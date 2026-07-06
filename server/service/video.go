@@ -58,9 +58,19 @@ var validVideoReferenceTypes = map[string]bool{
 	VideoReferenceVideo: true,
 }
 
+var validVideoProductionModes = map[string]bool{
+	"":                          true,
+	VideoProductionModeFastLane: true,
+	VideoProductionModeGuided:   true,
+	VideoProductionModeSequence: true,
+	VideoProductionModeRemake:   true,
+}
+
 // VideoGenerationRequest is the service-facing request for Ark content generation.
 type VideoGenerationRequest struct {
 	Prompt                 string                `json:"prompt"`
+	ScenarioKey            string                `json:"scenario_key,omitempty"`
+	ProductionMode         string                `json:"production_mode,omitempty"`
 	Purpose                string                `json:"purpose,omitempty"`
 	CreativeType           string                `json:"creative_type,omitempty"`
 	SubjectProfile         string                `json:"subject_profile,omitempty"`
@@ -79,17 +89,22 @@ type VideoGenerationRequest struct {
 	ServiceTier            string                `json:"service_tier,omitempty"`
 	SafetyID               string                `json:"safety_identifier,omitempty"`
 	TaskID                 string                `json:"task_id,omitempty"`
+	RetakeBudget           int                   `json:"retake_budget,omitempty"`
+	DeliveryTargets        []string              `json:"delivery_targets,omitempty"`
 	ReferenceSet           []VideoReferenceInput `json:"references,omitempty"`
 }
 
 // VideoReferenceInput describes one text/image/audio/video reference.
 type VideoReferenceInput struct {
-	Type                 string  `json:"type"`
-	URL                  string  `json:"url,omitempty"`
-	Text                 string  `json:"text,omitempty"`
-	TaskFileID           string  `json:"task_file_id,omitempty"`
-	ReferenceRole        string  `json:"reference_role,omitempty"`
-	InputDurationSeconds float64 `json:"input_duration_seconds,omitempty"`
+	Type                 string   `json:"type"`
+	URL                  string   `json:"url,omitempty"`
+	Text                 string   `json:"text,omitempty"`
+	TaskFileID           string   `json:"task_file_id,omitempty"`
+	ReferenceRole        string   `json:"reference_role,omitempty"`
+	MustKeep             []string `json:"must_keep,omitempty"`
+	CanChange            []string `json:"can_change,omitempty"`
+	MustNotTransfer      []string `json:"must_not_transfer,omitempty"`
+	InputDurationSeconds float64  `json:"input_duration_seconds,omitempty"`
 }
 
 // VideoGenerationCreateResult is returned immediately after task submission.
@@ -146,6 +161,8 @@ type VideoGenerationSegmentPlan struct {
 // VideoGenerationPlan is a deterministic MCP planning artifact.
 type VideoGenerationPlan struct {
 	ProjectID                 string                       `json:"project_id"`
+	ScenarioKey               string                       `json:"scenario_key,omitempty"`
+	ProductionMode            string                       `json:"production_mode,omitempty"`
 	Purpose                   string                       `json:"purpose"`
 	CreativeType              string                       `json:"creative_type,omitempty"`
 	SubjectProfile            string                       `json:"subject_profile,omitempty"`
@@ -169,6 +186,8 @@ type VideoGenerationPlan struct {
 	Preflight                 bool                         `json:"preflight,omitempty"`
 	ServiceTier               string                       `json:"service_tier,omitempty"`
 	References                []VideoReferenceInput        `json:"references,omitempty"`
+	RetakeBudget              int                          `json:"retake_budget,omitempty"`
+	DeliveryTargets           []string                     `json:"delivery_targets,omitempty"`
 	EstimatedCredits          int                          `json:"estimated_credits,omitempty"`
 	PricingBreakdown          *model.VideoPricingBreakdown `json:"pricing_breakdown,omitempty"`
 	RequiredArtifacts         []string                     `json:"required_artifacts"`
@@ -251,23 +270,27 @@ func (s *VideoService) BuildPlan(req VideoGenerationRequest, projectID string) (
 		contentPreview = append(contentPreview, entry)
 	}
 	return &VideoGenerationPlan{
-		ProjectID:      projectID,
-		Purpose:        resolved.Purpose,
-		CreativeType:   resolved.CreativeType,
-		SubjectProfile: resolved.SubjectProfile,
-		Audience:       resolved.Audience,
-		SingleMessage:  resolved.SingleMessage,
-		Prompt:         resolved.Prompt,
-		Model:          resolved.Model,
-		Resolution:     resolved.Resolution,
-		Ratio:          resolved.Ratio,
-		Duration:       resolved.Duration,
-		Seed:           resolved.Seed,
-		CameraFixed:    resolved.CameraFixed,
-		Watermark:      resolved.Watermark,
-		Preflight:      resolved.Preflight != nil && *resolved.Preflight,
-		ServiceTier:    resolved.ServiceTier,
-		References:     resolved.ReferenceSet,
+		ProjectID:       projectID,
+		ScenarioKey:     resolved.ScenarioKey,
+		ProductionMode:  resolved.ProductionMode,
+		Purpose:         resolved.Purpose,
+		CreativeType:    resolved.CreativeType,
+		SubjectProfile:  resolved.SubjectProfile,
+		Audience:        resolved.Audience,
+		SingleMessage:   resolved.SingleMessage,
+		Prompt:          resolved.Prompt,
+		Model:           resolved.Model,
+		Resolution:      resolved.Resolution,
+		Ratio:           resolved.Ratio,
+		Duration:        resolved.Duration,
+		Seed:            resolved.Seed,
+		CameraFixed:     resolved.CameraFixed,
+		Watermark:       resolved.Watermark,
+		Preflight:       resolved.Preflight != nil && *resolved.Preflight,
+		ServiceTier:     resolved.ServiceTier,
+		References:      resolved.ReferenceSet,
+		RetakeBudget:    resolved.RetakeBudget,
+		DeliveryTargets: resolved.DeliveryTargets,
 		RequiredArtifacts: []string{
 			"reference-anchors.md",
 			"creative-brief.md",
@@ -361,6 +384,12 @@ func validateVideoGenerationRequest(req VideoGenerationRequest) error {
 	}
 	if !validVideoPurposes[req.Purpose] {
 		return fmt.Errorf("purpose must be one of planting, ecommerce, lead_gen, promotion")
+	}
+	if !validVideoProductionModes[req.ProductionMode] {
+		return fmt.Errorf("production_mode must be one of fast_lane, guided, sequence, remake")
+	}
+	if req.RetakeBudget < 0 || req.RetakeBudget > 20 {
+		return fmt.Errorf("retake_budget must be between 0 and 20")
 	}
 	if req.Duration <= 0 || req.Duration > 600 {
 		return fmt.Errorf("duration must be between 1 and 600 seconds")

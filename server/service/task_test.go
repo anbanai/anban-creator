@@ -577,11 +577,18 @@ func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
 		Prompt:    "生成一条咖啡杯种草视频",
 		Quantity:  1,
 		Video: &model.VideoTaskConfig{
+			ScenarioKey:     "live_selling",
+			ProductionMode:  VideoProductionModeGuided,
+			RetakeBudget:    4,
+			DeliveryTargets: []string{"vertical_9x16", "textless_master"},
 			References: []model.VideoReferenceAsset{
 				{
 					Type:                 VideoReferenceImage,
 					URL:                  "https://cdn.example.com/cup.png",
 					ReferenceRole:        "product appearance",
+					MustKeep:             []string{"logo-free cup shape"},
+					CanChange:            []string{"countertop"},
+					MustNotTransfer:      []string{"donor hand"},
 					FileName:             "cup.png",
 					MimeType:             "image/png",
 					FileSize:             1234,
@@ -609,6 +616,15 @@ func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
 	vc := found.VideoConfig.Data()
 	if len(vc.References) != 2 {
 		t.Fatalf("references = %+v, want 2", vc.References)
+	}
+	if vc.ScenarioKey != "live_selling" || vc.ProductionMode != VideoProductionModeGuided || vc.RetakeBudget != 4 {
+		t.Fatalf("production config = %+v", vc)
+	}
+	if len(vc.DeliveryTargets) != 2 || vc.DeliveryTargets[1] != "textless_master" {
+		t.Fatalf("delivery targets = %+v", vc.DeliveryTargets)
+	}
+	if got := vc.References[0].MustNotTransfer; len(got) != 1 || got[0] != "donor hand" {
+		t.Fatalf("reference transfer rules = %+v", vc.References[0])
 	}
 	if vc.PricingBreakdown == nil || !vc.PricingBreakdown.InputVideo || vc.PricingBreakdown.InputSeconds != 4.2 {
 		t.Fatalf("pricing breakdown = %+v, want input video with measured seconds", vc.PricingBreakdown)

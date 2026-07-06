@@ -62,6 +62,17 @@ function friendlyUploadError(err: any) {
   return '上传失败，请稍后重试。'
 }
 
+function splitRuleList(value: string) {
+  return value
+    .split(/[,\n，、]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function joinRuleList(values: string[] | undefined) {
+  return values?.join('、') ?? ''
+}
+
 function useAuthenticatedPreviewUrl(src: string | undefined) {
   const normalized = useMemo(() => src ? normalizeStorageUrl(src) : '', [src])
   const [previewUrl, setPreviewUrl] = useState(normalized)
@@ -356,33 +367,70 @@ export function VideoReferenceInput({
           {value.map((ref, index) => {
             const Icon = referenceIcon(ref.type)
             return (
-              <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-center">
-                <div className="flex min-w-0 gap-3">
-                  <VideoReferencePreview ref={ref} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <Icon className="shrink-0 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">{referenceTypeLabel(ref.type)}</span>
-                      <span className="truncate text-sm text-foreground">{referenceDisplayName(ref)}</span>
+              <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="flex flex-col gap-3 p-3">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-center">
+                  <div className="flex min-w-0 gap-3">
+                    <VideoReferencePreview ref={ref} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Icon className="shrink-0 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">{referenceTypeLabel(ref.type)}</span>
+                        <span className="truncate text-sm text-foreground">{referenceDisplayName(ref)}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">用途：{videoReferenceRoleLabel(ref.reference_role)}</p>
+                      {ref.url && <p className="mt-1 truncate text-xs text-muted-foreground">{ref.url}</p>}
+                      {ref.input_duration_seconds ? (
+                        <p className="mt-1 text-xs text-muted-foreground">输入时长 {ref.input_duration_seconds.toFixed(1)} 秒</p>
+                      ) : null}
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">用途：{videoReferenceRoleLabel(ref.reference_role)}</p>
-                    {ref.url && <p className="mt-1 truncate text-xs text-muted-foreground">{ref.url}</p>}
-                    {ref.input_duration_seconds ? (
-                      <p className="mt-1 text-xs text-muted-foreground">输入时长 {ref.input_duration_seconds.toFixed(1)} 秒</p>
-                    ) : null}
                   </div>
+                  <Select value={ref.reference_role || DEFAULT_REFERENCE_ROLE} onValueChange={(role) => updateAt(index, { reference_role: role || DEFAULT_REFERENCE_ROLE })}>
+                    <SelectTrigger className="w-full"><SelectValue>{videoReferenceRoleLabel(ref.reference_role)}</SelectValue></SelectTrigger>
+                    <SelectContent>
+                      {videoReferenceRoles.map((role) => (
+                        <SelectItem key={role.value} value={role.value} label={role.label}>{role.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => removeAt(index)} aria-label="移除参考素材">
+                    <Trash2 />
+                  </Button>
                 </div>
-                <Select value={ref.reference_role || DEFAULT_REFERENCE_ROLE} onValueChange={(role) => updateAt(index, { reference_role: role || DEFAULT_REFERENCE_ROLE })}>
-                  <SelectTrigger className="w-full"><SelectValue>{videoReferenceRoleLabel(ref.reference_role)}</SelectValue></SelectTrigger>
-                  <SelectContent>
-                    {videoReferenceRoles.map((role) => (
-                      <SelectItem key={role.value} value={role.value} label={role.label}>{role.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button type="button" variant="ghost" size="sm" onClick={() => removeAt(index)} aria-label="移除参考素材">
-                  <Trash2 />
-                </Button>
+                {ref.type === 'video_url' && (
+                  <p className="text-xs text-muted-foreground">视频素材默认只参考运镜、节奏、动作，不复制人物、场景、logo。</p>
+                )}
+                <div className="grid gap-2 md:grid-cols-3">
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    控制什么
+                    <Textarea
+                      aria-label="控制什么"
+                      value={joinRuleList(ref.must_keep)}
+                      onChange={(event) => updateAt(index, { must_keep: splitRuleList(event.target.value) })}
+                      placeholder="例如：产品外观、动作节奏"
+                      className="min-h-16 resize-y text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    可变什么
+                    <Textarea
+                      aria-label="可变什么"
+                      value={joinRuleList(ref.can_change)}
+                      onChange={(event) => updateAt(index, { can_change: splitRuleList(event.target.value) })}
+                      placeholder="例如：背景、服装、道具"
+                      className="min-h-16 resize-y text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    不传递什么
+                    <Textarea
+                      aria-label="不传递什么"
+                      value={joinRuleList(ref.must_not_transfer)}
+                      onChange={(event) => updateAt(index, { must_not_transfer: splitRuleList(event.target.value) })}
+                      placeholder="例如：原人物、logo、场景"
+                      className="min-h-16 resize-y text-sm"
+                    />
+                  </label>
+                </div>
               </div>
             )
           })}

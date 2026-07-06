@@ -2,20 +2,39 @@ export type VideoPurpose = 'planting' | 'ecommerce' | 'lead_gen' | 'promotion'
 export type VideoWorkflow = 'creator' | 'editor'
 export type VideoReferenceType = 'text' | 'image_url' | 'audio_url' | 'video_url'
 export type VideoCreativeType = 'personal_ip' | 'high_efficiency_joke' | 'product_demo' | 'brand_promo' | 'custom'
+export type VideoProductionMode = 'fast_lane' | 'guided' | 'sequence' | 'remake'
 
 export interface VideoReferenceAsset {
   type: VideoReferenceType
   url?: string
   text?: string
   reference_role?: string
+  must_keep?: string[]
+  can_change?: string[]
+  must_not_transfer?: string[]
   file_name?: string
   mime_type?: string
   file_size?: number
   input_duration_seconds?: number
 }
 
+export interface VideoPlaybookSpec {
+  key: string
+  label: string
+  creative_type: VideoCreativeType
+  purpose: VideoPurpose
+  required_reference_roles: string[]
+  default_ratio: string
+  prompt_scaffold: string
+  qc_focus: string[]
+  risk_notes: string[]
+  agent_brief?: string
+}
+
 export interface VideoDefaults {
   workflow?: VideoWorkflow
+  scenario_key?: string
+  production_mode?: VideoProductionMode
   purpose?: VideoPurpose
   creative_type?: VideoCreativeType
   subject_profile?: string
@@ -32,6 +51,8 @@ export interface VideoDefaults {
   segment_min_duration_seconds?: number
   watermark?: boolean
   preflight?: boolean
+  retake_budget?: number
+  delivery_targets?: string[]
 }
 
 export interface VideoModelPolicy {
@@ -109,4 +130,38 @@ export interface VideoEstimateResponse {
   min_balance: number
   meets_min_balance: boolean
   warnings?: string[]
+  missing_reference_roles?: string[]
+  expected_artifacts?: string[]
+  segment_plan?: Array<{
+    index: number
+    start_second: number
+    end_second: number
+    duration: number
+    prompt?: string
+    model_key?: string
+    model?: string
+    resolution?: string
+    ratio?: string
+    estimated_credits?: number
+  }>
+  affordable_takes?: number
+}
+
+export interface VideoProductionArtifact {
+  status: 'available' | 'missing' | 'error' | string
+  file_id?: string
+  file_name: string
+  url?: string
+  content?: string
+  parsed_json?: Record<string, unknown>
+  error?: string
+}
+
+export interface VideoProductionResponse {
+  task_id: string
+  scenario_key?: string
+  production_mode?: VideoProductionMode | string
+  artifacts: Record<string, VideoProductionArtifact>
+  retake_actions: string[]
+  next_actions: string[]
 }

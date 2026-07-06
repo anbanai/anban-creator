@@ -196,6 +196,12 @@ export default function PlansPage() {
     retry: false,
   })
   const availableVideoModels = videoEstimateQuery.data?.available_models ?? []
+  const { data: videoPlaybooks } = useQuery({
+    queryKey: ['video-playbooks'],
+    queryFn: () => api.video.playbooks(),
+    enabled: modalOpen && watchedType === 'video',
+    staleTime: 10 * 60 * 1000,
+  })
 
   const createMutation = useMutation({
     mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
@@ -592,6 +598,7 @@ export default function PlansPage() {
                   form={form}
                   selectedProject={selectedProject}
                   availableVideoModels={availableVideoModels}
+                  playbooks={videoPlaybooks?.items ?? []}
                   modelsLoading={videoEstimateQuery.isLoading}
                   title="视频计划"
                   minimumBalanceHint="视频任务需至少 100,000 积分余额；计划触发时也会再次检查。"

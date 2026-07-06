@@ -50,9 +50,10 @@ export const videoReferenceRoles = [
   { value: 'action', label: '动作参考' },
   { value: 'camera movement', label: '镜头运动' },
   { value: 'rhythm', label: '节奏参考' },
+  { value: 'style', label: '风格参考' },
   { value: 'voice tone', label: '声音/BGM' },
 ]
 
 export function videoReferenceRoleLabel(value: string | null | undefined) {
-  return videoReferenceRoles.find((role) => role.value === value)?.label || '主体不变'
+  return videoReferenceRoles.find((role) => role.value === value)?.label || value || '主体不变'
 }

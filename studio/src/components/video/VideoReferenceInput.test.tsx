@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { VideoReferenceInput } from './VideoReferenceInput'
@@ -45,15 +46,23 @@ describe('VideoReferenceInput', () => {
         text: '品牌杯身必须保持银色金属质感，禁止变成卡通杯。',
         reference_role: 'subject identity',
       },
+      {
+        type: 'image_url',
+        url: 'https://cdn.example.com/style.png',
+        file_name: 'style.png',
+        reference_role: 'style',
+      },
     ]
 
     const { container } = render(<VideoReferenceInput value={refs} onChange={vi.fn()} />)
 
     expect(screen.getByRole('img', { name: 'cup.png' })).toHaveAttribute('src', 'https://cdn.example.com/cup.png')
+    expect(screen.getByRole('img', { name: 'style.png' })).toHaveAttribute('src', 'https://cdn.example.com/style.png')
     expect(container.querySelector('video source')).toHaveAttribute('src', 'https://cdn.example.com/motion.mp4')
     expect(container.querySelector('audio source')).toHaveAttribute('src', 'https://cdn.example.com/bgm.mp3')
     expect(screen.getAllByText('品牌杯身必须保持银色金属质感，禁止变成卡通杯。').length).toBeGreaterThan(0)
-    expect(screen.getAllByLabelText('移除参考素材')).toHaveLength(4)
+    expect(screen.getByText('用途：风格参考')).toBeInTheDocument()
+    expect(screen.getAllByLabelText('移除参考素材')).toHaveLength(5)
   })
 
   it('uses authenticated blob previews for internal image, video, and audio references', async () => {
@@ -152,5 +161,39 @@ describe('VideoReferenceInput', () => {
       text: '保持真实手持感',
       reference_role: 'subject identity',
     }])
+  })
+
+  it('edits explicit reference transfer rules for each asset', () => {
+    const onChange = vi.fn()
+    function Harness() {
+      const [refs, setRefs] = useState<VideoReferenceAsset[]>([{
+        type: 'video_url',
+        url: 'https://cdn.example.com/motion.mp4',
+        file_name: 'motion.mp4',
+        reference_role: 'camera movement',
+      }])
+      return <VideoReferenceInput value={refs} onChange={(next) => {
+        setRefs(next)
+        onChange(next)
+      }} />
+    }
+    render(<Harness />)
+
+    fireEvent.change(screen.getByLabelText('控制什么'), {
+      target: { value: '运镜, 节奏' },
+    })
+    fireEvent.change(screen.getByLabelText('可变什么'), {
+      target: { value: '人物, 场景' },
+    })
+    fireEvent.change(screen.getByLabelText('不传递什么'), {
+      target: { value: '原 logo, 原人物' },
+    })
+
+    expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({
+      must_keep: ['运镜', '节奏'],
+      can_change: ['人物', '场景'],
+      must_not_transfer: ['原 logo', '原人物'],
+    })])
+    expect(screen.getByText('视频素材默认只参考运镜、节奏、动作，不复制人物、场景、logo。')).toBeInTheDocument()
   })
 })

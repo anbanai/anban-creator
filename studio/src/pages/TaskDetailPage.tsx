@@ -24,6 +24,7 @@ import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary, WorkflowStageProgress } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
+import { VideoProductionPanel } from '@/components/video/VideoProductionPanel'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
@@ -72,7 +73,7 @@ export default function TaskDetailPage() {
   const abortRef = useRef<AbortController | null>(null)
   const logContainerRef = useRef<HTMLDivElement | null>(null)
   const resumeFileInputRef = useRef<HTMLInputElement | null>(null)
-  const { submit } = useSubmitLock()
+  const { submit, isSubmitting } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
 
@@ -97,6 +98,12 @@ export default function TaskDetailPage() {
     queryKey: ['task-files', id],
     queryFn: () => api.tasks.files(id!),
     enabled: !!id && task?.status === 'completed',
+  })
+
+  const { data: videoProduction } = useQuery({
+    queryKey: ['task-video-production', id],
+    queryFn: () => api.tasks.videoProduction(id!),
+    enabled: !!id && task?.type === 'video',
   })
 
   // Resolve project info for the task
@@ -527,6 +534,11 @@ export default function TaskDetailPage() {
         }
       }
     })
+  }
+
+  function handleVideoRetake(action: string) {
+    toast.info(`已选择返修决策：${action}`)
+    void handleClone()
   }
 
   function handleResumeFilesChange(event: ChangeEvent<HTMLInputElement>) {
@@ -1027,6 +1039,19 @@ export default function TaskDetailPage() {
                 <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
               )}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {task.type === 'video' && videoProduction && (
+        <Card size="sm" className="border-border/70">
+          <CardContent>
+            <VideoProductionPanel
+              production={videoProduction}
+              retakePending={isSubmitting}
+              onRetakeAction={handleVideoRetake}
+              onNextAction={(action) => toast.info(`已选择交付动作：${action}`)}
+            />
           </CardContent>
         </Card>
       )}

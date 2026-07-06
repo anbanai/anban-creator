@@ -25,10 +25,11 @@ import (
 )
 
 const (
-	maxTaskPromptCharacters = 5120
-	maxGoalTextCharacters   = 4000
-	maxTaskResumeFiles      = 10
-	maxTaskResumeFileBytes  = 25 * 1024 * 1024
+	maxTaskPromptCharacters         = 5120
+	maxGoalTextCharacters           = 4000
+	maxTaskResumeFiles              = 10
+	maxTaskResumeFileBytes          = 25 * 1024 * 1024
+	maxVideoProductionArtifactBytes = 512 * 1024
 )
 
 // TaskHandler handles task-related HTTP endpoints.
@@ -149,6 +150,25 @@ type taskCreditsSummary struct {
 	OperationConsumed int `json:"operation_consumed"`
 	Refunded          int `json:"refunded"`
 	NetConsumed       int `json:"net_consumed"`
+}
+
+type videoProductionResponse struct {
+	TaskID         string                             `json:"task_id"`
+	ScenarioKey    string                             `json:"scenario_key,omitempty"`
+	ProductionMode string                             `json:"production_mode,omitempty"`
+	Artifacts      map[string]videoProductionArtifact `json:"artifacts"`
+	RetakeActions  []string                           `json:"retake_actions"`
+	NextActions    []string                           `json:"next_actions"`
+}
+
+type videoProductionArtifact struct {
+	Status     string         `json:"status"`
+	FileID     string         `json:"file_id,omitempty"`
+	FileName   string         `json:"file_name"`
+	URL        string         `json:"url,omitempty"`
+	Content    string         `json:"content,omitempty"`
+	ParsedJSON map[string]any `json:"parsed_json,omitempty"`
+	Error      string         `json:"error,omitempty"`
 }
 
 // Create handles POST /api/v1/tasks.
@@ -878,6 +898,116 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 	}
 
 	return Success(c, files)
+}
+
+// GetVideoProduction handles GET /api/v1/tasks/:id/video-production.
+func (h *TaskHandler) GetVideoProduction(c fiber.Ctx) error {
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	task, err := h.verifyTaskOwnership(c, id)
+	if err != nil {
+		return nil
+	}
+	if task.Type != model.PlatformVideo {
+		return Error(c, fiber.StatusBadRequest, "task is not a video task")
+	}
+
+	files, err := h.service.GetFiles(c.Context(), id)
+	if err != nil {
+		h.logger.Error().Err(err).Str("task_id", id).Msg("get task files for video production failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to get task files")
+	}
+
+	filesByArtifact := videoProductionFilesByName(files)
+	artifacts := make(map[string]videoProductionArtifact, len(service.VideoProductionArtifactNames()))
+	for _, artifactName := range service.VideoProductionArtifactNames() {
+		file := filesByArtifact[artifactName]
+		if file == nil {
+			artifacts[artifactName] = videoProductionArtifact{
+				Status:   "missing",
+				FileName: artifactName,
+			}
+			continue
+		}
+		artifacts[artifactName] = h.readVideoProductionArtifact(c.Context(), file, artifactName)
+	}
+
+	cfg := task.VideoConfig.Data()
+	return Success(c, videoProductionResponse{
+		TaskID:         task.ID,
+		ScenarioKey:    cfg.ScenarioKey,
+		ProductionMode: cfg.ProductionMode,
+		Artifacts:      artifacts,
+		RetakeActions:  service.VideoRetakeActions(),
+		NextActions:    service.VideoNextActions(),
+	})
+}
+
+func videoProductionFilesByName(files []*model.TaskFile) map[string]*model.TaskFile {
+	result := map[string]*model.TaskFile{}
+	expected := map[string]bool{}
+	for _, name := range service.VideoProductionArtifactNames() {
+		expected[name] = true
+	}
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+		candidates := []string{
+			file.FileName,
+			file.FilePath,
+			filepath.Base(file.FilePath),
+		}
+		for _, candidate := range candidates {
+			clean := strings.TrimSpace(candidate)
+			if !expected[clean] || result[clean] != nil {
+				continue
+			}
+			result[clean] = file
+		}
+	}
+	return result
+}
+
+func (h *TaskHandler) readVideoProductionArtifact(ctx context.Context, file *model.TaskFile, artifactName string) videoProductionArtifact {
+	artifact := videoProductionArtifact{
+		Status:   "available",
+		FileID:   file.ID,
+		FileName: artifactName,
+		URL:      file.URL,
+	}
+	stream, _, err := h.service.GetFileStream(ctx, file.ID)
+	if err != nil {
+		artifact.Status = "error"
+		artifact.Error = "failed to read artifact"
+		return artifact
+	}
+	defer stream.Close()
+
+	data, err := io.ReadAll(io.LimitReader(stream, maxVideoProductionArtifactBytes+1))
+	if err != nil {
+		artifact.Status = "error"
+		artifact.Error = "failed to read artifact"
+		return artifact
+	}
+	if len(data) > maxVideoProductionArtifactBytes {
+		artifact.Content = string(data[:maxVideoProductionArtifactBytes])
+		artifact.Error = "artifact content truncated at 512KB"
+		return artifact
+	}
+	artifact.Content = string(data)
+	if strings.EqualFold(filepath.Ext(artifactName), ".json") {
+		var parsed map[string]any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			artifact.Error = "failed to parse JSON artifact"
+		} else {
+			artifact.ParsedJSON = parsed
+		}
+	}
+	return artifact
 }
 
 // Stream handles GET /api/v1/tasks/:id/stream — SSE endpoint for real-time progress.
