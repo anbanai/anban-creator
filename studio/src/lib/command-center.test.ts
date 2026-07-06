@@ -150,6 +150,16 @@ describe('command center rules', () => {
       projectId: 'project-1',
       intent: 'new',
     })).toBe('/tasks?create=true&type=video&project_id=project-1&intent=new')
+    expect(projectCreatedReturnHref({
+      returnTo: '//evil.example/path',
+      type: 'article',
+      projectId: 'project-1',
+    })).toBe('/tasks?create=true&type=article&project_id=project-1')
+    expect(projectCreatedReturnHref({
+      returnTo: '/tasks-evil?x=1',
+      type: 'article',
+      projectId: 'project-1',
+    })).toBe('/tasks?create=true&type=article&project_id=project-1')
   })
 
   it('parses create intent params without leaking invalid values into forms', () => {

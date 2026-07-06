@@ -111,6 +111,10 @@ export function projectsReturnHref({
   return `/projects?${params.toString()}`
 }
 
+function safeTasksReturnHref(returnTo?: string | null) {
+  return returnTo === '/tasks' || returnTo?.startsWith('/tasks?') ? returnTo : '/tasks'
+}
+
 export function projectCreatedReturnHref({
   returnTo,
   type,
@@ -122,7 +126,7 @@ export function projectCreatedReturnHref({
   projectId: string
   intent?: 'new' | 'retry' | 'schedule'
 }) {
-  const safeReturnTo = returnTo?.startsWith('/') ? returnTo : '/tasks'
+  const safeReturnTo = safeTasksReturnHref(returnTo)
   const [path, query = ''] = safeReturnTo.split('?')
   const params = new URLSearchParams(query)
   params.set('create', 'true')

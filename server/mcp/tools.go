@@ -148,6 +148,7 @@ func registerTaskTools(server *mcp.Server) {
 			"properties": map[string]any{
 				"status":     map[string]any{"type": "string", "enum": []any{"pending", "running", "completed", "failed", "cancelled"}, "description": "Filter by status"},
 				"project_id": map[string]any{"type": "string", "description": "Filter by project ID"},
+				"plan_id":    map[string]any{"type": "string", "description": "Filter by plan ID"},
 				"limit":      map[string]any{"type": "integer", "description": "Max results (default 20, max 100)", "default": 20},
 			},
 		},
