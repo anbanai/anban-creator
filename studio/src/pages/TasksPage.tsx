@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { TaskType, TaskStatus, CreateTaskRequest, Project, WorkflowStatus } from '@/types'
+import type { TaskType, TaskStatus, CreateTaskRequest, Project } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
@@ -48,6 +48,7 @@ import { useImageModels } from '@/hooks/useImageModels'
 import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
+import { workflowReadinessLabel } from '@/lib/workflow-readiness'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -60,22 +61,6 @@ const statusTabs: { label: string; value: string }[] = [
 
 function normalizeTaskStatusFilter(value: string | null) {
   return value && statusTabs.some((tab) => tab.value === value) ? value : 'all'
-}
-
-function workflowReadinessLabel(workflow: WorkflowStatus | string | null | undefined) {
-  if (!workflow) return ''
-  const parsed: WorkflowStatus | null = typeof workflow === 'string' ? (() => {
-    try {
-      return JSON.parse(workflow) as WorkflowStatus
-    } catch {
-      return null
-    }
-  })() : workflow
-  const readiness = parsed?.review?.readiness
-  if (readiness === 'ready') return '可发布'
-  if (readiness === 'ready_with_minor_edits') return '建议修改'
-  if (readiness === 'needs_revision') return '需重做'
-  return ''
 }
 
 export default function TasksPage() {
@@ -581,7 +566,7 @@ export default function TasksPage() {
             icon={Send}
             label="待发布确认"
             value={queueStats.approval}
-            description="需要人工审批的发布任务"
+            description="审核后放行到公众号草稿箱"
           />
           <TaskQueueLink
             to="/tasks?status=completed"
@@ -804,7 +789,7 @@ export default function TasksPage() {
                           )}
                           {task.publish_approval_state === 'pending' && (
                             <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-500">
-                              待审核发布
+                              待发布确认
                             </Badge>
                           )}
                           {task.publish_approval_state === 'rejected' && (

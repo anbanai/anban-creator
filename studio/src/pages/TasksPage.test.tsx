@@ -49,7 +49,31 @@ const fixtures = vi.hoisted(() => {
     started_at: '',
     completed_at: '',
   }
-  return { project, failedTask }
+  const approvalTask = {
+    id: 'approval-task',
+    type: 'article',
+    title: '待确认草稿',
+    prompt: '审批任务',
+    status: 'completed',
+    progress: 100,
+    error: null,
+    plan_id: null,
+    project_id: project.id,
+    result: { files: null, output: '' },
+    published: false,
+    published_at: null,
+    publish_approval_state: 'pending',
+    workflow_status: {
+      version: 'creation_workflow_v1',
+      current_stage: 'review',
+      stages: [{ key: 'review', label: '质量复盘', status: 'completed' }],
+      review: { overall_score: 88, readiness: 'ready', risks: [], next_actions: [], strengths: [] },
+    },
+    created_at: '2026-07-06T02:00:00.000Z',
+    started_at: '',
+    completed_at: '2026-07-06T02:10:00.000Z',
+  }
+  return { project, failedTask, approvalTask }
 })
 
 vi.mock('@/lib/api', async () => {
@@ -125,5 +149,18 @@ describe('TasksPage URL-driven recovery filters', () => {
     await waitFor(() => {
       expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }))
     })
+  })
+
+  it('uses the same publish approval and readiness labels in the recovery queue and task cards', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [fixtures.failedTask as Task, fixtures.approvalTask as Task],
+      total: 2,
+    })
+
+    renderTasksPage()
+
+    expect(await screen.findByRole('link', { name: /待发布确认/ })).toBeInTheDocument()
+    expect((await screen.findAllByText('待发布确认')).length).toBeGreaterThan(0)
+    expect(await screen.findByText('可发布')).toBeInTheDocument()
   })
 })
