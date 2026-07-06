@@ -24,4 +24,16 @@ describe('TasksPage recovery workspace contract', () => {
     expect(source).toContain('其余将跳过')
     expect(source).toContain('可删除')
   })
+
+  it('uses a compact stepped sheet for task creation', () => {
+    const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
+
+    expect(source).toContain('SheetContent')
+    expect(source).toContain('任务创建路径')
+    expect(source).toContain('类型')
+    expect(source).toContain('项目')
+    expect(source).toContain('目标/提示词')
+    expect(source).toContain('图片/高级')
+    expect(source).toContain('费用预估')
+  })
 })

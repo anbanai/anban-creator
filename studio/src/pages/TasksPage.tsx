@@ -16,7 +16,7 @@ import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
@@ -864,14 +864,36 @@ export default function TasksPage() {
         </>
       )}
 
-      {/* Create Task Dialog */}
-      <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>新建任务</DialogTitle>
-          </DialogHeader>
+      {/* Create Task Sheet */}
+      <Sheet open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
+        <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-2xl">
+          <SheetHeader className="border-b border-border px-4 py-3">
+            <SheetTitle>新建任务</SheetTitle>
+            <SheetDescription>任务创建路径：类型 → 项目 → 目标/提示词 → 图片/高级 → 费用预估</SheetDescription>
+            <div className="grid grid-cols-5 gap-1 pt-2 text-[11px] text-muted-foreground">
+              {['类型', '项目', '目标/提示词', '图片/高级', '费用预估'].map((label, index) => (
+                <span key={label} className="truncate rounded-md bg-muted px-2 py-1">
+                  {index + 1}. {label}
+                </span>
+              ))}
+            </div>
+          </SheetHeader>
           <Form {...form}>
-            <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
+            <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium uppercase text-muted-foreground">01 类型</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">选择项目后自动匹配任务类型</p>
+                  </div>
+                  <Badge variant="secondary" className="shrink-0">
+                    {contentTypeLabel[watchedType] || watchedType}
+                  </Badge>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">02 项目</p>
               <FormField control={form.control} name="project_id" render={({ field }) => (
                 <FormItem>
                   <FormLabel>项目</FormLabel>
@@ -905,6 +927,7 @@ export default function TasksPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+              </div>
 
               {selectedProject && watchedType !== 'viral_analysis' && (
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 space-y-1">
@@ -919,6 +942,8 @@ export default function TasksPage() {
                 </div>
               )}
 
+              <div className="pt-1">
+                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">03 目标/提示词</p>
               {watchedType !== 'video' && <FormField control={form.control} name="prompt" render={({ field }) => (
                 <FormItem>
                   <FormLabel>创作要求（可选）</FormLabel>
@@ -928,6 +953,10 @@ export default function TasksPage() {
                   <FormMessage />
                 </FormItem>
               )} />}
+              </div>
+
+              <div className="pt-1">
+                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">04 图片/高级</p>
 
               {/* Quantity selector (ecommerce bills a fixed package at qty=1) */}
               {watchedType !== 'ecommerce' && watchedType !== 'video' && (
@@ -1301,8 +1330,11 @@ export default function TasksPage() {
                 )}
               </div>
               )}
+              </div>
 
               {/* Cost display */}
+              <div className="pt-1">
+                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 费用预估</p>
               {(() => {
                 const isEcom = watchedType === 'ecommerce'
                 const cost = taskCostFor(watchedType)
@@ -1336,9 +1368,10 @@ export default function TasksPage() {
                   </div>
                 )
               })()}
+              </div>
             </form>
           </Form>
-          <DialogFooter>
+          <SheetFooter className="border-t border-border bg-popover px-4 py-3 sm:flex-row sm:items-center sm:justify-end">
             {localExecutorAvailable && (
               <div className="mr-auto flex min-w-0 items-center gap-2 text-xs">
                 <label className="flex cursor-pointer items-center gap-2 text-muted-foreground" title="在本机运行：使用桌面端内置的 Claude Code + ffmpeg，可剪辑本地视频、执行本地命令。关闭则改为云端执行。">
@@ -1374,9 +1407,9 @@ export default function TasksPage() {
                 ? '启动并创建'
                 : quantity > 1 ? `创建 ${quantity} 个任务` : '创建'}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       {/* Dirty form confirmation */}
       <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>
