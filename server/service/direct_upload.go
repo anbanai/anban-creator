@@ -158,8 +158,12 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 	}
 	ext := strings.ToLower(filepath.Ext(filename))
 	contentType := strings.TrimSpace(req.ContentType)
-	if contentType == "" {
-		contentType = contentTypeForUploadExt(ext)
+	if contentType == "" || strings.EqualFold(contentType, "application/octet-stream") {
+		if inferred := contentTypeForUploadExt(ext); inferred != "" && inferred != "application/octet-stream" {
+			contentType = inferred
+		} else if contentType == "" {
+			contentType = "application/octet-stream"
+		}
 	}
 	if !policy.validate(contentType, ext) {
 		return nil, fmt.Errorf("content type %q is not allowed for %s uploads", contentType, purpose)

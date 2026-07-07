@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -31,15 +32,17 @@ func setupTemplateHandlerTest(t *testing.T) (*fiber.App, repository.Repository) 
 			sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.Template{}); err != nil {
+	if err := db.AutoMigrate(&model.Template{}, &model.PendingUpload{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	db.Exec("DELETE FROM templates")
+	db.Exec("DELETE FROM pending_uploads")
 
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	svc := service.NewTemplateService(repo, &logger)
 	h := NewTemplateHandler(svc, &logger)
+	h.SetPendingUploadRepository(repo.PendingUploads())
 
 	app := fiber.New()
 	// Stub middleware: read X-User-ID into locals, mirroring how GetUserID works.
@@ -248,6 +251,47 @@ func TestTemplateHandler_Create_Success(t *testing.T) {
 	}
 }
 
+func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
+	app, repo := setupTemplateHandlerTest(t)
+	userID := uuid.New().String()
+	uploadID := "thumbnail-upload"
+	key := "uploads/pending/" + userID + "/" + uploadID + "/thumb.png"
+	publicURL := "https://cdn.example.com/" + key
+	if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
+		ID:          uploadID,
+		UserID:      userID,
+		Purpose:     service.DirectUploadPurposeProjectReference,
+		Key:         key,
+		PublicURL:   publicURL,
+		FileName:    "thumb.png",
+		ContentType: "image/png",
+		Size:        123,
+		Status:      model.PendingUploadStatusPending,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("seed pending upload: %v", err)
+	}
+
+	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
+		"name":          "新模板",
+		"type":          "seednote",
+		"thumbnail_url": publicURL,
+		"style_prompt":  "暖色",
+		"visibility":    "private",
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+
+	upload, err := repo.PendingUploads().FindPendingUploadByID(t.Context(), uploadID)
+	if err != nil {
+		t.Fatalf("find pending upload: %v", err)
+	}
+	if upload.Status != model.PendingUploadStatusFinalized {
+		t.Fatalf("pending upload status = %q, want finalized", upload.Status)
+	}
+}
+
 func TestTemplateHandler_Create_IgnoresNonVisualRuntimeFields(t *testing.T) {
 	app, _ := setupTemplateHandlerTest(t)
 	userID := uuid.New().String()
@@ -360,6 +404,44 @@ func TestTemplateHandler_Update_OwnerSucceeds(t *testing.T) {
 	}
 	if data["visibility"] != "private" {
 		t.Errorf("visibility = %v, want private", data["visibility"])
+	}
+}
+
+func TestTemplateHandler_UpdateFinalizesPendingThumbnail(t *testing.T) {
+	app, repo := setupTemplateHandlerTest(t)
+	owner := uuid.New().String()
+	tmpl := createTemplateRow(t, repo, owner, "public", "old name")
+	uploadID := "updated-thumbnail-upload"
+	key := "uploads/pending/" + owner + "/" + uploadID + "/thumb.png"
+	publicURL := "https://cdn.example.com/" + key
+	if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
+		ID:          uploadID,
+		UserID:      owner,
+		Purpose:     service.DirectUploadPurposeProjectReference,
+		Key:         key,
+		PublicURL:   publicURL,
+		FileName:    "thumb.png",
+		ContentType: "image/png",
+		Size:        123,
+		Status:      model.PendingUploadStatusPending,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("seed pending upload: %v", err)
+	}
+
+	resp := doRequest(t, app, "PUT", "/api/v1/templates/"+tmpl.ID, owner, map[string]any{
+		"thumbnail_url": publicURL,
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+
+	upload, err := repo.PendingUploads().FindPendingUploadByID(t.Context(), uploadID)
+	if err != nil {
+		t.Fatalf("find pending upload: %v", err)
+	}
+	if upload.Status != model.PendingUploadStatusFinalized {
+		t.Fatalf("pending upload status = %q, want finalized", upload.Status)
 	}
 }
 

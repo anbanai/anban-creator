@@ -82,8 +82,8 @@ export const createTaskSchema = z.object({
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
   // E-commerce package (server ignores for non-ecommerce). selected_modules maps
-  // module key → quantity; product_photos are /files/upload URLs materialized
-  // into the agent workspace by the executor.
+  // module key → quantity; product_photos are server-owned storage URLs
+  // materialized into the agent workspace by the executor.
   product_photos: z.array(z.string()).default([]),
   selected_modules: z.record(z.string(), z.number().int().min(0)).default({}),
   target_platform: z.string().optional(),

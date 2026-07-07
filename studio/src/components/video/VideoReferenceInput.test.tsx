@@ -95,7 +95,13 @@ describe('VideoReferenceInput', () => {
   it('uploads multiple media files, keeps successful items, and reports per-file failures', async () => {
     const onChange = vi.fn()
     vi.mocked(uploadToOSS)
-      .mockResolvedValueOnce({ uploadId: '1', key: 'k1', publicUrl: '/api/v1/files/uploads/video-references/u/cup.png', contentType: 'image/png', size: 123 })
+      .mockResolvedValueOnce({
+        uploadId: 'upload-1',
+        key: 'uploads/pending/user/upload-1/cup.png',
+        publicUrl: 'https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/pending/user/upload-1/cup.png',
+        contentType: 'image/png',
+        size: 123,
+      })
       .mockRejectedValueOnce(new Error('OSS 上传失败，请重试'))
 
     render(<VideoReferenceInput value={[]} onChange={onChange} />)
@@ -113,7 +119,7 @@ describe('VideoReferenceInput', () => {
     await waitFor(() => {
       expect(onChange).toHaveBeenCalledWith([expect.objectContaining({
         type: 'image_url',
-        url: '/api/v1/files/uploads/video-references/u/cup.png',
+        url: 'https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/pending/user/upload-1/cup.png',
         file_name: 'cup.png',
       })])
     })
@@ -142,8 +148,65 @@ describe('VideoReferenceInput', () => {
     expect(await screen.findByText('cup.png')).toBeInTheDocument()
     expect(await screen.findByText('25%')).toBeInTheDocument()
 
-    resolveUpload({ uploadId: '1', key: 'k1', publicUrl: '/api/v1/files/uploads/video-references/u/cup.png', contentType: 'image/png', size: 123 })
+    resolveUpload({
+      uploadId: 'upload-1',
+      key: 'uploads/pending/user/upload-1/cup.png',
+      publicUrl: 'https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/pending/user/upload-1/cup.png',
+      contentType: 'image/png',
+      size: 123,
+    })
     await waitFor(() => expect(onChange).toHaveBeenCalled())
+  })
+
+  it('stores measured duration for uploaded local video references', async () => {
+    const onChange = vi.fn()
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local-video')
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const createElement = vi.spyOn(document, 'createElement')
+    const originalCreateElement = createElement.getMockImplementation()
+    createElement.mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      const element = originalCreateElement
+        ? originalCreateElement(tagName, options)
+        : Document.prototype.createElement.call(document, tagName, options)
+      if (tagName === 'video') {
+        Object.defineProperty(element, 'duration', { value: 12.5, configurable: true })
+        Object.defineProperty(element, 'load', {
+          value: vi.fn(() => {
+            setTimeout(() => {
+              ;(element as HTMLVideoElement).onloadedmetadata?.(new Event('loadedmetadata'))
+            }, 0)
+          }),
+          configurable: true,
+        })
+      }
+      return element
+    })
+    vi.mocked(uploadToOSS).mockResolvedValueOnce({
+      uploadId: 'upload-video',
+      key: 'uploads/pending/user/upload-video/clip.mp4',
+      publicUrl: 'https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/pending/user/upload-video/clip.mp4',
+      contentType: 'video/mp4',
+      size: 123,
+    })
+
+    render(<VideoReferenceInput value={[]} onChange={onChange} />)
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(['video'], 'clip.mp4', { type: 'video/mp4' })],
+      },
+    })
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith([expect.objectContaining({
+        type: 'video_url',
+        input_duration_seconds: 12.5,
+      })])
+    })
+    createObjectURL.mockRestore()
+    revokeObjectURL.mockRestore()
+    createElement.mockRestore()
   })
 
   it('uses an explicit text constraint action instead of an ambiguous plus button', () => {

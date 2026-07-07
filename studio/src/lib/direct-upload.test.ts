@@ -20,8 +20,8 @@ vi.mock('@/lib/http-client', () => ({
   },
 }))
 
-function fileOf(size: number, type = 'image/png') {
-  const file = new File(['x'], 'asset.png', { type })
+function fileOf(size: number, type = 'image/png', name = 'asset.png') {
+  const file = new File(['x'], name, { type })
   Object.defineProperty(file, 'size', { value: size })
   return file
 }
@@ -43,6 +43,7 @@ describe('uploadToOSS', () => {
           sts_security_token: 'sts-token',
           expires_at: '2026-07-03T10:00:00Z',
           max_size: 50 * 1024 * 1024,
+          headers: { 'Content-Type': 'image/png' },
         },
       },
     })
@@ -101,49 +102,66 @@ describe('uploadToOSS', () => {
     })
   })
 
-  it('falls back to the legacy upload endpoint when STS assume-role credentials cannot be issued', async () => {
-    vi.mocked(http.post)
-      .mockRejectedValueOnce({
-        response: {
-          status: 503,
-          data: {
-            msg: 'issue upload credential: refresh session token failed: {"Code":"NoPermission","AuthAction":"sts:AssumeRole"}',
-          },
-        },
-      })
-      .mockResolvedValueOnce({
+  it('lets the server infer content type when the browser provides none', async () => {
+    vi.mocked(http.post).mockResolvedValueOnce({
+      data: {
         data: {
-          data: {
-            url: 'https://cdn.example.com/uploads/projects/user-1/ref.png',
-            key: 'uploads/projects/user-1/ref.png',
-            size: 1024,
-            type: 'image/png',
-          },
+          upload_id: 'up-audio',
+          key: 'uploads/pending/user/up-audio/sound.m4a',
+          public_url: 'https://cdn.example.com/uploads/pending/user/up-audio/sound.m4a',
+          region: 'oss-cn-hangzhou',
+          bucket: 'bucket',
+          endpoint: 'oss-cn-hangzhou.aliyuncs.com',
+          sts_access_key_id: 'sts-ak',
+          sts_access_key_secret: 'sts-secret',
+          sts_security_token: 'sts-token',
+          expires_at: '2026-07-03T10:00:00Z',
+          max_size: 50 * 1024 * 1024,
+          headers: { 'Content-Type': 'audio/mp4' },
         },
-      })
+      },
+    })
 
     const result = await uploadToOSS({
+      purpose: 'video_reference',
+      file: fileOf(1024, '', 'sound.m4a'),
+    })
+
+    expect(http.post).toHaveBeenCalledWith('/uploads/prepare', {
+      purpose: 'video_reference',
+      filename: 'sound.m4a',
+      content_type: '',
+      size: 1024,
+    })
+    expect(putMock).toHaveBeenCalledWith('uploads/pending/user/up-audio/sound.m4a', expect.any(File), expect.objectContaining({
+      headers: expect.objectContaining({ 'Content-Type': 'audio/mp4' }),
+    }))
+    expect(result.contentType).toBe('audio/mp4')
+  })
+
+  it('fails fast when STS assume-role credentials cannot be issued', async () => {
+    vi.mocked(http.post).mockRejectedValueOnce({
+      response: {
+        status: 503,
+        data: {
+          msg: 'issue upload credential: refresh session token failed: {"Code":"NoPermission","AuthAction":"sts:AssumeRole"}',
+        },
+      },
+    })
+
+    await expect(uploadToOSS({
       purpose: 'project_reference',
       file: fileOf(1024),
-    })
-    const legacyForm = vi.mocked(http.post).mock.calls[1][1] as FormData
+    })).rejects.toThrow('当前环境 OSS 直传凭证不可用，请联系管理员检查 RAM/STS 权限。')
 
-    expect(http.post).toHaveBeenNthCalledWith(1, '/uploads/prepare', {
+    expect(http.post).toHaveBeenCalledWith('/uploads/prepare', {
       purpose: 'project_reference',
       filename: 'asset.png',
       content_type: 'image/png',
       size: 1024,
     })
-    expect(http.post).toHaveBeenNthCalledWith(2, '/files/upload', expect.any(FormData), expect.any(Object))
-    expect(legacyForm.get('purpose')).toBe('project')
+    expect(http.post).toHaveBeenCalledTimes(1)
     expect(putMock).not.toHaveBeenCalled()
-    expect(result).toMatchObject({
-      uploadId: 'uploads/projects/user-1/ref.png',
-      key: 'uploads/projects/user-1/ref.png',
-      publicUrl: 'https://cdn.example.com/uploads/projects/user-1/ref.png',
-      contentType: 'image/png',
-      size: 1024,
-    })
   })
 
   it('maps expired credential errors to a Chinese retry hint', async () => {

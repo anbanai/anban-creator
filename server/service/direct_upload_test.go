@@ -184,6 +184,48 @@ func TestPrepareDirectUploadAllowsAIEntryMediaAndDocuments(t *testing.T) {
 	}
 }
 
+func TestPrepareDirectUploadInfersGenericContentTypeFromExtension(t *testing.T) {
+	store := &fakeDirectUploadStore{name: "oss"}
+	repo := &fakePendingUploadRepo{}
+	cfg := DirectUploadConfig{
+		Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", Region: "oss-cn-hangzhou"},
+		CredentialIssuer: StaticUploadCredentialIssuer(func(context.Context, UploadCredentialRequest) (*UploadCredential, error) {
+			return &UploadCredential{AccessKeyID: "ak", AccessKeySecret: "sk", SecurityToken: "token", ExpiresAt: time.Now().Add(time.Minute)}, nil
+		}),
+	}
+
+	result, err := PrepareDirectUpload(context.Background(), store, repo, cfg, DirectUploadPrepareRequest{
+		UserID:      "u",
+		Purpose:     DirectUploadPurposeVideoReference,
+		Filename:    "voice.m4a",
+		ContentType: "application/octet-stream",
+		Size:        1024,
+	})
+	if err != nil {
+		t.Fatalf("PrepareDirectUpload generic m4a: %v", err)
+	}
+	if got := result.Headers["Content-Type"]; got != "audio/mp4" {
+		t.Fatalf("Content-Type header = %q, want audio/mp4", got)
+	}
+	if store.contentType != "audio/mp4" {
+		t.Fatalf("signed upload content type = %q, want audio/mp4", store.contentType)
+	}
+
+	result, err = PrepareDirectUpload(context.Background(), store, repo, cfg, DirectUploadPrepareRequest{
+		UserID:      "u",
+		Purpose:     DirectUploadPurposeAIEntryAttachment,
+		Filename:    "brief.md",
+		ContentType: "",
+		Size:        1024,
+	})
+	if err != nil {
+		t.Fatalf("PrepareDirectUpload empty md: %v", err)
+	}
+	if got := result.Headers["Content-Type"]; got != "text/markdown" {
+		t.Fatalf("Content-Type header = %q, want text/markdown", got)
+	}
+}
+
 func TestPrepareDirectUploadRejectsInvalidPurposeSizeAndMIME(t *testing.T) {
 	store := &fakeDirectUploadStore{name: "oss"}
 	repo := &fakePendingUploadRepo{}

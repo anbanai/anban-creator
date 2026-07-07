@@ -62,6 +62,47 @@ function friendlyUploadError(err: any) {
   return '上传失败，请稍后重试。'
 }
 
+function measureLocalVideoDuration(file: File): Promise<number | undefined> {
+  if (typeof URL.createObjectURL !== 'function') return Promise.resolve(undefined)
+
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file)
+    const video = document.createElement('video')
+    let settled = false
+    let timeout: number | undefined
+
+    const finish = (duration: number | undefined) => {
+      if (settled) return
+      settled = true
+      if (timeout != null) window.clearTimeout(timeout)
+      video.onloadedmetadata = null
+      video.onerror = null
+      URL.revokeObjectURL(objectUrl)
+      resolve(duration)
+    }
+
+    timeout = window.setTimeout(() => finish(undefined), 10_000)
+    video.preload = 'metadata'
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : undefined
+      finish(duration)
+    }
+    video.onerror = () => finish(undefined)
+    video.src = objectUrl
+    const isJSDOM = typeof navigator !== 'undefined' && /\bjsdom\b/i.test(navigator.userAgent)
+    const hasElementLoadOverride = Object.prototype.hasOwnProperty.call(video, 'load')
+    if (isJSDOM && !hasElementLoadOverride) {
+      window.setTimeout(() => finish(undefined), 0)
+      return
+    }
+    try {
+      video.load()
+    } catch {
+      finish(undefined)
+    }
+  })
+}
+
 function splitRuleList(value: string) {
   return value
     .split(/[,\n，、]/)
@@ -269,6 +310,10 @@ export function VideoReferenceInput({
         continue
       }
       try {
+        const referenceType = referenceTypeForFile(file)
+        const measuredDuration = referenceType === 'video_url'
+          ? await measureLocalVideoDuration(file)
+          : undefined
         const result = await uploadToOSS({
           purpose: 'video_reference',
           file,
@@ -276,15 +321,15 @@ export function VideoReferenceInput({
         })
         updateProgress(progressId, 100)
         appendReference({
-          type: referenceTypeForFile(file),
+          type: referenceType,
           url: result.publicUrl,
           reference_role: undefined,
           file_name: file.name,
           mime_type: result.contentType || file.type,
           file_size: result.size || file.size,
-          input_duration_seconds: result.inputDurationSeconds,
+          input_duration_seconds: measuredDuration ?? result.inputDurationSeconds,
         })
-        if (result.warning && file.type.startsWith('video/')) {
+        if (result.warning && referenceType === 'video_url' && measuredDuration == null) {
           errors.push(`${file.name}：素材已上传，但暂未读取到视频时长，费用将按默认输入时长估算。`)
         }
       } catch (err: any) {

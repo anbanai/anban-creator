@@ -214,7 +214,9 @@ assertContains('src/stores/auth.ts', [
   'apiUrl(',
 ])
 assertContains('src/api/projects.ts', [
-  'uploadUrl(',
+  "'/uploads/prepare'",
+  'upload_url',
+  'uni.request({',
 ])
 assertContains('src/api/designer.ts', [
   'uploadUrl(',

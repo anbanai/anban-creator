@@ -16,9 +16,10 @@ import (
 
 // TemplateHandler handles template-related HTTP endpoints.
 type TemplateHandler struct {
-	service *service.TemplateService
-	logger  *zerolog.Logger
-	store   storage.Provider
+	service        *service.TemplateService
+	logger         *zerolog.Logger
+	store          storage.Provider
+	pendingUploads service.PendingUploadRepository
 }
 
 // NewTemplateHandler creates a new TemplateHandler.
@@ -30,6 +31,12 @@ func NewTemplateHandler(svc *service.TemplateService, logger *zerolog.Logger) *T
 // directly-fetchable URLs in responses.
 func (h *TemplateHandler) SetStore(s storage.Provider) {
 	h.store = s
+}
+
+// SetPendingUploadRepository injects pending direct-upload tracking for
+// user-uploaded template thumbnails.
+func (h *TemplateHandler) SetPendingUploadRepository(repo service.PendingUploadRepository) {
+	h.pendingUploads = repo
 }
 
 // signTemplateURLs resolves stored runtime image URLs to directly-fetchable
@@ -165,6 +172,9 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 	if req.Visibility != "public" && req.Visibility != "private" {
 		req.Visibility = "public"
 	}
+	if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.ThumbnailURL}); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 
 	tmpl := &model.Template{
 		Name:         req.Name,
@@ -238,6 +248,11 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 	if req.Visibility != nil && *req.Visibility == "" {
 		req.Visibility = nil
 		patch.Visibility = nil
+	}
+	if req.ThumbnailURL != nil {
+		if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{*req.ThumbnailURL}); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 	}
 
 	updated, err := h.service.UpdatePatch(c.Context(), id, userID, patch)

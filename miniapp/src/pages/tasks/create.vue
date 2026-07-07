@@ -518,7 +518,7 @@ async function chooseProductPhoto() {
     uploadingPhoto.value = true
     uni.showLoading({ title: '上传中...' })
     for (const p of paths) {
-      const res = await projectsApi.uploadImage(p, 'reference')
+      const res = await projectsApi.uploadImage(p, 'ecommerce_product_photo')
       if (res.url) form.product_photos.push(res.url)
     }
   } catch (err: any) {

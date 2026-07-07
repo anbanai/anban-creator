@@ -473,6 +473,7 @@ func main() {
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
 		if store != nil {
 			fileHandler = handler.NewFileHandler(store, log)
+			fileHandler.SetPendingUploadRepository(repo.PendingUploads())
 			uploadHandler = handler.NewUploadHandler(store, repo.PendingUploads(), service.DirectUploadConfig{
 				Storage: cfg.Storage,
 			}, log)
@@ -484,6 +485,9 @@ func main() {
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
 		if store != nil {
 			templateHandler.SetStore(store)
+		}
+		if repo != nil {
+			templateHandler.SetPendingUploadRepository(repo.PendingUploads())
 		}
 		if viralAnalysisSvc != nil {
 			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
