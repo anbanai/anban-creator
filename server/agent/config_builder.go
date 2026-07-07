@@ -205,6 +205,8 @@ func TaskTypeToAgent(taskType string) string {
 		return "wechatarticle"
 	case model.ScopeSeednote:
 		return "seednote"
+	case model.ScopeMoments:
+		return "moments"
 	case model.ScopeEcommerce:
 		return "ecommerce"
 	case model.ScopeVideo:

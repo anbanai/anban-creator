@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -1901,6 +1902,42 @@ func TestTaskService_CreateManual(t *testing.T) {
 	}
 	if task.Prompt != "Test topic" {
 		t.Errorf("Prompt = %q, want %q", task.Prompt, "Test topic")
+	}
+}
+
+func TestTaskService_CreateManualMomentsTaskDerivesTypeAndChargesDefaultCost(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	logger := zerolog.New(io.Discard)
+	creditSvc := NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.ScopeMoments: 3000}}, &logger)
+	svc.creditSvc = creditSvc
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 10_000)
+	projectID := createTestProject(t, repo, userID, model.PlatformMoments)
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "把这段活动素材写成朋友圈",
+	})
+	if err != nil {
+		t.Fatalf("CreateManual moments: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("created tasks = %d, want 1", len(tasks))
+	}
+	if tasks[0].Type != model.PlatformMoments {
+		t.Fatalf("task type = %q, want moments", tasks[0].Type)
+	}
+	snap := tasks[0].ProjectSnapshot.Data()
+	if snap.Platform != model.PlatformMoments {
+		t.Fatalf("task snapshot platform = %q, want moments", snap.Platform)
+	}
+	tx, err := repo.Credits().FindDeductionByTaskID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find moments deduction: %v", err)
+	}
+	if tx.Amount != -3000 || tx.Description != "生成朋友圈扣除积分3000" {
+		t.Fatalf("moments deduction = amount %d description %q", tx.Amount, tx.Description)
 	}
 }
 

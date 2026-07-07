@@ -35,6 +35,7 @@ func (e projectDeleteConflictError) Is(target error) bool {
 var validPlatforms = map[string]bool{
 	model.PlatformArticle:   true,
 	model.PlatformSeednote:  true,
+	model.PlatformMoments:   true,
 	model.PlatformEcommerce: true,
 	model.PlatformVideo:     true,
 }

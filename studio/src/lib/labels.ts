@@ -223,6 +223,7 @@ export const operationLabel: Record<string, string> = {
 export const taskTypeLabelCN: Record<string, string> = {
   article: '公众号',
   seednote: '种草笔记',
+  moments: '朋友圈',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
   video: '视频生成',
@@ -236,6 +237,7 @@ export const taskTypeLabelCN: Record<string, string> = {
 export const contentTypeLabel: Record<string, string> = {
   seednote: '种草笔记',
   article: '公众号文章',
+  moments: '朋友圈',
   ecommerce: '电商出图',
   video: '视频生成',
 }
@@ -257,8 +259,10 @@ export const progressStageLabel: Record<string, string> = {
   draft: '草稿提交',
   // seednote-only
   project: '项目信息',
+  material_analysis: '素材分析',
   viral_analysis: '爆文拆解',
   image_generation: '图片生成',
+  quality_review: '质量复核',
   compliance: '合规检查',
   archive: '资源归档',
   // ecommerce-only (slugs from claudecode/agents/ecommerce.md)
@@ -270,6 +274,7 @@ export const progressStageLabel: Record<string, string> = {
 export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
+  { value: 'moments', label: '朋友圈' },
   { value: 'video', label: '视频生成' },
   { value: 'ecommerce', label: '电商出图' },
 ]
@@ -277,18 +282,21 @@ export const contentTypeOptions = [
 export const platformLabels: Record<string, string> = {
   seednote: '种草笔记',
   article: '公众号',
+  moments: '朋友圈',
   ecommerce: '电商出图',
 }
 
 export const platformDefaultRatio: Record<string, string> = {
   article: '16:9',
   seednote: '3:4',
+  moments: '3:4',
   ecommerce: '1:1',
 }
 
 export const platformRatioLabel: Record<string, string> = {
   article: '16:9（公众号默认）',
   seednote: '3:4（种草笔记默认）',
+  moments: '3:4（朋友圈默认）',
   ecommerce: '1:1（电商主图默认）',
 }
 

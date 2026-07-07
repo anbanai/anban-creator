@@ -146,7 +146,7 @@ describe('createTaskSchema', () => {
   })
 
   it('accepts all valid content types', () => {
-    for (const type of ['seednote', 'article', 'viral_analysis'] as const) {
+    for (const type of ['seednote', 'article', 'moments', 'viral_analysis'] as const) {
       expect(createTaskSchema.safeParse({
         project_id: type === 'viral_analysis' ? '' : 'ch-1',
         type,
@@ -253,6 +253,19 @@ describe('createTaskSchema', () => {
       }],
     })
   })
+
+  it('accepts moments tasks without a separate image-mode field', () => {
+    const result = createTaskSchema.parse({
+      project_id: 'moments-1',
+      type: 'moments',
+      prompt: '把成交复盘写成朋友圈',
+      image_ratio: '3:4',
+    })
+
+    expect(result.type).toBe('moments')
+    expect(result.image_ratio).toBe('3:4')
+    expect('moments_with_image' in result).toBe(false)
+  })
 })
 
 describe('planSchema', () => {
@@ -307,6 +320,16 @@ describe('planSchema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('does not accept moments plans in V1', () => {
+    const result = planSchema.safeParse({
+      project_id: 'moments-1',
+      type: 'moments',
+      cron_expr: '0 9 * * *',
+      prompt: '每日朋友圈',
+    })
+    expect(result.success).toBe(false)
+  })
+
   it('accepts optional fields', () => {
     const result = planSchema.safeParse({
       type: 'seednote',
@@ -355,6 +378,15 @@ describe('projectSchema', () => {
   it('accepts seednote platform without wechat_app_id', () => {
     expect(projectSchema.safeParse({
       platform: 'seednote',
+    }).success).toBe(true)
+  })
+
+  it('accepts moments platform without publishing credentials', () => {
+    expect(projectSchema.safeParse({
+      platform: 'moments',
+      name: '朋友圈项目',
+      instructions: '私域成交内容',
+      image_ratio: '3:4',
     }).success).toBe(true)
   })
 

@@ -72,7 +72,7 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
   const positioning = project.instructions || project.positioning || ''
   const taskHref = createTaskHref({ type: project.platform, projectId: project.id, intent: 'new' })
   const planHref = `/plans?create=true&type=${project.platform}&project_id=${project.id}&intent=schedule`
-  const canCreatePlan = project.platform !== 'ecommerce'
+  const canCreatePlan = project.platform !== 'ecommerce' && project.platform !== 'moments'
   const operatingBadges = buildOperatingBadges(project, stats)
   const isArchived = project.status === 'archived'
   const cardTone = isArchived

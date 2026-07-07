@@ -215,6 +215,28 @@ func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, user
 	return persisted, nil
 }
 
+// UpdateTaskFileMetadata updates publication-facing metadata on a task file
+// after a downstream upload step (for example WeChat CDN registration).
+func (s *TaskService) UpdateTaskFileMetadata(ctx context.Context, file *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error) {
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("task service repository is not available")
+	}
+	if file == nil {
+		return nil, fmt.Errorf("task file is required")
+	}
+	updated := *file
+	if role != "" {
+		updated.Role = role
+	}
+	updated.MediaID = mediaID
+	updated.WechatURL = wechatURL
+	persisted, err := s.repo.TaskFiles().Upsert(ctx, &updated)
+	if err != nil {
+		return nil, fmt.Errorf("update task file metadata: %w", err)
+	}
+	return persisted, nil
+}
+
 func (s *TaskService) uploadTaskFileFromPath(ctx context.Context, taskID, userID, workDir, path string, info os.FileInfo) (*model.TaskFile, error) {
 	relPath, err := filepath.Rel(workDir, path)
 	if err != nil {

@@ -4,6 +4,7 @@ import { operationLabel } from './labels'
 const taskLabels: Record<string, string> = {
   seednote: '种草笔记',
   article: '公众号文章',
+  moments: '朋友圈',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
   video: '视频生成',

@@ -1204,10 +1204,16 @@ func (c *Config) applyDefaults() {
 		c.Credits.TaskCosts = map[string]int{
 			"article":        4000,
 			"seednote":       3600,
+			"moments":        3000,
 			"viral_analysis": 1200,
 		}
-	} else if _, ok := c.Credits.TaskCosts["viral_analysis"]; !ok {
-		c.Credits.TaskCosts["viral_analysis"] = 1200
+	} else {
+		if _, ok := c.Credits.TaskCosts["moments"]; !ok {
+			c.Credits.TaskCosts["moments"] = 3000
+		}
+		if _, ok := c.Credits.TaskCosts["viral_analysis"]; !ok {
+			c.Credits.TaskCosts["viral_analysis"] = 1200
+		}
 	}
 	if c.Credits.GoalModeMultiplier <= 0 {
 		c.Credits.GoalModeMultiplier = 3
@@ -1297,8 +1303,11 @@ func (c *Config) applyDefaults() {
 		c.Claude.MaxTurns = map[string]int{
 			"article":   100,
 			"seednote":  60,
+			"moments":   60,
 			"ecommerce": 120, // 多产品图 → 产品档案 → 主图/详情/封面/分享/SKU 批量 + 视觉自检循环，给足余量
 		}
+	} else if _, ok := c.Claude.MaxTurns["moments"]; !ok {
+		c.Claude.MaxTurns["moments"] = 60
 	}
 	if c.Claude.Docker.Image == "" {
 		c.Claude.Docker.Image = "anban-creator-agent:latest"

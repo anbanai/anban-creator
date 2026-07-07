@@ -22,7 +22,7 @@ type ProjectStats struct {
 // ProjectListOptions for filtering project list queries.
 type ProjectListOptions struct {
 	Status   string // filter by status (active, archived)
-	Platform string // filter by platform (article, seednote)
+	Platform string // filter by platform (article, seednote, moments, ecommerce, video)
 }
 
 // ProjectRepository defines the interface for project data access.

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -327,6 +328,33 @@ func TestPlanService_GetByID(t *testing.T) {
 	_, err = svc.GetByID(ctx, "non-existent-id")
 	if err == nil {
 		t.Error("expected error for non-existent ID")
+	}
+}
+
+func TestPlanService_CreateRejectsUnsupportedPlanPlatforms(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+
+	for _, tt := range []struct {
+		name     string
+		platform string
+	}{
+		{name: "ecommerce", platform: model.PlatformEcommerce},
+		{name: "moments", platform: model.PlatformMoments},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			projectID := createTestProject(t, repo, "user-unsupported-plan-"+tt.name, tt.platform)
+
+			_, err := svc.Create(ctx, CreatePlanParams{
+				UserID:    "user-unsupported-plan-" + tt.name,
+				ProjectID: projectID,
+				CronExpr:  "0 9 * * *",
+				Prompt:    "scheduled content",
+			})
+			if !errors.Is(err, ErrUnsupportedPlanPlatform) {
+				t.Fatalf("Create error = %v, want ErrUnsupportedPlanPlatform", err)
+			}
+		})
 	}
 }
 
