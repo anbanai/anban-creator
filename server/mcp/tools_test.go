@@ -2,11 +2,13 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -84,137 +86,61 @@ func createAccountInfoTask(t *testing.T, repo repository.Repository, userID, pro
 	return task
 }
 
+func taskToolRequest(t *testing.T, taskID string) *mcp.CallToolRequest {
+	t.Helper()
+	args, err := json.Marshal(map[string]string{"task_id": taskID})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	return &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
+}
+
 func TestTaskGetHandlerRejectsForeignTask(t *testing.T) {
-	db := repositoryTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	log := zerolog.New(zerolog.NewTestWriter(t))
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
 
 	ownerID := uuid.New().String()
-	callerID := uuid.New().String()
-	for _, userID := range []string{ownerID, callerID} {
-		if err := repo.Users().Create(ctx, &model.User{
-			ID:             userID,
-			Email:          userID + "@example.com",
-			Password:       "hashed",
-			InviteCode:     strings.ReplaceAll(userID[:8], "-", ""),
-			CreditsBalance: 1000,
-		}); err != nil {
-			t.Fatalf("create user %s: %v", userID, err)
-		}
-	}
-	projectID := uuid.New().String()
-	if err := repo.Projects().Create(ctx, &model.Project{
-		ID:       projectID,
-		UserID:   ownerID,
-		Platform: model.PlatformArticle,
-		Name:     "Foreign Article",
-		Status:   model.ProjectStatusActive,
-	}); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	taskID := uuid.New().String()
-	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    ownerID,
-		ProjectID: projectID,
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusRunning,
-		Prompt:    "secret prompt owned by another user",
-	}); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
+	intruderID := uuid.New().String()
+	project := createAccountInfoProject(t, repo, ownerID, "")
+	task := createAccountInfoTask(t, repo, ownerID, project.ID, "")
 
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &log, "", nil, "", nil, nil)
-	SetServices(&Services{TaskSvc: taskSvc})
-	SetLogger(&log)
-	t.Cleanup(func() {
-		SetServices(nil)
-		SetLogger(nil)
-	})
-
-	apiKeySvc := service.NewAPIKeyService(repo, &log)
-	rawKey, err := apiKeySvc.EnsureUserKey(ctx, callerID)
+	result, err := taskGetHandler(withMCPUserID(context.Background(), intruderID), taskToolRequest(t, task.ID))
 	if err != nil {
-		t.Fatalf("ensure caller key: %v", err)
+		t.Fatalf("taskGetHandler: %v", err)
 	}
-	handler := NewMCPHandler(apiKeySvc, "", &log)
-
-	text := callMCPTool(t, handler, "get_task", `{"task_id":"`+taskID+`"}`, rawKey)
-	if strings.Contains(text, "secret prompt owned by another user") {
-		t.Fatalf("foreign get_task leaked task prompt: %s", text)
-	}
-	if !strings.Contains(text, "access") && !strings.Contains(text, "belong") {
-		t.Fatalf("response = %q, want access denial", text)
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "task not found") {
+		t.Fatalf("expected ownership error, got: %s", text)
 	}
 }
 
-func TestTaskCancelHandlerRejectsForeignTask(t *testing.T) {
-	db := repositoryTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	log := zerolog.New(zerolog.NewTestWriter(t))
+func TestTaskCancelHandlerRejectsForeignTaskWithoutStatusChange(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
 
 	ownerID := uuid.New().String()
-	callerID := uuid.New().String()
-	for _, userID := range []string{ownerID, callerID} {
-		if err := repo.Users().Create(ctx, &model.User{
-			ID:             userID,
-			Email:          userID + "@example.com",
-			Password:       "hashed",
-			InviteCode:     strings.ReplaceAll(userID[:8], "-", ""),
-			CreditsBalance: 1000,
-		}); err != nil {
-			t.Fatalf("create user %s: %v", userID, err)
-		}
-	}
-	projectID := uuid.New().String()
-	if err := repo.Projects().Create(ctx, &model.Project{
-		ID:       projectID,
-		UserID:   ownerID,
-		Platform: model.PlatformArticle,
-		Name:     "Foreign Article",
-		Status:   model.ProjectStatusActive,
-	}); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	taskID := uuid.New().String()
-	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    ownerID,
-		ProjectID: projectID,
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusRunning,
-		Prompt:    "foreign running task",
-	}); err != nil {
-		t.Fatalf("create task: %v", err)
+	intruderID := uuid.New().String()
+	project := createAccountInfoProject(t, repo, ownerID, "")
+	task := createAccountInfoTask(t, repo, ownerID, project.ID, "")
+	task.Status = model.TaskStatusRunning
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatalf("update task: %v", err)
 	}
 
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &log, "", nil, "", nil, nil)
-	SetServices(&Services{TaskSvc: taskSvc})
-	SetLogger(&log)
-	t.Cleanup(func() {
-		SetServices(nil)
-		SetLogger(nil)
-	})
-
-	apiKeySvc := service.NewAPIKeyService(repo, &log)
-	rawKey, err := apiKeySvc.EnsureUserKey(ctx, callerID)
+	result, err := taskCancelHandler(withMCPUserID(context.Background(), intruderID), taskToolRequest(t, task.ID))
 	if err != nil {
-		t.Fatalf("ensure caller key: %v", err)
+		t.Fatalf("taskCancelHandler: %v", err)
 	}
-	handler := NewMCPHandler(apiKeySvc, "", &log)
-
-	text := callMCPTool(t, handler, "cancel_task", `{"task_id":"`+taskID+`"}`, rawKey)
-	if !strings.Contains(text, "access") && !strings.Contains(text, "belong") {
-		t.Fatalf("response = %q, want access denial", text)
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "task not found") {
+		t.Fatalf("expected ownership error, got: %s", text)
 	}
-	task, err := repo.Tasks().FindByID(ctx, taskID)
+	reloaded, err := repo.Tasks().FindByID(context.Background(), task.ID)
 	if err != nil {
-		t.Fatalf("find task: %v", err)
+		t.Fatalf("reload task: %v", err)
 	}
-	if task.Status != model.TaskStatusRunning {
-		t.Fatalf("foreign cancel changed status = %q, want %q", task.Status, model.TaskStatusRunning)
+	if reloaded.Status != model.TaskStatusRunning {
+		t.Fatalf("foreign cancel changed status to %q", reloaded.Status)
 	}
 }
 

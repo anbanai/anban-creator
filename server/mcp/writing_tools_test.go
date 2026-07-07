@@ -235,12 +235,12 @@ func TestBillingError_InsufficientCredits(t *testing.T) {
 }
 
 func TestBillingError_GenericError(t *testing.T) {
-	result := billingError("write article", fmt.Errorf("LLM timeout"))
+	result := billingError("render template", fmt.Errorf("LLM timeout"))
 	if !result.IsError {
 		t.Error("IsError should be true")
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, "write article") {
+	if !strings.Contains(text, "render template") {
 		t.Errorf("expected tool name in error, got: %q", text)
 	}
 	if !strings.Contains(text, "LLM timeout") {
@@ -266,7 +266,7 @@ func TestBillingError_WrappingChain(t *testing.T) {
 
 	// Verify ErrInsufficientCredits is detected even when wrapped.
 	creditErr := fmt.Errorf("deduct: %w", service.ErrInsufficientCredits)
-	result2 := billingError("write article", creditErr)
+	result2 := billingError("render template", creditErr)
 	text2 := result2.Content[0].(*mcp.TextContent).Text
 	if !strings.Contains(text2, "积分不足") {
 		t.Errorf("should detect wrapped ErrInsufficientCredits, got: %q", text2)

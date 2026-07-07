@@ -794,8 +794,9 @@ func (c *ImageAPIConfig) DesignerOrder() []string {
 	return c.designerOrder
 }
 
-// WritingConfig holds the default OpenAI-compatible text LLM route used by
-// server-side analysis helpers that still need text completion fallback.
+// WritingConfig holds the default OpenAI-compatible text LLM route for
+// LLM-backed writing-adjacent services.
+//
 // Markdown-to-WeChat HTML conversion is deterministic and does not use this
 // route.
 type WritingConfig struct {

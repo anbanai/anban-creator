@@ -404,8 +404,9 @@ func (r *taskRepository) CompareAndSwapStatus(ctx context.Context, taskID, expec
 	return result.RowsAffected > 0, nil
 }
 
-// CompareAndSwapStatusForUser atomically transitions task status only when the
-// task belongs to userID.
+// CompareAndSwapStatusForUser atomically transitions a task only when it belongs
+// to the supplied user. External user-facing paths must use this guard to avoid
+// cross-account cancellation.
 func (r *taskRepository) CompareAndSwapStatusForUser(ctx context.Context, taskID, userID, expected, newStatus string) (bool, error) {
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).

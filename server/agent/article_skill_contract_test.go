@@ -315,6 +315,81 @@ func TestArticleSkillContracts_InspectArticleMCPRemoved(t *testing.T) {
 	}
 }
 
+func TestArticleSkillsDoNotReferenceRemovedGenerationMCPTools(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	removed := []string{"write_article", "research_topics", "optimize_seo", "generate_outline"}
+	files := []string{
+		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
+		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
+	}
+	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+		for _, skill := range []string{"content-writing", "topic-research", "seo-optimization"} {
+			files = append(files, filepath.Join(root, plugin, "skills", skill, "SKILL.md"))
+		}
+	}
+
+	for _, file := range files {
+		body := readArticleContractFile(t, file)
+		for _, name := range removed {
+			if strings.Contains(body, name) {
+				t.Fatalf("%s must not reference removed MCP tool %q", file, name)
+			}
+		}
+	}
+}
+
+func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	requiredSections := []string{"## Intent Routing", "## Discovery First", "## Configuration Boundaries", "## Output Contract", "## Failure Handling"}
+
+	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+		content := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "content-writing", "SKILL.md"))
+		assertArticleContractContainsAll(t, plugin+" content-writing", content, append(requiredSections,
+			"get_project_profile",
+			"list_resources(category=\"writers\")",
+			"get_resource(category=\"writers\"",
+			"render_template",
+			"convert_markdown",
+			"$DIR/03-article.md",
+		)...)
+
+		topic := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "topic-research", "SKILL.md"))
+		assertArticleContractContainsAll(t, plugin+" topic-research", topic, append(requiredSections,
+			"claim_topic",
+			"list_project_titles",
+			"list_drafts",
+			"list_published_articles",
+			"$DIR/01-research.md",
+			"$DIR/02-outline.md",
+		)...)
+
+		seo := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "seo-optimization", "SKILL.md"))
+		assertArticleContractContainsAll(t, plugin+" seo-optimization", seo, append(requiredSections,
+			"MCP is not used for SEO generation",
+			"$DIR/seo-result.md",
+			"CTR",
+		)...)
+	}
+}
+
+func TestWechatArticleAgentsRouteCreativeGenerationToSkills(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	for _, file := range []string{
+		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
+		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
+	} {
+		body := readArticleContractFile(t, file)
+		assertArticleContractContainsAll(t, file, body,
+			"topic-research",
+			"content-writing",
+			"seo-optimization",
+			"Skills 内部完成",
+			"不要调用或等待任何生成类 MCP 工具",
+			"render_template",
+		)
+	}
+}
+
 func articleContractRepoRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("../..")
@@ -331,4 +406,13 @@ func readArticleContractFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+func assertArticleContractContainsAll(t *testing.T, label, body string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s missing %q", label, want)
+		}
+	}
 }

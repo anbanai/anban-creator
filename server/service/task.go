@@ -953,39 +953,31 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	return s.cancel(ctx, id, "")
 }
 
-// CancelForUser cancels a task only when it belongs to userID.
-func (s *TaskService) CancelForUser(ctx context.Context, id, userID string) error {
+// CancelForUser cancels a user-owned pending/running task. The status transition
+// is guarded by task_id + user_id so callers cannot cancel another account's
+// task even if they know its ID.
+func (s *TaskService) CancelForUser(ctx context.Context, userID, id string) error {
 	if userID == "" {
 		return fmt.Errorf("user_id is required")
 	}
 	return s.cancel(ctx, id, userID)
 }
 
-func (s *TaskService) cancel(ctx context.Context, id, ownerUserID string) error {
+func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 	// Fetch task before CAS so we can decide refund strategy.
 	task, taskErr := s.repo.Tasks().FindByID(ctx, id)
-	if taskErr != nil {
-		return fmt.Errorf("find task: %w", taskErr)
-	}
-	if ownerUserID != "" && task.UserID != ownerUserID {
-		return fmt.Errorf("task does not belong to user")
+	if userID != "" && taskErr == nil && task != nil && task.UserID != userID {
+		return fmt.Errorf("task not found")
 	}
 
 	// Atomically transition status: only pending or running can be cancelled.
-	swapStatus := func(expected string) (bool, error) {
-		if ownerUserID != "" {
-			return s.repo.Tasks().CompareAndSwapStatusForUser(ctx, id, ownerUserID, expected, model.TaskStatusCancelled)
-		}
-		return s.repo.Tasks().CompareAndSwapStatus(ctx, id, expected, model.TaskStatusCancelled)
-	}
-
-	swapped, err := swapStatus(model.TaskStatusRunning)
+	swapped, err := s.compareAndSwapCancelStatus(ctx, id, userID, model.TaskStatusRunning)
 	if err != nil {
 		return fmt.Errorf("cancel task: %w", err)
 	}
 	if !swapped {
 		// Also try pending → cancelled (task may not have started running yet).
-		swapped, err = swapStatus(model.TaskStatusPending)
+		swapped, err = s.compareAndSwapCancelStatus(ctx, id, userID, model.TaskStatusPending)
 		if err != nil {
 			return fmt.Errorf("cancel task: %w", err)
 		}
@@ -1027,6 +1019,13 @@ func (s *TaskService) cancel(ctx context.Context, id, ownerUserID string) error 
 		s.pubsub.PublishCancel(ctx, id)
 	}
 	return nil
+}
+
+func (s *TaskService) compareAndSwapCancelStatus(ctx context.Context, id, userID, expected string) (bool, error) {
+	if userID != "" {
+		return s.repo.Tasks().CompareAndSwapStatusForUser(ctx, id, userID, expected, model.TaskStatusCancelled)
+	}
+	return s.repo.Tasks().CompareAndSwapStatus(ctx, id, expected, model.TaskStatusCancelled)
 }
 
 // registerCancel stores a context.CancelFunc for a running task so it can be
