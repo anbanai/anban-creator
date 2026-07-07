@@ -4,9 +4,178 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+var (
+	claudeCodePluginNameRE    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	claudeCodeUserConfigKeyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	claudeCodeSemverRE        = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+)
+
+func TestClaudeCodePluginManifestMatchesOfficialBestPracticeFields(t *testing.T) {
+	var manifest struct {
+		Name        string `json:"name"`
+		DisplayName string `json:"displayName"`
+		Description string `json:"description"`
+		Version     string `json:"version"`
+		UserConfig  map[string]struct {
+			Type        string `json:"type"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Required    bool   `json:"required"`
+			Sensitive   bool   `json:"sensitive"`
+			Default     string `json:"default"`
+		} `json:"userConfig"`
+	}
+	raw := readRepoFile(t, "../../claudecode/.claude-plugin/plugin.json")
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		t.Fatalf("plugin.json must be valid JSON: %v", err)
+	}
+	if !claudeCodePluginNameRE.MatchString(manifest.Name) {
+		t.Fatalf("plugin name %q must be kebab-case for Claude Code namespacing", manifest.Name)
+	}
+	if manifest.DisplayName == "" {
+		t.Fatal("plugin.json must set displayName for Claude Code plugin UI surfaces")
+	}
+	if manifest.Description == "" {
+		t.Fatal("plugin.json must set description")
+	}
+	if !claudeCodeSemverRE.MatchString(manifest.Version) {
+		t.Fatalf("plugin version %q must be semantic version x.y.z", manifest.Version)
+	}
+
+	for key, opt := range manifest.UserConfig {
+		if !claudeCodeUserConfigKeyRE.MatchString(key) {
+			t.Fatalf("userConfig key %q must be a valid identifier for ${user_config.%s} substitution", key, key)
+		}
+		if opt.Type == "" || opt.Title == "" || opt.Description == "" {
+			t.Fatalf("userConfig.%s must set type, title, and description", key)
+		}
+	}
+	apiKey := manifest.UserConfig["api_key"]
+	if apiKey.Type != "string" || !apiKey.Required || !apiKey.Sensitive {
+		t.Fatalf("api_key userConfig must be a required sensitive string, got %+v", apiKey)
+	}
+	apiURL := manifest.UserConfig["api_url"]
+	if apiURL.Type != "string" || apiURL.Default != "https://api.creator.anbanai.com" {
+		t.Fatalf("api_url userConfig must be a string with official hosted default, got %+v", apiURL)
+	}
+
+	var marketplace struct {
+		Plugins []struct {
+			Name        string `json:"name"`
+			Source      string `json:"source"`
+			DisplayName string `json:"displayName"`
+			Version     string `json:"version"`
+		} `json:"plugins"`
+	}
+	raw = readRepoFile(t, "../../claudecode/.claude-plugin/marketplace.json")
+	if err := json.Unmarshal([]byte(raw), &marketplace); err != nil {
+		t.Fatalf("marketplace.json must be valid JSON: %v", err)
+	}
+	for _, plugin := range marketplace.Plugins {
+		if plugin.Name != manifest.Name {
+			continue
+		}
+		if plugin.Source != "./" {
+			t.Fatalf("marketplace entry source = %q, want ./ for repo-root plugin", plugin.Source)
+		}
+		if plugin.DisplayName != manifest.DisplayName {
+			t.Fatalf("marketplace displayName = %q, want %q", plugin.DisplayName, manifest.DisplayName)
+		}
+		if plugin.Version != manifest.Version {
+			t.Fatalf("marketplace version = %q, want %q", plugin.Version, manifest.Version)
+		}
+		return
+	}
+	t.Fatalf("marketplace.json missing plugin entry %q", manifest.Name)
+}
+
+func TestClaudeCodePluginComponentsUseRootDefaultLocations(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "claudecode")
+	for _, rel := range []string{
+		"skills",
+		"agents",
+		"hooks/hooks.json",
+		".mcp.json",
+		".claude-plugin/plugin.json",
+		".claude-plugin/marketplace.json",
+	} {
+		path := filepath.Join(root, rel)
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("Claude Code plugin component %s must exist: %v", rel, err)
+		}
+	}
+
+	for _, rel := range []string{
+		"skills",
+		"agents",
+		"hooks",
+		"commands",
+		"output-styles",
+		"themes",
+		"monitors",
+		".mcp.json",
+	} {
+		path := filepath.Join(root, ".claude-plugin", rel)
+		if _, err := os.Stat(path); err == nil {
+			t.Fatalf("%s must live at plugin root, not under .claude-plugin/", rel)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+	}
+}
+
+func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
+	allowed := map[string]bool{
+		"name": true, "description": true, "model": true, "effort": true,
+		"maxTurns": true, "tools": true, "disallowedTools": true,
+		"skills": true, "memory": true, "background": true, "isolation": true,
+		"color": true,
+	}
+	ignoredForPluginAgents := map[string]bool{
+		"hooks": true, "mcpServers": true, "permissionMode": true,
+	}
+
+	root := filepath.Join(repoRoot(t), "claudecode", "agents")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read claudecode agents: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		fm := readYAMLFrontmatter(t, path)
+		for key := range fm {
+			if ignoredForPluginAgents[key] {
+				t.Fatalf("%s uses %q, which Claude Code ignores for plugin-shipped agents", path, key)
+			}
+			if !allowed[key] {
+				t.Fatalf("%s uses unsupported plugin-agent frontmatter field %q", path, key)
+			}
+		}
+		name := frontmatterString(fm["name"])
+		if name == "" || !claudeCodePluginNameRE.MatchString(name) {
+			t.Fatalf("%s has invalid Claude Code agent name %q", path, name)
+		}
+		if want := strings.TrimSuffix(entry.Name(), ".md"); name != want {
+			t.Fatalf("%s name = %q, want filename-derived %q for predictable plugin-scoped id", path, name, want)
+		}
+		if frontmatterString(fm["description"]) == "" {
+			t.Fatalf("%s must set description so Claude Code can delegate appropriately", path)
+		}
+		if isolation := frontmatterString(fm["isolation"]); isolation != "" && isolation != "worktree" {
+			t.Fatalf("%s isolation = %q, the only plugin-supported value is worktree", path, isolation)
+		}
+	}
+}
 
 func TestClaudeCodePluginHasGitHubHealthFilesAndChangelog(t *testing.T) {
 	for _, rel := range []string{
@@ -18,6 +187,23 @@ func TestClaudeCodePluginHasGitHubHealthFilesAndChangelog(t *testing.T) {
 		if info, err := os.Stat(path); err != nil || info.IsDir() {
 			t.Fatalf("%s must exist as a repository health/release-practice file", rel)
 		}
+	}
+}
+
+func TestClaudeCodePluginChangelogMentionsManifestVersion(t *testing.T) {
+	var manifest struct {
+		Version string `json:"version"`
+	}
+	raw := readRepoFile(t, "../../claudecode/.claude-plugin/plugin.json")
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		t.Fatalf("plugin.json must be valid JSON: %v", err)
+	}
+	if manifest.Version == "" {
+		t.Fatal("plugin.json must set version")
+	}
+	changelog := readRepoFile(t, "../../claudecode/CHANGELOG.md")
+	if !strings.Contains(changelog, "## ["+manifest.Version+"]") {
+		t.Fatalf("CHANGELOG.md must include an entry for plugin version %s", manifest.Version)
 	}
 }
 
@@ -116,6 +302,51 @@ func TestClaudeCodeSkillsStayWithinOfficialSizeGuideline(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeSkillsUseOfficialInvocationContract(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "claudecode", "skills")
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Base(path) != "SKILL.md" {
+			return nil
+		}
+		fm := readYAMLFrontmatter(t, path)
+		description := frontmatterString(fm["description"])
+		if description == "" {
+			t.Fatalf("%s must set description so Claude Code can decide when to invoke the skill", path)
+		}
+		whenToUse := frontmatterString(fm["when_to_use"])
+		if n := len([]rune(description + whenToUse)); n > 1536 {
+			t.Fatalf("%s description plus when_to_use is %d chars; Claude Code truncates skill listings at 1536", path, n)
+		}
+		if name := frontmatterString(fm["name"]); name != "" && !claudeCodePluginNameRE.MatchString(name) {
+			t.Fatalf("%s name = %q, want lowercase plugin-safe skill display name", path, name)
+		}
+		for _, key := range []string{"user-invocable", "disable-model-invocation"} {
+			if raw, ok := fm[key]; ok {
+				if _, ok := raw.(bool); !ok {
+					t.Fatalf("%s %s must be boolean when present", path, key)
+				}
+			}
+		}
+		if tools, ok := fm["allowed-tools"]; ok {
+			for _, tool := range frontmatterStringList(tools) {
+				if tool == "AskUserQuestion" {
+					t.Fatalf("%s must not preapprove AskUserQuestion; Anban plugin agents are zero-interaction pipelines", path)
+				}
+			}
+		}
+		if context := frontmatterString(fm["context"]); context != "" && context != "fork" {
+			t.Fatalf("%s context = %q, the Claude Code skill contract only supports fork", path, context)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk claudecode skills: %v", err)
+	}
+}
+
 func TestClaudeCodeSkillsHaveProgressiveExamples(t *testing.T) {
 	root := repoRoot(t)
 	claudeSkillsRoot := filepath.Join(root, "claudecode", "skills")
@@ -170,5 +401,51 @@ func TestClaudeCodeSkillsHaveProgressiveExamples(t *testing.T) {
 				t.Fatalf("stat %s: %v", mirrorPath, err)
 			}
 		}
+	}
+}
+
+func readYAMLFrontmatter(t *testing.T, path string) map[string]any {
+	t.Helper()
+	body := readRepoFile(t, path)
+	if !strings.HasPrefix(body, "---\n") {
+		t.Fatalf("%s missing YAML frontmatter", path)
+	}
+	rest := body[len("---\n"):]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		t.Fatalf("%s frontmatter is not closed", path)
+	}
+	var fm map[string]any
+	if err := yaml.Unmarshal([]byte(rest[:end]), &fm); err != nil {
+		t.Fatalf("%s has invalid YAML frontmatter: %v", path, err)
+	}
+	return fm
+}
+
+func frontmatterString(raw any) string {
+	switch v := raw.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	default:
+		return ""
+	}
+}
+
+func frontmatterStringList(raw any) []string {
+	switch v := raw.(type) {
+	case string:
+		return strings.FieldsFunc(v, func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t' || r == '\n'
+		})
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s := frontmatterString(item); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
 	}
 }
