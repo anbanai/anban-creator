@@ -37,4 +37,11 @@ describe('TasksPage recovery workspace contract', () => {
     expect(source).toContain('图片/高级')
     expect(source).toContain('基础任务费预估')
   })
+
+  it('keeps ecommerce creation on the base-fee path even if goal mode state is stale', () => {
+    const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
+
+    expect(source).toContain("goal_mode: values.type !== 'ecommerce' && goalMode ? true : undefined")
+    expect(source).toContain('const multiplier = isEcom ? 1 : goalMode ? 3 : 1')
+  })
 })

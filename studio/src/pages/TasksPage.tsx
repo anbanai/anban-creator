@@ -429,8 +429,8 @@ export default function TasksPage() {
       image_ratio: values.image_ratio || undefined,
       image_model_key: values.image_model_key || undefined,
       watermark: watermark || undefined,
-      goal_mode: goalMode || undefined,
-      goal: goalMode ? (goalText.trim() || undefined) : undefined,
+      goal_mode: values.type !== 'ecommerce' && goalMode ? true : undefined,
+      goal: values.type !== 'ecommerce' && goalMode ? (goalText.trim() || undefined) : undefined,
       has_content_image: values.type === 'seednote' ? hasContentImage : undefined,
       has_tail_image: values.type === 'seednote' ? hasTailImage : undefined,
       // Article image toggles (公众号文章): both default true; non-article omits.
@@ -1310,7 +1310,7 @@ export default function TasksPage() {
               {(() => {
                 const isEcom = watchedType === 'ecommerce'
                 const cost = taskCostFor(pricing, watchedType)
-                const multiplier = goalMode ? 3 : 1
+                const multiplier = isEcom ? 1 : goalMode ? 3 : 1
                 const billableQuantity = isEcom ? 1 : quantity
                 const totalCost = cost * billableQuantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
@@ -1362,12 +1362,12 @@ export default function TasksPage() {
               disabled={(() => {
                 const isEcom = watchedType === 'ecommerce'
                 const cost = taskCostFor(pricing, watchedType)
-                const multiplier = goalMode ? 3 : 1
+                const multiplier = isEcom ? 1 : goalMode ? 3 : 1
                 const billableQuantity = isEcom ? 1 : quantity
                 const totalCost = cost * billableQuantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
                 if (balance - totalCost < 0) return true
-                if (goalMode && !goalText.trim()) return true
+                if (!isEcom && goalMode && !goalText.trim()) return true
                 if (isEcom) {
                   if (!watchedProductPhotos || watchedProductPhotos.length === 0) return true
                 }
