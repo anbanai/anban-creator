@@ -106,6 +106,7 @@ type createTaskRequest struct {
 	Language                 string                 `json:"language,omitempty"`
 	ProviderStrategyOverride string                 `json:"provider_strategy_override,omitempty"`
 	VideoConfig              *model.VideoTaskConfig `json:"video_config,omitempty"`
+	VideoInput               *model.VideoInput      `json:"video_input,omitempty"`
 	// ExecutionTarget, when "local", routes the task to the caller's desktop
 	// local executor instead of cloud execution. Set by the desktop studio build
 	// when a local executor is available. Empty = cloud (default). See
@@ -236,7 +237,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, videoReferenceURLs(req.VideoConfig)); err != nil {
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, videoReferenceURLs(videoConfigForReferenceURLs(req.VideoConfig, req.VideoInput))); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 	}
@@ -273,6 +274,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		Ecommerce:                ecommerceCfg,
 		Video:                    req.VideoConfig,
+		VideoInput:               req.VideoInput,
 		ExecutionTarget:          req.ExecutionTarget,
 	})
 	if err != nil {

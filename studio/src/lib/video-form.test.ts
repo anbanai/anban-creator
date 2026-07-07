@@ -1,128 +1,64 @@
 import { describe, expect, it } from 'vitest'
-import type { VideoDefaults, VideoTaskConfig } from '@/types'
+import type { VideoInput } from '@/types'
 import {
   VIDEO_PROJECT_DEFAULT_VALUE,
-  buildVideoFormConfig,
-  defaultVideoPurposeForCreativeType,
-  normalizeVideoConfigForSubmit,
+  buildVideoInputForSubmit,
+  initialVideoInput,
   readVideoSelectValue,
   writeVideoSelectValue,
 } from './video-form'
 
-describe('video form helpers', () => {
-  it('uses a stable select value for project defaults and clears it before submit', () => {
+describe('video intake form helpers', () => {
+  it('uses a stable select value for unset hard constraints and clears it before submit', () => {
     expect(readVideoSelectValue(undefined)).toBe(VIDEO_PROJECT_DEFAULT_VALUE)
     expect(writeVideoSelectValue(VIDEO_PROJECT_DEFAULT_VALUE)).toBeUndefined()
-    expect(writeVideoSelectValue('seedance-2.0-mini')).toBe('seedance-2.0-mini')
+    expect(writeVideoSelectValue('9:16')).toBe('9:16')
   })
 
-  it('seeds form values from project defaults with references ready for editing', () => {
-    const watermark = false
-    const defaults: VideoDefaults = {
-      purpose: 'planting',
-      model_key: 'seedance-2.0-mini',
-      resolution: '720p',
-      ratio: '9:16',
-      duration: 10,
-      watermark,
-      preflight: true,
-    }
-
-    expect(buildVideoFormConfig(defaults)).toEqual({
-      ...defaults,
-      creative_type: 'personal_ip',
-      production_mode: 'guided',
-      workflow: 'creator',
+  it('creates initial intake values with editable references', () => {
+    expect(initialVideoInput('生成一条咖啡杯短视频')).toEqual({
+      brief: '生成一条咖啡杯短视频',
       references: [],
+      hard_constraints: {
+        ratio: undefined,
+        duration: undefined,
+        watermark: undefined,
+      },
     })
   })
 
-  it('submits creator workflow by default for video generation', () => {
-    expect(normalizeVideoConfigForSubmit(buildVideoFormConfig())).toEqual({
-      workflow: 'creator',
-      production_mode: 'guided',
-      creative_type: 'personal_ip',
-      purpose: 'planting',
+  it('submits only user intake fields and falls back to prompt as brief', () => {
+    expect(buildVideoInputForSubmit('  生成一条咖啡杯短视频  ', undefined)).toEqual({
+      brief: '生成一条咖啡杯短视频',
     })
   })
 
-  it('defaults high-efficiency jokes to promotion purpose', () => {
-    expect(defaultVideoPurposeForCreativeType('high_efficiency_joke')).toBe('promotion')
-    expect(normalizeVideoConfigForSubmit({ creative_type: 'high_efficiency_joke' })).toEqual({
-      workflow: 'creator',
-      creative_type: 'high_efficiency_joke',
-      purpose: 'promotion',
-    })
-  })
-
-  it('keeps explicit false values and references while dropping default select sentinels', () => {
-    const config: VideoTaskConfig = {
-      workflow: 'editor',
-      scenario_key: 'live_selling',
-      production_mode: 'guided',
-      purpose: 'promotion',
-      model_key: VIDEO_PROJECT_DEFAULT_VALUE,
-      resolution: '',
-      ratio: '16:9',
-      duration: 0,
-      watermark: false,
-      preflight: true,
-      retake_budget: 4,
-      delivery_targets: ['vertical_9x16', 'textless_master'],
+  it('keeps references and explicit hard constraints while dropping empty assets', () => {
+    const input: VideoInput = {
+      brief: '  做一个露营杯视频  ',
       references: [
-        {
-          type: 'text',
-          text: '镜头要明亮',
-          must_keep: ['杯身'],
-          can_change: ['背景'],
-          must_not_transfer: ['参考人物'],
-        },
+        { type: 'text', text: '  杯身保持银色  ', reference_role: '' },
         { type: 'image_url', url: '' },
+        { type: 'image_url', url: ' https://cdn.example.com/cup.png ', reference_role: 'product appearance' },
       ],
+      hard_constraints: {
+        ratio: '9:16',
+        duration: 12,
+        watermark: false,
+      },
     }
 
-    expect(normalizeVideoConfigForSubmit(config)).toEqual({
-      workflow: 'editor',
-      scenario_key: 'live_selling',
-      production_mode: 'guided',
-      creative_type: 'personal_ip',
-      purpose: 'promotion',
-      ratio: '16:9',
-      watermark: false,
-      preflight: true,
-      retake_budget: 4,
-      delivery_targets: ['vertical_9x16', 'textless_master'],
-      references: [{
-        type: 'text',
-        text: '镜头要明亮',
-        must_keep: ['杯身'],
-        can_change: ['背景'],
-        must_not_transfer: ['参考人物'],
-      }],
-    })
-  })
-
-  it('does not submit inherited fallback duration as an explicit user duration', () => {
-    const defaults: VideoDefaults = {
-      purpose: 'planting',
-      model_key: 'seedance-2.0-mini',
-      resolution: '720p',
-      ratio: '9:16',
-      duration: 15,
-      watermark: false,
-      preflight: true,
-    }
-
-    expect(normalizeVideoConfigForSubmit(buildVideoFormConfig(defaults), defaults)).toEqual({
-      workflow: 'creator',
-      production_mode: 'guided',
-      creative_type: 'personal_ip',
-    })
-    expect(normalizeVideoConfigForSubmit({ ...buildVideoFormConfig(defaults), duration: 60 }, defaults)).toEqual({
-      workflow: 'creator',
-      production_mode: 'guided',
-      creative_type: 'personal_ip',
-      duration: 60,
+    expect(buildVideoInputForSubmit('备用 prompt', input)).toEqual({
+      brief: '做一个露营杯视频',
+      references: [
+        { type: 'text', text: '杯身保持银色', reference_role: undefined },
+        { type: 'image_url', url: 'https://cdn.example.com/cup.png', reference_role: 'product appearance' },
+      ],
+      hard_constraints: {
+        ratio: '9:16',
+        duration: 12,
+        watermark: false,
+      },
     })
   })
 })

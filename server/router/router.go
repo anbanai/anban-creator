@@ -52,6 +52,7 @@ type Services struct {
 	APIKeyHandler            *handler.APIKeyHandler
 	FileHandler              *handler.FileHandler
 	UploadHandler            *handler.UploadHandler
+	AIEntryHandler           *handler.AIEntryHandler
 	FeedbackHandler          *handler.FeedbackHandler
 	ModelConfigHandler       *handler.ModelConfigHandler
 	ImageModelHandler        *handler.ImageModelHandler
@@ -339,6 +340,9 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 	if svc.UploadHandler != nil {
 		apiV1.Post("/uploads/prepare", svc.UploadHandler.Prepare)
+	}
+	if svc.AIEntryHandler != nil {
+		apiV1.Post("/ai-entry/submit", svc.AIEntryHandler.Submit)
 	}
 
 	if svc.VideoHandler != nil {

@@ -367,14 +367,14 @@ func ShouldCollectTaskFile(task *model.Task, relPath string) bool {
 	isEditor := model.NormalizeVideoWorkflow(cfg.Workflow) == model.VideoWorkflowEditor
 	if isEditor {
 		if isVideoFileExtension(ext) {
-			return isVideoEditorDeliveryVideo(noOutput)
+			return isVideoEditingDeliveryVideo(noOutput)
 		}
-		return isVideoEditorDeliveryFile(noOutput)
+		return isVideoEditingDeliveryFile(noOutput)
 	}
 	if isVideoFileExtension(ext) {
 		return true
 	}
-	return isVideoCreatorDeliveryFile(noOutput)
+	return isVideoGenerationDeliveryFile(noOutput)
 }
 
 func isVideoFileExtension(ext string) bool {
@@ -386,7 +386,7 @@ func isVideoFileExtension(ext string) bool {
 	}
 }
 
-func isVideoEditorDeliveryVideo(path string) bool {
+func isVideoEditingDeliveryVideo(path string) bool {
 	switch path {
 	case "final.mp4", "preview.mp4":
 		return true
@@ -395,7 +395,7 @@ func isVideoEditorDeliveryVideo(path string) bool {
 	}
 }
 
-func isVideoCreatorDeliveryFile(path string) bool {
+func isVideoGenerationDeliveryFile(path string) bool {
 	switch path {
 	case "input-manifest.md",
 		"reference-anchors.md",
@@ -414,7 +414,7 @@ func isVideoCreatorDeliveryFile(path string) bool {
 	}
 }
 
-func isVideoEditorDeliveryFile(path string) bool {
+func isVideoEditingDeliveryFile(path string) bool {
 	switch path {
 	case "input-manifest.md",
 		"clip_results.json",

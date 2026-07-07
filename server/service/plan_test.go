@@ -480,7 +480,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 }
 
-func TestPlanService_UpdateVideoConfigRevalidatesAndStoresSnapshot(t *testing.T) {
+func TestPlanService_UpdateVideoConfigStoresVideoInputOnly(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	projectID := createTestVideoProject(t, repo, "user-1")
@@ -489,39 +489,81 @@ func TestPlanService_UpdateVideoConfigRevalidatesAndStoresSnapshot(t *testing.T)
 		ProjectID: projectID,
 		CronExpr:  "0 9 * * *",
 		Prompt:    "old video prompt",
+		VideoInput: &model.VideoInput{
+			Brief: "old video prompt",
+		},
 	})
 	if err != nil {
 		t.Fatalf("create video plan: %v", err)
 	}
-	if created.VideoEstimatedCredits != 2480 {
-		t.Fatalf("initial estimated credits = %d, want 2480", created.VideoEstimatedCredits)
+	if created.VideoEstimatedCredits != 0 {
+		t.Fatalf("initial estimated credits = %d, want 0 before MCP video_gen", created.VideoEstimatedCredits)
 	}
 	watermark := true
 	updated, err := svc.Update(ctx, UpdatePlanParams{
 		ID:     created.ID,
 		Prompt: "updated video prompt",
-		Video: &model.VideoTaskConfig{
-			Purpose:    VideoPurposePromotion,
-			ModelKey:   "seedance-2.0",
-			Resolution: "1080p",
-			Ratio:      "16:9",
-			Duration:   5,
-			Watermark:  &watermark,
-			Preflight:  true,
+		VideoInput: &model.VideoInput{
+			Brief: "updated video prompt",
+			References: []model.VideoReferenceAsset{{
+				Type: "image_url",
+				URL:  "https://cdn.example.com/cup.png",
+			}},
+			HardConstraints: model.VideoHardConstraints{
+				Ratio:     "16:9",
+				Duration:  5,
+				Watermark: &watermark,
+			},
 		},
 	})
 	if err != nil {
 		t.Fatalf("update video plan: %v", err)
 	}
-	vc := updated.VideoConfig.Data()
-	if vc.ModelKey != "seedance-2.0" || vc.Model != "doubao-seedance-2-0-260128" || vc.Resolution != "1080p" || vc.Duration != 5 {
-		t.Fatalf("video config was not resolved and stored: %#v", vc)
+	vi := updated.VideoInput.Data()
+	if vi.Brief != "updated video prompt" || vi.HardConstraints.Ratio != "16:9" || vi.HardConstraints.Duration != 5 || vi.HardConstraints.Watermark == nil || !*vi.HardConstraints.Watermark {
+		t.Fatalf("video input = %#v", vi)
 	}
-	if vc.PricingBreakdown == nil || vc.PricingBreakdown.CNY != 12.39 {
-		t.Fatalf("pricing breakdown = %#v, want 12.39 CNY", vc.PricingBreakdown)
+	if len(vi.References) != 1 || vi.References[0].URL != "https://cdn.example.com/cup.png" {
+		t.Fatalf("video input references = %#v", vi.References)
 	}
-	if updated.VideoEstimatedCredits != 12390 {
-		t.Fatalf("estimated credits = %d, want 12390", updated.VideoEstimatedCredits)
+	if vc := updated.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+		t.Fatalf("video config should stay empty before agent/MCP execution, got %#v", vc)
+	}
+	if updated.VideoEstimatedCredits != 0 {
+		t.Fatalf("estimated credits = %d, want 0 before MCP video_gen", updated.VideoEstimatedCredits)
+	}
+}
+
+func TestPlanService_UpdateVideoInputRejectsNonVideoPlans(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	projectID := createTestProject(t, repo, "user-1", model.PlatformArticle)
+	created, err := svc.Create(ctx, CreatePlanParams{
+		UserID:    "user-1",
+		ProjectID: projectID,
+		CronExpr:  "0 9 * * *",
+		Prompt:    "article prompt",
+	})
+	if err != nil {
+		t.Fatalf("create article plan: %v", err)
+	}
+
+	_, err = svc.Update(ctx, UpdatePlanParams{
+		ID: created.ID,
+		VideoInput: &model.VideoInput{
+			Brief: "should not attach to article plan",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "video_input can only be set on video plans") {
+		t.Fatalf("Update error = %v, want video_input rejection for non-video plan", err)
+	}
+
+	found, err := repo.Plans().FindByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("find plan: %v", err)
+	}
+	if vi := found.VideoInput.Data(); vi.Brief != "" {
+		t.Fatalf("article plan video_input = %#v, want empty", vi)
 	}
 }
 
@@ -551,8 +593,15 @@ func TestPlanService_CreateVideoPlanDoesNotRequireLegacyMinimumBalance(t *testin
 	if err != nil {
 		t.Fatalf("Create video plan: %v", err)
 	}
-	if created.VideoEstimatedCredits <= 0 {
-		t.Fatalf("video plan estimated credits = %d, want positive estimate", created.VideoEstimatedCredits)
+	if created.VideoEstimatedCredits != 0 {
+		t.Fatalf("video plan estimated credits = %d, want 0 before MCP video_gen", created.VideoEstimatedCredits)
+	}
+	vi := created.VideoInput.Data()
+	if vi.Brief != "计划生成视频" {
+		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
+	}
+	if vc := created.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+		t.Fatalf("video config should stay empty before agent/MCP execution, got %#v", vc)
 	}
 }
 

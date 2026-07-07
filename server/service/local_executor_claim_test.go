@@ -119,7 +119,7 @@ func TestBuildLocalExecutionConfigCarriesArticleImageSwitches(t *testing.T) {
 	}
 }
 
-func TestBuildLocalExecutionConfigRoutesVideoEditorAgent(t *testing.T) {
+func TestBuildLocalExecutionConfigRoutesUnifiedVideoAgent(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
 	task := &model.Task{
 		ID:     "task-video-editor-local",
@@ -129,8 +129,8 @@ func TestBuildLocalExecutionConfigRoutesVideoEditorAgent(t *testing.T) {
 	task.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
 
 	cfg := svc.buildLocalExecutionConfig(task)
-	if cfg.AgentFlag != "anban:videoeditor" {
-		t.Fatalf("AgentFlag = %q, want anban:videoeditor", cfg.AgentFlag)
+	if cfg.AgentFlag != "anban:video" {
+		t.Fatalf("AgentFlag = %q, want anban:video", cfg.AgentFlag)
 	}
 }
 

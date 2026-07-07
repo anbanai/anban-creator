@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,21 @@ import (
 // maxReferenceImageBytes caps downloaded reference image size to prevent
 // unbounded memory/disk usage. Mirrors the upload limit in handler/file.go.
 const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
+
+const maxInputAttachmentBytes int64 = 50 << 20 // 50 MB
+
+var unsafeAttachmentFilenameRunes = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+
+type MaterializedInputAttachment struct {
+	Index       int    `json:"index"`
+	Type        string `json:"type,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Text        string `json:"text,omitempty"`
+	FileName    string `json:"file_name,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+	Path        string `json:"path,omitempty"`
+}
 
 // EffectiveProject returns the task snapshot view when a task carries one,
 // otherwise the live project. Runtime config generation should use this so old
@@ -210,25 +226,16 @@ func TaskTypeToAgent(taskType string) string {
 	case model.ScopeEcommerce:
 		return "ecommerce"
 	case model.ScopeVideo:
-		return "videocreator"
+		return "video"
 	default:
 		return "seednote"
 	}
 }
 
-// TaskToAgent maps a full task snapshot to the Claude Code agent name. Video
-// tasks use video_config.workflow so generation and editing cannot drift into
-// each other's workflows.
+// TaskToAgent maps a full task snapshot to the Claude Code agent name.
 func TaskToAgent(task *model.Task) string {
 	if task == nil {
 		return TaskTypeToAgent("")
-	}
-	if task.Type == model.ScopeVideo {
-		cfg := task.VideoConfig.Data()
-		if model.NormalizeVideoWorkflow(cfg.Workflow) == model.VideoWorkflowEditor {
-			return "videoeditor"
-		}
-		return "videocreator"
 	}
 	return TaskTypeToAgent(task.Type)
 }
@@ -360,6 +367,192 @@ func DownloadProductImages(ctx context.Context, store storage.Provider, logger *
 		}
 	}
 	return len(names)
+}
+
+// DownloadInputAttachments materializes AI-entry attachments into
+// .anban-creator/input-attachments and writes index.json with stable local paths.
+func DownloadInputAttachments(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, attachments []model.EntryAttachment) int {
+	if len(attachments) == 0 {
+		return 0
+	}
+	destDir := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("create input attachments dir failed")
+		}
+		return 0
+	}
+
+	index := make([]MaterializedInputAttachment, 0, len(attachments))
+	for i, attachment := range attachments {
+		var data []byte
+		var err error
+		if strings.TrimSpace(attachment.URL) != "" {
+			data, err = fetchAttachmentBytes(ctx, store, attachment.URL)
+		} else if strings.TrimSpace(attachment.Text) != "" {
+			data = []byte(strings.TrimSpace(attachment.Text))
+		} else {
+			continue
+		}
+		if err != nil {
+			if logger != nil {
+				logger.Warn().Err(err).Str("url", attachment.URL).Int("index", i+1).Msg("failed to download input attachment, skipping")
+			}
+			continue
+		}
+		name := inputAttachmentFilename(i+1, attachment)
+		if err := os.WriteFile(filepath.Join(destDir, name), data, 0o644); err != nil {
+			if logger != nil {
+				logger.Warn().Err(err).Str("name", name).Msg("write input attachment failed, skipping")
+			}
+			continue
+		}
+		relPath := filepath.ToSlash(filepath.Join(appconfig.ConfigDir, "input-attachments", name))
+		index = append(index, MaterializedInputAttachment{
+			Index:       i + 1,
+			Type:        attachment.Type,
+			URL:         attachment.URL,
+			Text:        attachment.Text,
+			FileName:    attachment.FileName,
+			ContentType: attachment.ContentType,
+			Size:        attachment.Size,
+			Path:        relPath,
+		})
+	}
+	if len(index) > 0 {
+		if indexBytes, err := json.MarshalIndent(index, "", "  "); err == nil {
+			if err := os.WriteFile(filepath.Join(destDir, "index.json"), indexBytes, 0o644); err != nil && logger != nil {
+				logger.Warn().Err(err).Msg("write input attachments index.json failed")
+			}
+		}
+	}
+	return len(index)
+}
+
+func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL string) ([]byte, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if store != nil && store.IsOwnedURL(rawURL) {
+		if key, ok := storage.StorageKeyFromURL(rawURL); ok {
+			if data, err := store.Read(ctx, key); err == nil {
+				if int64(len(data)) > maxInputAttachmentBytes {
+					return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
+				}
+				return data, nil
+			}
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download: HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxInputAttachmentBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if int64(len(data)) > maxInputAttachmentBytes {
+		return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
+	}
+	return data, nil
+}
+
+func inputAttachmentFilename(index int, attachment model.EntryAttachment) string {
+	base := sanitizeAttachmentFilename(attachment.FileName)
+	if base == "" {
+		base = sanitizeAttachmentFilename(filenameFromURLPath(attachment.URL))
+	}
+	ext := strings.ToLower(filepath.Ext(base))
+	if ext == "" {
+		ext = inputAttachmentExt(attachment.ContentType, attachment.URL)
+	}
+	if base == "" {
+		base = "attachment" + ext
+	} else if ext != "" && filepath.Ext(base) == "" {
+		base += ext
+	}
+	return fmt.Sprintf("attachment_%02d_%s", index, base)
+}
+
+func sanitizeAttachmentFilename(raw string) string {
+	base := filepath.Base(strings.TrimSpace(stripQueryAndFragment(raw)))
+	base = strings.Trim(base, ".")
+	if base == "" || base == "/" {
+		return ""
+	}
+	base = unsafeAttachmentFilenameRunes.ReplaceAllString(base, "-")
+	return strings.Trim(base, "-")
+}
+
+func filenameFromURLPath(rawURL string) string {
+	rawURL = stripQueryAndFragment(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	return filepath.Base(rawURL)
+}
+
+func stripQueryAndFragment(raw string) string {
+	raw = strings.SplitN(raw, "#", 2)[0]
+	return strings.SplitN(raw, "?", 2)[0]
+}
+
+func inputAttachmentExt(contentType, rawURL string) string {
+	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/webp":
+		return ".webp"
+	case "image/gif":
+		return ".gif"
+	case "audio/mpeg":
+		return ".mp3"
+	case "audio/wav":
+		return ".wav"
+	case "audio/mp4":
+		return ".m4a"
+	case "video/mp4":
+		return ".mp4"
+	case "video/quicktime":
+		return ".mov"
+	case "video/webm":
+		return ".webm"
+	case "application/pdf":
+		return ".pdf"
+	case "application/msword":
+		return ".doc"
+	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		return ".docx"
+	case "application/vnd.ms-powerpoint":
+		return ".ppt"
+	case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+		return ".pptx"
+	case "application/vnd.ms-excel":
+		return ".xls"
+	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		return ".xlsx"
+	case "text/csv":
+		return ".csv"
+	case "text/markdown":
+		return ".md"
+	case "application/json":
+		return ".json"
+	case "text/plain":
+		return ".txt"
+	}
+	if ext := strings.ToLower(filepath.Ext(stripQueryAndFragment(rawURL))); ext != "" {
+		return ext
+	}
+	return ".bin"
 }
 
 // fetchImageBytes resolves an image URL to its bytes. For URLs owned by this

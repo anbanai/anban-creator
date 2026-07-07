@@ -482,6 +482,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			return nil, fmt.Errorf("ecommerce task: %d product photo(s) provided but none could be downloaded to the workspace; aborting to avoid inconsistent output", len(photos))
 		}
 	}
+	if attachments := opts.Task.InputAttachments.Data(); len(attachments) > 0 {
+		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, attachments); n == 0 {
+			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
+		}
+	}
 
 	// 3.5. Resolve API key for MCP authentication.
 	// Tries per-user key first, falls back to system key.

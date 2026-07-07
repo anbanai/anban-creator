@@ -519,7 +519,7 @@ export default function ProjectsPage() {
       avatar_url: values.avatar_url?.trim() || undefined,
       keywords: values.keywords?.trim() || undefined,
       instructions: values.instructions?.trim() || undefined,
-      visual_style: values.visual_style?.trim() || undefined,
+      visual_style: values.platform === 'video' ? undefined : values.visual_style?.trim() || undefined,
       writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
@@ -771,7 +771,10 @@ export default function ProjectsPage() {
                 <FormItem>
                   <FormLabel>项目定位</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="例如 面向开发者的实用 AI 教程" {...field} />
+                    <Textarea
+                      placeholder={isVideo ? '例如 品牌定位、账号人设、产品基础信息、画面偏好、禁忌与长期要求' : '例如 面向开发者的实用 AI 教程'}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -970,21 +973,21 @@ export default function ProjectsPage() {
                     </FormItem>
                   )} />
                 </section>
-              ) : (
+              ) : !isVideo ? (
                 <FormField control={form.control} name="visual_style" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{isVideo ? '视频风格与禁忌' : '视觉风格'}</FormLabel>
+                    <FormLabel>视觉风格</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder="描述视频的画面风格、镜头语言、主体一致性要求、禁忌和不可改变的创作约束"
+                        placeholder="描述图片视觉风格、构图、色彩与禁忌"
                         {...field}
                       />
                     </FormControl>
-                    <FormDescription>视频创作维度——用于约束画面风格、运动、主体一致性和禁忌；agent 会通过项目视频档案读取。</FormDescription>
+                    <FormDescription>图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立。</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )} />
-              )}
+              ) : null}
 
               {isEcommerce && (
                 <>

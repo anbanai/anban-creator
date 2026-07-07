@@ -31,6 +31,20 @@ type VideoModelPolicy struct {
 	MaxDuration        int64    `json:"max_duration,omitempty"`
 }
 
+// VideoInput stores the user-authored intake for a video task or plan. Project-
+// level facts live in Project.Instructions and are written to CLAUDE.md.
+type VideoInput struct {
+	Brief           string               `json:"brief,omitempty"`
+	References      []VideoReferenceAsset `json:"references,omitempty"`
+	HardConstraints VideoHardConstraints `json:"hard_constraints,omitempty"`
+}
+
+type VideoHardConstraints struct {
+	Ratio     string `json:"ratio,omitempty"`
+	Duration  int64  `json:"duration,omitempty"`
+	Watermark *bool  `json:"watermark,omitempty"`
+}
+
 // VideoTaskConfig is the immutable plan/task snapshot used by agents and Studio.
 type VideoTaskConfig struct {
 	Workflow                  string                   `json:"workflow,omitempty"`

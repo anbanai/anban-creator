@@ -396,8 +396,8 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		"positioning":           ch.Instructions,
 		"keywords":              ch.Keywords,
 		"visual_style":          r.VisualStyle,
-		"creative_constraints":  r.VisualStyle,
-		"visual_style_label":    videoAwareVisualStyleLabel(ch.Platform),
+		"creative_constraints":  creativeConstraintsForProfile(ch.Platform, r.VisualStyle),
+		"visual_style_label":    "图片视觉",
 		"reference_image_url":   ch.ReferenceImageURL,
 		"image_ratio":           ch.ImageRatio,
 		"uses_project_snapshot": usesProjectSnapshot,
@@ -479,7 +479,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	if ch.Platform == model.PlatformVideo {
 		videoBlock := buildVideoProfileBlock(ch, task)
 		info["video"] = videoBlock
-		info["agent_brief"] = buildProjectAgentBrief(ch, r.VisualStyle, usesProjectSnapshot, videoBlock)
+		info["agent_brief"] = buildProjectAgentBrief(ch, usesProjectSnapshot, videoBlock)
 	}
 
 	// Available resource options for the platform (best-effort; the embedded
@@ -516,11 +516,11 @@ func profileSource(usesProjectSnapshot bool) string {
 	return "project"
 }
 
-func videoAwareVisualStyleLabel(platform string) string {
+func creativeConstraintsForProfile(platform, visualStyle string) string {
 	if platform == model.PlatformVideo {
-		return "视频风格与禁忌/创作约束"
+		return ""
 	}
-	return "视觉风格"
+	return visualStyle
 }
 
 func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any {
@@ -528,8 +528,10 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 	policy := ch.VideoModelPolicy.Data()
 	catalog := filterVideoCatalogForPolicy(videoModelCatalog(), policy)
 	taskConfig := model.VideoTaskConfig{}
+	input := model.VideoInput{}
 	if task != nil && task.Type == model.PlatformVideo {
 		taskConfig = task.VideoConfig.Data()
+		input = task.VideoInput.Data()
 	}
 	resolvedDefaults := map[string]any{
 		"purpose":         firstNonEmpty(taskConfig.Purpose, defaults.Purpose),
@@ -556,7 +558,8 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 			"auto_downgrade_label": "参数不支持时自动降到可用分辨率",
 		},
 		"model_catalog": catalog,
-		"references":    taskConfig.References,
+		"input":         input,
+		"references":    input.References,
 		"task_config":   taskConfig,
 		"pricing": map[string]any{
 			"credits_per_cny":          videoCreditMultiplier(),
@@ -629,7 +632,7 @@ func taskOrDefaultPreflight(taskConfig model.VideoTaskConfig, defaults model.Vid
 	return defaults.Preflight
 }
 
-func buildProjectAgentBrief(ch *model.Project, creativeConstraints string, usesProjectSnapshot bool, videoBlock map[string]any) string {
+func buildProjectAgentBrief(ch *model.Project, usesProjectSnapshot bool, videoBlock map[string]any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "项目：%s\n", ch.Name)
 	fmt.Fprintf(&b, "平台：%s\n", ch.Platform)
@@ -639,9 +642,8 @@ func buildProjectAgentBrief(ch *model.Project, creativeConstraints string, usesP
 	if ch.Keywords != "" {
 		fmt.Fprintf(&b, "关键词：%s\n", ch.Keywords)
 	}
-	if creativeConstraints != "" {
-		fmt.Fprintf(&b, "视频风格与禁忌/创作约束：%s\n", creativeConstraints)
-	}
+	b.WriteString("分析入口：项目长期定位只读取工作区 CLAUDE.md / project.instructions；本次需求读取 task.prompt、video_input（profile 中为 video.input）的 brief、references 与 hard_constraints。\n")
+	b.WriteString("Studio 不再提供视频玩法、商业目标、制作模式、内容类型、主体、受众或核心信息；这些业务判断必须由 video agent 使用 seedance-20 / video-use SKILL 自主分析并落盘到 video_config。\n")
 	if usesProjectSnapshot {
 		b.WriteString("配置来源：任务创建时冻结的项目快照\n")
 	}

@@ -62,7 +62,7 @@ func TestSeedance20SkillFiles(t *testing.T) {
 			"目标成片时长",
 			"单次生成片段",
 			"参考视频时长",
-			`agent_name="videocreator"`,
+			`agent_name="video"`,
 			"project video profile",
 			"agent_brief",
 			"video.model_catalog",
@@ -221,7 +221,7 @@ func TestDreaminaVideoSkillIsCompatibilityAlias(t *testing.T) {
 			"compatibility",
 			"seedance-20",
 			"Do not maintain separate Dreamina-only workflow logic here",
-			"agent_name=\"videocreator\"",
+			"agent_name=\"video\"",
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s dreamina-video alias missing %q", plugin, want)

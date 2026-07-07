@@ -181,7 +181,7 @@ func TestBuildProcessor_EcommerceErrorsWhenNoImageAPI(t *testing.T) {
 	}
 }
 
-// TestBuildProcessor_VideoResolvesGenericImageAPI protects videocreator's
+// TestBuildProcessor_VideoResolvesGenericImageAPI protects the video agent's
 // visual-anchor bootstrap path: video projects have no platform-specific image
 // app-config section, but they still need generate_image for temporary subject
 // and product anchor references before video generation.

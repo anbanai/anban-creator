@@ -3,70 +3,36 @@ import { useWatch, useForm } from 'react-hook-form'
 import { describe, expect, it } from 'vitest'
 import { Form, FormControl, FormField, FormItem } from '@/components/ui/form'
 import { Textarea } from '@/components/ui/textarea'
-import type { Project, VideoTaskConfig } from '@/types'
+import type { Project, VideoInput } from '@/types'
 import { VideoCreationPanel } from './VideoCreationPanel'
 
 type PanelFormValues = {
   prompt: string
-  video_config: VideoTaskConfig
+  video_input: VideoInput
 }
 
 const videoProject = {
   id: 'project-1',
   name: '产品视频项目',
-  video_defaults: {
-    purpose: 'planting',
-    model_key: 'seedance-2.0-mini',
-    resolution: '720p',
-    ratio: '9:16',
-    duration: 15,
-    watermark: false,
-  },
 } as Project
 
 function PanelHarness() {
   const form = useForm<PanelFormValues>({
     defaultValues: {
       prompt: '',
-      video_config: {
-        model_key: 'custom-video-model',
-        references: [{ type: 'text', text: '保持杯身银色', reference_role: 'subject identity' }],
+      video_input: {
+        references: [{ type: 'text', text: '保持杯身银色' }],
+        hard_constraints: {},
       },
     },
   })
-  const videoConfig = useWatch({ control: form.control, name: 'video_config' })
+  const videoInput = useWatch({ control: form.control, name: 'video_input' })
 
   return (
     <Form {...form}>
       <VideoCreationPanel
         form={form}
         selectedProject={videoProject}
-        availableVideoModels={[]}
-        playbooks={[
-          {
-            key: 'live_selling',
-            label: '直播带货',
-            creative_type: 'product_demo',
-            purpose: 'ecommerce',
-            required_reference_roles: ['product appearance', 'action'],
-            default_ratio: '9:16',
-            prompt_scaffold: '黄金三秒开场、一个核心卖点、亲手展示。',
-            qc_focus: ['产品保真', 'CTA'],
-            risk_notes: ['不要编造优惠。'],
-          },
-          {
-            key: 'brand_promo',
-            label: '品牌宣传',
-            creative_type: 'brand_promo',
-            purpose: 'promotion',
-            required_reference_roles: ['scene background'],
-            default_ratio: '16:9',
-            prompt_scaffold: '只保留一个品牌记忆点。',
-            qc_focus: ['品牌记忆'],
-            risk_notes: ['文字建议后期加。'],
-          },
-        ]}
-        minimumBalanceHint="创建只扣视频基础任务费；提交 video_gen 后按实际参数另计。"
         promptField={(
           <FormField control={form.control} name="prompt" render={({ field }) => (
             <FormItem>
@@ -76,46 +42,34 @@ function PanelHarness() {
             </FormItem>
           )} />
         )}
-        estimateSummary={<p>估算摘要</p>}
       />
-      <output data-testid="video-config">{JSON.stringify(videoConfig)}</output>
+      <output data-testid="video-input">{JSON.stringify(videoInput)}</output>
     </Form>
   )
 }
 
 describe('VideoCreationPanel', () => {
-  it('keeps advanced settings controlled and restores project defaults without clearing references', () => {
+  it('renders intake fields without old business configuration controls', () => {
     render(<PanelHarness />)
 
-    expect(screen.queryByText('没有可用视频模型，请先在项目策略中选择已配置模型。')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '高级设置' }))
-    expect(screen.getByText('没有可用视频模型，请先在项目策略中选择已配置模型。')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '恢复项目默认' }))
-
-    expect(screen.getByTestId('video-config')).toHaveTextContent('seedance-2.0-mini')
-    expect(screen.getByTestId('video-config')).toHaveTextContent('保持杯身银色')
+    expect(screen.getByText('本次视频要求')).toBeInTheDocument()
+    expect(screen.getByText('参考素材')).toBeInTheDocument()
+    expect(screen.getAllByText('保持杯身银色').length).toBeGreaterThan(0)
+    for (const oldLabel of ['视频玩法', '制作模式', '工作流', '商业目标', '人物 / 主体', '目标受众', '核心信息']) {
+      expect(screen.queryByText(oldLabel)).not.toBeInTheDocument()
+    }
   })
 
-  it('lets the operator choose the editor workflow', () => {
+  it('stores only hard constraints in video_input', async () => {
     render(<PanelHarness />)
 
-    fireEvent.click(screen.getByRole('button', { name: '剪辑' }))
+    fireEvent.click(screen.getByRole('button', { name: /高级硬约束/ }))
+    fireEvent.change(screen.getByLabelText('时长（秒）'), { target: { value: '12' } })
+    fireEvent.click(screen.getByLabelText('加水印'))
 
-    expect(screen.getByTestId('video-config')).toHaveTextContent('"workflow":"editor"')
-    expect(screen.getByText('剪辑要求')).toBeInTheDocument()
-  })
-
-  it('applies a playbook and production mode before detailed prompting', () => {
-    render(<PanelHarness />)
-
-    fireEvent.click(screen.getByRole('button', { name: /直播带货/ }))
-    fireEvent.click(screen.getByRole('button', { name: '专业序列' }))
-
-    expect(screen.getByTestId('video-config')).toHaveTextContent('"scenario_key":"live_selling"')
-    expect(screen.getByTestId('video-config')).toHaveTextContent('"creative_type":"product_demo"')
-    expect(screen.getByTestId('video-config')).toHaveTextContent('"purpose":"ecommerce"')
-    expect(screen.getByTestId('video-config')).toHaveTextContent('"ratio":"9:16"')
-    expect(screen.getByTestId('video-config')).toHaveTextContent('"production_mode":"sequence"')
+    expect(screen.getByTestId('video-input')).toHaveTextContent('"duration":12')
+    expect(screen.getByTestId('video-input')).toHaveTextContent('"watermark":true')
+    expect(screen.getByTestId('video-input')).not.toHaveTextContent('purpose')
+    expect(screen.getByTestId('video-input')).not.toHaveTextContent('workflow')
   })
 })

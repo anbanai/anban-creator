@@ -17,7 +17,7 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
-func TestUploadMissingTaskFilesVideoCreatorUsesDeliveryAllowlist(t *testing.T) {
+func TestUploadMissingTaskFilesVideoGenerationUsesDeliveryAllowlist(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
@@ -76,7 +76,7 @@ func TestUploadMissingTaskFilesVideoCreatorUsesDeliveryAllowlist(t *testing.T) {
 	}
 }
 
-func TestShouldCollectTaskFileVideoEditorRestrictsVideoDeliverables(t *testing.T) {
+func TestShouldCollectTaskFileVideoEditingRestrictsVideoDeliverables(t *testing.T) {
 	task := &model.Task{Type: model.PlatformVideo}
 	task.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
 

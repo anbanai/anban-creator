@@ -539,7 +539,7 @@ func TestTaskService_CreateManualEcommerceTaskForcesSinglePackageWithoutCreditSe
 	}
 }
 
-func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesOnlyBaseFee(t *testing.T) {
+func TestTaskService_CreateManualVideoTaskStoresInputAndChargesOnlyBaseFee(t *testing.T) {
 	repoForCredits := setupCreditTestRepo(t)
 	creditSvc := newPricedCreditService(repoForCredits)
 	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
@@ -582,6 +582,17 @@ func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesOnlyBaseFee(
 		ProjectID: project.ID,
 		Prompt:    "生成一条咖啡杯种草视频",
 		Quantity:  1,
+		VideoInput: &model.VideoInput{
+			Brief: "生成一条咖啡杯种草视频",
+			References: []model.VideoReferenceAsset{{
+				Type: "image_url",
+				URL:  "https://cdn.example.com/cup.png",
+			}},
+			HardConstraints: model.VideoHardConstraints{
+				Ratio:    "9:16",
+				Duration: 12,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("CreateManual: %v", err)
@@ -593,12 +604,18 @@ func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesOnlyBaseFee(
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	vc := found.VideoConfig.Data()
-	if vc.ModelKey != "seedance-2.0-mini" || vc.Model != "doubao-seedance-2-0-mini-260615" || vc.EstimatedCredits != 2480 {
-		t.Fatalf("video config = %+v", vc)
+	vi := found.VideoInput.Data()
+	if vi.Brief != "生成一条咖啡杯种草视频" || vi.HardConstraints.Ratio != "9:16" || vi.HardConstraints.Duration != 12 {
+		t.Fatalf("video input = %+v", vi)
 	}
-	if found.VideoEstimatedCredits != 2480 || found.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits = estimated %d charged %d, want estimated 2480 and charged 0 at creation", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	if len(vi.References) != 1 || vi.References[0].URL != "https://cdn.example.com/cup.png" {
+		t.Fatalf("video input references = %+v", vi.References)
+	}
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+		t.Fatalf("video config should be empty at creation, got %+v", vc)
+	}
+	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 {
+		t.Fatalf("task video credits = estimated %d charged %d, want zero before MCP video_gen", found.VideoEstimatedCredits, found.VideoCreditsCharged)
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
 	if err != nil {
@@ -688,21 +705,22 @@ func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
+	input := found.VideoInput.Data()
+	if len(input.References) != 2 {
+		t.Fatalf("references = %+v, want 2", input.References)
+	}
+	if got := input.References[0].MustNotTransfer; len(got) != 1 || got[0] != "donor hand" {
+		t.Fatalf("reference transfer rules = %+v", input.References[0])
+	}
+	if input.References[1].InputDurationSeconds != 4.2 {
+		t.Fatalf("input duration = %+v, want measured seconds", input.References[1])
+	}
 	vc := found.VideoConfig.Data()
-	if len(vc.References) != 2 {
-		t.Fatalf("references = %+v, want 2", vc.References)
+	if vc.ScenarioKey != "" || vc.ProductionMode != "" || vc.RetakeBudget != 0 || len(vc.DeliveryTargets) != 0 {
+		t.Fatalf("video_config = %+v, want no Studio-authored business fields", vc)
 	}
-	if vc.ScenarioKey != "live_selling" || vc.ProductionMode != VideoProductionModeGuided || vc.RetakeBudget != 4 {
-		t.Fatalf("production config = %+v", vc)
-	}
-	if len(vc.DeliveryTargets) != 2 || vc.DeliveryTargets[1] != "textless_master" {
-		t.Fatalf("delivery targets = %+v", vc.DeliveryTargets)
-	}
-	if got := vc.References[0].MustNotTransfer; len(got) != 1 || got[0] != "donor hand" {
-		t.Fatalf("reference transfer rules = %+v", vc.References[0])
-	}
-	if vc.PricingBreakdown == nil || !vc.PricingBreakdown.InputVideo || vc.PricingBreakdown.InputSeconds != 4.2 {
-		t.Fatalf("pricing breakdown = %+v, want input video with measured seconds", vc.PricingBreakdown)
+	if vc.PricingBreakdown != nil {
+		t.Fatalf("pricing breakdown = %+v, want nil before MCP execution", vc.PricingBreakdown)
 	}
 }
 
@@ -814,8 +832,14 @@ func TestTaskService_CreateManualVideoTaskUsesConfiguredCreditMultiplier(t *test
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.VideoEstimatedCredits != 2976 || found.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits = estimated %d charged %d, want estimated 2976 and charged 0 at creation", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 {
+		t.Fatalf("task video credits = estimated %d charged %d, want zero before MCP video_gen", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	}
+	if vi := found.VideoInput.Data(); vi.Brief != "生成一条咖啡杯种草视频" {
+		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
+	}
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
 	if err != nil {
@@ -878,8 +902,14 @@ func TestTaskService_CreateManualVideoTaskAppliesUserBillingMultiplier(t *testin
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.VideoEstimatedCredits != 1488 || found.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits = estimated %d charged %d, want estimated 1488 and charged 0 at creation", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 {
+		t.Fatalf("task video credits = estimated %d charged %d, want zero before MCP video_gen", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	}
+	if vi := found.VideoInput.Data(); vi.Brief != "生成一条咖啡杯种草视频" {
+		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
+	}
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
 	if err != nil {
@@ -890,7 +920,7 @@ func TestTaskService_CreateManualVideoTaskAppliesUserBillingMultiplier(t *testin
 	}
 }
 
-func TestTaskService_CreateFromPlanVideoTaskRecomputesCurrentBilling(t *testing.T) {
+func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInputAndChargesOnlyBaseFee(t *testing.T) {
 	repoForCredits := setupCreditTestRepo(t)
 	creditSvc := newPricedCreditService(repoForCredits)
 	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
@@ -929,14 +959,6 @@ func TestTaskService_CreateFromPlanVideoTaskRecomputesCurrentBilling(t *testing.
 		t.Fatalf("create project: %v", err)
 	}
 
-	staleConfig := model.VideoTaskConfig{
-		ModelKey:         "seedance-2.0-mini",
-		Model:            "doubao-seedance-2-0-mini-260615",
-		Resolution:       "720p",
-		Ratio:            "16:9",
-		Duration:         5,
-		EstimatedCredits: 2480,
-	}
 	plan := &model.Plan{
 		ID:        uuid.New().String(),
 		UserID:    userID,
@@ -945,7 +967,17 @@ func TestTaskService_CreateFromPlanVideoTaskRecomputesCurrentBilling(t *testing.
 		Status:    model.PlanStatusActive,
 		Prompt:    "生成一条咖啡杯种草视频",
 	}
-	plan.SetVideoConfig(staleConfig)
+	plan.SetVideoInput(model.VideoInput{
+		Brief: "计划里的咖啡杯视频",
+		References: []model.VideoReferenceAsset{{
+			Type: "image_url",
+			URL:  "https://cdn.example.com/cup.png",
+		}},
+		HardConstraints: model.VideoHardConstraints{
+			Ratio:    "9:16",
+			Duration: 12,
+		},
+	})
 
 	task, err := svc.CreateFromPlan(ctx, plan)
 	if err != nil {
@@ -955,8 +987,18 @@ func TestTaskService_CreateFromPlanVideoTaskRecomputesCurrentBilling(t *testing.
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.VideoEstimatedCredits != 1488 || found.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits = estimated %d charged %d, want estimated 1488 and charged 0 at creation", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 {
+		t.Fatalf("task video credits = estimated %d charged %d, want zero before MCP video_gen", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	}
+	vi := found.VideoInput.Data()
+	if vi.Brief != "计划里的咖啡杯视频" || vi.HardConstraints.Ratio != "9:16" || vi.HardConstraints.Duration != 12 {
+		t.Fatalf("video input = %+v", vi)
+	}
+	if len(vi.References) != 1 || vi.References[0].URL != "https://cdn.example.com/cup.png" {
+		t.Fatalf("video input references = %+v", vi.References)
+	}
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
 	if err != nil {
@@ -967,7 +1009,7 @@ func TestTaskService_CreateFromPlanVideoTaskRecomputesCurrentBilling(t *testing.
 	}
 }
 
-func TestTaskService_CreateManualVideoTaskRequiresProjectProfile(t *testing.T) {
+func TestTaskService_CreateManualVideoTaskDoesNotRequireProjectProfileAtCreation(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -981,13 +1023,26 @@ func TestTaskService_CreateManualVideoTaskRequiresProjectProfile(t *testing.T) {
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	_, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
 		UserID:    userID,
 		ProjectID: project.ID,
 		Prompt:    "生成视频",
 	})
-	if err == nil || !strings.Contains(err.Error(), "project video profile is not configured") {
-		t.Fatalf("CreateManual error = %v", err)
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("created tasks = %d, want 1", len(tasks))
+	}
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if vi := found.VideoInput.Data(); vi.Brief != "生成视频" {
+		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
+	}
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
 	}
 }
 

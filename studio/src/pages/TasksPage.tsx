@@ -41,12 +41,11 @@ import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIco
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
-import { buildVideoFormConfig, normalizeVideoConfigForSubmit } from '@/lib/video-form'
+import { buildVideoInputForSubmit, initialVideoInput } from '@/lib/video-form'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
 import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
-import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
 import { agentRuntimeReserveFor, taskCostFor } from '@/lib/pricing'
@@ -151,44 +150,8 @@ export default function TasksPage() {
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
-  const watchedPrompt = useWatch({ control: form.control, name: 'prompt' })
-  const watchedVideoConfig = useWatch({ control: form.control, name: 'video_config' })
   // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
-  const [debouncedVideoEstimateInput, setDebouncedVideoEstimateInput] = useState<{
-    project_id: string
-    prompt?: string
-    video_config?: CreateTaskFormValues['video_config']
-  } | null>(null)
-
-  useEffect(() => {
-    if (!modalOpen || watchedType !== 'video' || !watchedProjectId) {
-      setDebouncedVideoEstimateInput(null)
-      return
-    }
-    const timer = setTimeout(() => {
-      setDebouncedVideoEstimateInput({
-        project_id: watchedProjectId,
-        prompt: watchedPrompt || '',
-        video_config: watchedVideoConfig,
-      })
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [modalOpen, watchedType, watchedProjectId, watchedPrompt, watchedVideoConfig])
-
-  const videoEstimateQuery = useQuery({
-    queryKey: ['video-estimate', debouncedVideoEstimateInput],
-    queryFn: () => api.video.estimate(debouncedVideoEstimateInput!),
-    enabled: Boolean(debouncedVideoEstimateInput),
-    retry: false,
-  })
-  const availableVideoModels = videoEstimateQuery.data?.available_models ?? []
-  const { data: videoPlaybooks } = useQuery({
-    queryKey: ['video-playbooks'],
-    queryFn: () => api.video.playbooks(),
-    enabled: modalOpen && watchedType === 'video',
-    staleTime: 10 * 60 * 1000,
-  })
 
   // Toggle a module on/off or adjust its quantity. Removing the key (vs storing 0)
   // keeps selected_modules clean and matches the server's "active module" semantics.
@@ -365,7 +328,7 @@ export default function TasksPage() {
       target_platform: selectedIntentProject?.ecommerce_defaults?.target_platform ?? '',
       selling_points: '',
       language: '',
-      video_config: selectedIntentProject?.platform === 'video' ? buildVideoFormConfig(selectedIntentProject.video_defaults) : undefined,
+      video_input: selectedIntentProject?.platform === 'video' ? initialVideoInput('') : undefined,
     })
     setQuantity(1)
     setWatermark(false)
@@ -392,7 +355,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_input: undefined })
     setQuantity(1)
     setWatermark(false)
     setGoalMode(false)
@@ -443,7 +406,7 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      video_config: values.type === 'video' ? normalizeVideoConfigForSubmit(values.video_config, selectedProject?.video_defaults) : undefined,
+      video_input: values.type === 'video' ? buildVideoInputForSubmit(values.prompt, values.video_input) : undefined,
       // Route to the desktop local executor only when it is running and able to claim now.
       execution_target: runThisTaskLocally ? 'local' : undefined,
     }))
@@ -884,13 +847,13 @@ export default function TasksPage() {
                             form.setValue('image_model_key', ch.ecommerce_defaults.image_model_key || '', { shouldDirty: false })
                           }
                           if (platform === 'video') {
-                            form.setValue('video_config', buildVideoFormConfig(ch?.video_defaults), { shouldDirty: false })
+                            form.setValue('video_input', initialVideoInput(form.getValues('prompt') || ''), { shouldDirty: false })
                           } else {
-                            form.setValue('video_config', undefined, { shouldDirty: false })
+                            form.setValue('video_input', undefined, { shouldDirty: false })
                           }
                         } else {
                           setProjectImageRatio('')
-                          form.setValue('video_config', undefined, { shouldDirty: false })
+                          form.setValue('video_input', undefined, { shouldDirty: false })
                         }
                       }}
                     />
@@ -904,7 +867,11 @@ export default function TasksPage() {
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 space-y-1">
                   <p className="text-xs font-medium text-foreground/80">将使用项目「{selectedProject.name}」的快照</p>
                   <p className="text-xs text-muted-foreground">
-                    {watchedType === 'video' ? '视频风格与禁忌' : '视觉风格'} {selectedProject.visual_style || '—'}
+                    {watchedType === 'video' ? (
+                      <>项目定位 {selectedProject.instructions || selectedProject.positioning || '—'}</>
+                    ) : (
+                      <>视觉风格 {selectedProject.visual_style || '—'}</>
+                    )}
                     {watchedType === 'article' && (
                       <> · 署名 {selectedProject.author || '—'} · 写作风格 {selectedProject.writer || '—'} · 排版 {selectedProject.theme || '默认'}</>
                     )}
@@ -1007,10 +974,6 @@ export default function TasksPage() {
                 <VideoCreationPanel
                   form={form}
                   selectedProject={selectedProject}
-                  availableVideoModels={availableVideoModels}
-                  playbooks={videoPlaybooks?.items ?? []}
-                  modelsLoading={videoEstimateQuery.isLoading}
-                  minimumBalanceHint="视频任务需至少覆盖基础任务费；提交 video_gen 后按下方预估和实际参数另计。"
                   promptField={(
                     <FormField control={form.control} name="prompt" render={({ field }) => (
                       <FormItem>
@@ -1020,13 +983,6 @@ export default function TasksPage() {
                         <FormMessage />
                       </FormItem>
                     )} />
-                  )}
-                  estimateSummary={(
-                    <VideoEstimateSummary
-                      estimate={videoEstimateQuery.data}
-                      isLoading={videoEstimateQuery.isLoading}
-                      error={videoEstimateQuery.error ? getApiErrorMessage(videoEstimateQuery.error, '视频参数不可用') : undefined}
-                    />
                   )}
                 />
               )}

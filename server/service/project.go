@@ -86,6 +86,9 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	if ch.Instructions == "" && ch.Positioning != "" {
 		ch.Instructions = ch.Positioning
 	}
+	if ch.Platform == model.PlatformVideo {
+		ch.VisualStyle = ""
+	}
 
 	// Platform-specific validation.
 	pc := model.GetPlatformConfig(ch.Platform)
@@ -209,6 +212,9 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	if ch.VideoProfileSet {
 		existing.VideoDefaults = ch.VideoDefaults
 		existing.VideoModelPolicy = ch.VideoModelPolicy
+	}
+	if existing.Platform == model.PlatformVideo {
+		existing.VisualStyle = ""
 	}
 	if err := s.validateVideoProfile(existing); err != nil {
 		return nil, err

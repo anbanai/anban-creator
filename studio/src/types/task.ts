@@ -1,4 +1,4 @@
-import type { VideoTaskConfig } from './video'
+import type { VideoInput, VideoTaskConfig } from './video'
 import type { CreditTransaction } from './credits'
 
 export type TaskType = 'seednote' | 'article' | 'moments' | 'ecommerce' | 'video'
@@ -81,6 +81,7 @@ export interface Task {
   project_snapshot?: ProjectSnapshot
   // E-commerce package config (only present for platform=ecommerce tasks).
   ecommerce?: EcommerceTaskConfig
+  video_input?: VideoInput
   video_config?: VideoTaskConfig
   video_generation_id?: string
   video_estimated_credits?: number
@@ -178,6 +179,7 @@ export interface CreateTaskRequest {
   target_platform?: string
   selling_points?: string
   language?: string
+  video_input?: VideoInput
   video_config?: VideoTaskConfig
   // ''/'cloud' (default) → cloud execution; 'local' → claim by the desktop
   // local executor and run on the user's machine (enables ffmpeg/local-shell).

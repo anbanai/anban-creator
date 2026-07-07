@@ -18,6 +18,18 @@ export interface VideoReferenceAsset {
   input_duration_seconds?: number
 }
 
+export interface VideoHardConstraints {
+  ratio?: string
+  duration?: number
+  watermark?: boolean
+}
+
+export interface VideoInput {
+  brief?: string
+  references?: VideoReferenceAsset[]
+  hard_constraints?: VideoHardConstraints
+}
+
 export interface VideoPlaybookSpec {
   key: string
   label: string

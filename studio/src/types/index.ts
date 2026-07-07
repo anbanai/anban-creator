@@ -29,6 +29,7 @@ export type {
 export type {
   TaskType,
   TaskStatus,
+  ExecutionTarget,
   Task,
   TaskResult,
   TaskFile,
@@ -92,8 +93,10 @@ export type { ImageModelOption, ImageModelListResponse } from './imageModel'
 
 export type {
   VideoDefaults,
+  VideoHardConstraints,
   VideoEstimateRequest,
   VideoEstimateResponse,
+  VideoInput,
   VideoCreativeType,
   VideoModelPolicy,
   VideoModelSpec,

@@ -51,10 +51,11 @@ describe('ProjectsPage layout contracts', () => {
     expect(source).not.toContain("['seedance-2.0', 'Seedance 2.0']")
   })
 
-  it('renames visual style copy for video projects', () => {
+  it('keeps video project positioning in instructions instead of a visual style field', () => {
     const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
 
-    expect(source).toContain('视频风格与禁忌')
-    expect(source).toContain('创作约束')
+    expect(source).toContain("values.platform === 'video' ? undefined : values.visual_style")
+    expect(source).toContain('品牌定位、账号人设、产品基础信息、画面偏好、禁忌与长期要求')
+    expect(source).not.toContain('视频风格与禁忌')
   })
 })

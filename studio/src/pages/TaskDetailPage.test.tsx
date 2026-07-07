@@ -404,6 +404,11 @@ describe('TaskDetailPage', () => {
       video_generation_id: 'vg-1',
       video_estimated_credits: 7440,
       video_credits_charged: 7440,
+      video_input: {
+        brief: '做一条办公室个人 IP 种草视频',
+        references: [{ type: 'video_url', url: 'https://cdn.example.com/ref.mp4' }],
+        hard_constraints: { ratio: '9:16', duration: 15 },
+      },
       video_config: {
         workflow: 'creator',
         creative_type: 'personal_ip',
@@ -445,7 +450,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('输入与创作参数')).toBeInTheDocument()
+    expect(await screen.findByText('用户输入')).toBeInTheDocument()
+    expect(screen.getByText('Agent 解析结果')).toBeInTheDocument()
     expect(screen.getAllByText('做一条办公室个人 IP 种草视频').length).toBeGreaterThan(0)
     expect(screen.getByText('个人 IP')).toBeInTheDocument()
     expect(screen.getByText('种草')).toBeInTheDocument()
@@ -462,6 +468,31 @@ describe('TaskDetailPage', () => {
     expect(within(videoDialog).getByText('生成任务 ID')).toBeInTheDocument()
     expect(within(videoDialog).getByText('参考素材')).toBeInTheDocument()
     expect(within(videoDialog).getByText(/已消耗 7,440/)).toBeInTheDocument()
+  })
+
+  it('shows only user video input before agent resolves execution params', async () => {
+    mockTask(taskWith({
+      type: 'video',
+      status: 'pending',
+      prompt: '做一条办公室个人 IP 种草视频',
+      video_input: {
+        brief: '做一条办公室个人 IP 种草视频',
+        references: [{ type: 'text', text: '不要卡通化' }],
+        hard_constraints: { ratio: '9:16' },
+      },
+      video_config: undefined,
+      result: { files: null, output: '' },
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('用户输入')).toBeInTheDocument()
+    expect(screen.getByText(/不要卡通化/)).toBeInTheDocument()
+    expect(screen.getByText('9:16')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 解析结果')).not.toBeInTheDocument()
+    expect(screen.queryByText('人物 / 主体')).not.toBeInTheDocument()
+    expect(screen.queryByText('目标受众')).not.toBeInTheDocument()
+    expect(screen.queryByText('核心信息')).not.toBeInTheDocument()
   })
 
   it('shows video production tabs, QC, delivery actions, and retake cloning', async () => {

@@ -18,6 +18,7 @@ import { designerApi } from './designer'
 import { imageModelsApi } from './image-models'
 import { ilinkApi } from './ilink'
 import { videoApi } from './video'
+import { aiEntryApi } from './ai-entry'
 
 export const api = {
   auth: authApi,
@@ -40,4 +41,5 @@ export const api = {
   imageModels: imageModelsApi,
   ilink: ilinkApi,
   video: videoApi,
+  aiEntry: aiEntryApi,
 }

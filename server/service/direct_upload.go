@@ -25,6 +25,7 @@ const (
 	DirectUploadPurposeEcommercePhoto    = "ecommerce_product_photo"
 	DirectUploadPurposeVideoReference    = "video_reference"
 	DirectUploadPurposeDesignerReference = "designer_reference"
+	DirectUploadPurposeAIEntryAttachment = "ai_entry_attachment"
 
 	defaultDirectUploadTTLSeconds = 15 * 60
 )
@@ -104,8 +105,9 @@ type DirectUploadConfig struct {
 }
 
 type directUploadPurposePolicy struct {
-	maxSize  int64
-	validate func(contentType, ext string) bool
+	maxSize    int64
+	maxSizeFor func(contentType, ext string) int64
+	validate   func(contentType, ext string) bool
 }
 
 var directUploadPolicies = map[string]directUploadPurposePolicy{
@@ -114,6 +116,7 @@ var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeEcommercePhoto:    {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeDesignerReference: {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeVideoReference:    {maxSize: 50 * 1024 * 1024, validate: isDirectUploadVideoReference},
+	DirectUploadPurposeAIEntryAttachment: {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
 }
 
 const maxUploadImageBytes = 10 * 1024 * 1024
@@ -142,9 +145,6 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 	if req.Size <= 0 {
 		return nil, fmt.Errorf("file size is required")
 	}
-	if req.Size > policy.maxSize {
-		return nil, fmt.Errorf("file size exceeds the %d MB limit", policy.maxSize/(1024*1024))
-	}
 	filename := sanitizeUploadFilename(req.Filename)
 	if filename == "" {
 		return nil, fmt.Errorf("filename is required")
@@ -156,6 +156,16 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 	}
 	if !policy.validate(contentType, ext) {
 		return nil, fmt.Errorf("content type %q is not allowed for %s uploads", contentType, purpose)
+	}
+	maxSize := policy.maxSize
+	if policy.maxSizeFor != nil {
+		maxSize = policy.maxSizeFor(contentType, ext)
+	}
+	if maxSize <= 0 {
+		return nil, fmt.Errorf("content type %q is not allowed for %s uploads", contentType, purpose)
+	}
+	if req.Size > maxSize {
+		return nil, fmt.Errorf("file size exceeds the %d MB limit", maxSize/(1024*1024))
 	}
 	if ext == "" {
 		if exts, _ := mime.ExtensionsByType(contentType); len(exts) > 0 {
@@ -237,7 +247,7 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 		STSAccessKeySecret: cred.AccessKeySecret,
 		STSSecurityToken:   cred.SecurityToken,
 		ExpiresAt:          minTime(expiresAt, cred.ExpiresAt),
-		MaxSize:            policy.maxSize,
+		MaxSize:            maxSize,
 	}, nil
 }
 
@@ -461,6 +471,54 @@ func isDirectUploadVideoReference(contentType, ext string) bool {
 	return false
 }
 
+func isDirectUploadAIEntryAttachment(contentType, ext string) bool {
+	return aiEntryAttachmentMaxSize(contentType, ext) > 0
+}
+
+func aiEntryAttachmentMaxSize(contentType, ext string) int64 {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	ext = strings.ToLower(strings.TrimSpace(ext))
+	if strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") {
+		switch ext {
+		case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".mp4", ".mov", ".webm", "":
+			return 50 * 1024 * 1024
+		}
+	}
+	switch ext {
+	case ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".csv", ".txt", ".md", ".markdown", ".json":
+		if isAIEntryDocumentContentType(ct, ext) {
+			return 25 * 1024 * 1024
+		}
+	}
+	return 0
+}
+
+func isAIEntryDocumentContentType(ct, ext string) bool {
+	if strings.HasPrefix(ct, "text/") {
+		switch ext {
+		case ".csv", ".txt", ".md", ".markdown":
+			return true
+		}
+	}
+	switch ct {
+	case "application/pdf",
+		"application/msword",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"application/vnd.ms-powerpoint",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		"application/vnd.ms-excel",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		"application/csv",
+		"application/json":
+		return true
+	case "application/octet-stream":
+		// Some browsers report generic types for local files. Keep the allowlist
+		// extension-bound so executable formats are still rejected.
+		return ext != ""
+	}
+	return false
+}
+
 func sanitizeUploadFilename(raw string) string {
 	base := filepath.Base(strings.TrimSpace(raw))
 	base = strings.Trim(base, ".")
@@ -499,6 +557,28 @@ func contentTypeForUploadExt(ext string) string {
 		return "audio/aac"
 	case ".ogg":
 		return "audio/ogg"
+	case ".pdf":
+		return "application/pdf"
+	case ".doc":
+		return "application/msword"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".ppt":
+		return "application/vnd.ms-powerpoint"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case ".xls":
+		return "application/vnd.ms-excel"
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".csv":
+		return "text/csv"
+	case ".txt":
+		return "text/plain"
+	case ".md", ".markdown":
+		return "text/markdown"
+	case ".json":
+		return "application/json"
 	default:
 		return "application/octet-stream"
 	}

@@ -122,6 +122,7 @@ type CreatePlanParams struct {
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
 	Video                    *model.VideoTaskConfig
+	VideoInput               *model.VideoInput
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -188,21 +189,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if p.ArticleWithContentImages != nil {
 		articleContent = *p.ArticleWithContentImages
 	}
-	var videoPlan *VideoGenerationPlan
-	if project.Platform == model.PlatformVideo {
-		resolved, err := ResolveVideoGenerationPlanWithBilling(
-			videoRequestFromTaskConfig(p.Prompt, p.Video),
-			project.VideoDefaults.Data(),
-			project.VideoModelPolicy.Data(),
-			s.resolvedVideoCatalog(),
-			s.videoBillingOptions(ctx, p.UserID),
-		)
-		if err != nil {
-			return nil, wrapVideoGenerationConfigError(err)
-		}
-		videoPlan = &resolved
-	}
-
 	// A plan carries scheduling-adjacent "what to produce" image params + goal
 	// mode. Project/account style config is snapshotted when a task is spawned.
 	plan := &model.Plan{
@@ -225,10 +211,14 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ArticleWithCover:         &articleCover,
 		ArticleWithContentImages: &articleContent,
 	}
-	if videoPlan != nil {
-		vc := videoTaskConfigFromPlan(*videoPlan)
-		plan.SetVideoConfig(vc)
-		plan.VideoEstimatedCredits = videoPlan.EstimatedCredits
+	if project.Platform == model.PlatformVideo {
+		if p.VideoInput != nil {
+			plan.SetVideoInput(*p.VideoInput)
+		} else if p.Video != nil {
+			plan.SetVideoInput(videoInputFromLegacyConfig(p.Prompt, p.Video))
+		} else if p.Prompt != "" {
+			plan.SetVideoInput(model.VideoInput{Brief: p.Prompt})
+		}
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -272,7 +262,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
-//   - Video: nil = leave unchanged; non-nil = re-resolve against project profile
+//   - VideoInput: nil = leave unchanged; non-nil = update the user-authored intake
 //
 // ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
 // unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
@@ -291,6 +281,7 @@ type UpdatePlanParams struct {
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
 	Video                    *model.VideoTaskConfig
+	VideoInput               *model.VideoInput
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -332,7 +323,17 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		v := *p.ArticleWithContentImages
 		plan.ArticleWithContentImages = &v
 	}
-	if p.Video != nil {
+	if p.VideoInput != nil {
+		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("find project: %w", err)
+		}
+		if project.Platform != model.PlatformVideo {
+			return nil, fmt.Errorf("video_input can only be set on video plans")
+		}
+		plan.SetVideoInput(*p.VideoInput)
+		plan.VideoEstimatedCredits = 0
+	} else if p.Video != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
 		if err != nil {
 			return nil, fmt.Errorf("find project: %w", err)
@@ -340,19 +341,8 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		if project.Platform != model.PlatformVideo {
 			return nil, fmt.Errorf("video_config can only be set on video plans")
 		}
-		resolved, err := ResolveVideoGenerationPlanWithBilling(
-			videoRequestFromTaskConfig(plan.Prompt, p.Video),
-			project.VideoDefaults.Data(),
-			project.VideoModelPolicy.Data(),
-			s.resolvedVideoCatalog(),
-			s.videoBillingOptions(ctx, plan.UserID),
-		)
-		if err != nil {
-			return nil, wrapVideoGenerationConfigError(err)
-		}
-		vc := videoTaskConfigFromPlan(resolved)
-		plan.SetVideoConfig(vc)
-		plan.VideoEstimatedCredits = resolved.EstimatedCredits
+		plan.SetVideoInput(videoInputFromLegacyConfig(plan.Prompt, p.Video))
+		plan.VideoEstimatedCredits = 0
 	}
 	// If cron expression changed, validate and recompute next run.
 	if p.CronExpr != "" && p.CronExpr != plan.CronExpr {

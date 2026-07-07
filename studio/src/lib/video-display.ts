@@ -55,5 +55,5 @@ export const videoReferenceRoles = [
 ]
 
 export function videoReferenceRoleLabel(value: string | null | undefined) {
-  return videoReferenceRoles.find((role) => role.value === value)?.label || value || '主体不变'
+  return videoReferenceRoles.find((role) => role.value === value)?.label || value || '由 Agent 判断'
 }

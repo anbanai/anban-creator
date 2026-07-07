@@ -27,3 +27,15 @@ func videoReferenceURLs(cfg *model.VideoTaskConfig) []string {
 	}
 	return urls
 }
+
+func videoConfigForReferenceURLs(cfg *model.VideoTaskConfig, input *model.VideoInput) *model.VideoTaskConfig {
+	if input == nil {
+		return cfg
+	}
+	merged := model.VideoTaskConfig{}
+	if cfg != nil {
+		merged = *cfg
+	}
+	merged.References = append(merged.References, input.References...)
+	return &merged
+}

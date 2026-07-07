@@ -1,4 +1,4 @@
-import type { VideoTaskConfig } from './video'
+import type { VideoInput, VideoTaskConfig } from './video'
 
 export type PlanType = 'seednote' | 'article' | 'video'
 export type PlanStatus = 'active' | 'paused' | 'completed'
@@ -26,6 +26,7 @@ export interface Plan {
   // toggleable. Both default true; spawned article tasks inherit them.
   article_with_cover?: boolean
   article_with_content_images?: boolean
+  video_input?: VideoInput
   video_config?: VideoTaskConfig
   video_estimated_credits?: number
   created_at: string
@@ -50,6 +51,7 @@ export interface CreatePlanRequest {
   // toggleable; both default true. Server ignores for non-article plans.
   article_with_cover?: boolean
   article_with_content_images?: boolean
+  video_input?: VideoInput
   video_config?: VideoTaskConfig
 }
 
@@ -67,5 +69,6 @@ export interface UpdatePlanRequest {
   // Article image toggles (公众号文章): leave-unchanged when omitted.
   article_with_cover?: boolean
   article_with_content_images?: boolean
+  video_input?: VideoInput
   video_config?: VideoTaskConfig
 }

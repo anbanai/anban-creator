@@ -145,6 +145,45 @@ func TestPrepareDirectUploadCreatesPendingScopedSTSSession(t *testing.T) {
 	}
 }
 
+func TestPrepareDirectUploadAllowsAIEntryMediaAndDocuments(t *testing.T) {
+	store := &fakeDirectUploadStore{name: "oss"}
+	repo := &fakePendingUploadRepo{}
+	cfg := DirectUploadConfig{
+		Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", Region: "oss-cn-hangzhou"},
+		CredentialIssuer: StaticUploadCredentialIssuer(func(context.Context, UploadCredentialRequest) (*UploadCredential, error) {
+			return &UploadCredential{AccessKeyID: "ak", AccessKeySecret: "sk", SecurityToken: "token", ExpiresAt: time.Now().Add(time.Minute)}, nil
+		}),
+	}
+
+	media, err := PrepareDirectUpload(context.Background(), store, repo, cfg, DirectUploadPrepareRequest{
+		UserID:      "u",
+		Purpose:     DirectUploadPurposeAIEntryAttachment,
+		Filename:    "demo.mp4",
+		ContentType: "video/mp4",
+		Size:        50 * 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("PrepareDirectUpload media: %v", err)
+	}
+	if media.MaxSize != 50*1024*1024 {
+		t.Fatalf("media max size = %d, want 50MB", media.MaxSize)
+	}
+
+	doc, err := PrepareDirectUpload(context.Background(), store, repo, cfg, DirectUploadPrepareRequest{
+		UserID:      "u",
+		Purpose:     DirectUploadPurposeAIEntryAttachment,
+		Filename:    "brief.pdf",
+		ContentType: "application/pdf",
+		Size:        25 * 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("PrepareDirectUpload document: %v", err)
+	}
+	if doc.MaxSize != 25*1024*1024 {
+		t.Fatalf("document max size = %d, want 25MB", doc.MaxSize)
+	}
+}
+
 func TestPrepareDirectUploadRejectsInvalidPurposeSizeAndMIME(t *testing.T) {
 	store := &fakeDirectUploadStore{name: "oss"}
 	repo := &fakePendingUploadRepo{}
@@ -158,6 +197,8 @@ func TestPrepareDirectUploadRejectsInvalidPurposeSizeAndMIME(t *testing.T) {
 		{UserID: "u", Purpose: "bad", Filename: "a.png", ContentType: "image/png", Size: 1},
 		{UserID: "u", Purpose: DirectUploadPurposeProjectReference, Filename: "a.mp4", ContentType: "video/mp4", Size: 1},
 		{UserID: "u", Purpose: DirectUploadPurposeVideoReference, Filename: "a.mp4", ContentType: "video/mp4", Size: 51 * 1024 * 1024},
+		{UserID: "u", Purpose: DirectUploadPurposeAIEntryAttachment, Filename: "brief.exe", ContentType: "application/x-msdownload", Size: 1},
+		{UserID: "u", Purpose: DirectUploadPurposeAIEntryAttachment, Filename: "brief.pdf", ContentType: "application/pdf", Size: 26 * 1024 * 1024},
 	}
 	for _, tc := range cases {
 		if _, err := PrepareDirectUpload(context.Background(), store, repo, cfg, tc); err == nil {

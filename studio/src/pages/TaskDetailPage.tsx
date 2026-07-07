@@ -460,6 +460,11 @@ export default function TaskDetailPage() {
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
+  const videoUserInput = task.video_input
+  const videoUserBrief = videoUserInput?.brief?.trim() || task.prompt || ''
+  const videoUserReferences = videoUserInput?.references ?? []
+  const videoHardConstraints = videoUserInput?.hard_constraints
+  const showVideoUserInput = task.type === 'video' && Boolean(videoUserBrief || videoUserReferences.length > 0 || videoHardConstraints?.ratio || videoHardConstraints?.duration || typeof videoHardConstraints?.watermark === 'boolean')
   const videoTargetDuration = task.video_config?.target_duration_seconds || task.video_config?.pricing_breakdown?.output_seconds || task.video_config?.duration
   const videoSegmentCount = task.video_config?.segments?.length || task.video_config?.pricing_breakdown?.segment_count || 0
   const videoSpecSummary = [
@@ -469,7 +474,24 @@ export default function TaskDetailPage() {
     videoSegmentCount > 0 ? `${videoSegmentCount} 段` : null,
   ].filter(Boolean).join(' · ')
   const videoInputReferences = task.video_config?.references ?? []
-  const showVideoInputParameters = task.type === 'video' && Boolean(task.video_config)
+  const hasVideoResolvedConfig = task.type === 'video' && Boolean(
+    task.video_config && (
+      task.video_config.model_key ||
+      task.video_config.model ||
+      task.video_config.resolution ||
+      task.video_config.ratio ||
+      task.video_config.duration ||
+      task.video_config.estimated_credits ||
+      task.video_config.pricing_breakdown ||
+      task.video_config.segments?.length ||
+      task.video_config.creative_type ||
+      task.video_config.purpose ||
+      task.video_config.subject_profile ||
+      task.video_config.audience ||
+      task.video_config.single_message ||
+      task.video_config.references?.length
+    ),
+  )
   const videoCreativeType = videoCreativeTypeLabel(task.video_config?.creative_type)
   const videoPurpose = videoPurposeLabel(task.video_config?.purpose)
   const videoSubjectProfile = task.video_config?.subject_profile?.trim() || '—'
@@ -1023,39 +1045,91 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {showVideoInputParameters && (
+      {showVideoUserInput && (
         <Card size="sm" className="border-border/70">
           <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs text-muted-foreground">视频创作</p>
-              <h2 className="mt-1 text-base font-semibold text-foreground">输入与创作参数</h2>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="outline">{videoCreativeType}</Badge>
-              <Badge variant="outline">{videoPurpose}</Badge>
+              <h2 className="mt-1 text-base font-semibold text-foreground">用户输入</h2>
             </div>
           </div>
           <CardContent className="space-y-4">
             <div>
               <p className="text-xs text-muted-foreground">创作要求</p>
               <p className="mt-1 whitespace-pre-wrap rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
-                {task.prompt || '—'}
+                {videoUserBrief || '—'}
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
-                <p className="text-xs text-muted-foreground">人物 / 主体</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSubjectProfile}</p>
+                <p className="text-xs text-muted-foreground">比例硬约束</p>
+                <p className="mt-1 text-sm text-foreground">{videoHardConstraints?.ratio || '由 Agent 判断'}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">目标受众</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoAudience}</p>
+                <p className="text-xs text-muted-foreground">时长硬约束</p>
+                <p className="mt-1 text-sm text-foreground">{videoHardConstraints?.duration ? `${videoHardConstraints.duration}s` : '由 Agent 判断'}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">核心信息</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSingleMessage}</p>
+                <p className="text-xs text-muted-foreground">水印硬约束</p>
+                <p className="mt-1 text-sm text-foreground">{typeof videoHardConstraints?.watermark === 'boolean' ? (videoHardConstraints.watermark ? '加水印' : '不加水印') : '由 Agent 判断'}</p>
               </div>
             </div>
+            <div className="border-t border-border pt-4">
+              <p className="text-xs text-muted-foreground">参考素材</p>
+              {videoUserReferences.length > 0 ? (
+                <div className="mt-2 divide-y divide-border rounded-md border border-border">
+                  {videoUserReferences.map((ref, index) => (
+                    <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-3 py-2 text-xs">
+                      <p className="truncate text-foreground">{ref.reference_role || '由 Agent 判断'} · {ref.file_name || ref.text || ref.url || '—'}</p>
+                      {ref.input_duration_seconds ? (
+                        <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {hasVideoResolvedConfig && (
+        <Card size="sm" className="border-border/70">
+          <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs text-muted-foreground">视频创作</p>
+              <h2 className="mt-1 text-base font-semibold text-foreground">Agent 解析结果</h2>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {task.video_config?.creative_type && <Badge variant="outline">{videoCreativeType}</Badge>}
+              {task.video_config?.purpose && <Badge variant="outline">{videoPurpose}</Badge>}
+            </div>
+          </div>
+          <CardContent className="space-y-4">
+            {(task.video_config?.subject_profile || task.video_config?.audience || task.video_config?.single_message) && (
+              <div className="grid gap-3 sm:grid-cols-3">
+                {task.video_config?.subject_profile && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">人物 / 主体</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSubjectProfile}</p>
+                  </div>
+                )}
+                {task.video_config?.audience && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">目标受众</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoAudience}</p>
+                  </div>
+                )}
+                {task.video_config?.single_message && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">核心信息</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSingleMessage}</p>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <p className="text-xs text-muted-foreground">视频模型</p>
@@ -1074,9 +1148,9 @@ export default function TaskDetailPage() {
                 <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}</p>
               </div>
             </div>
-            <div className="border-t border-border pt-4">
-              <p className="text-xs text-muted-foreground">参考素材</p>
-              {videoInputReferences.length > 0 ? (
+            {videoInputReferences.length > 0 && (
+              <div className="border-t border-border pt-4">
+                <p className="text-xs text-muted-foreground">执行参考素材</p>
                 <div className="mt-2 divide-y divide-border rounded-md border border-border">
                   {videoInputReferences.map((ref, index) => (
                     <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-3 py-2 text-xs">
@@ -1087,10 +1161,8 @@ export default function TaskDetailPage() {
                     </div>
                   ))}
                 </div>
-              ) : (
-                <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
-              )}
-            </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

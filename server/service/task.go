@@ -296,9 +296,12 @@ type CreateManualParams struct {
 	// the original task's frozen config. New manual tasks leave it nil and snapshot
 	// the current project at creation time.
 	ProjectSnapshot *model.ProjectSnapshot
-	Watermark       *bool
-	Goal            string
-	GoalMode        bool
+	// InputAttachments stores the original AI-entry attachments on the task so
+	// executors can materialize them into the agent workspace.
+	InputAttachments []model.EntryAttachment
+	Watermark        *bool
+	Goal             string
+	GoalMode         bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to task model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -318,6 +321,10 @@ type CreateManualParams struct {
 	// Video carries plan/task-level overrides for platform="video"; omitted
 	// fields are filled from the project's video profile.
 	Video *model.VideoTaskConfig
+	// VideoInput carries user-authored video intake. It is the only video data
+	// written by Studio/API task creation; VideoConfig is reserved for MCP/agent
+	// resolved execution snapshots.
+	VideoInput *model.VideoInput
 	// ExecutionTarget, when model.ExecutionTargetLocal, routes the task to a
 	// desktop local executor instead of cloud Asynq/Docker. The task is created
 	// pending with a LocalClaimDeadline and is NOT enqueued; a desktop claims it
@@ -389,21 +396,8 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			effectiveImageModelKey = projEc.ImageModelKey
 		}
 	}
-	var videoPlan *VideoGenerationPlan
 	if taskType == model.PlatformVideo {
 		quantity = 1
-		videoReq := videoRequestFromTaskConfig(p.Prompt, p.Video)
-		resolved, err := ResolveVideoGenerationPlanWithBilling(
-			videoReq,
-			project.VideoDefaults.Data(),
-			project.VideoModelPolicy.Data(),
-			s.resolvedVideoCatalog(),
-			s.videoBillingOptions(ctx, p.UserID),
-		)
-		if err != nil {
-			return nil, wrapVideoGenerationConfigError(err)
-		}
-		videoPlan = &resolved
 	}
 	if taskType == model.PlatformEcommerce {
 		// E-commerce creates one deliverable package task. Selected modules
@@ -425,9 +419,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	if s.creditSvc != nil {
-		if taskType == model.PlatformVideo && videoPlan == nil {
-			return nil, fmt.Errorf("video generation plan is required")
-		}
 		{
 			cost, ok := s.creditSvc.TaskCost(taskType)
 			if !ok {
@@ -545,11 +536,17 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.Ecommerce != nil {
 			task.SetEcommerce(*p.Ecommerce)
 		}
-		if videoPlan != nil {
-			vc := videoTaskConfigFromPlan(*videoPlan)
-			task.SetVideoConfig(vc)
-			task.VideoEstimatedCredits = videoPlan.EstimatedCredits
-			task.VideoCreditsCharged = 0
+		if len(p.InputAttachments) > 0 {
+			task.SetInputAttachments(p.InputAttachments)
+		}
+		if taskType == model.PlatformVideo {
+			if p.VideoInput != nil {
+				task.SetVideoInput(*p.VideoInput)
+			} else if p.Video != nil {
+				task.SetVideoInput(videoInputFromLegacyConfig(taskPrompt, p.Video))
+			} else if strings.TrimSpace(taskPrompt) != "" {
+				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
+			}
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -615,6 +612,20 @@ func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) Video
 	req.DeliveryTargets = cfg.DeliveryTargets
 	req.ReferenceSet = videoReferencesFromAssets(cfg.References)
 	return req
+}
+
+func videoInputFromLegacyConfig(prompt string, cfg *model.VideoTaskConfig) model.VideoInput {
+	input := model.VideoInput{Brief: strings.TrimSpace(prompt)}
+	if cfg == nil {
+		return input
+	}
+	input.References = cfg.References
+	input.HardConstraints = model.VideoHardConstraints{
+		Ratio:     cfg.Ratio,
+		Duration:  cfg.Duration,
+		Watermark: cfg.Watermark,
+	}
+	return input
 }
 
 func videoReferencesFromAssets(assets []model.VideoReferenceAsset) []VideoReferenceInput {
@@ -741,25 +752,13 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 			taskType = found.Platform
 		}
 	}
-	var planVideoConfig *model.VideoTaskConfig
+	var planVideoInput *model.VideoInput
 	if taskType == model.PlatformVideo {
-		vc := plan.VideoConfig.Data()
-		planVideoConfig = &vc
-		if project != nil {
-			resolved, err := ResolveVideoGenerationPlanWithBilling(
-				videoRequestFromTaskConfig(prompt, planVideoConfig),
-				project.VideoDefaults.Data(),
-				project.VideoModelPolicy.Data(),
-				s.resolvedVideoCatalog(),
-				s.videoBillingOptions(ctx, plan.UserID),
-			)
-			if err != nil {
-				s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("skipping video plan task with invalid video config")
-				return nil, nil
-			}
-			vc = videoTaskConfigFromPlan(resolved)
-			planVideoConfig = &vc
+		vi := plan.VideoInput.Data()
+		if vi.Brief == "" && prompt != "" {
+			vi.Brief = prompt
 		}
+		planVideoInput = &vi
 	}
 
 	// Deduct credits for the plan task.
@@ -772,10 +771,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	if s.creditSvc != nil {
-		if taskType == model.PlatformVideo && planVideoConfig == nil {
-			s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping video plan task without resolved video config")
-			return nil, nil
-		}
 		if _, costOK := s.creditSvc.TaskCost(taskType); !costOK {
 			s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task with unknown task type")
 			return nil, nil
@@ -811,10 +806,8 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if project != nil {
 		task.SetProjectSnapshot(model.SnapshotProject(project))
 	}
-	if planVideoConfig != nil {
-		task.SetVideoConfig(*planVideoConfig)
-		task.VideoEstimatedCredits = planVideoConfig.EstimatedCredits
-		task.VideoCreditsCharged = 0
+	if planVideoInput != nil {
+		task.SetVideoInput(*planVideoInput)
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {

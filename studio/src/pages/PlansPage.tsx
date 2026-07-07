@@ -28,7 +28,7 @@ import { planStatusLabel, contentTypeLabel, formatDateTimeCN, cronToHuman, getBa
 import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
-import { buildVideoFormConfig, normalizeVideoConfigForSubmit } from '@/lib/video-form'
+import { buildVideoInputForSubmit, initialVideoInput } from '@/lib/video-form'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
@@ -36,7 +36,6 @@ import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
-import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 import { cn } from '@/lib/utils'
 import { parseCreationIntent } from '@/lib/command-center'
 import { agentRuntimeReserveFor, taskCostFor } from '@/lib/pricing'
@@ -62,7 +61,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
-    video_config: plan.video_config ? buildVideoFormConfig(undefined, plan.video_config) : undefined,
+    video_input: initialVideoInput(plan.prompt || '', plan.video_input),
   }
 }
 
@@ -94,7 +93,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_config: undefined,
+      video_input: undefined,
     },
   })
 
@@ -108,13 +107,6 @@ export default function PlansPage() {
   const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedGoalMode = useWatch({ control: form.control, name: 'goal_mode' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
-  const watchedPrompt = useWatch({ control: form.control, name: 'prompt' })
-  const watchedVideoConfig = useWatch({ control: form.control, name: 'video_config' })
-  const [debouncedVideoEstimateInput, setDebouncedVideoEstimateInput] = useState<{
-    project_id: string
-    prompt?: string
-    video_config?: PlanFormValues['video_config']
-  } | null>(null)
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -173,34 +165,6 @@ export default function PlansPage() {
     queryKey: ['credits', 'balance'],
     queryFn: () => api.credits.balance(),
     staleTime: 30_000,
-  })
-  useEffect(() => {
-    if (!modalOpen || watchedType !== 'video' || !watchedProjectId) {
-      setDebouncedVideoEstimateInput(null)
-      return
-    }
-    const timer = setTimeout(() => {
-      setDebouncedVideoEstimateInput({
-        project_id: watchedProjectId,
-        prompt: watchedPrompt || '',
-        video_config: watchedVideoConfig,
-      })
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [modalOpen, watchedType, watchedProjectId, watchedPrompt, watchedVideoConfig])
-
-  const videoEstimateQuery = useQuery({
-    queryKey: ['video-estimate', 'plan', debouncedVideoEstimateInput],
-    queryFn: () => api.video.estimate(debouncedVideoEstimateInput!),
-    enabled: Boolean(debouncedVideoEstimateInput),
-    retry: false,
-  })
-  const availableVideoModels = videoEstimateQuery.data?.available_models ?? []
-  const { data: videoPlaybooks } = useQuery({
-    queryKey: ['video-playbooks'],
-    queryFn: () => api.video.playbooks(),
-    enabled: modalOpen && watchedType === 'video',
-    staleTime: 10 * 60 * 1000,
   })
 
   const createMutation = useMutation({
@@ -276,9 +240,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_config: requestedType === 'video'
-        ? buildVideoFormConfig(projectMap[createIntent.projectId ?? '']?.video_defaults)
-        : undefined,
+      video_input: requestedType === 'video' ? initialVideoInput('') : undefined,
     })
     setModalOpen(true)
   }, [createIntent.projectId, createIntent.type, form, projectMap])
@@ -318,7 +280,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_config: undefined,
+      video_input: undefined,
     })
   }
 
@@ -341,7 +303,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      video_config: values.type === 'video' ? normalizeVideoConfigForSubmit(values.video_config) : undefined,
+      video_input: values.type === 'video' ? buildVideoInputForSubmit(values.prompt, values.video_input) : undefined,
     }
 
     if (editingPlan) {
@@ -512,14 +474,13 @@ export default function PlansPage() {
                         field.onChange(id)
                         if (id) {
                           form.setValue('type', platform as PlanType)
-                          const project = allProjects?.find((p) => p.id === id)
                           if (platform === 'video') {
-                            form.setValue('video_config', buildVideoFormConfig(project?.video_defaults), { shouldDirty: false })
+                            form.setValue('video_input', initialVideoInput(form.getValues('prompt') || ''), { shouldDirty: false })
                           } else {
-                            form.setValue('video_config', undefined, { shouldDirty: false })
+                            form.setValue('video_input', undefined, { shouldDirty: false })
                           }
                         } else {
-                          form.setValue('video_config', undefined, { shouldDirty: false })
+                          form.setValue('video_input', undefined, { shouldDirty: false })
                         }
                       }}
                       excludePlatforms={['ecommerce']}
@@ -597,11 +558,7 @@ export default function PlansPage() {
                 <VideoCreationPanel
                   form={form}
                   selectedProject={selectedProject}
-                  availableVideoModels={availableVideoModels}
-                  playbooks={videoPlaybooks?.items ?? []}
-                  modelsLoading={videoEstimateQuery.isLoading}
                   title="视频计划"
-                  minimumBalanceHint="视频任务需至少覆盖计划基础任务费；提交 video_gen 后按实际参数另计。"
                   promptField={(
                     <FormField control={form.control} name="prompt" render={({ field }) => (
                       <FormItem>
@@ -611,13 +568,6 @@ export default function PlansPage() {
                         <FormMessage />
                       </FormItem>
                     )} />
-                  )}
-                  estimateSummary={(
-                    <VideoEstimateSummary
-                      estimate={videoEstimateQuery.data}
-                      isLoading={videoEstimateQuery.isLoading}
-                      error={videoEstimateQuery.error ? getApiErrorMessage(videoEstimateQuery.error, '视频参数不可用') : undefined}
-                    />
                   )}
                 />
               )}

@@ -345,6 +345,15 @@ func main() {
 		log.Info().Str("endpoint", cfg.VideoUnderstanding.BaseURL).Str("model", cfg.VideoUnderstanding.Model).Msg("video understanding LLM client initialized")
 	}
 
+	var aiEntrySvc *service.AIEntryService
+	if repo != nil && taskSvc != nil {
+		aiEntrySvc = service.NewAIEntryService(repo, taskSvc, writingLLMClient, log)
+		if modelConfigSvc != nil {
+			aiEntrySvc.SetModelConfigService(modelConfigSvc, cfg.Writing.Timeout)
+		}
+		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("AI entry service initialized")
+	}
+
 	if repo != nil && seednoteClient != nil {
 		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("SeedNote tracking service initialized")
@@ -375,6 +384,7 @@ func main() {
 				taskSvc.SetIlinkNotifier(ilinkNotifier)
 			}
 			conversation := service.NewIlinkConversationService(taskSvc, wcfClient, log)
+			conversation.SetAIEntryService(aiEntrySvc)
 			gateway := service.NewIlinkGateway(repo, ilinkBindingSvc, conversation, wcfClient, log)
 			ilinkPoller = service.NewIlinkPoller(wcfClient, gateway, rdb, time.Duration(cfg.Ilink.PollInterval)*time.Second, log)
 			ilinkWorker = service.NewIlinkNotificationWorker(repo, wcfClient, cfg.Ilink.NotificationRetryMax, 2*time.Second, log)
@@ -405,6 +415,7 @@ func main() {
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
 	var uploadHandler *handler.UploadHandler
+	var aiEntryHandler *handler.AIEntryHandler
 	var feedbackHandler *handler.FeedbackHandler
 	var modelConfigHandler *handler.ModelConfigHandler
 	var imageModelHandler *handler.ImageModelHandler
@@ -465,6 +476,9 @@ func main() {
 			uploadHandler = handler.NewUploadHandler(store, repo.PendingUploads(), service.DirectUploadConfig{
 				Storage: cfg.Storage,
 			}, log)
+		}
+		if aiEntrySvc != nil {
+			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo.PendingUploads(), log)
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
@@ -680,6 +694,7 @@ func main() {
 		APIKeyHandler:            apiKeyHandler,
 		FileHandler:              fileHandler,
 		UploadHandler:            uploadHandler,
+		AIEntryHandler:           aiEntryHandler,
 		FeedbackHandler:          feedbackHandler,
 		ModelConfigHandler:       modelConfigHandler,
 		ImageModelHandler:        imageModelHandler,

@@ -15,6 +15,30 @@ const goalSchema = z.string().refine(
   `目标条件不能超过 ${GOAL_TEXT_MAX_LENGTH} 个字符`,
 )
 
+const videoReferenceSchema = z.object({
+  type: z.enum(["text", "image_url", "audio_url", "video_url"]),
+  url: z.string().optional(),
+  text: z.string().optional(),
+  reference_role: z.string().optional(),
+  must_keep: z.array(z.string()).optional(),
+  can_change: z.array(z.string()).optional(),
+  must_not_transfer: z.array(z.string()).optional(),
+  file_name: z.string().optional(),
+  mime_type: z.string().optional(),
+  file_size: z.number().optional(),
+  input_duration_seconds: z.number().optional(),
+})
+
+const videoInputSchema = z.object({
+  brief: promptSchema.optional(),
+  references: z.array(videoReferenceSchema).optional(),
+  hard_constraints: z.object({
+    ratio: z.string().optional(),
+    duration: z.number().int().min(1).max(600).optional(),
+    watermark: z.boolean().optional(),
+  }).optional(),
+}).optional()
+
 export const loginSchema = z.object({
   email: z.string().min(1, "邮箱不能为空").email("请输入有效的邮箱地址"),
   password: z.string().min(1, "密码不能为空"),
@@ -65,37 +89,7 @@ export const createTaskSchema = z.object({
   target_platform: z.string().optional(),
   selling_points: z.string().max(2000, "卖点不能超过 2000 个字符").optional(),
   language: z.string().optional(),
-  video_config: z.object({
-    workflow: z.enum(["creator", "editor"]).default("creator"),
-    scenario_key: z.string().optional(),
-    production_mode: z.enum(["fast_lane", "guided", "sequence", "remake"]).optional(),
-    purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).optional(),
-    creative_type: z.enum(["personal_ip", "high_efficiency_joke", "product_demo", "brand_promo", "custom"]).optional(),
-    subject_profile: z.string().optional(),
-    audience: z.string().optional(),
-    single_message: z.string().optional(),
-    model_key: z.string().optional(),
-    resolution: z.string().optional(),
-    ratio: z.string().optional(),
-    duration: z.number().int().min(1).max(60).optional(),
-    watermark: z.boolean().optional(),
-    preflight: z.boolean().optional(),
-    retake_budget: z.number().int().min(0).max(20).optional(),
-    delivery_targets: z.array(z.string()).optional(),
-    references: z.array(z.object({
-      type: z.enum(["text", "image_url", "audio_url", "video_url"]),
-      url: z.string().optional(),
-      text: z.string().optional(),
-      reference_role: z.string().optional(),
-      must_keep: z.array(z.string()).optional(),
-      can_change: z.array(z.string()).optional(),
-      must_not_transfer: z.array(z.string()).optional(),
-      file_name: z.string().optional(),
-      mime_type: z.string().optional(),
-      file_size: z.number().optional(),
-      input_duration_seconds: z.number().optional(),
-    })).optional(),
-  }).optional(),
+  video_input: videoInputSchema,
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -170,37 +164,7 @@ export const planSchema = z.object({
   // article tasks inherit them; non-article plans ignore them server-side.
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
-  video_config: z.object({
-    workflow: z.enum(["creator", "editor"]).default("creator"),
-    scenario_key: z.string().optional(),
-    production_mode: z.enum(["fast_lane", "guided", "sequence", "remake"]).optional(),
-    purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).optional(),
-    creative_type: z.enum(["personal_ip", "high_efficiency_joke", "product_demo", "brand_promo", "custom"]).optional(),
-    subject_profile: z.string().optional(),
-    audience: z.string().optional(),
-    single_message: z.string().optional(),
-    model_key: z.string().optional(),
-    resolution: z.string().optional(),
-    ratio: z.string().optional(),
-    duration: z.number().int().min(1).max(60).optional(),
-    watermark: z.boolean().optional(),
-    preflight: z.boolean().optional(),
-    retake_budget: z.number().int().min(0).max(20).optional(),
-    delivery_targets: z.array(z.string()).optional(),
-    references: z.array(z.object({
-      type: z.enum(["text", "image_url", "audio_url", "video_url"]),
-      url: z.string().optional(),
-      text: z.string().optional(),
-      reference_role: z.string().optional(),
-      must_keep: z.array(z.string()).optional(),
-      can_change: z.array(z.string()).optional(),
-      must_not_transfer: z.array(z.string()).optional(),
-      file_name: z.string().optional(),
-      mime_type: z.string().optional(),
-      file_size: z.number().optional(),
-      input_duration_seconds: z.number().optional(),
-    })).optional(),
-  }).optional(),
+  video_input: videoInputSchema,
 }).superRefine((data, ctx) => {
   if (data.goal_mode) {
     const goal = data.goal?.trim() || ""

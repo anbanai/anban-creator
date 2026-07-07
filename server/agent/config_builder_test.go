@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -234,6 +235,64 @@ func TestDownloadReferenceImage_OversizedStoreReadReturnsError(t *testing.T) {
 	err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "https://oss.example.com/big")
 	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("err = %v, want 'too large'", err)
+	}
+}
+
+func TestDownloadInputAttachmentsMaterializesFilesAndIndex(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ref.png", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("image-bytes"))
+	})
+	mux.HandleFunc("/brief.pdf", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("pdf-bytes"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	workDir := t.TempDir()
+	attachments := []model.EntryAttachment{
+		{
+			Type:        "image",
+			URL:         srv.URL + "/ref.png",
+			FileName:    "ref.png",
+			ContentType: "image/png",
+			Size:        11,
+		},
+		{
+			Type:        "document",
+			URL:         srv.URL + "/brief.pdf",
+			FileName:    "brief.pdf",
+			ContentType: "application/pdf",
+			Size:        9,
+		},
+	}
+
+	if n := DownloadInputAttachments(context.Background(), nil, noopLogger(), workDir, attachments); n != 2 {
+		t.Fatalf("DownloadInputAttachments count = %d, want 2", n)
+	}
+	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
+	for name, want := range map[string]string{
+		"attachment_01_ref.png":   "image-bytes",
+		"attachment_02_brief.pdf": "pdf-bytes",
+	} {
+		got, err := os.ReadFile(filepath.Join(base, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(base, "index.json"))
+	if err != nil {
+		t.Fatalf("read index.json: %v", err)
+	}
+	var index []MaterializedInputAttachment
+	if err := json.Unmarshal(raw, &index); err != nil {
+		t.Fatalf("decode index.json: %v", err)
+	}
+	if len(index) != 2 || index[0].Path != ".anban-creator/input-attachments/attachment_01_ref.png" || index[1].ContentType != "application/pdf" {
+		t.Fatalf("index = %#v", index)
 	}
 }
 

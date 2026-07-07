@@ -1,0 +1,139 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/service"
+)
+
+type fakeAIEntrySubmitter struct {
+	req service.AIEntrySubmitRequest
+	res service.AIEntrySubmitResult
+	err error
+}
+
+func (f *fakeAIEntrySubmitter) Submit(_ context.Context, req service.AIEntrySubmitRequest) (*service.AIEntrySubmitResult, error) {
+	f.req = req
+	return &f.res, f.err
+}
+
+func TestAIEntryHandlerSubmitRequiresAuth(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	h := NewAIEntryHandler(&fakeAIEntrySubmitter{}, nil, &logger)
+	app := fiber.New()
+	app.Post("/ai-entry/submit", h.Submit)
+
+	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"text":"写文章"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	task := &model.Task{ID: uuid.NewString(), Type: model.PlatformArticle, Prompt: "写文章"}
+	submitter := &fakeAIEntrySubmitter{
+		res: service.AIEntrySubmitResult{
+			Status:  service.AIEntryStatusCreated,
+			Task:    task,
+			Message: "已创建任务",
+		},
+	}
+	h := NewAIEntryHandler(submitter, nil, &logger)
+	userID := uuid.NewString()
+	app := fiber.New()
+	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Submit(c)
+	})
+
+	body := `{
+		"channel":"studio",
+		"project_id":"project-1",
+		"text":"帮我写文章",
+		"execution_target":"local",
+		"attachments":[{
+			"type":"image",
+			"url":"https://cdn.example.com/ref.png",
+			"file_name":"ref.png",
+			"content_type":"image/png",
+			"size":123
+		}]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if submitter.req.UserID != userID || submitter.req.ProjectID != "project-1" || submitter.req.Text != "帮我写文章" {
+		t.Fatalf("submitted req = %#v", submitter.req)
+	}
+	if submitter.req.ExecutionTarget != model.ExecutionTargetLocal {
+		t.Fatalf("execution target = %q", submitter.req.ExecutionTarget)
+	}
+	if len(submitter.req.Attachments) != 1 || submitter.req.Attachments[0].FileName != "ref.png" {
+		t.Fatalf("attachments = %#v", submitter.req.Attachments)
+	}
+	var decoded Response
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	raw, _ := json.Marshal(decoded.Data)
+	var data service.AIEntrySubmitResult
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatalf("decode data: %v", err)
+	}
+	if data.Status != service.AIEntryStatusCreated || data.Task == nil || data.Task.ID != task.ID {
+		t.Fatalf("response data = %#v", data)
+	}
+}
+
+func TestAIEntryHandlerSubmitRejectsInvalidAttachmentURL(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	submitter := &fakeAIEntrySubmitter{}
+	h := NewAIEntryHandler(submitter, nil, &logger)
+	app := fiber.New()
+	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.NewString())
+		return h.Submit(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
+		"channel":"studio",
+		"project_id":"project-1",
+		"text":"写文章",
+		"attachments":[{"type":"image","url":"file:///etc/passwd","file_name":"x.png"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if submitter.req.UserID != "" {
+		t.Fatalf("submitter should not be called, got %#v", submitter.req)
+	}
+}

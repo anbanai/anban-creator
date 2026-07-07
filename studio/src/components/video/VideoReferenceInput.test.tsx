@@ -159,7 +159,7 @@ describe('VideoReferenceInput', () => {
     expect(onChange).toHaveBeenCalledWith([{
       type: 'text',
       text: '保持真实手持感',
-      reference_role: 'subject identity',
+      reference_role: undefined,
     }])
   })
 

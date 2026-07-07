@@ -14,6 +14,7 @@ import (
 
 type IlinkConversationService struct {
 	taskSvc *TaskService
+	aiEntry AIEntrySubmitter
 	sender  ilinkSender
 	logger  *zerolog.Logger
 }
@@ -22,14 +23,21 @@ func NewIlinkConversationService(taskSvc *TaskService, sender ilinkSender, logge
 	return &IlinkConversationService{taskSvc: taskSvc, sender: sender, logger: logger}
 }
 
+func (s *IlinkConversationService) SetAIEntryService(entry AIEntrySubmitter) {
+	if s == nil {
+		return
+	}
+	s.aiEntry = entry
+}
+
 func (s *IlinkConversationService) Handle(ctx context.Context, binding *model.IlinkBinding, event wcf.Event) {
 	if s == nil || binding == nil || !event.IsInboundText() {
 		return
 	}
-	cmd := parseIlinkIntent(event.BodyText)
+	cmd := parseCommand(event.BodyText)
 	var reply string
 	switch cmd.kind {
-	case cmdHelp, cmdUnknown:
+	case cmdHelp:
 		reply = ilinkHelpText()
 	case cmdRecent:
 		reply = s.handleRecent(ctx, binding.UserID)
@@ -37,8 +45,8 @@ func (s *IlinkConversationService) Handle(ctx context.Context, binding *model.Il
 		reply = s.handleStatus(ctx, binding.UserID, cmd.args)
 	case cmdCancel:
 		reply = s.handleCancel(ctx, binding.UserID, cmd.args)
-	case cmdCreate:
-		reply = s.handleCreate(ctx, binding, cmd.args)
+	default:
+		reply = s.handleAIEntryCreate(ctx, binding, event.BodyText)
 	}
 	s.reply(ctx, binding, reply)
 }
@@ -58,6 +66,52 @@ func parseIlinkIntent(raw string) parsedCommand {
 		}
 	}
 	return cmd
+}
+
+func (s *IlinkConversationService) handleAIEntryCreate(ctx context.Context, binding *model.IlinkBinding, text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ilinkHelpText()
+	}
+	if utf8.RuneCountInString(text) > maxWeChatPromptRunes {
+		return fmt.Sprintf("主题过长，请控制在 %d 字以内。", maxWeChatPromptRunes)
+	}
+	if binding.DefaultProjectID == "" {
+		return "请先在 Studio 设置页选择默认项目，然后再通过微信创建任务。"
+	}
+	if s.aiEntry == nil {
+		return s.handleCreate(ctx, binding, text)
+	}
+	result, err := s.aiEntry.Submit(ctx, AIEntrySubmitRequest{
+		UserID:    binding.UserID,
+		ProjectID: binding.DefaultProjectID,
+		Channel:   "ilink",
+		Text:      text,
+	})
+	if err != nil {
+		return "创建任务失败：" + cleanErr(err.Error())
+	}
+	if result == nil {
+		return "创建任务失败：未返回结果。"
+	}
+	switch result.Status {
+	case AIEntryStatusCreated:
+		if result.Task == nil {
+			return "创建任务失败：未生成任务。"
+		}
+		t := result.Task
+		return fmt.Sprintf("已创建%s任务\n《%s》\n任务ID: %s\n完成或失败后我会在这里通知你。", taskTypeLabel(t.Type), taskSubject(t), t.ID)
+	case AIEntryStatusNeedsConfiguration:
+		if result.ActionURL != "" {
+			return result.Message + "\n请在 Studio 补充配置：" + result.ActionURL
+		}
+		return result.Message
+	default:
+		if result.Message != "" {
+			return "创建任务失败：" + result.Message
+		}
+		return "创建任务失败：AI 入口暂不可用。"
+	}
 }
 
 func (s *IlinkConversationService) reply(ctx context.Context, binding *model.IlinkBinding, text string) {

@@ -335,7 +335,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},
-		{model.ScopeVideo, "videocreator"},
+		{model.ScopeVideo, "video"},
 		{"unknown", "seednote"},
 	}
 
@@ -356,27 +356,27 @@ func TestTaskToAgentRoutesVideoWorkflows(t *testing.T) {
 		want string
 	}{
 		{
-			name: "video defaults to creator",
+			name: "video defaults to unified router",
 			task: &model.Task{Type: model.ScopeVideo},
-			want: "videocreator",
+			want: "video",
 		},
 		{
-			name: "video creator workflow",
+			name: "video creator workflow still uses unified router",
 			task: func() *model.Task {
 				t := &model.Task{Type: model.ScopeVideo}
 				t.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowCreator})
 				return t
 			}(),
-			want: "videocreator",
+			want: "video",
 		},
 		{
-			name: "video editor workflow",
+			name: "video editor workflow still uses unified router",
 			task: func() *model.Task {
 				t := &model.Task{Type: model.ScopeVideo}
 				t.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
 				return t
 			}(),
-			want: "videoeditor",
+			want: "video",
 		},
 		{
 			name: "article unchanged",

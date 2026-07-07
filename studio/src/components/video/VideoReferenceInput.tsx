@@ -12,7 +12,7 @@ import { videoReferenceRoleLabel, videoReferenceRoles } from '@/lib/video-displa
 import type { VideoReferenceAsset, VideoReferenceType } from '@/types'
 
 const MAX_REFERENCE_FILE_SIZE = 50 * 1024 * 1024
-const DEFAULT_REFERENCE_ROLE = videoReferenceRoles[0].value
+const AUTO_REFERENCE_ROLE = '__agent_auto__'
 
 type UploadProgressItem = {
   id: string
@@ -226,7 +226,7 @@ export function VideoReferenceInput({
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [textRef, setTextRef] = useState('')
-  const [textRole, setTextRole] = useState(DEFAULT_REFERENCE_ROLE)
+  const [textRole, setTextRole] = useState(AUTO_REFERENCE_ROLE)
 
   useEffect(() => {
     latestValueRef.current = value
@@ -278,7 +278,7 @@ export function VideoReferenceInput({
         appendReference({
           type: referenceTypeForFile(file),
           url: result.publicUrl,
-          reference_role: DEFAULT_REFERENCE_ROLE,
+          reference_role: undefined,
           file_name: file.name,
           mime_type: result.contentType || file.type,
           file_size: result.size || file.size,
@@ -301,7 +301,7 @@ export function VideoReferenceInput({
   const addTextReference = () => {
     const text = textRef.trim()
     if (!text) return
-    onChange([...value, { type: 'text', text, reference_role: textRole }])
+    onChange([...value, { type: 'text', text, reference_role: textRole === AUTO_REFERENCE_ROLE ? undefined : textRole }])
     setTextRef('')
   }
 
@@ -341,22 +341,23 @@ export function VideoReferenceInput({
         </div>
       )}
 
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
+      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_auto] md:items-start">
         <Textarea
           value={textRef}
           onChange={(event) => setTextRef(event.target.value)}
           placeholder="例如：杯身必须保持银色金属质感，禁止变成卡通杯。"
           className="min-h-[72px] resize-y"
         />
-        <Select value={textRole} onValueChange={(role) => setTextRole(role || DEFAULT_REFERENCE_ROLE)}>
+        <Select value={textRole} onValueChange={(role) => setTextRole(role || AUTO_REFERENCE_ROLE)}>
           <SelectTrigger className="w-full"><SelectValue>{videoReferenceRoleLabel(textRole)}</SelectValue></SelectTrigger>
           <SelectContent>
+            <SelectItem value={AUTO_REFERENCE_ROLE} label="由 Agent 判断">由 Agent 判断</SelectItem>
             {videoReferenceRoles.map((role) => (
               <SelectItem key={role.value} value={role.value} label={role.label}>{role.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <Button type="button" variant="secondary" onClick={addTextReference} disabled={!textRef.trim()}>
+        <Button type="button" variant="secondary" className="w-full md:w-auto" onClick={addTextReference} disabled={!textRef.trim()}>
           <Plus />
           添加文本约束
         </Button>
@@ -368,7 +369,7 @@ export function VideoReferenceInput({
             const Icon = referenceIcon(ref.type)
             return (
               <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="flex flex-col gap-3 p-3">
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-center">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_auto] lg:items-center">
                   <div className="flex min-w-0 gap-3">
                     <VideoReferencePreview ref={ref} />
                     <div className="min-w-0 flex-1">
@@ -384,9 +385,10 @@ export function VideoReferenceInput({
                       ) : null}
                     </div>
                   </div>
-                  <Select value={ref.reference_role || DEFAULT_REFERENCE_ROLE} onValueChange={(role) => updateAt(index, { reference_role: role || DEFAULT_REFERENCE_ROLE })}>
+                  <Select value={ref.reference_role || AUTO_REFERENCE_ROLE} onValueChange={(role) => updateAt(index, { reference_role: !role || role === AUTO_REFERENCE_ROLE ? undefined : role })}>
                     <SelectTrigger className="w-full"><SelectValue>{videoReferenceRoleLabel(ref.reference_role)}</SelectValue></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value={AUTO_REFERENCE_ROLE} label="由 Agent 判断">由 Agent 判断</SelectItem>
                       {videoReferenceRoles.map((role) => (
                         <SelectItem key={role.value} value={role.value} label={role.label}>{role.label}</SelectItem>
                       ))}

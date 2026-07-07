@@ -87,6 +87,20 @@ describe('uploadToOSS', () => {
     expect(progress).toContain(42)
   })
 
+  it('prepares AI entry attachments with the unified upload purpose', async () => {
+    await uploadToOSS({
+      purpose: 'ai_entry_attachment',
+      file: fileOf(1024, 'application/pdf'),
+    })
+
+    expect(http.post).toHaveBeenCalledWith('/uploads/prepare', {
+      purpose: 'ai_entry_attachment',
+      filename: 'asset.png',
+      content_type: 'application/pdf',
+      size: 1024,
+    })
+  })
+
   it('maps expired credential errors to a Chinese retry hint', async () => {
     putMock
       .mockRejectedValueOnce(Object.assign(new Error('Request has expired'), { code: 'AccessDenied' }))

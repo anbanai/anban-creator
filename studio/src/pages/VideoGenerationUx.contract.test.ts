@@ -10,26 +10,31 @@ function pageSource(name: string) {
 }
 
 describe('video generation UX contracts', () => {
-  it('task creation uses server video estimate and reference assets', () => {
+  it('task creation uses intake contract without pre-generation estimates', () => {
     const source = pageSource('TasksPage.tsx')
 
     expect(source).toContain('VideoCreationPanel')
-    expect(source).toContain('VideoEstimateSummary')
-    expect(source).toContain('api.video.estimate')
-    expect(source).not.toContain('model.display_name || model.key')
-    expect(source).toContain('基础任务费')
-    expect(source).toContain('video_gen')
+    expect(source).toContain('video_input')
+    expect(source).not.toContain('VideoEstimateSummary')
+    expect(source).not.toContain('api.video.estimate')
+    expect(source).not.toContain('api.video.playbooks')
+    expect(source).not.toContain('视频风格与禁忌')
+    for (const oldLabel of ['视频玩法', '制作模式', '工作流', '商业目标', '人物 / 主体', '目标受众', '核心信息']) {
+      expect(source).not.toContain(oldLabel)
+    }
   })
 
-  it('plan creation uses server video estimate and reference assets', () => {
+  it('plan creation uses intake contract without pre-generation estimates', () => {
     const source = pageSource('PlansPage.tsx')
 
     expect(source).toContain('VideoCreationPanel')
-    expect(source).toContain('VideoEstimateSummary')
-    expect(source).toContain('api.video.estimate')
-    expect(source).not.toContain('model.display_name || model.key')
-    expect(source).toContain('基础任务费')
-    expect(source).toContain('video_gen')
+    expect(source).toContain('video_input')
+    expect(source).not.toContain('VideoEstimateSummary')
+    expect(source).not.toContain('api.video.estimate')
+    expect(source).not.toContain('api.video.playbooks')
+    for (const oldLabel of ['视频玩法', '制作模式', '工作流', '商业目标', '人物 / 主体', '目标受众', '核心信息']) {
+      expect(source).not.toContain(oldLabel)
+    }
   })
 
   it('task detail shows video results through generated file preview', () => {
@@ -37,7 +42,8 @@ describe('video generation UX contracts', () => {
     const previewSource = readFileSync(join(here, '../components/FilePreview.tsx'), 'utf8')
 
     expect(source).toContain('renderPreviewDetails')
-    expect(source).toContain('输入与创作参数')
+    expect(source).toContain('用户输入')
+    expect(source).toContain('Agent 解析结果')
     expect(source).toContain('creative_type')
     expect(source).toContain('subject_profile')
     expect(source).toContain('参考素材')

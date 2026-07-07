@@ -6,6 +6,7 @@ export type DirectUploadPurpose =
   | 'ecommerce_product_photo'
   | 'video_reference'
   | 'designer_reference'
+  | 'ai_entry_attachment'
 
 export interface UploadToOSSOptions {
   purpose: DirectUploadPurpose
@@ -161,6 +162,8 @@ function legacyPurposeForDirectUpload(purpose: DirectUploadPurpose) {
       return 'reference'
     case 'video_reference':
       return 'video_reference'
+    case 'ai_entry_attachment':
+      return ''
     default:
       return ''
   }

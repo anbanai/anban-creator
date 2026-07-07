@@ -1017,6 +1017,19 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 		Keywords:     "咖啡杯,露营,便携",
 		VisualStyle:  "自然光、真实手持，禁止卡通化",
 	})
+	task.SetVideoInput(model.VideoInput{
+		Brief: "生成一条咖啡杯种草视频",
+		References: []model.VideoReferenceAsset{{
+			Type:          "image_url",
+			URL:           "https://cdn.example.com/user-cup.png",
+			ReferenceRole: "",
+			FileName:      "user-cup.png",
+		}},
+		HardConstraints: model.VideoHardConstraints{
+			Ratio:    "9:16",
+			Duration: 12,
+		},
+	})
 	task.SetVideoConfig(model.VideoTaskConfig{
 		Purpose:    service.VideoPurposePlanting,
 		ModelKey:   "seedance-2.0",
@@ -1051,8 +1064,11 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 	if got := resolved["uses_project_snapshot"]; got != true {
 		t.Fatalf("uses_project_snapshot = %v, want true", got)
 	}
-	if got := resolved["creative_constraints"]; got != "自然光、真实手持，禁止卡通化" {
-		t.Fatalf("creative_constraints = %v, want snapshot visual style", got)
+	if got, exists := resolved["creative_constraints"]; exists && got != "" {
+		t.Fatalf("creative_constraints = %v, want empty for video projects", got)
+	}
+	if got := resolved["visual_style_label"]; got != "图片视觉" {
+		t.Fatalf("visual_style_label = %v, want 图片视觉", got)
 	}
 	video, ok := info["video"].(map[string]any)
 	if !ok {
@@ -1067,8 +1083,16 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 		t.Fatalf("video.policy.default_model = %v, want seedance-2.0", got)
 	}
 	refs := video["references"].([]model.VideoReferenceAsset)
-	if len(refs) != 1 || refs[0].ReferenceRole != "product appearance" {
-		t.Fatalf("video.references = %#v, want task video references", refs)
+	if len(refs) != 1 || refs[0].URL != "https://cdn.example.com/user-cup.png" {
+		t.Fatalf("video.references = %#v, want user video_input references", refs)
+	}
+	input := video["input"].(model.VideoInput)
+	if input.Brief != "生成一条咖啡杯种草视频" || input.HardConstraints.Ratio != "9:16" || input.HardConstraints.Duration != 12 {
+		t.Fatalf("video.input = %#v", input)
+	}
+	taskConfig := video["task_config"].(model.VideoTaskConfig)
+	if taskConfig.ModelKey != "seedance-2.0" || len(taskConfig.References) != 1 || taskConfig.References[0].ReferenceRole != "product appearance" {
+		t.Fatalf("video.task_config = %#v, want resolved agent/MCP snapshot", taskConfig)
 	}
 	anchors, ok := video["visual_anchor_generation"].(map[string]any)
 	if !ok {
@@ -1094,8 +1118,11 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 		t.Fatalf("video.pricing.operation_billing_rule = %v, want video_gen rule", pricing["operation_billing_rule"])
 	}
 	brief, ok := info["agent_brief"].(string)
-	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "自然光、真实手持") || !strings.Contains(brief, "seedance-2.0") || !strings.Contains(brief, "video_gen") {
+	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "面向露营人群的咖啡杯项目") || !strings.Contains(brief, "CLAUDE.md") || !strings.Contains(brief, "video_input") || !strings.Contains(brief, "seedance-20") || !strings.Contains(brief, "video_gen") {
 		t.Fatalf("agent_brief missing video project context: %#v", info["agent_brief"])
+	}
+	if strings.Contains(brief, "自然光、真实手持") {
+		t.Fatalf("agent_brief leaked visual_style into video instructions: %s", brief)
 	}
 }
 

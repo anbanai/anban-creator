@@ -19,7 +19,7 @@ func TestDockerExecutorUsesAnbanRuntimeNames(t *testing.T) {
 	if got, want := cmd[1], "run"; got != want {
 		t.Fatalf("agent subcommand = %q, want %q", got, want)
 	}
-	if got, want := flagValue(cmd, "--agent-flag"), "anban:videoeditor"; got != want {
+	if got, want := flagValue(cmd, "--agent-flag"), "anban:video"; got != want {
 		t.Fatalf("--agent-flag = %q, want %q", got, want)
 	}
 
