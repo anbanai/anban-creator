@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import type { Project, ProjectStats } from '@/types'
 import { platformLabels } from '@/lib/labels'
 import { renderPlatformIcon, platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
@@ -7,7 +6,6 @@ import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TopicPoolDialog } from '@/components/TopicPoolDialog'
-import { createTaskHref } from '@/lib/command-center'
 
 interface ProjectCardProps {
   project: Project
@@ -70,9 +68,6 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
   const borderColor = platformBorderColor[project.platform] || ''
   const hoverBorderColor = platformHoverBorderColor[project.platform] || ''
   const positioning = project.instructions || project.positioning || ''
-  const taskHref = createTaskHref({ type: project.platform, projectId: project.id, intent: 'new' })
-  const planHref = `/plans?create=true&type=${project.platform}&project_id=${project.id}&intent=schedule`
-  const canCreatePlan = project.platform !== 'ecommerce' && project.platform !== 'moments'
   const operatingBadges = buildOperatingBadges(project, stats)
   const isArchived = project.status === 'archived'
   const cardTone = isArchived
@@ -116,14 +111,6 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
         </div>
       )}
       <div className="mt-3 flex flex-wrap gap-1.5">
-        <Button variant="outline" size="xs" render={<Link to={taskHref} />}>
-          新建任务
-        </Button>
-        {canCreatePlan && (
-          <Button variant="ghost" size="xs" render={<Link to={planHref} />}>
-            创建计划
-          </Button>
-        )}
         {onEdit && (
           <Button variant="ghost" size="xs" onClick={() => onEdit(project)} aria-label="编辑项目">
             编辑

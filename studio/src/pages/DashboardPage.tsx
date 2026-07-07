@@ -5,31 +5,26 @@ import { toast } from 'sonner'
 import {
   AlertTriangle,
   ArrowRight,
-  CheckCircle2,
   FileText,
   ImageIcon,
-  Inbox,
   Paperclip,
   Send,
-  Settings,
   Sparkles,
   X,
 } from 'lucide-react'
 
-import EmptyState from '@/components/EmptyState'
 import QueryErrorState from '@/components/QueryErrorState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/common/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import type { AIEntryAttachment, AIEntryAttachmentType } from '@/lib/api/ai-entry'
-import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, hasUsableModelConfig, projectsReturnHref, type CommandCenterSignalKind, type ReadinessStatus } from '@/lib/command-center'
+import { projectsReturnHref } from '@/lib/command-center'
 import { uploadToOSS } from '@/lib/direct-upload'
 import { contentTypeLabel, formatDateTimeCN, statusBadgeVariant, taskStatusLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { queryKeys } from '@/lib/query-keys'
 import { getLocalExecutorStatus, isDesktop } from '@/lib/tauri'
-import { cn } from '@/lib/utils'
 
 const MEDIA_LIMIT = 50 * 1024 * 1024
 const DOCUMENT_LIMIT = 25 * 1024 * 1024
@@ -60,21 +55,6 @@ export default function DashboardPage() {
   const attachmentsRef = useRef<AIEntryAttachment[]>([])
   const uploadPromisesRef = useRef<Promise<void>[]>([])
 
-  const { data: creditsBalance } = useQuery({
-    queryKey: queryKeys.credits.balance,
-    queryFn: () => api.credits.balance(),
-  })
-
-  const { data: signInStatus } = useQuery({
-    queryKey: queryKeys.credits.signInStatus,
-    queryFn: () => api.credits.signInStatus(),
-  })
-
-  const { data: plansData, isLoading: plansLoading, isError: plansError, refetch: refetchPlans } = useQuery({
-    queryKey: ['plans', 'dashboard'],
-    queryFn: () => api.plans.list({ limit: 20 }),
-  })
-
   const { data: tasksData, isLoading: tasksLoading, isError: tasksError, refetch: refetchTasks } = useQuery({
     queryKey: ['tasks', 'dashboard'],
     queryFn: () => api.tasks.list({ limit: 20 }),
@@ -86,27 +66,13 @@ export default function DashboardPage() {
     staleTime: 60_000,
   })
 
-  const { data: apiKeys = [], isLoading: apiKeysLoading } = useQuery({
-    queryKey: queryKeys.apiKeys.all,
-    queryFn: async () => {
-      const data = await api.apiKeys.list()
-      return data.items || []
-    },
-  })
-
-  const { data: modelConfig, isLoading: modelConfigLoading } = useQuery({
-    queryKey: queryKeys.modelConfig.all,
-    queryFn: () => api.modelConfig.get(),
-  })
-
-  const { data: localExecutorStatus, isLoading: localExecutorLoading } = useQuery({
+  const { data: localExecutorStatus } = useQuery({
     queryKey: ['dashboard', 'local-executor-status'],
     queryFn: getLocalExecutorStatus,
     enabled: desktopMode,
     staleTime: 30_000,
   })
 
-  const plans = plansData?.items ?? []
   const tasks = tasksData?.items ?? []
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
   const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
@@ -130,39 +96,6 @@ export default function DashboardPage() {
         .slice(0, 5),
     [tasks],
   )
-
-  const commandSignals = useMemo(() => buildCommandCenterSignals({
-    tasks,
-    plans,
-    projects: activeProjects,
-    creditsBalance,
-    signInStatus,
-    apiKeysReady: apiKeysLoading ? null : apiKeys.length > 0,
-    modelConfigReady: modelConfigLoading ? null : hasUsableModelConfig(modelConfig),
-    localExecutorReady: desktopMode
-      ? localExecutorLoading
-        ? null
-        : Boolean(localExecutorStatus?.available)
-      : true,
-  }), [
-    tasks,
-    plans,
-    activeProjects,
-    creditsBalance,
-    signInStatus,
-    apiKeysLoading,
-    apiKeys.length,
-    modelConfigLoading,
-    modelConfig,
-    desktopMode,
-    localExecutorLoading,
-    localExecutorStatus,
-  ])
-
-  const nextBestActions = useMemo(() => buildNextBestActions(commandSignals).slice(0, 4), [commandSignals])
-  const defaultCreateHref = selectedProject
-    ? createTaskHref({ type: selectedProject.platform, projectId: selectedProject.id, intent: 'new' })
-    : projectsReturnHref({ type: 'seednote', intent: 'new' })
 
   const submitMutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.aiEntry.submit>[0]) => api.aiEntry.submit(payload),
@@ -188,9 +121,10 @@ export default function DashboardPage() {
     },
   })
 
-  const isLoading = plansLoading || tasksLoading || projectsLoading
-  const hasError = plansError || tasksError || projectsError
+  const isLoading = tasksLoading || projectsLoading
+  const hasError = tasksError || projectsError
   const canSubmit = Boolean(selectedProject) && !submitMutation.isPending && uploading.length === 0
+  const showProjectBlocker = !projectsLoading && activeProjects.length === 0 && !projectsError
 
   async function handleSubmit() {
     const text = prompt.trim()
@@ -365,6 +299,15 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {showProjectBlocker && !entryError && (
+          <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm">
+            <span className="min-w-0 text-muted-foreground">先创建一个项目，再开始创作。</span>
+            <Link className="shrink-0 font-medium text-primary hover:text-primary/80" to={projectsReturnHref({ type: 'seednote', intent: 'new' })}>
+              创建项目
+            </Link>
+          </div>
+        )}
+
         {entryError && (
           <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
             <span className="flex min-w-0 items-center gap-2 text-destructive">
@@ -381,109 +324,49 @@ export default function DashboardPage() {
       </section>
 
       {hasError ? (
-        <QueryErrorState onRetry={() => { refetchPlans(); refetchTasks(); refetchProjects() }} />
-      ) : (
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="rounded-xl border border-border bg-background p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold text-foreground">接入状态</h2>
-              <Link to={defaultCreateHref} className="text-sm font-medium text-primary hover:text-primary/80">
-                手动创建
-              </Link>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                commandSignals.readiness.checks.projects,
-                commandSignals.readiness.checks.apiKeys,
-                commandSignals.readiness.checks.modelConfig,
-                commandSignals.readiness.checks.localExecutor,
-              ].map((item) => (
-                <ReadinessItem key={item.label} status={item.status} label={item.label} description={item.description} href={item.href} />
-              ))}
-            </div>
-          </div>
+        <QueryErrorState onRetry={() => { refetchTasks(); refetchProjects() }} />
+      ) : null}
 
-          <div className="rounded-xl border border-border bg-background p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold text-foreground">下一步</h2>
-              <Badge variant={commandSignals.creditRisk.level === 'ok' ? 'secondary' : 'destructive'}>
-                积分 {commandSignals.creditRisk.balance?.toLocaleString() ?? '待检查'}
-              </Badge>
-            </div>
-            <div className="flex flex-col gap-2">
-              {nextBestActions.length === 0 ? (
-                <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  没有阻塞项，可以直接从上方输入开始。
+      {(isLoading || recentTasks.length > 0) && (
+        <section className="rounded-xl border border-border bg-background">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <h2 className="text-base font-semibold text-foreground">最近任务</h2>
+            <Link to="/tasks" className="text-sm font-medium text-primary hover:text-primary/80">
+              查看全部
+            </Link>
+          </div>
+          <div className="divide-y divide-border">
+            {isLoading ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <Skeleton className="h-4 w-2/3" />
+                    <Skeleton className="h-3 w-40" />
+                  </div>
+                  <Skeleton className="h-5 w-16" />
                 </div>
-              ) : nextBestActions.map((action) => (
-                <Link
-                  key={action.id}
-                  to={action.href}
-                  className="group flex items-start justify-between gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:border-primary/30 hover:bg-accent"
-                >
-                  <span className="min-w-0">
-                    <span className="flex items-center gap-2">
-                      <ActionDot kind={action.kind} />
-                      <span className="truncate text-sm font-medium text-foreground">{action.label}</span>
+              ))
+            ) : recentTasks.map((task) => (
+              <Link key={task.id} to={`/tasks/${task.id}`} className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-accent">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || `${contentTypeLabel[task.type]} 任务`}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{formatDateTimeCN(task.created_at)}</span>
+                    <span className="text-xs text-muted-foreground">|</span>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      {renderPlatformIcon(task.type)}
+                      {contentTypeLabel[task.type]}
                     </span>
-                    <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{action.description}</span>
-                  </span>
-                  <ArrowRight className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
-                </Link>
-              ))}
-            </div>
+                  </div>
+                </div>
+                <Badge variant={statusBadgeVariant(task.status)}>
+                  {taskStatusLabel[task.status]}
+                </Badge>
+              </Link>
+            ))}
           </div>
         </section>
       )}
-
-      <section className="rounded-xl border border-border bg-background">
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="text-base font-semibold text-foreground">最近任务</h2>
-          <Link to="/tasks" className="text-sm font-medium text-primary hover:text-primary/80">
-            查看全部
-          </Link>
-        </div>
-        <div className="divide-y divide-border">
-          {isLoading ? (
-            Array.from({ length: 4 }).map((_, index) => (
-              <div key={index} className="flex items-center justify-between px-4 py-3">
-                <div className="flex flex-1 flex-col gap-1.5">
-                  <Skeleton className="h-4 w-2/3" />
-                  <Skeleton className="h-3 w-40" />
-                </div>
-                <Skeleton className="h-5 w-16" />
-              </div>
-            ))
-          ) : recentTasks.length === 0 ? (
-            <EmptyState
-              icon={Inbox}
-              title="还没有任务"
-              description="上方输入需求后，Anban 会直接创建第一条任务。"
-              action={{
-                label: selectedProject ? '手动创建' : '创建项目',
-                onClick: () => navigate(defaultCreateHref),
-              }}
-            />
-          ) : recentTasks.map((task) => (
-            <Link key={task.id} to={`/tasks/${task.id}`} className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-accent">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || `${contentTypeLabel[task.type]} 任务`}</p>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-muted-foreground">{formatDateTimeCN(task.created_at)}</span>
-                  <span className="text-xs text-muted-foreground">|</span>
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    {renderPlatformIcon(task.type)}
-                    {contentTypeLabel[task.type]}
-                  </span>
-                </div>
-              </div>
-              <Badge variant={statusBadgeVariant(task.status)}>
-                {taskStatusLabel[task.status]}
-              </Badge>
-            </Link>
-          ))}
-        </div>
-      </section>
     </div>
   )
 }
@@ -498,49 +381,6 @@ function AttachmentChip({ attachment, onRemove }: { attachment: AIEntryAttachmen
         <X className="size-3.5" />
       </button>
     </span>
-  )
-}
-
-function ReadinessItem({
-  status,
-  label,
-  description,
-  href,
-}: {
-  status: ReadinessStatus
-  label: string
-  description: string
-  href: string
-}) {
-  const ready = status === 'ready'
-  const unknown = status === 'unknown'
-  return (
-    <Link to={href} className="flex min-h-[86px] items-start gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:border-primary/30 hover:bg-accent">
-      <span className={cn(
-        'mt-0.5 flex size-6 items-center justify-center rounded-full bg-muted text-muted-foreground',
-        ready && 'bg-primary/10 text-primary',
-        !ready && !unknown && 'bg-destructive/10 text-destructive',
-      )}>
-        {ready ? <CheckCircle2 className="size-3.5" /> : <Settings className="size-3.5" />}
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-medium text-foreground">{label}</span>
-        <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">{description}</span>
-      </span>
-    </Link>
-  )
-}
-
-function ActionDot({ kind }: { kind: CommandCenterSignalKind }) {
-  return (
-    <span className={cn(
-      'size-2 rounded-full bg-muted-foreground',
-      kind === 'risk' && 'bg-destructive',
-      kind === 'running' && 'bg-primary',
-      kind === 'publishing' && 'bg-ring',
-      kind === 'waiting' && 'bg-muted-foreground',
-      kind === 'success' && 'bg-primary',
-    )} />
   )
 }
 

@@ -28,27 +28,28 @@ const project: Project = {
 }
 
 describe('ProjectCard contextual actions', () => {
-  it('links project actions into task and plan creation with project context', () => {
-    render(<ProjectCard project={project} />)
+  it('keeps project management actions without task or plan shortcuts', () => {
+    render(
+      <ProjectCard
+        project={project}
+        onEdit={() => {}}
+        onArchive={() => {}}
+        onDelete={() => {}}
+      />,
+    )
 
-    expect(screen.getByRole('link', { name: '新建任务' })).toHaveAttribute(
-      'href',
-      '/tasks?create=true&type=article&project_id=project-1&intent=new',
-    )
-    expect(screen.getByRole('link', { name: '创建计划' })).toHaveAttribute(
-      'href',
-      '/plans?create=true&type=article&project_id=project-1&intent=schedule',
-    )
+    expect(screen.queryByRole('link', { name: '新建任务' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '创建计划' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑项目' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '归档项目' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除项目' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '查看素材/选题池' })).toBeInTheDocument()
   })
 
-  it('does not offer scheduled plans for moments projects in V1', () => {
+  it('does not offer task or plan shortcuts for moments projects', () => {
     render(<ProjectCard project={{ ...project, platform: 'moments', name: '朋友圈项目' }} />)
 
-    expect(screen.getByRole('link', { name: '新建任务' })).toHaveAttribute(
-      'href',
-      '/tasks?create=true&type=moments&project_id=project-1&intent=new',
-    )
+    expect(screen.queryByRole('link', { name: '新建任务' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '创建计划' })).not.toBeInTheDocument()
   })
 

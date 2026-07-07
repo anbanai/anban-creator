@@ -144,6 +144,9 @@ describe('DashboardPage AI entry', () => {
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     expect(await screen.findByText('公众号项目')).toBeInTheDocument()
     expect(screen.queryByText('今日创作态势')).not.toBeInTheDocument()
+    expect(screen.queryByText('接入状态')).not.toBeInTheDocument()
+    expect(screen.queryByText('下一步')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('还没有任务')).not.toBeInTheDocument())
 
     fireEvent.change(prompt, { target: { value: '帮我写一篇新品发布公众号文章' } })
     const fileInput = screen.getByLabelText('上传参考素材')
