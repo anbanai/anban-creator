@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"net/url"
@@ -30,7 +31,13 @@ const (
 	defaultDirectUploadTTLSeconds = 15 * 60
 )
 
-var ErrPendingUploadNotFound = model.ErrPendingUploadNotFound
+var (
+	ErrPendingUploadNotFound     = model.ErrPendingUploadNotFound
+	ErrPendingUploadInvalidURL   = errors.New("pending upload URL is invalid")
+	ErrPendingUploadAccessDenied = errors.New("pending upload access denied")
+	ErrPendingUploadNotPending   = errors.New("pending upload is not pending")
+	ErrPendingUploadExpired      = errors.New("pending upload has expired")
+)
 
 type directUploadStorage interface {
 	Name() string
@@ -291,6 +298,51 @@ func FinalizePendingUploadURLs(ctx context.Context, repo PendingUploadRepository
 		return nil
 	}
 	return repo.FinalizePendingUploads(ctx, ids, now)
+}
+
+func ValidatePendingUploadURL(ctx context.Context, repo PendingUploadRepository, userID string, allowedPurposes []string, rawURL string, now time.Time) (string, error) {
+	if repo == nil {
+		return "", fmt.Errorf("pending upload repository is not available")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return "", ErrPendingUploadAccessDenied
+	}
+	id := pendingUploadIDFromURL(rawURL)
+	if id == "" {
+		return "", ErrPendingUploadInvalidURL
+	}
+	upload, err := repo.FindPendingUploadByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrPendingUploadNotFound) {
+			return "", ErrPendingUploadAccessDenied
+		}
+		return "", err
+	}
+	if upload.UserID != userID {
+		return "", ErrPendingUploadAccessDenied
+	}
+	if !directUploadPurposeAllowed(upload.Purpose, allowedPurposes) {
+		return "", ErrPendingUploadAccessDenied
+	}
+	if upload.Status != model.PendingUploadStatusPending {
+		return "", ErrPendingUploadNotPending
+	}
+	if !upload.ExpiresAt.After(now) {
+		return "", ErrPendingUploadExpired
+	}
+	if strings.TrimSpace(upload.Key) == "" || !pendingUploadURLMatches(rawURL, upload) {
+		return "", ErrPendingUploadAccessDenied
+	}
+	return upload.Key, nil
+}
+
+func directUploadPurposeAllowed(purpose string, allowed []string) bool {
+	for _, candidate := range allowed {
+		if purpose == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func CleanupExpiredPendingUploads(ctx context.Context, store directUploadStorage, repo PendingUploadRepository, before time.Time, limit int) (int, error) {

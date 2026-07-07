@@ -32,6 +32,9 @@ storage:
   access_key_secret: "${ANBAN_OSS_ACCESS_KEY_SECRET}"
   bucket_name: "anbancreator"
   region: "cn-chengdu"
+  # Optional public CDN/OSS custom domain only, e.g. "cdn.example.com".
+  # Leave empty to return default https://{bucket}.{endpoint}/... OSS URLs.
+  # Do not point this at the Studio/API domain or the /api/v1/files proxy.
   custom_domain: "${ANBAN_OSS_CDN_DOMAIN}"
   sts_role_arn: "${ANBAN_OSS_STS_ROLE_ARN}"
   sts_session_name: "anban-direct-upload"

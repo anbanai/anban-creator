@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
+	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
@@ -88,6 +91,36 @@ func (f *fakeStorageProvider) HasCustomDomain() bool { return false }
 func (f *fakeStorageProvider) IsOwnedURL(rawURL string) bool {
 	return strings.HasPrefix(rawURL, "/api/v1/files/") ||
 		strings.HasPrefix(rawURL, "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/")
+}
+
+type fakeProjectPendingUploadRepo struct {
+	uploads   map[string]*model.PendingUpload
+	finalized []string
+}
+
+func (r *fakeProjectPendingUploadRepo) CreatePendingUpload(context.Context, *model.PendingUpload) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (r *fakeProjectPendingUploadRepo) FindPendingUploadByID(_ context.Context, id string) (*model.PendingUpload, error) {
+	if r.uploads == nil || r.uploads[id] == nil {
+		return nil, service.ErrPendingUploadNotFound
+	}
+	cp := *r.uploads[id]
+	return &cp, nil
+}
+
+func (r *fakeProjectPendingUploadRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) error {
+	r.finalized = append(r.finalized, ids...)
+	return nil
+}
+
+func (r *fakeProjectPendingUploadRepo) FindExpiredPendingUploads(context.Context, time.Time, int) ([]*model.PendingUpload, error) {
+	return nil, nil
+}
+
+func (r *fakeProjectPendingUploadRepo) MarkPendingUploadExpired(context.Context, string, time.Time) error {
+	return nil
 }
 
 func TestProjectFetchProfileAIAnalysisMergesFields(t *testing.T) {
@@ -258,6 +291,176 @@ func TestAnalyzeImageAllowsReferenceUploadPrefix(t *testing.T) {
 	}
 	if len(store.read) != 1 || store.read[0] != key {
 		t.Fatalf("store.Read keys = %v, want [%s]", store.read, key)
+	}
+}
+
+func TestAnalyzeImageAllowsOwnPendingProjectReference(t *testing.T) {
+	key := "uploads/pending/user-1/upload-1/reference.png"
+	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
+	store := &fakeStorageProvider{
+		data: map[string][]byte{key: tinyPNG()},
+	}
+	pending := &fakeProjectPendingUploadRepo{uploads: map[string]*model.PendingUpload{
+		"upload-1": {
+			ID:          "upload-1",
+			UserID:      "user-1",
+			Purpose:     service.DirectUploadPurposeProjectReference,
+			Key:         key,
+			PublicURL:   imageURL,
+			ContentType: "image/png",
+			Status:      model.PendingUploadStatusPending,
+			ExpiresAt:   time.Now().Add(time.Minute),
+		},
+	}}
+	h := NewProjectHandler(nil, testProjectLogger(t))
+	h.SetStore(store)
+	h.SetPendingUploadRepository(pending)
+	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"`+imageURL+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusOK)
+	}
+	if len(store.read) != 1 || store.read[0] != key {
+		t.Fatalf("store.Read keys = %v, want [%s]", store.read, key)
+	}
+	if len(pending.finalized) != 0 {
+		t.Fatalf("AnalyzeImage finalized pending uploads = %v, want none", pending.finalized)
+	}
+}
+
+func TestAnalyzeImageAllowsOwnPendingTaskReference(t *testing.T) {
+	key := "uploads/pending/user-1/upload-1/template.png"
+	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
+	store := &fakeStorageProvider{
+		data: map[string][]byte{key: tinyPNG()},
+	}
+	pending := &fakeProjectPendingUploadRepo{uploads: map[string]*model.PendingUpload{
+		"upload-1": {
+			ID:          "upload-1",
+			UserID:      "user-1",
+			Purpose:     service.DirectUploadPurposeTaskReference,
+			Key:         key,
+			PublicURL:   imageURL,
+			ContentType: "image/png",
+			Status:      model.PendingUploadStatusPending,
+			ExpiresAt:   time.Now().Add(time.Minute),
+		},
+	}}
+	h := NewProjectHandler(nil, testProjectLogger(t))
+	h.SetStore(store)
+	h.SetPendingUploadRepository(pending)
+	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"`+imageURL+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusOK)
+	}
+	if len(store.read) != 1 || store.read[0] != key {
+		t.Fatalf("store.Read keys = %v, want [%s]", store.read, key)
+	}
+	if len(pending.finalized) != 0 {
+		t.Fatalf("AnalyzeImage finalized pending uploads = %v, want none", pending.finalized)
+	}
+}
+
+func TestAnalyzeImageRejectsUnauthorizedPendingUpload(t *testing.T) {
+	key := "uploads/pending/user-2/upload-1/reference.png"
+	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
+	store := &fakeStorageProvider{
+		data: map[string][]byte{key: tinyPNG()},
+	}
+	pending := &fakeProjectPendingUploadRepo{uploads: map[string]*model.PendingUpload{
+		"upload-1": {
+			ID:          "upload-1",
+			UserID:      "user-2",
+			Purpose:     service.DirectUploadPurposeProjectReference,
+			Key:         key,
+			PublicURL:   imageURL,
+			ContentType: "image/png",
+			Status:      model.PendingUploadStatusPending,
+			ExpiresAt:   time.Now().Add(time.Minute),
+		},
+	}}
+	h := NewProjectHandler(nil, testProjectLogger(t))
+	h.SetStore(store)
+	h.SetPendingUploadRepository(pending)
+	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"`+imageURL+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusForbidden)
+	}
+	if len(store.read) != 0 {
+		t.Fatalf("store.Read should not be called for unauthorized pending upload, got %v", store.read)
+	}
+}
+
+func TestAnalyzeImageRejectsPendingUploadWithWrongPurpose(t *testing.T) {
+	key := "uploads/pending/user-1/upload-1/document.png"
+	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
+	store := &fakeStorageProvider{
+		data: map[string][]byte{key: tinyPNG()},
+	}
+	pending := &fakeProjectPendingUploadRepo{uploads: map[string]*model.PendingUpload{
+		"upload-1": {
+			ID:          "upload-1",
+			UserID:      "user-1",
+			Purpose:     service.DirectUploadPurposeAIEntryAttachment,
+			Key:         key,
+			PublicURL:   imageURL,
+			ContentType: "image/png",
+			Status:      model.PendingUploadStatusPending,
+			ExpiresAt:   time.Now().Add(time.Minute),
+		},
+	}}
+	h := NewProjectHandler(nil, testProjectLogger(t))
+	h.SetStore(store)
+	h.SetPendingUploadRepository(pending)
+	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"`+imageURL+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusForbidden)
+	}
+	if len(store.read) != 0 {
+		t.Fatalf("store.Read should not be called for wrong-purpose pending upload, got %v", store.read)
 	}
 }
 

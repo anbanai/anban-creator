@@ -146,6 +146,7 @@ describe('DashboardPage AI entry', () => {
     expect(screen.queryByText('今日创作态势')).not.toBeInTheDocument()
     expect(screen.queryByText('接入状态')).not.toBeInTheDocument()
     expect(screen.queryByText('下一步')).not.toBeInTheDocument()
+    expect(screen.queryByText('最近任务')).not.toBeInTheDocument()
     await waitFor(() => expect(screen.queryByText('还没有任务')).not.toBeInTheDocument())
 
     fireEvent.change(prompt, { target: { value: '帮我写一篇新品发布公众号文章' } })

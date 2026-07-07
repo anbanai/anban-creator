@@ -144,7 +144,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	case model.PlatformEcommerce:
 		photos := imageAttachmentURLs(req.Attachments)
 		if len(photos) == 0 {
-			return aiEntryNeedsConfiguration("创建电商任务需要至少上传一张产品图。", "/projects/"+project.ID), nil
+			return aiEntryNeedsConfiguration("创建电商任务需要至少上传一张产品图。", aiEntryTaskCreateActionURL(model.PlatformEcommerce, project.ID)), nil
 		}
 		modules := normalizeAIEntrySelectedModules(intent.SelectedModules)
 		if len(modules) == 0 {
@@ -428,4 +428,16 @@ func aiEntryNeedsConfiguration(message, actionURL string) *AIEntrySubmitResult {
 
 func aiEntryError(message string) *AIEntrySubmitResult {
 	return &AIEntrySubmitResult{Status: AIEntryStatusError, Message: message}
+}
+
+func aiEntryTaskCreateActionURL(taskType, projectID string) string {
+	taskType = strings.TrimSpace(taskType)
+	projectID = strings.TrimSpace(projectID)
+	if taskType == "" {
+		return "/tasks?create=true&intent=new"
+	}
+	if projectID == "" {
+		return "/tasks?create=true&type=" + taskType + "&intent=new"
+	}
+	return "/tasks?create=true&type=" + taskType + "&project_id=" + projectID + "&intent=new"
 }

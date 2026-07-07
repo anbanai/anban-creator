@@ -283,3 +283,92 @@ func TestFinalizePendingUploadURLsRejectsMismatchedPendingURL(t *testing.T) {
 		t.Fatalf("finalized = %v, want no finalized uploads", repo.finalized)
 	}
 }
+
+func TestValidatePendingUploadURLReturnsKeyWithoutFinalizing(t *testing.T) {
+	now := time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC)
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{
+		"ok": {
+			ID:        "ok",
+			UserID:    "user-1",
+			Purpose:   DirectUploadPurposeProjectReference,
+			Key:       "uploads/pending/user-1/ok/ref.png",
+			PublicURL: "https://cdn.example.com/uploads/pending/user-1/ok/ref.png",
+			Status:    model.PendingUploadStatusPending,
+			ExpiresAt: now.Add(time.Minute),
+		},
+	}}
+
+	key, err := ValidatePendingUploadURL(context.Background(), repo, "user-1", []string{DirectUploadPurposeProjectReference}, "https://cdn.example.com/uploads/pending/user-1/ok/ref.png?x=1", now)
+	if err != nil {
+		t.Fatalf("ValidatePendingUploadURL: %v", err)
+	}
+	if key != "uploads/pending/user-1/ok/ref.png" {
+		t.Fatalf("key = %q, want pending object key", key)
+	}
+	if len(repo.finalized) != 0 {
+		t.Fatalf("ValidatePendingUploadURL finalized uploads = %v, want none", repo.finalized)
+	}
+}
+
+func TestValidatePendingUploadURLRejectsUnauthorizedAndInvalid(t *testing.T) {
+	now := time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC)
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{
+		"other": {
+			ID:        "other",
+			UserID:    "user-2",
+			Purpose:   DirectUploadPurposeProjectReference,
+			Key:       "uploads/pending/user-2/other/ref.png",
+			PublicURL: "https://cdn.example.com/uploads/pending/user-2/other/ref.png",
+			Status:    model.PendingUploadStatusPending,
+			ExpiresAt: now.Add(time.Minute),
+		},
+		"wrong-purpose": {
+			ID:        "wrong-purpose",
+			UserID:    "user-1",
+			Purpose:   DirectUploadPurposeAIEntryAttachment,
+			Key:       "uploads/pending/user-1/wrong-purpose/ref.png",
+			PublicURL: "https://cdn.example.com/uploads/pending/user-1/wrong-purpose/ref.png",
+			Status:    model.PendingUploadStatusPending,
+			ExpiresAt: now.Add(time.Minute),
+		},
+		"expired": {
+			ID:        "expired",
+			UserID:    "user-1",
+			Purpose:   DirectUploadPurposeProjectReference,
+			Key:       "uploads/pending/user-1/expired/ref.png",
+			PublicURL: "https://cdn.example.com/uploads/pending/user-1/expired/ref.png",
+			Status:    model.PendingUploadStatusPending,
+			ExpiresAt: now.Add(-time.Minute),
+		},
+		"mismatch": {
+			ID:        "mismatch",
+			UserID:    "user-1",
+			Purpose:   DirectUploadPurposeProjectReference,
+			Key:       "uploads/pending/user-1/mismatch/ref.png",
+			PublicURL: "https://cdn.example.com/uploads/pending/user-1/mismatch/ref.png",
+			Status:    model.PendingUploadStatusPending,
+			ExpiresAt: now.Add(time.Minute),
+		},
+	}}
+
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"cross user", "https://cdn.example.com/uploads/pending/user-2/other/ref.png"},
+		{"wrong purpose", "https://cdn.example.com/uploads/pending/user-1/wrong-purpose/ref.png"},
+		{"expired", "https://cdn.example.com/uploads/pending/user-1/expired/ref.png"},
+		{"host mismatch", "https://evil.example.com/uploads/pending/user-1/mismatch/ref.png"},
+		{"path mismatch", "https://cdn.example.com/uploads/pending/user-1/mismatch/other.png"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ValidatePendingUploadURL(context.Background(), repo, "user-1", []string{DirectUploadPurposeProjectReference}, tc.url, now); err == nil {
+				t.Fatalf("ValidatePendingUploadURL(%q) succeeded, want error", tc.url)
+			}
+		})
+	}
+	if len(repo.finalized) != 0 {
+		t.Fatalf("ValidatePendingUploadURL finalized uploads = %v, want none", repo.finalized)
+	}
+}

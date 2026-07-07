@@ -945,7 +945,7 @@ func (h *ProjectHandler) AnalyzeImage(c fiber.Ctx) error {
 		Bool("owned", ownedPath).
 		Msg("analyze-image routing")
 	if ownedPath {
-		key, respondErr := cleanOwnedUploadKey(req.ImageURL, userID)
+		key, respondErr := h.cleanAnalysisImageKey(c.Context(), req.ImageURL, userID)
 		if respondErr != nil {
 			return respondErr(c)
 		}
@@ -1095,6 +1095,43 @@ func isPublicIP(ip net.IP) bool {
 }
 
 type fiberErrorFunc func(fiber.Ctx) error
+
+func (h *ProjectHandler) cleanAnalysisImageKey(ctx context.Context, imageURL, userID string) (string, fiberErrorFunc) {
+	if key, ok := storage.StorageKeyFromURL(imageURL); ok {
+		cleanKey := filepath.Clean(key)
+		if strings.HasPrefix(cleanKey, "uploads/pending/") {
+			pendingKey, err := service.ValidatePendingUploadURL(ctx, h.pendingUploads, userID, []string{
+				service.DirectUploadPurposeProjectReference,
+				service.DirectUploadPurposeTaskReference,
+			}, imageURL, time.Now())
+			if err != nil {
+				return "", pendingUploadAnalyzeError(h.logger, err)
+			}
+			return pendingKey, nil
+		}
+	}
+	return cleanOwnedUploadKey(imageURL, userID)
+}
+
+func pendingUploadAnalyzeError(logger *zerolog.Logger, err error) fiberErrorFunc {
+	switch {
+	case errors.Is(err, service.ErrPendingUploadInvalidURL):
+		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
+	case errors.Is(err, service.ErrPendingUploadExpired):
+		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "pending upload has expired") }
+	case errors.Is(err, service.ErrPendingUploadNotPending):
+		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "pending upload is not pending") }
+	case errors.Is(err, service.ErrPendingUploadAccessDenied):
+		return func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }
+	default:
+		if logger != nil {
+			logger.Error().Err(err).Msg("failed to validate pending upload for image analysis")
+		}
+		return func(c fiber.Ctx) error {
+			return Error(c, fiber.StatusInternalServerError, "failed to validate pending upload")
+		}
+	}
+}
 
 func cleanOwnedUploadKey(imageURL, userID string) (string, fiberErrorFunc) {
 	key, ok := storage.StorageKeyFromURL(imageURL)

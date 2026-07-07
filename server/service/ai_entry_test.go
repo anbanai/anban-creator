@@ -144,7 +144,8 @@ func TestAIEntryServiceSubmitNeedsConfigurationForEcommerceWithoutProductImage(t
 	if result.Status != AIEntryStatusNeedsConfiguration {
 		t.Fatalf("status = %q, want needs_configuration", result.Status)
 	}
-	if !strings.Contains(result.Message, "产品图") || result.ActionURL == "" {
+	wantActionURL := "/tasks?create=true&type=ecommerce&project_id=" + projectID + "&intent=new"
+	if !strings.Contains(result.Message, "产品图") || result.ActionURL != wantActionURL {
 		t.Fatalf("result = %#v, want product-photo hint and action URL", result)
 	}
 	tasks, total, err := taskSvc.List(ctx, userID, 0, 10, "", "", "")

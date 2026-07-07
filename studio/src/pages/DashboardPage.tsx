@@ -16,13 +16,11 @@ import {
 import QueryErrorState from '@/components/QueryErrorState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/common/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import type { AIEntryAttachment, AIEntryAttachmentType } from '@/lib/api/ai-entry'
 import { projectsReturnHref } from '@/lib/command-center'
 import { uploadToOSS } from '@/lib/direct-upload'
-import { contentTypeLabel, formatDateTimeCN, statusBadgeVariant, taskStatusLabel } from '@/lib/labels'
-import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { contentTypeLabel } from '@/lib/labels'
 import { queryKeys } from '@/lib/query-keys'
 import { getLocalExecutorStatus, isDesktop } from '@/lib/tauri'
 
@@ -55,11 +53,6 @@ export default function DashboardPage() {
   const attachmentsRef = useRef<AIEntryAttachment[]>([])
   const uploadPromisesRef = useRef<Promise<void>[]>([])
 
-  const { data: tasksData, isLoading: tasksLoading, isError: tasksError, refetch: refetchTasks } = useQuery({
-    queryKey: ['tasks', 'dashboard'],
-    queryFn: () => api.tasks.list({ limit: 20 }),
-  })
-
   const { data: projects = [], isLoading: projectsLoading, isError: projectsError, refetch: refetchProjects } = useQuery({
     queryKey: ['projects', 'dashboard', 'active'],
     queryFn: () => api.projects.list({ status: 'active' }),
@@ -73,7 +66,6 @@ export default function DashboardPage() {
     staleTime: 30_000,
   })
 
-  const tasks = tasksData?.items ?? []
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
   const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
   const localExecutionReady = desktopMode && Boolean(localExecutorStatus?.available)
@@ -87,15 +79,6 @@ export default function DashboardPage() {
       setSelectedProjectId(activeProjects[0].id)
     }
   }, [activeProjects, selectedProjectId])
-
-  const recentTasks = useMemo(
-    () =>
-      tasks
-        .slice()
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        .slice(0, 5),
-    [tasks],
-  )
 
   const submitMutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.aiEntry.submit>[0]) => api.aiEntry.submit(payload),
@@ -121,8 +104,7 @@ export default function DashboardPage() {
     },
   })
 
-  const isLoading = tasksLoading || projectsLoading
-  const hasError = tasksError || projectsError
+  const hasError = projectsError
   const canSubmit = Boolean(selectedProject) && !submitMutation.isPending && uploading.length === 0
   const showProjectBlocker = !projectsLoading && activeProjects.length === 0 && !projectsError
 
@@ -324,49 +306,8 @@ export default function DashboardPage() {
       </section>
 
       {hasError ? (
-        <QueryErrorState onRetry={() => { refetchTasks(); refetchProjects() }} />
+        <QueryErrorState onRetry={() => { refetchProjects() }} />
       ) : null}
-
-      {(isLoading || recentTasks.length > 0) && (
-        <section className="rounded-xl border border-border bg-background">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-base font-semibold text-foreground">最近任务</h2>
-            <Link to="/tasks" className="text-sm font-medium text-primary hover:text-primary/80">
-              查看全部
-            </Link>
-          </div>
-          <div className="divide-y divide-border">
-            {isLoading ? (
-              Array.from({ length: 3 }).map((_, index) => (
-                <div key={index} className="flex items-center justify-between px-4 py-3">
-                  <div className="flex flex-1 flex-col gap-1.5">
-                    <Skeleton className="h-4 w-2/3" />
-                    <Skeleton className="h-3 w-40" />
-                  </div>
-                  <Skeleton className="h-5 w-16" />
-                </div>
-              ))
-            ) : recentTasks.map((task) => (
-              <Link key={task.id} to={`/tasks/${task.id}`} className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-accent">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || `${contentTypeLabel[task.type]} 任务`}</p>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{formatDateTimeCN(task.created_at)}</span>
-                    <span className="text-xs text-muted-foreground">|</span>
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      {renderPlatformIcon(task.type)}
-                      {contentTypeLabel[task.type]}
-                    </span>
-                  </div>
-                </div>
-                <Badge variant={statusBadgeVariant(task.status)}>
-                  {taskStatusLabel[task.status]}
-                </Badge>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   )
 }

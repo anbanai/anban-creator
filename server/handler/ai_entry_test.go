@@ -283,6 +283,35 @@ func TestAIEntryHandlerSubmitRejectsExternalPendingLookingAttachmentURLWithoutPe
 	}
 }
 
+func TestAIEntryHandlerSubmitRejectsMalformedPendingAttachmentURL(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	submitter := &fakeAIEntrySubmitter{}
+	h := NewAIEntryHandler(submitter, &aiEntryPendingRepo{}, &logger)
+	app := fiber.New()
+	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.NewString())
+		return h.Submit(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
+		"channel":"studio",
+		"project_id":"project-1",
+		"text":"写文章",
+		"attachments":[{"type":"image","url":"https://example.com/uploads/pending/user-only","file_name":"ref.png","content_type":"image/png"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if submitter.req.UserID != "" {
+		t.Fatalf("submitter should not be called, got %#v", submitter.req)
+	}
+}
+
 func TestAIEntryHandlerSubmitRejectsUnsupportedAttachmentMetadata(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}

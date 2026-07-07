@@ -68,6 +68,19 @@ func TestOSSProvider_IsOwnedURL_CustomDomain(t *testing.T) {
 	}
 }
 
+func TestOSSProvider_GetURLUsesDefaultBucketEndpointWithoutCustomDomain(t *testing.T) {
+	p := &OSSProvider{
+		bucketName: "anbancreator",
+		endpoint:   "oss-cn-chengdu.aliyuncs.com",
+	}
+
+	got := p.GetURL("uploads/pending/user-1/upload-1/ref.png")
+	want := "https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/pending/user-1/upload-1/ref.png"
+	if got != want {
+		t.Fatalf("GetURL() = %q, want %q", got, want)
+	}
+}
+
 func TestLocalProvider_IsOwnedURL(t *testing.T) {
 	p := &LocalProvider{dataDir: "/tmp"}
 

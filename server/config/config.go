@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1698,6 +1699,9 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Storage.BucketName) == "" {
 			errs = append(errs, "storage.bucket_name is required when provider is \"oss\"")
 		}
+		if err := validateStorageCustomDomain(c.Storage.CustomDomain); err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
 
 	if c.Memory.Enabled {
@@ -1792,6 +1796,30 @@ func (c *Config) Validate() error {
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func validateStorageCustomDomain(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	candidate := raw
+	if !strings.Contains(candidate, "://") {
+		candidate = "//" + candidate
+	}
+	parsed, err := url.Parse(candidate)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return fmt.Errorf("storage.custom_domain must be a CDN/storage hostname, got %q", raw)
+	}
+	if strings.Trim(parsed.EscapedPath(), "/") != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("storage.custom_domain must not include a path, query, or fragment; leave it empty for default OSS URLs or set a CDN/storage hostname")
+	}
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	switch host {
+	case "creator.anbanai.com", "api.creator.anbanai.com", "api.anbanai.com":
+		return fmt.Errorf("storage.custom_domain must not point at the Studio/API system domain; leave it empty for default OSS URLs or set a CDN/storage hostname")
 	}
 	return nil
 }

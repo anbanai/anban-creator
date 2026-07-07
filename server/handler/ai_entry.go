@@ -254,5 +254,17 @@ func validAIEntryAttachmentURL(raw string, allowPendingUploadURL bool) bool {
 		return false
 	}
 	cut := strings.SplitN(strings.SplitN(raw, "#", 2)[0], "?", 2)[0]
-	return strings.Contains(cut, "/uploads/pending/")
+	return pendingUploadIDFromAIEntryURL(cut) != ""
+}
+
+func pendingUploadIDFromAIEntryURL(raw string) string {
+	parts := strings.Split(raw, "/uploads/pending/")
+	if len(parts) < 2 {
+		return ""
+	}
+	segments := strings.Split(strings.Trim(parts[1], "/"), "/")
+	if len(segments) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(segments[1])
 }
