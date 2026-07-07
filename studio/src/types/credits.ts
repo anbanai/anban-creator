@@ -5,6 +5,9 @@ export type CreditTransactionType =
   | 'admin_grant'
   | 'register_bonus'
   | 'invite_reward'
+  | 'agent_runtime_reserve'
+  | 'agent_runtime'
+  | 'agent_runtime_refund'
   | 'image_gen'
   | 'image_understanding'
   | 'image_upload'
@@ -43,6 +46,8 @@ export interface CreditTransaction {
     route?: string
     input_tokens?: number
     cached_input_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
     output_tokens?: number
     text_input_tokens?: number
     text_cached_input_tokens?: number
@@ -50,6 +55,11 @@ export interface CreditTransaction {
     image_cached_input_tokens?: number
     image_output_tokens?: number
     total_tokens?: number
+    session_id?: string
+    num_turns?: number
+    duration_api_ms?: number
+    total_cost_usd?: number
+    billing_source?: string
     base_credits?: number
     tier_multiplier?: number
     user_multiplier?: number
@@ -76,6 +86,7 @@ export interface RechargeTier {
 
 export interface CreditPricing {
   task_costs: Record<string, number>
+  agent_runtime_reserve?: Record<string, number>
   model_costs: Record<string, Record<string, number>>
   recharge_tiers?: RechargeTier[]
   model_prices?: {

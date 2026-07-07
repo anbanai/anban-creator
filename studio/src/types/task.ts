@@ -88,6 +88,8 @@ export interface Task {
   // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）。运行/失败/完成
   // 态可能填充；刚创建的 pending 任务为空。用于取消对话框展示「已消耗不退还」。
   total_cost_usd?: number | null
+  billing_status?: 'settled' | 'payment_required' | string
+  billing_shortfall_credits?: number
   // The upfront task credit deduction returned by task detail when a matching
   // credit transaction exists. Older rows or responses may omit it.
   credits_charged?: number | null

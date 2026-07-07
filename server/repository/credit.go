@@ -18,6 +18,7 @@ type CreditRepository interface {
 	FindDeductionByTaskID(ctx context.Context, taskID string) (*model.CreditTransaction, error)
 	FindRefundByTaskID(ctx context.Context, taskID string) (*model.CreditTransaction, error)
 	FindByTaskIDAndUserID(ctx context.Context, taskID, userID string) ([]*model.CreditTransaction, error)
+	FindByOperationID(ctx context.Context, operationID string) (*model.CreditTransaction, error)
 	FindDeductionByOperationID(ctx context.Context, operationID string) (*model.CreditTransaction, error)
 	FindRefundByOperationID(ctx context.Context, operationID string) (*model.CreditTransaction, error)
 }
@@ -96,6 +97,17 @@ func (r *creditRepository) FindByTaskIDAndUserID(ctx context.Context, taskID, us
 		Order("created_at ASC, id ASC").
 		Find(&transactions).Error
 	return transactions, err
+}
+
+func (r *creditRepository) FindByOperationID(ctx context.Context, operationID string) (*model.CreditTransaction, error) {
+	var tx model.CreditTransaction
+	err := r.db.WithContext(ctx).
+		Where("operation_id = ?", operationID).
+		First(&tx).Error
+	if err != nil {
+		return nil, err
+	}
+	return &tx, nil
 }
 
 func (r *creditRepository) FindDeductionByOperationID(ctx context.Context, operationID string) (*model.CreditTransaction, error) {

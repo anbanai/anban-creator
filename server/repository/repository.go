@@ -83,6 +83,7 @@ type TaskRepository interface {
 	FindByUserIDAndCreatedAtRange(ctx context.Context, userID string, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindRunning(ctx context.Context) ([]*model.Task, error)
 	FindRunningByUser(ctx context.Context, userID string, projectID string) ([]*model.Task, error)
+	FindPaymentRequiredByUser(ctx context.Context, userID string) ([]*model.Task, error)
 	FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.Task, error)
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
@@ -154,6 +155,7 @@ type TaskRepository interface {
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	Delete(ctx context.Context, id string) error
 	UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error
+	UpdateBillingStatus(ctx context.Context, id, status string, shortfallCredits int) error
 	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error)
 	AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error)
 }

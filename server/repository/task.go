@@ -113,6 +113,20 @@ func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string, p
 	return tasks, nil
 }
 
+func (r *taskRepository) FindPaymentRequiredByUser(ctx context.Context, userID string) ([]*model.Task, error) {
+	var tasks []*model.Task
+	err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Where("billing_status = ?", model.TaskBillingStatusPaymentRequired).
+		Where("billing_shortfall_credits > 0").
+		Order("completed_at ASC, created_at ASC").
+		Find(&tasks).Error
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
 // FindCompletedOlderThan finds tasks in a terminal state whose completed_at
 // is before the given time and which have not yet been cleaned up.
 func (r *taskRepository) FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.Task, error) {
@@ -540,6 +554,14 @@ func (r *taskRepository) UpdateTokenUsage(ctx context.Context, id string, inputT
 			"cache_read_tokens":     cacheReadTokens,
 			"cache_creation_tokens": cacheCreationTokens,
 			"total_cost_usd":        costUSD,
+		}).Error
+}
+
+func (r *taskRepository) UpdateBillingStatus(ctx context.Context, id, status string, shortfallCredits int) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"billing_status":            status,
+			"billing_shortfall_credits": shortfallCredits,
 		}).Error
 }
 

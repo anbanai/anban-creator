@@ -39,7 +39,7 @@ import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 import { cn } from '@/lib/utils'
 import { parseCreationIntent } from '@/lib/command-center'
-import { taskCostFor } from '@/lib/pricing'
+import { agentRuntimeReserveFor, taskCostFor } from '@/lib/pricing'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -793,14 +793,20 @@ export default function PlansPage() {
                 const cost = taskCostFor(pricing, watchedType as string)
                 const multiplier = watchedGoalMode ? 3 : 1
                 const perRun = cost * multiplier
+                const runtimeReserve = agentRuntimeReserveFor(pricing, watchedType as string) * multiplier
+                const perRunCreation = perRun + runtimeReserve
                 const balance = creditsBalance?.balance ?? 0
-                const remaining = balance - perRun
+                const remaining = balance - perRunCreation
                 return (
                   <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                     <p className="text-muted-foreground">
                       每次执行基础任务费：{cost}{multiplier > 1 ? ` × ${multiplier}` : ''} ={' '}
                       <span className="font-medium text-foreground">{perRun.toLocaleString()}</span> 积分
                       {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
+                    </p>
+                    <p className="text-muted-foreground">
+                      Claude Code 运行预留：<span className="font-medium text-foreground">{runtimeReserve.toLocaleString()}</span> 积分
+                      <span className="ml-1 text-xs text-muted-foreground">执行完成后按实际 token 多退少补</span>
                     </p>
                     <p className="text-xs text-muted-foreground">模型、图片、视频等 MCP 操作费用按实际用量另计。</p>
                     <p className="text-muted-foreground">

@@ -12,7 +12,7 @@ import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
 import { formatUSD } from '@/lib/utils'
-import type { TaskFile } from '@/types'
+import type { CreditTransaction, TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
@@ -33,6 +33,31 @@ import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVar
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
 import { formatCreditDescription } from '@/lib/credit-display'
+
+function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): string | null {
+  const metadata = tx.metadata
+  if (!metadata) return null
+  const parts: string[] = []
+  if (metadata.provider || metadata.model) {
+    parts.push([metadata.provider, metadata.model].filter(Boolean).join('/'))
+  }
+  if (metadata.total_tokens) {
+    parts.push(`${metadata.total_tokens.toLocaleString()} tokens`)
+  } else if (metadata.cache_read_input_tokens || metadata.cache_creation_input_tokens) {
+    const cacheTokens = (metadata.cache_read_input_tokens ?? 0) + (metadata.cache_creation_input_tokens ?? 0)
+    parts.push(`${cacheTokens.toLocaleString()} cache tokens`)
+  }
+  if (metadata.num_turns) {
+    parts.push(`${metadata.num_turns} turns`)
+  }
+  if (metadata.total_cost_usd) {
+    parts.push(`$${metadata.total_cost_usd.toFixed(4)}`)
+  }
+  if (metadata.final_credits) {
+    parts.push(`${metadata.final_credits.toLocaleString()} 积分`)
+  }
+  return parts.length > 0 ? parts.join(' · ') : null
+}
 
 interface ResumeFileInput {
   id: string
@@ -149,6 +174,8 @@ export default function TaskDetailPage() {
   const operationConsumedCredits = creditSummary?.operation_consumed ?? 0
   const refundedCredits = creditSummary?.refunded ?? 0
   const netConsumedCredits = creditSummary?.net_consumed ?? task?.credits_charged ?? 0
+  const billingShortfallCredits = task?.billing_shortfall_credits ?? 0
+  const billingLocked = task?.billing_status === 'payment_required' || billingShortfallCredits > 0
   const showCreditDetails = Boolean(
     task && (
       typeof task.credits_charged === 'number' ||
@@ -658,6 +685,7 @@ export default function TaskDetailPage() {
               variant={task.published ? 'outline' : 'default'}
               size="sm"
               loading={togglePublished.isPending}
+              disabled={billingLocked}
               onClick={() => { void submit(async () => togglePublished.mutateAsync({ published: !task.published })).catch(() => {}) }}
             >
               <Eye className="h-4 w-4" />
@@ -700,6 +728,22 @@ export default function TaskDetailPage() {
           )}
         </div>
       </div>
+
+      {billingLocked && (
+        <Card className="border-red-500/40 bg-red-500/10">
+          <CardContent className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-red-200">交付已锁定，需补扣 Claude Code 运行费用</p>
+              <p className="mt-1 text-xs text-red-100/80">
+                待补积分 {billingShortfallCredits.toLocaleString()}。充值后系统会自动补扣并恢复下载、预览和发布。
+              </p>
+            </div>
+            <Button variant="outline" size="sm" render={<Link to="/credits" />}>
+              去充值
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Publish-approval gate (Batch 4A): the project requires human review
           before publishing, so a completed article draft is held here until the
@@ -853,21 +897,29 @@ export default function TaskDetailPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {creditTransactions.map((tx) => (
-                        <tr key={tx.id} className="border-t border-border">
-                          <td className="py-2 pr-3">
-                            <Badge variant={tx.amount < 0 ? 'destructive' : 'secondary'}>
-                              {transactionTypeLabel[tx.type] || tx.type}
-                            </Badge>
-                          </td>
-                          <td className={`py-2 pr-3 font-medium ${tx.amount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
-                          </td>
-                          <td className="py-2 pr-3 text-muted-foreground">{tx.balance_after.toLocaleString()}</td>
-                          <td className="max-w-[260px] truncate py-2 pr-3 text-muted-foreground">{formatCreditDescription(tx)}</td>
-                          <td className="whitespace-nowrap py-2 text-xs text-muted-foreground">{formatFullDateTimeCN(tx.created_at)}</td>
-                        </tr>
-                      ))}
+                      {creditTransactions.map((tx) => {
+                        const usageSummary = transactionUsageSummary(tx)
+                        return (
+                          <tr key={tx.id} className="border-t border-border">
+                            <td className="py-2 pr-3">
+                              <Badge variant={tx.amount < 0 ? 'destructive' : 'secondary'}>
+                                {transactionTypeLabel[tx.type] || tx.type}
+                              </Badge>
+                            </td>
+                            <td className={`py-2 pr-3 font-medium ${tx.amount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                            </td>
+                            <td className="py-2 pr-3 text-muted-foreground">{tx.balance_after.toLocaleString()}</td>
+                            <td className="max-w-[260px] py-2 pr-3 text-muted-foreground">
+                              <div className="truncate">{formatCreditDescription(tx)}</div>
+                              {usageSummary && (
+                                <div className="mt-0.5 truncate text-xs text-muted-foreground/80">{usageSummary}</div>
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap py-2 text-xs text-muted-foreground">{formatFullDateTimeCN(tx.created_at)}</td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>

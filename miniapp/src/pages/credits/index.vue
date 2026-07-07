@@ -149,6 +149,26 @@
             </view>
           </view>
 
+          <!-- Claude Code runtime reserve -->
+          <view v-if="runtimeReserveRows.length > 0" class="accordion-item">
+            <view class="accordion-head" @tap="toggleSection('runtime')">
+              <text class="accordion-head__title">Claude Code 运行预留</text>
+              <text class="accordion-head__arrow" :class="{ 'accordion-head__arrow--open': openSections.runtime }">›</text>
+            </view>
+            <view v-if="openSections.runtime" class="accordion-body">
+              <view
+                v-for="row in runtimeReserveRows"
+                :key="row.label"
+                class="price-row"
+                :class="{ 'price-row--alt': row.alt }"
+              >
+                <text class="price-row__label">{{ row.label }}</text>
+                <text class="price-row__value">{{ row.value }}</text>
+              </view>
+              <text class="accordion-footnote">云端任务创建时预扣运行额度，执行完成后按实际 token 多退少补。</text>
+            </view>
+          </view>
+
           <!-- E-commerce module estimates -->
           <view v-if="ecommerceRows.length > 0" class="accordion-item">
             <view class="accordion-head" @tap="toggleSection('ecommerce')">
@@ -568,6 +588,16 @@ const taskCostRows = computed<PriceRow[]>(() => {
   )
 })
 
+const runtimeReserveRows = computed<PriceRow[]>(() => {
+  if (!pricing.value?.agent_runtime_reserve) return []
+  return withAlt(
+    Object.entries(pricing.value.agent_runtime_reserve).map(([type, cost]) => ({
+      label: taskTypeLabelCN[type] ?? type,
+      value: `${(cost ?? 0).toLocaleString()} 积分`,
+    })),
+  )
+})
+
 const ecommerceRows = computed<PriceRow[]>(() => {
   if (!pricing.value?.ecommerce_module_prices) return []
   const prices = pricing.value.ecommerce_module_prices
@@ -634,6 +664,7 @@ const incomeRows = computed<PriceRow[]>(() => {
 // --- Accordion state ---
 const openSections = reactive({
   task: true,
+  runtime: false,
   ecommerce: false,
   image: false,
   text: false,

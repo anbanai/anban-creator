@@ -51,6 +51,13 @@
         </view>
       </view>
 
+      <view v-if="billingLocked" class="task-detail__billing-lock">
+        <text class="task-detail__billing-title">交付已锁定，需补扣 Claude Code 运行费用</text>
+        <text class="task-detail__billing-text">
+          待补积分 {{ billingShortfall.toLocaleString() }}。充值后系统会自动补扣并恢复下载、预览和发布。
+        </text>
+      </view>
+
       <!-- Next actions -->
       <view v-if="nextActions.length > 0" class="task-detail__section next-actions">
         <view class="section-header">
@@ -518,6 +525,12 @@ const errorMessage = computed(() => {
   return t.error_message || t.error || '任务执行失败'
 })
 
+const billingShortfall = computed(() => task.value?.billing_shortfall_credits || 0)
+const billingLocked = computed(() => {
+  const t = task.value
+  return Boolean(t && (t.billing_status === 'payment_required' || billingShortfall.value > 0))
+})
+
 const imageUrls = computed(() => {
   const files = taskFiles.value.length > 0 ? taskFiles.value : task.value?.result?.files
   if (!files) return []
@@ -626,15 +639,15 @@ const nextActions = computed<NextAction[]>(() => {
   if (t.status === 'completed') {
     const actions: NextAction[] = []
     if (availableFiles.value.length > 0) {
-      actions.push({ key: 'download-zip', label: '下载全部', desc: `${availableFiles.value.length} 个文件打包`, tone: 'primary' })
+      actions.push({ key: 'download-zip', label: '下载全部', desc: billingLocked.value ? '补扣后可下载' : `${availableFiles.value.length} 个文件打包`, tone: 'primary' })
     }
     if (t.type === 'article') {
-      actions.push({ key: 'preview', label: '预览 HTML', desc: '检查公众号排版', tone: 'neutral' })
+      actions.push({ key: 'preview', label: '预览 HTML', desc: billingLocked.value ? '补扣后可预览' : '检查公众号排版', tone: 'neutral' })
     }
     if (resultText.value) {
       actions.push({ key: 'copy-result', label: '复制内容', desc: '带走正文或任务要求', tone: 'neutral' })
     }
-    actions.push({ key: 'published', label: t.published ? '取消发布标记' : '标记已发布', desc: '同步内容状态', tone: 'warning' })
+    actions.push({ key: 'published', label: t.published ? '取消发布标记' : '标记已发布', desc: billingLocked.value ? '补扣后可更新' : '同步内容状态', tone: 'warning' })
     actions.push({ key: 'share', label: '分享结果', desc: '通过微信菜单转发', tone: 'neutral' })
     actions.push({ key: 'follow-up', label: '基于结果再创作', desc: '复用产出生成新任务', tone: 'primary' })
     return actions
@@ -801,15 +814,27 @@ function previewFile(file: TaskFile) {
 }
 
 function downloadFile(file: TaskFile) {
+  if (billingLocked.value) {
+    uni.showToast({ title: '请先补扣运行费用', icon: 'none' })
+    return
+  }
   downloadByUrl(tasksApi.fileDownloadUrl(taskId.value, file.id), file.file_name)
 }
 
 function downloadZip() {
+  if (billingLocked.value) {
+    uni.showToast({ title: '请先补扣运行费用', icon: 'none' })
+    return
+  }
   downloadByUrl(tasksApi.zipDownloadUrl(taskId.value), `task_${taskId.value}_files.zip`)
 }
 
 async function onPreviewArticle() {
   if (!taskId.value) return
+  if (billingLocked.value) {
+    uni.showToast({ title: '请先补扣运行费用', icon: 'none' })
+    return
+  }
   // Open the overlay first (better perceived latency), then fetch HTML.
   previewVisible.value = true
   previewLoading.value = true
@@ -964,6 +989,10 @@ async function onDelete() {
 
 async function onTogglePublished() {
   if (!task.value) return
+  if (billingLocked.value) {
+    uni.showToast({ title: '请先补扣运行费用', icon: 'none' })
+    return
+  }
   actionLoading.value = true
   try {
     const newPublished = !task.value.published
@@ -1121,6 +1150,29 @@ onShareAppMessage(() => ({
     &--error {
       border-left: 6rpx solid $ab-danger;
     }
+  }
+
+  &__billing-lock {
+    display: flex;
+    flex-direction: column;
+    gap: 8rpx;
+    margin-bottom: $ab-space-sm;
+    padding: $ab-space-md;
+    border-radius: $ab-radius-md;
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1rpx solid rgba(239, 68, 68, 0.35);
+  }
+
+  &__billing-title {
+    font-size: $ab-text-sm;
+    font-weight: $ab-font-semibold;
+    color: #b91c1c;
+  }
+
+  &__billing-text {
+    font-size: $ab-text-xs;
+    color: #991b1b;
+    line-height: 1.5;
   }
 
   &__progress-row {

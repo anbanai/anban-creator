@@ -441,12 +441,17 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 				taskIDs[i] = generateTaskID()
 			}
 
-			// Deduct total cost in a single atomic transaction.
+			// Deduct total base service fees (plus runtime reserve for cloud tasks)
+			// in a single atomic transaction.
 			var deductErr error
-			if multiplier > 1 {
-				deductErr = s.creditSvc.DeductBatchWithMultiplier(ctx, p.UserID, taskType, totalCost, taskIDs, multiplier)
+			if p.ExecutionTarget == model.ExecutionTargetLocal {
+				if multiplier > 1 {
+					deductErr = s.creditSvc.DeductBatchWithMultiplier(ctx, p.UserID, taskType, totalCost, taskIDs, multiplier)
+				} else {
+					deductErr = s.creditSvc.DeductBatch(ctx, p.UserID, taskType, totalCost, taskIDs)
+				}
 			} else {
-				deductErr = s.creditSvc.DeductBatch(ctx, p.UserID, taskType, totalCost, taskIDs)
+				deductErr = s.creditSvc.DeductBatchForTaskCreation(ctx, p.UserID, taskType, totalCost, taskIDs, multiplier)
 			}
 			if deductErr != nil {
 				if errors.Is(deductErr, ErrInsufficientCredits) {
@@ -554,6 +559,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 				for j := i; j < len(deductedTaskIDs); j++ {
 					if refundErr := s.creditSvc.RefundForTask(ctx, deductedTaskIDs[j]); refundErr != nil {
 						s.logger.Error().Err(refundErr).Str("task_id", deductedTaskIDs[j]).Msg("failed to refund credits during rollback")
+					}
+					if refundErr := s.creditSvc.RefundAgentRuntimeReserve(ctx, deductedTaskIDs[j], "任务创建失败退还 Claude Code 运行预留"); refundErr != nil {
+						s.logger.Error().Err(refundErr).Str("task_id", deductedTaskIDs[j]).Msg("failed to refund runtime reserve during rollback")
 					}
 				}
 			}
@@ -771,7 +779,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		if _, costOK := s.creditSvc.TaskCost(taskType); !costOK {
 			s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task with unknown task type")
 			return nil, nil
-		} else if _, err := s.creditSvc.DeductForTask(ctx, plan.UserID, taskType, taskID, planMultiplier); err != nil {
+		} else if _, err := s.creditSvc.DeductForTaskCreation(ctx, plan.UserID, taskType, taskID, planMultiplier); err != nil {
 			if errors.Is(err, ErrInsufficientCredits) {
 				s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task due to insufficient credits")
 				return nil, nil
@@ -814,6 +822,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		if s.creditSvc != nil {
 			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
 				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits during plan task rollback")
+			}
+			if refundErr := s.creditSvc.RefundAgentRuntimeReserve(ctx, taskID, "计划任务创建失败退还 Claude Code 运行预留"); refundErr != nil {
+				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund runtime reserve during plan task rollback")
 			}
 		}
 		// Release the pre-claimed topic back to the pool so it isn't orphaned
@@ -988,6 +999,11 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 	// Refund credits for the cancelled task (idempotent — double-refund protected).
 	if s.creditSvc != nil && task != nil {
 		s.refundTaskByMode(ctx, task, "取消")
+		if task.Status == model.TaskStatusPending {
+			if refundErr := s.creditSvc.RefundAgentRuntimeReserve(ctx, task.ID, "任务取消退还 Claude Code 运行预留"); refundErr != nil {
+				s.logger.Error().Err(refundErr).Str("task_id", task.ID).Msg("failed to refund runtime reserve for cancelled pending task")
+			}
+		}
 	}
 	if task != nil {
 		if err := s.repo.Tasks().SetCompletedAt(ctx, id); err != nil {

@@ -271,6 +271,7 @@ func main() {
 		projectSvc = service.NewProjectService(repo, log)
 		projectSvc.SetVideoCatalog(videoCatalog)
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
+		creditSvc.SetFullConfig(cfg)
 		planSvc.SetCreditService(creditSvc)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)

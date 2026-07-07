@@ -137,12 +137,16 @@ model_prices:
       currency: USD
       unit: 1000000
       cached_input: 0.19
+      cache_read_input: 0.19
+      cache_creation_input: 0.95
       input: 0.95
       output: 4.00
     moonshot/kimi-k2.7-code-highspeed:
       currency: USD
       unit: 1000000
       cached_input: 0.38
+      cache_read_input: 0.38
+      cache_creation_input: 1.90
       input: 1.90
       output: 8.00
 
@@ -251,6 +255,12 @@ credits:
   register_bonus: 1000
   invite_reward: 1000
   task_costs:
+    article: 4000
+    seednote: 3600
+    ecommerce: 3000
+    video: 2000
+    viral_analysis: 1200
+  agent_runtime_reserve:
     article: 4000
     seednote: 3600
     ecommerce: 3000

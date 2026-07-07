@@ -54,6 +54,8 @@ export interface Task {
   ecommerce?: EcommerceTaskConfig
   // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）
   total_cost_usd?: number | null
+  billing_status?: 'settled' | 'payment_required' | string
+  billing_shortfall_credits?: number
   created_at: string
   started_at: string | null
   completed_at: string | null

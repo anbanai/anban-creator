@@ -196,6 +196,11 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: persist result")
 		}
 	}
+	if s.creditSvc != nil {
+		if err := s.creditSvc.SettleAgentRuntime(ctx, task, result); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: settle agent runtime billing")
+		}
+	}
 
 	// Failure → terminal-fail (no cloud retry). Local execution is an explicit
 	// user choice; silently re-running a failed local task on cloud would

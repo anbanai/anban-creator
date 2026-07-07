@@ -49,7 +49,7 @@ import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
-import { taskCostFor } from '@/lib/pricing'
+import { agentRuntimeReserveFor, taskCostFor } from '@/lib/pricing'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -1313,8 +1313,10 @@ export default function TasksPage() {
                 const multiplier = isEcom ? 1 : goalMode ? 3 : 1
                 const billableQuantity = isEcom ? 1 : quantity
                 const totalCost = cost * billableQuantity * multiplier
+                const runtimeReserve = runLocally ? 0 : agentRuntimeReserveFor(pricing, watchedType) * billableQuantity * multiplier
+                const creationTotal = totalCost + runtimeReserve
                 const balance = creditsBalance?.balance ?? 0
-                const remaining = balance - totalCost
+                const remaining = balance - creationTotal
                 return (
                   <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                     <p className="text-muted-foreground">
@@ -1322,6 +1324,14 @@ export default function TasksPage() {
                       {multiplier > 1 && ` × ${multiplier}`} = <span className="font-medium text-foreground">{totalCost}</span> 积分
                       {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
                     </p>
+                    {runLocally ? (
+                      <p className="text-xs text-muted-foreground">本机运行使用你的 Claude Code 环境，不收平台 Claude Code 运行预留。</p>
+                    ) : (
+                      <p className="text-muted-foreground">
+                        Claude Code 运行预留：<span className="font-medium text-foreground">{runtimeReserve.toLocaleString()}</span> 积分
+                        <span className="ml-1 text-xs text-muted-foreground">完成后按实际 token 多退少补</span>
+                      </p>
+                    )}
                     {isEcom ? (
                       <p className="text-xs text-muted-foreground">所选交付模块会影响后续图片生成和理解操作用量，最终以交易明细汇总为准。</p>
                     ) : (
@@ -1365,8 +1375,9 @@ export default function TasksPage() {
                 const multiplier = isEcom ? 1 : goalMode ? 3 : 1
                 const billableQuantity = isEcom ? 1 : quantity
                 const totalCost = cost * billableQuantity * multiplier
+                const runtimeReserve = runLocally ? 0 : agentRuntimeReserveFor(pricing, watchedType) * billableQuantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
-                if (balance - totalCost < 0) return true
+                if (balance - totalCost - runtimeReserve < 0) return true
                 if (!isEcom && goalMode && !goalText.trim()) return true
                 if (isEcom) {
                   if (!watchedProductPhotos || watchedProductPhotos.length === 0) return true

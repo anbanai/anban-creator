@@ -170,12 +170,14 @@ func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 		rechargeTiers = h.fullCfg.EnabledRechargeTiers()
 	}
 	income := fiber.Map{}
+	agentRuntimeReserve := map[string]int{}
 	if h.cfg != nil {
 		income = fiber.Map{
 			"daily_sign_in":  h.cfg.DailySignIn,
 			"register_bonus": h.cfg.RegisterBonus,
 			"invite_reward":  h.cfg.InviteReward,
 		}
+		agentRuntimeReserve = h.cfg.AgentRuntimeReserve
 	}
 
 	// Synthesize only legacy fixed image_gen pricing from ImageAPI config
@@ -205,6 +207,7 @@ func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 
 	return Success(c, fiber.Map{
 		"task_costs":              h.service.TaskCosts(),
+		"agent_runtime_reserve":   agentRuntimeReserve,
 		"model_costs":             modelCosts,
 		"model_prices":            modelPrices,
 		"billing":                 billing,

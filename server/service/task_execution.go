@@ -140,6 +140,11 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	if err := s.UpdateExecutionResult(persistCtx, taskID, result); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to persist task result")
 	}
+	if s.creditSvc != nil {
+		if err := s.creditSvc.SettleAgentRuntime(persistCtx, task, result); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to settle agent runtime billing")
+		}
+	}
 
 	// Upload workspace files from the host side regardless of agent success.
 	// The agent binary's in-container upload may fail (e.g. Docker networking),

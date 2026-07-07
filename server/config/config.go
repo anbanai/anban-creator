@@ -297,11 +297,13 @@ type CurrencyRate struct {
 }
 
 type TokenModelPrice struct {
-	Currency    string        `yaml:"currency" json:"currency"`
-	Unit        int64         `yaml:"unit" json:"unit"`
-	CachedInput FlexibleFloat `yaml:"cached_input" json:"cached_input"`
-	Input       FlexibleFloat `yaml:"input" json:"input"`
-	Output      FlexibleFloat `yaml:"output" json:"output"`
+	Currency           string        `yaml:"currency" json:"currency"`
+	Unit               int64         `yaml:"unit" json:"unit"`
+	CachedInput        FlexibleFloat `yaml:"cached_input" json:"cached_input"`
+	CacheReadInput     FlexibleFloat `yaml:"cache_read_input" json:"cache_read_input,omitempty"`
+	CacheCreationInput FlexibleFloat `yaml:"cache_creation_input" json:"cache_creation_input,omitempty"`
+	Input              FlexibleFloat `yaml:"input" json:"input"`
+	Output             FlexibleFloat `yaml:"output" json:"output"`
 }
 
 type UnitModelPrice struct {
@@ -360,33 +362,37 @@ type RechargeTierConfig struct {
 }
 
 type TokenUsage struct {
-	InputTokens       int64 `json:"input_tokens"`
-	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"`
-	OutputTokens      int64 `json:"output_tokens"`
-	TotalTokens       int64 `json:"total_tokens"`
+	InputTokens              int64 `json:"input_tokens"`
+	CachedInputTokens        int64 `json:"cached_input_tokens,omitempty"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+	OutputTokens             int64 `json:"output_tokens"`
+	TotalTokens              int64 `json:"total_tokens"`
 }
 
 type PriceSnapshot struct {
-	Provider         string  `json:"provider"`
-	Model            string  `json:"model"`
-	Currency         string  `json:"currency"`
-	Unit             int64   `json:"unit"`
-	CurrencyToCNY    float64 `json:"currency_to_cny"`
-	CreditsPerCNY    int     `json:"credits_per_cny"`
-	CachedInput      float64 `json:"cached_input"`
-	Input            float64 `json:"input"`
-	Output           float64 `json:"output"`
-	PricingType      string  `json:"pricing_type,omitempty"`
-	Price            float64 `json:"price,omitempty"`
-	TextInput        float64 `json:"text_input,omitempty"`
-	TextCachedInput  float64 `json:"text_cached_input,omitempty"`
-	ImageInput       float64 `json:"image_input,omitempty"`
-	ImageCachedInput float64 `json:"image_cached_input,omitempty"`
-	ImageOutput      float64 `json:"image_output,omitempty"`
-	Size             string  `json:"size,omitempty"`
-	Quality          string  `json:"quality,omitempty"`
-	Count            int     `json:"count,omitempty"`
-	OfficialEstimate float64 `json:"official_estimate,omitempty"`
+	Provider           string  `json:"provider"`
+	Model              string  `json:"model"`
+	Currency           string  `json:"currency"`
+	Unit               int64   `json:"unit"`
+	CurrencyToCNY      float64 `json:"currency_to_cny"`
+	CreditsPerCNY      int     `json:"credits_per_cny"`
+	CachedInput        float64 `json:"cached_input"`
+	CacheReadInput     float64 `json:"cache_read_input,omitempty"`
+	CacheCreationInput float64 `json:"cache_creation_input,omitempty"`
+	Input              float64 `json:"input"`
+	Output             float64 `json:"output"`
+	PricingType        string  `json:"pricing_type,omitempty"`
+	Price              float64 `json:"price,omitempty"`
+	TextInput          float64 `json:"text_input,omitempty"`
+	TextCachedInput    float64 `json:"text_cached_input,omitempty"`
+	ImageInput         float64 `json:"image_input,omitempty"`
+	ImageCachedInput   float64 `json:"image_cached_input,omitempty"`
+	ImageOutput        float64 `json:"image_output,omitempty"`
+	Size               string  `json:"size,omitempty"`
+	Quality            string  `json:"quality,omitempty"`
+	Count              int     `json:"count,omitempty"`
+	OfficialEstimate   float64 `json:"official_estimate,omitempty"`
 }
 
 type TokenCreditCost struct {
@@ -471,17 +477,40 @@ func (c *Config) CalculateTokenModelCredits(provider, modelName string, usage To
 	if userMultiplier <= 0 {
 		userMultiplier = 1
 	}
-	nonCachedInput := usage.InputTokens - usage.CachedInputTokens
-	if nonCachedInput < 0 {
-		nonCachedInput = 0
+	cacheReadTokens := usage.CacheReadInputTokens
+	if cacheReadTokens == 0 && usage.CachedInputTokens > 0 {
+		cacheReadTokens = usage.CachedInputTokens
 	}
-	costInCurrency := (float64(nonCachedInput)*price.Input.Float64() + float64(usage.CachedInputTokens)*price.CachedInput.Float64() + float64(usage.OutputTokens)*price.Output.Float64()) / float64(unit)
+	cacheReadPrice := price.CacheReadInput.Float64()
+	if cacheReadPrice <= 0 {
+		cacheReadPrice = price.CachedInput.Float64()
+	}
+	cacheCreationPrice := price.CacheCreationInput.Float64()
+	if cacheCreationPrice <= 0 {
+		cacheCreationPrice = price.Input.Float64()
+	}
+	inputTokens := usage.InputTokens
+	if usage.CacheReadInputTokens == 0 && usage.CacheCreationInputTokens == 0 && usage.CachedInputTokens > 0 {
+		inputTokens = usage.InputTokens - usage.CachedInputTokens
+		if inputTokens < 0 {
+			inputTokens = 0
+		}
+	}
+	totalTokens := usage.TotalTokens
+	if totalTokens <= 0 {
+		totalTokens = usage.InputTokens + usage.OutputTokens + cacheReadTokens + usage.CacheCreationInputTokens
+		usage.TotalTokens = totalTokens
+	}
+	costInCurrency := (float64(inputTokens)*price.Input.Float64() +
+		float64(cacheReadTokens)*cacheReadPrice +
+		float64(usage.CacheCreationInputTokens)*cacheCreationPrice +
+		float64(usage.OutputTokens)*price.Output.Float64()) / float64(unit)
 	baseCredits := int(math.Ceil(costInCurrency * rate * float64(creditsPerCNY)))
-	if usage.TotalTokens > 0 && baseCredits < minCharge {
+	if totalTokens > 0 && baseCredits < minCharge {
 		baseCredits = minCharge
 	}
 	finalCredits := int(math.Ceil(float64(baseCredits) * tierMultiplier * userMultiplier))
-	if usage.TotalTokens > 0 && finalCredits < minCharge {
+	if totalTokens > 0 && finalCredits < minCharge {
 		finalCredits = minCharge
 	}
 	return TokenCreditCost{
@@ -491,15 +520,17 @@ func (c *Config) CalculateTokenModelCredits(provider, modelName string, usage To
 		UserMultiplier: userMultiplier,
 		Usage:          usage,
 		PriceSnapshot: PriceSnapshot{
-			Provider:      provider,
-			Model:         modelName,
-			Currency:      currency,
-			Unit:          unit,
-			CurrencyToCNY: rate,
-			CreditsPerCNY: creditsPerCNY,
-			CachedInput:   price.CachedInput.Float64(),
-			Input:         price.Input.Float64(),
-			Output:        price.Output.Float64(),
+			Provider:           provider,
+			Model:              modelName,
+			Currency:           currency,
+			Unit:               unit,
+			CurrencyToCNY:      rate,
+			CreditsPerCNY:      creditsPerCNY,
+			CachedInput:        price.CachedInput.Float64(),
+			CacheReadInput:     cacheReadPrice,
+			CacheCreationInput: cacheCreationPrice,
+			Input:              price.Input.Float64(),
+			Output:             price.Output.Float64(),
 		},
 	}, nil
 }
@@ -902,12 +933,13 @@ type MemoryConfig struct {
 
 // CreditsConfig holds credits/points system configuration.
 type CreditsConfig struct {
-	DailySignIn   int                       `yaml:"daily_sign_in"`  // credits awarded per daily sign-in (default 100)
-	RegisterBonus int                       `yaml:"register_bonus"` // credits awarded on registration (default 1000)
-	InviteReward  int                       `yaml:"invite_reward"`  // credits awarded to inviter when invitee registers (default 1000)
-	TaskCosts     map[string]int            `yaml:"task_costs"`     // base service fees by task type, e.g. {"article": 4000, "seednote": 3600, "ecommerce": 3000, "video": 2000}
-	ModelCosts    map[string]map[string]int `yaml:"model_costs"`    // per-model costs, key format: "provider/model"
-	AdminAPIKey   string                    `yaml:"admin_api_key"`  // API key for admin credit grant endpoint
+	DailySignIn         int                       `yaml:"daily_sign_in"`                                      // credits awarded per daily sign-in (default 100)
+	RegisterBonus       int                       `yaml:"register_bonus"`                                     // credits awarded on registration (default 1000)
+	InviteReward        int                       `yaml:"invite_reward"`                                      // credits awarded to inviter when invitee registers (default 1000)
+	TaskCosts           map[string]int            `yaml:"task_costs"`                                         // base service fees by task type, e.g. {"article": 4000, "seednote": 3600, "ecommerce": 3000, "video": 2000}
+	AgentRuntimeReserve map[string]int            `yaml:"agent_runtime_reserve" json:"agent_runtime_reserve"` // Claude Code runtime reserve by task type
+	ModelCosts          map[string]map[string]int `yaml:"model_costs"`                                        // per-model costs, key format: "provider/model"
+	AdminAPIKey         string                    `yaml:"admin_api_key"`                                      // API key for admin credit grant endpoint
 
 	// E-commerce deliverable module pricing for delivery-scale estimates only.
 	// Creation billing uses TaskCosts["ecommerce"]; actual model/media work is
@@ -1212,6 +1244,18 @@ func (c *Config) applyDefaults() {
 		for taskType, cost := range defaultTaskCosts {
 			if _, ok := c.Credits.TaskCosts[taskType]; !ok {
 				c.Credits.TaskCosts[taskType] = cost
+			}
+		}
+	}
+	if c.Credits.AgentRuntimeReserve == nil {
+		c.Credits.AgentRuntimeReserve = map[string]int{}
+		for taskType, cost := range defaultTaskCosts {
+			c.Credits.AgentRuntimeReserve[taskType] = cost
+		}
+	} else {
+		for taskType, cost := range defaultTaskCosts {
+			if _, ok := c.Credits.AgentRuntimeReserve[taskType]; !ok {
+				c.Credits.AgentRuntimeReserve[taskType] = cost
 			}
 		}
 	}

@@ -340,15 +340,20 @@
           <text class="credit-info__value credit-info__value--cost">约 {{ estimatedCost }} 积分</text>
         </view>
         <view class="credit-info__row">
+          <text class="credit-info__label">Claude运行预留</text>
+          <text class="credit-info__value credit-info__value--cost">约 {{ runtimeReserve }} 积分</text>
+        </view>
+        <view class="credit-info__row">
           <text class="credit-info__label">当前余额</text>
-          <text class="credit-info__value" :class="{ 'credit-info__value--low': balance < estimatedCost }">
+          <text class="credit-info__value" :class="{ 'credit-info__value--low': balance < creationCost }">
             {{ balance.toLocaleString() }} 积分
           </text>
         </view>
       </view>
+      <text class="field-hint">Claude Code 运行预留会在执行完成后按实际 token 多退少补。</text>
       <text v-if="!isEcommerce" class="field-hint">模型、图片、视频等 MCP 操作费用按实际用量另计。</text>
       <text v-else class="field-hint">交付模块会影响后续图片生成和理解操作用量，最终以交易明细汇总为准。</text>
-      <text v-if="balance > 0 && balance < estimatedCost" class="field-error">积分不足，请先充值</text>
+      <text v-if="balance > 0 && balance < creationCost" class="field-error">积分不足，请先充值</text>
     </view>
 
     <!-- Fixed bottom button -->
@@ -545,10 +550,22 @@ const estimatedCost = computed(() => {
   return costPerTask * billableQuantity * multiplier
 })
 
+const runtimeReserve = computed(() => {
+  if (!selectedProject.value) return 0
+  const reservePerTask = pricing.value?.agent_runtime_reserve?.[selectedProject.value.platform]
+    ?? DEFAULT_TASK_COSTS[selectedProject.value.platform]
+    ?? 0
+  const multiplier = form.goal_mode ? 3 : 1
+  const billableQuantity = isEcommerce.value ? 1 : form.quantity
+  return reservePerTask * billableQuantity * multiplier
+})
+
+const creationCost = computed(() => estimatedCost.value + runtimeReserve.value)
+
 const canSubmit = computed(() => {
   if (!form.project_id || !form.prompt.trim()) return false
   if (form.goal_mode && !form.goal.trim()) return false
-  if (balance.value < estimatedCost.value) return false
+  if (balance.value < creationCost.value) return false
   return !submitting.value
 })
 
