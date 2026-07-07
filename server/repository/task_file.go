@@ -36,7 +36,7 @@ func (r *taskFileRepository) Upsert(ctx context.Context, file *model.TaskFile) (
 		Columns: []clause.Column{{Name: "task_id"}, {Name: "file_path"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"file_name", "mime_type", "file_size", "oss_key", "oss_url",
-			"storage_provider", "role", "content_hash",
+			"storage_provider", "role", "content_hash", "media_id", "wechat_url",
 		}),
 	}).Create(file)
 

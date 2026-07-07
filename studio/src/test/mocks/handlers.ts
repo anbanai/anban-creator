@@ -150,6 +150,16 @@ export const mockPlatformConfigs: PlatformConfig[] = [
     default_image_ratio: '3:4',
     fields: [],
   },
+  {
+    id: 'moments',
+    label: '朋友圈',
+    badge_variant: 'secondary',
+    supports_publishing: false,
+    supports_auto_fetch: false,
+    profile_url_pattern: '',
+    default_image_ratio: '3:4',
+    fields: [],
+  },
 ]
 
 export const mockApiKeys: APIKey[] = [
@@ -236,6 +246,7 @@ export const handlers = [
         task_costs: {
           article: 4000,
           seednote: 3600,
+          moments: 3000,
           viral_analysis: 1200,
         },
         model_costs: {},

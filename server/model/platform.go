@@ -69,6 +69,24 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "image_ratio", Label: "图片比例", Placeholder: "3:4（种草笔记默认）", Type: "select", Group: "advanced"},
 		},
 	},
+	PlatformMoments: {
+		ID:                 PlatformMoments,
+		Label:              "朋友圈",
+		BadgeVariant:       "secondary",
+		SupportsPublishing: false,
+		SupportsAutoFetch:  false,
+		DefaultImageRatio:  "3:4",
+		Fields: []PlatformFieldConfig{
+			{Key: "name", Label: "项目名称", Placeholder: "例如 私域朋友圈", Required: true, Type: "text", Group: "basic"},
+			{Key: "avatar_url", Label: "头像", Placeholder: "手动填写或上传", Type: "url", Group: "basic"},
+			{Key: "instructions", Label: "项目定位", Placeholder: "例如 面向高信任私域成交的生活化朋友圈", Type: "textarea", Group: "basic"},
+			{Key: "keywords", Label: "关键词", Placeholder: "例如 私域, 成交, 咨询, 生活方式", Type: "textarea", Group: "advanced"},
+			{Key: "visual_style", Label: "视觉风格", Placeholder: "例如 归藏社交卡、真实手机随拍、Swiss editorial", Type: "textarea", Group: "advanced"},
+			{Key: "author", Label: "人设称呼", Placeholder: "例如 主理人、顾问昵称", Type: "text", Group: "advanced"},
+			{Key: "reference_image_url", Label: "视觉参考图", Placeholder: "粘贴图片 URL（支持 JPG, PNG）", Type: "url", Group: "advanced"},
+			{Key: "image_ratio", Label: "图片比例", Placeholder: "3:4（朋友圈默认）", Type: "select", Group: "advanced"},
+		},
+	},
 }
 
 // GetPlatformConfig returns the config for a given platform, or nil if not found.
@@ -78,7 +96,7 @@ func GetPlatformConfig(platform string) *PlatformConfig {
 
 // GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-	order := []string{PlatformSeednote, PlatformArticle}
+	order := []string{PlatformSeednote, PlatformMoments, PlatformArticle, PlatformEcommerce, PlatformVideo}
 	configs := make([]*PlatformConfig, 0, len(order))
 	for _, key := range order {
 		if pc, ok := PlatformConfigs[key]; ok {

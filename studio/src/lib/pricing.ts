@@ -3,6 +3,7 @@ import type { CreditPricing } from '@/types/credits'
 export const DEFAULT_TASK_COSTS: Record<string, number> = {
   article: 4000,
   seednote: 3600,
+  moments: 3000,
   ecommerce: 3000,
   video: 2000,
   viral_analysis: 1200,

@@ -151,6 +151,8 @@ func taskTypeLabel(t string) string {
 		return "文章"
 	case model.PlatformSeednote:
 		return "种草笔记"
+	case model.PlatformMoments:
+		return "朋友圈"
 	case model.PlatformEcommerce:
 		return "电商图"
 	case "poster":

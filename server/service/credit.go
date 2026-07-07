@@ -39,6 +39,8 @@ func creditTaskLabel(taskType string) string {
 	switch taskType {
 	case model.ScopeSeednote:
 		return "种草笔记"
+	case model.ScopeMoments:
+		return "朋友圈"
 	case model.ScopeArticle:
 		return "公众号文章"
 	case model.ScopeEcommerce:

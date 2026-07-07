@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -475,6 +476,177 @@ func TestRegisterGeneratedImageTaskFile_UploadErrorPropagates(t *testing.T) {
 	if !strings.Contains(err.Error(), "storage down") {
 		t.Errorf("[FAIL] error should wrap the upload error, got %q", err.Error())
 	}
+}
+
+type fakeRenderedImageRegistrar struct {
+	uploadCalls  []fakeUploadCall
+	uploadResult *model.TaskFile
+	uploadErr    error
+	enrichCalled bool
+	updateCalls  []fakeRenderedImageUpdateCall
+}
+
+type fakeRenderedImageUpdateCall struct {
+	role, mediaID, wechatURL string
+}
+
+func (f *fakeRenderedImageRegistrar) UploadTaskFileFromReader(_ context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	io.Copy(io.Discard, reader)
+	f.uploadCalls = append(f.uploadCalls, fakeUploadCall{taskID, userID, relPath, mimeType, fileSize})
+	return f.uploadResult, f.uploadErr
+}
+
+func (f *fakeRenderedImageRegistrar) EnrichFilesWithURLs(_ context.Context, _ []*model.TaskFile) {
+	f.enrichCalled = true
+}
+
+func (f *fakeRenderedImageRegistrar) UpdateTaskFileMetadata(_ context.Context, file *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error) {
+	f.updateCalls = append(f.updateCalls, fakeRenderedImageUpdateCall{role: role, mediaID: mediaID, wechatURL: wechatURL})
+	if role != "" {
+		file.Role = role
+	}
+	file.MediaID = mediaID
+	file.WechatURL = wechatURL
+	return file, nil
+}
+
+type fakeRenderedImageUploader struct {
+	result *service.UploadImageResult
+	err    error
+	calls  []fakeRenderedImageUploadCall
+}
+
+type fakeRenderedImageUploadCall struct {
+	userID, projectID, filePath string
+}
+
+func (f *fakeRenderedImageUploader) UploadImage(_ context.Context, userID, projectID, filePath string) (*service.UploadImageResult, error) {
+	f.calls = append(f.calls, fakeRenderedImageUploadCall{userID: userID, projectID: projectID, filePath: filePath})
+	return f.result, f.err
+}
+
+func TestRegisterRenderedImageAssetFromBase64RegistersTaskFileAndWechatUpload(t *testing.T) {
+	png := tinyPNGBytes()
+	fakeReg := &fakeRenderedImageRegistrar{
+		uploadResult: &model.TaskFile{
+			ID:       "task-file-1",
+			FileName: "wechat-21x9-cover.png",
+			FilePath: "wechat-21x9-cover.png",
+			Role:     model.FileRoleImage,
+			URL:      "https://files.example.com/task-file-1.png",
+		},
+	}
+	fakeUpload := &fakeRenderedImageUploader{
+		result: &service.UploadImageResult{WechatURL: "https://mmbiz.qpic.cn/cover.png", MediaID: "media-123"},
+	}
+
+	got, err := registerRenderedImageAsset(context.Background(), fakeReg, fakeUpload, "user-1", "project-1", "task-1", renderedImageInput{
+		Name:        "wechat-21x9-cover.png",
+		Role:        model.FileRoleCover,
+		ImageBase64: base64.StdEncoding.EncodeToString(png),
+		UploadToCDN: true,
+	})
+	if err != nil {
+		t.Fatalf("registerRenderedImageAsset returned error: %v", err)
+	}
+	if got.TaskFileID != "task-file-1" {
+		t.Fatalf("task_file_id = %q, want task-file-1", got.TaskFileID)
+	}
+	if got.DownloadURL != "https://files.example.com/task-file-1.png" {
+		t.Fatalf("download_url = %q", got.DownloadURL)
+	}
+	if got.WeChatURL != "https://mmbiz.qpic.cn/cover.png" || got.MediaID != "media-123" {
+		t.Fatalf("wechat upload fields = (%q,%q), want URL/media", got.WeChatURL, got.MediaID)
+	}
+	if got.Role != model.FileRoleCover {
+		t.Fatalf("role = %q, want cover", got.Role)
+	}
+	if len(fakeReg.uploadCalls) != 1 {
+		t.Fatalf("upload calls = %d, want 1", len(fakeReg.uploadCalls))
+	}
+	call := fakeReg.uploadCalls[0]
+	if call.relPath != "wechat-21x9-cover.png" || call.mime != "image/png" || call.size != int64(len(png)) {
+		t.Fatalf("upload call = %+v, want name/png/%d bytes", call, len(png))
+	}
+	if len(fakeUpload.calls) != 1 || fakeUpload.calls[0].projectID != "project-1" {
+		t.Fatalf("cdn upload calls = %+v, want project-1", fakeUpload.calls)
+	}
+	if len(fakeReg.updateCalls) != 1 {
+		t.Fatalf("metadata update calls = %d, want 1", len(fakeReg.updateCalls))
+	}
+	if fakeReg.updateCalls[0].role != model.FileRoleCover || fakeReg.updateCalls[0].mediaID != "media-123" {
+		t.Fatalf("metadata update = %+v", fakeReg.updateCalls[0])
+	}
+}
+
+func TestRegisterRenderedImageAssetWithoutCDNUploadPreservesExistingWechatMetadata(t *testing.T) {
+	png := tinyPNGBytes()
+	fakeReg := &fakeRenderedImageRegistrar{
+		uploadResult: &model.TaskFile{
+			ID:        "task-file-1",
+			FileName:  "wechat-21x9-cover.png",
+			FilePath:  "wechat-21x9-cover.png",
+			Role:      model.FileRoleCover,
+			URL:       "https://files.example.com/task-file-1.png",
+			MediaID:   "existing-media",
+			WechatURL: "https://mmbiz.qpic.cn/existing.png",
+		},
+	}
+
+	got, err := registerRenderedImageAsset(context.Background(), fakeReg, nil, "user-1", "project-1", "task-1", renderedImageInput{
+		Name:        "wechat-21x9-cover.png",
+		Role:        model.FileRoleCover,
+		ImageBase64: base64.StdEncoding.EncodeToString(png),
+		UploadToCDN: false,
+	})
+	if err != nil {
+		t.Fatalf("registerRenderedImageAsset returned error: %v", err)
+	}
+	if got.MediaID != "existing-media" || got.WeChatURL != "https://mmbiz.qpic.cn/existing.png" {
+		t.Fatalf("wechat metadata = (%q,%q), want existing values", got.MediaID, got.WeChatURL)
+	}
+	if len(fakeReg.updateCalls) != 1 {
+		t.Fatalf("metadata update calls = %d, want 1", len(fakeReg.updateCalls))
+	}
+	if fakeReg.updateCalls[0].mediaID != "existing-media" || fakeReg.updateCalls[0].wechatURL != "https://mmbiz.qpic.cn/existing.png" {
+		t.Fatalf("metadata update = %+v, want existing WeChat fields", fakeReg.updateCalls[0])
+	}
+}
+
+func TestRegisterRenderedImageAssetRejectsInvalidMIME(t *testing.T) {
+	_, err := registerRenderedImageAsset(context.Background(), &fakeRenderedImageRegistrar{}, nil, "user-1", "project-1", "task-1", renderedImageInput{
+		Name:        "not-image.png",
+		ImageBase64: base64.StdEncoding.EncodeToString([]byte("this is text, not an image")),
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported image MIME") {
+		t.Fatalf("error = %v, want unsupported image MIME", err)
+	}
+}
+
+func TestRegisterRenderedImageAssetRejectsOversizeImage(t *testing.T) {
+	tooLarge := append(tinyPNGBytes(), make([]byte, maxRenderedImageBytes+1)...)
+	_, err := registerRenderedImageAsset(context.Background(), &fakeRenderedImageRegistrar{}, nil, "user-1", "project-1", "task-1", renderedImageInput{
+		Name:        "too-large.png",
+		ImageBase64: base64.StdEncoding.EncodeToString(tooLarge),
+	})
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("error = %v, want size rejection", err)
+	}
+}
+
+func TestRegisterRenderedImageAssetRejectsUnsafeRelativeFilePath(t *testing.T) {
+	_, err := registerRenderedImageAsset(context.Background(), &fakeRenderedImageRegistrar{}, nil, "user-1", "project-1", "task-1", renderedImageInput{
+		Name:     "cover.png",
+		FilePath: "../secret.png",
+	})
+	if err == nil || !strings.Contains(err.Error(), "absolute server-local path") {
+		t.Fatalf("error = %v, want server-local absolute path rejection", err)
+	}
+}
+
+func tinyPNGBytes() []byte {
+	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+	return data
 }
 
 func TestRunImageVerificationAssociatesUnderstandingChargeWithTask(t *testing.T) {

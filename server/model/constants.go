@@ -53,6 +53,7 @@ const (
 const (
 	ScopeArticle   = "article"
 	ScopeSeednote  = "seednote"
+	ScopeMoments   = "moments"
 	ScopeEcommerce = "ecommerce"
 	ScopeVideo     = "video"
 )
@@ -84,6 +85,7 @@ const (
 const (
 	PlatformArticle   = "article"
 	PlatformSeednote  = "seednote"
+	PlatformMoments   = "moments"
 	PlatformEcommerce = "ecommerce"
 	PlatformVideo     = "video"
 )

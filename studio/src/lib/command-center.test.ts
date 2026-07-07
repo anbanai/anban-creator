@@ -171,6 +171,9 @@ describe('command center rules', () => {
       type: 'article',
       projectId: 'project-1',
     })).toBe('/tasks?create=true&type=article&project_id=project-1')
+    expect(createTaskHref({ type: 'moments', projectId: 'moments-1', intent: 'new' })).toBe(
+      '/tasks?create=true&type=moments&project_id=moments-1&intent=new',
+    )
   })
 
   it('parses create intent params without leaking invalid values into forms', () => {
@@ -185,6 +188,12 @@ describe('command center rules', () => {
       type: undefined,
       projectId: undefined,
       intent: undefined,
+    })
+    expect(parseCreationIntent(new URLSearchParams('create=true&type=moments&project_id=moments-1&intent=new'))).toEqual({
+      shouldCreate: true,
+      type: 'moments',
+      projectId: 'moments-1',
+      intent: 'new',
     })
   })
 

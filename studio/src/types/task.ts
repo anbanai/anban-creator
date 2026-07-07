@@ -1,7 +1,7 @@
 import type { VideoTaskConfig } from './video'
 import type { CreditTransaction } from './credits'
 
-export type TaskType = 'seednote' | 'article' | 'ecommerce' | 'video'
+export type TaskType = 'seednote' | 'article' | 'moments' | 'ecommerce' | 'video'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection

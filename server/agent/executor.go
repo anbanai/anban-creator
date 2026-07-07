@@ -45,7 +45,7 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // (for the app library). Keeping them out of the prompt is what lets the three
 // channels never disagree (P2 contract).
 type UserPromptParams struct {
-	TaskType  string // model.PlatformArticle / model.PlatformSeednote
+	TaskType  string // model.PlatformArticle / model.PlatformSeednote / model.PlatformMoments / ...
 	Topic     string // user prompt; empty triggers autonomous research mode
 	Goal      string // goal-mode condition; empty = no /goal prefix
 	TaskID    string // injected as task_id=<x> into the prompt body

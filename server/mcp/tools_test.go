@@ -263,6 +263,62 @@ func TestBuildAccountInfo_TaskProjectSnapshotWinsOverCurrentProject(t *testing.T
 	}
 }
 
+func TestBuildAccountInfo_MomentsProfileIncludesDeliveryContract(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := &model.Project{
+		ID:                uuid.New().String(),
+		UserID:            userID,
+		Platform:          model.PlatformMoments,
+		Name:              "私域朋友圈",
+		Status:            model.ProjectStatusActive,
+		Instructions:      "高信任成交内容",
+		Keywords:          "私域,成交,生活方式",
+		VisualStyle:       "归藏社交卡，Swiss editorial",
+		ReferenceImageURL: "/api/v1/files/ref-card.png",
+		ImageRatio:        "3:4",
+	}
+	if err := repo.Projects().Create(ctx, ch); err != nil {
+		t.Fatalf("create moments project: %v", err)
+	}
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: ch.ID,
+		Type:      model.PlatformMoments,
+		Status:    model.TaskStatusPending,
+	}
+	task.SetProjectSnapshot(model.SnapshotProject(ch))
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create moments task: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"project_id": ch.ID,
+		"scope":      "moments",
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	if got := info["platform"]; got != model.PlatformMoments {
+		t.Fatalf("platform = %v, want moments", got)
+	}
+	moments, ok := info["moments"].(map[string]any)
+	if !ok {
+		t.Fatalf("moments block missing or wrong type: %T", info["moments"])
+	}
+	artifacts, _ := moments["required_artifacts"].([]string)
+	if strings.Join(artifacts, ",") != "material-analysis.md,content.md,quality-review.md" {
+		t.Fatalf("required artifacts = %#v", artifacts)
+	}
+	if moments["image_skill"] != "guizang-social-card" {
+		t.Fatalf("image_skill = %v, want guizang-social-card", moments["image_skill"])
+	}
+}
+
 // TestBuildAccountInfo_TaskStyleEmpty_FallsBackToProject: task_id supplied but the
 // task carries no VisualStyle override → project visual_style wins, source "project".
 func TestBuildAccountInfo_TaskStyleEmpty_FallsBackToProject(t *testing.T) {

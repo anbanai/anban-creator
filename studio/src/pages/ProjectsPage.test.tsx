@@ -94,4 +94,16 @@ describe('ProjectsPage deletion feedback', () => {
       expect(errorMock).toHaveBeenCalledWith('cannot delete project with 13 associated tasks; archive it instead')
     })
   })
+
+  it('opens moments project creation intent with the Guizang social-card visual style preset', async () => {
+    window.history.pushState({}, '', '/projects?return_to=/tasks&create=true&type=moments&intent=new')
+    render(<ProjectsPage />)
+
+    expect(await screen.findByText('朋友圈')).toBeInTheDocument()
+    const styleField = await screen.findByPlaceholderText(/描述朋友圈社交卡片/)
+    fireEvent.click(await screen.findByRole('button', { name: '归藏社交卡' }))
+
+    expect((styleField as HTMLTextAreaElement).value).toContain('归藏社交卡')
+    expect((styleField as HTMLTextAreaElement).value).toContain('Guizang social card')
+  })
 })

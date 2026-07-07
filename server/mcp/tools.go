@@ -107,7 +107,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"status":   map[string]any{"type": "string", "enum": []any{"active", "archived"}, "description": "Filter by status"},
-				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote"}, "description": "Filter by platform type"},
+				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "video"}, "description": "Filter by platform type"},
 			},
 		},
 	}, projectListHandler)
@@ -131,7 +131,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "ecommerce", "video"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "video"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, reads the task's frozen project_snapshot so historical tasks stay reproducible. The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists."},
 			},
 			"required": []any{"project_id"},
@@ -413,6 +413,27 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		// For seednote, style is a visual/image style description used for image prompt generation.
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
+		}
+	case "moments":
+		info["image_config"] = map[string]any{
+			"reference_image_url": ch.ReferenceImageURL,
+			"default_ratio":       firstNonEmpty(ch.ImageRatio, "3:4"),
+			"optional_skill":      "guizang-social-card",
+		}
+		info["moments"] = map[string]any{
+			"required_artifacts": []string{
+				"material-analysis.md",
+				"content.md",
+				"quality-review.md",
+			},
+			"method": []string{
+				"六类素材：发售、人设、产品、案例、生活、认知",
+				"四层提炼：观点层、框架层、风格层、人设层",
+			},
+			"image_skill":       "guizang-social-card",
+			"auto_publish":      false,
+			"scheduled_plans":   false,
+			"falsification_ban": "不伪造客户案例、成交数据、用户反馈",
 		}
 	case "ecommerce":
 		// E-commerce: surface the package config (selected modules, target

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
+
+var ErrUnsupportedPlanPlatform = errors.New("plans are not supported for this project platform")
 
 // PlanService handles plan CRUD and lifecycle operations.
 type PlanService struct {
@@ -150,13 +153,14 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
 	}
-	// E-commerce projects can't back plans: e-commerce tasks require per-task
-	// product photos + module selection, none of which a plan can supply. Reject up front so an
-	// API/legacy plan referencing an e-commerce project fails fast here instead
-	// of silently no-op'ing (and re-firing every check) at spawn time — see
-	// TaskService.CreateFromPlan, where taskType resolves to the project platform.
-	if project.Platform == model.PlatformEcommerce {
-		return nil, fmt.Errorf("plans are not supported for e-commerce projects")
+	// Package-priced or one-off-only platforms can't back plans. Reject up front
+	// so API/MCP callers fail fast instead of creating schedules the task runner
+	// should never execute for that platform.
+	switch project.Platform {
+	case model.PlatformEcommerce:
+		return nil, fmt.Errorf("plans are not supported for e-commerce projects: %w", ErrUnsupportedPlanPlatform)
+	case model.PlatformMoments:
+		return nil, fmt.Errorf("plans are not supported for moments projects: %w", ErrUnsupportedPlanPlatform)
 	}
 
 	nextRun, err := s.computeNextRun(p.CronExpr)
