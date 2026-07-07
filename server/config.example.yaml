@@ -33,6 +33,9 @@ storage:
   bucket_name: "anbancreator"
   region: "cn-chengdu"
   custom_domain: "${ANBAN_OSS_CDN_DOMAIN}"
+  sts_role_arn: "${ANBAN_OSS_STS_ROLE_ARN}"
+  sts_session_name: "anban-direct-upload"
+  sts_endpoint: "${ANBAN_OSS_STS_ENDPOINT}"
   direct_upload_expires_seconds: 900
   local_data_dir: "./data/files"
 
