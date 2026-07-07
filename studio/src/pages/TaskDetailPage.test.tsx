@@ -480,7 +480,7 @@ describe('TaskDetailPage', () => {
         references: [{ type: 'text', text: '不要卡通化' }],
         hard_constraints: { ratio: '9:16' },
       },
-      video_config: undefined,
+      video_config: {},
       result: { files: null, output: '' },
     }))
 
@@ -490,6 +490,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText(/不要卡通化/)).toBeInTheDocument()
     expect(screen.getByText('9:16')).toBeInTheDocument()
     expect(screen.queryByText('Agent 解析结果')).not.toBeInTheDocument()
+    expect(screen.queryByText('视频模型')).not.toBeInTheDocument()
     expect(screen.queryByText('人物 / 主体')).not.toBeInTheDocument()
     expect(screen.queryByText('目标受众')).not.toBeInTheDocument()
     expect(screen.queryByText('核心信息')).not.toBeInTheDocument()
