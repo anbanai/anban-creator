@@ -113,7 +113,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	}
 	llm := s.llmForUser(ctx, req.UserID)
 	if llm == nil {
-		return aiEntryError("模型配置不可用：请先配置 writing 模型路由或用户文本模型。"), nil
+		return aiEntryNeedsConfiguration("模型配置不可用：请先配置 writing 模型路由或用户文本模型。", "/settings#model-key-settings"), nil
 	}
 
 	intent, parseErr := s.parseIntent(ctx, llm, project, req)

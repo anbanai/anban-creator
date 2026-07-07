@@ -366,7 +366,7 @@ func TestAIEntryServiceSubmitRequiresLLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusError || !strings.Contains(result.Message, "模型") {
-		t.Fatalf("result = %#v, want model configuration error", result)
+	if result.Status != AIEntryStatusNeedsConfiguration || !strings.Contains(result.Message, "模型") || result.ActionURL == "" {
+		t.Fatalf("result = %#v, want model configuration action", result)
 	}
 }

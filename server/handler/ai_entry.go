@@ -63,7 +63,7 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 		if req.Attachments[i].URL == "" {
 			continue
 		}
-		if !validAIEntryAttachmentURL(req.Attachments[i].URL) {
+		if !validAIEntryAttachmentURL(req.Attachments[i].URL, h.pending != nil) {
 			return Error(c, fiber.StatusBadRequest, "attachment URLs must be internal file paths or http(s) URLs")
 		}
 		urls = append(urls, req.Attachments[i].URL)
@@ -240,14 +240,19 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func validAIEntryAttachmentURL(raw string) bool {
+func validAIEntryAttachmentURL(raw string, allowPendingUploadURL bool) bool {
 	if raw == "" {
 		return true
 	}
 	if len(raw) > 2048 {
 		return false
 	}
-	return strings.HasPrefix(raw, "/api/v1/files/") ||
-		strings.HasPrefix(raw, "/files/") ||
-		referenceURLPattern.MatchString(raw)
+	if strings.HasPrefix(raw, "/api/v1/files/") || strings.HasPrefix(raw, "/files/") {
+		return true
+	}
+	if !allowPendingUploadURL {
+		return false
+	}
+	cut := strings.SplitN(strings.SplitN(raw, "#", 2)[0], "?", 2)[0]
+	return strings.Contains(cut, "/uploads/pending/")
 }
