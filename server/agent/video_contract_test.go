@@ -59,14 +59,59 @@ func TestVideoEditorAgentStaysOnEditingWorkflow(t *testing.T) {
 		"final.mp4",
 		"preview.mp4",
 		"不得调用 Seedance",
+		"禁止调用 Claude `Agent` 工具",
+		"prepare_workspace(content_type=\"video\"",
+		"prepare_file_upload",
+		"create_video_asr_task",
+		"prepare_video_transcript_download",
+		"save-asr-result",
+		"pack-transcripts",
+		"match-script",
+		"takes_packed.md",
+		"edit-candidates.json",
+		"word boundaries",
+		"setpts=PTS-STARTPTS+T/TB",
+		"subtitles are applied LAST",
+		"display rotation",
+		"Source Han Sans",
+		"draft",
+		"自然语言确认剪辑策略",
+		"project.md",
+		"submit_agent_feedback(agent_name=\"videoeditor\"",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("videoeditor.md missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"create_video_generation_task", "download_video_generation_result"} {
+	for _, forbidden := range []string{
+		"create_video_generation_task",
+		"download_video_generation_result",
+		"create_video_generation_job",
+		"query_video_generation_job",
+		"download_video_generation_results",
+		"compose_video_segments",
+		"validate_video_delivery",
+	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("videoeditor.md should not include video generation tool %q", forbidden)
+		}
+	}
+
+	codexAgent := readRepoFile(t, "../../codex/agents/videoeditor.toml")
+	for _, want := range []string{
+		`name = "videoeditor"`,
+		"skills/video-use/SKILL.md",
+		"prepare_file_upload",
+		"prepare_video_transcript_download",
+		"save-asr-result",
+		"pack-transcripts",
+		"match-script",
+		"subtitles are applied LAST",
+		"setpts=PTS-STARTPTS+T/TB",
+		"submit_agent_feedback(agent_name=\"videoeditor\"",
+	} {
+		if !strings.Contains(codexAgent, want) {
+			t.Fatalf("codex videoeditor.toml missing %q", want)
 		}
 	}
 }
