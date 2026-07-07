@@ -64,6 +64,14 @@ type aiEntryIntent struct {
 	} `json:"video"`
 }
 
+var aiEntryEcommerceModuleMax = map[string]int{
+	"main_images":  10,
+	"detail_page":  20,
+	"cover_banner": 5,
+	"share_image":  5,
+	"sku_images":   20,
+}
+
 func NewAIEntryService(repo repository.Repository, taskSvc *TaskService, llm LLMClient, logger *zerolog.Logger) *AIEntryService {
 	if logger == nil {
 		nop := zerolog.Nop()
@@ -125,8 +133,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		ProjectID:        req.ProjectID,
 		Prompt:           prompt,
 		Quantity:         1,
-		ImageRatio:       intent.ImageRatio,
-		ImageModelKey:    intent.ImageModelKey,
+		ImageRatio:       normalizeAIEntryImageRatio(intent.ImageRatio),
 		InputAttachments: normalizeEntryAttachments(req.Attachments),
 		ExecutionTarget:  normalizeAIEntryExecutionTarget(req.ExecutionTarget),
 	}
@@ -139,7 +146,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		if len(photos) == 0 {
 			return aiEntryNeedsConfiguration("创建电商任务需要至少上传一张产品图。", "/projects/"+project.ID), nil
 		}
-		modules := intent.SelectedModules
+		modules := normalizeAIEntrySelectedModules(intent.SelectedModules)
 		if len(modules) == 0 {
 			modules = project.EcommerceDefaults.Data().DefaultSelectedModules
 		}
@@ -158,8 +165,8 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			Brief:      prompt,
 			References: videoReferencesFromEntryAttachments(req.Attachments),
 			HardConstraints: model.VideoHardConstraints{
-				Ratio:     intent.Video.Ratio,
-				Duration:  intent.Video.Duration,
+				Ratio:     normalizeAIEntryVideoRatio(intent.Video.Ratio),
+				Duration:  normalizeAIEntryVideoDuration(intent.Video.Duration),
 				Watermark: intent.Video.Watermark,
 			},
 		}
@@ -205,7 +212,6 @@ func (s *AIEntryService) parseIntent(ctx context.Context, llm LLMClient, project
   "target_platform": "电商平台，可选",
   "language": "语言，可选",
   "image_ratio": "3:4|1:1|4:3|16:9，可选",
-  "image_model_key": "图片模型 key，可选",
   "video": {"ratio": "9:16|16:9|1:1，可选", "duration": 12}
 }
 缺失字段请省略。`)
@@ -311,6 +317,52 @@ func normalizeAIEntryExecutionTarget(target string) string {
 	default:
 		return model.ExecutionTargetCloud
 	}
+}
+
+func normalizeAIEntryImageRatio(ratio string) string {
+	ratio = strings.TrimSpace(ratio)
+	if model.ValidImageRatios[ratio] {
+		return ratio
+	}
+	return ""
+}
+
+func normalizeAIEntrySelectedModules(modules map[string]int) map[string]int {
+	if len(modules) == 0 {
+		return nil
+	}
+	out := map[string]int{}
+	for key, qty := range modules {
+		key = strings.TrimSpace(key)
+		maxQty, ok := aiEntryEcommerceModuleMax[key]
+		if !ok || qty <= 0 {
+			continue
+		}
+		if qty > maxQty {
+			qty = maxQty
+		}
+		out[key] = qty
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeAIEntryVideoRatio(ratio string) string {
+	switch strings.TrimSpace(ratio) {
+	case "9:16", "16:9", "1:1":
+		return strings.TrimSpace(ratio)
+	default:
+		return ""
+	}
+}
+
+func normalizeAIEntryVideoDuration(duration int64) int64 {
+	if duration < 1 || duration > 600 {
+		return 0
+	}
+	return duration
 }
 
 func firstImageAttachmentURL(attachments []model.EntryAttachment) string {

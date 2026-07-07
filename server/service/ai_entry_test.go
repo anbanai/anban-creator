@@ -86,6 +86,41 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	}
 }
 
+func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	llm := &fakeAIEntryLLM{responses: []string{
+		`{"prompt":"写一篇新品发布文章","image_ratio":"2:1","image_model_key":"custom"}`,
+	}}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID:    userID,
+		ProjectID: projectID,
+		Channel:   "studio",
+		Text:      "写一篇新品发布文章",
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || result.Task == nil {
+		t.Fatalf("result = %#v, want created task", result)
+	}
+	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.ImageRatio != "" {
+		t.Fatalf("image_ratio = %q, want invalid LLM ratio dropped", found.ImageRatio)
+	}
+	if found.ImageModelKey != "" {
+		t.Fatalf("image_model_key = %q, want LLM model key ignored", found.ImageModelKey)
+	}
+}
+
 func TestAIEntryServiceSubmitNeedsConfigurationForEcommerceWithoutProductImage(t *testing.T) {
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -119,6 +154,88 @@ func TestAIEntryServiceSubmitNeedsConfigurationForEcommerceWithoutProductImage(t
 	if total != 0 || len(tasks) != 0 {
 		t.Fatalf("created tasks = %d/%d, want none", len(tasks), total)
 	}
+}
+
+func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
+	t.Run("falls back to minimum legal default when parsed modules are invalid", func(t *testing.T) {
+		taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+		ctx := context.Background()
+		userID := uuid.NewString()
+		projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
+		llm := &fakeAIEntryLLM{responses: []string{
+			`{"prompt":"做一套保温杯主图","selected_modules":{"bogus":9,"main_images":0}}`,
+		}}
+		logger := zerolog.New(io.Discard)
+		entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+
+		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+			UserID:    userID,
+			ProjectID: projectID,
+			Channel:   "studio",
+			Text:      "做一套保温杯主图",
+			Attachments: []model.EntryAttachment{{
+				Type:        "image",
+				URL:         "https://cdn.example.com/product.png",
+				FileName:    "product.png",
+				ContentType: "image/png",
+				Size:        123,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		if result.Status != AIEntryStatusCreated || result.Task == nil {
+			t.Fatalf("result = %#v, want created task", result)
+		}
+		found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+		if err != nil {
+			t.Fatalf("find task: %v", err)
+		}
+		modules := found.Ecommerce.Data().SelectedModules
+		if len(modules) != 1 || modules["main_images"] != 1 {
+			t.Fatalf("selected modules = %#v, want minimum main_images default", modules)
+		}
+	})
+
+	t.Run("caps parsed module quantities to Studio-supported limits", func(t *testing.T) {
+		taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+		ctx := context.Background()
+		userID := uuid.NewString()
+		projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
+		llm := &fakeAIEntryLLM{responses: []string{
+			`{"prompt":"做一套保温杯商详","selected_modules":{"detail_page":99,"share_image":2}}`,
+		}}
+		logger := zerolog.New(io.Discard)
+		entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+
+		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+			UserID:    userID,
+			ProjectID: projectID,
+			Channel:   "studio",
+			Text:      "做一套保温杯商详",
+			Attachments: []model.EntryAttachment{{
+				Type:        "image",
+				URL:         "https://cdn.example.com/product.png",
+				FileName:    "product.png",
+				ContentType: "image/png",
+				Size:        123,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		if result.Status != AIEntryStatusCreated || result.Task == nil {
+			t.Fatalf("result = %#v, want created task", result)
+		}
+		found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+		if err != nil {
+			t.Fatalf("find task: %v", err)
+		}
+		modules := found.Ecommerce.Data().SelectedModules
+		if len(modules) != 2 || modules["detail_page"] != 20 || modules["share_image"] != 2 {
+			t.Fatalf("selected modules = %#v, want capped detail_page and preserved share_image", modules)
+		}
+	})
 }
 
 func TestAIEntryServiceSubmitStoresVideoInputReferences(t *testing.T) {
@@ -164,6 +281,39 @@ func TestAIEntryServiceSubmitStoresVideoInputReferences(t *testing.T) {
 	}
 	if len(input.References) != 1 || input.References[0].Type != "video_url" || input.References[0].URL != "https://cdn.example.com/demo.mp4" {
 		t.Fatalf("video references = %#v", input.References)
+	}
+}
+
+func TestAIEntryServiceSubmitDropsInvalidVideoHardConstraints(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	llm := &fakeAIEntryLLM{responses: []string{
+		`{"prompt":"生成一条咖啡杯短视频","video":{"ratio":"2:1","duration":9999}}`,
+	}}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID:    userID,
+		ProjectID: projectID,
+		Channel:   "studio",
+		Text:      "生成一条咖啡杯短视频",
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || result.Task == nil {
+		t.Fatalf("result = %#v, want created video task", result)
+	}
+	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	input := found.VideoInput.Data()
+	if input.HardConstraints.Ratio != "" || input.HardConstraints.Duration != 0 {
+		t.Fatalf("video hard constraints = %#v, want invalid fields dropped", input.HardConstraints)
 	}
 }
 
