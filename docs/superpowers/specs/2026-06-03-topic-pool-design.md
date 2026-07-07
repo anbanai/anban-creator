@@ -2,9 +2,9 @@
 
 ## Context
 
-AI-generated content tasks currently select topics in two ways: the user provides a prompt/topic hint, or the AI autonomously researches and generates a topic via `research_topics`. There is no persistent topic queue — AI-generated topic candidates are discarded after each run.
+AI-generated content tasks currently select topics in two ways: the user provides a prompt/topic hint, or the agent autonomously researches and generates a topic through the writing Skills workflow. There is no persistent topic queue — AI-generated topic candidates are discarded after each run.
 
-This feature adds a user-managed "topic pool" (选题池) per channel. Users manually add topic text to the pool. When a plan triggers task creation, the system claims an unused topic from the pool instead of requiring AI research. When the pool is empty, the system falls back to existing AI research behavior.
+This feature adds a user-managed "topic pool" (选题池) per channel. Users manually add topic text to the pool. When a plan triggers task creation, the system claims an unused topic from the pool instead of requiring AI research. When the pool is empty, the system falls back to the Skills-side topic research behavior.
 
 ## Data Model
 

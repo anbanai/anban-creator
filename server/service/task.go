@@ -32,8 +32,6 @@ type PublishedTrackingService interface {
 // TypeContentGenerate is the Asynq task type for content generation.
 const TypeContentGenerate = "content:generate"
 
-const MinVideoCreationBalance = 100000
-
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
 	repo                  repository.Repository
@@ -370,9 +368,8 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	// E-commerce: merge the PROJECT's reusable e-commerce defaults (default
 	// modules, target platform, brand brief, image model key) into the task config
 	// with task-level explicit values winning. Product photos and selling points
-	// stay per-task. Done before billing so the package cost reflects the merged
-	// module selection. The project is the single source of truth — there is no
-	// template layer in the runtime resolution chain.
+	// stay per-task. Done before validation so selected modules are available to
+	// the agent; modules shape later MCP usage, not the creation-time base fee.
 	effectiveImageModelKey := p.ImageModelKey
 	if taskType == model.PlatformEcommerce {
 		projEc := project.EcommerceDefaults.Data()
@@ -408,6 +405,15 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 		videoPlan = &resolved
 	}
+	if taskType == model.PlatformEcommerce {
+		// E-commerce creates one deliverable package task. Selected modules
+		// influence later image/vision MCP usage; creation deducts only the
+		// configured base task service fee when billing is enabled.
+		quantity = 1
+		if p.Ecommerce == nil || len(p.Ecommerce.SelectedModules) == 0 {
+			return nil, fmt.Errorf("ecommerce task requires at least one selected module")
+		}
+	}
 
 	// Pre-calculate total credit cost and deduct upfront to avoid race conditions.
 	var deductedTaskIDs []string
@@ -419,46 +425,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	if s.creditSvc != nil {
-		if taskType == model.PlatformEcommerce {
-			// E-commerce is billed as a single deliverable package whose cost is
-			// the sum of selected module unit prices × quantities (see
-			// CreditService.EcommercePackageCost). Quantity is forced to 1 (one
-			// package per task); the goal-mode multiplier does not apply.
-			quantity = 1
-			if p.Ecommerce == nil || len(p.Ecommerce.SelectedModules) == 0 {
-				return nil, fmt.Errorf("ecommerce task requires at least one selected module")
-			}
-			packageCost, known := s.creditSvc.EcommercePackageCost(p.Ecommerce.SelectedModules)
-			if !known {
-				return nil, fmt.Errorf("unknown ecommerce module selected")
-			}
-			if packageCost <= 0 {
-				return nil, fmt.Errorf("ecommerce package cost must be positive")
-			}
-			taskID := generateTaskID()
-			if _, err := s.creditSvc.DeductForTaskWithAmount(ctx, p.UserID, taskType, taskID, packageCost); err != nil {
-				if errors.Is(err, ErrInsufficientCredits) {
-					return nil, fmt.Errorf("积分不足: %w", err)
-				}
-				return nil, fmt.Errorf("deduct credits: %w", err)
-			}
-			deductedTaskIDs = []string{taskID}
-		} else if taskType == model.PlatformVideo {
-			if videoPlan == nil || videoPlan.EstimatedCredits <= 0 {
-				return nil, fmt.Errorf("video estimated credits must be positive")
-			}
-			if err := s.requireVideoCreationBalance(ctx, p.UserID); err != nil {
-				return nil, err
-			}
-			taskID := generateTaskID()
-			if _, err := s.creditSvc.DeductForTaskWithAmount(ctx, p.UserID, taskType, taskID, videoPlan.EstimatedCredits); err != nil {
-				if errors.Is(err, ErrInsufficientCredits) {
-					return nil, fmt.Errorf("积分不足: %w", err)
-				}
-				return nil, fmt.Errorf("deduct credits: %w", err)
-			}
-			deductedTaskIDs = []string{taskID}
-		} else {
+		if taskType == model.PlatformVideo && videoPlan == nil {
+			return nil, fmt.Errorf("video generation plan is required")
+		}
+		{
 			cost, ok := s.creditSvc.TaskCost(taskType)
 			if !ok {
 				return nil, fmt.Errorf("unknown task type: %s", taskType)
@@ -574,9 +544,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			vc := videoTaskConfigFromPlan(*videoPlan)
 			task.SetVideoConfig(vc)
 			task.VideoEstimatedCredits = videoPlan.EstimatedCredits
-			if s.creditSvc != nil {
-				task.VideoCreditsCharged = videoPlan.EstimatedCredits
-			}
+			task.VideoCreditsCharged = 0
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -733,20 +701,6 @@ func videoTaskSegmentsFromPlan(segments []VideoGenerationSegmentPlan) []model.Vi
 	return out
 }
 
-func (s *TaskService) requireVideoCreationBalance(ctx context.Context, userID string) error {
-	if s == nil || s.creditSvc == nil {
-		return nil
-	}
-	balance, err := s.creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("check video credit balance: %w", err)
-	}
-	if balance < MinVideoCreationBalance {
-		return fmt.Errorf("video tasks require at least %d credits: %w: %w", MinVideoCreationBalance, ErrMinimumVideoBalance, ErrInsufficientCredits)
-	}
-	return nil
-}
-
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
 //
 // The plan's scheduling-adjacent "what to produce" params (image model,
@@ -810,28 +764,11 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	if s.creditSvc != nil {
-		if taskType == model.PlatformVideo {
-			if planVideoConfig == nil || planVideoConfig.EstimatedCredits <= 0 {
-				s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping video plan task without estimated credits")
-				return nil, nil
-			}
-			if err := s.requireVideoCreationBalance(ctx, plan.UserID); err != nil {
-				if errors.Is(err, ErrInsufficientCredits) {
-					s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping video plan task due to minimum balance")
-					return nil, nil
-				}
-				s.logger.Error().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("failed to check video plan task minimum balance")
-				return nil, nil
-			}
-			if _, err := s.creditSvc.DeductForTaskWithAmount(ctx, plan.UserID, taskType, taskID, planVideoConfig.EstimatedCredits); err != nil {
-				if errors.Is(err, ErrInsufficientCredits) {
-					s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task due to insufficient credits")
-					return nil, nil
-				}
-				s.logger.Error().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("failed to deduct credits for video plan task")
-				return nil, nil
-			}
-		} else if _, costOK := s.creditSvc.TaskCost(taskType); !costOK {
+		if taskType == model.PlatformVideo && planVideoConfig == nil {
+			s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping video plan task without resolved video config")
+			return nil, nil
+		}
+		if _, costOK := s.creditSvc.TaskCost(taskType); !costOK {
 			s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task with unknown task type")
 			return nil, nil
 		} else if _, err := s.creditSvc.DeductForTask(ctx, plan.UserID, taskType, taskID, planMultiplier); err != nil {
@@ -869,9 +806,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if planVideoConfig != nil {
 		task.SetVideoConfig(*planVideoConfig)
 		task.VideoEstimatedCredits = planVideoConfig.EstimatedCredits
-		if s.creditSvc != nil {
-			task.VideoCreditsCharged = planVideoConfig.EstimatedCredits
-		}
+		task.VideoCreditsCharged = 0
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -1015,21 +950,42 @@ func normalizeTitleForDedup(title string) string {
 // Goal-mode tasks receive a proportional refund based on remaining attempts;
 // normal tasks receive a full refund.
 func (s *TaskService) Cancel(ctx context.Context, id string) error {
+	return s.cancel(ctx, id, "")
+}
+
+// CancelForUser cancels a task only when it belongs to userID.
+func (s *TaskService) CancelForUser(ctx context.Context, id, userID string) error {
+	if userID == "" {
+		return fmt.Errorf("user_id is required")
+	}
+	return s.cancel(ctx, id, userID)
+}
+
+func (s *TaskService) cancel(ctx context.Context, id, ownerUserID string) error {
 	// Fetch task before CAS so we can decide refund strategy.
 	task, taskErr := s.repo.Tasks().FindByID(ctx, id)
+	if taskErr != nil {
+		return fmt.Errorf("find task: %w", taskErr)
+	}
+	if ownerUserID != "" && task.UserID != ownerUserID {
+		return fmt.Errorf("task does not belong to user")
+	}
 
 	// Atomically transition status: only pending or running can be cancelled.
-	swapped, err := s.repo.Tasks().CompareAndSwapStatus(
-		ctx, id, model.TaskStatusRunning, model.TaskStatusCancelled,
-	)
+	swapStatus := func(expected string) (bool, error) {
+		if ownerUserID != "" {
+			return s.repo.Tasks().CompareAndSwapStatusForUser(ctx, id, ownerUserID, expected, model.TaskStatusCancelled)
+		}
+		return s.repo.Tasks().CompareAndSwapStatus(ctx, id, expected, model.TaskStatusCancelled)
+	}
+
+	swapped, err := swapStatus(model.TaskStatusRunning)
 	if err != nil {
 		return fmt.Errorf("cancel task: %w", err)
 	}
 	if !swapped {
 		// Also try pending → cancelled (task may not have started running yet).
-		swapped, err = s.repo.Tasks().CompareAndSwapStatus(
-			ctx, id, model.TaskStatusPending, model.TaskStatusCancelled,
-		)
+		swapped, err = swapStatus(model.TaskStatusPending)
 		if err != nil {
 			return fmt.Errorf("cancel task: %w", err)
 		}
@@ -1038,10 +994,10 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 		}
 	}
 	// Refund credits for the cancelled task (idempotent — double-refund protected).
-	if s.creditSvc != nil && taskErr == nil && task != nil {
+	if s.creditSvc != nil && task != nil {
 		s.refundTaskByMode(ctx, task, "取消")
 	}
-	if taskErr == nil && task != nil {
+	if task != nil {
 		if err := s.repo.Tasks().SetCompletedAt(ctx, id); err != nil {
 			s.logger.Error().Err(err).Str("task_id", id).Msg("failed to set completed_at on cancellation")
 		}
@@ -1050,7 +1006,7 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	// Release concurrency slot.
 	if s.pubsub != nil {
 		var projectID string
-		if taskErr == nil && task != nil {
+		if task != nil {
 			projectID = task.ProjectID
 		} else if t, err := s.repo.Tasks().FindByID(ctx, id); err == nil {
 			projectID = t.ProjectID

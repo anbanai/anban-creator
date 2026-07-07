@@ -165,7 +165,7 @@
     <!-- E-commerce package (ecommerce only): product photos + delivery modules -->
     <view class="task-create__section" v-if="isEcommerce">
       <text class="field-label">电商素材包</text>
-      <text class="field-hint">上传产品图，选择交付模块。积分按所选模块求和扣除，保证产品跨图一致。</text>
+      <text class="field-hint">上传产品图，选择交付模块。创建只扣基础任务费，后续图片生成和理解按实际用量结算。</text>
 
       <!-- Product photos (required) -->
       <view class="field-spacer">
@@ -336,7 +336,7 @@
     <view class="task-create__section">
       <view class="credit-info">
         <view class="credit-info__row">
-          <text class="credit-info__label">{{ isEcommerce ? '套餐费用预估' : '基础费用预估' }}</text>
+          <text class="credit-info__label">基础任务费</text>
           <text class="credit-info__value credit-info__value--cost">约 {{ estimatedCost }} 积分</text>
         </view>
         <view class="credit-info__row">
@@ -347,7 +347,7 @@
         </view>
       </view>
       <text v-if="!isEcommerce" class="field-hint">模型、图片、视频等 MCP 操作费用按实际用量另计。</text>
-      <text v-else class="field-hint">模块套餐不含后续模型、图片、视频等额外操作费用，最终以交易明细为准。</text>
+      <text v-else class="field-hint">交付模块会影响后续图片生成和理解操作用量，最终以交易明细汇总为准。</text>
       <text v-if="balance > 0 && balance < estimatedCost" class="field-error">积分不足，请先充值</text>
     </view>
 
@@ -403,6 +403,8 @@ const LANGUAGE_LABELS = ecommerceLanguageOptions.map((o) => o.label)
 const DEFAULT_TASK_COSTS: Record<string, number> = {
   article: 4000,
   seednote: 3600,
+  ecommerce: 3000,
+  video: 2000,
   viral_analysis: 1200,
 }
 
@@ -498,18 +500,6 @@ const languageLabel = computed(
   () => ecommerceLanguageOptions.find((o) => o.value === form.language)?.label || '',
 )
 
-// Credit cost for ecommerce = Σ price × qty over enabled modules (matches studio).
-const ecommerceCreditCost = computed(() => {
-  let total = 0
-  for (const mod of ecommerceModuleCatalog) {
-    const qty = form.selected_modules[mod.key] ?? 0
-    if (qty < 1) continue
-    const price = modulePrice(mod.key)
-    if (typeof price === 'number') total += price * qty
-  }
-  return total
-})
-
 async function chooseProductPhoto() {
   if (form.product_photos.length >= 16) {
     uni.showToast({ title: '最多上传 16 张产品图', icon: 'none' })
@@ -547,13 +537,12 @@ const selectedThemeName = computed(() => {
 
 const estimatedCost = computed(() => {
   if (!selectedProject.value) return 0
-  // Ecommerce bills by module (Σ price × qty), not per-task unit cost.
-  if (isEcommerce.value) return ecommerceCreditCost.value
   const costPerTask = pricing.value?.task_costs?.[selectedProject.value.platform]
     ?? DEFAULT_TASK_COSTS[selectedProject.value.platform]
     ?? 3600
   const multiplier = form.goal_mode ? 3 : 1
-  return costPerTask * form.quantity * multiplier
+  const billableQuantity = isEcommerce.value ? 1 : form.quantity
+  return costPerTask * billableQuantity * multiplier
 })
 
 const canSubmit = computed(() => {

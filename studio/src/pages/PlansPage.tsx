@@ -601,7 +601,7 @@ export default function PlansPage() {
                   playbooks={videoPlaybooks?.items ?? []}
                   modelsLoading={videoEstimateQuery.isLoading}
                   title="视频计划"
-                  minimumBalanceHint="视频任务需至少 100,000 积分余额；计划触发时也会再次检查。"
+                  minimumBalanceHint="视频任务需至少覆盖计划基础任务费；提交 video_gen 后按实际参数另计。"
                   promptField={(
                     <FormField control={form.control} name="prompt" render={({ field }) => (
                       <FormItem>
@@ -798,7 +798,7 @@ export default function PlansPage() {
                 return (
                   <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                     <p className="text-muted-foreground">
-                      每次执行基础费用：{cost}{multiplier > 1 ? ` × ${multiplier}` : ''} ={' '}
+                      每次执行基础任务费：{cost}{multiplier > 1 ? ` × ${multiplier}` : ''} ={' '}
                       <span className="font-medium text-foreground">{perRun.toLocaleString()}</span> 积分
                       {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
                     </p>

@@ -538,10 +538,12 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 		"references":    taskConfig.References,
 		"task_config":   taskConfig,
 		"pricing": map[string]any{
-			"credits_per_cny":         videoCreditMultiplier(),
-			"min_balance":             service.MinVideoCreationBalance,
-			"min_balance_description": "视频任务/计划创建和触发前需至少 100000 积分余额；实际扣费按动态估算费用。",
-			"estimate_rule":           "Server estimates credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",
+			"credits_per_cny":          videoCreditMultiplier(),
+			"base_task_fee_rule":       "Video task/plan creation deducts only credits.task_costs.video as the base service fee.",
+			"operation_billing_rule":   "create_video_generation_job/create_video_generation_task deduct video_gen operation credits independently when the provider job is submitted.",
+			"operation_refund_rule":    "If provider submission or persistence fails immediately, the video_gen operation deduction is refunded; task failure/cancel refunds only the base task fee.",
+			"estimate_rule":            "Server estimates video_gen credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",
+			"insufficient_credit_rule": "If balance cannot cover video_gen at execution time, the MCP operation fails and the task should stop with a recharge hint.",
 		},
 		"persistent_file_rule": "all server-persistent references and generated results must be OSS-backed task files; local agent files are temporary only",
 		"visual_anchor_generation": map[string]any{
@@ -627,7 +629,7 @@ func buildProjectAgentBrief(ch *model.Project, creativeConstraints string, usesP
 			defaults["model_key"], defaults["resolution"], defaults["ratio"], defaults["duration"], defaults["watermark"])
 	}
 	if pricing, ok := videoBlock["pricing"].(map[string]any); ok {
-		fmt.Fprintf(&b, "积分规则：创建/触发视频任务需余额至少 %v 积分，实际扣费以服务端动态估价为准。\n", pricing["min_balance"])
+		fmt.Fprintf(&b, "积分规则：创建/触发视频任务只扣基础任务服务费；提交 video_gen 时按服务端估价独立扣费。%v\n", pricing["insufficient_credit_rule"])
 	}
 	b.WriteString("模型规则：只能使用本 profile 返回的 video.model_catalog 与 video.policy.allowed_models 中的模型 key；未返回的模型不可使用。")
 	return b.String()
@@ -652,6 +654,7 @@ func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTo
 }
 
 func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
@@ -661,6 +664,9 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	task, err := svcs.TaskSvc.GetByID(context.Background(), taskID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("get task: %v", err)), nil
+	}
+	if userID != "" && task.UserID != userID {
+		return errorResult("task does not belong to user"), nil
 	}
 	var result any
 	if task.Result != nil && *task.Result != "" {
@@ -682,13 +688,20 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 }
 
 func taskCancelHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
 		return errorResult("task_id is required"), nil
 	}
 
-	if err := svcs.TaskSvc.Cancel(context.Background(), taskID); err != nil {
+	var err error
+	if userID == "" {
+		err = svcs.TaskSvc.Cancel(context.Background(), taskID)
+	} else {
+		err = svcs.TaskSvc.CancelForUser(context.Background(), taskID, userID)
+	}
+	if err != nil {
 		return errorResult(fmt.Sprintf("cancel task: %v", err)), nil
 	}
 	return textResult(map[string]any{"cancelled": true, "task_id": taskID})

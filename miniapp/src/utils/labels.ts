@@ -70,7 +70,7 @@ export const operationLabel: Record<string, string> = {
   poster_generation: '海报生成',
 }
 
-// 电商素材模块目录（key 对齐 server credits.ecommerce_module_prices）。
+// 电商素材模块目录（key 对齐 server credits.ecommerce_module_prices，用作交付规模预估）。
 // 字段与 studio ecommerceModuleCatalog 一致：可调数量 + 价格预览。
 export interface EcommerceModuleDef {
   key: string

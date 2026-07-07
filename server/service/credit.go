@@ -19,7 +19,6 @@ import (
 var (
 	ErrAlreadySignedIn     = errors.New("already signed in today")
 	ErrInsufficientCredits = errors.New("insufficient credits")
-	ErrMinimumVideoBalance = errors.New("minimum video balance not met")
 	ErrInvalidAmount       = errors.New("invalid credit amount")
 	ErrUnknownTaskType     = errors.New("unknown task type for credit costing")
 )
@@ -641,12 +640,10 @@ func (s *CreditService) RefundForOperationByID(ctx context.Context, operationID 
 	})
 }
 
-// DeductForTaskWithAmount deducts an explicit credit amount for a task whose
-// cost is computed from user-selected options rather than the fixed TaskCosts
-// table — e.g. an e-commerce package whose total is the sum of selected module
-// prices (see EcommercePackageCost). The deduction is recorded as a task_deduct
-// tied to taskID, so the amount-agnostic RefundForTask(taskID) refunds the exact
-// amount on failure without any change to the refund path.
+// DeductForTaskWithAmount deducts an explicit task_deduct amount for legacy or
+// exceptional paths that cannot use the fixed TaskCosts table. Normal task
+// creation, including e-commerce and video, should use DeductForTask/DeductBatch
+// so creation billing remains a base service fee.
 func (s *CreditService) DeductForTaskWithAmount(ctx context.Context, userID, taskType, taskID string, amount int) (int, error) {
 	if amount <= 0 {
 		return 0, ErrInvalidAmount
@@ -686,12 +683,9 @@ func (s *CreditService) DeductForTaskWithAmount(ctx context.Context, userID, tas
 	return newBalance, nil
 }
 
-// EcommercePackageCost sums the per-module unit price × quantity over the
-// selected deliverable modules. selected maps a module key (e.g. "main_images",
-// "detail_page", "sku_images") to its quantity. The boolean reports whether
-// every selected module had a configured price; unknown modules are skipped but
-// reported as false so the caller can reject the request rather than silently
-// under-charging.
+// EcommercePackageCost sums the per-module unit price × quantity over selected
+// deliverable modules for delivery-scale estimates. It is not used as the
+// creation-time charge; e-commerce creation deducts TaskCosts["ecommerce"].
 func (s *CreditService) EcommercePackageCost(selected map[string]int) (int, bool) {
 	total := 0
 	known := true
@@ -709,8 +703,8 @@ func (s *CreditService) EcommercePackageCost(selected map[string]int) (int, bool
 	return total, known
 }
 
-// EcommerceModulePrices returns the configured per-module unit prices, exposed
-// so the API can give the task-creation UI a real-time cost estimate.
+// EcommerceModulePrices returns configured per-module unit prices for delivery
+// scale estimates in UI and planning surfaces.
 func (s *CreditService) EcommerceModulePrices() map[string]int {
 	return s.cfg.EcommerceModulePrices
 }

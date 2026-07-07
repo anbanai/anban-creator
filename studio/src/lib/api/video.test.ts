@@ -40,7 +40,7 @@ describe('videoApi', () => {
               model_key: 'configured-video',
             },
             balance: 120000,
-            min_balance: 100000,
+            min_balance: 0,
             meets_min_balance: true,
           },
         })

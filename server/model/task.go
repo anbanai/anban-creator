@@ -29,9 +29,9 @@ type ProgressPayload struct {
 // SelectedModules maps a module key to its quantity:
 //   - main_images / detail_page / cover_banner / share_image / sku_images
 //
-// The task's credit cost is sum(module unit price × quantity) over this map, billed
-// once at creation via CreditService.DeductForTaskWithAmount and refunded on failure
-// via RefundForTask (amount-agnostic, keyed by task_id).
+// Task creation deducts the configured ecommerce base service fee. Selected
+// modules are delivery-scope hints for the agent and drive later MCP image/vision
+// operation usage, which is charged independently in credit_transactions.
 type EcommerceConfig struct {
 	SelectedModules map[string]int `json:"selected_modules,omitempty"`
 	ProductPhotos   []string       `json:"product_photos,omitempty"`

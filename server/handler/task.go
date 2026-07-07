@@ -95,7 +95,8 @@ type createTaskRequest struct {
 	ArticleWithContentImages *bool `json:"article_with_content_images,omitempty"`
 	// E-commerce package fields (project platform = "ecommerce"). SelectedModules
 	// maps a module key (main_images / detail_page / cover_banner / share_image /
-	// sku_images) to its quantity; the task cost = sum(unit price × quantity).
+	// sku_images) to its quantity; creation billing uses the ecommerce base task
+	// fee, and selected modules only guide later image/vision MCP usage.
 	// ProductPhotos are server-owned URLs (from /files/upload) materialized into
 	// the agent workspace by the executor.
 	ProductPhotos            []string               `json:"product_photos,omitempty"`
@@ -276,9 +277,6 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
-		if errors.Is(err, service.ErrMinimumVideoBalance) {
-			return Error(c, fiber.StatusPaymentRequired, "视频任务需至少 100000 积分余额")
-		}
 		if errors.Is(err, service.ErrVideoGenerationConfig) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
@@ -414,7 +412,7 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	if err := h.service.Cancel(c.Context(), id); err != nil {
+	if err := h.service.CancelForUser(c.Context(), id, userID); err != nil {
 		h.logger.Error().Err(err).Msg("cancel task failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to cancel task")
 	}
@@ -460,9 +458,6 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 	newTask, err := h.service.Clone(c.Context(), id)
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", id).Msg("clone task failed")
-		if errors.Is(err, service.ErrMinimumVideoBalance) {
-			return Error(c, fiber.StatusPaymentRequired, "视频任务需至少 100000 积分余额")
-		}
 		if errors.Is(err, service.ErrVideoGenerationConfig) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
@@ -740,7 +735,7 @@ func (h *TaskHandler) BulkCancel(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "not_cancellable"})
 			continue
 		}
-		if err := h.service.Cancel(c.Context(), id); err != nil {
+		if err := h.service.CancelForUser(c.Context(), id, userID); err != nil {
 			h.logger.Error().Err(err).Str("task_id", id).Msg("bulk cancel: task failed")
 			results = append(results, bulkTaskResult{ID: id, Reason: "failed"})
 			continue

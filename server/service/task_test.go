@@ -464,7 +464,81 @@ func TestTaskService_ListFiltersByPlanID(t *testing.T) {
 	}
 }
 
-func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesDynamicCredits(t *testing.T) {
+func TestTaskService_CreateManualEcommerceTaskChargesOnlyBaseFee(t *testing.T) {
+	repoForCredits := setupCreditTestRepo(t)
+	creditSvc := newPricedCreditService(repoForCredits)
+	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
+	creditSvc.repo = repo
+	ctx := context.Background()
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-ecommerce-base", CreditsBalance: 100_000}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "做一组咖啡杯电商图",
+		Quantity:  3,
+		Ecommerce: &model.EcommerceConfig{
+			SelectedModules: map[string]int{
+				"main_images": 5,
+				"detail_page": 10,
+			},
+			ProductPhotos: []string{"https://cdn.example.com/cup.png"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("created tasks = %d, want 1 ecommerce package task", len(tasks))
+	}
+	bal, err := creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	if bal != 100_000-3000 {
+		t.Fatalf("balance = %d, want base fee %d", bal, 100_000-3000)
+	}
+	tx, err := repo.Credits().FindDeductionByTaskID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task deduction: %v", err)
+	}
+	if tx.Amount != -3000 || tx.Type != model.CreditTypeTaskDeduct {
+		t.Fatalf("deduction = type %s amount %d, want task_deduct -3000", tx.Type, tx.Amount)
+	}
+}
+
+func TestTaskService_CreateManualEcommerceTaskForcesSinglePackageWithoutCreditService(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-ecommerce-no-credit"}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "做一组咖啡杯电商图",
+		Quantity:  5,
+		Ecommerce: &model.EcommerceConfig{
+			SelectedModules: map[string]int{"main_images": 5},
+			ProductPhotos:   []string{"https://cdn.example.com/cup.png"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("created tasks = %d, want 1 ecommerce package task", len(tasks))
+	}
+}
+
+func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesOnlyBaseFee(t *testing.T) {
 	repoForCredits := setupCreditTestRepo(t)
 	creditSvc := newPricedCreditService(repoForCredits)
 	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
@@ -522,15 +596,15 @@ func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesDynamicCredi
 	if vc.ModelKey != "seedance-2.0-mini" || vc.Model != "doubao-seedance-2-0-mini-260615" || vc.EstimatedCredits != 2480 {
 		t.Fatalf("video config = %+v", vc)
 	}
-	if found.VideoEstimatedCredits != 2480 || found.VideoCreditsCharged != 2480 {
-		t.Fatalf("task video credits = estimated %d charged %d", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	if found.VideoEstimatedCredits != 2480 || found.VideoCreditsCharged != 0 {
+		t.Fatalf("task video credits = estimated %d charged %d, want estimated 2480 and charged 0 at creation", found.VideoEstimatedCredits, found.VideoCreditsCharged)
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if bal != 200_000-2480 {
-		t.Fatalf("balance = %d, want %d", bal, 200_000-2480)
+	if bal != 200_000-2000 {
+		t.Fatalf("balance = %d, want base fee %d", bal, 200_000-2000)
 	}
 }
 
@@ -631,7 +705,7 @@ func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
 	}
 }
 
-func TestTaskService_CreateManualVideoTaskRequiresMinimumBalance(t *testing.T) {
+func TestTaskService_CreateManualVideoTaskOnlyRequiresBaseFeeBalance(t *testing.T) {
 	repoForCredits := setupCreditTestRepo(t)
 	creditSvc := newPricedCreditService(repoForCredits)
 	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
@@ -668,20 +742,23 @@ func TestTaskService_CreateManualVideoTaskRequiresMinimumBalance(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	_, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
 		UserID:    userID,
 		ProjectID: project.ID,
 		Prompt:    "生成一条咖啡杯种草视频",
 	})
-	if err == nil || !strings.Contains(err.Error(), "video tasks require at least 100000 credits") {
-		t.Fatalf("CreateManual error = %v, want minimum balance error", err)
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("created tasks = %d, want 1", len(tasks))
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if bal != 99_999 {
-		t.Fatalf("balance = %d, want unchanged 99999", bal)
+	if bal != 99_999-2000 {
+		t.Fatalf("balance = %d, want base fee %d", bal, 99_999-2000)
 	}
 }
 
@@ -736,8 +813,15 @@ func TestTaskService_CreateManualVideoTaskUsesConfiguredCreditMultiplier(t *test
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.VideoEstimatedCredits != 2976 || found.VideoCreditsCharged != 2976 {
-		t.Fatalf("task video credits = estimated %d charged %d, want 2976", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	if found.VideoEstimatedCredits != 2976 || found.VideoCreditsCharged != 0 {
+		t.Fatalf("task video credits = estimated %d charged %d, want estimated 2976 and charged 0 at creation", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	}
+	bal, err := creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	if bal != 200_000-2000 {
+		t.Fatalf("balance = %d, want base fee %d", bal, 200_000-2000)
 	}
 }
 
@@ -793,8 +877,15 @@ func TestTaskService_CreateManualVideoTaskAppliesUserBillingMultiplier(t *testin
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.VideoEstimatedCredits != 1488 || found.VideoCreditsCharged != 1488 {
-		t.Fatalf("task video credits = estimated %d charged %d, want 1488", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	if found.VideoEstimatedCredits != 1488 || found.VideoCreditsCharged != 0 {
+		t.Fatalf("task video credits = estimated %d charged %d, want estimated 1488 and charged 0 at creation", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	}
+	bal, err := creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	if bal != 200_000-2000 {
+		t.Fatalf("balance = %d, want base fee %d", bal, 200_000-2000)
 	}
 }
 
@@ -863,15 +954,15 @@ func TestTaskService_CreateFromPlanVideoTaskRecomputesCurrentBilling(t *testing.
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.VideoEstimatedCredits != 1488 || found.VideoCreditsCharged != 1488 {
-		t.Fatalf("task video credits = estimated %d charged %d, want current billing 1488", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	if found.VideoEstimatedCredits != 1488 || found.VideoCreditsCharged != 0 {
+		t.Fatalf("task video credits = estimated %d charged %d, want estimated 1488 and charged 0 at creation", found.VideoEstimatedCredits, found.VideoCreditsCharged)
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if bal != 200_000-1488 {
-		t.Fatalf("balance = %d, want %d", bal, 200_000-1488)
+	if bal != 200_000-2000 {
+		t.Fatalf("balance = %d, want base fee %d", bal, 200_000-2000)
 	}
 }
 

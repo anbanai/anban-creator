@@ -17,7 +17,8 @@ describe('video generation UX contracts', () => {
     expect(source).toContain('VideoEstimateSummary')
     expect(source).toContain('api.video.estimate')
     expect(source).not.toContain('model.display_name || model.key')
-    expect(source).toContain('视频任务需至少')
+    expect(source).toContain('基础任务费')
+    expect(source).toContain('video_gen')
   })
 
   it('plan creation uses server video estimate and reference assets', () => {
@@ -27,7 +28,8 @@ describe('video generation UX contracts', () => {
     expect(source).toContain('VideoEstimateSummary')
     expect(source).toContain('api.video.estimate')
     expect(source).not.toContain('model.display_name || model.key')
-    expect(source).toContain('视频任务需至少')
+    expect(source).toContain('基础任务费')
+    expect(source).toContain('video_gen')
   })
 
   it('task detail shows video results through generated file preview', () => {

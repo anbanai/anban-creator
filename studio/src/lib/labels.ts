@@ -294,8 +294,8 @@ export const platformRatioLabel: Record<string, string> = {
 
 // --- E-commerce module catalog ---
 // Keys match server credits.ecommerce_module_prices + model.EcommerceConfig.SelectedModules.
-// `defaultQty` is the suggested quantity when the module is toggled on; the live
-// credit estimate sums price × qty over the enabled modules using pricing data.
+// `defaultQty` is the suggested quantity when the module is toggled on; pricing
+// data is shown only as delivery-scale guidance, not the creation-time charge.
 
 export interface EcommerceModuleDef {
   key: string

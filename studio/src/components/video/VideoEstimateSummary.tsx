@@ -46,11 +46,12 @@ export function VideoEstimateSummary({
   }
 
   const afterBalance = estimate.balance - estimate.estimated_credits
+  const canCoverEstimate = estimate.balance >= estimate.estimated_credits
   return (
     <div className="space-y-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
       <div className="grid gap-2 text-xs sm:grid-cols-3">
         <div>
-          <p className="text-muted-foreground">预估费用</p>
+          <p className="text-muted-foreground">后续视频生成操作费</p>
           <p className="mt-0.5 text-sm font-semibold text-foreground">{formatCredits(estimate.estimated_credits)}</p>
         </div>
         <div>
@@ -58,18 +59,18 @@ export function VideoEstimateSummary({
           <p className="mt-0.5 text-sm font-semibold text-foreground">{formatCredits(estimate.balance)}</p>
         </div>
         <div>
-          <p className="text-muted-foreground">创建后余额</p>
+          <p className="text-muted-foreground">预计生成后余额</p>
           <p className="mt-0.5 text-sm font-semibold text-foreground">{formatCredits(afterBalance)}</p>
         </div>
       </div>
       <div className={`flex items-start gap-2 rounded-md px-2 py-1.5 text-xs ${
-        estimate.meets_min_balance ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-destructive/10 text-destructive'
+        canCoverEstimate ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-destructive/10 text-destructive'
       }`}>
-        {estimate.meets_min_balance ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+        {canCoverEstimate ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
         <span>
-          {estimate.meets_min_balance
-            ? `余额满足视频创建门槛：至少 ${formatCredits(estimate.min_balance)} 积分。`
-            : `视频任务需至少 ${formatCredits(estimate.min_balance)} 积分余额。`}
+          {canCoverEstimate
+            ? '余额可覆盖当前视频生成预估；实际在 MCP video_gen 提交时扣除。'
+            : '当前余额不足以覆盖当前视频生成预估；任务可创建，执行到 video_gen 时会提示充值。'}
         </span>
       </div>
       {estimate.pricing_breakdown && (

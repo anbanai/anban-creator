@@ -173,6 +173,22 @@ describe('TasksPage URL-driven recovery filters', () => {
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
-    expect(await screen.findByText(/基础费用：4000 × 1 =/)).toBeInTheDocument()
+    expect(await screen.findByText(/基础任务费：4000 × 1 =/)).toBeInTheDocument()
+  })
+
+  it('shows ecommerce creation as a base task fee instead of a module package charge', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([{
+      ...fixtures.project,
+      id: 'project-ecommerce',
+      platform: 'ecommerce',
+      name: '电商项目',
+    } as Project])
+
+    renderTasksPage('/tasks?create=true&type=ecommerce&project_id=project-ecommerce&intent=new')
+
+    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByText(/基础任务费：3000 × 1 =/)).toBeInTheDocument()
+    expect(screen.queryByText(/模块套餐预估/)).not.toBeInTheDocument()
+    expect(screen.getByText(/所选交付模块会影响后续图片生成和理解操作用量/)).toBeInTheDocument()
   })
 })

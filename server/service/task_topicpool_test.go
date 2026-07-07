@@ -309,6 +309,10 @@ func TestCreateManual_DoesNotClaimForEcommerce(t *testing.T) {
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  1,
+		Ecommerce: &model.EcommerceConfig{
+			SelectedModules: map[string]int{"main_images": 1},
+			ProductPhotos:   []string{"https://cdn.example.com/product.png"},
+		},
 		// Prompt empty, platform=ecommerce → must NOT claim.
 	})
 	if err != nil {

@@ -36,6 +36,7 @@ function transactionBadgeVariant(type: string) {
     case 'seo':
     case 'draft_publish':
     case 'outline':
+    case 'video_gen':
     case 'video_understanding':
       return 'destructive'
     default: return 'secondary'
@@ -302,8 +303,8 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
   const textOps = modelOps.filter(([op]) => op !== 'image_gen')
   const textModels = [...new Set(textOps.flatMap(([, models]) => Object.keys(models)))]
 
-  // E-commerce module unit prices (Σ module price × qty = package cost). Catalog
-  // supplies the Chinese label/ratio/unit; price comes from /credits/pricing.
+  // E-commerce module unit prices for delivery-scale estimates. Catalog supplies
+  // the Chinese label/ratio/unit; price comes from /credits/pricing.
   const ecommercePrices = pricing.ecommerce_module_prices
   const ecommerceRows = ecommercePrices
     ? ecommerceModuleCatalog
@@ -336,13 +337,15 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
           </AccordionContent>
         </AccordionItem>
 
-        {/* E-commerce module costs */}
+        {/* E-commerce module estimates */}
         {ecommerceRows.length > 0 && (
           <AccordionItem>
-            <AccordionTrigger>电商素材模块（按所选模块求和扣费）</AccordionTrigger>
+            <AccordionTrigger>电商素材模块（交付规模参考）</AccordionTrigger>
             <AccordionContent>
               <PricingTable rows={ecommerceRows} />
-              <p className="mt-2 text-xs text-muted-foreground">套餐价 = Σ（模块单价 × 数量）；模型、图片、视频等额外操作按实际用量另计。</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                创建电商任务只扣基础服务费；模块数量用于估算后续图片生成和理解操作规模，最终以交易明细汇总为准。
+              </p>
             </AccordionContent>
           </AccordionItem>
         )}

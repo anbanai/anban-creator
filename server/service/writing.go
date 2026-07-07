@@ -49,9 +49,9 @@ type usageTextLLMClient interface {
 
 // streamingLLMClient is the OPTIONAL streaming capability of an LLMClient. Real
 // OpenAI-compatible clients implement it; test fakes need not — callers detect
-// support via a type assertion and fall back to the blocking Complete path. Used
-// by write_article so a long generation streams progress to the client instead
-// of blocking on a single deadline.
+// support via a type assertion and fall back to the blocking Complete path.
+// Long article generation can stream progress to the client instead of blocking
+// on a single deadline.
 type streamingLLMClient interface {
 	CompleteStream(ctx context.Context, systemPrompt, userPrompt string, onDelta func(string)) (string, error)
 }
@@ -154,10 +154,10 @@ func (c *openaiLLMClient) CompleteResult(ctx context.Context, systemPrompt, user
 }
 
 // CompleteStream sends a system + user message and returns the accumulated
-// assistant text, invoking onDelta for each content chunk as it arrives. It is
-// the streaming capability used by write_article: a slow generation streams
-// progress to the client instead of blocking on a single deadline. If onDelta is
-// nil it behaves like Complete minus the per-call timeout.
+// assistant text, invoking onDelta for each content chunk as it arrives. Slow
+// generation can stream progress to the client instead of blocking on a single
+// deadline. If onDelta is nil it behaves like Complete minus the per-call
+// timeout.
 //
 // Streaming intentionally does NOT apply c.timeout: the whole point is that a
 // long generation stays alive chunk-by-chunk, bounded only by the caller's
@@ -167,7 +167,7 @@ func (c *openaiLLMClient) CompleteStream(ctx context.Context, systemPrompt, user
 	stream := c.client.Chat.Completions.NewStreaming(ctx, c.chatCompletionParams(systemPrompt, userPrompt))
 	// The stream owns the underlying HTTP response body; Close returns it to the
 	// transport pool. Idempotent (no-op once the decoder is drained), so defer is
-	// safe on every return path — without it every write_article leaks a conn.
+	// safe on every return path; without it every stream leaks a connection.
 	defer stream.Close()
 	var b strings.Builder
 	for stream.Next() {

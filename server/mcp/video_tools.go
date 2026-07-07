@@ -541,16 +541,16 @@ func createVideoGenerationTaskHandler(ctx context.Context, req *mcp.CallToolRequ
 	videoReq.Duration = plan.Duration
 	videoReq.Watermark = plan.Watermark
 	userID := getUserID(ctx)
-	if err := maybeDeductVideo(ctx, userID, videoReq.TaskID, plan.EstimatedCredits); err != nil {
+	operationID, err := maybeDeductVideo(ctx, userID, videoReq.TaskID, plan)
+	if err != nil {
 		return billingError("create video generation task", err), nil
 	}
 	result, err := svcs.VideoSvc.CreateTask(ctx, videoReq)
 	if err != nil {
-		_ = maybeRefundVideoOperation(ctx, videoReq.TaskID)
+		_ = maybeRefundVideoOperation(ctx, operationID)
 		return billingError("create video generation task", err), nil
 	}
 	if err := persistVideoGenerationSubmitted(ctx, projectID, userID, videoReq.TaskID, result, plan); err != nil {
-		_ = maybeRefundVideoOperation(ctx, videoReq.TaskID)
 		return billingError("persist video generation", err), nil
 	}
 	return textResult(map[string]any{"task": result, "estimated_credits": plan.EstimatedCredits, "pricing_breakdown": plan.PricingBreakdown})
@@ -580,16 +580,18 @@ func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReque
 		return errorResult(err.Error()), nil
 	}
 	userID := getUserID(ctx)
-	if err := maybeDeductVideo(ctx, userID, videoReq.TaskID, plan.EstimatedCredits); err != nil {
+	operationID, err := maybeDeductVideo(ctx, userID, videoReq.TaskID, plan)
+	if err != nil {
 		return billingError("create video generation job", err), nil
 	}
 	gen, err := persistVideoGenerationJobPlanned(ctx, projectID, userID, videoReq.TaskID, plan)
 	if err != nil {
-		_ = maybeRefundVideoOperation(ctx, videoReq.TaskID)
+		_ = maybeRefundVideoOperation(ctx, operationID)
 		return billingError("persist video generation job", err), nil
 	}
 	repo := svcs.TaskSvc.Repository().VideoGenerations()
 	submitted := make([]map[string]any, 0, len(plan.Segments))
+	providerSubmitted := 0
 	for _, seg := range plan.Segments {
 		segmentReq := videoReq
 		segmentReq.Model = seg.Model
@@ -604,9 +606,13 @@ func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReque
 			gen.Status = "failed"
 			gen.ErrorMessage = err.Error()
 			_ = repo.Update(ctx, gen)
-			_ = maybeRefundVideoOperation(ctx, videoReq.TaskID)
+			if providerSubmitted == 0 {
+				_ = maybeRefundVideoOperation(ctx, operationID)
+				clearVideoGenerationChargeSnapshot(ctx, gen, videoReq.TaskID)
+			}
 			return billingError("create video generation segment", err), nil
 		}
+		providerSubmitted++
 		segment := &model.VideoGenerationSegment{
 			VideoGenerationID: gen.ID,
 			UserID:            userID,
@@ -626,7 +632,6 @@ func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReque
 			gen.Status = "failed"
 			gen.ErrorMessage = err.Error()
 			_ = repo.Update(ctx, gen)
-			_ = maybeRefundVideoOperation(ctx, videoReq.TaskID)
 			return billingError("persist video generation segment", err), nil
 		}
 		submitted = append(submitted, map[string]any{
@@ -1152,47 +1157,92 @@ func videoBillingOptions(ctx context.Context, userID string) service.VideoBillin
 	return service.VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
 }
 
-func maybeDeductVideo(ctx context.Context, userID, taskID string, credits int) error {
-	if credits <= 0 {
-		logBillingSkip(userID, model.CreditTypeVideoGen, "unpriced")
-		return nil
-	}
+func maybeDeductVideo(ctx context.Context, userID, taskID string, plan *service.VideoGenerationPlan) (string, error) {
 	if billSvc == nil || billSvc.creditSvc == nil {
 		logBillingSkip(userID, model.CreditTypeVideoGen, "no_credit_service")
-		return nil
+		return "", nil
 	}
 	if userID == "" || isAdminCall(ctx) {
 		logBillingSkip(userID, model.CreditTypeVideoGen, "admin_static_key")
-		return nil
+		return "", nil
 	}
 	if userID == "system" {
 		logBillingSkip(userID, model.CreditTypeVideoGen, "system_user")
-		return nil
+		return "", nil
+	}
+	if plan == nil {
+		return "", fmt.Errorf("video generation plan is required")
+	}
+	if plan.EstimatedCredits <= 0 {
+		return "", fmt.Errorf("video_gen estimated credits must be positive")
 	}
 	if err := validateBillingTask(ctx, userID, taskID); err != nil {
-		return err
+		return "", err
 	}
-	if taskID != "" && svcs != nil && svcs.TaskSvc != nil {
-		if task, err := svcs.TaskSvc.GetByID(ctx, taskID); err == nil && task.Type == model.PlatformVideo && task.VideoCreditsCharged > 0 {
-			return nil
+	provider := "volcengine_ark"
+	if billSvc.config != nil && strings.TrimSpace(billSvc.config.ModelRoutes.VideoGeneration.Provider) != "" {
+		provider = billSvc.config.ModelRoutes.VideoGeneration.Provider
+	}
+	priceSnapshot := map[string]any{}
+	if plan.PricingBreakdown != nil {
+		if data, err := json.Marshal(plan.PricingBreakdown); err == nil {
+			_ = json.Unmarshal(data, &priceSnapshot)
 		}
 	}
-	_, err := billSvc.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeVideoGen, credits, videoOperationID(taskID), taskID)
-	return err
+	tierMultiplier := 0.0
+	userMultiplier := 0.0
+	if plan.PricingBreakdown != nil {
+		tierMultiplier = plan.PricingBreakdown.TierMultiplier
+		userMultiplier = plan.PricingBreakdown.UserMultiplier
+	}
+	metadata := model.CreditTransactionMetadata{
+		Provider:       provider,
+		Model:          plan.Model,
+		Route:          "video_generation",
+		BaseCredits:    plan.EstimatedCredits,
+		TierMultiplier: tierMultiplier,
+		UserMultiplier: userMultiplier,
+		FinalCredits:   plan.EstimatedCredits,
+		PriceSnapshot:  priceSnapshot,
+	}
+	operationID := videoOperationID(taskID)
+	_, err := billSvc.creditSvc.DeductForOperationWithMetadata(ctx, userID, model.CreditTypeVideoGen, plan.EstimatedCredits, metadata, operationID, taskID)
+	return operationID, err
 }
 
-func maybeRefundVideoOperation(ctx context.Context, taskID string) error {
-	if billSvc == nil || billSvc.creditSvc == nil || taskID == "" {
+func maybeRefundVideoOperation(ctx context.Context, operationID string) error {
+	if billSvc == nil || billSvc.creditSvc == nil || operationID == "" {
 		return nil
 	}
-	return billSvc.creditSvc.RefundForOperationByID(ctx, videoOperationID(taskID), "视频生成提交失败退还")
+	return billSvc.creditSvc.RefundForOperationByID(ctx, operationID, "视频生成提交失败退还")
+}
+
+func clearVideoGenerationChargeSnapshot(ctx context.Context, gen *model.VideoGeneration, taskID string) {
+	if svcs == nil || svcs.TaskSvc == nil || svcs.TaskSvc.Repository() == nil {
+		return
+	}
+	repo := svcs.TaskSvc.Repository()
+	if gen != nil && repo.VideoGenerations() != nil {
+		gen.CreditsCharged = 0
+		_ = repo.VideoGenerations().Update(ctx, gen)
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return
+	}
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return
+	}
+	task.VideoCreditsCharged = 0
+	_ = repo.Tasks().Update(ctx, task)
 }
 
 func videoOperationID(taskID string) string {
+	suffix := time.Now().UnixNano()
 	if strings.TrimSpace(taskID) == "" {
-		return fmt.Sprintf("video_gen:%d", time.Now().UnixNano())
+		return fmt.Sprintf("video_gen:%d", suffix)
 	}
-	return "video_gen:" + taskID
+	return fmt.Sprintf("video_gen:%s:%d", strings.TrimSpace(taskID), suffix)
 }
 
 func rejectMCPModelSelection(args map[string]any, keys ...string) error {

@@ -28,7 +28,7 @@ func TestStartProgressHeartbeat_NoToken(t *testing.T) {
 	fake := &fakeNotifier{}
 	before := runtime.NumGoroutine()
 
-	stop := startProgressHeartbeat(context.Background(), fake, nil, "write_article", 10*time.Millisecond)
+	stop := startProgressHeartbeat(context.Background(), fake, nil, "render_template", 10*time.Millisecond)
 	if stop == nil {
 		t.Fatal("expected non-nil stop function even for no-op")
 	}
@@ -48,7 +48,7 @@ func TestStartProgressHeartbeat_NoToken(t *testing.T) {
 func TestStartProgressHeartbeat_NilSession(t *testing.T) {
 	before := runtime.NumGoroutine()
 
-	stop := startProgressHeartbeat(context.Background(), nil, "tok-1", "write_article", 10*time.Millisecond)
+	stop := startProgressHeartbeat(context.Background(), nil, "tok-1", "render_template", 10*time.Millisecond)
 	stop()
 
 	after := runtime.NumGoroutine()
@@ -61,7 +61,7 @@ func TestStartProgressHeartbeat_NilSession(t *testing.T) {
 // runaway ticker.
 func TestStartProgressHeartbeat_NonPositiveInterval(t *testing.T) {
 	fake := &fakeNotifier{}
-	stop := startProgressHeartbeat(context.Background(), fake, "tok-1", "write_article", 0)
+	stop := startProgressHeartbeat(context.Background(), fake, "tok-1", "render_template", 0)
 	stop()
 	if got := fake.calls.Load(); got != 0 {
 		t.Errorf("expected 0 calls for zero interval, got %d", got)
@@ -76,7 +76,7 @@ func TestStartProgressHeartbeat_FiresOnTick(t *testing.T) {
 	interval := 20 * time.Millisecond
 
 	before := runtime.NumGoroutine()
-	stop := startProgressHeartbeat(context.Background(), fake, "tok-1", "write_article", interval)
+	stop := startProgressHeartbeat(context.Background(), fake, "tok-1", "render_template", interval)
 
 	// Wait long enough for ~3 ticks. Generous slack so CI flake stays low.
 	time.Sleep(75 * time.Millisecond)
@@ -104,7 +104,7 @@ func TestStartProgressHeartbeat_StopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	before := runtime.NumGoroutine()
-	stop := startProgressHeartbeat(ctx, fake, "tok-1", "write_article", 20*time.Millisecond)
+	stop := startProgressHeartbeat(ctx, fake, "tok-1", "render_template", 20*time.Millisecond)
 	defer stop() // Defensive: stop() should also be safe to call after ctx cancel.
 
 	time.Sleep(30 * time.Millisecond) // at least one tick
@@ -125,7 +125,7 @@ func TestStartProgressHeartbeat_StopsOnContextCancel(t *testing.T) {
 // Regression guard for the close-on-already-closed-project panic.
 func TestStartProgressHeartbeat_StopIsIdempotent(t *testing.T) {
 	fake := &fakeNotifier{}
-	stop := startProgressHeartbeat(context.Background(), fake, "tok-1", "write_article", time.Second)
+	stop := startProgressHeartbeat(context.Background(), fake, "tok-1", "render_template", time.Second)
 
 	stop()
 	stop()

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -90,7 +89,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 	}
 }
 
-func TestCreatePlan_VideoMinimumBalanceReturnsPaymentRequired(t *testing.T) {
+func TestCreatePlan_VideoPlanAllowsLowBalanceWithoutLegacyMinimumGate(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -136,6 +135,7 @@ func TestCreatePlan_VideoMinimumBalanceReturnsPaymentRequired(t *testing.T) {
 	creditSvc := service.NewCreditService(repo, nil, &logger)
 	planSvc := service.NewPlanService(repo, &logger)
 	planSvc.SetCreditService(creditSvc)
+	planSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)
 	h := NewPlanHandler(planSvc, &logger)
 
 	app := fiber.New()
@@ -151,16 +151,7 @@ func TestCreatePlan_VideoMinimumBalanceReturnsPaymentRequired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	if resp.StatusCode != fiber.StatusPaymentRequired {
-		t.Fatalf("status = %d, want 402", resp.StatusCode)
-	}
-	var bodyResp struct {
-		Msg string `json:"msg"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&bodyResp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if bodyResp.Msg != "视频任务需至少 100000 积分余额" {
-		t.Fatalf("msg = %q, want video minimum balance hint", bodyResp.Msg)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }

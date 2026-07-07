@@ -121,7 +121,7 @@ func TestVideoEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T)
 	if body.Data.ResolvedConfig.ModelKey != "configured-video" || body.Data.EstimatedCredits != 5000 {
 		t.Fatalf("estimate = %+v", body.Data)
 	}
-	if body.Data.Balance != 120_000 || body.Data.MinBalance != service.MinVideoCreationBalance || !body.Data.MeetsMinBalance {
+	if body.Data.Balance != 120_000 || body.Data.MinBalance != 0 || !body.Data.MeetsMinBalance {
 		t.Fatalf("balance gate = %+v", body.Data)
 	}
 }

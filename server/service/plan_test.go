@@ -497,7 +497,7 @@ func TestPlanService_UpdateVideoConfigRevalidatesAndStoresSnapshot(t *testing.T)
 	}
 }
 
-func TestPlanService_CreateVideoPlanRequiresMinimumBalance(t *testing.T) {
+func TestPlanService_CreateVideoPlanDoesNotRequireLegacyMinimumBalance(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	creditSvc := newPricedCreditService(repo)
@@ -514,14 +514,17 @@ func TestPlanService_CreateVideoPlanRequiresMinimumBalance(t *testing.T) {
 	}
 	projectID := createTestVideoProject(t, repo, userID)
 
-	_, err := svc.Create(ctx, CreatePlanParams{
+	created, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    userID,
 		ProjectID: projectID,
 		CronExpr:  "0 9 * * *",
 		Prompt:    "计划生成视频",
 	})
-	if err == nil || !strings.Contains(err.Error(), "video tasks require at least 100000 credits") {
-		t.Fatalf("Create video plan error = %v, want minimum balance error", err)
+	if err != nil {
+		t.Fatalf("Create video plan: %v", err)
+	}
+	if created.VideoEstimatedCredits <= 0 {
+		t.Fatalf("video plan estimated credits = %d, want positive estimate", created.VideoEstimatedCredits)
 	}
 }
 

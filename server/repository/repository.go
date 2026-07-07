@@ -131,6 +131,7 @@ type TaskRepository interface {
 	// unclaimed local task.
 	ResetLocalTarget(ctx context.Context, taskID string) (bool, error)
 	CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error)
+	CompareAndSwapStatusForUser(ctx context.Context, taskID, userID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
 	ResetTerminalTaskForResume(ctx context.Context, taskID string) (bool, error)

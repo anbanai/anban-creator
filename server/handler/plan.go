@@ -168,9 +168,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
-		if errors.Is(err, service.ErrMinimumVideoBalance) {
-			return Error(c, fiber.StatusPaymentRequired, "视频任务需至少 100000 积分余额")
-		}
 		if errors.Is(err, service.ErrVideoGenerationConfig) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}

@@ -90,8 +90,9 @@ export interface CreditPricing {
     default_user_multiplier?: number
     minimum_charge_credits?: number
   }
-  // E-commerce module unit prices (key → credits per unit). A task's package
-  // cost = Σ(price × quantity) over selected_modules. Absent on older servers.
+  // E-commerce module unit prices for delivery-scale estimates. Creation
+  // billing uses task_costs.ecommerce; actual image/vision work is charged by
+  // MCP operation transactions.
   ecommerce_module_prices?: Record<string, number>
   income?: {
     daily_sign_in: number

@@ -404,6 +404,19 @@ func (r *taskRepository) CompareAndSwapStatus(ctx context.Context, taskID, expec
 	return result.RowsAffected > 0, nil
 }
 
+// CompareAndSwapStatusForUser atomically transitions task status only when the
+// task belongs to userID.
+func (r *taskRepository) CompareAndSwapStatusForUser(ctx context.Context, taskID, userID, expected, newStatus string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND user_id = ? AND status = ?", taskID, userID, expected).
+		Update("status", newStatus)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // CompareAndSwapStatusAndStartedAt atomically transitions status and sets started_at.
 func (r *taskRepository) CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error) {
 	result := r.db.WithContext(ctx).

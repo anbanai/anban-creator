@@ -12,16 +12,18 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
-// newPricedCreditService builds a CreditService wired with e-commerce module
-// prices, so EcommercePackageCost has something to sum and
-// DeductForTaskWithAmount can run end-to-end. It complements newTestCreditService,
-// which deliberately leaves prices unconfigured (to exercise the unknown-price path).
+// newPricedCreditService builds a CreditService wired with task base fees and
+// e-commerce module prices. Module prices remain available for delivery-scale
+// estimates, while task creation should deduct only TaskCosts.
 func newPricedCreditService(repo repository.Repository) *CreditService {
 	logger := zerolog.New(io.Discard)
 	return NewCreditService(repo, &config.CreditsConfig{
 		TaskCosts: map[string]int{
-			"article":  4000,
-			"seednote": 3600,
+			"article":        4000,
+			"seednote":       3600,
+			"ecommerce":      3000,
+			"video":          2000,
+			"viral_analysis": 1200,
 		},
 		EcommerceModulePrices: map[string]int{
 			"main_images":  1500,
@@ -71,8 +73,8 @@ func TestEcommercePackageCost(t *testing.T) {
 }
 
 // When module prices are not configured at all, EcommercePackageCost reports
-// every module as unknown rather than silently pricing it at 0 — so the task
-// creation path can reject an un-priced package instead of letting it run free.
+// every module as unknown rather than silently pricing it at 0. The helper is
+// retained for delivery-scale estimates, not task-creation billing.
 func TestEcommercePackageCost_UnconfiguredPrices(t *testing.T) {
 	repo := setupCreditTestRepo(t)
 	svc := newTestCreditService(repo) // no EcommerceModulePrices in config

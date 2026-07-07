@@ -149,10 +149,10 @@
             </view>
           </view>
 
-          <!-- E-commerce module costs -->
+          <!-- E-commerce module estimates -->
           <view v-if="ecommerceRows.length > 0" class="accordion-item">
             <view class="accordion-head" @tap="toggleSection('ecommerce')">
-              <text class="accordion-head__title">电商素材模块（按所选模块求和扣费）</text>
+              <text class="accordion-head__title">电商素材模块（交付规模参考）</text>
               <text class="accordion-head__arrow" :class="{ 'accordion-head__arrow--open': openSections.ecommerce }">›</text>
             </view>
             <view v-if="openSections.ecommerce" class="accordion-body">
@@ -165,7 +165,7 @@
                 <text class="price-row__label">{{ row.label }}</text>
                 <text class="price-row__value">{{ row.value }}</text>
               </view>
-              <text class="accordion-footnote">套餐价 = Σ（模块单价 × 数量）；模型、图片、视频等额外操作按实际用量另计。</text>
+              <text class="accordion-footnote">创建电商任务只扣基础服务费；模块数量用于估算后续图片生成和理解操作规模，最终以交易明细汇总为准。</text>
             </view>
           </view>
 

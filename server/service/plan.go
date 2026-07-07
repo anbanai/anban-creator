@@ -150,9 +150,8 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
 	}
-	// E-commerce projects can't back plans: e-commerce tasks are package-priced
-	// (sum of selected modules) and require per-task product photos + module
-	// selection, none of which a plan can supply. Reject up front so an
+	// E-commerce projects can't back plans: e-commerce tasks require per-task
+	// product photos + module selection, none of which a plan can supply. Reject up front so an
 	// API/legacy plan referencing an e-commerce project fails fast here instead
 	// of silently no-op'ing (and re-firing every check) at spawn time — see
 	// TaskService.CreateFromPlan, where taskType resolves to the project platform.
@@ -187,9 +186,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	}
 	var videoPlan *VideoGenerationPlan
 	if project.Platform == model.PlatformVideo {
-		if err := s.requireVideoCreationBalance(ctx, p.UserID); err != nil {
-			return nil, err
-		}
 		resolved, err := ResolveVideoGenerationPlanWithBilling(
 			videoRequestFromTaskConfig(p.Prompt, p.Video),
 			project.VideoDefaults.Data(),
@@ -236,20 +232,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	}
 
 	return plan, nil
-}
-
-func (s *PlanService) requireVideoCreationBalance(ctx context.Context, userID string) error {
-	if s == nil || s.creditSvc == nil {
-		return nil
-	}
-	balance, err := s.creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("check video credit balance: %w", err)
-	}
-	if balance < MinVideoCreationBalance {
-		return fmt.Errorf("video tasks require at least %d credits: %w: %w", MinVideoCreationBalance, ErrMinimumVideoBalance, ErrInsufficientCredits)
-	}
-	return nil
 }
 
 // GetByID returns a plan by its ID.

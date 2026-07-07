@@ -66,7 +66,7 @@ function PanelHarness() {
             risk_notes: ['文字建议后期加。'],
           },
         ]}
-        minimumBalanceHint="视频任务需至少 100,000 积分余额。"
+        minimumBalanceHint="创建只扣视频基础任务费；提交 video_gen 后按实际参数另计。"
         promptField={(
           <FormField control={form.control} name="prompt" render={({ field }) => (
             <FormItem>

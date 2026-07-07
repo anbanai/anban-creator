@@ -190,25 +190,6 @@ export default function TasksPage() {
     staleTime: 10 * 60 * 1000,
   })
 
-  // E-commerce package cost = Σ(module price × quantity), mirroring the server's
-  // CreditService.EcommercePackageCost. `known=false` when pricing lacks a selected
-  // module (older server / unconfigured) — surfaced in the estimate UI so the user
-  // is never silently undercharged.
-  const ecommercePackageCost = useMemo(() => {
-    const prices = pricing?.ecommerce_module_prices
-    const modules = watchedSelectedModules ?? {}
-    if (!prices) return { total: 0, known: false }
-    let total = 0
-    let known = true
-    for (const [key, qty] of Object.entries(modules)) {
-      if (!qty || qty < 1) continue
-      const price = prices[key]
-      if (price == null) { known = false; continue }
-      total += price * qty
-    }
-    return { total, known }
-  }, [pricing, watchedSelectedModules])
-
   // Toggle a module on/off or adjust its quantity. Removing the key (vs storing 0)
   // keeps selected_modules clean and matches the server's "active module" semantics.
   const setModuleQty = (key: string, qty: number) => {
@@ -455,7 +436,7 @@ export default function TasksPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? articleWithCover : undefined,
       article_with_content_images: values.type === 'article' ? articleWithContentImages : undefined,
-      // E-commerce package (server forces quantity=1 and bills the package sum).
+      // E-commerce package (server forces quantity=1 and charges only the base task fee).
       // The schema guarantees ≥1 module + ≥1 photo for ecommerce; strip empties.
       product_photos: values.type === 'ecommerce' && values.product_photos?.length ? values.product_photos : undefined,
       selected_modules: values.type === 'ecommerce' && values.selected_modules && Object.values(values.selected_modules).some((q) => q >= 1) ? values.selected_modules : undefined,
@@ -859,9 +840,9 @@ export default function TasksPage() {
         <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-2xl">
           <SheetHeader className="border-b border-border px-4 py-3">
             <SheetTitle>新建任务</SheetTitle>
-            <SheetDescription>任务创建路径：类型 → 项目 → 目标/提示词 → 图片/高级 → 基础费用预估</SheetDescription>
+            <SheetDescription>任务创建路径：类型 → 项目 → 目标/提示词 → 图片/高级 → 基础任务费预估</SheetDescription>
             <div className="grid grid-cols-5 gap-1 pt-2 text-[11px] text-muted-foreground">
-              {['类型', '项目', '目标/提示词', '图片/高级', '基础费用预估'].map((label, index) => (
+              {['类型', '项目', '目标/提示词', '图片/高级', '基础任务费预估'].map((label, index) => (
                 <span key={label} className="truncate rounded-md bg-muted px-2 py-1">
                   {index + 1}. {label}
                 </span>
@@ -948,7 +929,7 @@ export default function TasksPage() {
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">04 图片/高级</p>
 
-              {/* Quantity selector (ecommerce bills a fixed package at qty=1) */}
+              {/* Quantity selector (ecommerce creates one guided package task at qty=1) */}
               {watchedType !== 'ecommerce' && watchedType !== 'video' && (
               <div className="space-y-2">
                 <FormLabel>数量</FormLabel>
@@ -1029,7 +1010,7 @@ export default function TasksPage() {
                   availableVideoModels={availableVideoModels}
                   playbooks={videoPlaybooks?.items ?? []}
                   modelsLoading={videoEstimateQuery.isLoading}
-                  minimumBalanceHint="视频任务需至少 100,000 积分余额；实际扣费按下方动态估算。"
+                  minimumBalanceHint="视频任务需至少覆盖基础任务费；提交 video_gen 后按下方预估和实际参数另计。"
                   promptField={(
                     <FormField control={form.control} name="prompt" render={({ field }) => (
                       <FormItem>
@@ -1153,7 +1134,7 @@ export default function TasksPage() {
               )}
 
               {/* E-commerce package: product photos + selectable modules + platform/compliance.
-                  Billing = Σ(module price × qty); quantity is fixed at 1 server-side. */}
+                  Creation billing is the ecommerce base task fee; module qty only guides later MCP usage. */}
               {watchedType === 'ecommerce' && (
                 <div className="space-y-4 rounded-lg border border-border p-3">
                   <div className="flex items-start gap-3">
@@ -1161,7 +1142,7 @@ export default function TasksPage() {
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground">电商素材包</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        上传产品图，选择交付模块。积分按所选模块求和扣除，保证产品跨图一致。
+                        上传产品图，选择交付模块。创建只扣基础任务费，后续图片生成和理解按实际用量结算。
                       </p>
                     </div>
                   </div>
@@ -1270,7 +1251,7 @@ export default function TasksPage() {
               )}
 
 
-              {/* Goal mode toggle (ecommerce bills a fixed package; no ×3 retry multiplier) */}
+              {/* Goal mode toggle (ecommerce keeps a guided package flow without goal retries) */}
               {watchedType !== 'ecommerce' && (
               <div className={`rounded-lg border p-3 transition-colors ${
                 goalMode ? 'border-primary bg-primary/5' : 'border-border'
@@ -1325,29 +1306,25 @@ export default function TasksPage() {
 
               {/* Cost display */}
               <div className="pt-1">
-                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 基础费用预估</p>
+                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 基础任务费预估</p>
               {(() => {
                 const isEcom = watchedType === 'ecommerce'
                 const cost = taskCostFor(pricing, watchedType)
                 const multiplier = goalMode ? 3 : 1
-                const totalCost = isEcom ? ecommercePackageCost.total : cost * quantity * multiplier
+                const billableQuantity = isEcom ? 1 : quantity
+                const totalCost = cost * billableQuantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
                 const remaining = balance - totalCost
                 return (
                   <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
+                    <p className="text-muted-foreground">
+                      基础任务费：{cost} × {billableQuantity}
+                      {multiplier > 1 && ` × ${multiplier}`} = <span className="font-medium text-foreground">{totalCost}</span> 积分
+                      {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
+                    </p>
                     {isEcom ? (
-                      <p className="text-muted-foreground">
-                        模块套餐预估：Σ（模块价 × 数量）= <span className="font-medium text-foreground">{totalCost}</span> 积分
-                        {!ecommercePackageCost.known && <span className="ml-1 text-xs text-amber-600">（部分模块未定价，以实际扣费为准）</span>}
-                      </p>
+                      <p className="text-xs text-muted-foreground">所选交付模块会影响后续图片生成和理解操作用量，最终以交易明细汇总为准。</p>
                     ) : (
-                      <p className="text-muted-foreground">
-                        基础费用：{cost} × {quantity}
-                        {multiplier > 1 && ` × ${multiplier}`} = <span className="font-medium text-foreground">{totalCost}</span> 积分
-                        {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
-                      </p>
-                    )}
-                    {watchedType !== 'video' && watchedType !== 'ecommerce' && (
                       <p className="text-xs text-muted-foreground">模型、图片、视频等 MCP 操作费用按实际用量另计。</p>
                     )}
                     <p className="text-muted-foreground">
@@ -1386,12 +1363,12 @@ export default function TasksPage() {
                 const isEcom = watchedType === 'ecommerce'
                 const cost = taskCostFor(pricing, watchedType)
                 const multiplier = goalMode ? 3 : 1
-                const totalCost = isEcom ? ecommercePackageCost.total : cost * quantity * multiplier
+                const billableQuantity = isEcom ? 1 : quantity
+                const totalCost = cost * billableQuantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
                 if (balance - totalCost < 0) return true
                 if (goalMode && !goalText.trim()) return true
                 if (isEcom) {
-                  if (totalCost <= 0) return true
                   if (!watchedProductPhotos || watchedProductPhotos.length === 0) return true
                 }
                 return false

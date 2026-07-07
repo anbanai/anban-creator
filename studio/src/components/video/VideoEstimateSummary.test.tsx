@@ -10,7 +10,7 @@ describe('VideoEstimateSummary', () => {
       resolved_config: { model_key: 'seedance-2.0-mini', resolution: '720p', ratio: '9:16', duration: 16 },
       estimated_credits: 8000,
       balance: 120000,
-      min_balance: 100000,
+      min_balance: 0,
       meets_min_balance: true,
       missing_reference_roles: ['action', 'voice tone'],
       expected_artifacts: ['creative-brief.md', 'quality-review.md'],
@@ -23,6 +23,9 @@ describe('VideoEstimateSummary', () => {
 
     render(<VideoEstimateSummary estimate={estimate} />)
 
+    expect(screen.getByText('后续视频生成操作费')).toBeInTheDocument()
+    expect(screen.getByText(/MCP video_gen 提交时扣除/)).toBeInTheDocument()
+    expect(screen.queryByText(/创建门槛/)).not.toBeInTheDocument()
     expect(screen.getByText('缺少参考角色')).toBeInTheDocument()
     expect(screen.getByText('action、voice tone')).toBeInTheDocument()
     expect(screen.getByText('2 段生成计划')).toBeInTheDocument()

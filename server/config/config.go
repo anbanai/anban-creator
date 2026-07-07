@@ -794,12 +794,10 @@ func (c *ImageAPIConfig) DesignerOrder() []string {
 	return c.designerOrder
 }
 
-// WritingConfig holds LLM API configuration for writing services
-// (article writing, topic research, SEO, outlines).
-//
-// Markdown→WeChat-HTML conversion is now deterministic (no LLM), so it has no
-// dedicated timeout — Timeout below covers only the LLM-using paths
-// (write_article, outlines).
+// WritingConfig holds the default OpenAI-compatible text LLM route used by
+// server-side analysis helpers that still need text completion fallback.
+// Markdown-to-WeChat HTML conversion is deterministic and does not use this
+// route.
 type WritingConfig struct {
 	BaseURL string        `yaml:"base_url"` // LLM API endpoint
 	Key     string        `yaml:"key"`      // API key
@@ -906,14 +904,13 @@ type CreditsConfig struct {
 	DailySignIn   int                       `yaml:"daily_sign_in"`  // credits awarded per daily sign-in (default 100)
 	RegisterBonus int                       `yaml:"register_bonus"` // credits awarded on registration (default 1000)
 	InviteReward  int                       `yaml:"invite_reward"`  // credits awarded to inviter when invitee registers (default 1000)
-	TaskCosts     map[string]int            `yaml:"task_costs"`     // base service fees by task type, e.g. {"article": 4000, "seednote": 3600}
+	TaskCosts     map[string]int            `yaml:"task_costs"`     // base service fees by task type, e.g. {"article": 4000, "seednote": 3600, "ecommerce": 3000, "video": 2000}
 	ModelCosts    map[string]map[string]int `yaml:"model_costs"`    // per-model costs, key format: "provider/model"
 	AdminAPIKey   string                    `yaml:"admin_api_key"`  // API key for admin credit grant endpoint
 
-	// E-commerce deliverable module pricing. Each module (main_images, detail_page,
-	// cover_banner, share_image, sku_images) maps to a per-unit credit price; an
-	// e-commerce task's total cost is sum(unit_price × quantity) over the
-	// user-selected modules (see CreditService.EcommercePackageCost).
+	// E-commerce deliverable module pricing for delivery-scale estimates only.
+	// Creation billing uses TaskCosts["ecommerce"]; actual model/media work is
+	// charged through MCP operation transactions.
 	EcommerceModulePrices map[string]int `yaml:"ecommerce_module_prices"`
 
 	// Goal mode pricing.
@@ -1201,14 +1198,21 @@ func (c *Config) applyDefaults() {
 	if c.Credits.InviteReward == 0 {
 		c.Credits.InviteReward = 1000
 	}
+	defaultTaskCosts := map[string]int{
+		"article":        4000,
+		"seednote":       3600,
+		"ecommerce":      3000,
+		"video":          2000,
+		"viral_analysis": 1200,
+	}
 	if c.Credits.TaskCosts == nil {
-		c.Credits.TaskCosts = map[string]int{
-			"article":        4000,
-			"seednote":       3600,
-			"viral_analysis": 1200,
+		c.Credits.TaskCosts = defaultTaskCosts
+	} else {
+		for taskType, cost := range defaultTaskCosts {
+			if _, ok := c.Credits.TaskCosts[taskType]; !ok {
+				c.Credits.TaskCosts[taskType] = cost
+			}
 		}
-	} else if _, ok := c.Credits.TaskCosts["viral_analysis"]; !ok {
-		c.Credits.TaskCosts["viral_analysis"] = 1200
 	}
 	if c.Credits.GoalModeMultiplier <= 0 {
 		c.Credits.GoalModeMultiplier = 3

@@ -341,7 +341,7 @@ func TestSeednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *t
 	enq := &fakeTrackingEnqueuer{}
 	svc := NewSeednoteTrackingService(repo, platformFake, &fakeSeednoteLLM{}, enq, &logger)
 	now := time.Now()
-	lastRun := now.Add(-time.Hour)
+	lastRun := now
 	nextRun := now.Add(time.Hour)
 	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
@@ -364,7 +364,7 @@ func TestSeednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *t
 		ID:           uuid.New().String(),
 		TrackingID:   tracking.ID,
 		TaskID:       taskID,
-		CapturedAt:   now.Add(-30 * time.Minute),
+		CapturedAt:   now,
 		CapturedDate: model.SeednoteCapturedDate(now),
 		LikeCount:    10,
 	}); err != nil {

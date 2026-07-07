@@ -1090,11 +1090,11 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 		}
 	}
 	pricing := video["pricing"].(map[string]any)
-	if got := pricing["min_balance"]; got != service.MinVideoCreationBalance {
-		t.Fatalf("video.pricing.min_balance = %v, want %d", got, service.MinVideoCreationBalance)
+	if got, _ := pricing["operation_billing_rule"].(string); !strings.Contains(got, "video_gen") {
+		t.Fatalf("video.pricing.operation_billing_rule = %v, want video_gen rule", pricing["operation_billing_rule"])
 	}
 	brief, ok := info["agent_brief"].(string)
-	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "自然光、真实手持") || !strings.Contains(brief, "seedance-2.0") {
+	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "自然光、真实手持") || !strings.Contains(brief, "seedance-2.0") || !strings.Contains(brief, "video_gen") {
 		t.Fatalf("agent_brief missing video project context: %#v", info["agent_brief"])
 	}
 }
@@ -1246,8 +1246,36 @@ func TestDownloadVideoGenerationResultDoesNotRequireAgentOutputPath(t *testing.T
 func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
+	oldBill := billSvc
+	t.Cleanup(func() { billSvc = oldBill })
 	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/task/video.mp4"}
-	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          userID + "@example.com",
+		Password:       "hashed",
+		InviteCode:     strings.ToUpper(userID[:8]),
+		CreditsBalance: 100_000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.UserID = userID
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project owner: %v", err)
+	}
+	ctx = withMCPUserID(ctx, userID)
+	logger := zerolog.New(io.Discard)
+	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+		VideoAPI: config.VideoAPIConfig{ModelCatalog: defaultMCPVideoModelCatalogEntries()},
+		ModelRoutes: config.ModelRoutesConfig{
+			VideoGeneration: config.VideoGenerationRouteConfig{Provider: "volcengine_ark"},
+		},
+	})
 	taskID := createMCPVideoTaskWithConfig(t, repo, userID, projectID, model.VideoTaskConfig{
 		ModelKey: "seedance-2.0-mini",
 	})
@@ -1297,6 +1325,236 @@ func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *tes
 	}
 	if task.VideoGenerationID != gen.ID || task.VideoEstimatedCredits != gen.CreditsCharged || task.VideoCreditsCharged != gen.CreditsCharged {
 		t.Fatalf("task video snapshot not linked: %#v generation=%#v", task, gen)
+	}
+	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	if err != nil {
+		t.Fatalf("find task transactions: %v", err)
+	}
+	var tx *model.CreditTransaction
+	for _, candidate := range txs {
+		if candidate.Type == model.CreditTypeVideoGen && candidate.Amount < 0 {
+			tx = candidate
+			break
+		}
+	}
+	if tx == nil {
+		t.Fatalf("transactions = %+v, want video_gen deduction", txs)
+	}
+	if tx.Type != model.CreditTypeVideoGen || tx.Amount != -gen.CreditsCharged {
+		t.Fatalf("video operation deduction = type %s amount %d, want video_gen -%d", tx.Type, tx.Amount, gen.CreditsCharged)
+	}
+	if tx.TaskID == nil || *tx.TaskID != taskID {
+		t.Fatalf("video operation task_id = %v, want %q", tx.TaskID, taskID)
+	}
+	if tx.OperationID == nil || !strings.HasPrefix(*tx.OperationID, "video_gen:"+taskID+":") {
+		t.Fatalf("video operation_id = %v, want unique task-scoped video_gen id", tx.OperationID)
+	}
+}
+
+func TestCreateVideoGenerationJobKeepsChargeAfterPartialProviderSubmission(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	oldBill := billSvc
+	t.Cleanup(func() { billSvc = oldBill })
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, nil)
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          userID + "@example.com",
+		Password:       "hashed",
+		InviteCode:     strings.ToUpper(userID[:8]),
+		CreditsBalance: 100_000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.UserID = userID
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    service.VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   60,
+		Watermark:  &watermark,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   60,
+	})
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	ctx = withMCPUserID(ctx, userID)
+	logger := zerolog.New(io.Discard)
+	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+		VideoAPI: config.VideoAPIConfig{ModelCatalog: defaultMCPVideoModelCatalogEntries()},
+		ModelRoutes: config.ModelRoutesConfig{
+			VideoGeneration: config.VideoGenerationRouteConfig{Provider: "volcengine_ark"},
+		},
+	})
+	taskID := createMCPVideoTaskWithConfig(t, repo, userID, projectID, model.VideoTaskConfig{
+		ModelKey: "seedance-2.0-mini",
+	})
+	postCount := 0
+	arkSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost || r.URL.Path != "/contents/generations/tasks" {
+			t.Fatalf("unexpected Ark request %s %s", r.Method, r.URL.Path)
+		}
+		postCount++
+		if postCount == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "cgt-video-1"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"segment provider outage"}}`))
+	}))
+	defer arkSrv.Close()
+	svcs.VideoSvc = service.NewVideoService(&config.VideoAPIConfig{Key: "test-key", BaseURL: arkSrv.URL, Timeout: time.Second})
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
+			"prompt":"生成一条 60 秒产品推广视频",
+			"duration":60,
+			"resolution":"720p",
+			"ratio":"9:16"
+		}`)},
+	}
+	result, err := createVideoGenerationJobHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("createVideoGenerationJobHandler returned error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected provider error after partial submission")
+	}
+	if postCount < 2 {
+		t.Fatalf("provider POST calls = %d, want first success then later failure", postCount)
+	}
+	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	if err != nil {
+		t.Fatalf("find task transactions: %v", err)
+	}
+	if len(txs) != 1 || txs[0].Type != model.CreditTypeVideoGen || txs[0].Amount >= 0 {
+		t.Fatalf("transactions = %+v, want only retained video_gen deduction", txs)
+	}
+}
+
+func TestCreateVideoGenerationJobRefundsAndClearsChargeBeforeProviderSubmission(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	oldBill := billSvc
+	t.Cleanup(func() { billSvc = oldBill })
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, nil)
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          userID + "@example.com",
+		Password:       "hashed",
+		InviteCode:     strings.ToUpper(userID[:8]),
+		CreditsBalance: 100_000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.UserID = userID
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    service.VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   60,
+		Watermark:  &watermark,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   60,
+	})
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	ctx = withMCPUserID(ctx, userID)
+	logger := zerolog.New(io.Discard)
+	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+		VideoAPI: config.VideoAPIConfig{ModelCatalog: defaultMCPVideoModelCatalogEntries()},
+		ModelRoutes: config.ModelRoutesConfig{
+			VideoGeneration: config.VideoGenerationRouteConfig{Provider: "volcengine_ark"},
+		},
+	})
+	taskID := createMCPVideoTaskWithConfig(t, repo, userID, projectID, model.VideoTaskConfig{
+		ModelKey: "seedance-2.0-mini",
+	})
+	arkSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost || r.URL.Path != "/contents/generations/tasks" {
+			t.Fatalf("unexpected Ark request %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"provider rejected first segment"}}`))
+	}))
+	defer arkSrv.Close()
+	svcs.VideoSvc = service.NewVideoService(&config.VideoAPIConfig{Key: "test-key", BaseURL: arkSrv.URL, Timeout: time.Second})
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
+			"prompt":"生成一条 60 秒产品推广视频",
+			"duration":60,
+			"resolution":"720p",
+			"ratio":"9:16"
+		}`)},
+	}
+	result, err := createVideoGenerationJobHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("createVideoGenerationJobHandler returned error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected provider error before first submission")
+	}
+	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	if err != nil {
+		t.Fatalf("find task transactions: %v", err)
+	}
+	if len(txs) != 2 || txs[0].Type != model.CreditTypeVideoGen || txs[0].Amount >= 0 || txs[1].Amount != -txs[0].Amount {
+		t.Fatalf("transactions = %+v, want video_gen deduction followed by equal refund", txs)
+	}
+	if txs[0].OperationID == nil || txs[1].OperationID == nil || *txs[0].OperationID != *txs[1].OperationID {
+		t.Fatalf("operation ids = %v / %v, want matching refund id", txs[0].OperationID, txs[1].OperationID)
+	}
+	user, err := repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		t.Fatalf("find user: %v", err)
+	}
+	if user.CreditsBalance != 100_000 {
+		t.Fatalf("balance = %d, want refunded original 100000", user.CreditsBalance)
+	}
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if task.VideoCreditsCharged != 0 {
+		t.Fatalf("task video credits charged = %d, want cleared after refunded submission failure", task.VideoCreditsCharged)
+	}
+	gen, err := repo.VideoGenerations().FindByID(ctx, task.VideoGenerationID)
+	if err != nil {
+		t.Fatalf("find generation: %v", err)
+	}
+	if gen.CreditsCharged != 0 || gen.Status != "failed" {
+		t.Fatalf("generation charge/status = %d/%s, want cleared failed generation", gen.CreditsCharged, gen.Status)
 	}
 }
 

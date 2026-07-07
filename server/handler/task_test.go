@@ -552,7 +552,9 @@ func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	creditSvc := service.NewCreditService(repo, nil, &logger)
+	creditSvc := service.NewCreditService(repo, &config.CreditsConfig{
+		TaskCosts: map[string]int{"video": 2000},
+	}, &logger)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
 	taskSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -570,17 +572,15 @@ func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	if resp.StatusCode != fiber.StatusPaymentRequired {
-		t.Fatalf("status = %d, want 402", resp.StatusCode)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	var body struct {
-		Msg string `json:"msg"`
+	bal, err := creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.Msg != "视频任务需至少 100000 积分余额" {
-		t.Fatalf("msg = %q, want video minimum balance hint", body.Msg)
+	if bal != 99_999-2000 {
+		t.Fatalf("balance = %d, want base fee %d", bal, 99_999-2000)
 	}
 }
 

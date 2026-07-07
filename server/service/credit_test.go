@@ -76,8 +76,11 @@ func newTestCreditService(repo repository.Repository) *CreditService {
 	logger := zerolog.New(io.Discard)
 	return NewCreditService(repo, &config.CreditsConfig{
 		TaskCosts: map[string]int{
-			"article":  4000,
-			"seednote": 3600,
+			"article":        4000,
+			"seednote":       3600,
+			"ecommerce":      3000,
+			"video":          2000,
+			"viral_analysis": 1200,
 		},
 	}, &logger)
 }

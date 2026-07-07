@@ -1,8 +1,8 @@
 export type TaskType = 'seednote' | 'article' | 'ecommerce'
 
 // E-commerce package config carried on a task (mirrors server model.EcommerceConfig).
-// `selected_modules` maps module key → quantity; package price is the
-// Σ(module price × quantity), computed from /credits/pricing.ecommerce_module_prices.
+// `selected_modules` maps module key → quantity. Delivery module selection
+// affects later MCP image/vision usage; creation billing uses task_costs.ecommerce.
 export interface EcommerceTaskConfig {
   selected_modules?: Record<string, number>
   product_photos?: string[]

@@ -51,7 +51,7 @@ vi.mock('@/lib/api', async () => {
           },
           estimated_credits: 2480,
           balance: 200000,
-          min_balance: 100000,
+          min_balance: 0,
           meets_min_balance: true,
         }),
       },
@@ -241,6 +241,6 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByText(/每次执行基础费用：4000 =/)).toBeInTheDocument()
+    expect(await within(dialog).findByText(/每次执行基础任务费：4000 =/)).toBeInTheDocument()
   })
 })

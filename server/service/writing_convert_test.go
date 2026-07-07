@@ -16,10 +16,11 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Diagnostic LLM mock — still wired through setupConvertTest because the
-// WriteArticle path uses it. ConvertMarkdown/RenderTemplate no longer call the
-// LLM (deterministic renderer), so the mock's recorded calls stay empty for
-// those paths and the tests below assert on the rendered HTML instead.
+// Diagnostic LLM mock — still wired through setupConvertTest because
+// WritingService retains an LLM client for non-rendering capabilities.
+// ConvertMarkdown/RenderTemplate do not call the LLM (deterministic renderer),
+// so the mock's recorded calls stay empty for those paths and the tests below
+// assert on the rendered HTML instead.
 // ---------------------------------------------------------------------------
 
 type llmCall struct {
