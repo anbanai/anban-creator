@@ -1805,6 +1805,9 @@ func validateStorageCustomDomain(raw string) error {
 	if raw == "" {
 		return nil
 	}
+	if strings.Contains(raw, "://") {
+		return fmt.Errorf("storage.custom_domain must be a CDN/storage hostname without scheme, path, query, or fragment; leave it empty for default OSS URLs")
+	}
 	candidate := raw
 	if !strings.Contains(candidate, "://") {
 		candidate = "//" + candidate

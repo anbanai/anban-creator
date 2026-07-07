@@ -35,6 +35,18 @@ func TestValidateRejectsStorageCustomDomainWithPath(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsStorageCustomDomainWithScheme(t *testing.T) {
+	cfg := validOSSConfig("https://cdn.example.com")
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want storage.custom_domain scheme error")
+	}
+	if !strings.Contains(err.Error(), "storage.custom_domain") {
+		t.Fatalf("Validate() error = %v, want storage.custom_domain mention", err)
+	}
+}
+
 func TestValidateAllowsEmptyStorageCustomDomain(t *testing.T) {
 	cfg := validOSSConfig("")
 
