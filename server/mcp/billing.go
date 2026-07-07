@@ -91,19 +91,25 @@ func maybeDeductUnderstandingTokens(ctx context.Context, userID, taskID, opType 
 	if data, err := json.Marshal(cost.PriceSnapshot); err == nil {
 		_ = json.Unmarshal(data, &priceSnapshot)
 	}
+	cacheReadTokens := usage.CacheReadInputTokens
+	if cacheReadTokens == 0 && usage.CachedInputTokens > 0 {
+		cacheReadTokens = usage.CachedInputTokens
+	}
 	metadata := model.CreditTransactionMetadata{
-		Provider:          provider,
-		Model:             modelName,
-		Route:             opType,
-		InputTokens:       usage.InputTokens,
-		CachedInputTokens: usage.CachedInputTokens,
-		OutputTokens:      usage.OutputTokens,
-		TotalTokens:       usage.TotalTokens,
-		BaseCredits:       cost.BaseCredits,
-		TierMultiplier:    cost.TierMultiplier,
-		UserMultiplier:    cost.UserMultiplier,
-		FinalCredits:      cost.FinalCredits,
-		PriceSnapshot:     priceSnapshot,
+		Provider:                 provider,
+		Model:                    modelName,
+		Route:                    opType,
+		InputTokens:              usage.InputTokens,
+		CachedInputTokens:        usage.CachedInputTokens,
+		CacheReadInputTokens:     cacheReadTokens,
+		CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		OutputTokens:             usage.OutputTokens,
+		TotalTokens:              usage.TotalTokens,
+		BaseCredits:              cost.BaseCredits,
+		TierMultiplier:           cost.TierMultiplier,
+		UserMultiplier:           cost.UserMultiplier,
+		FinalCredits:             cost.FinalCredits,
+		PriceSnapshot:            priceSnapshot,
 	}
 	operationID := fmt.Sprintf("%s:%s:%d:%d", opType, taskID, usage.TotalTokens, time.Now().UnixNano())
 	_, err = billSvc.creditSvc.DeductForOperationWithMetadata(ctx, userID, opType, cost.FinalCredits, metadata, operationID, taskID)

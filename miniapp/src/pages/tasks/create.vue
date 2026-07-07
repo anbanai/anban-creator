@@ -312,7 +312,7 @@
     </view>
 
     <!-- Goal mode -->
-    <view class="task-create__section" v-if="advancedOpen">
+    <view class="task-create__section" v-if="advancedOpen && !isEcommerce">
       <view class="switch-row">
         <view class="switch-row__text">
           <text class="field-label switch-row__label">强目标模式</text>
@@ -468,6 +468,7 @@ const platform = computed(() => selectedProject.value?.platform || '')
 const isArticle = computed(() => platform.value === 'article')
 const isSeednote = computed(() => platform.value === 'seednote')
 const isEcommerce = computed(() => platform.value === 'ecommerce')
+const billableGoalMode = computed(() => !isEcommerce.value && form.goal_mode)
 
 // ---- E-commerce: product photos + delivery modules ----
 const uploadingPhoto = ref(false)
@@ -545,7 +546,7 @@ const estimatedCost = computed(() => {
   const costPerTask = pricing.value?.task_costs?.[selectedProject.value.platform]
     ?? DEFAULT_TASK_COSTS[selectedProject.value.platform]
     ?? 3600
-  const multiplier = form.goal_mode ? 3 : 1
+  const multiplier = billableGoalMode.value ? 3 : 1
   const billableQuantity = isEcommerce.value ? 1 : form.quantity
   return costPerTask * billableQuantity * multiplier
 })
@@ -555,7 +556,7 @@ const runtimeReserve = computed(() => {
   const reservePerTask = pricing.value?.agent_runtime_reserve?.[selectedProject.value.platform]
     ?? DEFAULT_TASK_COSTS[selectedProject.value.platform]
     ?? 0
-  const multiplier = form.goal_mode ? 3 : 1
+  const multiplier = billableGoalMode.value ? 3 : 1
   const billableQuantity = isEcommerce.value ? 1 : form.quantity
   return reservePerTask * billableQuantity * multiplier
 })
@@ -564,7 +565,7 @@ const creationCost = computed(() => estimatedCost.value + runtimeReserve.value)
 
 const canSubmit = computed(() => {
   if (!form.project_id || !form.prompt.trim()) return false
-  if (form.goal_mode && !form.goal.trim()) return false
+  if (billableGoalMode.value && !form.goal.trim()) return false
   if (balance.value < creationCost.value) return false
   return !submitting.value
 })
@@ -744,7 +745,7 @@ function validate(): boolean {
     errors.prompt = '请输入创作要求'
     return false
   }
-  if (form.goal_mode && !form.goal.trim()) {
+  if (billableGoalMode.value && !form.goal.trim()) {
     errors.goal = '强目标模式需填写成功目标'
     return false
   }
@@ -760,7 +761,7 @@ function validate(): boolean {
       return false
     }
   }
-  if (balance.value < estimatedCost.value) {
+  if (balance.value < creationCost.value) {
     uni.showToast({ title: '积分不足，请先充值', icon: 'none' })
     return false
   }
@@ -800,8 +801,8 @@ async function onSubmit() {
       product_photos: isEcommerce.value && form.product_photos.length ? form.product_photos : undefined,
       selected_modules:
         isEcommerce.value && enabledModuleCount.value > 0 ? form.selected_modules : undefined,
-      goal: form.goal_mode && form.goal.trim() ? form.goal.trim() : undefined,
-      goal_mode: form.goal_mode || undefined,
+      goal: billableGoalMode.value && form.goal.trim() ? form.goal.trim() : undefined,
+      goal_mode: billableGoalMode.value || undefined,
       skip_reference_image: form.skip_reference_image || undefined,
       reference_image_url: form.reference_image_url.trim() || undefined,
       watermark: form.watermark || undefined,
