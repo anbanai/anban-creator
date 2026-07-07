@@ -42,6 +42,16 @@ describe('ProjectCard contextual actions', () => {
     expect(screen.getByRole('button', { name: '查看素材/选题池' })).toBeInTheDocument()
   })
 
+  it('does not offer scheduled plans for moments projects in V1', () => {
+    render(<ProjectCard project={{ ...project, platform: 'moments', name: '朋友圈项目' }} />)
+
+    expect(screen.getByRole('link', { name: '新建任务' })).toHaveAttribute(
+      'href',
+      '/tasks?create=true&type=moments&project_id=project-1&intent=new',
+    )
+    expect(screen.queryByRole('link', { name: '创建计划' })).not.toBeInTheDocument()
+  })
+
   it('summarizes publishing mode, defaults, and success rate as operating badges', () => {
     render(
       <ProjectCard

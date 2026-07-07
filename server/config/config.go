@@ -1234,6 +1234,7 @@ func (c *Config) applyDefaults() {
 	defaultTaskCosts := map[string]int{
 		"article":        4000,
 		"seednote":       3600,
+		"moments":        3000,
 		"ecommerce":      3000,
 		"video":          2000,
 		"viral_analysis": 1200,
@@ -1347,8 +1348,11 @@ func (c *Config) applyDefaults() {
 		c.Claude.MaxTurns = map[string]int{
 			"article":   100,
 			"seednote":  60,
+			"moments":   60,
 			"ecommerce": 120, // 多产品图 → 产品档案 → 主图/详情/封面/分享/SKU 批量 + 视觉自检循环，给足余量
 		}
+	} else if _, ok := c.Claude.MaxTurns["moments"]; !ok {
+		c.Claude.MaxTurns["moments"] = 60
 	}
 	if c.Claude.Docker.Image == "" {
 		c.Claude.Docker.Image = "anban-creator-agent:latest"

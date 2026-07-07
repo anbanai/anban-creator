@@ -1,10 +1,11 @@
-import { BookOpen, ShoppingBag, Signature, Video } from 'lucide-react'
+import { BookOpen, MessageCircle, ShoppingBag, Signature, Video } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { TaskType } from '@/types'
 
 export const platformIcon: Record<TaskType, LucideIcon> = {
   seednote: BookOpen,
   article: Signature,
+  moments: MessageCircle,
   ecommerce: ShoppingBag,
   video: Video,
 }
@@ -12,6 +13,7 @@ export const platformIcon: Record<TaskType, LucideIcon> = {
 export const platformIconColor: Record<TaskType, string> = {
   seednote: 'text-[#FF2442]',
   article: 'text-[#07C160]',
+  moments: 'text-[#2F855A]',
   ecommerce: 'text-[#FF6A00]',
   video: 'text-[#2563EB]',
 }
@@ -19,6 +21,7 @@ export const platformIconColor: Record<TaskType, string> = {
 export const platformBorderColor: Record<string, string> = {
   article: 'border-l-[#07C160]',
   seednote: 'border-l-[#FF2442]',
+  moments: 'border-l-[#2F855A]',
   ecommerce: 'border-l-[#FF6A00]',
   video: 'border-l-[#2563EB]',
 }
@@ -26,6 +29,7 @@ export const platformBorderColor: Record<string, string> = {
 export const platformHoverBorderColor: Record<string, string> = {
   article: 'hover:border-l-[#07C160]/50',
   seednote: 'hover:border-l-[#FF2442]/50',
+  moments: 'hover:border-l-[#2F855A]/50',
   ecommerce: 'hover:border-l-[#FF6A00]/50',
   video: 'hover:border-l-[#2563EB]/50',
 }
@@ -33,6 +37,7 @@ export const platformHoverBorderColor: Record<string, string> = {
 export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   article: 'secondary',
   seednote: 'destructive',
+  moments: 'secondary',
   ecommerce: 'default',
   video: 'outline',
 }
@@ -40,6 +45,7 @@ export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'des
 export const platformBgColor: Record<string, string> = {
   article: 'bg-[#07C160]/10',
   seednote: 'bg-[#FF2442]/10',
+  moments: 'bg-[#2F855A]/10',
   ecommerce: 'bg-[#FF6A00]/10',
   video: 'bg-[#2563EB]/10',
 }

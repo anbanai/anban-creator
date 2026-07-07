@@ -36,6 +36,14 @@ describe('formatCreditDescription', () => {
     }))).toBe('生成公众号文章扣除积分128')
   })
 
+  it('normalizes legacy moments task deduction descriptions', () => {
+    expect(formatCreditDescription(tx({
+      type: 'task_deduct',
+      amount: -3000,
+      description: '任务扣费 (moments) -3000',
+    }))).toBe('生成朋友圈扣除积分3000')
+  })
+
   it('normalizes legacy operation deduction descriptions', () => {
     expect(formatCreditDescription(tx({
       type: 'image_gen',

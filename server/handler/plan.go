@@ -171,6 +171,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrVideoGenerationConfig) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 		if errors.Is(err, service.ErrInsufficientCredits) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
 				"code": 40200,

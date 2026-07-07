@@ -333,6 +333,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 	}{
 		{model.ScopeArticle, "wechatarticle"},
 		{model.ScopeSeednote, "seednote"},
+		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},
 		{model.ScopeVideo, "videocreator"},
 		{"unknown", "seednote"},

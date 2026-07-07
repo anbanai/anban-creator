@@ -7,10 +7,9 @@ import "github.com/anbanai/anban-creator/server/model"
 // progress_percent, so the progress bar advances without requiring every
 // skill to pass a number. Stages not listed here leave percent unchanged.
 //
-// Stage names are extracted from claudecode/agents/{wechatarticle,seednote}.md.
-// Only article and seednote go through TaskService.UpdateProgress; other
-// pipelines (designer, live-slicer, video) have their own
-// services and are out of scope here.
+// Stage names are extracted from claudecode/agents/{wechatarticle,seednote,moments}.md.
+// Agent-backed content pipelines go through TaskService.UpdateProgress; other
+// pipelines such as designer, live-slicer, and video have their own services.
 var stagePercentByType = map[string]map[string]int{
 	model.ScopeArticle: {
 		"research":     10,
@@ -32,6 +31,15 @@ var stagePercentByType = map[string]map[string]int{
 		"compliance":       85,
 		"archive":          95,
 		"finalize":         100,
+	},
+	model.ScopeMoments: {
+		"project":           5,
+		"material_analysis": 25,
+		"writing":           55,
+		"image_generation":  75,
+		"quality_review":    88,
+		"archive":           97,
+		"finalize":          100,
 	},
 	// Ecommerce stage slugs come from claudecode/agents/ecommerce.md
 	// update_task_progress calls (project → analysis → copywriting →

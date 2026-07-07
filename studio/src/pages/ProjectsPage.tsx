@@ -4,7 +4,7 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Inbox, Loader2, Minus } from 'lucide-react'
+import { Plus, Inbox, Loader2, Minus, Sparkles } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -41,6 +41,7 @@ import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-cen
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
+  { value: 'moments', label: '朋友圈' },
   { value: 'ecommerce', label: '电商出图' },
   { value: 'video', label: '视频生成' },
 ]
@@ -93,6 +94,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
 
 const defaultVideoDefaults = CHANNEL_FORM_DEFAULTS.video_defaults!
 const defaultVideoPolicy = CHANNEL_FORM_DEFAULTS.video_model_policy!
+const GUIZANG_SOCIAL_CARD_STYLE = '归藏社交卡 / Guizang social card：Swiss editorial card + 杂志式小红书组图；用于朋友圈 3:4 社交卡片、1080x1440 图文笔记卡片，以及微信公众号 21:9 封面 + 1:1 分享图。'
 
 function projectToForm(ch: Project, configuredVideoModels: VideoModelSpec[] = []): ProjectFormValues {
   const configuredKeys = new Set(configuredVideoModels.map((model) => model.key))
@@ -164,10 +166,11 @@ export default function ProjectsPage() {
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
   const isWechat = selectedPlatform === 'article'
   const isSeednote = selectedPlatform === 'seednote'
+  const isMoments = selectedPlatform === 'moments'
   const isEcommerce = selectedPlatform === 'ecommerce'
   const isVideo = selectedPlatform === 'video'
   const visualTemplateType: TemplateType | null = isWechat ? 'article' : isSeednote ? 'seednote' : isEcommerce ? 'ecommerce' : null
-  const supportsVisualReference = !!visualTemplateType
+  const supportsVisualReference = !!visualTemplateType || isMoments
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
@@ -212,6 +215,11 @@ export default function ProjectsPage() {
     if (qty >= 1) next[key] = qty
     else delete next[key]
     form.setValue('ecommerce_default_selected_modules', next, { shouldDirty: true })
+  }
+
+  const applyGuizangSocialCardPreset = () => {
+    styleManuallyEditedRef.current = true
+    form.setValue('visual_style', GUIZANG_SOCIAL_CARD_STYLE, { shouldDirty: true })
   }
 
   // Auto-focus profile_url field when dialog opens
@@ -552,7 +560,7 @@ export default function ProjectsPage() {
     if (!payload.image_ratio) {
       if (payload.platform === 'article') {
         payload.image_ratio = '16:9'
-      } else if (payload.platform === 'seednote') {
+      } else if (payload.platform === 'seednote' || payload.platform === 'moments') {
         payload.image_ratio = '3:4'
       }
     }
@@ -889,7 +897,9 @@ export default function ProjectsPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">图文视觉配置</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">先选视觉模板，再用参考图识别和 prompt 微调最终风格。</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {isMoments ? '上传参考图或填写风格，让 Agent 判断是否生成社交卡片。' : '先选视觉模板，再用参考图识别和 prompt 微调最终风格。'}
+                      </p>
                     </div>
                     <ReferenceImageUpload
                       value={referenceImageUrl}
@@ -905,12 +915,28 @@ export default function ProjectsPage() {
 
                   <FormField control={form.control} name="visual_style" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>视觉风格</FormLabel>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <FormLabel>视觉风格</FormLabel>
+                        {(isWechat || isSeednote || isMoments) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1.5 px-2 text-xs"
+                            onClick={applyGuizangSocialCardPreset}
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            归藏社交卡
+                          </Button>
+                        )}
+                      </div>
                       <FormControl>
                         <div className="relative">
                           <Textarea
                             placeholder={isSeednote
                               ? '描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格'
+                              : isMoments
+                                ? '描述朋友圈社交卡片的视觉风格，如：真实生活感、轻杂志排版、暖色自然光、不过度营销'
                               : isEcommerce
                                 ? '描述品牌视觉风格基线，如：高端极简白底、国潮暖橙插画、电商爆款高饱和促销感。作为主图/详情/封面跨图一致的视觉锚点'
                                 : '描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由项目定位与内容主题三维分析自动确定'}
@@ -934,6 +960,8 @@ export default function ProjectsPage() {
                       <FormDescription>
                         {isSeednote
                           ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示'
+                          : isMoments
+                            ? '朋友圈视觉维度——用于 Agent 判断是否生成可配发的社交卡片，不增加独立图片开关'
                           : isEcommerce
                             ? '品牌视觉维度——作为电商素材跨图一致的视觉基线（产品图在任务级上传）'
                             : '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'}

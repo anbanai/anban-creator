@@ -78,6 +78,7 @@ func newTestCreditService(repo repository.Repository) *CreditService {
 		TaskCosts: map[string]int{
 			"article":        4000,
 			"seednote":       3600,
+			"moments":        3000,
 			"ecommerce":      3000,
 			"video":          2000,
 			"viral_analysis": 1200,
@@ -185,6 +186,26 @@ func TestDeductForTaskWithMultiplierUsesFriendlyDescription(t *testing.T) {
 	}
 	if tx.Description != "生成种草笔记（强目标 x3）扣除积分10800" {
 		t.Fatalf("description = %q, want friendly goal-mode deduction", tx.Description)
+	}
+}
+
+func TestDeductForMomentsTaskUsesFriendlyDescription(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 10_000)
+	taskID := uuid.New().String()
+	svc := newTestCreditService(repo)
+
+	if _, err := svc.DeductForTask(ctx, userID, model.ScopeMoments, taskID); err != nil {
+		t.Fatalf("deduct moments task: %v", err)
+	}
+
+	tx, err := repo.Credits().FindDeductionByTaskID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("find deduction by task id: %v", err)
+	}
+	if tx.Description != "生成朋友圈扣除积分3000" {
+		t.Fatalf("description = %q, want friendly moments deduction", tx.Description)
 	}
 }
 

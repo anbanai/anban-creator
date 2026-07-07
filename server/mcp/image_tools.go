@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,6 +42,24 @@ func registerImageTools(server *mcp.Server) {
 			"required": []any{"project_id", "file_path"},
 		},
 	}, uploadImageHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "register_rendered_image",
+		Description: "Register an image rendered by an agent from HTML/CSS/Playwright as a task file, optionally uploading it to the project's CDN. Use image_base64 for agent/client-local PNG/JPEG/WebP bytes. Use file_path only for an absolute server-local file path readable by the MCP server. For WeChat article projects, upload_to_cdn=true uploads to the WeChat material library and returns wechat_url + media_id.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"project_id":    map[string]any{"type": "string", "description": "Project ID (must match task_id)"},
+				"task_id":       map[string]any{"type": "string", "description": "Task ID that owns the rendered image"},
+				"name":          map[string]any{"type": "string", "description": "Task-file name/path to store, e.g. cover.png, image_01.png, wechat-21x9-cover.png"},
+				"role":          map[string]any{"type": "string", "enum": []any{"cover", "image", "other"}, "description": "Task-file role. Use cover for cover.png/wechat-21x9-cover.png, image for body cards."},
+				"image_base64":  map[string]any{"type": "string", "description": "Base64 image bytes or data:image/... URL. Preferred for agent/client-local rendered files."},
+				"file_path":     map[string]any{"type": "string", "description": "Absolute server-local file path readable by the MCP server. Do not pass an agent/client-local path; use image_base64 instead."},
+				"upload_to_cdn": map[string]any{"type": "boolean", "description": "When true, upload the registered image to the project's CDN. Article projects return wechat_url + media_id.", "default": false},
+			},
+			"required": []any{"project_id", "task_id", "name"},
+		},
+	}, registerRenderedImageHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "compress_image",
@@ -464,6 +484,323 @@ func registerGeneratedImageTaskFile(ctx context.Context, reg taskFileRegistrar, 
 		return tf.URL, nil
 	}
 	return tf.OSSURL, nil
+}
+
+const maxRenderedImageBytes = 10 * 1024 * 1024
+
+type renderedImageInput struct {
+	Name        string
+	Role        string
+	ImageBase64 string
+	FilePath    string
+	UploadToCDN bool
+}
+
+type renderedImageRegistrationResult struct {
+	TaskFileID  string `json:"task_file_id"`
+	Name        string `json:"name"`
+	Role        string `json:"role"`
+	FilePath    string `json:"file_path"`
+	MimeType    string `json:"mime_type"`
+	FileSize    int64  `json:"file_size"`
+	DownloadURL string `json:"download_url,omitempty"`
+	WeChatURL   string `json:"wechat_url,omitempty"`
+	MediaID     string `json:"media_id,omitempty"`
+}
+
+type renderedImageRegistrar interface {
+	UploadTaskFileFromReader(ctx context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error)
+	EnrichFilesWithURLs(ctx context.Context, files []*model.TaskFile)
+	UpdateTaskFileMetadata(ctx context.Context, file *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error)
+}
+
+type renderedImageUploader interface {
+	UploadImage(ctx context.Context, userID, projectID, filePath string) (*service.UploadImageResult, error)
+}
+
+func registerRenderedImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.TaskSvc == nil {
+		return errorResult("task service not available"), nil
+	}
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+
+	projectID, _ := args["project_id"].(string)
+	taskID, _ := args["task_id"].(string)
+	name, _ := args["name"].(string)
+	role, _ := args["role"].(string)
+	imageBase64, _ := args["image_base64"].(string)
+	filePath, _ := args["file_path"].(string)
+	uploadToCDN, _ := args["upload_to_cdn"].(bool)
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
+	}
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
+	}
+	if name == "" {
+		return errorResult("name is required"), nil
+	}
+	if uploadToCDN && svcs.ImageSvc == nil {
+		return errorResult("image service not available for CDN upload"), nil
+	}
+
+	t, err := svcs.TaskSvc.GetByID(ctx, taskID)
+	if err != nil || t == nil {
+		return errorResult("task not found"), nil
+	}
+	if userID != "" && t.UserID != userID {
+		return errorResult("task not found"), nil
+	}
+	if t.ProjectID != projectID {
+		return errorResult("task does not belong to the requested project"), nil
+	}
+
+	result, err := registerRenderedImageAsset(ctx, svcs.TaskSvc, svcs.ImageSvc, userID, projectID, taskID, renderedImageInput{
+		Name:        name,
+		Role:        role,
+		ImageBase64: imageBase64,
+		FilePath:    filePath,
+		UploadToCDN: uploadToCDN,
+	})
+	if err != nil {
+		return errorResult(fmt.Sprintf("register rendered image: %v", err)), nil
+	}
+	return textResult(result)
+}
+
+func registerRenderedImageAsset(ctx context.Context, reg renderedImageRegistrar, uploader renderedImageUploader, userID, projectID, taskID string, input renderedImageInput) (*renderedImageRegistrationResult, error) {
+	if reg == nil {
+		return nil, fmt.Errorf("task file registrar is required")
+	}
+	name, err := service.CleanTaskFileRelativePath(input.Name)
+	if err != nil {
+		return nil, fmt.Errorf("invalid name: %w", err)
+	}
+	if strings.Contains(filepath.ToSlash(name), "/../") {
+		return nil, fmt.Errorf("invalid name")
+	}
+	role, err := normalizeRenderedImageRole(input.Role)
+	if err != nil {
+		return nil, err
+	}
+
+	payload, sourcePath, cleanup, err := loadRenderedImagePayload(input)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(payload.data) == 0 {
+		return nil, fmt.Errorf("image data is required")
+	}
+	if len(payload.data) > maxRenderedImageBytes {
+		return nil, fmt.Errorf("rendered image is too large (max %d bytes)", maxRenderedImageBytes)
+	}
+	if err := validateRenderedImageMIME(name, payload.mimeType); err != nil {
+		return nil, err
+	}
+	if role == "" {
+		role = service.DetermineTaskFileRole(name, payload.mimeType)
+		if role == "" {
+			role = model.FileRoleImage
+		}
+	}
+
+	tf, err := reg.UploadTaskFileFromReader(ctx, taskID, userID, name, bytes.NewReader(payload.data), payload.mimeType, int64(len(payload.data)))
+	if err != nil {
+		return nil, fmt.Errorf("register task file: %w", err)
+	}
+	reg.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
+
+	wechatURL := tf.WechatURL
+	mediaID := tf.MediaID
+	if input.UploadToCDN {
+		if uploader == nil {
+			return nil, fmt.Errorf("image uploader is required when upload_to_cdn is true")
+		}
+		uploaded, err := uploader.UploadImage(ctx, userID, projectID, sourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("upload rendered image to CDN: %w", err)
+		}
+		if uploaded != nil {
+			if uploaded.WechatURL != "" {
+				wechatURL = uploaded.WechatURL
+			}
+			if uploaded.MediaID != "" {
+				mediaID = uploaded.MediaID
+			}
+		}
+	}
+
+	updated, err := reg.UpdateTaskFileMetadata(ctx, tf, role, mediaID, wechatURL)
+	if err != nil {
+		return nil, err
+	}
+	if updated != nil {
+		tf = updated
+	}
+	reg.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
+
+	return &renderedImageRegistrationResult{
+		TaskFileID:  tf.ID,
+		Name:        name,
+		Role:        tf.Role,
+		FilePath:    firstNonEmpty(tf.FilePath, name),
+		MimeType:    payload.mimeType,
+		FileSize:    int64(len(payload.data)),
+		DownloadURL: firstNonEmpty(tf.URL, tf.OSSURL),
+		WeChatURL:   wechatURL,
+		MediaID:     mediaID,
+	}, nil
+}
+
+type renderedImagePayload struct {
+	data     []byte
+	mimeType string
+}
+
+func loadRenderedImagePayload(input renderedImageInput) (*renderedImagePayload, string, func(), error) {
+	hasBase64 := strings.TrimSpace(input.ImageBase64) != ""
+	hasPath := strings.TrimSpace(input.FilePath) != ""
+	if hasBase64 == hasPath {
+		return nil, "", nil, fmt.Errorf("provide exactly one of image_base64 or file_path")
+	}
+	if hasBase64 {
+		data, err := decodeRenderedImageBase64(input.ImageBase64)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		if len(data) > maxRenderedImageBytes {
+			return nil, "", nil, fmt.Errorf("rendered image is too large (max %d bytes)", maxRenderedImageBytes)
+		}
+		mimeType := http.DetectContentType(data)
+		tempPath, cleanup, err := writeRenderedImageTempFile(data, mimeType)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		return &renderedImagePayload{data: data, mimeType: mimeType}, tempPath, cleanup, nil
+	}
+
+	cleanPath, err := cleanRenderedServerLocalPath(input.FilePath)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	info, err := os.Stat(cleanPath)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("stat file_path: %w", err)
+	}
+	if info.IsDir() {
+		return nil, "", nil, fmt.Errorf("file_path must be a file")
+	}
+	if info.Size() > maxRenderedImageBytes {
+		return nil, "", nil, fmt.Errorf("rendered image is too large (max %d bytes)", maxRenderedImageBytes)
+	}
+	data, err := os.ReadFile(cleanPath)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("read file_path: %w", err)
+	}
+	return &renderedImagePayload{data: data, mimeType: http.DetectContentType(data)}, cleanPath, nil, nil
+}
+
+func decodeRenderedImageBase64(raw string) ([]byte, error) {
+	body := strings.TrimSpace(raw)
+	if strings.HasPrefix(body, "data:") {
+		comma := strings.Index(body, ",")
+		if comma < 0 {
+			return nil, fmt.Errorf("invalid data URL")
+		}
+		body = body[comma+1:]
+	}
+	data, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		return nil, fmt.Errorf("decode image_base64: %w", err)
+	}
+	return data, nil
+}
+
+func cleanRenderedServerLocalPath(raw string) (string, error) {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return "", fmt.Errorf("file_path is required")
+	}
+	if strings.ContainsRune(path, 0) || strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "data:") {
+		return "", fmt.Errorf("file_path must be an absolute server-local path")
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("file_path must be an absolute server-local path")
+	}
+	return filepath.Clean(path), nil
+}
+
+func writeRenderedImageTempFile(data []byte, mimeType string) (string, func(), error) {
+	ext := renderedImageExt(mimeType)
+	if ext == "" {
+		ext = ".img"
+	}
+	f, err := os.CreateTemp("", "anban-rendered-*"+ext)
+	if err != nil {
+		return "", nil, fmt.Errorf("create temp rendered image: %w", err)
+	}
+	path := f.Name()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return "", nil, fmt.Errorf("write temp rendered image: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", nil, fmt.Errorf("close temp rendered image: %w", err)
+	}
+	return path, func() { _ = os.Remove(path) }, nil
+}
+
+func normalizeRenderedImageRole(role string) (string, error) {
+	role = strings.TrimSpace(role)
+	switch role {
+	case "":
+		return "", nil
+	case model.FileRoleCover, model.FileRoleImage, model.FileRoleOther:
+		return role, nil
+	default:
+		return "", fmt.Errorf("unsupported role %q", role)
+	}
+}
+
+func validateRenderedImageMIME(name, mimeType string) error {
+	if !isAllowedRenderedImageMIME(mimeType) {
+		return fmt.Errorf("unsupported image MIME %q", mimeType)
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".webp":
+		return nil
+	default:
+		return fmt.Errorf("unsupported image extension %q", ext)
+	}
+}
+
+func isAllowedRenderedImageMIME(mimeType string) bool {
+	switch mimeType {
+	case "image/png", "image/jpeg", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func renderedImageExt(mimeType string) string {
+	switch mimeType {
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ""
+	}
 }
 
 // VisionVerification lives in the service package so it can be a field on
