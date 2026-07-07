@@ -212,6 +212,10 @@ func assertAgentSkillBestPractice(t *testing.T, path string) {
 	if description == "" {
 		t.Fatalf("%s missing required description frontmatter", path)
 	}
+	descriptionLower := strings.ToLower(description)
+	if !strings.HasPrefix(descriptionLower, "use when ") && !strings.HasPrefix(descriptionLower, "this skill should be used when ") {
+		t.Fatalf("%s description must start with activation wording (%q or %q), got %q", path, "Use when", "This skill should be used when", description)
+	}
 	if n := len([]rune(description)); n > 1024 {
 		t.Fatalf("%s description is %d chars; Agent Skills limit is 1024", path, n)
 	}
@@ -230,6 +234,73 @@ func assertAgentSkillBestPractice(t *testing.T, path string) {
 			}
 		}
 	}
+}
+
+func TestLongSkillReferencesUseDirectProgressiveDisclosure(t *testing.T) {
+	root := repoRoot(t)
+	for _, distro := range []string{"claudecode", "codex", "openclaw"} {
+		skillsRoot := filepath.Join(root, distro, "skills")
+		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || filepath.Base(path) != "SKILL.md" {
+				return nil
+			}
+			skillBody := readRepoFile(t, path)
+			skillDir := filepath.Dir(path)
+			refsDir := filepath.Join(skillDir, "references")
+			if _, err := os.Stat(refsDir); os.IsNotExist(err) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+
+			return filepath.WalkDir(refsDir, func(refPath string, refEntry os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if refEntry.IsDir() || filepath.Ext(refPath) != ".md" {
+					return nil
+				}
+				refBody := readRepoFile(t, refPath)
+				if strings.Count(refBody, "\n")+1 <= 100 {
+					return nil
+				}
+				rel, err := filepath.Rel(skillDir, refPath)
+				if err != nil {
+					return err
+				}
+				rel = filepath.ToSlash(rel)
+				if filepath.Dir(rel) == "references" && !strings.Contains(skillBody, rel) {
+					t.Fatalf("%s is a long reference and must be linked directly from %s for one-level progressive disclosure", refPath, path)
+				}
+				if !hasReferenceContents(refBody) {
+					t.Fatalf("%s has more than 100 lines and must start with a Contents/Table of contents/目录 section", refPath)
+				}
+				return nil
+			})
+		})
+		if err != nil {
+			t.Fatalf("walk %s skills: %v", distro, err)
+		}
+	}
+}
+
+func hasReferenceContents(body string) bool {
+	head := body
+	if len(head) > 2500 {
+		head = head[:2500]
+	}
+	for _, line := range strings.Split(head, "\n") {
+		normalized := strings.ToLower(strings.TrimSpace(line))
+		normalized = strings.TrimLeft(normalized, "# ")
+		switch normalized {
+		case "contents", "table of contents", "目录":
+			return true
+		}
+	}
+	return false
 }
 
 func parseSkillFrontmatter(t *testing.T, path, body string) map[string]any {
