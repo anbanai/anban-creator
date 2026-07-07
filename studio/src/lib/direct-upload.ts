@@ -115,7 +115,10 @@ async function prepareUpload(purpose: DirectUploadPurpose, file: File, contentTy
     return (res.data?.data ?? res.data) as PrepareUploadResponse
   } catch (err: any) {
     const msg = err?.response?.data?.msg || err?.message || ''
-    if (err?.response?.status === 503 && /OSS|direct upload|storage/i.test(msg)) {
+    if (err?.response?.status === 503 && isDirectUploadUnavailableMessage(msg)) {
+      if (isDirectUploadCredentialUnavailableMessage(msg)) {
+        throw new Error('当前环境 OSS 直传凭证不可用，请联系管理员检查 RAM/STS 权限。')
+      }
       throw new Error('当前环境未配置 OSS 直传，请联系管理员配置对象存储。')
     }
     throw new Error(msg || '获取上传凭证失败，请重试')
@@ -171,7 +174,15 @@ function legacyPurposeForDirectUpload(purpose: DirectUploadPurpose) {
 
 function isDirectUploadUnavailable(err: unknown) {
   const message = err instanceof Error ? err.message : String(err || '')
-  return /未配置 OSS 直传|direct uploads require OSS|requires OSS|file storage is not available/i.test(message)
+  return isDirectUploadUnavailableMessage(message)
+}
+
+function isDirectUploadUnavailableMessage(message: string) {
+  return /未配置 OSS 直传|OSS 直传凭证不可用|direct upload|storage provider|requires OSS|file storage is not available|browser direct uploads|storage\.sts_role_arn|issue upload credential|refresh session token|AssumeRole|NoPermission|authorized by RAM/i.test(message)
+}
+
+function isDirectUploadCredentialUnavailableMessage(message: string) {
+  return /OSS 直传凭证不可用|browser direct uploads|storage\.sts_role_arn|issue upload credential|refresh session token|AssumeRole|NoPermission|authorized by RAM/i.test(message)
 }
 
 function friendlyDirectUploadError(err: unknown) {

@@ -101,6 +101,51 @@ describe('uploadToOSS', () => {
     })
   })
 
+  it('falls back to the legacy upload endpoint when STS assume-role credentials cannot be issued', async () => {
+    vi.mocked(http.post)
+      .mockRejectedValueOnce({
+        response: {
+          status: 503,
+          data: {
+            msg: 'issue upload credential: refresh session token failed: {"Code":"NoPermission","AuthAction":"sts:AssumeRole"}',
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            url: 'https://cdn.example.com/uploads/projects/user-1/ref.png',
+            key: 'uploads/projects/user-1/ref.png',
+            size: 1024,
+            type: 'image/png',
+          },
+        },
+      })
+
+    const result = await uploadToOSS({
+      purpose: 'project_reference',
+      file: fileOf(1024),
+    })
+    const legacyForm = vi.mocked(http.post).mock.calls[1][1] as FormData
+
+    expect(http.post).toHaveBeenNthCalledWith(1, '/uploads/prepare', {
+      purpose: 'project_reference',
+      filename: 'asset.png',
+      content_type: 'image/png',
+      size: 1024,
+    })
+    expect(http.post).toHaveBeenNthCalledWith(2, '/files/upload', expect.any(FormData), expect.any(Object))
+    expect(legacyForm.get('purpose')).toBe('project')
+    expect(putMock).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      uploadId: 'uploads/projects/user-1/ref.png',
+      key: 'uploads/projects/user-1/ref.png',
+      publicUrl: 'https://cdn.example.com/uploads/projects/user-1/ref.png',
+      contentType: 'image/png',
+      size: 1024,
+    })
+  })
+
   it('maps expired credential errors to a Chinese retry hint', async () => {
     putMock
       .mockRejectedValueOnce(Object.assign(new Error('Request has expired'), { code: 'AccessDenied' }))
