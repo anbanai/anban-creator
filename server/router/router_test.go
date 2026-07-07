@@ -168,6 +168,24 @@ func TestProtectedEndpointsRequireAuth(t *testing.T) {
 	}
 }
 
+func TestLegacyFileUploadRouteIsNotRegistered(t *testing.T) {
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 0, Host: "0.0.0.0"},
+	}
+	app := NewRouter(&Services{
+		Config:      cfg,
+		Logger:      &logger,
+		FileHandler: handler.NewFileHandler(nil, &logger),
+	})
+
+	for _, route := range app.GetRoutes() {
+		if route.Method == "POST" && route.Path == "/api/v1/files/"+"upload" {
+			t.Fatalf("legacy upload route is still registered: %+v", route)
+		}
+	}
+}
+
 // TestPublicAuthEndpoints tests that public auth endpoints are accessible
 // without authentication.
 func TestPublicAuthEndpoints(t *testing.T) {

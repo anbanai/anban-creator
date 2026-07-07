@@ -897,10 +897,10 @@ async function onFetchProfile() {
   }
 }
 
-// Avatar / reference / author-avatar uploads via /files/upload.
+// Avatar / reference / author-avatar uploads use OSS direct upload.
 function chooseAndUpload(
   target: 'avatar' | 'reference' | 'author_avatar',
-  purpose: 'project' | 'reference',
+  purpose: 'project_reference',
 ) {
   uni.chooseImage({
     count: 1,
@@ -929,17 +929,17 @@ function chooseAndUpload(
 
 function onChooseAvatar() {
   if (avatarUploading.value) return
-  chooseAndUpload('avatar', 'project')
+  chooseAndUpload('avatar', 'project_reference')
 }
 
 function onChooseReference() {
   if (referenceUploading.value) return
-  chooseAndUpload('reference', 'reference')
+  chooseAndUpload('reference', 'project_reference')
 }
 
 function onChooseAuthorAvatar() {
   if (authorAvatarUploading.value) return
-  chooseAndUpload('author_avatar', 'project')
+  chooseAndUpload('author_avatar', 'project_reference')
 }
 
 async function onAnalyzeReference() {

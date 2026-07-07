@@ -172,8 +172,8 @@ export interface CreateTaskRequest {
   article_with_cover?: boolean
   article_with_content_images?: boolean
   // E-commerce package fields (server ignores for non-ecommerce). Product photos
-  // are server-owned URLs returned by /files/upload; the executor materializes
-  // them into the agent workspace.
+  // are server-owned storage URLs returned by direct upload; the executor
+  // materializes them into the agent workspace.
   product_photos?: string[]
   selected_modules?: Record<string, number>
   target_platform?: string

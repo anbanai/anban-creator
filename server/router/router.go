@@ -334,10 +334,6 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/files/*", svc.FileHandler.ServeFile)
 	}
 
-	// File upload endpoint.
-	if svc.FileHandler != nil {
-		apiV1.Post("/files/upload", svc.FileHandler.Upload)
-	}
 	if svc.UploadHandler != nil {
 		apiV1.Post("/uploads/prepare", svc.UploadHandler.Prepare)
 	}

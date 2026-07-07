@@ -97,8 +97,8 @@ type createTaskRequest struct {
 	// maps a module key (main_images / detail_page / cover_banner / share_image /
 	// sku_images) to its quantity; creation billing uses the ecommerce base task
 	// fee, and selected modules only guide later image/vision MCP usage.
-	// ProductPhotos are server-owned URLs (from /files/upload) materialized into
-	// the agent workspace by the executor.
+	// ProductPhotos are server-owned storage URLs materialized into the agent
+	// workspace by the executor.
 	ProductPhotos            []string               `json:"product_photos,omitempty"`
 	SelectedModules          map[string]int         `json:"selected_modules,omitempty"`
 	TargetPlatform           string                 `json:"target_platform,omitempty"`

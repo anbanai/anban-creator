@@ -12,7 +12,6 @@ export interface UploadToOSSOptions {
   purpose: DirectUploadPurpose
   file: File
   onProgress?: (percent: number) => void
-  fallbackToLegacy?: boolean
 }
 
 export interface UploadToOSSResult {
@@ -29,6 +28,7 @@ interface PrepareUploadResponse {
   upload_id: string
   key: string
   public_url: string
+  headers?: Record<string, string>
   region: string
   bucket: string
   endpoint: string
@@ -41,21 +41,14 @@ interface PrepareUploadResponse {
 
 const MULTIPART_THRESHOLD = 8 * 1024 * 1024
 
-export async function uploadToOSS({ purpose, file, onProgress, fallbackToLegacy = true }: UploadToOSSOptions): Promise<UploadToOSSResult> {
-  const contentType = file.type || 'application/octet-stream'
+export async function uploadToOSS({ purpose, file, onProgress }: UploadToOSSOptions): Promise<UploadToOSSResult> {
+  const contentType = file.type || ''
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    let prepared: PrepareUploadResponse
-    try {
-      prepared = await prepareUpload(purpose, file, contentType)
-    } catch (err) {
-      if (fallbackToLegacy && isDirectUploadUnavailable(err)) {
-        return uploadWithLegacyEndpoint(purpose, file, onProgress)
-      }
-      throw err
-    }
+    const prepared = await prepareUpload(purpose, file, contentType)
     if (file.size > prepared.max_size) {
       throw new Error(`文件大小不能超过 ${Math.round(prepared.max_size / 1024 / 1024)}MB`)
     }
+    const uploadContentType = preparedContentType(prepared, contentType)
 
     const { default: OSS } = await import('ali-oss')
     const client = new OSS({
@@ -72,14 +65,14 @@ export async function uploadToOSS({ purpose, file, onProgress, fallbackToLegacy 
       onProgress?.(1)
       if (file.size >= MULTIPART_THRESHOLD) {
         await client.multipartUpload(prepared.key, file, {
-          headers: { 'Content-Type': contentType },
+          headers: { 'Content-Type': uploadContentType },
           progress: (p: number) => {
             onProgress?.(Math.min(99, Math.max(1, Math.round(p * 100))))
           },
         })
       } else {
         await client.put(prepared.key, file, {
-          headers: { 'Content-Type': contentType },
+          headers: { 'Content-Type': uploadContentType },
         })
       }
       onProgress?.(100)
@@ -96,12 +89,19 @@ export async function uploadToOSS({ purpose, file, onProgress, fallbackToLegacy 
       uploadId: prepared.upload_id,
       key: prepared.key,
       publicUrl: prepared.public_url,
-      contentType,
+      contentType: uploadContentType,
       size: file.size,
     }
   }
 
   throw new Error('上传凭证已过期，请重试上传')
+}
+
+function preparedContentType(prepared: PrepareUploadResponse, requested: string) {
+  return prepared.headers?.['Content-Type'] ||
+    prepared.headers?.['content-type'] ||
+    requested ||
+    'application/octet-stream'
 }
 
 async function prepareUpload(purpose: DirectUploadPurpose, file: File, contentType: string): Promise<PrepareUploadResponse> {
@@ -123,58 +123,6 @@ async function prepareUpload(purpose: DirectUploadPurpose, file: File, contentTy
     }
     throw new Error(msg || '获取上传凭证失败，请重试')
   }
-}
-
-async function uploadWithLegacyEndpoint(
-  purpose: DirectUploadPurpose,
-  file: File,
-  onProgress?: (percent: number) => void,
-): Promise<UploadToOSSResult> {
-  const legacyPurpose = legacyPurposeForDirectUpload(purpose)
-  if (!legacyPurpose) throw new Error('当前环境未配置 OSS 直传，请联系管理员配置对象存储。')
-  const form = new FormData()
-  form.append('file', file)
-  form.append('purpose', legacyPurpose)
-  const res = await http.post('/files/upload', form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    onUploadProgress: (event) => {
-      const total = event.total || file.size
-      onProgress?.(total ? Math.min(99, Math.round((event.loaded / total) * 100)) : 50)
-    },
-  })
-  const data = res.data?.data ?? res.data
-  onProgress?.(100)
-  return {
-    uploadId: data.key || data.url || file.name,
-    key: data.key || '',
-    publicUrl: data.url,
-    contentType: data.type || file.type || 'application/octet-stream',
-    size: data.size || file.size,
-    inputDurationSeconds: data.input_duration_seconds,
-    warning: data.duration_probe_warning,
-  }
-}
-
-function legacyPurposeForDirectUpload(purpose: DirectUploadPurpose) {
-  switch (purpose) {
-    case 'project_reference':
-      return 'project'
-    case 'task_reference':
-    case 'ecommerce_product_photo':
-    case 'designer_reference':
-      return 'reference'
-    case 'video_reference':
-      return 'video_reference'
-    case 'ai_entry_attachment':
-      return ''
-    default:
-      return ''
-  }
-}
-
-function isDirectUploadUnavailable(err: unknown) {
-  const message = err instanceof Error ? err.message : String(err || '')
-  return isDirectUploadUnavailableMessage(message)
 }
 
 function isDirectUploadUnavailableMessage(message: string) {

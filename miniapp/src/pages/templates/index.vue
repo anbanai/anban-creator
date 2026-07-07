@@ -972,7 +972,7 @@ function chooseThumbnail() {
       if (!filePath) return
       thumbUploading.value = true
       try {
-        const result = await projectsApi.uploadImage(filePath, 'reference')
+        const result = await projectsApi.uploadImage(filePath, 'project_reference')
         form.thumbnail_url = result.url
         uni.showToast({ title: '上传成功', icon: 'success' })
         // Auto-analyze when uploading a new image (skip when editing existing url)
@@ -995,7 +995,7 @@ function chooseAuthorAvatar() {
       if (!filePath) return
       authorAvatarUploading.value = true
       try {
-        const result = await projectsApi.uploadImage(filePath, 'project')
+        const result = await projectsApi.uploadImage(filePath, 'project_reference')
         form.persona_avatar = result.url
         uni.showToast({ title: '上传成功', icon: 'success' })
       } catch (err: any) {

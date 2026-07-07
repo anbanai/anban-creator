@@ -589,7 +589,7 @@ func fetchImageBytes(ctx context.Context, store storage.Provider, imageURL strin
 
 // imageExtFromURL infers a lowercase image extension from the URL path, defaulting
 // to .png when unknown. Extension is taken from the URL (the canonical source for
-// /files/upload and OSS object keys) rather than sniffing bytes.
+// server-owned storage URLs and OSS object keys) rather than sniffing bytes.
 func imageExtFromURL(imageURL string) string {
 	switch ext := strings.ToLower(filepath.Ext(imageURL)); ext {
 	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
