@@ -444,7 +444,7 @@ export function VideoReferenceInput({
                   </Button>
                 </div>
                 {ref.type === 'video_url' && (
-                  <p className="text-xs text-muted-foreground">视频素材默认只参考运镜、节奏、动作，不复制人物、场景、logo。</p>
+                  <p className="text-xs text-muted-foreground">视频素材默认约束运镜、节奏、动作；当要求同款/复刻/完全一样时，会作为段子结构和时间轴参考，但主体、产品、场景仍以你的其他素材和文字为准。</p>
                 )}
                 <div className="grid gap-2 md:grid-cols-3">
                   <label className="flex flex-col gap-1 text-xs text-muted-foreground">

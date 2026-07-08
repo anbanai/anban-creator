@@ -34,9 +34,9 @@ type VideoModelPolicy struct {
 // VideoInput stores the user-authored intake for a video task or plan. Project-
 // level facts live in Project.Instructions and are written to CLAUDE.md.
 type VideoInput struct {
-	Brief           string               `json:"brief,omitempty"`
+	Brief           string                `json:"brief,omitempty"`
 	References      []VideoReferenceAsset `json:"references,omitempty"`
-	HardConstraints VideoHardConstraints `json:"hard_constraints,omitempty"`
+	HardConstraints VideoHardConstraints  `json:"hard_constraints,omitempty"`
 }
 
 type VideoHardConstraints struct {
@@ -104,6 +104,7 @@ type VideoReferenceAsset struct {
 	Type                 string   `json:"type"`
 	URL                  string   `json:"url,omitempty"`
 	Text                 string   `json:"text,omitempty"`
+	TaskFileID           string   `json:"task_file_id,omitempty"`
 	ReferenceRole        string   `json:"reference_role,omitempty"`
 	MustKeep             []string `json:"must_keep,omitempty"`
 	CanChange            []string `json:"can_change,omitempty"`

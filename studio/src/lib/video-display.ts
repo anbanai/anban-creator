@@ -43,6 +43,8 @@ export function videoPurposeLabel(value: string | null | undefined) {
 
 export const videoReferenceRoles = [
   { value: 'subject identity', label: '主体不变' },
+  { value: 'full remake reference', label: '完整复刻参考' },
+  { value: 'joke timeline', label: '段子/时间轴结构' },
   { value: 'product appearance', label: '产品外观' },
   { value: 'scene background', label: '场景背景' },
   { value: 'first frame', label: '首帧参考' },

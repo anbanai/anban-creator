@@ -92,6 +92,23 @@ describe('VideoReferenceInput', () => {
     revokeObjectURL.mockRestore()
   })
 
+  it('offers strict remake roles as optional choices while defaulting to Agent judgment', () => {
+    render(<VideoReferenceInput value={[{
+      type: 'video_url',
+      url: 'https://cdn.example.com/reference.mp4',
+      file_name: 'reference.mp4',
+      input_duration_seconds: 45,
+    }]} onChange={vi.fn()} />)
+
+    expect(screen.getByText('用途：由 Agent 判断')).toBeInTheDocument()
+    expect(screen.getByText('输入时长 45.0 秒')).toBeInTheDocument()
+
+    fireEvent.click(screen.getAllByRole('combobox')[0])
+
+    expect(screen.getByText('完整复刻参考')).toBeInTheDocument()
+    expect(screen.getByText('段子/时间轴结构')).toBeInTheDocument()
+  })
+
   it('uploads multiple media files, keeps successful items, and reports per-file failures', async () => {
     const onChange = vi.fn()
     vi.mocked(uploadToOSS)
@@ -257,6 +274,6 @@ describe('VideoReferenceInput', () => {
       can_change: ['人物', '场景'],
       must_not_transfer: ['原 logo', '原人物'],
     })])
-    expect(screen.getByText('视频素材默认只参考运镜、节奏、动作，不复制人物、场景、logo。')).toBeInTheDocument()
+    expect(screen.getByText('视频素材默认约束运镜、节奏、动作；当要求同款/复刻/完全一样时，会作为段子结构和时间轴参考，但主体、产品、场景仍以你的其他素材和文字为准。')).toBeInTheDocument()
   })
 })

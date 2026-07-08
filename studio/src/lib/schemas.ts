@@ -19,6 +19,7 @@ const videoReferenceSchema = z.object({
   type: z.enum(["text", "image_url", "audio_url", "video_url"]),
   url: z.string().optional(),
   text: z.string().optional(),
+  task_file_id: z.string().optional(),
   reference_role: z.string().optional(),
   must_keep: z.array(z.string()).optional(),
   can_change: z.array(z.string()).optional(),

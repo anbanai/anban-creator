@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -47,6 +48,19 @@ func registerVideoTools(server *mcp.Server) {
 			"required": []any{"project_id", "type"},
 		},
 	}, registerVideoReferenceHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "prepare_video_generation_inputs",
+		Description: "Normalize Studio video_input.references into a fail-closed video input contract before Seedance generation. Infers reference roles, validates public media, preserves measured video duration, registers video-input-contract.json, and returns the references that must be used by validate/build/create.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"project_id": map[string]any{"type": "string"},
+				"task_id":    map[string]any{"type": "string"},
+			},
+			"required": []any{"project_id", "task_id"},
+		},
+	}, prepareVideoGenerationInputsHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "analyze_video_reference",
@@ -230,6 +244,436 @@ func registerVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest
 		resp["task_file_id"] = taskFile.ID
 	}
 	return textResult(resp)
+}
+
+type videoInputContract struct {
+	ProjectID              string                        `json:"project_id"`
+	TaskID                 string                        `json:"task_id"`
+	InferredMode           string                        `json:"inferred_mode"`
+	StrictRemake           bool                          `json:"strict_remake"`
+	References             []videoInputContractReference `json:"references"`
+	RequiredReferenceRoles []string                      `json:"required_reference_roles,omitempty"`
+	RequiredReferenceCount int                           `json:"required_reference_count"`
+	RequiredVideoReference bool                          `json:"required_video_reference"`
+	TargetDurationSeconds  int64                         `json:"target_duration_seconds,omitempty"`
+	TargetDurationSource   string                        `json:"target_duration_source,omitempty"`
+	TargetDurationReason   string                        `json:"target_duration_reason,omitempty"`
+	VideoInputContractFile string                        `json:"video_input_contract_file"`
+	VideoUnderstandingFile string                        `json:"video_understanding_file,omitempty"`
+	PreparationWarnings    []string                      `json:"preparation_warnings,omitempty"`
+}
+
+type videoInputContractReference struct {
+	Type                 string   `json:"type"`
+	URL                  string   `json:"url,omitempty"`
+	Text                 string   `json:"text,omitempty"`
+	TaskFileID           string   `json:"task_file_id,omitempty"`
+	ReferenceRole        string   `json:"reference_role,omitempty"`
+	MustKeep             []string `json:"must_keep,omitempty"`
+	CanChange            []string `json:"can_change,omitempty"`
+	MustNotTransfer      []string `json:"must_not_transfer,omitempty"`
+	FileName             string   `json:"file_name,omitempty"`
+	MimeType             string   `json:"mime_type,omitempty"`
+	FileSize             int64    `json:"file_size,omitempty"`
+	InputDurationSeconds float64  `json:"input_duration_seconds,omitempty"`
+	Required             bool     `json:"required"`
+}
+
+func prepareVideoGenerationInputsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := parseArgs(req.Params.Arguments)
+	projectID, _ := args["project_id"].(string)
+	taskID, _ := args["task_id"].(string)
+	if strings.TrimSpace(projectID) == "" {
+		return errorResult("project_id is required"), nil
+	}
+	task, err := mcpTaskForProject(ctx, taskID, projectID)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	contract, err := buildVideoInputContract(ctx, projectID, task, true)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	if svcs == nil || svcs.TaskSvc == nil {
+		return errorResult("task service not available"), nil
+	}
+	if err := materializeOwnedVideoInputReferences(ctx, task, contract); err != nil {
+		return errorResult(err.Error()), nil
+	}
+	if err := analyzeStrictRemakeReferencesDuringPrepare(ctx, task, contract); err != nil {
+		return errorResult(err.Error()), nil
+	}
+	payload, err := json.MarshalIndent(contract, "", "  ")
+	if err != nil {
+		return errorResult("marshal video input contract: " + err.Error()), nil
+	}
+	tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, task.ID, getUserID(ctx), "video-input-contract.json", strings.NewReader(string(payload)), "application/json", int64(len(payload)))
+	if err != nil {
+		return errorResult("register video-input-contract.json: " + err.Error()), nil
+	}
+	svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
+	resp := map[string]any{
+		"video_input_contract":       contract,
+		"video_input_contract_file":  "video-input-contract.json",
+		"video_input_contract_id":    tf.ID,
+		"video_input_contract_asset": tf,
+		"normalized_references":      contract.References,
+		"required_reference_roles":   contract.RequiredReferenceRoles,
+		"inferred_mode":              contract.InferredMode,
+		"target_duration_seconds":    contract.TargetDurationSeconds,
+		"target_duration_source":     contract.TargetDurationSource,
+	}
+	return textResult(resp)
+}
+
+func materializeOwnedVideoInputReferences(ctx context.Context, task *model.Task, contract *videoInputContract) error {
+	if task == nil || contract == nil || svcs == nil || svcs.TaskSvc == nil || svcs.Store == nil {
+		return nil
+	}
+	for i := range contract.References {
+		ref := &contract.References[i]
+		if !ref.Required || ref.Type == service.VideoReferenceText || strings.TrimSpace(ref.TaskFileID) != "" || strings.TrimSpace(ref.URL) == "" {
+			continue
+		}
+		if !svcs.Store.IsOwnedURL(ref.URL) {
+			continue
+		}
+		source, err := service.ResolveMediaSourceBytes(ctx, svcs.Store, nil, service.MediaSourceRequest{
+			RawURL:      ref.URL,
+			MaxBytes:    50 << 20,
+			ContentType: ref.MimeType,
+		})
+		if err != nil {
+			return fmt.Errorf("materialize video_input.references %s: %w", contractReferenceLabel(*ref), err)
+		}
+		fileName := videoInputContractFileName(*ref, source.Filename)
+		mimeType := videoInputContractMimeType(*ref, source.ContentType)
+		tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, task.ID, getUserID(ctx), filepath.ToSlash(filepath.Join("video-inputs", fileName)), bytes.NewReader(source.Bytes), mimeType, int64(len(source.Bytes)))
+		if err != nil {
+			return fmt.Errorf("register video_input.references %s as task file: %w", contractReferenceLabel(*ref), err)
+		}
+		svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
+		ref.TaskFileID = tf.ID
+		if strings.TrimSpace(tf.URL) != "" {
+			ref.URL = tf.URL
+		}
+		ref.FileName = tf.FileName
+		ref.MimeType = tf.MimeType
+		ref.FileSize = tf.FileSize
+	}
+	return nil
+}
+
+func videoInputContractFileName(ref videoInputContractReference, fallback string) string {
+	for _, value := range []string{ref.FileName, fallback, ref.URL, ref.Type} {
+		base := filepath.Base(strings.TrimSpace(value))
+		if base != "." && base != "/" && base != "" {
+			return base
+		}
+	}
+	switch ref.Type {
+	case service.VideoReferenceImage:
+		return "reference.png"
+	case service.VideoReferenceAudio:
+		return "reference.mp3"
+	case service.VideoReferenceVideo:
+		return "reference.mp4"
+	default:
+		return "reference.bin"
+	}
+}
+
+func videoInputContractMimeType(ref videoInputContractReference, fallback string) string {
+	if strings.TrimSpace(ref.MimeType) != "" {
+		return strings.TrimSpace(ref.MimeType)
+	}
+	if strings.TrimSpace(fallback) != "" {
+		return strings.TrimSpace(fallback)
+	}
+	ext := strings.ToLower(filepath.Ext(ref.FileName))
+	switch ext {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	case ".mp4", ".m4v":
+		return "video/mp4"
+	case ".mov":
+		return "video/quicktime"
+	case ".webm":
+		return "video/webm"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	case ".m4a":
+		return "audio/mp4"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func analyzeStrictRemakeReferencesDuringPrepare(ctx context.Context, task *model.Task, contract *videoInputContract) error {
+	if task == nil || contract == nil || !contract.StrictRemake || !contract.RequiredVideoReference {
+		return nil
+	}
+	if svcs == nil || svcs.WritingSvc == nil || svcs.TaskSvc == nil {
+		return nil
+	}
+	analyzed := 0
+	for _, ref := range contract.References {
+		if !ref.Required || ref.Type != service.VideoReferenceVideo {
+			continue
+		}
+		analyzed++
+		fileName := "video-understanding.json"
+		if analyzed > 1 {
+			fileName = fmt.Sprintf("video-understanding-%02d.json", analyzed)
+		}
+		taskFileID, err := analyzeAndRegisterVideoUnderstanding(ctx, task.ID, ref, fileName)
+		if err != nil {
+			return err
+		}
+		if contract.VideoUnderstandingFile == "" {
+			contract.VideoUnderstandingFile = fileName
+		}
+		if taskFileID != "" {
+			contract.PreparationWarnings = append(contract.PreparationWarnings, fmt.Sprintf("registered %s task_file_id=%s", fileName, taskFileID))
+		}
+	}
+	return nil
+}
+
+func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, ref videoInputContractReference, fileName string) (string, error) {
+	if err := service.ValidatePublicHTTPSURLForVideoReference(ref.URL); err != nil {
+		return "", err
+	}
+	userID := getUserID(ctx)
+	if err := preflightUnderstandingTokenBilling(ctx, userID, taskID, model.CreditTypeVideoUnderstanding); err != nil {
+		return "", err
+	}
+	prompt := buildVideoUnderstandingPrompt(ref.ReferenceRole, "strict_remake", "Extract the full reference timeline, joke structure, visual beats, camera, action, expression, rhythm, must_keep, can_change, and must_not_change for reference-timeline.json.")
+	analysis, err := svcs.WritingSvc.AnalyzeVideoURLDetailed(ctx, userID, ref.URL, prompt)
+	if err != nil {
+		return "", fmt.Errorf("analyze video reference during preparation: %w", err)
+	}
+	understanding := normalizeVideoUnderstanding(analysis.Text)
+	understanding["metadata"] = map[string]any{"source_url": ref.URL}
+	understanding["model"] = analysis.Model
+	understanding["analysis_mode"] = "native_video"
+	understanding["source_url"] = ref.URL
+	understanding["reference_role"] = strings.TrimSpace(ref.ReferenceRole)
+	understanding["purpose_hint"] = "strict_remake"
+	understanding["usage"] = analysis.Usage
+	creditsCharged, err := maybeDeductUnderstandingTokens(ctx, userID, taskID, model.CreditTypeVideoUnderstanding, analysis.Usage)
+	if err != nil {
+		return "", fmt.Errorf("bill video understanding during preparation: %w", err)
+	}
+	understanding["credits_charged"] = creditsCharged
+	payload, _ := json.MarshalIndent(understanding, "", "  ")
+	tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, taskID, userID, fileName, strings.NewReader(string(payload)), "application/json", int64(len(payload)))
+	if err != nil {
+		return "", fmt.Errorf("register %s: %w", fileName, err)
+	}
+	svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
+	return tf.ID, nil
+}
+
+func buildVideoInputContract(ctx context.Context, projectID string, task *model.Task, allowNativeAnalysis bool) (*videoInputContract, error) {
+	if task == nil {
+		return nil, fmt.Errorf("task is required")
+	}
+	input := task.VideoInput.Data()
+	promptContext := strings.TrimSpace(strings.Join([]string{task.Prompt, input.Brief}, "\n"))
+	strict := isStrictVideoRemakePrompt(promptContext)
+	contract := &videoInputContract{
+		ProjectID:              projectID,
+		TaskID:                 task.ID,
+		InferredMode:           "standard",
+		StrictRemake:           strict,
+		VideoInputContractFile: "video-input-contract.json",
+	}
+	if strict {
+		contract.InferredMode = "strict_remake"
+	}
+	seenRoles := map[string]bool{}
+	for _, asset := range input.References {
+		ref, err := normalizeVideoInputContractReference(ctx, task, promptContext, asset, strict)
+		if err != nil {
+			return nil, err
+		}
+		if ref.Type == "" {
+			continue
+		}
+		contract.References = append(contract.References, ref)
+		if ref.Required {
+			contract.RequiredReferenceCount++
+			if strings.TrimSpace(ref.ReferenceRole) != "" && !seenRoles[ref.ReferenceRole] {
+				contract.RequiredReferenceRoles = append(contract.RequiredReferenceRoles, ref.ReferenceRole)
+				seenRoles[ref.ReferenceRole] = true
+			}
+			if ref.Type == service.VideoReferenceVideo {
+				contract.RequiredVideoReference = true
+				if ref.InputDurationSeconds > 0 && contract.TargetDurationSeconds == 0 {
+					contract.TargetDurationSeconds = int64(math.Round(ref.InputDurationSeconds))
+					contract.TargetDurationSource = service.VideoDurationSourceReferenceVideo
+					contract.TargetDurationReason = "matched measured reference video duration"
+				}
+			}
+		}
+	}
+	if input.HardConstraints.Duration > 0 {
+		contract.TargetDurationSeconds = input.HardConstraints.Duration
+		contract.TargetDurationSource = service.VideoDurationSourceUser
+		contract.TargetDurationReason = "user requested explicit target duration"
+	}
+	if allowNativeAnalysis && strict && contract.RequiredVideoReference && svcs != nil && svcs.WritingSvc != nil {
+		contract.VideoUnderstandingFile = "video-understanding.json"
+		contract.PreparationWarnings = append(contract.PreparationWarnings, "native video understanding should be attached to the strict remake plan")
+	}
+	return contract, nil
+}
+
+func normalizeVideoInputContractReference(ctx context.Context, task *model.Task, promptContext string, asset model.VideoReferenceAsset, strict bool) (videoInputContractReference, error) {
+	refType := strings.TrimSpace(asset.Type)
+	urlValue := strings.TrimSpace(asset.URL)
+	taskFileID := strings.TrimSpace(asset.TaskFileID)
+	duration := asset.InputDurationSeconds
+	if taskFileID != "" {
+		resolvedURL, measuredDuration, tf, err := videoReferenceURLFromTaskFile(ctx, task.ID, taskFileID, refType)
+		if err != nil {
+			return videoInputContractReference{}, err
+		}
+		urlValue = resolvedURL
+		if measuredDuration > 0 {
+			duration = measuredDuration
+		}
+		if tf != nil {
+			asset.FileName = tf.FileName
+			asset.MimeType = tf.MimeType
+			asset.FileSize = tf.FileSize
+		}
+	}
+	if refType == "" {
+		refType = inferVideoReferenceType(urlValue, asset.Text)
+	}
+	role := strings.TrimSpace(asset.ReferenceRole)
+	if role == "" {
+		role = inferVideoInputReferenceRole(promptContext, refType, strict)
+	}
+	required := isRequiredVideoInputReference(refType, urlValue, asset.Text)
+	if required && refType != service.VideoReferenceText {
+		if err := service.ValidatePublicHTTPSURLForVideoReference(urlValue); err != nil {
+			return videoInputContractReference{}, fmt.Errorf("video_input.references %s is not usable: %w", videoInputReferenceLabel(asset), err)
+		}
+	}
+	if refType == service.VideoReferenceVideo && duration <= 0 {
+		return videoInputContractReference{}, fmt.Errorf("video_input.references %s is a video reference but has no measured input_duration_seconds; upload/register it before generation", videoInputReferenceLabel(asset))
+	}
+	return videoInputContractReference{
+		Type:                 refType,
+		URL:                  urlValue,
+		Text:                 strings.TrimSpace(asset.Text),
+		TaskFileID:           taskFileID,
+		ReferenceRole:        role,
+		MustKeep:             append([]string(nil), asset.MustKeep...),
+		CanChange:            append([]string(nil), asset.CanChange...),
+		MustNotTransfer:      append([]string(nil), asset.MustNotTransfer...),
+		FileName:             strings.TrimSpace(asset.FileName),
+		MimeType:             strings.TrimSpace(asset.MimeType),
+		FileSize:             asset.FileSize,
+		InputDurationSeconds: duration,
+		Required:             required,
+	}, nil
+}
+
+func inferVideoReferenceType(urlValue, textValue string) string {
+	if strings.TrimSpace(textValue) != "" && strings.TrimSpace(urlValue) == "" {
+		return service.VideoReferenceText
+	}
+	lower := strings.ToLower(strings.TrimSpace(urlValue))
+	switch {
+	case strings.HasSuffix(lower, ".mp4"), strings.HasSuffix(lower, ".mov"), strings.HasSuffix(lower, ".webm"), strings.HasSuffix(lower, ".m4v"):
+		return service.VideoReferenceVideo
+	case strings.HasSuffix(lower, ".mp3"), strings.HasSuffix(lower, ".wav"), strings.HasSuffix(lower, ".m4a"), strings.HasSuffix(lower, ".aac"):
+		return service.VideoReferenceAudio
+	case lower != "":
+		return service.VideoReferenceImage
+	default:
+		return ""
+	}
+}
+
+func inferVideoInputReferenceRole(promptContext, refType string, strict bool) string {
+	switch refType {
+	case service.VideoReferenceVideo:
+		if strict {
+			if strings.Contains(promptContext, "段子") || strings.Contains(promptContext, "时间轴") || strings.Contains(promptContext, "照着") {
+				return "joke timeline"
+			}
+			return "full remake reference"
+		}
+		return "motion reference"
+	case service.VideoReferenceImage:
+		if strict || strings.Contains(promptContext, "主体不变") || strings.Contains(promptContext, "主体") {
+			return "subject identity"
+		}
+		return "visual reference"
+	case service.VideoReferenceAudio:
+		return "audio reference"
+	case service.VideoReferenceText:
+		return "text constraint"
+	default:
+		return ""
+	}
+}
+
+func isStrictVideoRemakePrompt(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	for _, phrase := range []string{
+		"主体不变",
+		"完全一样",
+		"同款",
+		"复刻",
+		"参考视频",
+		"照着这个段子",
+		"照着段子",
+		"时间轴结构",
+		"strict remake",
+		"full remake",
+		"same as reference",
+		"copy this video",
+	} {
+		if strings.Contains(text, strings.ToLower(phrase)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isRequiredVideoInputReference(refType, urlValue, textValue string) bool {
+	switch refType {
+	case service.VideoReferenceImage, service.VideoReferenceAudio, service.VideoReferenceVideo:
+		return strings.TrimSpace(urlValue) != ""
+	case service.VideoReferenceText:
+		return strings.TrimSpace(textValue) != ""
+	default:
+		return strings.TrimSpace(urlValue) != "" || strings.TrimSpace(textValue) != ""
+	}
+}
+
+func videoInputReferenceLabel(asset model.VideoReferenceAsset) string {
+	for _, value := range []string{asset.FileName, asset.URL, asset.Text, asset.ReferenceRole, asset.Type} {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "reference"
 }
 
 func analyzeVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -964,6 +1408,183 @@ func isMCPVideoTaskFile(file *model.TaskFile) bool {
 	return false
 }
 
+func applyVideoInputContractToRequest(ctx context.Context, projectID string, task *model.Task, req *service.VideoGenerationRequest) (*videoInputContract, error) {
+	if task == nil || req == nil {
+		return nil, nil
+	}
+	input := task.VideoInput.Data()
+	if strings.TrimSpace(req.Ratio) == "" && strings.TrimSpace(input.HardConstraints.Ratio) != "" {
+		req.Ratio = strings.TrimSpace(input.HardConstraints.Ratio)
+	}
+	if req.Duration <= 0 && input.HardConstraints.Duration > 0 {
+		req.Duration = input.HardConstraints.Duration
+	}
+	if req.Watermark == nil && input.HardConstraints.Watermark != nil {
+		watermark := *input.HardConstraints.Watermark
+		req.Watermark = &watermark
+	}
+	currentContract, err := buildVideoInputContract(ctx, projectID, task, false)
+	if err != nil {
+		return nil, err
+	}
+	if currentContract == nil || currentContract.RequiredReferenceCount == 0 {
+		return currentContract, nil
+	}
+	contract, loaded, err := loadPreparedVideoInputContract(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !loaded {
+		return nil, fmt.Errorf("video_input.references require prepare_video_generation_inputs before generation; missing video-input-contract.json")
+	}
+	if contract == nil || contract.RequiredReferenceCount == 0 {
+		return nil, fmt.Errorf("video-input-contract.json has no required video_input.references")
+	}
+	for _, required := range contract.References {
+		if !required.Required {
+			continue
+		}
+		index := findVideoReferenceInRequest(req.ReferenceSet, required)
+		if index < 0 {
+			return nil, fmt.Errorf("video_input.references required reference is missing from final generation plan: %s; generated visual anchors may supplement user media but cannot replace it", contractReferenceLabel(required))
+		}
+		mergeVideoContractReferenceIntoRequest(&req.ReferenceSet[index], required)
+	}
+	if contract.RequiredVideoReference {
+		hasVideo := false
+		for _, ref := range req.ReferenceSet {
+			if ref.Type == service.VideoReferenceVideo {
+				hasVideo = true
+				if ref.InputDurationSeconds <= 0 {
+					return nil, fmt.Errorf("video_input.references video reference %s is not measured; call prepare_video_generation_inputs/register_video_reference before generation", strings.TrimSpace(ref.URL))
+				}
+			}
+		}
+		if !hasVideo {
+			return nil, fmt.Errorf("video_input.references contains a required video reference, but final references[] contains no video_url")
+		}
+	}
+	return contract, nil
+}
+
+func loadPreparedVideoInputContract(ctx context.Context, taskID string) (*videoInputContract, bool, error) {
+	if svcs == nil || svcs.TaskSvc == nil || svcs.TaskSvc.Repository() == nil || svcs.TaskSvc.Repository().TaskFiles() == nil {
+		return nil, false, fmt.Errorf("video_input.references require prepare_video_generation_inputs before generation, but task file repository is not available")
+	}
+	files, err := svcs.TaskSvc.Repository().TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+		for _, value := range []string{file.FileName, file.FilePath} {
+			if filepath.Base(strings.TrimSpace(value)) == "video-input-contract.json" {
+				stream, _, err := svcs.TaskSvc.GetFileStream(ctx, file.ID)
+				if err != nil {
+					return nil, false, fmt.Errorf("load video-input-contract.json: %w", err)
+				}
+				defer stream.Close()
+				payload, err := io.ReadAll(stream)
+				if err != nil {
+					return nil, false, fmt.Errorf("read video-input-contract.json: %w", err)
+				}
+				var contract videoInputContract
+				if err := json.Unmarshal(payload, &contract); err != nil {
+					return nil, false, fmt.Errorf("parse video-input-contract.json: %w", err)
+				}
+				return &contract, true, nil
+			}
+		}
+	}
+	return nil, false, nil
+}
+
+func validateVideoInputContractPlan(contract *videoInputContract, plan *service.VideoGenerationPlan) error {
+	if contract == nil || contract.RequiredReferenceCount == 0 || plan == nil {
+		return nil
+	}
+	for _, required := range contract.References {
+		if !required.Required {
+			continue
+		}
+		if findVideoReferenceInRequest(plan.References, required) < 0 {
+			return fmt.Errorf("video_input.references required reference disappeared from resolved generation plan: %s", contractReferenceLabel(required))
+		}
+	}
+	if contract.RequiredVideoReference {
+		if plan.PricingBreakdown == nil || !plan.PricingBreakdown.InputVideo {
+			return fmt.Errorf("video_input.references includes a required video reference but resolved plan has input_video=false")
+		}
+	}
+	return nil
+}
+
+func findVideoReferenceInRequest(refs []service.VideoReferenceInput, required videoInputContractReference) int {
+	for i, ref := range refs {
+		if videoReferenceMatchesContract(ref, required) {
+			return i
+		}
+	}
+	return -1
+}
+
+func videoReferenceMatchesContract(ref service.VideoReferenceInput, required videoInputContractReference) bool {
+	if strings.TrimSpace(required.TaskFileID) != "" && strings.TrimSpace(ref.TaskFileID) == strings.TrimSpace(required.TaskFileID) {
+		return true
+	}
+	if strings.TrimSpace(required.URL) != "" && strings.TrimSpace(ref.URL) == strings.TrimSpace(required.URL) {
+		return true
+	}
+	if required.Type == service.VideoReferenceText && strings.TrimSpace(required.Text) != "" && strings.TrimSpace(ref.Text) == strings.TrimSpace(required.Text) {
+		return true
+	}
+	return false
+}
+
+func mergeVideoContractReferenceIntoRequest(ref *service.VideoReferenceInput, required videoInputContractReference) {
+	if ref == nil {
+		return
+	}
+	if strings.TrimSpace(ref.Type) == "" {
+		ref.Type = required.Type
+	}
+	if strings.TrimSpace(ref.URL) == "" {
+		ref.URL = required.URL
+	}
+	if strings.TrimSpace(ref.Text) == "" {
+		ref.Text = required.Text
+	}
+	if strings.TrimSpace(ref.TaskFileID) == "" {
+		ref.TaskFileID = required.TaskFileID
+	}
+	if strings.TrimSpace(ref.ReferenceRole) == "" {
+		ref.ReferenceRole = required.ReferenceRole
+	}
+	if len(ref.MustKeep) == 0 {
+		ref.MustKeep = append([]string(nil), required.MustKeep...)
+	}
+	if len(ref.CanChange) == 0 {
+		ref.CanChange = append([]string(nil), required.CanChange...)
+	}
+	if len(ref.MustNotTransfer) == 0 {
+		ref.MustNotTransfer = append([]string(nil), required.MustNotTransfer...)
+	}
+	if ref.InputDurationSeconds <= 0 {
+		ref.InputDurationSeconds = required.InputDurationSeconds
+	}
+}
+
+func contractReferenceLabel(ref videoInputContractReference) string {
+	for _, value := range []string{ref.FileName, ref.URL, ref.Text, ref.ReferenceRole, ref.Type} {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "reference"
+}
+
 func activeVideoService() *service.VideoService {
 	if svcs != nil && svcs.VideoSvc != nil {
 		return svcs.VideoSvc
@@ -991,6 +1612,10 @@ func resolveMCPVideoPlan(ctx context.Context, projectID string, videoReq service
 	if cfg := task.VideoConfig.Data(); strings.TrimSpace(cfg.ModelKey) != "" {
 		videoReq.Model = cfg.ModelKey
 	}
+	contract, err := applyVideoInputContractToRequest(ctx, projectID, task, &videoReq)
+	if err != nil {
+		return nil, err
+	}
 	if err := requireMeasuredVideoReferences(ctx, videoReq.ReferenceSet, videoReq.TaskID); err != nil {
 		return nil, err
 	}
@@ -1005,6 +1630,9 @@ func resolveMCPVideoPlan(ctx context.Context, projectID string, videoReq service
 		return nil, err
 	}
 	plan.ProjectID = projectID
+	if err := validateVideoInputContractPlan(contract, &plan); err != nil {
+		return nil, err
+	}
 	previewDuration := plan.Duration
 	previewPrompt := plan.Prompt
 	if len(plan.Segments) > 0 {
@@ -1324,13 +1952,41 @@ func parseVideoReferences(raw any) []service.VideoReferenceInput {
 		textValue, _ := m["text"].(string)
 		taskFileID, _ := m["task_file_id"].(string)
 		referenceRole, _ := m["reference_role"].(string)
-		ref := service.VideoReferenceInput{Type: refType, URL: urlValue, Text: textValue, TaskFileID: taskFileID, ReferenceRole: referenceRole}
+		ref := service.VideoReferenceInput{
+			Type:            refType,
+			URL:             urlValue,
+			Text:            textValue,
+			TaskFileID:      taskFileID,
+			ReferenceRole:   referenceRole,
+			MustKeep:        stringSliceFromAny(m["must_keep"]),
+			CanChange:       stringSliceFromAny(m["can_change"]),
+			MustNotTransfer: stringSliceFromAny(m["must_not_transfer"]),
+		}
 		if v, ok := numberAsFloat64(m["input_duration_seconds"]); ok {
 			ref.InputDurationSeconds = v
 		}
 		refs = append(refs, ref)
 	}
 	return refs
+}
+
+func stringSliceFromAny(raw any) []string {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		value, ok := item.(string)
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func requireMeasuredVideoReferences(ctx context.Context, refs []service.VideoReferenceInput, taskID string) error {
@@ -1362,6 +2018,19 @@ func videoReferenceMatchesTaskConfig(ctx context.Context, taskID string, ref ser
 	}
 	cfg := task.VideoConfig.Data()
 	for _, asset := range cfg.References {
+		if asset.Type != service.VideoReferenceVideo {
+			continue
+		}
+		if strings.TrimSpace(asset.URL) != strings.TrimSpace(ref.URL) {
+			continue
+		}
+		if asset.InputDurationSeconds <= 0 {
+			continue
+		}
+		return math.Abs(asset.InputDurationSeconds-ref.InputDurationSeconds) < 0.01
+	}
+	input := task.VideoInput.Data()
+	for _, asset := range input.References {
 		if asset.Type != service.VideoReferenceVideo {
 			continue
 		}

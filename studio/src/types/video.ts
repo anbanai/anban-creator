@@ -8,6 +8,7 @@ export interface VideoReferenceAsset {
   type: VideoReferenceType
   url?: string
   text?: string
+  task_file_id?: string
   reference_role?: string
   must_keep?: string[]
   can_change?: string[]
