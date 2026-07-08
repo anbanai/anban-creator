@@ -91,6 +91,50 @@ func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
 	}
 }
 
+func TestSeednoteAgentsTreatImageFailuresAsRecoverableFailedState(t *testing.T) {
+	root := repoRoot(t)
+	paths := []string{
+		filepath.Join(root, "claudecode", "agents", "seednote.md"),
+		filepath.Join(root, "codex", "agents", "seednote.toml"),
+	}
+
+	required := []string{
+		"generate_image",
+		"image-prompts.md",
+		"image-review.md",
+		"provider",
+		"model",
+		"output_path",
+		"error",
+		"下一步建议",
+		"停止在图片阶段",
+		"可恢复失败态",
+	}
+	forbidden := []string{
+		"单张内容图失败时重试一次，仍失败则跳过",
+		"单张内容图生成失败 | 重试一次，仍失败则跳过",
+		"封面失败两次后请求用户协助",
+		"封面生成失败 | 重试两次，仍失败则请求用户协助",
+		"自动重试 + 降级，不中断流程",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			body := readRepoFile(t, path)
+			for _, term := range required {
+				if !strings.Contains(body, term) {
+					t.Fatalf("%s missing recoverable image failure term %q", path, term)
+				}
+			}
+			for _, term := range forbidden {
+				if strings.Contains(body, term) {
+					t.Fatalf("%s still contains stale image fallback term %q", path, term)
+				}
+			}
+		})
+	}
+}
+
 func TestSeednoteWritingSkillKeepsUserInputLocking(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{

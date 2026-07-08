@@ -248,6 +248,83 @@ func TestPlanHandlersSplitVideoFields(t *testing.T) {
 	}
 }
 
+func TestBuildAccountInfoSplitsVideoProjectProfiles(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	userID := uuid.New().String()
+	creatorProject := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideoCreator,
+		Name:     "creator",
+		Status:   model.ProjectStatusActive,
+	}
+	editorProject := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideoEditor,
+		Name:     "editor",
+		Status:   model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(ctx, creatorProject); err != nil {
+		t.Fatalf("create creator project: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, editorProject); err != nil {
+		t.Fatalf("create editor project: %v", err)
+	}
+
+	creator, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"project_id": creatorProject.ID,
+		"scope":      model.PlatformVideoCreator,
+	})
+	if errMsg != "" {
+		t.Fatalf("creator profile error: %s", errMsg)
+	}
+	if _, ok := creator["videocreator"].(map[string]any); !ok {
+		t.Fatalf("creator profile missing videocreator block: %#v", creator)
+	}
+	if _, ok := creator["videoeditor"]; ok {
+		t.Fatalf("creator profile exposed videoeditor block: %#v", creator)
+	}
+	if _, ok := creator["video"]; ok {
+		t.Fatalf("creator profile exposed generic video block: %#v", creator)
+	}
+	brief, ok := creator["agent_brief"].(string)
+	if !ok || !strings.Contains(brief, "video_creator_input") || !strings.Contains(brief, "videocreator.model_catalog") {
+		t.Fatalf("creator agent_brief = %#v, want videocreator contract", creator["agent_brief"])
+	}
+
+	editor, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"project_id": editorProject.ID,
+		"scope":      model.PlatformVideoEditor,
+	})
+	if errMsg != "" {
+		t.Fatalf("editor profile error: %s", errMsg)
+	}
+	editorBlock, ok := editor["videoeditor"].(map[string]any)
+	if !ok {
+		t.Fatalf("editor profile missing videoeditor block: %#v", editor)
+	}
+	if _, ok := editor["videocreator"]; ok {
+		t.Fatalf("editor profile exposed videocreator block: %#v", editor)
+	}
+	if _, ok := editor["video"]; ok {
+		t.Fatalf("editor profile exposed generic video block: %#v", editor)
+	}
+	if _, ok := editor["agent_brief"]; ok {
+		t.Fatalf("editor profile should not expose videocreator agent_brief: %#v", editor["agent_brief"])
+	}
+	if editorBlock["requires_source_media"] != true {
+		t.Fatalf("editor requires_source_media = %#v, want true", editorBlock["requires_source_media"])
+	}
+	delivery, _ := editorBlock["delivery"].([]string)
+	if strings.Join(delivery, ",") != "final.mp4,preview.mp4,capcut draft" {
+		t.Fatalf("editor delivery = %#v, want final/preview/capcut", editorBlock["delivery"])
+	}
+}
+
 func taskToolRequest(t *testing.T, taskID string) *mcp.CallToolRequest {
 	t.Helper()
 	args, err := json.Marshal(map[string]string{"task_id": taskID})
