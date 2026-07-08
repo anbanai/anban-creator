@@ -101,6 +101,7 @@ vi.mock('@/lib/api', async () => {
         balance: vi.fn().mockResolvedValue({ balance: 1000 }),
         pricing: vi.fn().mockResolvedValue({
           task_costs: {},
+          agent_runtime_reserve: { article: 4000, ecommerce: 3000 },
           model_costs: {},
           ecommerce_module_prices: {},
           recharge_tiers: [
@@ -170,10 +171,15 @@ describe('TasksPage URL-driven recovery filters', () => {
   })
 
   it('uses backend-matching fallback pricing for article tasks when pricing omits task costs', async () => {
+    vi.mocked(api.credits.balance).mockResolvedValueOnce({ balance: 5000 })
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
     expect(await screen.findByText(/基础任务费：4000 × 1 =/)).toBeInTheDocument()
+    expect(screen.getByText(/余额：5,000 →/)).toBeInTheDocument()
+    expect(screen.getByText('1,000')).toBeInTheDocument()
+    expect(screen.queryByText(/运行预留/)).not.toBeInTheDocument()
+    expect(screen.queryByText('积分不足')).not.toBeInTheDocument()
   })
 
   it('shows ecommerce creation as a base task fee instead of a module package charge', async () => {

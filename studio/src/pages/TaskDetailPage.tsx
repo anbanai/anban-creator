@@ -125,12 +125,6 @@ export default function TaskDetailPage() {
     enabled: !!id && task?.status === 'completed',
   })
 
-  const { data: videoProduction } = useQuery({
-    queryKey: ['task-video-production', id],
-    queryFn: () => api.tasks.videoProduction(id!),
-    enabled: !!id && task?.type === 'video',
-  })
-
   // Resolve project info for the task
   const { data: projectDetail } = useQuery({
     queryKey: ['project', task?.project_id],
@@ -176,6 +170,12 @@ export default function TaskDetailPage() {
   const netConsumedCredits = creditSummary?.net_consumed ?? task?.credits_charged ?? 0
   const billingShortfallCredits = task?.billing_shortfall_credits ?? 0
   const billingLocked = task?.billing_status === 'payment_required' || billingShortfallCredits > 0
+  const lockedDeliveryMessage = '交付已锁定，充值后可恢复下载、预览和发布。'
+  const { data: videoProduction } = useQuery({
+    queryKey: ['task-video-production', id],
+    queryFn: () => api.tasks.videoProduction(id!),
+    enabled: !!id && task?.type === 'video' && !billingLocked,
+  })
   const showCreditDetails = Boolean(
     task && (
       typeof task.credits_charged === 'number' ||
@@ -708,7 +708,10 @@ export default function TaskDetailPage() {
               size="sm"
               loading={togglePublished.isPending}
               disabled={billingLocked}
-              onClick={() => { void submit(async () => togglePublished.mutateAsync({ published: !task.published })).catch(() => {}) }}
+              onClick={() => {
+                if (billingLocked) return
+                void submit(async () => togglePublished.mutateAsync({ published: !task.published })).catch(() => {})
+              }}
             >
               <Eye className="h-4 w-4" />
               {task.published ? '已发布' : '标记已发布'}
@@ -752,15 +755,20 @@ export default function TaskDetailPage() {
       </div>
 
       {billingLocked && (
-        <Card className="border-red-500/40 bg-red-500/10">
-          <CardContent className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-medium text-red-200">交付已锁定，需补扣 Claude Code 运行费用</p>
-              <p className="mt-1 text-xs text-red-100/80">
-                待补积分 {billingShortfallCredits.toLocaleString()}。充值后系统会自动补扣并恢复下载、预览和发布。
-              </p>
+        <Card className="border-amber-500/40 bg-amber-500/10">
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <Ban className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              <div>
+                <p className="text-sm font-medium text-foreground">交付已锁定</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {billingShortfallCredits > 0
+                    ? `待补积分 ${billingShortfallCredits.toLocaleString()}，充值后系统会恢复下载、预览和发布。`
+                    : '充值后系统会恢复下载、预览和发布。'}
+                </p>
+              </div>
             </div>
-            <Button variant="outline" size="sm" render={<Link to="/credits" />}>
+            <Button size="sm" nativeButton={false} render={<Link to="/credits" />}>
               去充值
             </Button>
           </CardContent>
@@ -786,7 +794,11 @@ export default function TaskDetailPage() {
               <Button
                 size="sm"
                 loading={approvePublish.isPending}
-                onClick={() => { void submit(async () => approvePublish.mutateAsync()).catch(() => {}) }}
+                disabled={billingLocked}
+                onClick={() => {
+                  if (billingLocked) return
+                  void submit(async () => approvePublish.mutateAsync()).catch(() => {})
+                }}
               >
                 <Send className="h-4 w-4" />
                 放行发布
@@ -1258,6 +1270,7 @@ export default function TaskDetailPage() {
             <Button
               size="sm"
               onClick={async () => {
+                if (billingLocked) return
                 try {
                   const blob = await api.tasks.downloadZipBlob(task.id)
                   const url = URL.createObjectURL(blob)
@@ -1270,6 +1283,7 @@ export default function TaskDetailPage() {
                   toast.error('下载 ZIP 失败，请稍后重试')
                 }
               }}
+              disabled={billingLocked}
             >
               <Download className="h-4 w-4" />
               下载全部 (ZIP)
@@ -1277,7 +1291,12 @@ export default function TaskDetailPage() {
           </div>
           <div className="p-4 space-y-4">
             {task.type === 'ecommerce' ? (
-              <EcommerceFilesGallery files={files} taskId={task.id} />
+              <EcommerceFilesGallery
+                files={files}
+                taskId={task.id}
+                accessLocked={billingLocked}
+                lockedMessage={lockedDeliveryMessage}
+              />
             ) : (
               <>
                 {/* Image files in compact grid */}
@@ -1286,7 +1305,13 @@ export default function TaskDetailPage() {
                   if (imageFiles.length === 0) return null
                   return (
                     <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-                      <FilePreviewGallery files={imageFiles} taskId={task.id} inlineItemClassName="shrink-0 snap-start" />
+                      <FilePreviewGallery
+                        files={imageFiles}
+                        taskId={task.id}
+                        inlineItemClassName="shrink-0 snap-start"
+                        accessLocked={billingLocked}
+                        lockedMessage={lockedDeliveryMessage}
+                      />
                     </div>
                   )
                 })()}
@@ -1300,6 +1325,8 @@ export default function TaskDetailPage() {
                         files={nonImageFiles}
                         taskId={task.id}
                         renderPreviewDetails={renderVideoPreviewDetails}
+                        accessLocked={billingLocked}
+                        lockedMessage={lockedDeliveryMessage}
                       />
                     </div>
                   )

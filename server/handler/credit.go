@@ -177,7 +177,6 @@ func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 			"register_bonus": h.cfg.RegisterBonus,
 			"invite_reward":  h.cfg.InviteReward,
 		}
-		agentRuntimeReserve = h.cfg.AgentRuntimeReserve
 	}
 
 	// Synthesize only legacy fixed image_gen pricing from ImageAPI config

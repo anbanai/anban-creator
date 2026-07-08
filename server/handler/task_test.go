@@ -24,6 +24,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type noopTaskEnqueuer struct{}
@@ -60,6 +61,15 @@ func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	taskID := uuid.New().String()
+	fileID := uuid.New().String()
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
+	}
+	upload, err := store.Upload(ctx, "tasks/"+taskID+"/article.html", strings.NewReader("<main>ok</main>"), "text/html")
+	if err != nil {
+		t.Fatalf("upload file: %v", err)
+	}
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      userID + "@example.com",
@@ -87,9 +97,23 @@ func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 	if locked.BillingStatus != model.TaskBillingStatusPaymentRequired || locked.BillingShortfallCredits != 3200 {
 		t.Fatalf("reloaded billing = %q/%d", locked.BillingStatus, locked.BillingShortfallCredits)
 	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID:              fileID,
+		TaskID:          taskID,
+		Role:            model.FileRoleHTML,
+		FilePath:        "article.html",
+		FileName:        "article.html",
+		MimeType:        "text/html",
+		FileSize:        upload.Size,
+		OSSKey:          upload.Key,
+		OSSURL:          upload.URL,
+		StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatalf("create task file: %v", err)
+	}
 
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files/zip", func(c fiber.Ctx) error {
@@ -106,20 +130,141 @@ func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 		data, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 402 body=%s", resp.StatusCode, data)
 	}
-	var body Response
+}
+
+func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	taskID := uuid.New().String()
+	fileID := uuid.New().String()
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
+	}
+	upload, err := store.Upload(ctx, "tasks/"+taskID+"/output/image_01.png", strings.NewReader("png"), "image/png")
+	if err != nil {
+		t.Fatalf("upload file: %v", err)
+	}
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "fileslock",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: uuid.New().String(),
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusCompleted,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID:        fileID,
+		TaskID:    taskID,
+		Role:      model.FileRoleImage,
+		FilePath:  "output/image_01.png",
+		FileName:  "image_01.png",
+		MimeType:  "image/png",
+		FileSize:  upload.Size,
+		OSSKey:    upload.Key,
+		OSSURL:    upload.URL,
+		MediaID:   "wechat-media-1",
+		WechatURL: "https://mmbiz.qpic.cn/wechat-media-1",
+	}); err != nil {
+		t.Fatalf("create task file: %v", err)
+	}
+	if err := repo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusPaymentRequired, 3200); err != nil {
+		t.Fatalf("set billing status: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	app := fiber.New()
+	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.GetFiles(c)
+	})
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files", nil))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, data)
+	}
+	var body struct {
+		Code int              `json:"code"`
+		Msg  string           `json:"msg"`
+		Data []model.TaskFile `json:"data"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	raw, _ := json.Marshal(body.Data)
-	var data struct {
-		BillingStatus           string `json:"billing_status"`
-		BillingShortfallCredits int    `json:"billing_shortfall_credits"`
+	if len(body.Data) != 1 {
+		t.Fatalf("files = %d, want 1", len(body.Data))
 	}
-	if err := json.Unmarshal(raw, &data); err != nil {
-		t.Fatalf("decode data: %v", err)
+	got := body.Data[0]
+	if got.ID != fileID || got.FileName != "image_01.png" || got.MimeType != "image/png" || got.FileSize != upload.Size {
+		t.Fatalf("metadata = %+v, want file metadata preserved", got)
 	}
-	if body.Msg != "payment_required" || data.BillingStatus != model.TaskBillingStatusPaymentRequired || data.BillingShortfallCredits != 3200 {
-		t.Fatalf("response = msg %q data %#v, want payment_required/3200", body.Msg, data)
+	if got.URL != "" || got.MediaID != "" || got.WechatURL != "" {
+		t.Fatalf("delivery fields = url %q media_id %q wechat_url %q, want redacted", got.URL, got.MediaID, got.WechatURL)
+	}
+}
+
+func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	taskID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "videolock",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: uuid.New().String(),
+		Type:      model.PlatformVideo,
+		Status:    model.TaskStatusCompleted,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusPaymentRequired, 800); err != nil {
+		t.Fatalf("set billing status: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	app := fiber.New()
+	app.Get("/tasks/:id/video-production", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.GetVideoProduction(c)
+	})
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/video-production", nil))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusPaymentRequired {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 402 body=%s", resp.StatusCode, data)
 	}
 }
 

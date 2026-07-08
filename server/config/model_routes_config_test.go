@@ -385,7 +385,16 @@ func TestTaskCostDefaultsFillPartialMap(t *testing.T) {
 	}
 }
 
-func TestAgentRuntimeReserveDefaultsFillPartialMap(t *testing.T) {
+func TestAgentRuntimeReserveDefaultsDoNotCreateRuntimeReserve(t *testing.T) {
+	cfg := &Config{}
+	cfg.applyDefaults()
+
+	if len(cfg.Credits.AgentRuntimeReserve) != 0 {
+		t.Fatalf("agent_runtime_reserve = %#v, want empty because runtime cost is platform-paid", cfg.Credits.AgentRuntimeReserve)
+	}
+}
+
+func TestAgentRuntimeReserveDefaultsPreserveLegacyExplicitValues(t *testing.T) {
 	cfg := &Config{
 		Credits: CreditsConfig{
 			AgentRuntimeReserve: map[string]int{"article": 4500},
@@ -393,17 +402,8 @@ func TestAgentRuntimeReserveDefaultsFillPartialMap(t *testing.T) {
 	}
 	cfg.applyDefaults()
 
-	want := map[string]int{
-		"article":        4500,
-		"seednote":       3600,
-		"ecommerce":      3000,
-		"video":          2000,
-		"viral_analysis": 1200,
-	}
-	for key, value := range want {
-		if got := cfg.Credits.AgentRuntimeReserve[key]; got != value {
-			t.Fatalf("agent_runtime_reserve[%s] = %d, want %d in %#v", key, got, value, cfg.Credits.AgentRuntimeReserve)
-		}
+	if len(cfg.Credits.AgentRuntimeReserve) != 1 || cfg.Credits.AgentRuntimeReserve["article"] != 4500 {
+		t.Fatalf("agent_runtime_reserve = %#v, want only explicit legacy value", cfg.Credits.AgentRuntimeReserve)
 	}
 }
 
