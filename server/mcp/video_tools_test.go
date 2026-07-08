@@ -1760,6 +1760,94 @@ func TestBuildVideoPlanRequiresNativeVideoUnderstandingArtifact(t *testing.T) {
 	}
 }
 
+func TestBuildVideoPlanRejectsUnderstandingArtifactWithoutNativeAnalysisMode(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/video-input-contract.json"}
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0"},
+		DefaultModel:  "seedance-2.0",
+		MaxResolution: "1080p",
+		MaxDuration:   120,
+	})
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	prompt := "主体不变，照着这个段子完全复刻"
+	taskID := createMCPVideoTaskWithInput(t, repo, userID, projectID, prompt, model.VideoInput{
+		Brief: prompt,
+		References: []model.VideoReferenceAsset{{
+			Type:                 service.VideoReferenceVideo,
+			URL:                  "https://cdn.example.com/reference.mp4",
+			ReferenceRole:        "joke timeline",
+			InputDurationSeconds: 10,
+		}},
+	})
+	contract := `{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(taskID) + `,
+		"inferred_mode":"strict_remake",
+		"strict_remake":true,
+		"references":[{
+			"type":"video_url",
+			"url":"https://cdn.example.com/reference.mp4",
+			"reference_role":"joke timeline",
+			"input_duration_seconds":10,
+			"required":true
+		}],
+		"required_reference_roles":["joke timeline"],
+		"required_reference_count":1,
+		"required_video_reference":true,
+		"target_duration_seconds":10,
+		"target_duration_source":"reference_video",
+		"video_creator_input_contract_file":"video-input-contract.json",
+		"video_understanding_file":"video-understanding.json",
+		"video_understanding_files":[{
+			"file_name":"video-understanding.json",
+			"source_url":"https://cdn.example.com/reference.mp4",
+			"reference_role":"joke timeline",
+			"analysis_mode":"native_video"
+		}]
+	}`
+	if _, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, taskID, userID, "video-input-contract.json", strings.NewReader(contract), "application/json", int64(len(contract))); err != nil {
+		t.Fatalf("upload prepared contract: %v", err)
+	}
+	understanding := `{
+		"visual_summary":"一个人在办公室说话。",
+		"deep_intent":{"creator_intent":"保留段子的误会和反转。"},
+		"must_keep_meaning":["误会铺垫和最后反转必须成立"]
+	}`
+	if _, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, taskID, userID, "video-understanding.json", strings.NewReader(understanding), "application/json", int64(len(understanding))); err != nil {
+		t.Fatalf("upload video understanding: %v", err)
+	}
+
+	result, err := buildVideoGenerationPlanHandler(ctx, &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
+			"prompt":"主体不变，照着这个段子完全复刻",
+			"references":[
+				{"type":"video_url","url":"https://cdn.example.com/reference.mp4","reference_role":"joke timeline","input_duration_seconds":10}
+			]
+		}`)},
+	})
+	if err != nil {
+		t.Fatalf("buildVideoGenerationPlanHandler returned error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected build to reject video-understanding artifact without analysis_mode=native_video")
+	}
+	text := callToolText(result)
+	if !strings.Contains(text, "analysis_mode=native_video") {
+		t.Fatalf("unexpected error text: %q", text)
+	}
+}
+
 func TestBuildVideoPlanUsesPreparedMaterializedReferences(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })

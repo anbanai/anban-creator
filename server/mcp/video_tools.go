@@ -855,7 +855,7 @@ func validateDeepVideoUnderstanding(understanding map[string]any) error {
 			missing = append(missing, field)
 		}
 	}
-	if mode, _ := understanding["analysis_mode"].(string); strings.TrimSpace(mode) != "" && mode != "native_video" {
+	if mode, _ := understanding["analysis_mode"].(string); strings.TrimSpace(mode) != "native_video" {
 		missing = append(missing, "analysis_mode=native_video")
 	}
 	if len(missing) > 0 {
