@@ -1,6 +1,7 @@
 export interface ModelCapabilities {
   qualityLevels: string[]
   sizePresets: string[]
+  defaultSize: string
   maxBatch: number
   maxReferenceImages: number
   supportsReference: boolean
@@ -34,6 +35,7 @@ export interface RawDesignerProvider {
   capabilities?: {
     quality_levels?: string[]
     size_presets?: string[]
+    default_size?: string
     max_batch?: number
     max_reference_images?: number
     supports_reference?: boolean

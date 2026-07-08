@@ -3,6 +3,7 @@ import type { Project, ProjectStats, Task, TaskType } from '@/types'
 import { projectsReturnHref } from '@/lib/command-center'
 import { contentTypeLabel, platformDefaultRatio } from '@/lib/labels'
 import { taskCostFor } from '@/lib/pricing'
+import { isVideoCreator, isVideoPlatform } from '@/lib/video-platforms'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
 
 export interface DashboardBlocker {
@@ -136,13 +137,13 @@ export function buildProjectReadinessSummary(project: Project, stats?: ProjectSt
     )
     details.push(project.writer || project.theme || project.author ? '写作已配置' : '补写作配置')
   }
-  if (project.platform !== 'video') {
+  if (!isVideoPlatform(project.platform)) {
     details.push(project.visual_style ? '视觉已配置' : '补视觉配置')
   }
   if (project.platform === 'ecommerce') {
     details.push(project.ecommerce_defaults?.target_platform ? `投放 ${project.ecommerce_defaults.target_platform}` : '补投放平台')
   }
-  if (project.platform === 'video') {
+  if (isVideoCreator(project.platform)) {
     details.push(project.video_defaults?.model_key ? '视频默认已配置' : '补视频模型')
   }
   if (stats && stats.total_tasks > 0) {

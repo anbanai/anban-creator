@@ -229,7 +229,8 @@ export const taskTypeLabelCN: Record<string, string> = {
   moments: '朋友圈',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
-  video: '视频生成',
+  videocreator: 'AI 视频生成',
+  videoeditor: '视频剪辑后期',
 }
 
 // --- Content Types ---
@@ -242,7 +243,9 @@ export const contentTypeLabel: Record<string, string> = {
   article: '公众号文章',
   moments: '朋友圈',
   ecommerce: '电商出图',
-  video: '视频生成',
+  viral_analysis: '爆文拆解',
+  videocreator: 'AI 视频生成',
+  videoeditor: '视频剪辑后期',
 }
 
 // Pipeline stage → 中文标签。stage 取值来自 server/service/task_progress_stages.go
@@ -278,7 +281,8 @@ export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
   { value: 'moments', label: '朋友圈' },
-  { value: 'video', label: '视频生成' },
+  { value: 'videocreator', label: 'AI 视频生成' },
+  { value: 'videoeditor', label: '视频剪辑后期' },
   { value: 'ecommerce', label: '电商出图' },
 ]
 
@@ -287,6 +291,8 @@ export const platformLabels: Record<string, string> = {
   article: '公众号',
   moments: '朋友圈',
   ecommerce: '电商出图',
+  videocreator: 'AI 视频生成',
+  videoeditor: '视频剪辑后期',
 }
 
 export const platformDefaultRatio: Record<string, string> = {
@@ -294,6 +300,8 @@ export const platformDefaultRatio: Record<string, string> = {
   seednote: '3:4',
   moments: '3:4',
   ecommerce: '1:1',
+  videocreator: '9:16',
+  videoeditor: '9:16',
 }
 
 export const platformRatioLabel: Record<string, string> = {

@@ -119,18 +119,32 @@ func TestBuildLocalExecutionConfigCarriesArticleImageSwitches(t *testing.T) {
 	}
 }
 
-func TestBuildLocalExecutionConfigRoutesUnifiedVideoAgent(t *testing.T) {
+func TestBuildLocalExecutionConfigRoutesSplitVideoAgents(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
-	task := &model.Task{
-		ID:     "task-video-editor-local",
-		Type:   model.PlatformVideo,
-		Prompt: "给素材加字幕并剪成短视频",
+	tests := []struct {
+		name string
+		task *model.Task
+		want string
+	}{
+		{
+			name: "creator",
+			task: &model.Task{ID: "task-video-creator-local", Type: model.PlatformVideoCreator, Prompt: "生成一条短视频"},
+			want: "anban:videocreator",
+		},
+		{
+			name: "editor",
+			task: &model.Task{ID: "task-video-editor-local", Type: model.PlatformVideoEditor, Prompt: "给素材加字幕并剪成短视频"},
+			want: "anban:videoeditor",
+		},
 	}
-	task.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
 
-	cfg := svc.buildLocalExecutionConfig(task)
-	if cfg.AgentFlag != "anban:video" {
-		t.Fatalf("AgentFlag = %q, want anban:video", cfg.AgentFlag)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := svc.buildLocalExecutionConfig(tt.task)
+			if cfg.AgentFlag != tt.want {
+				t.Fatalf("AgentFlag = %q, want %s", cfg.AgentFlag, tt.want)
+			}
+		})
 	}
 }
 

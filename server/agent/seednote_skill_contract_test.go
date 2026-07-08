@@ -11,6 +11,7 @@ func TestSeednoteVisualDesignSkillKeepsImageRelevanceContract(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
 		filepath.Join(root, "claudecode", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "seednote-visual-design", "SKILL.md"),
 		filepath.Join(root, "openclaw", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 
@@ -38,6 +39,52 @@ func TestSeednoteVisualDesignSkillKeepsImageRelevanceContract(t *testing.T) {
 			for _, term := range required {
 				if !strings.Contains(body, term) {
 					t.Fatalf("%s missing required term %q", path, term)
+				}
+			}
+		})
+	}
+}
+
+func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
+	root := repoRoot(t)
+	paths := []string{
+		filepath.Join(root, "claudecode", "skills", "seednote", "SKILL.md"),
+		filepath.Join(root, "claudecode", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "seednote", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "seednote", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "seednote-visual-design", "SKILL.md"),
+	}
+
+	required := []string{
+		"Seednote 视觉方法论",
+		"内容蒸馏",
+		"视觉策略",
+		"Prompt 蓝图",
+		"generate_image",
+		"image-prompts.md",
+		"image-review.md",
+		"质量复盘",
+		"editorial 信息层级",
+		"Swiss/magazine 秩序感",
+		"图文节奏",
+		"provider",
+		"model",
+		"output_path",
+		"下一步建议",
+		"可恢复失败态",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			body := string(data)
+			for _, term := range required {
+				if !strings.Contains(body, term) {
+					t.Fatalf("%s missing Seednote visual methodology term %q", path, term)
 				}
 			}
 		})

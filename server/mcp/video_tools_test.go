@@ -252,7 +252,7 @@ func setupMCPVideoProject(t *testing.T) (context.Context, repository.Repository,
 	project := &model.Project{
 		ID:       uuid.NewString(),
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "视频项目",
 		Status:   model.ProjectStatusActive,
 	}
@@ -310,7 +310,7 @@ func createMCPVideoTask(t *testing.T, repo repository.Repository, userID, projec
 		ID:        uuid.NewString(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformVideo,
+		Type:      model.PlatformVideoCreator,
 		Status:    model.TaskStatusRunning,
 		Title:     "视频生成任务",
 	}
@@ -326,7 +326,7 @@ func createMCPVideoTaskWithConfig(t *testing.T, repo repository.Repository, user
 		ID:        uuid.NewString(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformVideo,
+		Type:      model.PlatformVideoCreator,
 		Status:    model.TaskStatusRunning,
 		Title:     "视频生成任务",
 	}
@@ -343,7 +343,7 @@ func createMCPVideoTaskWithInput(t *testing.T, repo repository.Repository, userI
 		ID:        uuid.NewString(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformVideo,
+		Type:      model.PlatformVideoCreator,
 		Status:    model.TaskStatusRunning,
 		Title:     "视频生成任务",
 		Prompt:    prompt,
@@ -1049,7 +1049,7 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 	task.Prompt = "生成一条咖啡杯种草视频"
 	task.SetProjectSnapshot(model.ProjectSnapshot{
 		ProjectName:  "快照视频项目",
-		Platform:     model.PlatformVideo,
+		Platform:     model.PlatformVideoCreator,
 		Instructions: "面向露营人群的咖啡杯项目",
 		Keywords:     "咖啡杯,露营,便携",
 		VisualStyle:  "自然光、真实手持，禁止卡通化",
@@ -1155,7 +1155,7 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 		t.Fatalf("video.pricing.operation_billing_rule = %v, want video_gen rule", pricing["operation_billing_rule"])
 	}
 	brief, ok := info["agent_brief"].(string)
-	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "面向露营人群的咖啡杯项目") || !strings.Contains(brief, "CLAUDE.md") || !strings.Contains(brief, "video_input") || !strings.Contains(brief, "seedance-20") || !strings.Contains(brief, "video_gen") {
+	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "面向露营人群的咖啡杯项目") || !strings.Contains(brief, "CLAUDE.md") || !strings.Contains(brief, "video_creator_input") || !strings.Contains(brief, "seedance-20") || !strings.Contains(brief, "video_gen") {
 		t.Fatalf("agent_brief missing video project context: %#v", info["agent_brief"])
 	}
 	if strings.Contains(brief, "自然光、真实手持") {

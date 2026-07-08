@@ -335,7 +335,8 @@ func TestTaskTypeToAgent(t *testing.T) {
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},
-		{model.ScopeVideo, "video"},
+		{model.ScopeVideoCreator, "videocreator"},
+		{model.ScopeVideoEditor, "videoeditor"},
 		{"unknown", "seednote"},
 	}
 
@@ -349,34 +350,21 @@ func TestTaskTypeToAgent(t *testing.T) {
 	}
 }
 
-func TestTaskToAgentRoutesVideoWorkflows(t *testing.T) {
+func TestTaskToAgentRoutesSplitVideoTasks(t *testing.T) {
 	tests := []struct {
 		name string
 		task *model.Task
 		want string
 	}{
 		{
-			name: "video defaults to unified router",
-			task: &model.Task{Type: model.ScopeVideo},
-			want: "video",
+			name: "video creator uses dedicated agent",
+			task: &model.Task{Type: model.ScopeVideoCreator},
+			want: "videocreator",
 		},
 		{
-			name: "video creator workflow still uses unified router",
-			task: func() *model.Task {
-				t := &model.Task{Type: model.ScopeVideo}
-				t.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowCreator})
-				return t
-			}(),
-			want: "video",
-		},
-		{
-			name: "video editor workflow still uses unified router",
-			task: func() *model.Task {
-				t := &model.Task{Type: model.ScopeVideo}
-				t.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
-				return t
-			}(),
-			want: "video",
+			name: "video editor uses dedicated agent",
+			task: &model.Task{Type: model.ScopeVideoEditor},
+			want: "videoeditor",
 		},
 		{
 			name: "article unchanged",

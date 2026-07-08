@@ -146,8 +146,8 @@ func TestCreditPricingDoesNotExposeAgentRuntimeReserve(t *testing.T) {
 		Credits: srvconfig.CreditsConfig{
 			TaskCosts: map[string]int{"article": 4000},
 			AgentRuntimeReserve: map[string]int{
-				"article": 4000,
-				"video":   2000,
+				"article":      4000,
+				"videocreator": 2000,
 			},
 		},
 	}

@@ -121,6 +121,12 @@ func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
 	if providers[0].Capabilities.MaxBatch != 10 || !providers[0].Capabilities.SupportsReference || len(providers[0].Capabilities.QualityLevels) == 0 {
 		t.Fatalf("capabilities = %+v", providers[0].Capabilities)
 	}
+	if providers[0].Capabilities.DefaultSize != "auto" {
+		t.Fatalf("default size = %q, want auto for GPT Image", providers[0].Capabilities.DefaultSize)
+	}
+	if len(providers[0].Capabilities.SizePresets) == 0 || providers[0].Capabilities.SizePresets[0] != "auto" {
+		t.Fatalf("size presets = %+v, want auto first for GPT Image", providers[0].Capabilities.SizePresets)
+	}
 	if providers[0].Pricing.PricingType != srvconfig.ImagePricingTypeOpenAIUsage || !providers[0].Pricing.RequiresUsage {
 		t.Fatalf("pricing = %+v", providers[0].Pricing)
 	}

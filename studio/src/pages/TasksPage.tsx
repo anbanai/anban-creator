@@ -42,6 +42,7 @@ import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { buildVideoInputForSubmit, initialVideoInput } from '@/lib/video-form'
+import { isVideoCreator, isVideoEditor, isVideoPlatform } from '@/lib/video-platforms'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
@@ -146,8 +147,11 @@ export default function TasksPage() {
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
+  const isVideoCreatorTask = isVideoCreator(watchedType)
+  const isVideoTask = isVideoPlatform(watchedType)
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
+  const watchedVideoReferences = useWatch({ control: form.control, name: 'video_input.references' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
@@ -328,7 +332,7 @@ export default function TasksPage() {
       target_platform: defaults.targetPlatform,
       selling_points: '',
       language: '',
-      video_input: defaultType === 'video' ? initialVideoInput('') : undefined,
+      video_input: isVideoPlatform(defaultType) ? initialVideoInput('') : undefined,
     })
     setQuantity(1)
     setWatermark(false)
@@ -406,7 +410,7 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      video_input: values.type === 'video' ? buildVideoInputForSubmit(values.prompt, values.video_input) : undefined,
+      video_input: isVideoPlatform(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_input) : undefined,
       // Route to the desktop local executor only when it is running and able to claim now.
       execution_target: runThisTaskLocally ? 'local' : undefined,
     }))
@@ -475,12 +479,15 @@ export default function TasksPage() {
     balance: creditsBalance?.balance ?? 0,
   })
 
+  const videoEditorHasSourceMedia = (watchedVideoReferences ?? []).some((ref) => ref.type === 'video_url' && (ref.url || ref.task_file_id))
   const creationBlocker = costPreview.insufficient
     ? { message: '积分不足，补充积分后再创建。', href: '/credits', actionLabel: '查看积分' }
     : watchedType !== 'ecommerce' && goalMode && !goalText.trim()
       ? { message: '强目标模式需要填写目标条件。', href: '', actionLabel: '' }
       : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
         ? { message: '电商出图需要先上传产品图。', href: '', actionLabel: '' }
+        : isVideoEditor(watchedType) && !videoEditorHasSourceMedia
+          ? { message: '视频剪辑后期需要先上传至少一个源视频素材。', href: '', actionLabel: '' }
         : null
 
   return (
@@ -846,7 +853,7 @@ export default function TasksPage() {
                           form.setValue('selected_modules', defaults.selectedModules, { shouldDirty: false })
                           form.setValue('target_platform', defaults.targetPlatform, { shouldDirty: false })
                           form.setValue('image_model_key', defaults.imageModelKey, { shouldDirty: false })
-                          form.setValue('video_input', defaults.type === 'video' ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+                          form.setValue('video_input', isVideoPlatform(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
                         } else {
                           setProjectImageRatio('')
                           form.setValue('video_input', undefined, { shouldDirty: false })
@@ -863,7 +870,7 @@ export default function TasksPage() {
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 space-y-1">
                   <p className="text-xs font-medium text-foreground/80">将使用项目「{selectedProject.name}」的快照</p>
                   <p className="text-xs text-muted-foreground">
-                    {watchedType === 'video' ? (
+                    {isVideoTask ? (
                       <>项目定位 {selectedProject.instructions || selectedProject.positioning || '—'}</>
                     ) : (
                       <>视觉风格 {selectedProject.visual_style || '—'}</>
@@ -878,7 +885,7 @@ export default function TasksPage() {
 
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">03 目标/提示词</p>
-              {watchedType !== 'video' && <FormField control={form.control} name="prompt" render={({ field }) => (
+              {!isVideoTask && <FormField control={form.control} name="prompt" render={({ field }) => (
                 <FormItem>
                   <FormLabel>创作要求（可选）</FormLabel>
                   <FormControl>
@@ -893,7 +900,7 @@ export default function TasksPage() {
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">04 图片/高级</p>
 
               {/* Quantity selector (ecommerce creates one guided package task at qty=1) */}
-              {watchedType !== 'ecommerce' && watchedType !== 'video' && (
+              {watchedType !== 'ecommerce' && !isVideoTask && (
               <div className="space-y-2">
                 <FormLabel>数量</FormLabel>
                 <div className="flex gap-2">
@@ -913,7 +920,7 @@ export default function TasksPage() {
               )}
 
               {/* Image ratio selector (ecommerce uses per-module ratios from platform specs) */}
-              {watchedType !== 'ecommerce' && watchedType !== 'video' && (
+              {watchedType !== 'ecommerce' && !isVideoTask && (
               <FormField control={form.control} name="image_ratio" render={({ field }) => {
                 const defaultRatio = projectImageRatio || platformDefaultRatio[watchedType] || '3:4'
                 const defaultLabel = platformRatioLabel[watchedType] || `${defaultRatio}（默认）`
@@ -948,7 +955,7 @@ export default function TasksPage() {
               )}
 
               {/* Image model selector */}
-              {watchedType !== 'video' && <FormField control={form.control} name="image_model_key" render={({ field }) => (
+              {!isVideoTask && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
                   <FormLabel>图像模型</FormLabel>
                   <FormControl>
@@ -966,15 +973,21 @@ export default function TasksPage() {
                 </FormItem>
               )} />}
 
-              {watchedType === 'video' && (
+              {isVideoTask && (
                 <VideoCreationPanel
                   form={form}
                   selectedProject={selectedProject}
+                  title={isVideoCreatorTask ? 'AI 视频生成' : '视频剪辑后期'}
                   promptField={(
                     <FormField control={form.control} name="prompt" render={({ field }) => (
                       <FormItem>
                         <FormControl>
-                          <Textarea placeholder="描述你想要的视频内容、卖点、镜头风格或禁忌，留空则根据项目自动生成" {...field} />
+                          <Textarea
+                            placeholder={isVideoCreatorTask
+                              ? '描述你想要的视频内容、卖点、镜头风格或禁忌，留空则根据项目自动生成'
+                              : '描述剪辑目标、脚本、字幕、节奏、包装、CapCut 草稿或交付要求'}
+                            {...field}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -984,7 +997,7 @@ export default function TasksPage() {
               )}
 
               {/* Watermark toggle */}
-              {watchedType !== 'video' && <button
+              {!isVideoTask && <button
                 type="button"
                 onClick={() => setWatermark(!watermark)}
                 className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${

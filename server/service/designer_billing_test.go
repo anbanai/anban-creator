@@ -122,6 +122,38 @@ func TestDesignerCreateGenerationPreDeductsGPTImage2Estimate(t *testing.T) {
 	}
 }
 
+func TestDesignerCreateGenerationAllowsGPTImageAutoSizeWithEstimate(t *testing.T) {
+	svc, repo, db := setupDesignerBillingTest(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 5000)
+
+	created, err := svc.CreateGenerationRecord(ctx, userID, DesignerGenerateRequest{
+		ProjectID:  "default",
+		Prompt:     "a tall milk carton poster",
+		ProviderID: "gpt_image_2",
+		Quality:    "medium",
+		Size:       "auto",
+		N:          1,
+	})
+	if err != nil {
+		t.Fatalf("CreateGenerationRecord() error = %v", err)
+	}
+	if created.EstimatedCredits != 497 || created.BillingMode != srvconfig.ImagePricingTypeOpenAIUsage {
+		t.Fatalf("created = %+v, want estimated=497 billing=openai_image_usage", created)
+	}
+
+	var gen model.ImageGeneration
+	if err := db.First(&gen, "id = ?", created.GenerationID).Error; err != nil {
+		t.Fatalf("find generation: %v", err)
+	}
+	if gen.Size != "auto" {
+		t.Fatalf("generation size = %q, want auto", gen.Size)
+	}
+	if gen.EstimatedCost != 497 || gen.Cost != 497 || gen.BillingStatus != "estimated" {
+		t.Fatalf("generation billing fields = %+v", gen)
+	}
+}
+
 func TestDesignerCreateGenerationUsesProviderIDAsRuntimeSourceOfTruth(t *testing.T) {
 	svc, _, db := setupDesignerBillingTest(t)
 	ctx := context.Background()

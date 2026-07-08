@@ -219,7 +219,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 	}
 
 	var artifactValidation agent.ArtifactValidation
-	if task.Type == model.PlatformVideo {
+	if model.IsVideoPlatform(task.Type) {
 		var err error
 		artifactValidation, err = s.validateVideoCompletionArtifacts(ctx, task)
 		if err != nil {

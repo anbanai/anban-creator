@@ -31,15 +31,14 @@ func TestUploadMissingTaskFilesVideoGenerationUsesDeliveryAllowlist(t *testing.T
 	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformVideo,
+		Type:      model.PlatformVideoCreator,
 		Status:    model.TaskStatusRunning,
 	}
-	task.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowCreator})
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -77,8 +76,7 @@ func TestUploadMissingTaskFilesVideoGenerationUsesDeliveryAllowlist(t *testing.T
 }
 
 func TestShouldCollectTaskFileVideoEditingRestrictsVideoDeliverables(t *testing.T) {
-	task := &model.Task{Type: model.PlatformVideo}
-	task.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
+	task := &model.Task{Type: model.PlatformVideoEditor}
 
 	tests := []struct {
 		path string
@@ -116,10 +114,9 @@ func TestUploadMissingTaskFilesRefreshesExistingPathWhenContentChanges(t *testin
 	task := &model.Task{
 		ID:     uuid.New().String(),
 		UserID: userID,
-		Type:   model.PlatformVideo,
+		Type:   model.PlatformVideoCreator,
 		Status: model.TaskStatusRunning,
 	}
-	task.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowCreator})
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}

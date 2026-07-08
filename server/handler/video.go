@@ -108,8 +108,8 @@ func (h *VideoHandler) Estimate(c fiber.Ctx) error {
 	if project.UserID != userID {
 		return Forbidden(c, "you do not have access to this project")
 	}
-	if project.Platform != model.PlatformVideo {
-		return Error(c, fiber.StatusBadRequest, "project is not a video project")
+	if !model.IsVideoCreatorPlatform(project.Platform) {
+		return Error(c, fiber.StatusBadRequest, "project is not a video creator project")
 	}
 
 	policy := project.VideoModelPolicy.Data()

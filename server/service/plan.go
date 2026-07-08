@@ -162,6 +162,8 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		return nil, fmt.Errorf("plans are not supported for e-commerce projects: %w", ErrUnsupportedPlanPlatform)
 	case model.PlatformMoments:
 		return nil, fmt.Errorf("plans are not supported for moments projects: %w", ErrUnsupportedPlanPlatform)
+	case model.PlatformVideoEditor:
+		return nil, fmt.Errorf("plans are not supported for video editor projects: %w", ErrUnsupportedPlanPlatform)
 	}
 
 	nextRun, err := s.computeNextRun(p.CronExpr)
@@ -211,7 +213,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ArticleWithCover:         &articleCover,
 		ArticleWithContentImages: &articleContent,
 	}
-	if project.Platform == model.PlatformVideo {
+	if model.IsVideoCreatorPlatform(project.Platform) {
 		if p.VideoInput != nil {
 			plan.SetVideoInput(*p.VideoInput)
 		} else if p.Video != nil {
@@ -328,8 +330,8 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		if err != nil {
 			return nil, fmt.Errorf("find project: %w", err)
 		}
-		if project.Platform != model.PlatformVideo {
-			return nil, fmt.Errorf("video_input can only be set on video plans")
+		if !model.IsVideoCreatorPlatform(project.Platform) {
+			return nil, fmt.Errorf("video_input can only be set on videocreator plans")
 		}
 		plan.SetVideoInput(*p.VideoInput)
 		plan.VideoEstimatedCredits = 0
@@ -338,8 +340,8 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		if err != nil {
 			return nil, fmt.Errorf("find project: %w", err)
 		}
-		if project.Platform != model.PlatformVideo {
-			return nil, fmt.Errorf("video_config can only be set on video plans")
+		if !model.IsVideoCreatorPlatform(project.Platform) {
+			return nil, fmt.Errorf("video_config can only be set on videocreator plans")
 		}
 		plan.SetVideoInput(videoInputFromLegacyConfig(plan.Prompt, p.Video))
 		plan.VideoEstimatedCredits = 0

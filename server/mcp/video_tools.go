@@ -1599,7 +1599,7 @@ func resolveMCPVideoPlan(ctx context.Context, projectID string, videoReq service
 	if err != nil {
 		return nil, err
 	}
-	if project.Platform != model.PlatformVideo {
+	if !model.IsVideoCreatorPlatform(project.Platform) {
 		return nil, fmt.Errorf("project is not a video generation project")
 	}
 	task, err := mcpTaskForProject(ctx, videoReq.TaskID, projectID)
@@ -2013,7 +2013,7 @@ func videoReferenceMatchesTaskConfig(ctx context.Context, taskID string, ref ser
 		return false
 	}
 	task, err := svcs.TaskSvc.GetByID(ctx, taskID)
-	if err != nil || task.Type != model.PlatformVideo {
+	if err != nil || !model.IsVideoCreatorPlatform(task.Type) {
 		return false
 	}
 	cfg := task.VideoConfig.Data()

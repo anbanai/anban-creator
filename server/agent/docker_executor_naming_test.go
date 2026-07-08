@@ -9,8 +9,7 @@ import (
 
 func TestDockerExecutorUsesAnbanRuntimeNames(t *testing.T) {
 	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
-	task := model.Task{ID: "task-1", Type: model.PlatformVideo, Prompt: "topic"}
-	task.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
+	task := model.Task{ID: "task-1", Type: model.PlatformVideoEditor, Prompt: "topic"}
 
 	cmd := e.buildAgentCommand(&ExecutionOptions{Task: &task}, "sonnet", 100, "/workspace", "key")
 	if got, want := cmd[0], "anban"; got != want {
@@ -19,7 +18,7 @@ func TestDockerExecutorUsesAnbanRuntimeNames(t *testing.T) {
 	if got, want := cmd[1], "run"; got != want {
 		t.Fatalf("agent subcommand = %q, want %q", got, want)
 	}
-	if got, want := flagValue(cmd, "--agent-flag"), "anban:video"; got != want {
+	if got, want := flagValue(cmd, "--agent-flag"), "anban:videoeditor"; got != want {
 		t.Fatalf("--agent-flag = %q, want %q", got, want)
 	}
 

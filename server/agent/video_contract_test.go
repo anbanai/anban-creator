@@ -6,48 +6,71 @@ import (
 	"testing"
 )
 
-func TestVideoAgentUsesUnifiedSkillDrivenIntake(t *testing.T) {
-	text := readRepoFile(t, "../../claudecode/agents/video.md")
-	if strings.Contains(frontmatterBlock(t, text), "\ntools:") {
-		t.Fatal("video agent must not define a tools allowlist; omitting tools lets Claude Code inherit MCP tools")
+func TestVideoAgentsUseDedicatedCreatorAndEditorContracts(t *testing.T) {
+	creator := readRepoFile(t, "../../claudecode/agents/videocreator.md")
+	editor := readRepoFile(t, "../../claudecode/agents/videoeditor.md")
+	for path, text := range map[string]string{
+		"claudecode/agents/videocreator.md": creator,
+		"claudecode/agents/videoeditor.md":  editor,
+	} {
+		if strings.Contains(frontmatterBlock(t, text), "\ntools:") {
+			t.Fatalf("%s must not define a tools allowlist; omitting tools lets Claude Code inherit MCP tools", path)
+		}
+		if strings.Contains(frontmatterBlock(t, text), "mcpServers") {
+			t.Fatalf("%s must not define mcpServers; plugin agents inherit plugin-level MCP", path)
+		}
+		if !strings.Contains(text, "禁止调用 Claude `Agent` 工具") {
+			t.Fatalf("%s must forbid nested Agent delegation", path)
+		}
 	}
 	for _, want := range []string{
-		"禁止调用 Claude `Agent` 工具",
-		"video",
-		"video_input",
-		"CLAUDE.md",
-		"Studio 不再提供",
-		"业务玩法",
-		"制作模式",
+		"name: videocreator",
 		"seedance-20",
-		"video-use",
 		"create_video_generation_job",
 		"query_video_generation_job",
 		"download_video_generation_results",
 		"compose_video_segments",
 		"validate_video_delivery",
-		`agent_name="video"`,
+		`agent_name="videocreator"`,
 	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("video.md missing %q", want)
+		if !strings.Contains(creator, want) {
+			t.Fatalf("videocreator.md missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"video-use", "capcut-draft", `agent_name="video"`} {
+		if strings.Contains(creator, forbidden) {
+			t.Fatalf("videocreator.md must not contain editor/unified contract %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		"name: videoeditor",
+		"video-use",
+		"prepare_file_upload",
+		"create_video_asr_task",
+		"edl.json",
+		"final.mp4",
+		`agent_name="videoeditor"`,
+	} {
+		if !strings.Contains(editor, want) {
+			t.Fatalf("videoeditor.md missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"create_video_generation_job", "seedance-20", `agent_name="video"`} {
+		if strings.Contains(editor, forbidden) {
+			t.Fatalf("videoeditor.md must not contain creator/unified contract %q", forbidden)
 		}
 	}
 
-	codexAgent := readRepoFile(t, "../../codex/agents/video.toml")
-	for _, want := range []string{
-		`name = "video"`,
-		"video_input",
-		"CLAUDE.md",
-		"Studio 不再提供",
-		"业务玩法",
-		"制作模式",
-		"seedance-20",
-		"skills/video-use/SKILL.md",
-		"create_video_generation_job",
-		"submit_agent_feedback(agent_name=\"video\"",
-	} {
-		if !strings.Contains(codexAgent, want) {
-			t.Fatalf("codex video.toml missing %q", want)
+	codexCreator := readRepoFile(t, "../../codex/agents/videocreator.toml")
+	codexEditor := readRepoFile(t, "../../codex/agents/videoeditor.toml")
+	for _, want := range []string{`name = "videocreator"`, "seedance-20", "submit_agent_feedback(agent_name=\"videocreator\""} {
+		if !strings.Contains(codexCreator, want) {
+			t.Fatalf("codex videocreator.toml missing %q", want)
+		}
+	}
+	for _, want := range []string{`name = "videoeditor"`, "skills/video-use/SKILL.md", "submit_agent_feedback(agent_name=\"videoeditor\""} {
+		if !strings.Contains(codexEditor, want) {
+			t.Fatalf("codex videoeditor.toml missing %q", want)
 		}
 	}
 }
@@ -86,62 +109,86 @@ func TestVideoSkillContractsUseVideoInputReferences(t *testing.T) {
 	}
 }
 
-func TestVideoHookQualityGateIsRegistered(t *testing.T) {
+func TestSplitVideoHookQualityGatesAreRegistered(t *testing.T) {
 	text := readRepoFile(t, "../../claudecode/hooks/hooks.json")
-	if !strings.Contains(text, "video-quality-gate.sh") {
-		t.Fatal("video-quality-gate.sh is not registered in hooks.json")
+	for _, want := range []string{
+		`"matcher": "anban:videocreator"`,
+		`"matcher": "anban:videoeditor"`,
+		"videocreator-quality-gate.sh",
+		"videoeditor-quality-gate.sh",
+		`agent_name=\"videocreator\"`,
+		`agent_name=\"videoeditor\"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("claudecode hooks missing %q", want)
+		}
 	}
 }
 
-func TestCodexVideoHookQualityGateIsRegistered(t *testing.T) {
+func TestCodexSplitVideoHookQualityGatesAreRegistered(t *testing.T) {
 	hooks := readRepoFile(t, "../../codex/hooks/hooks.json")
 	for _, want := range []string{
-		`"matcher": "video"`,
-		"${PLUGIN_ROOT}/hooks/video-quality-gate.sh",
+		`"matcher": "videocreator"`,
+		`"matcher": "videoeditor"`,
+		"${PLUGIN_ROOT}/hooks/videocreator-quality-gate.sh",
+		"${PLUGIN_ROOT}/hooks/videoeditor-quality-gate.sh",
 	} {
 		if !strings.Contains(hooks, want) {
 			t.Fatalf("codex hooks missing %q", want)
 		}
 	}
 
-	script := readRepoFile(t, "../../codex/hooks/video-quality-gate.sh")
-	for _, want := range []string{"video", "seedance-20", "dreamina-video", "video-use"} {
-		if !strings.Contains(script, want) {
-			t.Fatalf("codex video quality gate missing %q", want)
+	creatorScript := readRepoFile(t, "../../codex/hooks/videocreator-quality-gate.sh")
+	for _, want := range []string{"videocreator", "seedance-20", "task_id not in text"} {
+		if !strings.Contains(creatorScript, want) {
+			t.Fatalf("codex videocreator quality gate missing %q", want)
 		}
+	}
+	for _, forbidden := range []string{"output/video/$task_id", "selected_skill=.*seedance-20", "dreamina-video\" \"$manifest\""} {
+		if strings.Contains(creatorScript, forbidden) {
+			t.Fatalf("codex videocreator quality gate must not use legacy/generic manifest discovery %q", forbidden)
+		}
+	}
+	editorScript := readRepoFile(t, "../../codex/hooks/videoeditor-quality-gate.sh")
+	for _, want := range []string{"videoeditor", "video-use", "edl.json", "task_id not in text"} {
+		if !strings.Contains(editorScript, want) {
+			t.Fatalf("codex videoeditor quality gate missing %q", want)
+		}
+	}
+	if strings.Contains(editorScript, "output/video/$task_id") || strings.Contains(editorScript, "workflow=.*video-use") {
+		t.Fatalf("codex videoeditor quality gate must not use legacy/generic manifest discovery")
 	}
 }
 
-func TestCodexVideoAgentsUseSeedance20Skill(t *testing.T) {
-	text := readRepoFile(t, "../../codex/agents/video.toml")
+func TestCodexVideoCreatorAgentUsesSeedance20Skill(t *testing.T) {
+	text := readRepoFile(t, "../../codex/agents/videocreator.toml")
 	for _, want := range []string{
 		"seedance-20",
 		"__PLUGIN_ROOT__/skills/seedance-20/SKILL.md",
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("codex video.toml missing %q", want)
+			t.Fatalf("codex videocreator.toml missing %q", want)
 		}
 	}
 	for _, forbidden := range []string{
 		"using dreamina-video skill",
 		"path = \"__PLUGIN_ROOT__/skills/dreamina-video/SKILL.md\"",
+		"path = \"__PLUGIN_ROOT__/skills/capcut-draft/SKILL.md\"",
 		"workflow=dreamina-video",
 	} {
 		if strings.Contains(text, forbidden) {
-			t.Fatalf("codex video.toml should not keep dreamina-video as primary workflow: %q", forbidden)
+			t.Fatalf("codex videocreator.toml should not keep dreamina-video as primary workflow: %q", forbidden)
 		}
 	}
 }
 
-func TestVideoDistributionDoesNotExposeLegacySplitAgents(t *testing.T) {
+func TestVideoDistributionDoesNotExposeUnifiedVideoAgent(t *testing.T) {
 	for _, path := range []string{
-		"../../claudecode/agents/videocreator.md",
-		"../../claudecode/agents/videoeditor.md",
-		"../../codex/agents/videocreator.toml",
-		"../../codex/agents/videoeditor.toml",
+		"../../claudecode/agents/video.md",
+		"../../codex/agents/video.toml",
 	} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("legacy split video agent should not be distributed: %s", path)
+			t.Fatalf("unified video agent should not be distributed: %s", path)
 		}
 	}
 
@@ -154,9 +201,9 @@ func TestVideoDistributionDoesNotExposeLegacySplitAgents(t *testing.T) {
 		"../../claudecode/docs/plugin-development.md",
 	} {
 		text := readRepoFile(t, path)
-		for _, forbidden := range []string{"videocreator", "videoeditor", "VideoCreator", "VideoEditor"} {
+		for _, forbidden := range []string{`name = "video"`, `"matcher": "anban:video"`, `"matcher": "video"`, "统一视频", "统一入口"} {
 			if strings.Contains(text, forbidden) {
-				t.Fatalf("%s still exposes legacy split video agent %q", path, forbidden)
+				t.Fatalf("%s still exposes unified video agent %q", path, forbidden)
 			}
 		}
 	}

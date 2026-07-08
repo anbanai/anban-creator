@@ -1,6 +1,6 @@
 import type { VideoDefaults, VideoModelPolicy } from './video'
 
-export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'video'
+export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'videocreator' | 'videoeditor'
 export type ProjectStatus = 'active' | 'archived'
 
 export interface ProjectConfig {

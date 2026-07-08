@@ -431,7 +431,7 @@ describe('TaskDetailPage', () => {
 
   it('shows generated video files in the files list and opens the video result in a dialog', async () => {
     mockTask(taskWith({
-      type: 'video',
+      type: 'videocreator',
       status: 'completed',
       prompt: '做一条办公室个人 IP 种草视频',
       video_generation_id: 'vg-1',
@@ -505,7 +505,7 @@ describe('TaskDetailPage', () => {
 
   it('shows only user video input before agent resolves execution params', async () => {
     mockTask(taskWith({
-      type: 'video',
+      type: 'videocreator',
       status: 'pending',
       prompt: '做一条办公室个人 IP 种草视频',
       video_input: {
@@ -532,7 +532,7 @@ describe('TaskDetailPage', () => {
   it('shows video production tabs, QC, delivery actions, and retake cloning', async () => {
     mockTask(taskWith({
       id: 'task-1',
-      type: 'video',
+      type: 'videocreator',
       status: 'completed',
       prompt: '生成一条直播带货视频',
       video_config: {

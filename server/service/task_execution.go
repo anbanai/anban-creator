@@ -224,7 +224,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	artifactValidation := agent.ArtifactValidation{Valid: true}
-	if task.Type == model.PlatformVideo {
+	if model.IsVideoPlatform(task.Type) {
 		var err error
 		artifactValidation, err = s.validateVideoCompletionArtifacts(persistCtx, task)
 		if err != nil {
@@ -353,6 +353,9 @@ func (s *TaskService) validateVideoCompletionArtifacts(ctx context.Context, task
 	if err != nil {
 		return agent.ArtifactValidation{}, err
 	}
+	if model.IsVideoEditorPlatform(task.Type) {
+		return validateVideoEditorCompletionArtifacts(files), nil
+	}
 	if !requiresGeneratedVideoTaskFile(task) {
 		return agent.ValidateTaskArtifactsFromTaskFiles(task, files), nil
 	}
@@ -383,10 +386,65 @@ func (s *TaskService) validateVideoCompletionArtifacts(ctx context.Context, task
 }
 
 func requiresGeneratedVideoTaskFile(task *model.Task) bool {
-	if task == nil || task.Type != model.PlatformVideo {
+	if task == nil || !model.IsVideoCreatorPlatform(task.Type) {
 		return false
 	}
 	return strings.TrimSpace(task.VideoGenerationID) != "" || task.VideoEstimatedCredits > 0 || task.VideoCreditsCharged > 0
+}
+
+func validateVideoEditorCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
+	hasEDL := false
+	hasRenderedVideo := false
+	hasDraft := false
+	meaningful := 0
+	for _, file := range files {
+		if file == nil || file.FileSize <= 0 {
+			continue
+		}
+		name := normalizeVideoDeliveryPath(file.FileName)
+		path := normalizeVideoDeliveryPath(file.FilePath)
+		if name == "edit/edl.json" || path == "edit/edl.json" {
+			hasEDL = true
+			meaningful++
+			continue
+		}
+		if (name == "final.mp4" || name == "preview.mp4" || path == "final.mp4" || path == "preview.mp4") && isVideoTaskFile(file) {
+			hasRenderedVideo = true
+			meaningful++
+			continue
+		}
+		if isVideoEditorDraftPath(name) || isVideoEditorDraftPath(path) {
+			hasDraft = true
+			meaningful++
+		}
+	}
+	var missing []string
+	if !hasEDL {
+		missing = append(missing, "edit/edl.json")
+	}
+	if !hasRenderedVideo && !hasDraft {
+		missing = append(missing, "final.mp4 or preview.mp4 or CapCut draft")
+	}
+	if len(missing) > 0 {
+		return agent.ArtifactValidation{
+			MeaningfulFileCount: meaningful,
+			Missing:             missing,
+			Reason:              "videoeditor missing required deliverables: " + strings.Join(missing, ", "),
+		}
+	}
+	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
+}
+
+func normalizeVideoDeliveryPath(path string) string {
+	path = filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(path), "./"))
+	return strings.TrimPrefix(path, "output/")
+}
+
+func isVideoEditorDraftPath(path string) bool {
+	if !strings.HasSuffix(path, ".json") {
+		return false
+	}
+	return strings.HasPrefix(path, "capcut/") || strings.HasPrefix(path, "capcut-draft/")
 }
 
 func isVideoTaskFile(file *model.TaskFile) bool {

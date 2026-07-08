@@ -1005,6 +1005,7 @@ type DesignerProviderInfo struct {
 type DesignerProviderCapabilities struct {
 	QualityLevels      []string `json:"quality_levels"`
 	SizePresets        []string `json:"size_presets"`
+	DefaultSize        string   `json:"default_size"`
 	MaxBatch           int      `json:"max_batch"`
 	MaxReferenceImages int      `json:"max_reference_images"`
 	SupportsReference  bool     `json:"supports_reference"`
@@ -1130,7 +1131,8 @@ func designerCapabilities(provider, modelName string) DesignerProviderCapabiliti
 		if strings.HasPrefix(strings.ToLower(modelName), "gpt-image-") {
 			return DesignerProviderCapabilities{
 				QualityLevels:      []string{"auto", "low", "medium", "high"},
-				SizePresets:        []string{"1024x1024", "1536x1024", "1024x1536"},
+				SizePresets:        []string{"auto", "1024x1024", "1536x1024", "1024x1536"},
+				DefaultSize:        "auto",
 				MaxBatch:           10,
 				MaxReferenceImages: 16,
 				SupportsReference:  true,
@@ -1143,6 +1145,7 @@ func designerCapabilities(provider, modelName string) DesignerProviderCapabiliti
 	case "volcengine":
 		return DesignerProviderCapabilities{
 			SizePresets:        []string{"1:1", "3:4", "4:3", "16:9", "9:16"},
+			DefaultSize:        "1:1",
 			MaxBatch:           1,
 			MaxReferenceImages: 1,
 			SupportsReference:  true,
@@ -1152,6 +1155,7 @@ func designerCapabilities(provider, modelName string) DesignerProviderCapabiliti
 	case "gemini":
 		return DesignerProviderCapabilities{
 			SizePresets:        []string{"1:1", "3:4", "4:3", "16:9"},
+			DefaultSize:        "1:1",
 			MaxBatch:           1,
 			MaxReferenceImages: 10,
 			SupportsReference:  true,

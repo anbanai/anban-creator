@@ -33,11 +33,12 @@ func (e projectDeleteConflictError) Is(target error) bool {
 
 // validPlatforms defines the allowed platform values.
 var validPlatforms = map[string]bool{
-	model.PlatformArticle:   true,
-	model.PlatformSeednote:  true,
-	model.PlatformMoments:   true,
-	model.PlatformEcommerce: true,
-	model.PlatformVideo:     true,
+	model.PlatformArticle:      true,
+	model.PlatformSeednote:     true,
+	model.PlatformMoments:      true,
+	model.PlatformEcommerce:    true,
+	model.PlatformVideoCreator: true,
+	model.PlatformVideoEditor:  true,
 }
 
 // ProjectService handles project CRUD operations with ownership verification.
@@ -86,7 +87,7 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	if ch.Instructions == "" && ch.Positioning != "" {
 		ch.Instructions = ch.Positioning
 	}
-	if ch.Platform == model.PlatformVideo {
+	if model.IsVideoPlatform(ch.Platform) {
 		ch.VisualStyle = ""
 	}
 
@@ -213,7 +214,7 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 		existing.VideoDefaults = ch.VideoDefaults
 		existing.VideoModelPolicy = ch.VideoModelPolicy
 	}
-	if existing.Platform == model.PlatformVideo {
+	if model.IsVideoPlatform(existing.Platform) {
 		existing.VisualStyle = ""
 	}
 	if err := s.validateVideoProfile(existing); err != nil {
@@ -236,7 +237,7 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 }
 
 func (s *ProjectService) validateVideoProfile(ch *model.Project) error {
-	if ch == nil || ch.Platform != model.PlatformVideo {
+	if ch == nil || !model.IsVideoCreatorPlatform(ch.Platform) {
 		return nil
 	}
 	catalog := s.resolvedVideoCatalog()
@@ -342,7 +343,7 @@ func SanitizeProject(ch *model.Project) {
 // Studio or agents. Persistence remains unchanged; create/update/estimate/task
 // execution still fail closed through the service validation paths.
 func SanitizeProjectVideoProfile(ch *model.Project, catalog VideoModelCatalog) {
-	if ch == nil || ch.Platform != model.PlatformVideo {
+	if ch == nil || !model.IsVideoCreatorPlatform(ch.Platform) {
 		return
 	}
 	if catalog == nil {

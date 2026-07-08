@@ -553,7 +553,7 @@ func TestTaskService_CreateManualVideoTaskStoresInputAndChargesOnlyBaseFee(t *te
 	project := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "视频项目",
 		Status:   model.ProjectStatusActive,
 	}
@@ -639,7 +639,7 @@ func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
 	project := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "视频项目",
 		Status:   model.ProjectStatusActive,
 	}
@@ -724,6 +724,29 @@ func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
 	}
 }
 
+func TestTaskService_CreateManualVideoEditorRequiresSourceVideo(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+
+	_, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "加字幕并剪成 30 秒短视频",
+		VideoInput: &model.VideoInput{
+			Brief: "加字幕并剪成 30 秒短视频",
+			References: []model.VideoReferenceAsset{{
+				Type: VideoReferenceImage,
+				URL:  "https://cdn.example.com/storyboard.png",
+			}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "videoeditor task requires at least one source video") {
+		t.Fatalf("CreateManual error = %v, want source video rejection", err)
+	}
+}
+
 func TestTaskService_CreateManualVideoTaskOnlyRequiresBaseFeeBalance(t *testing.T) {
 	repoForCredits := setupCreditTestRepo(t)
 	creditSvc := newPricedCreditService(repoForCredits)
@@ -737,7 +760,7 @@ func TestTaskService_CreateManualVideoTaskOnlyRequiresBaseFeeBalance(t *testing.
 	project := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "视频项目",
 		Status:   model.ProjectStatusActive,
 	}
@@ -795,7 +818,7 @@ func TestTaskService_CreateManualVideoTaskUsesConfiguredCreditMultiplier(t *test
 	project := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "视频项目",
 		Status:   model.ProjectStatusActive,
 	}
@@ -865,7 +888,7 @@ func TestTaskService_CreateManualVideoTaskAppliesUserBillingMultiplier(t *testin
 	project := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "视频项目",
 		Status:   model.ProjectStatusActive,
 	}
@@ -935,7 +958,7 @@ func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInputAndChargesOnlyBaseFe
 	project := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "视频项目",
 		Status:   model.ProjectStatusActive,
 	}
@@ -963,7 +986,7 @@ func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInputAndChargesOnlyBaseFe
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: project.ID,
-		Type:      model.PlatformVideo,
+		Type:      model.PlatformVideoCreator,
 		Status:    model.PlanStatusActive,
 		Prompt:    "生成一条咖啡杯种草视频",
 	}
@@ -1016,7 +1039,7 @@ func TestTaskService_CreateManualVideoTaskDoesNotRequireProjectProfileAtCreation
 	project := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "未配置视频项目",
 		Status:   model.ProjectStatusActive,
 	}
@@ -1268,7 +1291,7 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFile(t *tes
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	workDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workDir, "input-manifest.md"), []byte("workflow: dreamina-video"), 0644); err != nil {
 		t.Fatalf("write input manifest: %v", err)
@@ -1277,7 +1300,7 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFile(t *tes
 		ID:                    uuid.New().String(),
 		UserID:                userID,
 		ProjectID:             projectID,
-		Type:                  model.PlatformVideo,
+		Type:                  model.PlatformVideoCreator,
 		Status:                model.TaskStatusRunning,
 		VideoEstimatedCredits: 2400,
 		VideoCreditsCharged:   2400,
@@ -1323,12 +1346,12 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFileWhenWor
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	task := &model.Task{
 		ID:                    uuid.New().String(),
 		UserID:                userID,
 		ProjectID:             projectID,
-		Type:                  model.PlatformVideo,
+		Type:                  model.PlatformVideoCreator,
 		Status:                model.TaskStatusRunning,
 		VideoEstimatedCredits: 2400,
 		VideoCreditsCharged:   2400,
@@ -1373,12 +1396,12 @@ func TestTaskServiceHandleExecutionRejectsGeneratedVideoTaskWithOnlyInputVideoRe
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	task := &model.Task{
 		ID:                    uuid.New().String(),
 		UserID:                userID,
 		ProjectID:             projectID,
-		Type:                  model.PlatformVideo,
+		Type:                  model.PlatformVideoCreator,
 		Status:                model.TaskStatusRunning,
 		VideoEstimatedCredits: 2400,
 		VideoCreditsCharged:   2400,
@@ -1435,14 +1458,14 @@ func TestTaskServiceHandleExecutionAcceptsRegisteredFinalVideoFile(t *testing.T)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	generationID := uuid.New().String()
 	fileID := uuid.New().String()
 	task := &model.Task{
 		ID:                    uuid.New().String(),
 		UserID:                userID,
 		ProjectID:             projectID,
-		Type:                  model.PlatformVideo,
+		Type:                  model.PlatformVideoCreator,
 		Status:                model.TaskStatusRunning,
 		VideoGenerationID:     generationID,
 		VideoEstimatedCredits: 2400,
@@ -1493,7 +1516,7 @@ func TestTaskServiceHandleExecutionAcceptsRegisteredFinalVideoFile(t *testing.T)
 	}
 }
 
-func TestTaskServiceHandleExecutionAcceptsNonGenerationVideoWorkflowArtifact(t *testing.T) {
+func TestTaskServiceHandleExecutionRejectsVideoEditorWithoutRequiredDeliverables(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
@@ -1505,12 +1528,12 @@ func TestTaskServiceHandleExecutionAcceptsNonGenerationVideoWorkflowArtifact(t *
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformVideo,
+		Type:      model.PlatformVideoEditor,
 		Status:    model.TaskStatusRunning,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
@@ -1542,8 +1565,81 @@ func TestTaskServiceHandleExecutionAcceptsNonGenerationVideoWorkflowArtifact(t *
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.Status == model.TaskStatusFailed {
-		t.Fatalf("non-generation video workflow artifact should not fail validation: %#v", found)
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", found.Status)
+	}
+	if !strings.Contains(found.ErrorMessage, "videoeditor missing required deliverables") {
+		t.Fatalf("error = %q, want videoeditor missing required deliverables", found.ErrorMessage)
+	}
+}
+
+func TestTaskServiceHandleExecutionAcceptsVideoEditorEDLAndPreview(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformVideoEditor,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for _, file := range []*model.TaskFile{
+		{
+			ID:       uuid.New().String(),
+			TaskID:   task.ID,
+			Role:     model.FileRoleOther,
+			FileName: "edit/edl.json",
+			FilePath: "output/edit/edl.json",
+			MimeType: "application/json",
+			FileSize: 128,
+		},
+		{
+			ID:       uuid.New().String(),
+			TaskID:   task.ID,
+			Role:     model.FileRoleVideo,
+			FileName: "preview.mp4",
+			FilePath: "output/preview.mp4",
+			MimeType: "video/mp4",
+			FileSize: 4096,
+		},
+	} {
+		if err := repo.TaskFiles().Create(ctx, file); err != nil {
+			t.Fatalf("create task file: %v", err)
+		}
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+		ToolUseSummary: map[string]int{
+			"create_video_asr_task": 1,
+			"Write":                 2,
+		},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q error=%q, want completed with editor deliverables", found.Status, found.ErrorMessage)
+	}
+	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 || found.VideoGenerationID != "" {
+		t.Fatalf("editor task should not carry video_gen billing state: estimated=%d charged=%d generation=%q", found.VideoEstimatedCredits, found.VideoCreditsCharged, found.VideoGenerationID)
 	}
 }
 

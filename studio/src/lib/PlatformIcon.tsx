@@ -1,4 +1,4 @@
-import { BookOpen, MessageCircle, ShoppingBag, Signature, Video } from 'lucide-react'
+import { BookOpen, MessageCircle, Scissors, ShoppingBag, Signature, Video } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { TaskType } from '@/types'
 
@@ -7,7 +7,9 @@ export const platformIcon: Record<TaskType, LucideIcon> = {
   article: Signature,
   moments: MessageCircle,
   ecommerce: ShoppingBag,
-  video: Video,
+  viral_analysis: BookOpen,
+  videocreator: Video,
+  videoeditor: Scissors,
 }
 
 export const platformIconColor: Record<TaskType, string> = {
@@ -15,7 +17,9 @@ export const platformIconColor: Record<TaskType, string> = {
   article: 'text-[#07C160]',
   moments: 'text-[#2F855A]',
   ecommerce: 'text-[#FF6A00]',
-  video: 'text-[#2563EB]',
+  viral_analysis: 'text-[#7C3AED]',
+  videocreator: 'text-[#2563EB]',
+  videoeditor: 'text-[#0F766E]',
 }
 
 export const platformBorderColor: Record<string, string> = {
@@ -23,7 +27,9 @@ export const platformBorderColor: Record<string, string> = {
   seednote: 'border-l-[#FF2442]',
   moments: 'border-l-[#2F855A]',
   ecommerce: 'border-l-[#FF6A00]',
-  video: 'border-l-[#2563EB]',
+  viral_analysis: 'border-l-[#7C3AED]',
+  videocreator: 'border-l-[#2563EB]',
+  videoeditor: 'border-l-[#0F766E]',
 }
 
 export const platformHoverBorderColor: Record<string, string> = {
@@ -31,7 +37,9 @@ export const platformHoverBorderColor: Record<string, string> = {
   seednote: 'hover:border-l-[#FF2442]/50',
   moments: 'hover:border-l-[#2F855A]/50',
   ecommerce: 'hover:border-l-[#FF6A00]/50',
-  video: 'hover:border-l-[#2563EB]/50',
+  viral_analysis: 'hover:border-l-[#7C3AED]/50',
+  videocreator: 'hover:border-l-[#2563EB]/50',
+  videoeditor: 'hover:border-l-[#0F766E]/50',
 }
 
 export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -39,7 +47,9 @@ export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'des
   seednote: 'destructive',
   moments: 'secondary',
   ecommerce: 'default',
-  video: 'outline',
+  viral_analysis: 'outline',
+  videocreator: 'outline',
+  videoeditor: 'secondary',
 }
 
 export const platformBgColor: Record<string, string> = {
@@ -47,7 +57,9 @@ export const platformBgColor: Record<string, string> = {
   seednote: 'bg-[#FF2442]/10',
   moments: 'bg-[#2F855A]/10',
   ecommerce: 'bg-[#FF6A00]/10',
-  video: 'bg-[#2563EB]/10',
+  viral_analysis: 'bg-[#7C3AED]/10',
+  videocreator: 'bg-[#2563EB]/10',
+  videoeditor: 'bg-[#0F766E]/10',
 }
 
 export function renderPlatformIcon(type: string) {

@@ -222,7 +222,7 @@ describe('createTaskSchema', () => {
   it('keeps video intake fields and reference transfer rules', () => {
     const result = createTaskSchema.parse({
       project_id: 'video-1',
-      type: 'video',
+      type: 'videocreator',
       prompt: '测试',
       video_input: {
         brief: '测试',

@@ -264,7 +264,8 @@ credits:
     article: 4000
     seednote: 3600
     ecommerce: 3000
-    video: 2000
+    videocreator: 2000
+    videoeditor: 2000
     viral_analysis: 1200
   admin_api_key: "${ANBAN_CREDITS_ADMIN_API_KEY}"
 
@@ -288,7 +289,8 @@ claude:
     viral_analysis: 30
     seednote: 50
     article: 60
-    video: 80
+    videocreator: 80
+    videoeditor: 80
     ecommerce: 90
   task_log_dir: "./data/logs/tasks"
   env:

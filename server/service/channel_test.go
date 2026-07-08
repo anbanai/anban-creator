@@ -76,40 +76,44 @@ func TestProjectServiceDoesNotDefaultSeednoteStyle(t *testing.T) {
 }
 
 func TestProjectServiceVideoIgnoresVisualStyleOnCreateAndUpdate(t *testing.T) {
-	svc, _ := setupTestProjectService(t)
-	ch, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform:     model.PlatformVideo,
-		Name:         "Video Project",
-		Instructions: "品牌、人设、账号、产品基础信息和视频风格都写在这里",
-		VisualStyle:  "旧视频风格入口不应保存",
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if ch.VisualStyle != "" {
-		t.Fatalf("created video VisualStyle = %q, want empty because video profile belongs to Instructions", ch.VisualStyle)
-	}
+	for _, platform := range []string{model.PlatformVideoCreator, model.PlatformVideoEditor} {
+		t.Run(platform, func(t *testing.T) {
+			svc, _ := setupTestProjectService(t)
+			ch, err := svc.Create(context.Background(), "user-1", &model.Project{
+				Platform:     platform,
+				Name:         "Video Project",
+				Instructions: "品牌、人设、账号、产品基础信息和视频风格都写在这里",
+				VisualStyle:  "旧视频风格入口不应保存",
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if ch.VisualStyle != "" {
+				t.Fatalf("created video VisualStyle = %q, want empty because video profile belongs to Instructions", ch.VisualStyle)
+			}
 
-	ch.VisualStyle = "存量旧视频风格入口"
-	if err := svc.repo.Projects().Update(context.Background(), ch); err != nil {
-		t.Fatalf("seed legacy visual style: %v", err)
-	}
+			ch.VisualStyle = "存量旧视频风格入口"
+			if err := svc.repo.Projects().Update(context.Background(), ch); err != nil {
+				t.Fatalf("seed legacy visual style: %v", err)
+			}
 
-	updated, err := svc.Update(context.Background(), "user-1", ch.ID, &model.Project{
-		Platform:        model.PlatformVideo,
-		Name:            "Video Project Updated",
-		Instructions:    "更新后的项目定位",
-		InstructionsSet: true,
-		VisualStyle:     "更新请求里的旧视频风格入口也应忽略",
-	})
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if updated.VisualStyle != "" {
-		t.Fatalf("updated video VisualStyle = %q, want empty because video profile belongs to Instructions", updated.VisualStyle)
-	}
-	if updated.Instructions != "更新后的项目定位" {
-		t.Fatalf("updated Instructions = %q, want 更新后的项目定位", updated.Instructions)
+			updated, err := svc.Update(context.Background(), "user-1", ch.ID, &model.Project{
+				Platform:        platform,
+				Name:            "Video Project Updated",
+				Instructions:    "更新后的项目定位",
+				InstructionsSet: true,
+				VisualStyle:     "更新请求里的旧视频风格入口也应忽略",
+			})
+			if err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			if updated.VisualStyle != "" {
+				t.Fatalf("updated video VisualStyle = %q, want empty because video profile belongs to Instructions", updated.VisualStyle)
+			}
+			if updated.Instructions != "更新后的项目定位" {
+				t.Fatalf("updated Instructions = %q, want 更新后的项目定位", updated.Instructions)
+			}
+		})
 	}
 }
 
@@ -247,7 +251,7 @@ func TestProjectServiceRejectsUnconfiguredVideoPolicyOnCreateAndUpdate(t *testin
 	})
 
 	create := &model.Project{
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "Video",
 	}
 	create.SetVideoDefaults(model.VideoDefaults{
@@ -269,7 +273,7 @@ func TestProjectServiceRejectsUnconfiguredVideoPolicyOnCreateAndUpdate(t *testin
 	}
 
 	ok := &model.Project{
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "Video",
 	}
 	ok.SetVideoDefaults(model.VideoDefaults{

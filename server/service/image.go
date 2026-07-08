@@ -276,7 +276,7 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 			}
 		}
 	}
-	if apiCfg == nil && ch.Platform == model.PlatformVideo {
+	if apiCfg == nil && model.IsVideoCreatorPlatform(ch.Platform) {
 		// Video projects use generate_image only for temporary visual anchors
 		// that become video references. They have no dedicated app-config image
 		// section, so reuse the generic image API with Content preferred because

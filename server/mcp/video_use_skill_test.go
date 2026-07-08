@@ -212,79 +212,151 @@ func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 	}
 }
 
-func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
+func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 
-	claudeAgent := filepath.Join(root, "claudecode", "agents", "video.md")
-	raw, err := os.ReadFile(claudeAgent)
+	creatorRaw, err := os.ReadFile(filepath.Join(root, "claudecode", "agents", "videocreator.md"))
 	if err != nil {
-		t.Fatalf("video agent missing: %v", err)
+		t.Fatalf("videocreator agent missing: %v", err)
 	}
-	body := string(raw)
+	creator := string(creatorRaw)
 	for _, want := range []string{
-		"name: video",
+		"name: videocreator",
 		"skills:",
 		"- seedance-20",
+		"register_video_reference",
+		"prepare_video_generation_inputs",
+		"create_video_generation_job",
+		"video-input-contract.json",
+		"generated visual anchors can supplement user media but cannot replace it",
+		"compose_video_segments",
+		`submit_agent_feedback(agent_name="videocreator"`,
+	} {
+		if !strings.Contains(creator, want) {
+			t.Fatalf("videocreator agent missing %q", want)
+		}
+	}
+	creatorFrontmatter := creator
+	if end := strings.Index(creator[len("---\n"):], "\n---"); end >= 0 {
+		creatorFrontmatter = creator[:len("---\n")+end+len("\n---")]
+	}
+	if strings.Contains(creatorFrontmatter, "\nmcpServers:") || strings.Contains(creatorFrontmatter, "\ntools:") {
+		t.Fatal("videocreator agent must not define tools or mcpServers")
+	}
+	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task", "create_video_asr_task", "pack_video_transcripts", "video-use"} {
+		if strings.Contains(creator, banned) {
+			t.Fatalf("videocreator agent should not mention %q", banned)
+		}
+	}
+
+	editorRaw, err := os.ReadFile(filepath.Join(root, "claudecode", "agents", "videoeditor.md"))
+	if err != nil {
+		t.Fatalf("videoeditor agent missing: %v", err)
+	}
+	editor := string(editorRaw)
+	for _, want := range []string{
+		"name: videoeditor",
+		"skills:",
 		"- video-use",
 		"- hyperframes-video-overlays",
 		"- remotion-video-overlays",
 		"- manim-video-overlays",
 		"- pil-video-overlays",
-		"- short-video-cover",
-		"- portrait-pose-variants",
 		"- capcut-draft",
-		"插件级 `.mcp.json`",
 		"prepare_file_upload",
 		"create_video_asr_task",
-		"query_video_asr_task",
 		"prepare_video_transcript_download",
-		"pack_video_transcripts",
 		"anban video",
-		"media-manifest.json",
+		"edit/media-manifest.json",
 		"display rotation",
 		"save-asr-result",
 		"pack-transcripts",
 		"match-script",
-		"draft",
-		"preview",
-		"final",
+		"preview.mp4",
+		"final.mp4",
 		"普通素材剪辑不得调用",
-		"register_video_reference",
-		"prepare_video_generation_inputs",
-		"create_video_generation_job",
-		"video-input-contract.json",
-		"reference-timeline.json",
-		"strict remake",
-		"full remake reference",
-		"joke timeline",
-		"generated visual anchors can supplement user media but cannot replace it",
-		"主体不变",
-		"完全一样",
-		"同款",
-		"复刻",
-		"照着这个段子",
-		"input_video=false",
-		"compose_video_segments",
+		`submit_agent_feedback(agent_name="videoeditor"`,
 	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("video agent missing %q", want)
+		if !strings.Contains(editor, want) {
+			t.Fatalf("videoeditor agent missing %q", want)
 		}
 	}
-	frontmatter := body
-	if end := strings.Index(body[len("---\n"):], "\n---"); end >= 0 {
-		frontmatter = body[:len("---\n")+end+len("\n---")]
+	editorFrontmatter := editor
+	if end := strings.Index(editor[len("---\n"):], "\n---"); end >= 0 {
+		editorFrontmatter = editor[:len("---\n")+end+len("\n---")]
 	}
-	if strings.Contains(frontmatter, "\nmcpServers:") {
-		t.Fatal("video agent must not define mcpServers; plugin subagents inherit the plugin-level MCP server")
+	if strings.Contains(editorFrontmatter, "\nmcpServers:") || strings.Contains(editorFrontmatter, "\ntools:") {
+		t.Fatal("videoeditor agent must not define tools or mcpServers")
 	}
-	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task"} {
-		if strings.Contains(body, banned) {
-			t.Fatalf("video agent should not mention %q", banned)
+	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task", "create_video_generation_job", "prepare_video_generation_inputs", "seedance-20"} {
+		if strings.Contains(editor, banned) {
+			t.Fatalf("videoeditor agent should not mention %q", banned)
 		}
+	}
+
+	codexCreatorRaw, err := os.ReadFile(filepath.Join(root, "codex", "agents", "videocreator.toml"))
+	if err != nil {
+		t.Fatalf("codex videocreator agent missing: %v", err)
+	}
+	codexCreator := string(codexCreatorRaw)
+	for _, want := range []string{
+		`name = "videocreator"`,
+		"skills/seedance-20/SKILL.md",
+		"prepare_video_generation_inputs",
+		"video-input-contract.json",
+		"compose_video_segments",
+		`submit_agent_feedback(agent_name="videocreator"`,
+	} {
+		if !strings.Contains(codexCreator, want) {
+			t.Fatalf("codex videocreator agent missing %q", want)
+		}
+	}
+
+	codexEditorRaw, err := os.ReadFile(filepath.Join(root, "codex", "agents", "videoeditor.toml"))
+	if err != nil {
+		t.Fatalf("codex videoeditor agent missing: %v", err)
+	}
+	codexEditor := string(codexEditorRaw)
+	for _, want := range []string{
+		`name = "videoeditor"`,
+		"skills/video-use/SKILL.md",
+		"skills/hyperframes-video-overlays/SKILL.md",
+		"skills/remotion-video-overlays/SKILL.md",
+		"skills/manim-video-overlays/SKILL.md",
+		"skills/pil-video-overlays/SKILL.md",
+		"anban video",
+		"edit/media-manifest.json",
+		"display rotation",
+		"prepare_video_transcript_download",
+		"save-asr-result",
+		"pack-transcripts",
+		"match-script",
+		"preview.mp4",
+		"final.mp4",
+		`submit_agent_feedback(agent_name="videoeditor"`,
+	} {
+		if !strings.Contains(codexEditor, want) {
+			t.Fatalf("codex videoeditor agent missing %q", want)
+		}
+	}
+	for _, banned := range []string{
+		"create_video_generation_job",
+		"prepare_video_generation_inputs",
+		"seedance-20",
+	} {
+		if strings.Contains(codexEditor, banned) {
+			t.Fatalf("codex videoeditor agent should not contain creator flow %q", banned)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "claudecode", "agents", "video.md")); !os.IsNotExist(err) {
+		t.Fatalf("unified claudecode video agent should be removed")
+	}
+	if _, err := os.Stat(filepath.Join(root, "codex", "agents", "video.toml")); !os.IsNotExist(err) {
+		t.Fatalf("unified codex video agent should be removed")
 	}
 	if _, err := os.Stat(filepath.Join(root, "claudecode", "agents", "short-video-studio.md")); !os.IsNotExist(err) {
 		t.Fatalf("old claudecode short-video-studio agent should be removed")
@@ -293,59 +365,13 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		t.Fatalf("old codex short-video-studio agent should be removed")
 	}
 
-	codexAgentRaw, err := os.ReadFile(filepath.Join(root, "codex", "agents", "video.toml"))
-	if err != nil {
-		t.Fatalf("codex video agent missing: %v", err)
-	}
-	codexAgent := string(codexAgentRaw)
-	for _, want := range []string{
-		`name = "video"`,
-		"music-to-video",
-		"slideshow",
-		"remotion-best-practices",
-		"skills/seedance-20/SKILL.md",
-		"skills/video-use/SKILL.md",
-		"skills/hyperframes-video-overlays/SKILL.md",
-		"skills/remotion-video-overlays/SKILL.md",
-		"skills/manim-video-overlays/SKILL.md",
-		"skills/pil-video-overlays/SKILL.md",
-		"anban video",
-		"media-manifest.json",
-		"display rotation",
-		"prepare_video_transcript_download",
-		"prepare_video_generation_inputs",
-		"video-input-contract.json",
-		"reference-timeline.json",
-		"strict remake",
-		"input_video=false",
-		"compose_video_segments",
-		"save-asr-result",
-		"pack-transcripts",
-		"match-script",
-		"draft",
-		"preview",
-		"final",
-	} {
-		if !strings.Contains(codexAgent, want) {
-			t.Fatalf("codex video agent missing %q", want)
-		}
-	}
-	for _, banned := range []string{
-		"保存返回的 normalized JSON",
-		"调用 pack_video_transcripts，保存 edit/takes_packed.md",
-	} {
-		if strings.Contains(codexAgent, banned) {
-			t.Fatalf("codex video agent still contains old flow %q", banned)
-		}
-	}
-
 	regRaw, err := os.ReadFile(filepath.Join(root, "codex", "install", "agents-registration.toml"))
 	if err != nil {
 		t.Fatalf("codex registration missing: %v", err)
 	}
 	reg := string(regRaw)
-	if !strings.Contains(reg, "[agents.video]") || strings.Contains(reg, "short-video-studio") {
-		t.Fatalf("codex registration should contain video and remove short-video-studio:\n%s", reg)
+	if !strings.Contains(reg, "[agents.videocreator]") || !strings.Contains(reg, "[agents.videoeditor]") || strings.Contains(reg, "[agents.video]") || strings.Contains(reg, "short-video-studio") {
+		t.Fatalf("codex registration should contain split video agents and remove unified/short-video entries:\n%s", reg)
 	}
 }
 

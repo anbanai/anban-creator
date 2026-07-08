@@ -7,7 +7,8 @@ const taskLabels: Record<string, string> = {
   moments: '朋友圈',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
-  video: '视频生成',
+  videocreator: 'AI 视频生成',
+  videoeditor: '视频剪辑后期',
 }
 
 function creditAmount(tx: CreditTransaction, fallback?: string): number {

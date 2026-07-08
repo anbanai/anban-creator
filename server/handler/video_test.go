@@ -36,7 +36,7 @@ func TestVideoEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T)
 	project := &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "Video",
 		Status:   model.ProjectStatusActive,
 	}
@@ -147,7 +147,7 @@ func TestVideoEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
 	project := &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "Video",
 		Status:   model.ProjectStatusActive,
 	}
@@ -248,7 +248,7 @@ func TestVideoEstimateAllowsEmptyPromptForConfigurationPreview(t *testing.T) {
 	project := &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "Video",
 		Status:   model.ProjectStatusActive,
 	}
@@ -384,7 +384,7 @@ func TestVideoEstimateReturnsProductionGuidance(t *testing.T) {
 	project := &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "Video",
 		Status:   model.ProjectStatusActive,
 	}

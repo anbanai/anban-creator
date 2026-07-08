@@ -937,7 +937,7 @@ type CreditsConfig struct {
 	DailySignIn         int                       `yaml:"daily_sign_in"`                                      // credits awarded per daily sign-in (default 100)
 	RegisterBonus       int                       `yaml:"register_bonus"`                                     // credits awarded on registration (default 1000)
 	InviteReward        int                       `yaml:"invite_reward"`                                      // credits awarded to inviter when invitee registers (default 1000)
-	TaskCosts           map[string]int            `yaml:"task_costs"`                                         // base service fees by task type, e.g. {"article": 4000, "seednote": 3600, "ecommerce": 3000, "video": 2000}
+	TaskCosts           map[string]int            `yaml:"task_costs"`                                         // base service fees by task type, e.g. {"article": 4000, "seednote": 3600, "ecommerce": 3000, "videocreator": 2000, "videoeditor": 2000}
 	AgentRuntimeReserve map[string]int            `yaml:"agent_runtime_reserve" json:"agent_runtime_reserve"` // legacy/ignored; Claude Code runtime is platform-paid
 	ModelCosts          map[string]map[string]int `yaml:"model_costs"`                                        // per-model costs, key format: "provider/model"
 	AdminAPIKey         string                    `yaml:"admin_api_key"`                                      // API key for admin credit grant endpoint
@@ -1237,7 +1237,8 @@ func (c *Config) applyDefaults() {
 		"seednote":       3600,
 		"moments":        3000,
 		"ecommerce":      3000,
-		"video":          2000,
+		"videocreator":   2000,
+		"videoeditor":    2000,
 		"viral_analysis": 1200,
 	}
 	if c.Credits.TaskCosts == nil {
@@ -1341,7 +1342,8 @@ func (c *Config) applyDefaults() {
 		"viral_analysis": 30,
 		"seednote":       50,
 		"article":        60,
-		"video":          80,
+		"videocreator":   80,
+		"videoeditor":    80,
 		"ecommerce":      90,
 	}
 	if c.Claude.MaxTurns == nil {

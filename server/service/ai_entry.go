@@ -160,7 +160,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			SellingPoints:   firstNonEmptyString(intent.SellingPoints, req.Text),
 			Language:        intent.Language,
 		}
-	case model.PlatformVideo:
+	case model.PlatformVideoCreator:
 		params.VideoInput = &model.VideoInput{
 			Brief:      prompt,
 			References: videoReferencesFromEntryAttachments(req.Attachments),
@@ -169,6 +169,10 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 				Duration:  normalizeAIEntryVideoDuration(intent.Video.Duration),
 				Watermark: intent.Video.Watermark,
 			},
+		}
+	case model.PlatformVideoEditor:
+		if len(videoAttachmentURLs(req.Attachments)) == 0 {
+			return aiEntryNeedsConfiguration("创建视频剪辑任务需要至少上传一个视频素材。", aiEntryTaskCreateActionURL(model.PlatformVideoEditor, project.ID)), nil
 		}
 	default:
 		return aiEntryNeedsConfiguration("当前项目平台暂不支持 AI 入口创建任务。", "/projects/"+project.ID), nil
@@ -378,6 +382,16 @@ func imageAttachmentURLs(attachments []model.EntryAttachment) []string {
 	urls := []string{}
 	for _, a := range attachments {
 		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "image" && strings.TrimSpace(a.URL) != "" {
+			urls = append(urls, strings.TrimSpace(a.URL))
+		}
+	}
+	return urls
+}
+
+func videoAttachmentURLs(attachments []model.EntryAttachment) []string {
+	urls := []string{}
+	for _, a := range attachments {
+		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "video" && strings.TrimSpace(a.URL) != "" {
 			urls = append(urls, strings.TrimSpace(a.URL))
 		}
 	}

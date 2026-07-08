@@ -107,7 +107,7 @@ func TestCreatePlan_VideoPlanAllowsLowBalanceWithoutLegacyMinimumGate(t *testing
 	project := &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "Video",
 		Status:   model.ProjectStatusActive,
 	}

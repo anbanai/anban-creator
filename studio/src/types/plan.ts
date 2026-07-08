@@ -1,6 +1,6 @@
 import type { VideoInput, VideoTaskConfig } from './video'
 
-export type PlanType = 'seednote' | 'article' | 'video'
+export type PlanType = 'seednote' | 'article' | 'videocreator'
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
 export interface Plan {

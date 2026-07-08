@@ -15,7 +15,7 @@ func registerWorkspaceTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"content_type": map[string]any{"type": "string", "description": "Content type (articles, seednote, moments, ecommerce, video)"},
+				"content_type": map[string]any{"type": "string", "description": "Content type (articles, seednote, moments, ecommerce, videocreator, videoeditor)"},
 				"task_id":      map[string]any{"type": "string", "description": "Task ID — when provided, returns 'output' relative to task workspace"},
 			},
 			"required": []any{"content_type"},

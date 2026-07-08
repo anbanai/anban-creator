@@ -239,7 +239,7 @@ func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
 		ID:        taskID,
 		UserID:    userID,
 		ProjectID: uuid.New().String(),
-		Type:      model.PlatformVideo,
+		Type:      model.PlatformVideoCreator,
 		Status:    model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -741,7 +741,7 @@ func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
 	project := &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "Video",
 		Status:   model.ProjectStatusActive,
 	}
@@ -767,7 +767,7 @@ func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	creditSvc := service.NewCreditService(repo, &config.CreditsConfig{
-		TaskCosts: map[string]int{"video": 2000},
+		TaskCosts: map[string]int{model.PlatformVideoCreator: 2000},
 	}, &logger)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
 	taskSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)

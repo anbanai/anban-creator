@@ -20,10 +20,11 @@ function cleanReferences(references: VideoReferenceAsset[] | undefined) {
   if (!references?.length) return undefined
   const next = references.filter((ref) => {
     if (ref.type === 'text') return Boolean(ref.text?.trim())
-    return Boolean(ref.url?.trim())
+    return Boolean(ref.url?.trim() || ref.task_file_id?.trim())
   }).map((ref) => ({
     ...ref,
     reference_role: cleanString(ref.reference_role),
+    task_file_id: cleanString(ref.task_file_id),
     text: cleanString(ref.text),
     url: cleanString(ref.url),
   }))

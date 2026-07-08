@@ -61,4 +61,18 @@ describe('video intake form helpers', () => {
       },
     })
   })
+
+  it('keeps task file references without public URLs', () => {
+    const input: VideoInput = {
+      references: [
+        { type: 'video_url', task_file_id: ' task-file-1 ', reference_role: ' source footage ' },
+      ],
+    }
+
+    expect(buildVideoInputForSubmit('', input)).toEqual({
+      references: [
+        { type: 'video_url', task_file_id: 'task-file-1', reference_role: 'source footage' },
+      ],
+    })
+  })
 })

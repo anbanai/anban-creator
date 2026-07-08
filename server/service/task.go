@@ -318,8 +318,8 @@ type CreateManualParams struct {
 	// otherwise. When set, the task is billed once as a single package at the sum
 	// of selected module prices and quantity is forced to 1.
 	Ecommerce *model.EcommerceConfig
-	// Video carries plan/task-level overrides for platform="video"; omitted
-	// fields are filled from the project's video profile.
+	// Video carries generation overrides for videocreator tasks; omitted fields
+	// are filled from the project's video profile.
 	Video *model.VideoTaskConfig
 	// VideoInput carries user-authored video intake. It is the only video data
 	// written by Studio/API task creation; VideoConfig is reserved for MCP/agent
@@ -396,8 +396,11 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			effectiveImageModelKey = projEc.ImageModelKey
 		}
 	}
-	if taskType == model.PlatformVideo {
+	if model.IsVideoPlatform(taskType) {
 		quantity = 1
+	}
+	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(p.VideoInput, p.InputAttachments) {
+		return nil, fmt.Errorf("videoeditor task requires at least one source video")
 	}
 	if taskType == model.PlatformEcommerce {
 		// E-commerce creates one deliverable package task. Selected modules
@@ -540,12 +543,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if len(p.InputAttachments) > 0 {
 			task.SetInputAttachments(p.InputAttachments)
 		}
-		if taskType == model.PlatformVideo {
+		if model.IsVideoPlatform(taskType) {
 			if p.VideoInput != nil {
 				task.SetVideoInput(*p.VideoInput)
 			} else if p.Video != nil {
 				task.SetVideoInput(videoInputFromLegacyConfig(taskPrompt, p.Video))
-			} else if strings.TrimSpace(taskPrompt) != "" {
+			} else if model.IsVideoCreatorPlatform(taskType) && strings.TrimSpace(taskPrompt) != "" {
 				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
 			}
 		}
@@ -588,6 +591,24 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	return tasks, nil
+}
+
+func hasVideoEditorSourceVideo(input *model.VideoInput, attachments []model.EntryAttachment) bool {
+	if input != nil {
+		for _, ref := range input.References {
+			if ref.Type == VideoReferenceVideo || ref.Type == "video_url" {
+				if strings.TrimSpace(ref.URL) != "" || strings.TrimSpace(ref.TaskFileID) != "" {
+					return true
+				}
+			}
+		}
+	}
+	for _, attachment := range attachments {
+		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && strings.TrimSpace(attachment.URL) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) VideoGenerationRequest {
@@ -754,7 +775,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		}
 	}
 	var planVideoInput *model.VideoInput
-	if taskType == model.PlatformVideo {
+	if model.IsVideoCreatorPlatform(taskType) {
 		vi := plan.VideoInput.Data()
 		if vi.Brief == "" && prompt != "" {
 			vi.Brief = prompt

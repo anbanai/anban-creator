@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
@@ -19,11 +20,12 @@ func newPricedCreditService(repo repository.Repository) *CreditService {
 	logger := zerolog.New(io.Discard)
 	return NewCreditService(repo, &config.CreditsConfig{
 		TaskCosts: map[string]int{
-			"article":        4000,
-			"seednote":       3600,
-			"ecommerce":      3000,
-			"video":          2000,
-			"viral_analysis": 1200,
+			model.PlatformArticle:      4000,
+			model.PlatformSeednote:     3600,
+			model.PlatformEcommerce:    3000,
+			model.PlatformVideoCreator: 2000,
+			model.PlatformVideoEditor:  2000,
+			"viral_analysis":           1200,
 		},
 		EcommerceModulePrices: map[string]int{
 			"main_images":  1500,

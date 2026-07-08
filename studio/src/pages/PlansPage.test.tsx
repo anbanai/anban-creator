@@ -150,7 +150,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     vi.mocked(api.plans.list).mockResolvedValue({
       items: [{
         id: 'plan-video-1',
-        type: 'video',
+        type: 'videocreator',
         title: '视频计划',
         description: '',
         cron_expr: '0 9 * * 1',
@@ -174,7 +174,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     vi.mocked(api.projects.list).mockResolvedValue([{
       id: 'video-project-1',
       user_id: '1',
-      platform: 'video',
+      platform: 'videocreator',
       name: '视频项目',
       avatar_url: '',
       profile_url: '',

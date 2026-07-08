@@ -926,8 +926,8 @@ func (h *TaskHandler) GetVideoProduction(c fiber.Ctx) error {
 	if err != nil {
 		return nil
 	}
-	if task.Type != model.PlatformVideo {
-		return Error(c, fiber.StatusBadRequest, "task is not a video task")
+	if !model.IsVideoCreatorPlatform(task.Type) {
+		return Error(c, fiber.StatusBadRequest, "task is not a video creator task")
 	}
 	if err := h.ensureTaskBillingUnlocked(c, task); err != nil {
 		return err

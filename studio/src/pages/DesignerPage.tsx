@@ -13,6 +13,7 @@ import { designerApi } from '@/lib/api/designer'
 import { getApiErrorMessage } from '@/lib/http-client'
 import type { GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types/designer'
 import { saveActiveGeneration, loadActiveGeneration, clearActiveGeneration } from '@/lib/designer-session'
+import { buildDesignerRequestSize } from '@/lib/designer-size'
 
 const DEFAULT_SETTINGS: DesignerSettings = {
   quality: 'auto',
@@ -85,7 +86,7 @@ export default function DesignerPage() {
     setSelectedProviderId(effectiveProvider.id)
     setSettings((current) => ({
       ...current,
-      size: effectiveProvider.capabilities.sizePresets[0] ?? current.size,
+      size: effectiveProvider.capabilities.defaultSize || current.size,
       quality: effectiveProvider.capabilities.qualityLevels[0] ?? current.quality,
       n: Math.min(current.n, Math.max(1, effectiveProvider.capabilities.maxBatch || 1)),
     }))
@@ -199,14 +200,14 @@ export default function DesignerPage() {
         : []
 
       // Start async generation
-      const sizeWithTier = settings.resolution === '2K' ? settings.size : `${settings.size}:${settings.resolution}`
+      const requestSize = buildDesignerRequestSize(settings.size, settings.resolution)
       const { generation_id } = await designerApi.generate({
         project_id: '',
         prompt,
         provider: effectiveProvider.provider,
         provider_id: effectiveProvider.id,
         quality: settings.quality !== 'auto' ? settings.quality : undefined,
-        size: sizeWithTier,
+        size: requestSize,
         n: settings.n > 1 ? settings.n : undefined,
         output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
         output_compression: effectiveCaps?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
@@ -242,7 +243,7 @@ export default function DesignerPage() {
     const caps = newProvider?.capabilities
     setSettings({
       ...DEFAULT_SETTINGS,
-      size: caps?.sizePresets?.[0] ?? '1:1',
+      size: caps?.defaultSize || DEFAULT_SETTINGS.size,
       quality: caps?.qualityLevels?.[0] ?? DEFAULT_SETTINGS.quality,
       n: Math.min(DEFAULT_SETTINGS.n, Math.max(1, caps?.maxBatch ?? 1)),
     })

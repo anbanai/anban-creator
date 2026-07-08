@@ -51,11 +51,12 @@ const (
 
 // Config scope constants.
 const (
-	ScopeArticle   = "article"
-	ScopeSeednote  = "seednote"
-	ScopeMoments   = "moments"
-	ScopeEcommerce = "ecommerce"
-	ScopeVideo     = "video"
+	ScopeArticle      = "article"
+	ScopeSeednote     = "seednote"
+	ScopeMoments      = "moments"
+	ScopeEcommerce    = "ecommerce"
+	ScopeVideoCreator = "videocreator"
+	ScopeVideoEditor  = "videoeditor"
 )
 
 // File role constants.
@@ -83,12 +84,25 @@ const (
 
 // Platform constants.
 const (
-	PlatformArticle   = "article"
-	PlatformSeednote  = "seednote"
-	PlatformMoments   = "moments"
-	PlatformEcommerce = "ecommerce"
-	PlatformVideo     = "video"
+	PlatformArticle      = "article"
+	PlatformSeednote     = "seednote"
+	PlatformMoments      = "moments"
+	PlatformEcommerce    = "ecommerce"
+	PlatformVideoCreator = "videocreator"
+	PlatformVideoEditor  = "videoeditor"
 )
+
+func IsVideoPlatform(platform string) bool {
+	return platform == PlatformVideoCreator || platform == PlatformVideoEditor
+}
+
+func IsVideoCreatorPlatform(platform string) bool {
+	return platform == PlatformVideoCreator
+}
+
+func IsVideoEditorPlatform(platform string) bool {
+	return platform == PlatformVideoEditor
+}
 
 // ValidImageRatios is the set of allowed image aspect ratios.
 var ValidImageRatios = map[string]bool{

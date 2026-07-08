@@ -61,14 +61,14 @@ func TestTaskVideoProductionAggregatesProductionArtifacts(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "video-production@example.com", Password: "hashed", InviteCode: "videoproduction"}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideo, Name: "Video", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoCreator, Name: "Video", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &model.Task{
 		ID:        taskID,
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformVideo,
+		Type:      model.PlatformVideoCreator,
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "做一条产品视频",
 	}

@@ -55,8 +55,10 @@ func creditTaskLabel(taskType string) string {
 		return "公众号文章"
 	case model.ScopeEcommerce:
 		return "电商出图"
-	case model.ScopeVideo:
-		return "视频生成"
+	case model.ScopeVideoCreator:
+		return "AI 视频生成"
+	case model.ScopeVideoEditor:
+		return "视频剪辑后期"
 	case model.CreditTypeViralAnalysis:
 		return "爆文拆解"
 	default:

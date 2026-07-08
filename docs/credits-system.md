@@ -60,7 +60,8 @@ Anban 智能创作助手采用**钱包模式**管理积分：
 | `article` | 4,000 | 4,000 | 公众号文章 |
 | `seednote` | 3,600 | 3,600 | 种草笔记图文 |
 | `ecommerce` | 3,000 | 3,000 | 电商素材任务基础费 |
-| `video` | 2,000 | 2,000 | 视频任务基础费 |
+| `videocreator` | 2,000 | 2,000 | AI 视频生成基础费 |
+| `videoeditor` | 2,000 | 2,000 | 视频剪辑后期基础费 |
 | `viral_analysis` | 1,200 | 1,200 | 爆文拆解 |
 
 - `task_costs` 只表示基础服务费，不包含 Claude Code runtime 和后续 MCP/模型/媒体操作费
@@ -68,7 +69,8 @@ Anban 智能创作助手采用**钱包模式**管理积分：
 - 本机运行使用用户自己的 Claude Code 环境，不预扣平台 Claude Code 运行费
 - 批量创建：基础服务费和运行预留均按数量计入；强目标模式按配置倍率计入基础服务费和运行预留
 - 电商出图创建只扣 `task_costs.ecommerce`；所选模块只影响后续图片生成/理解操作用量
-- 视频任务创建只扣 `task_costs.video`；调用 `video_gen` MCP 时再按服务端估算和实际参数独立结算
+- AI 视频生成任务创建只扣 `task_costs.videocreator`；调用 `video_gen` MCP 时再按服务端估算和实际参数独立结算
+- 视频剪辑后期任务创建只扣 `task_costs.videoeditor`；不触发 `video_gen` 动态扣费
 - 失败/取消退款只退相应任务基础服务费；已成功发生的 Claude Code runtime 与独立 MCP 操作交易不自动合并到基础费里
 
 ### 4.2 Claude Code Agent Runtime（按官方结果结算）
@@ -182,13 +184,15 @@ credits:
     article: 4000
     seednote: 3600
     ecommerce: 3000
-    video: 2000
+    videocreator: 2000
+    videoeditor: 2000
     viral_analysis: 1200
   agent_runtime_reserve:       # 云端 Claude Code 运行预留，执行完成后按真实成本多退少补
     article: 4000
     seednote: 3600
     ecommerce: 3000
-    video: 2000
+    videocreator: 2000
+    videoeditor: 2000
     viral_analysis: 1200
   admin_api_key: ""            # 管理员充值 API Key
 

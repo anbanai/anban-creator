@@ -356,16 +356,14 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 // user-facing task file. Video workflows use explicit delivery allowlists so
 // runtime project files never leak into task deliverables.
 func ShouldCollectTaskFile(task *model.Task, relPath string) bool {
-	if task == nil || task.Type != model.PlatformVideo {
+	if task == nil || !model.IsVideoPlatform(task.Type) {
 		return true
 	}
 	normalized := filepath.ToSlash(strings.TrimPrefix(relPath, "./"))
 	noOutput := strings.TrimPrefix(normalized, "output/")
 	ext := strings.ToLower(filepath.Ext(noOutput))
 
-	cfg := task.VideoConfig.Data()
-	isEditor := model.NormalizeVideoWorkflow(cfg.Workflow) == model.VideoWorkflowEditor
-	if isEditor {
+	if model.IsVideoEditorPlatform(task.Type) {
 		if isVideoFileExtension(ext) {
 			return isVideoEditingDeliveryVideo(noOutput)
 		}

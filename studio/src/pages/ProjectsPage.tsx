@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { Project, ProjectStats, CreateProjectRequest, PlatformConfig, Template, TemplateType, VideoDefaults, VideoModelPolicy, VideoModelSpec } from '@/types'
+import type { Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig, Template, TemplateType, VideoDefaults, VideoModelPolicy, VideoModelSpec } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ProjectCard } from '@/components/ProjectCard'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -37,13 +37,15 @@ import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/la
 import { useImageModels } from '@/hooks/useImageModels'
 import { videoModelDisplayName } from '@/lib/video-display'
 import { createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
+import { isVideoCreator, isVideoPlatform } from '@/lib/video-platforms'
 
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
   { value: 'moments', label: '朋友圈' },
   { value: 'ecommerce', label: '电商出图' },
-  { value: 'video', label: '视频生成' },
+  { value: 'videocreator', label: 'AI 视频生成' },
+  { value: 'videoeditor', label: '视频剪辑后期' },
 ]
 
 const statusTabs: { label: string; value: string }[] = [
@@ -94,6 +96,20 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
 
 const defaultVideoDefaults = CHANNEL_FORM_DEFAULTS.video_defaults!
 const defaultVideoPolicy = CHANNEL_FORM_DEFAULTS.video_model_policy!
+
+function projectPlatformFromIntent(type?: string): ProjectPlatform {
+  switch (type) {
+    case 'article':
+    case 'seednote':
+    case 'moments':
+    case 'ecommerce':
+    case 'videocreator':
+    case 'videoeditor':
+      return type
+    default:
+      return CHANNEL_FORM_DEFAULTS.platform
+  }
+}
 
 function projectToForm(ch: Project, configuredVideoModels: VideoModelSpec[] = []): ProjectFormValues {
   const configuredKeys = new Set(configuredVideoModels.map((model) => model.key))
@@ -167,7 +183,8 @@ export default function ProjectsPage() {
   const isSeednote = selectedPlatform === 'seednote'
   const isMoments = selectedPlatform === 'moments'
   const isEcommerce = selectedPlatform === 'ecommerce'
-  const isVideo = selectedPlatform === 'video'
+  const isVideo = isVideoPlatform(selectedPlatform)
+  const isVideoCreatorProject = isVideoCreator(selectedPlatform)
   const visualTemplateType: TemplateType | null = isWechat ? 'article' : isSeednote ? 'seednote' : isEcommerce ? 'ecommerce' : null
   const supportsVisualReference = !!visualTemplateType || isMoments
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
@@ -189,7 +206,7 @@ export default function ProjectsPage() {
   const defaultConfiguredVideoModel = configuredVideoModels[0]?.key || ''
 
   useEffect(() => {
-    if (!isVideo || configuredVideoModels.length === 0) return
+    if (!isVideoCreatorProject || configuredVideoModels.length === 0) return
     const currentDefaults: VideoDefaults = form.getValues('video_defaults') || {}
     const currentPolicy: VideoModelPolicy = form.getValues('video_model_policy') || {}
     const allowed = (currentPolicy.allowed_models || []).filter((key: string) => configuredVideoModelKeys.has(key))
@@ -206,7 +223,7 @@ export default function ProjectsPage() {
     if (currentPolicy.default_model !== nextDefault) {
       form.setValue('video_model_policy.default_model', nextDefault, { shouldDirty: false })
     }
-  }, [isVideo, configuredVideoModels, configuredVideoModelKeys, defaultConfiguredVideoModel, form])
+  }, [isVideoCreatorProject, configuredVideoModels, configuredVideoModelKeys, defaultConfiguredVideoModel, form])
 
   const setEcommerceModuleQty = (key: string, qty: number) => {
     const cur = form.getValues('ecommerce_default_selected_modules') ?? {}
@@ -440,7 +457,7 @@ export default function ProjectsPage() {
     setProfileFetchHint(null)
     form.reset({
       ...CHANNEL_FORM_DEFAULTS,
-      platform: createIntent.type ?? CHANNEL_FORM_DEFAULTS.platform,
+      platform: projectPlatformFromIntent(createIntent.type),
     })
     setSelectedTemplate(null)
     setModalOpen(true)
@@ -513,7 +530,7 @@ export default function ProjectsPage() {
       avatar_url: values.avatar_url?.trim() || undefined,
       keywords: values.keywords?.trim() || undefined,
       instructions: values.instructions?.trim() || undefined,
-      visual_style: values.platform === 'video' ? undefined : values.visual_style?.trim() || undefined,
+      visual_style: isVideoPlatform(values.platform) ? undefined : values.visual_style?.trim() || undefined,
       writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
@@ -533,7 +550,7 @@ export default function ProjectsPage() {
         image_model_key: values.ecommerce_image_model_key || undefined,
       }
     }
-    if (values.platform === 'video') {
+    if (isVideoCreator(values.platform)) {
       const allowedModels = (values.video_model_policy?.allowed_models || []).filter((key) => configuredVideoModelKeys.has(key))
       const modelKey = configuredVideoModelKeys.has(values.video_defaults?.model_key || '') ? values.video_defaults?.model_key : ''
       const defaultModel = configuredVideoModelKeys.has(values.video_model_policy?.default_model || '')
@@ -1039,7 +1056,7 @@ export default function ProjectsPage() {
                 </>
               )}
 
-              {isVideo && (
+              {isVideoCreatorProject && (
                 <div className="space-y-3 rounded-lg border border-border p-3">
                   <div>
                     <p className="text-sm font-medium text-foreground">视频生成默认配置</p>

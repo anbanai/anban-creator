@@ -32,6 +32,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
+import { isVideoCreator } from '@/lib/video-platforms'
 import { formatCreditDescription } from '@/lib/credit-display'
 
 function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): string | null {
@@ -174,7 +175,7 @@ export default function TaskDetailPage() {
   const { data: videoProduction } = useQuery({
     queryKey: ['task-video-production', id],
     queryFn: () => api.tasks.videoProduction(id!),
-    enabled: !!id && task?.type === 'video' && !billingLocked,
+    enabled: !!id && isVideoCreator(task?.type) && !billingLocked,
   })
   const showCreditDetails = Boolean(
     task && (
@@ -464,7 +465,7 @@ export default function TaskDetailPage() {
   const videoUserBrief = videoUserInput?.brief?.trim() || task.prompt || ''
   const videoUserReferences = videoUserInput?.references ?? []
   const videoHardConstraints = videoUserInput?.hard_constraints
-  const showVideoUserInput = task.type === 'video' && Boolean(videoUserBrief || videoUserReferences.length > 0 || videoHardConstraints?.ratio || videoHardConstraints?.duration || typeof videoHardConstraints?.watermark === 'boolean')
+  const showVideoUserInput = isVideoCreator(task.type) && Boolean(videoUserBrief || videoUserReferences.length > 0 || videoHardConstraints?.ratio || videoHardConstraints?.duration || typeof videoHardConstraints?.watermark === 'boolean')
   const videoTargetDuration = task.video_config?.target_duration_seconds || task.video_config?.pricing_breakdown?.output_seconds || task.video_config?.duration
   const videoSegmentCount = task.video_config?.segments?.length || task.video_config?.pricing_breakdown?.segment_count || 0
   const videoSpecSummary = [
@@ -474,7 +475,7 @@ export default function TaskDetailPage() {
     videoSegmentCount > 0 ? `${videoSegmentCount} 段` : null,
   ].filter(Boolean).join(' · ')
   const videoInputReferences = task.video_config?.references ?? []
-  const hasVideoResolvedConfig = task.type === 'video' && Boolean(
+  const hasVideoResolvedConfig = isVideoCreator(task.type) && Boolean(
     task.video_config && (
       task.video_config.model_key ||
       task.video_config.model ||
@@ -1033,7 +1034,7 @@ export default function TaskDetailPage() {
                 </div>
               </div>
             )}
-            {task.type === 'video' && task.video_config && (
+            {isVideoCreator(task.type) && task.video_config && (
               <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <p className="text-xs text-muted-foreground">视频模型</p>
@@ -1179,7 +1180,7 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {task.type === 'video' && videoProduction && (
+      {isVideoCreator(task.type) && videoProduction && (
         <Card size="sm" className="border-border/70">
           <CardContent>
             <VideoProductionPanel

@@ -107,7 +107,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"status":   map[string]any{"type": "string", "enum": []any{"active", "archived"}, "description": "Filter by status"},
-				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "video"}, "description": "Filter by platform type"},
+				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "videocreator", "videoeditor"}, "description": "Filter by platform type"},
 			},
 		},
 	}, projectListHandler)
@@ -131,7 +131,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "video"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "videocreator", "videoeditor"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, reads the task's frozen project_snapshot so historical tasks stay reproducible. The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists."},
 			},
 			"required": []any{"project_id"},
@@ -354,7 +354,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			usesProjectSnapshot = true
 		}
 	}
-	if ch.Platform == model.PlatformVideo {
+	if model.IsVideoCreatorPlatform(ch.Platform) {
 		service.SanitizeProjectVideoProfile(ch, videoModelCatalog())
 	}
 
@@ -474,10 +474,16 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		}
 		info["ecommerce"] = ec
 	}
-	if ch.Platform == model.PlatformVideo {
+	if model.IsVideoCreatorPlatform(ch.Platform) {
 		videoBlock := buildVideoProfileBlock(ch, task)
 		info["video"] = videoBlock
 		info["agent_brief"] = buildProjectAgentBrief(ch, usesProjectSnapshot, videoBlock)
+	} else if model.IsVideoEditorPlatform(ch.Platform) {
+		info["video_editor"] = map[string]any{
+			"input_attachment_dir":  ".anban-creator/input-attachments",
+			"requires_source_media": true,
+			"delivery":              []string{"final.mp4", "preview.mp4", "capcut draft"},
+		}
 	}
 
 	// Available resource options for the platform (best-effort; the embedded
@@ -515,7 +521,7 @@ func profileSource(usesProjectSnapshot bool) string {
 }
 
 func creativeConstraintsForProfile(platform, visualStyle string) string {
-	if platform == model.PlatformVideo {
+	if model.IsVideoPlatform(platform) {
 		return ""
 	}
 	return visualStyle
@@ -527,7 +533,7 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 	catalog := filterVideoCatalogForPolicy(videoModelCatalog(), policy)
 	taskConfig := model.VideoTaskConfig{}
 	input := model.VideoInput{}
-	if task != nil && task.Type == model.PlatformVideo {
+	if task != nil && model.IsVideoCreatorPlatform(task.Type) {
 		taskConfig = task.VideoConfig.Data()
 		input = task.VideoInput.Data()
 	}
@@ -542,7 +548,7 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 		"ratio":           firstNonEmpty(taskConfig.Ratio, defaults.Ratio),
 		"duration":        firstPositiveInt64(taskConfig.Duration, defaults.Duration),
 		"watermark":       firstBoolPtr(taskConfig.Watermark, defaults.Watermark),
-		"preflight":       taskOrDefaultPreflight(taskConfig, defaults, task != nil && task.Type == model.PlatformVideo),
+		"preflight":       taskOrDefaultPreflight(taskConfig, defaults, task != nil && model.IsVideoCreatorPlatform(task.Type)),
 	}
 	return map[string]any{
 		"defaults": resolvedDefaults,
@@ -561,7 +567,7 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 		"task_config":   taskConfig,
 		"pricing": map[string]any{
 			"credits_per_cny":          videoCreditMultiplier(),
-			"base_task_fee_rule":       "Video task/plan creation deducts only credits.task_costs.video as the base service fee.",
+			"base_task_fee_rule":       "VideoCreator task/plan creation deducts only credits.task_costs.videocreator as the base service fee.",
 			"operation_billing_rule":   "create_video_generation_job/create_video_generation_task deduct video_gen operation credits independently when the provider job is submitted.",
 			"operation_refund_rule":    "If provider submission or persistence fails immediately, the video_gen operation deduction is refunded; task failure/cancel refunds only the base task fee.",
 			"estimate_rule":            "Server estimates video_gen credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",
@@ -640,8 +646,8 @@ func buildProjectAgentBrief(ch *model.Project, usesProjectSnapshot bool, videoBl
 	if ch.Keywords != "" {
 		fmt.Fprintf(&b, "关键词：%s\n", ch.Keywords)
 	}
-	b.WriteString("分析入口：项目长期定位只读取工作区 CLAUDE.md / project.instructions；本次需求读取 task.prompt、video_input（profile 中为 video.input）的 brief、references 与 hard_constraints。\n")
-	b.WriteString("Studio 不再提供视频玩法、商业目标、制作模式、内容类型、主体、受众或核心信息；这些业务判断必须由 video agent 使用 seedance-20 / video-use SKILL 自主分析并落盘到 video_config。\n")
+	b.WriteString("分析入口：项目长期定位只读取工作区 CLAUDE.md / project.instructions；本次需求读取 task.prompt、video_creator_input（profile 中为 video.input）的 brief、references 与 hard_constraints。\n")
+	b.WriteString("Studio 不再提供视频玩法、商业目标、制作模式、内容类型、主体、受众或核心信息；这些业务判断必须由 videocreator agent 使用 seedance-20 SKILL 自主分析并落盘到 video_creator_config。\n")
 	if usesProjectSnapshot {
 		b.WriteString("配置来源：任务创建时冻结的项目快照\n")
 	}

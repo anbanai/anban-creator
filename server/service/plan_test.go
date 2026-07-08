@@ -96,7 +96,7 @@ func createTestVideoProject(t *testing.T, repo repository.Repository, userID str
 	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformVideo,
+		Platform: model.PlatformVideoCreator,
 		Name:     "Test Video Project",
 		Status:   model.ProjectStatusActive,
 	}
@@ -554,7 +554,7 @@ func TestPlanService_UpdateVideoInputRejectsNonVideoPlans(t *testing.T) {
 			Brief: "should not attach to article plan",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "video_input can only be set on video plans") {
+	if err == nil || !strings.Contains(err.Error(), "video_input can only be set on videocreator plans") {
 		t.Fatalf("Update error = %v, want video_input rejection for non-video plan", err)
 	}
 
@@ -564,6 +564,22 @@ func TestPlanService_UpdateVideoInputRejectsNonVideoPlans(t *testing.T) {
 	}
 	if vi := found.VideoInput.Data(); vi.Brief != "" {
 		t.Fatalf("article plan video_input = %#v, want empty", vi)
+	}
+}
+
+func TestPlanService_CreateRejectsVideoEditorPlans(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	projectID := createTestProject(t, repo, "user-1", model.PlatformVideoEditor)
+
+	_, err := svc.Create(ctx, CreatePlanParams{
+		UserID:    "user-1",
+		ProjectID: projectID,
+		CronExpr:  "0 9 * * *",
+		Prompt:    "把素材剪成一条短视频",
+	})
+	if err == nil || !strings.Contains(err.Error(), "plans are not supported for video editor projects") {
+		t.Fatalf("Create error = %v, want videoeditor plan rejection", err)
 	}
 }
 

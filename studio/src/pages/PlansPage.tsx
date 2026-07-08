@@ -29,6 +29,7 @@ import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } f
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { buildVideoInputForSubmit, initialVideoInput } from '@/lib/video-form'
+import { isVideoCreator } from '@/lib/video-platforms'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
@@ -43,7 +44,7 @@ import { taskCostFor } from '@/lib/pricing'
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
-  { value: 'video', label: '视频生成' },
+  { value: 'videocreator', label: 'AI 视频生成' },
 ]
 
 function planToFormValues(plan: Plan): PlanFormValues {
@@ -61,7 +62,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
-    video_input: initialVideoInput(plan.prompt || '', plan.video_input),
+    video_input: isVideoCreator(plan.type) ? initialVideoInput(plan.prompt || '', plan.video_input) : undefined,
   }
 }
 
@@ -226,8 +227,8 @@ export default function PlansPage() {
   })
 
   const openCreate = useCallback(() => {
-    const requestedType = createIntent.type && createIntent.type !== 'ecommerce'
-      ? (createIntent.type as PlanType)
+    const requestedType: PlanType = createIntent.type === 'article' || isVideoCreator(createIntent.type)
+      ? createIntent.type
       : 'seednote'
     setEditingPlan(null)
     form.reset({
@@ -240,7 +241,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_input: requestedType === 'video' ? initialVideoInput('') : undefined,
+      video_input: isVideoCreator(requestedType) ? initialVideoInput('') : undefined,
     })
     setModalOpen(true)
   }, [createIntent.projectId, createIntent.type, form, projectMap])
@@ -303,7 +304,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      video_input: values.type === 'video' ? buildVideoInputForSubmit(values.prompt, values.video_input) : undefined,
+      video_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_input) : undefined,
     }
 
     if (editingPlan) {
@@ -330,7 +331,7 @@ export default function PlansPage() {
           <ProjectSelector
             value={projectFilter}
             onChange={(id) => setProjectFilter(id)}
-            excludePlatforms={['ecommerce']}
+            excludePlatforms={['moments', 'ecommerce', 'videoeditor']}
           />
         </div>
         <div className="w-full sm:w-48 sm:ml-auto">
@@ -474,7 +475,7 @@ export default function PlansPage() {
                         field.onChange(id)
                         if (id) {
                           form.setValue('type', platform as PlanType)
-                          if (platform === 'video') {
+                          if (isVideoCreator(platform)) {
                             form.setValue('video_input', initialVideoInput(form.getValues('prompt') || ''), { shouldDirty: false })
                           } else {
                             form.setValue('video_input', undefined, { shouldDirty: false })
@@ -483,7 +484,7 @@ export default function PlansPage() {
                           form.setValue('video_input', undefined, { shouldDirty: false })
                         }
                       }}
-                      excludePlatforms={['ecommerce']}
+                      excludePlatforms={['moments', 'ecommerce', 'videoeditor']}
                       disabled={!!editingPlan}
                     />
                   </FormControl>
@@ -526,7 +527,7 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              {watchedType !== 'video' && <FormField control={form.control} name="prompt" render={({ field }) => (
+              {!isVideoCreator(watchedType) && <FormField control={form.control} name="prompt" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Prompt（可选）</FormLabel>
                   <FormControl>
@@ -536,7 +537,7 @@ export default function PlansPage() {
                 </FormItem>
               )} />}
 
-              {watchedType !== 'video' && <FormField control={form.control} name="image_model_key" render={({ field }) => (
+              {!isVideoCreator(watchedType) && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
                   <FormLabel>图像模型</FormLabel>
                   <FormControl>
@@ -554,7 +555,7 @@ export default function PlansPage() {
                 </FormItem>
               )} />}
 
-              {watchedType === 'video' && (
+              {isVideoCreator(watchedType) && (
                 <VideoCreationPanel
                   form={form}
                   selectedProject={selectedProject}
@@ -572,7 +573,7 @@ export default function PlansPage() {
                 />
               )}
 
-              {watchedType !== 'video' && <FormField control={form.control} name="watermark" render={({ field }) => (
+              {!isVideoCreator(watchedType) && <FormField control={form.control} name="watermark" render={({ field }) => (
                 <FormItem>
                   <button
                     type="button"

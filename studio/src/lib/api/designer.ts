@@ -18,6 +18,7 @@ function normalizeProvider(raw: RawDesignerProvider): DesignerProvider {
     capabilities: {
       qualityLevels: caps.quality_levels ?? [],
       sizePresets: caps.size_presets ?? [],
+      defaultSize: caps.default_size ?? 'auto',
       maxBatch: caps.max_batch ?? 1,
       maxReferenceImages: caps.max_reference_images ?? 0,
       supportsReference: caps.supports_reference ?? false,
