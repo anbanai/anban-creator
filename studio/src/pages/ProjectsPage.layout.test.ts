@@ -58,4 +58,13 @@ describe('ProjectsPage layout contracts', () => {
     expect(source).toContain('品牌定位、账号人设、产品基础信息、画面偏好、禁忌与长期要求')
     expect(source).not.toContain('视频风格与禁忌')
   })
+
+  it('keeps project cards focused on creation readiness', () => {
+    const cardSource = readFileSync(join(here, '../components/ProjectCard.tsx'), 'utf8')
+    const pageSource = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
+
+    expect(cardSource).toContain('buildProjectReadinessSummary')
+    expect(cardSource).toContain('用此项目创建任务')
+    expect(pageSource).toContain('createTaskHref')
+  })
 })

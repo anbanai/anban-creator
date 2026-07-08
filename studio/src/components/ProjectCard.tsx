@@ -6,6 +6,7 @@ import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TopicPoolDialog } from '@/components/TopicPoolDialog'
+import { buildProjectReadinessSummary } from '@/lib/studio-ux'
 
 interface ProjectCardProps {
   project: Project
@@ -16,59 +17,17 @@ interface ProjectCardProps {
   onArchive?: (id: string) => void
   onRestore?: (id: string) => void
   onDelete?: (id: string) => void
+  onCreateTask?: (project: Project) => void
 }
 
-function buildOperatingBadges(project: Project, stats?: ProjectStats) {
-  const badges: Array<{ label: string; variant: 'secondary' | 'outline' | 'destructive' }> = []
-
-  if (project.config.enable_publishing) {
-    badges.push({ label: '公众号草稿箱', variant: 'secondary' })
-    badges.push({
-      label: project.config.require_publish_approval ? '发布需审核' : '自动入草稿箱',
-      variant: project.config.require_publish_approval ? 'outline' : 'secondary',
-    })
-  } else if (project.platform === 'article') {
-    badges.push({ label: '发布未启用', variant: 'outline' })
-  }
-
-  badges.push({
-    label: project.visual_style ? '视觉已配置' : '视觉未配置',
-    variant: project.visual_style ? 'secondary' : 'outline',
-  })
-
-  if (project.platform === 'article') {
-    badges.push({
-      label: project.writer || project.theme || project.author ? '写作已配置' : '写作未配置',
-      variant: project.writer || project.theme || project.author ? 'secondary' : 'outline',
-    })
-  }
-
-  if (project.platform === 'ecommerce' && project.ecommerce_defaults?.target_platform) {
-    badges.push({ label: `投放 ${project.ecommerce_defaults.target_platform}`, variant: 'secondary' })
-  }
-
-  if (project.platform === 'video' && project.video_defaults?.model_key) {
-    badges.push({ label: '视频默认已配置', variant: 'secondary' })
-  }
-
-  if (stats && stats.total_tasks > 0) {
-    badges.push({
-      label: `成功率 ${(stats.success_rate * 100).toFixed(0)}%`,
-      variant: stats.success_rate >= 0.6 ? 'secondary' : 'destructive',
-    })
-  }
-
-  return badges
-}
-
-export function ProjectCard({ project, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ProjectCardProps) {
+export function ProjectCard({ project, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete, onCreateTask }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const platformLabel = platformLabels[project.platform] || project.platform
   const platformBadge = platformBadgeVariant[project.platform] || ('secondary' as const)
   const borderColor = platformBorderColor[project.platform] || ''
   const hoverBorderColor = platformHoverBorderColor[project.platform] || ''
   const positioning = project.instructions || project.positioning || ''
-  const operatingBadges = buildOperatingBadges(project, stats)
+  const readiness = buildProjectReadinessSummary(project, stats)
   const isArchived = project.status === 'archived'
   const cardTone = isArchived
     ? 'border-border/60 bg-muted/30 opacity-75 grayscale-[0.25] hover:border-border/70 hover:shadow-none'
@@ -94,15 +53,14 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
       {positioning && (
         <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{positioning}</p>
       )}
-      {operatingBadges.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {operatingBadges.map((badge) => (
-            <Badge key={badge.label} variant={badge.variant} className="text-[10px]">
-              {badge.label}
-            </Badge>
+      <div className="mt-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+        <p className="text-xs font-medium text-foreground">{readiness.headline}</p>
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          {readiness.details.map((detail) => (
+            <span key={detail}>{detail}</span>
           ))}
         </div>
-      )}
+      </div>
       {stats && (
         <div className="mt-4 flex gap-4 border-t border-border pt-3 text-xs text-muted-foreground">
           <span>任务 {stats.total_tasks}</span>
@@ -111,6 +69,11 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
         </div>
       )}
       <div className="mt-3 flex flex-wrap gap-1.5">
+        {project.status === 'active' && onCreateTask && (
+          <Button variant="secondary" size="xs" onClick={() => onCreateTask(project)} aria-label="用此项目创建任务">
+            创建任务
+          </Button>
+        )}
         {onEdit && (
           <Button variant="ghost" size="xs" onClick={() => onEdit(project)} aria-label="编辑项目">
             编辑

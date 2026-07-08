@@ -36,7 +36,7 @@ import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
 import { useImageModels } from '@/hooks/useImageModels'
 import { videoModelDisplayName } from '@/lib/video-display'
-import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
+import { createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
@@ -659,6 +659,11 @@ export default function ProjectsPage() {
               onArchive={(id) => { void submit(async () => archiveMutation.mutateAsync(id)).catch(() => {}) }}
               onRestore={(id) => { void submit(async () => restoreMutation.mutateAsync(id)).catch(() => {}) }}
               onDelete={handleDelete}
+              onCreateTask={(project) => navigate(createTaskHref({
+                type: project.platform,
+                projectId: project.id,
+                intent: 'new',
+              }))}
             />
           ))}
         </div>
