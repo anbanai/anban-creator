@@ -55,7 +55,7 @@ func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestDownloadZipIgnoresLegacyPaymentRequiredTask(t *testing.T) {
+func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -126,16 +126,13 @@ func TestDownloadZipIgnoresLegacyPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("request: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
+	if resp.StatusCode != fiber.StatusPaymentRequired {
 		data, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, data)
-	}
-	if got := resp.Header.Get("Content-Type"); got != "application/zip" {
-		t.Fatalf("content-type = %q, want application/zip", got)
+		t.Fatalf("status = %d, want 402 body=%s", resp.StatusCode, data)
 	}
 }
 
-func TestGetFilesPreservesDeliveryURLsForLegacyPaymentRequiredTask(t *testing.T) {
+func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -219,12 +216,12 @@ func TestGetFilesPreservesDeliveryURLsForLegacyPaymentRequiredTask(t *testing.T)
 	if got.ID != fileID || got.FileName != "image_01.png" || got.MimeType != "image/png" || got.FileSize != upload.Size {
 		t.Fatalf("metadata = %+v, want file metadata preserved", got)
 	}
-	if got.URL == "" || got.MediaID != "wechat-media-1" || got.WechatURL != "https://mmbiz.qpic.cn/wechat-media-1" {
-		t.Fatalf("delivery fields = url %q media_id %q wechat_url %q, want preserved", got.URL, got.MediaID, got.WechatURL)
+	if got.URL != "" || got.MediaID != "" || got.WechatURL != "" {
+		t.Fatalf("delivery fields = url %q media_id %q wechat_url %q, want redacted", got.URL, got.MediaID, got.WechatURL)
 	}
 }
 
-func TestVideoProductionIgnoresLegacyPaymentRequiredTask(t *testing.T) {
+func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -265,9 +262,9 @@ func TestVideoProductionIgnoresLegacyPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("request: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
+	if resp.StatusCode != fiber.StatusPaymentRequired {
 		data, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, data)
+		t.Fatalf("status = %d, want 402 body=%s", resp.StatusCode, data)
 	}
 }
 

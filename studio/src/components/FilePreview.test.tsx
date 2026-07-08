@@ -1,5 +1,5 @@
 import { fireEvent, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FilePreviewGallery } from './FilePreview'
 import { render } from '@/test/test-utils'
@@ -36,6 +36,10 @@ function fileWith(overrides: Partial<TaskFile>): TaskFile {
 }
 
 describe('FilePreviewGallery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('uses a stable 70vh frame for HTML previews', async () => {
     vi.mocked(api.tasks.fetchPreviewHTML).mockResolvedValue('<main>预览内容</main>')
 
@@ -45,5 +49,44 @@ describe('FilePreviewGallery', () => {
 
     const frame = await screen.findByTitle('文章预览')
     expect(frame).toHaveClass('h-[70vh]')
+  })
+
+  it('renders locked file rows without loading preview or download content', () => {
+    render(
+      <FilePreviewGallery
+        files={[fileWith({})]}
+        taskId="task-1"
+        accessLocked
+        lockedMessage="交付已锁定"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /预览 article\.html/ }))
+    fireEvent.click(screen.getByRole('button', { name: /下载 article\.html/ }))
+
+    expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /下载 article\.html/ })).toBeDisabled()
+    expect(api.tasks.fetchPreviewHTML).not.toHaveBeenCalled()
+    expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('renders locked image files as placeholders instead of signed image urls', () => {
+    render(
+      <FilePreviewGallery
+        files={[fileWith({
+          file_name: 'seednote.png',
+          mime_type: 'image/png',
+          url: 'https://oss.example.com/signed-image.png',
+        })]}
+        taskId="task-1"
+        accessLocked
+        lockedMessage="交付已锁定"
+      />,
+    )
+
+    expect(screen.getByText('交付已锁定')).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'seednote.png' })).not.toBeInTheDocument()
+    expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
   })
 })

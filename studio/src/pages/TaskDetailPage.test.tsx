@@ -167,7 +167,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('03-draft.md')).toBeInTheDocument()
   })
 
-  it('keeps delivery controls available for legacy payment-required tasks', async () => {
+  it('disables delivery controls for payment-required tasks', async () => {
     mockTask(taskWith({
       status: 'completed',
       billing_status: 'payment_required',
@@ -190,11 +190,12 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByText('生成文件 (1)')).toBeInTheDocument()
-    expect(screen.queryByText('交付已锁定')).not.toBeInTheDocument()
+    expect(screen.getByText('交付已锁定')).toBeInTheDocument()
     const zipButton = screen.getByRole('button', { name: /下载全部/ })
-    expect(zipButton).toBeEnabled()
-    expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /^下载$/ })).toBeEnabled()
+    expect(zipButton).toBeDisabled()
+    expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /下载 article\.html/ })).toBeDisabled()
+    expect(api.tasks.videoProduction).not.toHaveBeenCalled()
   })
 
   it('lets completed tasks be cloned as a fresh task', async () => {
