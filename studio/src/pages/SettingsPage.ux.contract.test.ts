@@ -15,5 +15,8 @@ describe('SettingsPage readiness center contract', () => {
     expect(source).toContain('发布渠道')
     expect(source).toContain('账号安全')
     expect(source).toContain('SettingsReadinessItem')
+    expect(source).toContain('buildSettingsReadinessItems')
+    expect(source).toContain('impact')
+    expect(source).toContain('actionLabel')
   })
 })

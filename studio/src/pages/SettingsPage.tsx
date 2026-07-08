@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, Loader2, RadioTower, ShieldCheck, Terminal, WandSparkles, type LucideIcon } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useAuth } from '@/contexts/AuthContext'
@@ -25,6 +25,7 @@ import ModelConfigSection from '@/components/settings/ModelConfigSection'
 import LocalExecutorSection from '@/components/settings/LocalExecutorSection'
 import IlinkBindingSection from '@/components/settings/IlinkBindingSection'
 import { isDesktop } from '@/lib/tauri'
+import { buildSettingsReadinessItems, type SettingsReadinessListItem } from '@/lib/studio-ux'
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -35,6 +36,7 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
   const { submit } = useSubmitLock()
+  const desktopApp = isDesktop()
 
   const passwordForm = useForm<ChangePasswordFormValues>({
     resolver: zodResolver(changePasswordSchema),
@@ -47,6 +49,12 @@ export default function SettingsPage() {
       const data = await api.apiKeys.list()
       return data.items || []
     },
+  })
+
+  const readinessItems = buildSettingsReadinessItems({
+    isDesktopApp: desktopApp,
+    apiKeyCount: apiKeys.length,
+    hasPassword: Boolean(user?.has_password),
   })
 
   const createMutation = useMutation({
@@ -102,38 +110,9 @@ export default function SettingsPage() {
       <Card>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <SettingsReadinessItem
-              icon={Terminal}
-              title="执行环境"
-              status={isDesktop() ? '桌面执行器可检查' : '浏览器模式'}
-              description={isDesktop() ? '本地执行器、ffmpeg 与任务认领状态在这里管理。' : '当前为 Web 端，任务默认走云端执行。'}
-              href="#execution-settings"
-              ready
-            />
-            <SettingsReadinessItem
-              icon={WandSparkles}
-              title="模型与密钥"
-              status={apiKeys.length > 0 ? `${apiKeys.length} 个平台密钥` : '需要创建密钥'}
-              description="模型配置与 API Key 决定 agent、插件和生成能力。"
-              href="#model-key-settings"
-              ready={apiKeys.length > 0}
-            />
-            <SettingsReadinessItem
-              icon={RadioTower}
-              title="发布渠道"
-              status="需要检查"
-              description="微信助手、通知和发布相关能力从这里进入。"
-              href="#publishing-settings"
-              ready={false}
-            />
-            <SettingsReadinessItem
-              icon={ShieldCheck}
-              title="账号安全"
-              status={user?.has_password ? '已设置密码' : '需要设置密码'}
-              description="账号资料、配额和登录密码集中管理。"
-              href="#account-security-settings"
-              ready={Boolean(user?.has_password)}
-            />
+            {readinessItems.map((item) => (
+              <SettingsReadinessItem key={item.id} item={item} />
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -144,7 +123,7 @@ export default function SettingsPage() {
         description="本机执行、任务通知和创作助手接入状态。"
       />
       {/* Local executor (desktop only — renders nothing in the web build) */}
-      {isDesktop() && <LocalExecutorSection />}
+      {desktopApp && <LocalExecutorSection />}
 
       <SettingsGroupTitle
         id="publishing-settings"
@@ -399,36 +378,22 @@ export default function SettingsPage() {
   )
 }
 
-function SettingsReadinessItem({
-  icon: Icon,
-  title,
-  status,
-  description,
-  href,
-  ready,
-}: {
-  icon: LucideIcon
-  title: string
-  status: string
-  description: string
-  href: string
-  ready: boolean
-}) {
+function SettingsReadinessItem({ item }: { item: SettingsReadinessListItem }) {
   return (
     <a
-      href={href}
+      href={item.href}
       className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:border-primary/30 hover:bg-accent"
     >
-      <span className={`mt-0.5 flex size-8 items-center justify-center rounded-lg ${ready ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-        <Icon className="size-4" />
+      <span className={`mt-0.5 flex size-8 items-center justify-center rounded-lg ${item.ready ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+        {item.ready ? <CheckCircle2 className="size-4" /> : <AlertCircle className="size-4" />}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium text-foreground">{title}</span>
-          {ready && <CheckCircle2 className="size-3.5 shrink-0 text-primary" />}
+        <span className="flex items-center justify-between gap-2">
+          <span className="truncate text-sm font-medium text-foreground">{item.title}</span>
+          <span className="shrink-0 text-[11px] font-medium text-primary">{item.actionLabel}</span>
         </span>
-        <span className="mt-1 block text-xs font-medium text-foreground">{status}</span>
-        <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">{description}</span>
+        <span className="mt-1 block text-xs font-medium text-foreground">{item.status}</span>
+        <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">{item.impact}</span>
       </span>
     </a>
   )
