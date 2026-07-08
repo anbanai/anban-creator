@@ -151,7 +151,7 @@ export default function TasksPage() {
   const isVideoTask = isVideoPlatform(watchedType)
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
-  const watchedVideoReferences = useWatch({ control: form.control, name: 'video_input.references' })
+  const watchedVideoEditorReferences = useWatch({ control: form.control, name: 'video_editor_input.references' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
@@ -332,7 +332,8 @@ export default function TasksPage() {
       target_platform: defaults.targetPlatform,
       selling_points: '',
       language: '',
-      video_input: isVideoPlatform(defaultType) ? initialVideoInput('') : undefined,
+      video_creator_input: isVideoCreator(defaultType) ? initialVideoInput('') : undefined,
+      video_editor_input: isVideoEditor(defaultType) ? initialVideoInput('') : undefined,
     })
     setQuantity(1)
     setWatermark(false)
@@ -359,7 +360,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_input: undefined })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_creator_input: undefined, video_editor_input: undefined })
     setQuantity(1)
     setWatermark(false)
     setGoalMode(false)
@@ -410,7 +411,8 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      video_input: isVideoPlatform(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_input) : undefined,
+      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_creator_input) : undefined,
+      video_editor_input: isVideoEditor(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_editor_input) : undefined,
       // Route to the desktop local executor only when it is running and able to claim now.
       execution_target: runThisTaskLocally ? 'local' : undefined,
     }))
@@ -479,7 +481,7 @@ export default function TasksPage() {
     balance: creditsBalance?.balance ?? 0,
   })
 
-  const videoEditorHasSourceMedia = (watchedVideoReferences ?? []).some((ref) => ref.type === 'video_url' && (ref.url || ref.task_file_id))
+  const videoEditorHasSourceMedia = (watchedVideoEditorReferences ?? []).some((ref) => ref.type === 'video_url' && (ref.url || ref.task_file_id))
   const creationBlocker = costPreview.insufficient
     ? { message: '积分不足，补充积分后再创建。', href: '/credits', actionLabel: '查看积分' }
     : watchedType !== 'ecommerce' && goalMode && !goalText.trim()
@@ -853,10 +855,12 @@ export default function TasksPage() {
                           form.setValue('selected_modules', defaults.selectedModules, { shouldDirty: false })
                           form.setValue('target_platform', defaults.targetPlatform, { shouldDirty: false })
                           form.setValue('image_model_key', defaults.imageModelKey, { shouldDirty: false })
-                          form.setValue('video_input', isVideoPlatform(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+                          form.setValue('video_creator_input', isVideoCreator(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+                          form.setValue('video_editor_input', isVideoEditor(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
                         } else {
                           setProjectImageRatio('')
-                          form.setValue('video_input', undefined, { shouldDirty: false })
+                          form.setValue('video_creator_input', undefined, { shouldDirty: false })
+                          form.setValue('video_editor_input', undefined, { shouldDirty: false })
                         }
                       }}
                     />
@@ -976,6 +980,7 @@ export default function TasksPage() {
               {isVideoTask && (
                 <VideoCreationPanel
                   form={form}
+                  fieldRoot={isVideoCreatorTask ? 'video_creator_input' : 'video_editor_input'}
                   selectedProject={selectedProject}
                   title={isVideoCreatorTask ? 'AI 视频生成' : '视频剪辑后期'}
                   promptField={(

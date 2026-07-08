@@ -14,19 +14,19 @@ func TestResolveVideoGenerationPlanRequiresProjectProfile(t *testing.T) {
 		Prompt: "生成一条产品种草视频",
 	}, model.VideoDefaults{}, model.VideoModelPolicy{}, DefaultVideoModelCatalog(), 1000)
 	if err == nil {
-		t.Fatal("expected missing project video profile to fail")
+		t.Fatal("expected missing project videocreator profile to fail")
 	}
-	if got := err.Error(); got != "project video profile is not configured" {
+	if got := err.Error(); got != "project videocreator profile is not configured" {
 		t.Fatalf("error = %q", got)
 	}
 }
 
 func TestVideoGenerationConfigErrorPreservesMessageAndSentinel(t *testing.T) {
-	err := wrapVideoGenerationConfigError(errors.New("project video profile is not configured"))
+	err := wrapVideoGenerationConfigError(errors.New("project videocreator profile is not configured"))
 	if !errors.Is(err, ErrVideoGenerationConfig) {
 		t.Fatal("wrapped error should match ErrVideoGenerationConfig")
 	}
-	if got := err.Error(); got != "project video profile is not configured" {
+	if got := err.Error(); got != "project videocreator profile is not configured" {
 		t.Fatalf("error = %q", got)
 	}
 }

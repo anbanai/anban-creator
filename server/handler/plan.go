@@ -93,8 +93,8 @@ type createPlanRequest struct {
 	// (cover NOT mandatory). nil → fall back to plan model defaults (both on).
 	ArticleWithCover         *bool                  `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool                  `json:"article_with_content_images,omitempty"`
-	VideoConfig              *model.VideoTaskConfig `json:"video_config,omitempty"`
-	VideoInput               *model.VideoInput      `json:"video_input,omitempty"`
+	VideoCreatorConfig       *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
+	VideoCreatorInput        *model.VideoInput      `json:"video_creator_input,omitempty"`
 }
 
 type updatePlanRequest struct {
@@ -110,8 +110,8 @@ type updatePlanRequest struct {
 	HasTailImage             *bool                  `json:"has_tail_image,omitempty"`
 	ArticleWithCover         *bool                  `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool                  `json:"article_with_content_images,omitempty"`
-	VideoConfig              *model.VideoTaskConfig `json:"video_config,omitempty"`
-	VideoInput               *model.VideoInput      `json:"video_input,omitempty"`
+	VideoCreatorConfig       *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
+	VideoCreatorInput        *model.VideoInput      `json:"video_creator_input,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -119,6 +119,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	var req createPlanRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if err := rejectPlanVideoFields(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
 	if req.ProjectID == "" {
@@ -146,7 +149,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL}); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, videoReferenceURLs(videoConfigForReferenceURLs(req.VideoConfig, req.VideoInput))); err != nil {
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 	}
@@ -166,12 +169,12 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
-		Video:                    req.VideoConfig,
-		VideoInput:               req.VideoInput,
+		VideoCreatorConfig:       req.VideoCreatorConfig,
+		VideoCreatorInput:        req.VideoCreatorInput,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) {
+		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
@@ -187,7 +190,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	}
 
 	h.signPlanURLs(c.Context(), plan)
-	return Success(c, plan)
+	return Success(c, planAPIResponse(plan))
 }
 
 // List handles GET /api/v1/plans.
@@ -219,7 +222,7 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{
-		"items": plans,
+		"items": planAPIResponses(plans),
 		"total": total,
 	})
 }
@@ -246,7 +249,7 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 	}
 
 	h.signPlanURLs(c.Context(), plan)
-	return Success(c, plan)
+	return Success(c, planAPIResponse(plan))
 }
 
 // Update handles PUT /api/v1/plans/:id.
@@ -264,6 +267,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	var req updatePlanRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if err := rejectPlanVideoFields(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
 	if req.ReferenceImageURL != nil && !validReferenceImageURL(*req.ReferenceImageURL) {
@@ -296,7 +302,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 				return Error(c, fiber.StatusBadRequest, err.Error())
 			}
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, videoReferenceURLs(videoConfigForReferenceURLs(req.VideoConfig, req.VideoInput))); err != nil {
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 	}
@@ -315,19 +321,19 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
-		Video:                    req.VideoConfig,
-		VideoInput:               req.VideoInput,
+		VideoCreatorConfig:       req.VideoCreatorConfig,
+		VideoCreatorInput:        req.VideoCreatorInput,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) {
+		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")
 	}
 
 	h.signPlanURLs(c.Context(), plan)
-	return Success(c, plan)
+	return Success(c, planAPIResponse(plan))
 }
 
 // Delete handles DELETE /api/v1/plans/:id.

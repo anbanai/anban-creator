@@ -1107,52 +1107,55 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 	if got := resolved["visual_style_label"]; got != "图片视觉" {
 		t.Fatalf("visual_style_label = %v, want 图片视觉", got)
 	}
-	video, ok := info["video"].(map[string]any)
+	video, ok := info["videocreator"].(map[string]any)
 	if !ok {
-		t.Fatalf("video block missing or wrong type: %T", info["video"])
+		t.Fatalf("videocreator block missing or wrong type: %T", info["videocreator"])
+	}
+	if _, exists := info["video"]; exists {
+		t.Fatalf("generic video profile block should not be exposed: %#v", info["video"])
 	}
 	defaults := video["defaults"].(map[string]any)
 	if got := defaults["model_key"]; got != "seedance-2.0" {
-		t.Fatalf("video.defaults.model_key = %v, want seedance-2.0", got)
+		t.Fatalf("videocreator.defaults.model_key = %v, want seedance-2.0", got)
 	}
 	policy := video["policy"].(map[string]any)
 	if got := policy["default_model"]; got != "seedance-2.0" {
-		t.Fatalf("video.policy.default_model = %v, want seedance-2.0", got)
+		t.Fatalf("videocreator.policy.default_model = %v, want seedance-2.0", got)
 	}
 	refs := video["references"].([]model.VideoReferenceAsset)
 	if len(refs) != 1 || refs[0].URL != "https://cdn.example.com/user-cup.png" {
-		t.Fatalf("video.references = %#v, want user video_input references", refs)
+		t.Fatalf("videocreator.references = %#v, want user video_creator_input references", refs)
 	}
 	input := video["input"].(model.VideoInput)
 	if input.Brief != "生成一条咖啡杯种草视频" || input.HardConstraints.Ratio != "9:16" || input.HardConstraints.Duration != 12 {
-		t.Fatalf("video.input = %#v", input)
+		t.Fatalf("videocreator.input = %#v", input)
 	}
 	taskConfig := video["task_config"].(model.VideoTaskConfig)
 	if taskConfig.ModelKey != "seedance-2.0" || len(taskConfig.References) != 1 || taskConfig.References[0].ReferenceRole != "product appearance" {
-		t.Fatalf("video.task_config = %#v, want resolved agent/MCP snapshot", taskConfig)
+		t.Fatalf("videocreator.task_config = %#v, want resolved agent/MCP snapshot", taskConfig)
 	}
 	anchors, ok := video["visual_anchor_generation"].(map[string]any)
 	if !ok {
-		t.Fatalf("video.visual_anchor_generation missing or wrong type: %T", video["visual_anchor_generation"])
+		t.Fatalf("videocreator.visual_anchor_generation missing or wrong type: %T", video["visual_anchor_generation"])
 	}
 	if got := anchors["available"]; got != true {
-		t.Fatalf("video.visual_anchor_generation.available = %v, want true", got)
+		t.Fatalf("videocreator.visual_anchor_generation.available = %v, want true", got)
 	}
 	if got := anchors["default_image_type"]; got != "content" {
-		t.Fatalf("video.visual_anchor_generation.default_image_type = %v, want content", got)
+		t.Fatalf("videocreator.visual_anchor_generation.default_image_type = %v, want content", got)
 	}
 	if got := anchors["max_auto_anchors"]; got != 3 {
-		t.Fatalf("video.visual_anchor_generation.max_auto_anchors = %v, want 3", got)
+		t.Fatalf("videocreator.visual_anchor_generation.max_auto_anchors = %v, want 3", got)
 	}
 	for _, field := range []string{"verify_with_vision", "register_tool", "fallback"} {
 		value, _ := anchors[field].(string)
 		if strings.TrimSpace(value) == "" {
-			t.Fatalf("video.visual_anchor_generation.%s is empty: %#v", field, anchors[field])
+			t.Fatalf("videocreator.visual_anchor_generation.%s is empty: %#v", field, anchors[field])
 		}
 	}
 	pricing := video["pricing"].(map[string]any)
 	if got, _ := pricing["operation_billing_rule"].(string); !strings.Contains(got, "video_gen") {
-		t.Fatalf("video.pricing.operation_billing_rule = %v, want video_gen rule", pricing["operation_billing_rule"])
+		t.Fatalf("videocreator.pricing.operation_billing_rule = %v, want video_gen rule", pricing["operation_billing_rule"])
 	}
 	brief, ok := info["agent_brief"].(string)
 	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "面向露营人群的咖啡杯项目") || !strings.Contains(brief, "CLAUDE.md") || !strings.Contains(brief, "video_creator_input") || !strings.Contains(brief, "seedance-20") || !strings.Contains(brief, "video_gen") {
@@ -1457,10 +1460,10 @@ func TestBuildVideoPlanRequiresTaskVideoInputReferences(t *testing.T) {
 		t.Fatalf("buildVideoGenerationPlanHandler returned error: %v", err)
 	}
 	if !result.IsError {
-		t.Fatal("expected missing Studio video_input references to fail before generation")
+		t.Fatal("expected missing Studio video_creator_input references to fail before generation")
 	}
 	text := callToolText(result)
-	if !strings.Contains(text, "video_input.references") || !strings.Contains(text, "reference.mp4") {
+	if !strings.Contains(text, "video_creator_input.references") || !strings.Contains(text, "reference.mp4") {
 		t.Fatalf("unexpected error text: %q", text)
 	}
 }

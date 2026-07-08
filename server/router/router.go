@@ -342,9 +342,9 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	if svc.VideoHandler != nil {
-		apiV1.Get("/video/models", svc.VideoHandler.Models)
-		apiV1.Get("/video/playbooks", svc.VideoHandler.Playbooks)
-		apiV1.Post("/video/estimate", svc.VideoHandler.Estimate)
+		apiV1.Get("/videocreator/models", svc.VideoHandler.Models)
+		apiV1.Get("/videocreator/playbooks", svc.VideoHandler.Playbooks)
+		apiV1.Post("/videocreator/estimate", svc.VideoHandler.Estimate)
 	}
 
 	// ---------------------------------------------------------------------------

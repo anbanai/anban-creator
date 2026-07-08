@@ -8,7 +8,7 @@ import { VideoCreationPanel } from './VideoCreationPanel'
 
 type PanelFormValues = {
   prompt: string
-  video_input: VideoInput
+  video_creator_input: VideoInput
 }
 
 const videoProject = {
@@ -20,19 +20,21 @@ function PanelHarness() {
   const form = useForm<PanelFormValues>({
     defaultValues: {
       prompt: '',
-      video_input: {
+      video_creator_input: {
         references: [{ type: 'text', text: '保持杯身银色' }],
         hard_constraints: {},
       },
     },
   })
-  const videoInput = useWatch({ control: form.control, name: 'video_input' })
+  const videoInput = useWatch({ control: form.control, name: 'video_creator_input' })
 
   return (
     <Form {...form}>
       <VideoCreationPanel
         form={form}
+        fieldRoot="video_creator_input"
         selectedProject={videoProject}
+        title="AI 视频生成"
         promptField={(
           <FormField control={form.control} name="prompt" render={({ field }) => (
             <FormItem>
@@ -60,7 +62,7 @@ describe('VideoCreationPanel', () => {
     }
   })
 
-  it('stores only hard constraints in video_input', async () => {
+  it('stores only hard constraints in video_creator_input', async () => {
     render(<PanelHarness />)
 
     fireEvent.click(screen.getByRole('button', { name: /高级硬约束/ }))

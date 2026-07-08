@@ -22,7 +22,7 @@ import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
-import { WorkflowReviewSummary, WorkflowStageProgress } from '@/components/TaskWorkflowPanel'
+import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { VideoProductionPanel } from '@/components/video/VideoProductionPanel'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -32,7 +32,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
-import { isVideoCreator } from '@/lib/video-platforms'
+import { isVideoCreator, isVideoEditor, isVideoPlatform } from '@/lib/video-platforms'
 import { formatCreditDescription } from '@/lib/credit-display'
 
 function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): string | null {
@@ -453,7 +453,6 @@ export default function TaskDetailPage() {
   const currentTask = task
   const snapshot = task.project_snapshot
   const showProjectParameters = Boolean(snapshot?.platform || project)
-  const showWorkflowStages = Boolean(task.workflow_status) && task.status !== 'pending' && task.status !== 'running'
   const projectParameterName = snapshot?.project_name || project?.name || '—'
   const projectParameterVisualStyle = snapshot?.visual_style || project?.visual_style || '—'
   const projectParameterImageRatio = snapshot?.image_ratio || project?.image_ratio || task.image_ratio || '—'
@@ -461,43 +460,53 @@ export default function TaskDetailPage() {
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
-  const videoUserInput = task.video_input
+  const videoUserInput = isVideoCreator(task.type)
+    ? task.video_creator_input
+    : isVideoEditor(task.type)
+      ? task.video_editor_input
+      : undefined
+  const videoResolvedConfig = isVideoCreator(task.type)
+    ? task.video_creator_config
+    : isVideoEditor(task.type)
+      ? task.video_editor_config
+      : undefined
+  const videoWorkflowLabel = isVideoEditor(task.type) ? '视频剪辑后期' : 'AI 视频生成'
   const videoUserBrief = videoUserInput?.brief?.trim() || task.prompt || ''
   const videoUserReferences = videoUserInput?.references ?? []
   const videoHardConstraints = videoUserInput?.hard_constraints
-  const showVideoUserInput = isVideoCreator(task.type) && Boolean(videoUserBrief || videoUserReferences.length > 0 || videoHardConstraints?.ratio || videoHardConstraints?.duration || typeof videoHardConstraints?.watermark === 'boolean')
-  const videoTargetDuration = task.video_config?.target_duration_seconds || task.video_config?.pricing_breakdown?.output_seconds || task.video_config?.duration
-  const videoSegmentCount = task.video_config?.segments?.length || task.video_config?.pricing_breakdown?.segment_count || 0
+  const showVideoUserInput = isVideoPlatform(task.type) && Boolean(videoUserBrief || videoUserReferences.length > 0 || videoHardConstraints?.ratio || videoHardConstraints?.duration || typeof videoHardConstraints?.watermark === 'boolean')
+  const videoTargetDuration = videoResolvedConfig?.target_duration_seconds || videoResolvedConfig?.pricing_breakdown?.output_seconds || videoResolvedConfig?.duration
+  const videoSegmentCount = videoResolvedConfig?.segments?.length || videoResolvedConfig?.pricing_breakdown?.segment_count || 0
   const videoSpecSummary = [
-    task.video_config?.resolution || '—',
-    task.video_config?.ratio || '—',
+    videoResolvedConfig?.resolution || '—',
+    videoResolvedConfig?.ratio || '—',
     videoTargetDuration ? `目标 ${videoTargetDuration}s` : '目标 —',
     videoSegmentCount > 0 ? `${videoSegmentCount} 段` : null,
   ].filter(Boolean).join(' · ')
-  const videoInputReferences = task.video_config?.references ?? []
-  const hasVideoResolvedConfig = isVideoCreator(task.type) && Boolean(
-    task.video_config && (
-      task.video_config.model_key ||
-      task.video_config.model ||
-      task.video_config.resolution ||
-      task.video_config.ratio ||
-      task.video_config.duration ||
-      task.video_config.estimated_credits ||
-      task.video_config.pricing_breakdown ||
-      task.video_config.segments?.length ||
-      task.video_config.creative_type ||
-      task.video_config.purpose ||
-      task.video_config.subject_profile ||
-      task.video_config.audience ||
-      task.video_config.single_message ||
-      task.video_config.references?.length
+  const videoInputReferences = videoResolvedConfig?.references ?? []
+  const hasVideoResolvedConfig = isVideoPlatform(task.type) && Boolean(
+    videoResolvedConfig && (
+      videoResolvedConfig.model_key ||
+      videoResolvedConfig.model ||
+      videoResolvedConfig.resolution ||
+      videoResolvedConfig.ratio ||
+      videoResolvedConfig.duration ||
+      videoResolvedConfig.estimated_credits ||
+      videoResolvedConfig.pricing_breakdown ||
+      videoResolvedConfig.segments?.length ||
+      videoResolvedConfig.creative_type ||
+      videoResolvedConfig.purpose ||
+      videoResolvedConfig.subject_profile ||
+      videoResolvedConfig.audience ||
+      videoResolvedConfig.single_message ||
+      videoResolvedConfig.references?.length
     ),
   )
-  const videoCreativeType = videoCreativeTypeLabel(task.video_config?.creative_type)
-  const videoPurpose = videoPurposeLabel(task.video_config?.purpose)
-  const videoSubjectProfile = task.video_config?.subject_profile?.trim() || '—'
-  const videoAudience = task.video_config?.audience?.trim() || '—'
-  const videoSingleMessage = task.video_config?.single_message?.trim() || '—'
+  const videoCreativeType = videoCreativeTypeLabel(videoResolvedConfig?.creative_type)
+  const videoPurpose = videoPurposeLabel(videoResolvedConfig?.purpose)
+  const videoSubjectProfile = videoResolvedConfig?.subject_profile?.trim() || '—'
+  const videoAudience = videoResolvedConfig?.audience?.trim() || '—'
+  const videoSingleMessage = videoResolvedConfig?.single_message?.trim() || '—'
   const renderVideoPreviewDetails = (file: TaskFile) => {
     if (!isVideoTaskFile(file)) return null
     return (
@@ -530,23 +539,23 @@ export default function TaskDetailPage() {
         <div>
           <p className="text-xs text-muted-foreground">费用明细</p>
           <p className="mt-1 text-foreground">
-            估算 {(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()} ·
+            估算 {(task.video_estimated_credits || videoResolvedConfig?.estimated_credits || 0).toLocaleString()} ·
             已消耗 {(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}
           </p>
-          {task.video_config?.pricing_breakdown && (
+          {videoResolvedConfig?.pricing_breakdown && (
             <p className="mt-1 text-xs text-muted-foreground">
-              {videoModelDisplayName(task.video_config.pricing_breakdown.model_key)} · {task.video_config.pricing_breakdown.resolution} · 输出 {task.video_config.pricing_breakdown.output_seconds}s
-              {task.video_config.pricing_breakdown.input_video && typeof task.video_config.pricing_breakdown.input_seconds === 'number'
-                ? ` · 输入视频 ${task.video_config.pricing_breakdown.input_seconds}s`
+              {videoModelDisplayName(videoResolvedConfig.pricing_breakdown.model_key)} · {videoResolvedConfig.pricing_breakdown.resolution} · 输出 {videoResolvedConfig.pricing_breakdown.output_seconds}s
+              {videoResolvedConfig.pricing_breakdown.input_video && typeof videoResolvedConfig.pricing_breakdown.input_seconds === 'number'
+                ? ` · 输入视频 ${videoResolvedConfig.pricing_breakdown.input_seconds}s`
                 : ''}
             </p>
           )}
         </div>
         <div>
           <p className="text-xs text-muted-foreground">参考素材</p>
-          {task.video_config?.references && task.video_config.references.length > 0 ? (
+          {videoResolvedConfig?.references && videoResolvedConfig.references.length > 0 ? (
             <div className="mt-1 divide-y divide-border rounded-md border border-border">
-              {task.video_config.references.map((ref, index) => (
+              {videoResolvedConfig.references.map((ref, index) => (
                 <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-2 py-1.5 text-xs">
                   <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
                   {ref.input_duration_seconds && (
@@ -844,10 +853,6 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {showWorkflowStages && (
-        <WorkflowStageProgress workflow={task.workflow_status} />
-      )}
-
       {task.status === 'completed' && (
         <WorkflowReviewSummary workflow={task.workflow_status} />
       )}
@@ -1034,11 +1039,11 @@ export default function TaskDetailPage() {
                 </div>
               </div>
             )}
-            {isVideoCreator(task.type) && task.video_config && (
+            {isVideoCreator(task.type) && videoResolvedConfig && (
               <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <p className="text-xs text-muted-foreground">视频模型</p>
-                  <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(task.video_config.model_key || task.video_config.model) || '—'}</p>
+                  <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(videoResolvedConfig.model_key || videoResolvedConfig.model) || '—'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">规格</p>
@@ -1046,7 +1051,7 @@ export default function TaskDetailPage() {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">估算积分</p>
-                  <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || task.video_config.estimated_credits || 0).toLocaleString()}</p>
+                  <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || videoResolvedConfig.estimated_credits || 0).toLocaleString()}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">积分消耗</p>
@@ -1062,7 +1067,7 @@ export default function TaskDetailPage() {
         <Card size="sm" className="border-border/70">
           <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs text-muted-foreground">视频创作</p>
+              <p className="text-xs text-muted-foreground">{videoWorkflowLabel}</p>
               <h2 className="mt-1 text-base font-semibold text-foreground">用户输入</h2>
             </div>
           </div>
@@ -1112,30 +1117,30 @@ export default function TaskDetailPage() {
         <Card size="sm" className="border-border/70">
           <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs text-muted-foreground">视频创作</p>
+              <p className="text-xs text-muted-foreground">{videoWorkflowLabel}</p>
               <h2 className="mt-1 text-base font-semibold text-foreground">Agent 解析结果</h2>
             </div>
             <div className="flex flex-wrap gap-2">
-              {task.video_config?.creative_type && <Badge variant="outline">{videoCreativeType}</Badge>}
-              {task.video_config?.purpose && <Badge variant="outline">{videoPurpose}</Badge>}
+              {videoResolvedConfig?.creative_type && <Badge variant="outline">{videoCreativeType}</Badge>}
+              {videoResolvedConfig?.purpose && <Badge variant="outline">{videoPurpose}</Badge>}
             </div>
           </div>
           <CardContent className="space-y-4">
-            {(task.video_config?.subject_profile || task.video_config?.audience || task.video_config?.single_message) && (
+            {(videoResolvedConfig?.subject_profile || videoResolvedConfig?.audience || videoResolvedConfig?.single_message) && (
               <div className="grid gap-3 sm:grid-cols-3">
-                {task.video_config?.subject_profile && (
+                {videoResolvedConfig?.subject_profile && (
                   <div>
                     <p className="text-xs text-muted-foreground">人物 / 主体</p>
                     <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSubjectProfile}</p>
                   </div>
                 )}
-                {task.video_config?.audience && (
+                {videoResolvedConfig?.audience && (
                   <div>
                     <p className="text-xs text-muted-foreground">目标受众</p>
                     <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoAudience}</p>
                   </div>
                 )}
-                {task.video_config?.single_message && (
+                {videoResolvedConfig?.single_message && (
                   <div>
                     <p className="text-xs text-muted-foreground">核心信息</p>
                     <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSingleMessage}</p>
@@ -1146,7 +1151,7 @@ export default function TaskDetailPage() {
             <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <p className="text-xs text-muted-foreground">视频模型</p>
-                <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(task.video_config?.model_key || task.video_config?.model) || '—'}</p>
+                <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(videoResolvedConfig?.model_key || videoResolvedConfig?.model) || '—'}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">规格</p>
@@ -1154,7 +1159,7 @@ export default function TaskDetailPage() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">估算积分</p>
-                <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()}</p>
+                <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || videoResolvedConfig?.estimated_credits || 0).toLocaleString()}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">积分消耗</p>

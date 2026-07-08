@@ -318,13 +318,15 @@ type CreateManualParams struct {
 	// otherwise. When set, the task is billed once as a single package at the sum
 	// of selected module prices and quantity is forced to 1.
 	Ecommerce *model.EcommerceConfig
-	// Video carries generation overrides for videocreator tasks; omitted fields
-	// are filled from the project's video profile.
-	Video *model.VideoTaskConfig
-	// VideoInput carries user-authored video intake. It is the only video data
-	// written by Studio/API task creation; VideoConfig is reserved for MCP/agent
-	// resolved execution snapshots.
-	VideoInput *model.VideoInput
+	// VideoCreatorConfig/VideoCreatorInput carry generation intake for
+	// videocreator tasks. VideoConfig remains agent-owned resolved execution
+	// state; user-authored creation input is persisted through Task.VideoInput.
+	VideoCreatorConfig *model.VideoTaskConfig
+	VideoCreatorInput  *model.VideoInput
+	// VideoEditorConfig/VideoEditorInput carry edit/post-production intake for
+	// videoeditor tasks. They are rejected for creator projects and vice versa.
+	VideoEditorConfig *model.VideoTaskConfig
+	VideoEditorInput  *model.VideoInput
 	// ExecutionTarget, when model.ExecutionTargetLocal, routes the task to a
 	// desktop local executor instead of cloud Asynq/Docker. The task is created
 	// pending with a LocalClaimDeadline and is NOT enqueued; a desktop claims it
@@ -371,6 +373,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	taskType := project.Platform
+	videoCfg, videoInput, err := p.videoPayloadForTask(taskType)
+	if err != nil {
+		return nil, err
+	}
 
 	// E-commerce: merge the PROJECT's reusable e-commerce defaults (default
 	// modules, target platform, brand brief, image model key) into the task config
@@ -399,7 +405,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if model.IsVideoPlatform(taskType) {
 		quantity = 1
 	}
-	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(p.VideoInput, p.InputAttachments) {
+	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(videoInput, p.InputAttachments) {
 		return nil, fmt.Errorf("videoeditor task requires at least one source video")
 	}
 	if taskType == model.PlatformEcommerce {
@@ -544,10 +550,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			task.SetInputAttachments(p.InputAttachments)
 		}
 		if model.IsVideoPlatform(taskType) {
-			if p.VideoInput != nil {
-				task.SetVideoInput(*p.VideoInput)
-			} else if p.Video != nil {
-				task.SetVideoInput(videoInputFromLegacyConfig(taskPrompt, p.Video))
+			if videoInput != nil {
+				task.SetVideoInput(*videoInput)
+			} else if videoCfg != nil {
+				task.SetVideoInput(videoInputFromTaskConfig(taskPrompt, videoCfg))
 			} else if model.IsVideoCreatorPlatform(taskType) && strings.TrimSpace(taskPrompt) != "" {
 				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
 			}
@@ -593,6 +599,29 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	return tasks, nil
 }
 
+func (p CreateManualParams) videoPayloadForTask(taskType string) (*model.VideoTaskConfig, *model.VideoInput, error) {
+	hasCreatorPayload := p.VideoCreatorConfig != nil || p.VideoCreatorInput != nil
+	hasEditorPayload := p.VideoEditorConfig != nil || p.VideoEditorInput != nil
+
+	switch {
+	case model.IsVideoCreatorPlatform(taskType):
+		if hasEditorPayload {
+			return nil, nil, fmt.Errorf("%w: video_editor_input/video_editor_config can only be set on videoeditor tasks", ErrVideoTaskInput)
+		}
+		return p.VideoCreatorConfig, p.VideoCreatorInput, nil
+	case model.IsVideoEditorPlatform(taskType):
+		if hasCreatorPayload {
+			return nil, nil, fmt.Errorf("%w: video_creator_input/video_creator_config can only be set on videocreator tasks", ErrVideoTaskInput)
+		}
+		return p.VideoEditorConfig, p.VideoEditorInput, nil
+	default:
+		if hasCreatorPayload || hasEditorPayload {
+			return nil, nil, fmt.Errorf("%w: video_creator_input/video_editor_input can only be set on videocreator or videoeditor tasks", ErrVideoTaskInput)
+		}
+		return nil, nil, nil
+	}
+}
+
 func hasVideoEditorSourceVideo(input *model.VideoInput, attachments []model.EntryAttachment) bool {
 	if input != nil {
 		for _, ref := range input.References {
@@ -636,7 +665,7 @@ func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) Video
 	return req
 }
 
-func videoInputFromLegacyConfig(prompt string, cfg *model.VideoTaskConfig) model.VideoInput {
+func videoInputFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) model.VideoInput {
 	input := model.VideoInput{Brief: strings.TrimSpace(prompt)}
 	if cfg == nil {
 		return input

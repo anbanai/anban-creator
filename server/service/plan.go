@@ -121,8 +121,8 @@ type CreatePlanParams struct {
 	// non-nil honors explicit user choice.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	Video                    *model.VideoTaskConfig
-	VideoInput               *model.VideoInput
+	VideoCreatorConfig       *model.VideoTaskConfig
+	VideoCreatorInput        *model.VideoInput
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -164,6 +164,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		return nil, fmt.Errorf("plans are not supported for moments projects: %w", ErrUnsupportedPlanPlatform)
 	case model.PlatformVideoEditor:
 		return nil, fmt.Errorf("plans are not supported for video editor projects: %w", ErrUnsupportedPlanPlatform)
+	}
+	if !model.IsVideoCreatorPlatform(project.Platform) && (p.VideoCreatorInput != nil || p.VideoCreatorConfig != nil) {
+		return nil, fmt.Errorf("%w: video_creator_input/video_creator_config can only be set on videocreator plans", ErrVideoTaskInput)
 	}
 
 	nextRun, err := s.computeNextRun(p.CronExpr)
@@ -214,10 +217,10 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ArticleWithContentImages: &articleContent,
 	}
 	if model.IsVideoCreatorPlatform(project.Platform) {
-		if p.VideoInput != nil {
-			plan.SetVideoInput(*p.VideoInput)
-		} else if p.Video != nil {
-			plan.SetVideoInput(videoInputFromLegacyConfig(p.Prompt, p.Video))
+		if p.VideoCreatorInput != nil {
+			plan.SetVideoInput(*p.VideoCreatorInput)
+		} else if p.VideoCreatorConfig != nil {
+			plan.SetVideoInput(videoInputFromTaskConfig(p.Prompt, p.VideoCreatorConfig))
 		} else if p.Prompt != "" {
 			plan.SetVideoInput(model.VideoInput{Brief: p.Prompt})
 		}
@@ -264,7 +267,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
-//   - VideoInput: nil = leave unchanged; non-nil = update the user-authored intake
+//   - VideoCreatorInput: nil = leave unchanged; non-nil = update the user-authored creator intake
 //
 // ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
 // unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
@@ -282,8 +285,8 @@ type UpdatePlanParams struct {
 	HasTailImage             *bool
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	Video                    *model.VideoTaskConfig
-	VideoInput               *model.VideoInput
+	VideoCreatorConfig       *model.VideoTaskConfig
+	VideoCreatorInput        *model.VideoInput
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -325,25 +328,25 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		v := *p.ArticleWithContentImages
 		plan.ArticleWithContentImages = &v
 	}
-	if p.VideoInput != nil {
+	if p.VideoCreatorInput != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
 		if err != nil {
 			return nil, fmt.Errorf("find project: %w", err)
 		}
 		if !model.IsVideoCreatorPlatform(project.Platform) {
-			return nil, fmt.Errorf("video_input can only be set on videocreator plans")
+			return nil, fmt.Errorf("%w: video_creator_input can only be set on videocreator plans", ErrVideoTaskInput)
 		}
-		plan.SetVideoInput(*p.VideoInput)
+		plan.SetVideoInput(*p.VideoCreatorInput)
 		plan.VideoEstimatedCredits = 0
-	} else if p.Video != nil {
+	} else if p.VideoCreatorConfig != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
 		if err != nil {
 			return nil, fmt.Errorf("find project: %w", err)
 		}
 		if !model.IsVideoCreatorPlatform(project.Platform) {
-			return nil, fmt.Errorf("video_config can only be set on videocreator plans")
+			return nil, fmt.Errorf("%w: video_creator_config can only be set on videocreator plans", ErrVideoTaskInput)
 		}
-		plan.SetVideoInput(videoInputFromLegacyConfig(plan.Prompt, p.Video))
+		plan.SetVideoInput(videoInputFromTaskConfig(plan.Prompt, p.VideoCreatorConfig))
 		plan.VideoEstimatedCredits = 0
 	}
 	// If cron expression changed, validate and recompute next run.

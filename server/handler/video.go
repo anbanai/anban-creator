@@ -69,14 +69,14 @@ func (h *VideoHandler) videoBillingOptions(ctx fiber.Ctx, userID string) service
 }
 
 type videoEstimateRequest struct {
-	ProjectID   string                 `json:"project_id"`
-	Prompt      string                 `json:"prompt"`
-	VideoConfig *model.VideoTaskConfig `json:"video_config,omitempty"`
+	ProjectID          string                 `json:"project_id"`
+	Prompt             string                 `json:"prompt"`
+	VideoCreatorConfig *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
 }
 
 type videoEstimateResponse struct {
 	AvailableModels       []service.VideoModelSpec       `json:"available_models"`
-	ResolvedConfig        model.VideoTaskConfig          `json:"resolved_config"`
+	ResolvedCreatorConfig model.VideoTaskConfig          `json:"resolved_creator_config"`
 	EstimatedCredits      int                            `json:"estimated_credits"`
 	PricingBreakdown      *model.VideoPricingBreakdown   `json:"pricing_breakdown,omitempty"`
 	Balance               int                            `json:"balance"`
@@ -98,6 +98,9 @@ func (h *VideoHandler) Estimate(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
+	if err := rejectVideoCreatorOnlyFields(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	if strings.TrimSpace(req.ProjectID) == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
@@ -115,7 +118,7 @@ func (h *VideoHandler) Estimate(c fiber.Ctx) error {
 	policy := project.VideoModelPolicy.Data()
 	available, warnings := h.availableModels(policy)
 	plan, err := service.ResolveVideoGenerationPlanWithBilling(
-		videoGenerationRequestFromConfig(req.Prompt, req.VideoConfig),
+		videoGenerationRequestFromConfig(req.Prompt, req.VideoCreatorConfig),
 		project.VideoDefaults.Data(),
 		policy,
 		h.catalog,
@@ -136,7 +139,7 @@ func (h *VideoHandler) Estimate(c fiber.Ctx) error {
 	}
 	return Success(c, videoEstimateResponse{
 		AvailableModels:       available,
-		ResolvedConfig:        videoTaskConfigFromGenerationPlan(plan),
+		ResolvedCreatorConfig: videoTaskConfigFromGenerationPlan(plan),
 		EstimatedCredits:      plan.EstimatedCredits,
 		PricingBreakdown:      plan.PricingBreakdown,
 		Balance:               balance,

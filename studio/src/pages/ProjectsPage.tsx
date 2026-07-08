@@ -198,7 +198,7 @@ export default function ProjectsPage() {
 
   const { data: videoModelsResponse, isLoading: videoModelsLoading } = useQuery({
     queryKey: ['video-models'],
-    queryFn: () => api.video.models(),
+    queryFn: () => api.videoCreator.models(),
     staleTime: 60_000,
   })
   const configuredVideoModels = videoModelsResponse?.items ?? []

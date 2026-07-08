@@ -161,7 +161,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			Language:        intent.Language,
 		}
 	case model.PlatformVideoCreator:
-		params.VideoInput = &model.VideoInput{
+		params.VideoCreatorInput = &model.VideoInput{
 			Brief:      prompt,
 			References: videoReferencesFromEntryAttachments(req.Attachments),
 			HardConstraints: model.VideoHardConstraints{
@@ -171,9 +171,15 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			},
 		}
 	case model.PlatformVideoEditor:
-		if len(videoAttachmentURLs(req.Attachments)) == 0 {
+		videoRefs := videoReferencesFromEntryAttachments(req.Attachments)
+		videoInput := model.VideoInput{
+			Brief:      prompt,
+			References: videoRefs,
+		}
+		if !hasVideoEditorSourceVideo(&videoInput, nil) {
 			return aiEntryNeedsConfiguration("创建视频剪辑任务需要至少上传一个视频素材。", aiEntryTaskCreateActionURL(model.PlatformVideoEditor, project.ID)), nil
 		}
+		params.VideoEditorInput = &videoInput
 	default:
 		return aiEntryNeedsConfiguration("当前项目平台暂不支持 AI 入口创建任务。", "/projects/"+project.ID), nil
 	}

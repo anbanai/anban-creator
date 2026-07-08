@@ -105,8 +105,10 @@ type createTaskRequest struct {
 	SellingPoints            string                 `json:"selling_points,omitempty"`
 	Language                 string                 `json:"language,omitempty"`
 	ProviderStrategyOverride string                 `json:"provider_strategy_override,omitempty"`
-	VideoConfig              *model.VideoTaskConfig `json:"video_config,omitempty"`
-	VideoInput               *model.VideoInput      `json:"video_input,omitempty"`
+	VideoCreatorConfig       *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
+	VideoCreatorInput        *model.VideoInput      `json:"video_creator_input,omitempty"`
+	VideoEditorConfig        *model.VideoTaskConfig `json:"video_editor_config,omitempty"`
+	VideoEditorInput         *model.VideoInput      `json:"video_editor_input,omitempty"`
 	// ExecutionTarget, when "local", routes the task to the caller's desktop
 	// local executor instead of cloud execution. Set by the desktop studio build
 	// when a local executor is available. Empty = cloud (default). See
@@ -140,13 +142,6 @@ type bulkTasksResponse struct {
 	Results   []bulkTaskResult `json:"results"`
 }
 
-type taskDetailResponse struct {
-	*model.Task
-	CreditsCharged     *int                       `json:"credits_charged,omitempty"`
-	CreditsSummary     *taskCreditsSummary        `json:"credits_summary,omitempty"`
-	CreditTransactions []*model.CreditTransaction `json:"credit_transactions,omitempty"`
-}
-
 type taskCreditsSummary struct {
 	TaskConsumed      int `json:"task_consumed"`
 	OperationConsumed int `json:"operation_consumed"`
@@ -178,6 +173,12 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	var req createTaskRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if err := rejectLegacyVideoFields(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	if err := validateSplitVideoTaskFields(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
 	if req.ProjectID == "" {
@@ -237,7 +238,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, videoReferenceURLs(videoConfigForReferenceURLs(req.VideoConfig, req.VideoInput))); err != nil {
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 	}
@@ -273,13 +274,15 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		Ecommerce:                ecommerceCfg,
-		Video:                    req.VideoConfig,
-		VideoInput:               req.VideoInput,
+		VideoCreatorConfig:       req.VideoCreatorConfig,
+		VideoCreatorInput:        req.VideoCreatorInput,
+		VideoEditorConfig:        req.VideoEditorConfig,
+		VideoEditorInput:         req.VideoEditorInput,
 		ExecutionTarget:          req.ExecutionTarget,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) {
+		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrInsufficientCredits) {
@@ -293,9 +296,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 
 	// Return single task for quantity=1 (frontend expects Task, not Task[]).
 	if quantity == 1 && len(tasks) > 0 {
-		return Success(c, tasks[0])
+		return Success(c, taskAPIResponse(tasks[0]))
 	}
-	return Success(c, tasks)
+	return Success(c, taskAPIResponses(tasks))
 }
 
 // List handles GET /api/v1/tasks.
@@ -325,7 +328,7 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{
-		"items": tasks,
+		"items": taskAPIResponses(tasks),
 		"total": total,
 	})
 }
@@ -351,16 +354,16 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	resp := taskDetailResponse{Task: task}
+	resp := taskAPIResponse(task)
 	if h.repo != nil {
 		if tx, err := h.repo.Credits().FindDeductionByTaskID(c.Context(), task.ID); err == nil && tx != nil && tx.Amount < 0 {
 			charged := -tx.Amount
-			resp.CreditsCharged = &charged
+			resp["credits_charged"] = charged
 		}
 		if transactions, err := h.repo.Credits().FindByTaskIDAndUserID(c.Context(), task.ID, userID); err == nil {
-			resp.CreditTransactions = transactions
+			resp["credit_transactions"] = transactions
 			summary := summarizeTaskCredits(transactions)
-			resp.CreditsSummary = &summary
+			resp["credits_summary"] = summary
 		}
 	}
 
@@ -460,7 +463,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 	newTask, err := h.service.Clone(c.Context(), id)
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", id).Msg("clone task failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) {
+		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrInsufficientCredits) {
@@ -472,7 +475,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
 	}
 
-	return Success(c, newTask)
+	return Success(c, taskAPIResponse(newTask))
 }
 
 // Resume handles POST /api/v1/tasks/:id/resume.
@@ -565,7 +568,7 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		}
 	}
 
-	return Success(c, task)
+	return Success(c, taskAPIResponse(task))
 }
 
 func formFiles(form *multipart.Form, key string) []*multipart.FileHeader {

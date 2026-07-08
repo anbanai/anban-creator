@@ -155,7 +155,7 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pt-2" aria-label="主导航">
-          <SidebarSection label="今日" icon={LayoutDashboard} items={todayItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="Anban 智能体" icon={LayoutDashboard} items={todayItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           <SidebarSection label="创作" icon={Workflow} items={creationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           <SidebarSection label="自动化" icon={CalendarRange} items={automationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           <SidebarSection label="资产" icon={Boxes} items={assetItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />

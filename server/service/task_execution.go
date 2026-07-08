@@ -356,15 +356,19 @@ func (s *TaskService) validateVideoCompletionArtifacts(ctx context.Context, task
 	if model.IsVideoEditorPlatform(task.Type) {
 		return validateVideoEditorCompletionArtifacts(files), nil
 	}
-	if !requiresGeneratedVideoTaskFile(task) {
-		return agent.ValidateTaskArtifactsFromTaskFiles(task, files), nil
+	if model.IsVideoCreatorPlatform(task.Type) {
+		return s.validateVideoCreatorCompletionArtifacts(ctx, task, files)
 	}
+	return agent.ValidateTaskArtifactsFromTaskFiles(task, files), nil
+}
+
+func (s *TaskService) validateVideoCreatorCompletionArtifacts(ctx context.Context, task *model.Task, files []*model.TaskFile) (agent.ArtifactValidation, error) {
 	gen, err := s.videoGenerationForTask(ctx, task)
 	if err != nil {
 		return agent.ArtifactValidation{}, err
 	}
 	if gen == nil {
-		return agent.ArtifactValidation{Reason: "video missing final video task file"}, nil
+		return agent.ArtifactValidation{Reason: "videocreator missing final_video task file"}, nil
 	}
 	var ids map[string]string
 	if len(gen.TaskFileIDs) > 0 {
@@ -372,24 +376,17 @@ func (s *TaskService) validateVideoCompletionArtifacts(ctx context.Context, task
 	}
 	finalID := strings.TrimSpace(ids["final_video"])
 	if finalID == "" {
-		return agent.ArtifactValidation{Reason: "video missing final video task file"}, nil
+		return agent.ArtifactValidation{Reason: "videocreator missing final_video task file"}, nil
 	}
 	for _, file := range files {
 		if file != nil && file.ID == finalID {
 			if !isVideoTaskFile(file) {
-				return agent.ArtifactValidation{Reason: "video missing final video task file"}, nil
+				return agent.ArtifactValidation{Reason: "videocreator missing final_video task file"}, nil
 			}
 			return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: 1}, nil
 		}
 	}
-	return agent.ArtifactValidation{Reason: "video missing final video task file"}, nil
-}
-
-func requiresGeneratedVideoTaskFile(task *model.Task) bool {
-	if task == nil || !model.IsVideoCreatorPlatform(task.Type) {
-		return false
-	}
-	return strings.TrimSpace(task.VideoGenerationID) != "" || task.VideoEstimatedCredits > 0 || task.VideoCreditsCharged > 0
+	return agent.ArtifactValidation{Reason: "videocreator missing final_video task file"}, nil
 }
 
 func validateVideoEditorCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {

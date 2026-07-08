@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -153,6 +154,124 @@ func TestCreatePlan_VideoPlanAllowsLowBalanceWithoutLegacyMinimumGate(t *testing
 	}
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestPlanHandler_VideoCreatorSplitInputContract(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      "video-plan-split@example.com",
+		Password:   "hashed",
+		InviteCode: "videoplansplit",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformVideoCreator,
+		Name:     "Video Creator",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	planSvc := service.NewPlanService(repo, &logger)
+	h := NewPlanHandler(planSvc, &logger)
+	h.SetRepository(repo)
+
+	app := fiber.New()
+	app.Post("/plans", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+	app.Put("/plans/:id", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Update(c)
+	})
+
+	createBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","video_creator_input":{"brief":"每日生成新品短视频","hard_constraints":{"duration":12}}}`
+	createResp := postJSON(t, app, "/plans", createBody)
+	if createResp.StatusCode != fiber.StatusOK {
+		raw, _ := io.ReadAll(createResp.Body)
+		t.Fatalf("create status = %d, want 200 body=%s", createResp.StatusCode, raw)
+	}
+	createData := decodeEnvelopeRawData(t, createResp)
+	if _, ok := createData["video_creator_input"]; !ok {
+		t.Fatalf("create response missing video_creator_input: %s", string(mustMarshalTaskJSON(t, createData)))
+	}
+	if _, ok := createData["video_input"]; ok {
+		t.Fatalf("create response exposed generic video_input: %s", string(mustMarshalTaskJSON(t, createData)))
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(mustMarshalTaskJSON(t, createData), &created); err != nil {
+		t.Fatalf("decode created plan: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatalf("created plan id is empty")
+	}
+
+	updateBody := `{"video_creator_input":{"brief":"改成周更产品视频","hard_constraints":{"ratio":"16:9"}}}`
+	updateReq := httptest.NewRequest("PUT", "/plans/"+created.ID, strings.NewReader(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateResp, err := app.Test(updateReq)
+	if err != nil {
+		t.Fatalf("update request failed: %v", err)
+	}
+	if updateResp.StatusCode != fiber.StatusOK {
+		raw, _ := io.ReadAll(updateResp.Body)
+		t.Fatalf("update status = %d, want 200 body=%s", updateResp.StatusCode, raw)
+	}
+	updateData := decodeEnvelopeRawData(t, updateResp)
+	if _, ok := updateData["video_creator_input"]; !ok {
+		t.Fatalf("update response missing video_creator_input: %s", string(mustMarshalTaskJSON(t, updateData)))
+	}
+	if _, ok := updateData["video_input"]; ok {
+		t.Fatalf("update response exposed generic video_input: %s", string(mustMarshalTaskJSON(t, updateData)))
+	}
+
+	legacyBody := `{"project_id":"` + projectID + `","cron_expr":"0 10 * * *","video_input":{"brief":"旧字段"},"video_config":{"duration":9}}`
+	legacyResp := postJSON(t, app, "/plans", legacyBody)
+	if legacyResp.StatusCode != fiber.StatusBadRequest {
+		raw, _ := io.ReadAll(legacyResp.Body)
+		t.Fatalf("legacy create status = %d, want 400 body=%s", legacyResp.StatusCode, raw)
+	}
+
+	legacyUpdateReq := httptest.NewRequest("PUT", "/plans/"+created.ID, strings.NewReader(`{"video_input":{"brief":"旧字段更新"}}`))
+	legacyUpdateReq.Header.Set("Content-Type", "application/json")
+	legacyUpdateResp, err := app.Test(legacyUpdateReq)
+	if err != nil {
+		t.Fatalf("legacy update request failed: %v", err)
+	}
+	if legacyUpdateResp.StatusCode != fiber.StatusBadRequest {
+		raw, _ := io.ReadAll(legacyUpdateResp.Body)
+		t.Fatalf("legacy update status = %d, want 400 body=%s", legacyUpdateResp.StatusCode, raw)
+	}
+
+	editorBody := `{"project_id":"` + projectID + `","cron_expr":"0 11 * * *","video_editor_input":{"brief":"计划不支持剪辑输入"}}`
+	editorResp := postJSON(t, app, "/plans", editorBody)
+	if editorResp.StatusCode != fiber.StatusBadRequest {
+		raw, _ := io.ReadAll(editorResp.Body)
+		t.Fatalf("editor create status = %d, want 400 body=%s", editorResp.StatusCode, raw)
+	}
+
+	editorUpdateReq := httptest.NewRequest("PUT", "/plans/"+created.ID, strings.NewReader(`{"video_editor_input":{"brief":"计划不支持剪辑更新"}}`))
+	editorUpdateReq.Header.Set("Content-Type", "application/json")
+	editorUpdateResp, err := app.Test(editorUpdateReq)
+	if err != nil {
+		t.Fatalf("editor update request failed: %v", err)
+	}
+	if editorUpdateResp.StatusCode != fiber.StatusBadRequest {
+		raw, _ := io.ReadAll(editorUpdateResp.Body)
+		t.Fatalf("editor update status = %d, want 400 body=%s", editorUpdateResp.StatusCode, raw)
 	}
 }
 

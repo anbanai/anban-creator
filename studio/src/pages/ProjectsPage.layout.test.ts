@@ -46,7 +46,7 @@ describe('ProjectsPage layout contracts', () => {
   it('does not hardcode Seedance video model choices in the project form', () => {
     const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
 
-    expect(source).toContain('api.video.models')
+    expect(source).toContain('api.videoCreator.models')
     expect(source).toContain('videoModelDisplayName')
     expect(source).not.toContain('model.display_name || model.key')
     expect(source).not.toContain("allowed_models: ['seedance-2.0'")

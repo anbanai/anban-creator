@@ -40,7 +40,7 @@ function renderAuthenticatedShell(initialPath = '/') {
           <Sidebar />
           <main>
             <Routes>
-              <Route path="/" element={<h1>今日页</h1>} />
+              <Route path="/" element={<h1>Anban 智能体页</h1>} />
               <Route path="/projects" element={<h1>项目页</h1>} />
               <Route path="/tasks" element={<h1>任务页</h1>} />
             </Routes>
@@ -62,7 +62,7 @@ describe('Sidebar', () => {
   it('renders navigation items', () => {
     renderSidebar()
 
-    expect(screen.getAllByText('今日').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Anban 智能体').length).toBeGreaterThan(0)
     expect(screen.getByText('项目')).toBeInTheDocument()
     expect(screen.getByText('计划')).toBeInTheDocument()
     expect(screen.getByText('任务')).toBeInTheDocument()

@@ -219,12 +219,12 @@ describe('createTaskSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('keeps video intake fields and reference transfer rules', () => {
+  it('keeps videocreator intake fields and reference transfer rules', () => {
     const result = createTaskSchema.parse({
       project_id: 'video-1',
       type: 'videocreator',
       prompt: '测试',
-      video_input: {
+      video_creator_input: {
         brief: '测试',
         hard_constraints: {
           ratio: '9:16',
@@ -242,7 +242,7 @@ describe('createTaskSchema', () => {
       },
     })
 
-    expect(result.video_input).toMatchObject({
+    expect(result.video_creator_input).toMatchObject({
       brief: '测试',
       hard_constraints: {
         ratio: '9:16',
@@ -255,6 +255,30 @@ describe('createTaskSchema', () => {
         must_not_transfer: ['logo'],
       }],
     })
+  })
+
+  it('requires source media in videoeditor intake', () => {
+    const missingSource = createTaskSchema.safeParse({
+      project_id: 'video-editor-1',
+      type: 'videoeditor',
+      prompt: '加字幕',
+      video_editor_input: {
+        brief: '加字幕',
+        references: [{ type: 'text', text: '做成短视频' }],
+      },
+    })
+    expect(missingSource.success).toBe(false)
+
+    const withSource = createTaskSchema.safeParse({
+      project_id: 'video-editor-1',
+      type: 'videoeditor',
+      prompt: '加字幕',
+      video_editor_input: {
+        brief: '加字幕',
+        references: [{ type: 'video_url', url: 'https://cdn.example.com/source.mp4' }],
+      },
+    })
+    expect(withSource.success).toBe(true)
   })
 
   it('accepts moments tasks without a separate image-mode field', () => {

@@ -8,6 +8,48 @@ import { render } from '@/test/test-utils'
 
 const navigateMock = vi.fn()
 
+const { articleProject, seednoteProject, ecommerceProject } = vi.hoisted(() => {
+  const articleProject = {
+    id: 'project-1',
+    user_id: 'user-1',
+    platform: 'article',
+    name: '公众号项目',
+    avatar_url: '',
+    profile_url: '',
+    keywords: '',
+    visual_style: '',
+    writer: '',
+    theme: '',
+    author: '',
+    template_id: '',
+    reference_image_url: '',
+    image_ratio: '',
+    max_concurrent_tasks: 1,
+    config: { enable_publishing: true },
+    status: 'active',
+    created_at: '2026-07-01T00:00:00.000Z',
+    updated_at: '2026-07-01T00:00:00.000Z',
+  } as const
+
+  return {
+    articleProject,
+    seednoteProject: {
+      ...articleProject,
+      id: 'project-2',
+      platform: 'seednote',
+      name: '种草项目',
+      config: {},
+    } as const,
+    ecommerceProject: {
+      ...articleProject,
+      id: 'project-3',
+      platform: 'ecommerce',
+      name: '电商项目',
+      config: {},
+    } as const,
+  }
+})
+
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
   return {
@@ -98,27 +140,7 @@ vi.mock('@/lib/api', async () => {
       },
       projects: {
         ...actual.api.projects,
-        list: vi.fn().mockResolvedValue([{
-          id: 'project-1',
-          user_id: 'user-1',
-          platform: 'article',
-          name: '公众号项目',
-          avatar_url: '',
-          profile_url: '',
-          keywords: '',
-          visual_style: '',
-          writer: '',
-          theme: '',
-          author: '',
-          template_id: '',
-          reference_image_url: '',
-          image_ratio: '',
-          max_concurrent_tasks: 1,
-          config: { enable_publishing: true },
-          status: 'active',
-          created_at: '2026-07-01T00:00:00.000Z',
-          updated_at: '2026-07-01T00:00:00.000Z',
-        }]),
+        list: vi.fn().mockResolvedValue([{ ...articleProject }]),
       },
       apiKeys: {
         ...actual.api.apiKeys,
@@ -135,6 +157,8 @@ vi.mock('@/lib/api', async () => {
 describe('DashboardPage AI entry', () => {
   beforeEach(() => {
     navigateMock.mockClear()
+    vi.mocked(api.aiEntry.submit).mockClear()
+    vi.mocked(uploadToOSS).mockClear()
   })
 
   it('sends first-time users to project creation from the AI entry', async () => {
@@ -143,7 +167,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByText('先创建一个项目，再开始创作。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '创建项目' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /创建第一个项目/ })).toHaveAttribute(
       'href',
       '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
     )
@@ -163,9 +187,14 @@ describe('DashboardPage AI entry', () => {
   it('renders a Codex-style AI entry and creates a task with uploaded attachments', async () => {
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('heading', { name: '今天想让 Anban 帮你创作什么？' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '今天用「公众号项目」创作什么？' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '首页项目选择' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '选择项目 公众号项目' })).toHaveAttribute('aria-pressed', 'true')
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     expect(await screen.findByText('公众号项目')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /新建创作任务/ })).toHaveAttribute('href', '/tasks?create=true&type=article&project_id=project-1&intent=new')
+    expect(screen.getByRole('link', { name: /安排自动计划/ })).toHaveAttribute('href', '/plans?create=true&type=article&project_id=project-1&intent=schedule')
+    expect(screen.getByRole('link', { name: /管理项目配置/ })).toHaveAttribute('href', '/projects')
     expect(screen.queryByText('今日创作态势')).not.toBeInTheDocument()
     expect(screen.queryByText('接入状态')).not.toBeInTheDocument()
     expect(screen.queryByText('下一步')).not.toBeInTheDocument()
@@ -196,6 +225,52 @@ describe('DashboardPage AI entry', () => {
       })],
     }))
     expect(navigateMock).toHaveBeenCalledWith('/tasks/task-ai-1')
+  })
+
+  it('switches the selected homepage project before submitting', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([
+      { ...articleProject },
+      { ...seednoteProject },
+    ])
+
+    render(<DashboardPage />)
+
+    expect(await screen.findByRole('heading', { name: '今天用「公众号项目」创作什么？' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '选择项目 种草项目' }))
+
+    expect(await screen.findByRole('heading', { name: '今天用「种草项目」创作什么？' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '选择项目 种草项目' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('link', { name: /新建创作任务/ })).toHaveAttribute('href', '/tasks?create=true&type=seednote&project_id=project-2&intent=new')
+    expect(screen.getByRole('link', { name: /安排自动计划/ })).toHaveAttribute('href', '/plans?create=true&type=seednote&project_id=project-2&intent=schedule')
+
+    fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '写一篇种草笔记' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+
+    await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: 'project-2',
+      text: '写一篇种草笔记',
+    })))
+  })
+
+  it('hides schedule shortcuts for project types that cannot create plans', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([
+      { ...articleProject },
+      { ...ecommerceProject },
+    ])
+
+    render(<DashboardPage />)
+
+    expect(await screen.findByRole('heading', { name: '今天用「公众号项目」创作什么？' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /安排自动计划/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '选择项目 电商项目' }))
+
+    expect(await screen.findByRole('heading', { name: '今天用「电商项目」创作什么？' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /新建创作任务/ })).toHaveAttribute('href', '/tasks?create=true&type=ecommerce&project_id=project-3&intent=new')
+    expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
   })
 
   it('shows needs-configuration errors without navigating', async () => {

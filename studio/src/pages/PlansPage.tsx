@@ -62,7 +62,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
-    video_input: isVideoCreator(plan.type) ? initialVideoInput(plan.prompt || '', plan.video_input) : undefined,
+    video_creator_input: isVideoCreator(plan.type) ? initialVideoInput(plan.prompt || '', plan.video_creator_input) : undefined,
   }
 }
 
@@ -94,7 +94,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_input: undefined,
+      video_creator_input: undefined,
     },
   })
 
@@ -241,7 +241,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_input: isVideoCreator(requestedType) ? initialVideoInput('') : undefined,
+      video_creator_input: isVideoCreator(requestedType) ? initialVideoInput('') : undefined,
     })
     setModalOpen(true)
   }, [createIntent.projectId, createIntent.type, form, projectMap])
@@ -281,7 +281,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_input: undefined,
+      video_creator_input: undefined,
     })
   }
 
@@ -304,7 +304,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      video_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_input) : undefined,
+      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_creator_input) : undefined,
     }
 
     if (editingPlan) {
@@ -476,12 +476,12 @@ export default function PlansPage() {
                         if (id) {
                           form.setValue('type', platform as PlanType)
                           if (isVideoCreator(platform)) {
-                            form.setValue('video_input', initialVideoInput(form.getValues('prompt') || ''), { shouldDirty: false })
+                            form.setValue('video_creator_input', initialVideoInput(form.getValues('prompt') || ''), { shouldDirty: false })
                           } else {
-                            form.setValue('video_input', undefined, { shouldDirty: false })
+                            form.setValue('video_creator_input', undefined, { shouldDirty: false })
                           }
                         } else {
-                          form.setValue('video_input', undefined, { shouldDirty: false })
+                          form.setValue('video_creator_input', undefined, { shouldDirty: false })
                         }
                       }}
                       excludePlatforms={['moments', 'ecommerce', 'videoeditor']}
@@ -558,8 +558,9 @@ export default function PlansPage() {
               {isVideoCreator(watchedType) && (
                 <VideoCreationPanel
                   form={form}
+                  fieldRoot="video_creator_input"
                   selectedProject={selectedProject}
-                  title="视频计划"
+                  title="AI 视频生成计划"
                   promptField={(
                     <FormField control={form.control} name="prompt" render={({ field }) => (
                       <FormItem>

@@ -20,7 +20,7 @@ import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, hasUsa
 import { queryKeys } from '@/lib/query-keys'
 
 const shortcutMap: Record<string, string> = {
-  '今日': 'g d',
+  'Anban 智能体': 'g d',
   '项目': 'g c',
   '计划': 'g p',
   '任务': 'g t',

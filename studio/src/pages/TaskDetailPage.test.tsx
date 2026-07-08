@@ -123,7 +123,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
   })
 
-  it('shows terminal workflow stages before review and generated files', async () => {
+  it('shows review summary without terminal workflow stage grid', async () => {
     mockTask(taskWith({
       status: 'completed',
       progress: 100,
@@ -157,14 +157,14 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const stages = await screen.findByText('创作进度')
     const review = await screen.findByText('发布前检查')
     const parameters = await screen.findByText('项目参数')
     const files = await screen.findByText('生成文件 (1)')
-    expect(stages.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(review.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByText('03-draft.md')).toBeInTheDocument()
+    expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
+    expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
+    expect(screen.queryByText('03-draft.md')).not.toBeInTheDocument()
   })
 
   it('disables delivery controls for payment-required tasks', async () => {
@@ -437,13 +437,12 @@ describe('TaskDetailPage', () => {
       video_generation_id: 'vg-1',
       video_estimated_credits: 7440,
       video_credits_charged: 7440,
-      video_input: {
+      video_creator_input: {
         brief: '做一条办公室个人 IP 种草视频',
         references: [{ type: 'video_url', url: 'https://cdn.example.com/ref.mp4' }],
         hard_constraints: { ratio: '9:16', duration: 15 },
       },
-      video_config: {
-        workflow: 'creator',
+      video_creator_config: {
         creative_type: 'personal_ip',
         purpose: 'planting',
         subject_profile: '30 岁效率博主，黑色衬衫，语速快但亲和',
@@ -508,12 +507,12 @@ describe('TaskDetailPage', () => {
       type: 'videocreator',
       status: 'pending',
       prompt: '做一条办公室个人 IP 种草视频',
-      video_input: {
+      video_creator_input: {
         brief: '做一条办公室个人 IP 种草视频',
         references: [{ type: 'text', text: '不要卡通化' }],
         hard_constraints: { ratio: '9:16' },
       },
-      video_config: {},
+      video_creator_config: {},
       result: { files: null, output: '' },
     }))
 
@@ -535,7 +534,7 @@ describe('TaskDetailPage', () => {
       type: 'videocreator',
       status: 'completed',
       prompt: '生成一条直播带货视频',
-      video_config: {
+      video_creator_config: {
         scenario_key: 'live_selling',
         production_mode: 'guided',
         creative_type: 'product_demo',

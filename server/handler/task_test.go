@@ -55,6 +55,40 @@ func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func postJSON(t *testing.T, app *fiber.App, path, body string) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	return resp
+}
+
+func decodeEnvelopeRawData(t *testing.T, resp *http.Response) map[string]json.RawMessage {
+	t.Helper()
+	var env struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if env.Data == nil {
+		t.Fatalf("response data is nil")
+	}
+	return env.Data
+}
+
+func mustMarshalTaskJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal json: %v", err)
+	}
+	return raw
+}
+
 func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -796,6 +830,99 @@ func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
 	if bal != 99_999-2000 {
 		t.Fatalf("balance = %d, want base fee %d", bal, 99_999-2000)
 	}
+}
+
+func TestCreateTask_VideoSplitInputsAndResponseFields(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	creatorProjectID := uuid.New().String()
+	editorProjectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      "video-split-handler@example.com",
+		Password:   "hashed",
+		InviteCode: "videosplit",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	for _, project := range []*model.Project{
+		{ID: creatorProjectID, UserID: userID, Platform: model.PlatformVideoCreator, Name: "Creator", Status: model.ProjectStatusActive},
+		{ID: editorProjectID, UserID: userID, Platform: model.PlatformVideoEditor, Name: "Editor", Status: model.ProjectStatusActive},
+	} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatalf("create project %s: %v", project.Platform, err)
+		}
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	t.Run("creator accepts creator input and never exposes generic video fields", func(t *testing.T) {
+		body := `{"project_id":"` + creatorProjectID + `","video_creator_input":{"brief":"生成产品视频","hard_constraints":{"ratio":"9:16"}}}`
+		resp := postJSON(t, app, "/tasks", body)
+		if resp.StatusCode != fiber.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, raw)
+		}
+		data := decodeEnvelopeRawData(t, resp)
+		if _, ok := data["video_creator_input"]; !ok {
+			t.Fatalf("response missing video_creator_input: %s", string(mustMarshalTaskJSON(t, data)))
+		}
+		if _, ok := data["video_input"]; ok {
+			t.Fatalf("response exposed generic video_input: %s", string(mustMarshalTaskJSON(t, data)))
+		}
+		tasks, err := repo.Tasks().FindByUserID(ctx, userID, creatorProjectID, "", 0, 10)
+		if err != nil {
+			t.Fatalf("find creator tasks: %v", err)
+		}
+		if len(tasks) != 1 || tasks[0].VideoInput.Data().Brief != "生成产品视频" {
+			t.Fatalf("stored creator video input = %#v", tasks)
+		}
+	})
+
+	t.Run("editor accepts editor input and never exposes generic video fields", func(t *testing.T) {
+		body := `{"project_id":"` + editorProjectID + `","prompt":"加字幕并剪成 30 秒","video_editor_input":{"brief":"加字幕并剪成 30 秒","references":[{"type":"video_url","url":"https://cdn.example.com/source.mp4"}]}}`
+		resp := postJSON(t, app, "/tasks", body)
+		if resp.StatusCode != fiber.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, raw)
+		}
+		data := decodeEnvelopeRawData(t, resp)
+		if _, ok := data["video_editor_input"]; !ok {
+			t.Fatalf("response missing video_editor_input: %s", string(mustMarshalTaskJSON(t, data)))
+		}
+		if _, ok := data["video_input"]; ok {
+			t.Fatalf("response exposed generic video_input: %s", string(mustMarshalTaskJSON(t, data)))
+		}
+	})
+
+	t.Run("legacy generic video fields are rejected", func(t *testing.T) {
+		body := `{"project_id":"` + creatorProjectID + `","video_input":{"brief":"旧字段不允许"},"video_config":{"ratio":"9:16"}}`
+		resp := postJSON(t, app, "/tasks", body)
+		if resp.StatusCode != fiber.StatusBadRequest {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, raw)
+		}
+	})
+
+	t.Run("mismatched workflow input is rejected", func(t *testing.T) {
+		body := `{"project_id":"` + editorProjectID + `","video_creator_input":{"brief":"生成而不是剪辑"}}`
+		resp := postJSON(t, app, "/tasks", body)
+		if resp.StatusCode != fiber.StatusBadRequest {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, raw)
+		}
+	})
 }
 
 func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {

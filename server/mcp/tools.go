@@ -476,10 +476,10 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	}
 	if model.IsVideoCreatorPlatform(ch.Platform) {
 		videoBlock := buildVideoProfileBlock(ch, task)
-		info["video"] = videoBlock
+		info["videocreator"] = videoBlock
 		info["agent_brief"] = buildProjectAgentBrief(ch, usesProjectSnapshot, videoBlock)
 	} else if model.IsVideoEditorPlatform(ch.Platform) {
-		info["video_editor"] = map[string]any{
+		info["videoeditor"] = map[string]any{
 			"input_attachment_dir":  ".anban-creator/input-attachments",
 			"requires_source_media": true,
 			"delivery":              []string{"final.mp4", "preview.mp4", "capcut draft"},
@@ -646,7 +646,7 @@ func buildProjectAgentBrief(ch *model.Project, usesProjectSnapshot bool, videoBl
 	if ch.Keywords != "" {
 		fmt.Fprintf(&b, "关键词：%s\n", ch.Keywords)
 	}
-	b.WriteString("分析入口：项目长期定位只读取工作区 CLAUDE.md / project.instructions；本次需求读取 task.prompt、video_creator_input（profile 中为 video.input）的 brief、references 与 hard_constraints。\n")
+	b.WriteString("分析入口：项目长期定位只读取工作区 CLAUDE.md / project.instructions；本次需求读取 task.prompt、video_creator_input（profile 中为 videocreator.input）的 brief、references 与 hard_constraints。\n")
 	b.WriteString("Studio 不再提供视频玩法、商业目标、制作模式、内容类型、主体、受众或核心信息；这些业务判断必须由 videocreator agent 使用 seedance-20 SKILL 自主分析并落盘到 video_creator_config。\n")
 	if usesProjectSnapshot {
 		b.WriteString("配置来源：任务创建时冻结的项目快照\n")
@@ -656,9 +656,9 @@ func buildProjectAgentBrief(ch *model.Project, usesProjectSnapshot bool, videoBl
 			defaults["model_key"], defaults["resolution"], defaults["ratio"], defaults["duration"], defaults["watermark"])
 	}
 	if pricing, ok := videoBlock["pricing"].(map[string]any); ok {
-		fmt.Fprintf(&b, "积分规则：创建/触发视频任务只扣基础任务服务费；提交 video_gen 时按服务端估价独立扣费。%v\n", pricing["insufficient_credit_rule"])
+		fmt.Fprintf(&b, "积分规则：创建/触发 AI 视频生成任务只扣基础任务服务费；提交 video_gen 时按服务端估价独立扣费。%v\n", pricing["insufficient_credit_rule"])
 	}
-	b.WriteString("模型规则：只能使用本 profile 返回的 video.model_catalog 与 video.policy.allowed_models 中的模型 key；未返回的模型不可使用。")
+	b.WriteString("模型规则：只能使用本 profile 返回的 videocreator.model_catalog 与 videocreator.policy.allowed_models 中的模型 key；未返回的模型不可使用。")
 	return b.String()
 }
 
@@ -677,7 +677,7 @@ func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTo
 	if err != nil {
 		return errorResult(fmt.Sprintf("list tasks: %v", err)), nil
 	}
-	return textResult(map[string]any{"items": tasks, "total": total})
+	return textResult(map[string]any{"items": mcpTaskResponses(tasks), "total": total})
 }
 
 func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -699,7 +699,7 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	if task.Result != nil && *task.Result != "" {
 		_ = json.Unmarshal([]byte(*task.Result), &result)
 	}
-	return textResult(map[string]any{
+	resp := map[string]any{
 		"id":            task.ID,
 		"type":          task.Type,
 		"status":        task.Status,
@@ -711,7 +711,9 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 		"created_at":    task.CreatedAt,
 		"started_at":    task.StartedAt,
 		"completed_at":  task.CompletedAt,
-	})
+	}
+	rewriteMCPVideoFields(resp, task.Type, task.VideoInput.Data(), task.VideoConfig.Data())
+	return textResult(resp)
 }
 
 func taskCancelHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -798,7 +800,7 @@ func planListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTo
 	if err != nil {
 		return errorResult(fmt.Sprintf("list plans: %v", err)), nil
 	}
-	return textResult(map[string]any{"items": plans, "total": total})
+	return textResult(map[string]any{"items": mcpPlanResponses(plans), "total": total})
 }
 
 func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -821,5 +823,5 @@ func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	if err != nil {
 		return errorResult(fmt.Sprintf("create plan: %v", err)), nil
 	}
-	return textResult(plan)
+	return textResult(mcpPlanResponse(plan))
 }

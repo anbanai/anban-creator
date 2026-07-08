@@ -38,11 +38,11 @@ vi.mock('@/lib/api', async () => {
         }),
         balance: vi.fn().mockResolvedValue({ balance: 0 }),
       },
-      video: {
-        ...actual.api.video,
+      videoCreator: {
+        ...actual.api.videoCreator,
         estimate: vi.fn().mockResolvedValue({
           available_models: [{ key: 'seedance-2.0-mini', display_name: 'Seedance Mini' }],
-          resolved_config: {
+          resolved_creator_config: {
             purpose: 'planting',
             model_key: 'seedance-2.0-mini',
             resolution: '720p',
@@ -158,7 +158,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
         status: 'active',
         next_run_at: '2025-01-20T09:00:00Z',
         project_id: 'video-project-1',
-        video_config: {
+        video_creator_config: {
           purpose: 'planting',
           model_key: 'seedance-2.0-mini',
           resolution: '720p',

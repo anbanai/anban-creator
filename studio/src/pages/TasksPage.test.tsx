@@ -112,8 +112,8 @@ vi.mock('@/lib/api', async () => {
           income: { daily_sign_in: 100, register_bonus: 1000, invite_reward: 1000 },
         }),
       },
-      video: {
-        ...actual.api.video,
+      videoCreator: {
+        ...actual.api.videoCreator,
         estimate: vi.fn(),
       },
     },

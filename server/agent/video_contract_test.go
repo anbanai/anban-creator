@@ -75,7 +75,7 @@ func TestVideoAgentsUseDedicatedCreatorAndEditorContracts(t *testing.T) {
 	}
 }
 
-func TestVideoSkillContractsUseVideoInputReferences(t *testing.T) {
+func TestVideoSkillContractsUseVideoCreatorInputReferences(t *testing.T) {
 	for _, path := range []string{
 		"../../claudecode/skills/seedance-20/references/mcp-contract.md",
 		"../../codex/skills/seedance-20/references/mcp-contract.md",
@@ -89,21 +89,22 @@ func TestVideoSkillContractsUseVideoInputReferences(t *testing.T) {
 	} {
 		text := readRepoFile(t, path)
 		for _, want := range []string{
-			"video.input",
-			"video_input.references",
+			"videocreator.input",
+			"video_creator_input.references",
 		} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("%s missing %q", path, want)
 			}
 		}
 		for _, forbidden := range []string{
+			"video_input.references",
 			"task/plan `video_config.references`",
 			"task/plan video_config.references",
 			"task or plan has `video_config.references`",
 			"metadata from task/plan `video_config.references`",
 		} {
 			if strings.Contains(text, forbidden) {
-				t.Fatalf("%s still points user references at video_config: %q", path, forbidden)
+				t.Fatalf("%s still points user references at generic video config: %q", path, forbidden)
 			}
 		}
 	}

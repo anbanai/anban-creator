@@ -353,8 +353,8 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 }
 
 // ShouldCollectTaskFile reports whether a workspace file should become a
-// user-facing task file. Video workflows use explicit delivery allowlists so
-// runtime project files never leak into task deliverables.
+// user-facing task file. Videocreator/videoeditor use explicit delivery
+// allowlists so runtime project files never leak into task deliverables.
 func ShouldCollectTaskFile(task *model.Task, relPath string) bool {
 	if task == nil || !model.IsVideoPlatform(task.Type) {
 		return true

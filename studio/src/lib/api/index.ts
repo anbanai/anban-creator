@@ -17,7 +17,7 @@ import { topicPoolApi } from './topic-pool'
 import { designerApi } from './designer'
 import { imageModelsApi } from './image-models'
 import { ilinkApi } from './ilink'
-import { videoApi } from './video'
+import { videoCreatorApi } from './video'
 import { aiEntryApi } from './ai-entry'
 
 export const api = {
@@ -40,6 +40,6 @@ export const api = {
   designer: designerApi,
   imageModels: imageModelsApi,
   ilink: ilinkApi,
-  video: videoApi,
+  videoCreator: videoCreatorApi,
   aiEntry: aiEntryApi,
 }

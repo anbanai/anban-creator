@@ -3,6 +3,7 @@ package service
 import "errors"
 
 var ErrVideoGenerationConfig = errors.New("video generation config invalid")
+var ErrVideoTaskInput = errors.New("videocreator/videoeditor input invalid")
 
 type videoGenerationConfigError struct {
 	cause error

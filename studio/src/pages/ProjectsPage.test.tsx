@@ -27,8 +27,8 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.imageModels,
         list: vi.fn().mockResolvedValue({ items: [], tier: 'pro' }),
       },
-      video: {
-        ...actual.api.video,
+      videoCreator: {
+        ...actual.api.videoCreator,
         models: vi.fn().mockResolvedValue({ items: [] }),
       },
     },
@@ -87,7 +87,8 @@ describe('ProjectsPage deletion feedback', () => {
 
     render(<ProjectsPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '删除项目' }))
+    await screen.findByText('测试项目', {}, { timeout: 5000 })
+    fireEvent.click(await screen.findByRole('button', { name: '删除项目' }, { timeout: 5000 }))
     fireEvent.click(await screen.findByRole('button', { name: '删除' }))
 
     await waitFor(() => {

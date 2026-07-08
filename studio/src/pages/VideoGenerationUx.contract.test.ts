@@ -14,10 +14,11 @@ describe('video generation UX contracts', () => {
     const source = pageSource('TasksPage.tsx')
 
     expect(source).toContain('VideoCreationPanel')
-    expect(source).toContain('video_input')
+    expect(source).toContain('video_creator_input')
+    expect(source).toContain('video_editor_input')
+    expect(source).not.toContain('video_input')
     expect(source).not.toContain('VideoEstimateSummary')
-    expect(source).not.toContain('api.video.estimate')
-    expect(source).not.toContain('api.video.playbooks')
+    expect(source).not.toMatch(/api\.video(?!Creator)/)
     expect(source).not.toContain('视频风格与禁忌')
     for (const oldLabel of ['视频玩法', '制作模式', '工作流', '商业目标', '人物 / 主体', '目标受众', '核心信息']) {
       expect(source).not.toContain(oldLabel)
@@ -28,10 +29,11 @@ describe('video generation UX contracts', () => {
     const source = pageSource('PlansPage.tsx')
 
     expect(source).toContain('VideoCreationPanel')
-    expect(source).toContain('video_input')
+    expect(source).toContain('video_creator_input')
+    expect(source).not.toContain('video_input')
+    expect(source).not.toContain('video_editor_input')
     expect(source).not.toContain('VideoEstimateSummary')
-    expect(source).not.toContain('api.video.estimate')
-    expect(source).not.toContain('api.video.playbooks')
+    expect(source).not.toMatch(/api\.video(?!Creator)/)
     for (const oldLabel of ['视频玩法', '制作模式', '工作流', '商业目标', '人物 / 主体', '目标受众', '核心信息']) {
       expect(source).not.toContain(oldLabel)
     }

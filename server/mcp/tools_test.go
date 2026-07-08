@@ -33,10 +33,11 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	logger := zerolog.Nop()
 	projectSvc := service.NewProjectService(repo, &logger)
 	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	planSvc := service.NewPlanService(repo, &logger)
 	templateSvc := service.NewTemplateService(repo, &logger)
 
 	old := svcs
-	svcs = &Services{ProjectSvc: projectSvc, TaskSvc: taskSvc, TemplateSvc: templateSvc}
+	svcs = &Services{ProjectSvc: projectSvc, TaskSvc: taskSvc, PlanSvc: planSvc, TemplateSvc: templateSvc}
 
 	cleanup := func() {
 		sqlDB, _ := db.DB()
@@ -46,6 +47,22 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 		svcs = old
 	}
 	return taskSvc, projectSvc, repo, cleanup
+}
+
+func decodeMCPMap(t *testing.T, result *mcp.CallToolResult) map[string]any {
+	t.Helper()
+	if result == nil || len(result.Content) == 0 {
+		t.Fatal("empty MCP result")
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("unexpected MCP content type: %T", result.Content[0])
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(text.Text), &data); err != nil {
+		t.Fatalf("decode MCP JSON %q: %v", text.Text, err)
+	}
+	return data
 }
 
 func createAccountInfoProject(t *testing.T, repo repository.Repository, userID, style string) *model.Project {
@@ -86,6 +103,151 @@ func createAccountInfoTask(t *testing.T, repo repository.Repository, userID, pro
 	return task
 }
 
+func TestTaskListHandlerSplitsVideoFields(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+
+	userID := uuid.New().String()
+	ctx := context.Background()
+	creatorProject := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideoCreator,
+		Name:     "creator",
+		Status:   model.ProjectStatusActive,
+	}
+	editorProject := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideoEditor,
+		Name:     "editor",
+		Status:   model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(ctx, creatorProject); err != nil {
+		t.Fatalf("create creator project: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, editorProject); err != nil {
+		t.Fatalf("create editor project: %v", err)
+	}
+	creatorTask := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: creatorProject.ID,
+		Type:      model.PlatformVideoCreator,
+		Status:    model.TaskStatusPending,
+		Prompt:    "生成产品短片",
+	}
+	creatorTask.SetVideoInput(model.VideoInput{Brief: "生成产品短片"})
+	creatorTask.SetVideoConfig(model.VideoTaskConfig{Ratio: "9:16"})
+	editorTask := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: editorProject.ID,
+		Type:      model.PlatformVideoEditor,
+		Status:    model.TaskStatusPending,
+		Prompt:    "剪辑源视频",
+	}
+	editorTask.SetVideoInput(model.VideoInput{Brief: "剪辑源视频", References: []model.VideoReferenceAsset{{Type: "video_url", URL: "https://cdn.example.com/source.mp4"}}})
+	if err := repo.Tasks().Create(ctx, creatorTask); err != nil {
+		t.Fatalf("create creator task: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, editorTask); err != nil {
+		t.Fatalf("create editor task: %v", err)
+	}
+
+	result, err := taskListHandler(withMCPUserID(context.Background(), userID), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"limit":10}`)}})
+	if err != nil {
+		t.Fatalf("taskListHandler: %v", err)
+	}
+	data := decodeMCPMap(t, result)
+	items, ok := data["items"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("items = %#v, want two tasks", data["items"])
+	}
+	for _, item := range items {
+		task, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("task item type = %T", item)
+		}
+		if _, ok := task["video_input"]; ok {
+			t.Fatalf("MCP task_list exposed generic video_input: %#v", task)
+		}
+		if _, ok := task["video_config"]; ok {
+			t.Fatalf("MCP task_list exposed generic video_config: %#v", task)
+		}
+		switch task["type"] {
+		case model.PlatformVideoCreator:
+			if _, ok := task["video_creator_input"]; !ok {
+				t.Fatalf("creator task missing video_creator_input: %#v", task)
+			}
+			if _, ok := task["video_editor_input"]; ok {
+				t.Fatalf("creator task exposed editor input: %#v", task)
+			}
+		case model.PlatformVideoEditor:
+			if _, ok := task["video_editor_input"]; !ok {
+				t.Fatalf("editor task missing video_editor_input: %#v", task)
+			}
+			if _, ok := task["video_creator_input"]; ok {
+				t.Fatalf("editor task exposed creator input: %#v", task)
+			}
+		default:
+			t.Fatalf("unexpected task type: %#v", task)
+		}
+	}
+}
+
+func TestPlanHandlersSplitVideoFields(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+
+	userID := uuid.New().String()
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideoCreator,
+		Name:     "creator",
+		Status:   model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	reqBody := json.RawMessage(`{"project_id":"` + project.ID + `","cron_expr":"0 9 * * *","prompt":"每日生成新品短视频"}`)
+	result, err := planCreateHandler(withMCPUserID(context.Background(), userID), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: reqBody}})
+	if err != nil {
+		t.Fatalf("planCreateHandler: %v", err)
+	}
+	created := decodeMCPMap(t, result)
+	if _, ok := created["video_creator_input"]; !ok {
+		t.Fatalf("MCP plan_create missing video_creator_input: %#v", created)
+	}
+	if _, ok := created["video_input"]; ok {
+		t.Fatalf("MCP plan_create exposed generic video_input: %#v", created)
+	}
+	if _, ok := created["video_config"]; ok {
+		t.Fatalf("MCP plan_create exposed generic video_config: %#v", created)
+	}
+
+	listResult, err := planListHandler(withMCPUserID(context.Background(), userID), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{}`)}})
+	if err != nil {
+		t.Fatalf("planListHandler: %v", err)
+	}
+	list := decodeMCPMap(t, listResult)
+	items, ok := list["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("items = %#v, want one plan", list["items"])
+	}
+	plan := items[0].(map[string]any)
+	if _, ok := plan["video_creator_input"]; !ok {
+		t.Fatalf("MCP plan_list missing video_creator_input: %#v", plan)
+	}
+	if _, ok := plan["video_input"]; ok {
+		t.Fatalf("MCP plan_list exposed generic video_input: %#v", plan)
+	}
+	if _, ok := plan["video_config"]; ok {
+		t.Fatalf("MCP plan_list exposed generic video_config: %#v", plan)
+	}
+}
+
 func taskToolRequest(t *testing.T, taskID string) *mcp.CallToolRequest {
 	t.Helper()
 	args, err := json.Marshal(map[string]string{"task_id": taskID})
@@ -111,6 +273,65 @@ func TestTaskGetHandlerRejectsForeignTask(t *testing.T) {
 	text := result.Content[0].(*mcp.TextContent).Text
 	if !strings.Contains(text, "task not found") {
 		t.Fatalf("expected ownership error, got: %s", text)
+	}
+}
+
+func TestTaskGetHandlerReturnsSplitVideoFields(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	userID := uuid.New().String()
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideoCreator,
+		Name:     "video-project",
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: project.ID,
+		Type:      model.PlatformVideoCreator,
+		Status:    model.TaskStatusPending,
+		Prompt:    "生成产品视频",
+	}
+	task.SetVideoInput(model.VideoInput{Brief: "使用用户素材生成短视频"})
+	task.SetVideoConfig(model.VideoTaskConfig{Ratio: "9:16", Duration: 12})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create video task: %v", err)
+	}
+
+	result, err := taskGetHandler(withMCPUserID(ctx, userID), taskToolRequest(t, task.ID))
+	if err != nil {
+		t.Fatalf("taskGetHandler: %v", err)
+	}
+	data := decodeMCPMap(t, result)
+	if _, ok := data["video_input"]; ok {
+		t.Fatalf("task_get exposed generic video_input: %#v", data)
+	}
+	if _, ok := data["video_config"]; ok {
+		t.Fatalf("task_get exposed generic video_config: %#v", data)
+	}
+	input, ok := data["video_creator_input"].(map[string]any)
+	if !ok {
+		t.Fatalf("video_creator_input missing or wrong type: %T", data["video_creator_input"])
+	}
+	if got := input["brief"]; got != "使用用户素材生成短视频" {
+		t.Fatalf("video_creator_input.brief = %v", got)
+	}
+	cfg, ok := data["video_creator_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("video_creator_config missing or wrong type: %T", data["video_creator_config"])
+	}
+	if got := cfg["ratio"]; got != "9:16" {
+		t.Fatalf("video_creator_config.ratio = %v", got)
+	}
+	if got := cfg["duration"]; got != float64(12) {
+		t.Fatalf("video_creator_config.duration = %v", got)
 	}
 }
 

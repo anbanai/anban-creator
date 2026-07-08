@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { WorkflowReviewSummary, WorkflowStageProgress } from './TaskWorkflowPanel'
+import { WorkflowReviewSummary } from './TaskWorkflowPanel'
 import type { WorkflowStatus } from '@/types'
 
 const workflow: WorkflowStatus = {
@@ -22,28 +22,6 @@ const workflow: WorkflowStatus = {
 }
 
 describe('TaskWorkflowPanel', () => {
-  it('renders compact stage progress from workflow object', () => {
-    render(<WorkflowStageProgress workflow={workflow} />)
-
-    expect(screen.getByText('创作进度')).toBeInTheDocument()
-    expect(screen.getByText('初稿')).toBeInTheDocument()
-    expect(screen.getByText('当前阶段')).toBeInTheDocument()
-    expect(screen.getByText('03-draft.md')).toBeInTheDocument()
-  })
-
-  it('renders stage progress from workflow JSON string', () => {
-    render(<WorkflowStageProgress workflow={JSON.stringify(workflow)} />)
-
-    expect(screen.getByText('创作进度')).toBeInTheDocument()
-    expect(screen.getByText('排版 HTML')).toBeInTheDocument()
-  })
-
-  it('renders nothing when workflow progress is missing or invalid', () => {
-    const { container } = render(<WorkflowStageProgress workflow="not-json" />)
-
-    expect(container.firstChild).toBeNull()
-  })
-
   it('renders review summary with readiness risks and next actions first', () => {
     render(<WorkflowReviewSummary workflow={workflow} />)
 

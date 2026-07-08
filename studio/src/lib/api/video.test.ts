@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/test/mocks/server'
-import { videoApi } from './video'
+import { videoCreatorApi } from './video'
 
-describe('videoApi', () => {
+describe('videoCreatorApi', () => {
   beforeEach(() => {
     vi.stubGlobal('localStorage', {
       getItem: vi.fn(() => null),
@@ -12,17 +12,17 @@ describe('videoApi', () => {
     })
   })
 
-  it('posts video config references and unwraps estimate response', async () => {
+  it('posts video creator config references and unwraps estimate response', async () => {
     let requestBody: unknown
     server.use(
-      http.post('/api/v1/video/estimate', async ({ request }) => {
+      http.post('/api/v1/videocreator/estimate', async ({ request }) => {
         requestBody = await request.json()
         return HttpResponse.json({
           code: 0,
           msg: 'success',
           data: {
             available_models: [{ key: 'configured-video', display_name: 'Configured Video' }],
-            resolved_config: {
+            resolved_creator_config: {
               model_key: 'configured-video',
               resolution: '720p',
               ratio: '9:16',
@@ -47,10 +47,10 @@ describe('videoApi', () => {
       }),
     )
 
-    const estimate = await videoApi.estimate({
+    const estimate = await videoCreatorApi.estimate({
       project_id: 'project-1',
       prompt: '生成视频',
-      video_config: {
+      video_creator_config: {
         references: [{ type: 'image_url', url: 'https://cdn.example.com/a.png', reference_role: 'product appearance' }],
       },
     })
@@ -58,7 +58,7 @@ describe('videoApi', () => {
     expect(requestBody).toEqual({
       project_id: 'project-1',
       prompt: '生成视频',
-      video_config: {
+      video_creator_config: {
         references: [{ type: 'image_url', url: 'https://cdn.example.com/a.png', reference_role: 'product appearance' }],
       },
     })
@@ -69,7 +69,7 @@ describe('videoApi', () => {
 
   it('lists configured video models', async () => {
     server.use(
-      http.get('/api/v1/video/models', () => HttpResponse.json({
+      http.get('/api/v1/videocreator/models', () => HttpResponse.json({
         code: 0,
         msg: 'success',
         data: {
@@ -78,14 +78,14 @@ describe('videoApi', () => {
       })),
     )
 
-    const models = await videoApi.models()
+    const models = await videoCreatorApi.models()
 
     expect(models.items).toEqual([{ key: 'configured-video', display_name: 'Configured Video' }])
   })
 
   it('lists video playbooks for scenario-first creation', async () => {
     server.use(
-      http.get('/api/v1/video/playbooks', () => HttpResponse.json({
+      http.get('/api/v1/videocreator/playbooks', () => HttpResponse.json({
         code: 0,
         msg: 'success',
         data: {
@@ -104,7 +104,7 @@ describe('videoApi', () => {
       })),
     )
 
-    const playbooks = await videoApi.playbooks()
+    const playbooks = await videoCreatorApi.playbooks()
 
     expect(playbooks.items[0]).toMatchObject({
       key: 'live_selling',

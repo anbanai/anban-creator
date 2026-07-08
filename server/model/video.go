@@ -1,10 +1,5 @@
 package model
 
-const (
-	VideoWorkflowCreator = "creator"
-	VideoWorkflowEditor  = "editor"
-)
-
 // VideoDefaults stores reusable video generation defaults on a project. Plans
 // and tasks copy these values into their own snapshots when they override them.
 type VideoDefaults struct {
@@ -31,8 +26,9 @@ type VideoModelPolicy struct {
 	MaxDuration        int64    `json:"max_duration,omitempty"`
 }
 
-// VideoInput stores the user-authored intake for a video task or plan. Project-
-// level facts live in Project.Instructions and are written to CLAUDE.md.
+// VideoInput stores user-authored intake for videocreator/videoeditor tasks and
+// videocreator plans. Project-level facts live in Project.Instructions and are
+// written to CLAUDE.md.
 type VideoInput struct {
 	Brief           string                `json:"brief,omitempty"`
 	References      []VideoReferenceAsset `json:"references,omitempty"`
@@ -46,8 +42,8 @@ type VideoHardConstraints struct {
 }
 
 // VideoTaskConfig is the immutable plan/task snapshot used by agents and Studio.
+// The task/platform type, not this config, selects videocreator vs videoeditor.
 type VideoTaskConfig struct {
-	Workflow                  string                   `json:"workflow,omitempty"`
 	ScenarioKey               string                   `json:"scenario_key,omitempty"`
 	ProductionMode            string                   `json:"production_mode,omitempty"`
 	Purpose                   string                   `json:"purpose,omitempty"`
@@ -88,18 +84,10 @@ type VideoTaskSegmentConfig struct {
 	EstimatedCredits int    `json:"estimated_credits,omitempty"`
 }
 
-func NormalizeVideoWorkflow(workflow string) string {
-	switch workflow {
-	case VideoWorkflowEditor:
-		return VideoWorkflowEditor
-	default:
-		return VideoWorkflowCreator
-	}
-}
-
-// VideoReferenceAsset is a Studio/API-facing reference saved on video tasks and
-// plans. Agents map it into provider-facing references via MCP so only
-// server-owned or public assets reach the video model.
+// VideoReferenceAsset is a Studio/API-facing reference saved on
+// videocreator/videoeditor tasks and videocreator plans. Agents map it into
+// provider-facing references via MCP so only server-owned or public assets reach
+// the video model.
 type VideoReferenceAsset struct {
 	Type                 string   `json:"type"`
 	URL                  string   `json:"url,omitempty"`

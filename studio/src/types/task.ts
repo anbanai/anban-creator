@@ -81,8 +81,10 @@ export interface Task {
   project_snapshot?: ProjectSnapshot
   // E-commerce package config (only present for platform=ecommerce tasks).
   ecommerce?: EcommerceTaskConfig
-  video_input?: VideoInput
-  video_config?: VideoTaskConfig
+  video_creator_input?: VideoInput
+  video_creator_config?: VideoTaskConfig
+  video_editor_input?: VideoInput
+  video_editor_config?: VideoTaskConfig
   video_generation_id?: string
   video_estimated_credits?: number
   video_credits_charged?: number
@@ -179,8 +181,10 @@ export interface CreateTaskRequest {
   target_platform?: string
   selling_points?: string
   language?: string
-  video_input?: VideoInput
-  video_config?: VideoTaskConfig
+  video_creator_input?: VideoInput
+  video_creator_config?: VideoTaskConfig
+  video_editor_input?: VideoInput
+  video_editor_config?: VideoTaskConfig
   // ''/'cloud' (default) → cloud execution; 'local' → claim by the desktop
   // local executor and run on the user's machine (enables ffmpeg/local-shell).
   // The desktop sets this when a local executor is available; web always omits.

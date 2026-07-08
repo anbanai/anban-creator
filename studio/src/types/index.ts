@@ -109,7 +109,6 @@ export type {
   VideoReferenceAsset,
   VideoReferenceType,
   VideoTaskConfig,
-  VideoWorkflow,
 } from './video'
 
 // Topic Pool

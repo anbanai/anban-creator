@@ -18,7 +18,7 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 )
 
-func TestVideoEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T) {
+func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -81,12 +81,12 @@ func TestVideoEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T)
 	}, 1000, &logger)
 
 	app := fiber.New()
-	app.Post("/video/estimate", func(c fiber.Ctx) error {
+	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return h.Estimate(c)
 	})
 
-	req := httptest.NewRequest("POST", "/video/estimate", strings.NewReader(`{"project_id":"`+projectID+`","prompt":"生成视频"}`))
+	req := httptest.NewRequest("POST", "/videocreator/estimate", strings.NewReader(`{"project_id":"`+projectID+`","prompt":"生成视频"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {
@@ -100,13 +100,13 @@ func TestVideoEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T)
 			AvailableModels []struct {
 				Key string `json:"key"`
 			} `json:"available_models"`
-			EstimatedCredits int  `json:"estimated_credits"`
-			Balance          int  `json:"balance"`
-			MinBalance       int  `json:"min_balance"`
-			MeetsMinBalance  bool `json:"meets_min_balance"`
-			ResolvedConfig   struct {
+			EstimatedCredits      int  `json:"estimated_credits"`
+			Balance               int  `json:"balance"`
+			MinBalance            int  `json:"min_balance"`
+			MeetsMinBalance       bool `json:"meets_min_balance"`
+			ResolvedCreatorConfig struct {
 				ModelKey string `json:"model_key"`
-			} `json:"resolved_config"`
+			} `json:"resolved_creator_config"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -118,15 +118,37 @@ func TestVideoEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T)
 	if body.Data.AvailableModels[0].Key != "configured-video" {
 		t.Fatalf("available model = %+v", body.Data.AvailableModels[0])
 	}
-	if body.Data.ResolvedConfig.ModelKey != "configured-video" || body.Data.EstimatedCredits != 5000 {
+	if body.Data.ResolvedCreatorConfig.ModelKey != "configured-video" || body.Data.EstimatedCredits != 5000 {
 		t.Fatalf("estimate = %+v", body.Data)
 	}
 	if body.Data.Balance != 120_000 || body.Data.MinBalance != 0 || !body.Data.MeetsMinBalance {
 		t.Fatalf("balance gate = %+v", body.Data)
 	}
+
+	legacyReq := httptest.NewRequest("POST", "/videocreator/estimate", strings.NewReader(`{"project_id":"`+projectID+`","video_config":{"duration":9}}`))
+	legacyReq.Header.Set("Content-Type", "application/json")
+	legacyResp, err := app.Test(legacyReq)
+	if err != nil {
+		t.Fatalf("legacy request failed: %v", err)
+	}
+	if legacyResp.StatusCode != fiber.StatusBadRequest {
+		raw, _ := io.ReadAll(legacyResp.Body)
+		t.Fatalf("legacy status = %d, want 400 body=%s", legacyResp.StatusCode, raw)
+	}
+
+	editorReq := httptest.NewRequest("POST", "/videocreator/estimate", strings.NewReader(`{"project_id":"`+projectID+`","video_editor_config":{"duration":9}}`))
+	editorReq.Header.Set("Content-Type", "application/json")
+	editorResp, err := app.Test(editorReq)
+	if err != nil {
+		t.Fatalf("editor request failed: %v", err)
+	}
+	if editorResp.StatusCode != fiber.StatusBadRequest {
+		raw, _ := io.ReadAll(editorResp.Body)
+		t.Fatalf("editor status = %d, want 400 body=%s", editorResp.StatusCode, raw)
+	}
 }
 
-func TestVideoEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
+func TestVideoCreatorEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -195,12 +217,12 @@ func TestVideoEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
 	})
 
 	app := fiber.New()
-	app.Post("/video/estimate", func(c fiber.Ctx) error {
+	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return h.Estimate(c)
 	})
 
-	req := httptest.NewRequest("POST", "/video/estimate", strings.NewReader(`{"project_id":"`+projectID+`","prompt":"生成视频"}`))
+	req := httptest.NewRequest("POST", "/videocreator/estimate", strings.NewReader(`{"project_id":"`+projectID+`","prompt":"生成视频"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {
@@ -230,7 +252,7 @@ func TestVideoEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
 	}
 }
 
-func TestVideoEstimateAllowsEmptyPromptForConfigurationPreview(t *testing.T) {
+func TestVideoCreatorEstimateAllowsEmptyPromptForConfigurationPreview(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -287,12 +309,12 @@ func TestVideoEstimateAllowsEmptyPromptForConfigurationPreview(t *testing.T) {
 	}, 1000, &logger)
 
 	app := fiber.New()
-	app.Post("/video/estimate", func(c fiber.Ctx) error {
+	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return h.Estimate(c)
 	})
 
-	req := httptest.NewRequest("POST", "/video/estimate", strings.NewReader(`{"project_id":"`+projectID+`"}`))
+	req := httptest.NewRequest("POST", "/videocreator/estimate", strings.NewReader(`{"project_id":"`+projectID+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {
@@ -303,17 +325,17 @@ func TestVideoEstimateAllowsEmptyPromptForConfigurationPreview(t *testing.T) {
 	}
 }
 
-func TestVideoPlaybooksReturnsSeedanceBusinessScenarios(t *testing.T) {
+func TestVideoCreatorPlaybooksReturnsSeedanceBusinessScenarios(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	h := NewVideoHandler(nil, nil, nil, 1000, &logger)
 
 	app := fiber.New()
-	app.Get("/video/playbooks", func(c fiber.Ctx) error {
+	app.Get("/videocreator/playbooks", func(c fiber.Ctx) error {
 		c.Locals("user_id", "user-1")
 		return h.Playbooks(c)
 	})
 
-	resp, err := app.Test(httptest.NewRequest("GET", "/video/playbooks", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/videocreator/playbooks", nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -366,7 +388,7 @@ func TestVideoPlaybooksReturnsSeedanceBusinessScenarios(t *testing.T) {
 	}
 }
 
-func TestVideoEstimateReturnsProductionGuidance(t *testing.T) {
+func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -426,7 +448,7 @@ func TestVideoEstimateReturnsProductionGuidance(t *testing.T) {
 	}, 1000, &logger)
 
 	app := fiber.New()
-	app.Post("/video/estimate", func(c fiber.Ctx) error {
+	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return h.Estimate(c)
 	})
@@ -434,7 +456,7 @@ func TestVideoEstimateReturnsProductionGuidance(t *testing.T) {
 	body := `{
 		"project_id":"` + projectID + `",
 		"prompt":"生成一条直播带货口播视频",
-		"video_config":{
+		"video_creator_config":{
 			"scenario_key":"live_selling",
 			"production_mode":"guided",
 			"retake_budget":5,
@@ -443,7 +465,7 @@ func TestVideoEstimateReturnsProductionGuidance(t *testing.T) {
 			]
 		}
 	}`
-	req := httptest.NewRequest("POST", "/video/estimate", strings.NewReader(body))
+	req := httptest.NewRequest("POST", "/videocreator/estimate", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {
@@ -461,18 +483,18 @@ func TestVideoEstimateReturnsProductionGuidance(t *testing.T) {
 				Index    int   `json:"index"`
 				Duration int64 `json:"duration"`
 			} `json:"segment_plan"`
-			ResolvedConfig struct {
+			ResolvedCreatorConfig struct {
 				ScenarioKey    string `json:"scenario_key"`
 				ProductionMode string `json:"production_mode"`
 				RetakeBudget   int    `json:"retake_budget"`
-			} `json:"resolved_config"`
+			} `json:"resolved_creator_config"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if decoded.Data.ResolvedConfig.ScenarioKey != "live_selling" || decoded.Data.ResolvedConfig.ProductionMode != "guided" || decoded.Data.ResolvedConfig.RetakeBudget != 5 {
-		t.Fatalf("resolved production config = %+v", decoded.Data.ResolvedConfig)
+	if decoded.Data.ResolvedCreatorConfig.ScenarioKey != "live_selling" || decoded.Data.ResolvedCreatorConfig.ProductionMode != "guided" || decoded.Data.ResolvedCreatorConfig.RetakeBudget != 5 {
+		t.Fatalf("resolved production config = %+v", decoded.Data.ResolvedCreatorConfig)
 	}
 	if len(decoded.Data.SegmentPlan) != 2 || decoded.Data.SegmentPlan[0].Duration != 8 || decoded.Data.SegmentPlan[1].Duration != 8 {
 		t.Fatalf("segment plan = %+v, want two 8s segments", decoded.Data.SegmentPlan)
@@ -488,7 +510,7 @@ func TestVideoEstimateReturnsProductionGuidance(t *testing.T) {
 	}
 }
 
-func TestVideoModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
+func TestVideoCreatorModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	h := NewVideoHandler(nil, nil, service.VideoModelCatalog{
 		"configured-video": {
@@ -499,12 +521,12 @@ func TestVideoModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
 	}, 1000, &logger)
 
 	app := fiber.New()
-	app.Get("/video/models", func(c fiber.Ctx) error {
+	app.Get("/videocreator/models", func(c fiber.Ctx) error {
 		c.Locals("user_id", "user-1")
 		return h.Models(c)
 	})
 
-	resp, err := app.Test(httptest.NewRequest("GET", "/video/models", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/videocreator/models", nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -526,17 +548,17 @@ func TestVideoModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
 	}
 }
 
-func TestVideoModelsReturnsEmptyWhenCatalogUnconfigured(t *testing.T) {
+func TestVideoCreatorModelsReturnsEmptyWhenCatalogUnconfigured(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	h := NewVideoHandler(nil, nil, nil, 1000, &logger)
 
 	app := fiber.New()
-	app.Get("/video/models", func(c fiber.Ctx) error {
+	app.Get("/videocreator/models", func(c fiber.Ctx) error {
 		c.Locals("user_id", "user-1")
 		return h.Models(c)
 	})
 
-	resp, err := app.Test(httptest.NewRequest("GET", "/video/models", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/videocreator/models", nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}

@@ -323,7 +323,7 @@ export const handlers = [
     })
   }),
 
-  http.get('/api/v1/video/playbooks', async () => {
+  http.get('/api/v1/videocreator/playbooks', async () => {
     return HttpResponse.json({
       code: 0,
       msg: 'ok',

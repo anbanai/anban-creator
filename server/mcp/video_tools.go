@@ -51,7 +51,7 @@ func registerVideoTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_video_generation_inputs",
-		Description: "Normalize Studio video_input.references into a fail-closed video input contract before Seedance generation. Infers reference roles, validates public media, preserves measured video duration, registers video-input-contract.json, and returns the references that must be used by validate/build/create.",
+		Description: "Normalize Studio video_creator_input.references into a fail-closed video input contract before Seedance generation. Infers reference roles, validates public media, preserves measured video duration, registers video-input-contract.json, and returns the references that must be used by validate/build/create.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -88,7 +88,7 @@ func registerVideoTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "validate_video_generation_params",
-		Description: "Validate video generation parameters against the project video profile and return resolved parameters, suggested params, and estimated credits without calling Ark.",
+		Description: "Validate video generation parameters against the project videocreator profile and return resolved parameters, suggested params, and estimated credits without calling Ark.",
 		InputSchema: videoGenerationInputSchema(),
 	}, validateVideoGenerationParamsHandler)
 
@@ -258,7 +258,7 @@ type videoInputContract struct {
 	TargetDurationSeconds  int64                         `json:"target_duration_seconds,omitempty"`
 	TargetDurationSource   string                        `json:"target_duration_source,omitempty"`
 	TargetDurationReason   string                        `json:"target_duration_reason,omitempty"`
-	VideoInputContractFile string                        `json:"video_input_contract_file"`
+	VideoInputContractFile string                        `json:"video_creator_input_contract_file"`
 	VideoUnderstandingFile string                        `json:"video_understanding_file,omitempty"`
 	PreparationWarnings    []string                      `json:"preparation_warnings,omitempty"`
 }
@@ -313,15 +313,15 @@ func prepareVideoGenerationInputsHandler(ctx context.Context, req *mcp.CallToolR
 	}
 	svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
 	resp := map[string]any{
-		"video_input_contract":       contract,
-		"video_input_contract_file":  "video-input-contract.json",
-		"video_input_contract_id":    tf.ID,
-		"video_input_contract_asset": tf,
-		"normalized_references":      contract.References,
-		"required_reference_roles":   contract.RequiredReferenceRoles,
-		"inferred_mode":              contract.InferredMode,
-		"target_duration_seconds":    contract.TargetDurationSeconds,
-		"target_duration_source":     contract.TargetDurationSource,
+		"video_creator_input_contract":       contract,
+		"video_creator_input_contract_file":  "video-input-contract.json",
+		"video_creator_input_contract_id":    tf.ID,
+		"video_creator_input_contract_asset": tf,
+		"normalized_references":              contract.References,
+		"required_reference_roles":           contract.RequiredReferenceRoles,
+		"inferred_mode":                      contract.InferredMode,
+		"target_duration_seconds":            contract.TargetDurationSeconds,
+		"target_duration_source":             contract.TargetDurationSource,
 	}
 	return textResult(resp)
 }
@@ -344,13 +344,13 @@ func materializeOwnedVideoInputReferences(ctx context.Context, task *model.Task,
 			ContentType: ref.MimeType,
 		})
 		if err != nil {
-			return fmt.Errorf("materialize video_input.references %s: %w", contractReferenceLabel(*ref), err)
+			return fmt.Errorf("materialize video_creator_input.references %s: %w", contractReferenceLabel(*ref), err)
 		}
 		fileName := videoInputContractFileName(*ref, source.Filename)
 		mimeType := videoInputContractMimeType(*ref, source.ContentType)
 		tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, task.ID, getUserID(ctx), filepath.ToSlash(filepath.Join("video-inputs", fileName)), bytes.NewReader(source.Bytes), mimeType, int64(len(source.Bytes)))
 		if err != nil {
-			return fmt.Errorf("register video_input.references %s as task file: %w", contractReferenceLabel(*ref), err)
+			return fmt.Errorf("register video_creator_input.references %s as task file: %w", contractReferenceLabel(*ref), err)
 		}
 		svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
 		ref.TaskFileID = tf.ID
@@ -566,11 +566,11 @@ func normalizeVideoInputContractReference(ctx context.Context, task *model.Task,
 	required := isRequiredVideoInputReference(refType, urlValue, asset.Text)
 	if required && refType != service.VideoReferenceText {
 		if err := service.ValidatePublicHTTPSURLForVideoReference(urlValue); err != nil {
-			return videoInputContractReference{}, fmt.Errorf("video_input.references %s is not usable: %w", videoInputReferenceLabel(asset), err)
+			return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is not usable: %w", videoInputReferenceLabel(asset), err)
 		}
 	}
 	if refType == service.VideoReferenceVideo && duration <= 0 {
-		return videoInputContractReference{}, fmt.Errorf("video_input.references %s is a video reference but has no measured input_duration_seconds; upload/register it before generation", videoInputReferenceLabel(asset))
+		return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is a video reference but has no measured input_duration_seconds; upload/register it before generation", videoInputReferenceLabel(asset))
 	}
 	return videoInputContractReference{
 		Type:                 refType,
@@ -1369,7 +1369,7 @@ func validateVideoDeliveryHandler(ctx context.Context, req *mcp.CallToolRequest)
 	}
 	finalID, _ := ids["final_video"].(string)
 	if strings.TrimSpace(finalID) == "" {
-		return textResult(map[string]any{"valid": false, "reason": "video missing final_video task file", "video_generation_id": gen.ID})
+		return textResult(map[string]any{"valid": false, "reason": "videocreator missing final_video task file", "video_generation_id": gen.ID})
 	}
 	if strings.TrimSpace(taskID) == "" {
 		taskID = gen.TaskID
@@ -1435,10 +1435,10 @@ func applyVideoInputContractToRequest(ctx context.Context, projectID string, tas
 		return nil, err
 	}
 	if !loaded {
-		return nil, fmt.Errorf("video_input.references require prepare_video_generation_inputs before generation; missing video-input-contract.json")
+		return nil, fmt.Errorf("video_creator_input.references require prepare_video_generation_inputs before generation; missing video-input-contract.json")
 	}
 	if contract == nil || contract.RequiredReferenceCount == 0 {
-		return nil, fmt.Errorf("video-input-contract.json has no required video_input.references")
+		return nil, fmt.Errorf("video-input-contract.json has no required video_creator_input.references")
 	}
 	for _, required := range contract.References {
 		if !required.Required {
@@ -1446,7 +1446,7 @@ func applyVideoInputContractToRequest(ctx context.Context, projectID string, tas
 		}
 		index := findVideoReferenceInRequest(req.ReferenceSet, required)
 		if index < 0 {
-			return nil, fmt.Errorf("video_input.references required reference is missing from final generation plan: %s; generated visual anchors may supplement user media but cannot replace it", contractReferenceLabel(required))
+			return nil, fmt.Errorf("video_creator_input.references required reference is missing from final generation plan: %s; generated visual anchors may supplement user media but cannot replace it", contractReferenceLabel(required))
 		}
 		mergeVideoContractReferenceIntoRequest(&req.ReferenceSet[index], required)
 	}
@@ -1456,12 +1456,12 @@ func applyVideoInputContractToRequest(ctx context.Context, projectID string, tas
 			if ref.Type == service.VideoReferenceVideo {
 				hasVideo = true
 				if ref.InputDurationSeconds <= 0 {
-					return nil, fmt.Errorf("video_input.references video reference %s is not measured; call prepare_video_generation_inputs/register_video_reference before generation", strings.TrimSpace(ref.URL))
+					return nil, fmt.Errorf("video_creator_input.references video reference %s is not measured; call prepare_video_generation_inputs/register_video_reference before generation", strings.TrimSpace(ref.URL))
 				}
 			}
 		}
 		if !hasVideo {
-			return nil, fmt.Errorf("video_input.references contains a required video reference, but final references[] contains no video_url")
+			return nil, fmt.Errorf("video_creator_input.references contains a required video reference, but final references[] contains no video_url")
 		}
 	}
 	return contract, nil
@@ -1469,7 +1469,7 @@ func applyVideoInputContractToRequest(ctx context.Context, projectID string, tas
 
 func loadPreparedVideoInputContract(ctx context.Context, taskID string) (*videoInputContract, bool, error) {
 	if svcs == nil || svcs.TaskSvc == nil || svcs.TaskSvc.Repository() == nil || svcs.TaskSvc.Repository().TaskFiles() == nil {
-		return nil, false, fmt.Errorf("video_input.references require prepare_video_generation_inputs before generation, but task file repository is not available")
+		return nil, false, fmt.Errorf("video_creator_input.references require prepare_video_generation_inputs before generation, but task file repository is not available")
 	}
 	files, err := svcs.TaskSvc.Repository().TaskFiles().FindByTaskID(ctx, taskID)
 	if err != nil {
@@ -1510,12 +1510,12 @@ func validateVideoInputContractPlan(contract *videoInputContract, plan *service.
 			continue
 		}
 		if findVideoReferenceInRequest(plan.References, required) < 0 {
-			return fmt.Errorf("video_input.references required reference disappeared from resolved generation plan: %s", contractReferenceLabel(required))
+			return fmt.Errorf("video_creator_input.references required reference disappeared from resolved generation plan: %s", contractReferenceLabel(required))
 		}
 	}
 	if contract.RequiredVideoReference {
 		if plan.PricingBreakdown == nil || !plan.PricingBreakdown.InputVideo {
-			return fmt.Errorf("video_input.references includes a required video reference but resolved plan has input_video=false")
+			return fmt.Errorf("video_creator_input.references includes a required video reference but resolved plan has input_video=false")
 		}
 	}
 	return nil
@@ -2003,7 +2003,7 @@ func requireMeasuredVideoReferences(ctx context.Context, refs []service.VideoRef
 		if ref.InputDurationSeconds <= 0 {
 			return fmt.Errorf("video_url references must be registered with register_video_reference using task_file_id so the server can measure input video duration")
 		}
-		return fmt.Errorf("video_url references with saved input duration must match the current task video_config; use register_video_reference with task_file_id for new raw video references")
+		return fmt.Errorf("video_url references with saved input duration must match the current task video_creator_config; use register_video_reference with task_file_id for new raw video references")
 	}
 	return nil
 }

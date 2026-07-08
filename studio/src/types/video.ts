@@ -1,5 +1,4 @@
 export type VideoPurpose = 'planting' | 'ecommerce' | 'lead_gen' | 'promotion'
-export type VideoWorkflow = 'creator' | 'editor'
 export type VideoReferenceType = 'text' | 'image_url' | 'audio_url' | 'video_url'
 export type VideoCreativeType = 'personal_ip' | 'high_efficiency_joke' | 'product_demo' | 'brand_promo' | 'custom'
 export type VideoProductionMode = 'fast_lane' | 'guided' | 'sequence' | 'remake'
@@ -45,7 +44,6 @@ export interface VideoPlaybookSpec {
 }
 
 export interface VideoDefaults {
-  workflow?: VideoWorkflow
   scenario_key?: string
   production_mode?: VideoProductionMode
   purpose?: VideoPurpose
@@ -131,12 +129,12 @@ export interface VideoModelSpec {
 export interface VideoEstimateRequest {
   project_id: string
   prompt?: string
-  video_config?: VideoTaskConfig
+  video_creator_config?: VideoTaskConfig
 }
 
 export interface VideoEstimateResponse {
   available_models: VideoModelSpec[]
-  resolved_config: VideoTaskConfig
+  resolved_creator_config: VideoTaskConfig
   estimated_credits: number
   pricing_breakdown?: VideoPricingBreakdown
   balance: number

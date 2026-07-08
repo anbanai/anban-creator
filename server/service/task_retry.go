@@ -64,6 +64,17 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		ec := src.Ecommerce.Data()
 		params.Ecommerce = &ec
 	}
+	if attachments := src.InputAttachments.Data(); len(attachments) > 0 {
+		params.InputAttachments = attachments
+	}
+	if model.IsVideoCreatorPlatform(src.Type) {
+		input := src.VideoInput.Data()
+		params.VideoCreatorInput = &input
+	}
+	if model.IsVideoEditorPlatform(src.Type) {
+		input := src.VideoInput.Data()
+		params.VideoEditorInput = &input
+	}
 
 	tasks, err := s.CreateManual(ctx, params)
 	if err != nil {

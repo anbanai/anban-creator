@@ -489,7 +489,7 @@ func TestPlanService_UpdateVideoConfigStoresVideoInputOnly(t *testing.T) {
 		ProjectID: projectID,
 		CronExpr:  "0 9 * * *",
 		Prompt:    "old video prompt",
-		VideoInput: &model.VideoInput{
+		VideoCreatorInput: &model.VideoInput{
 			Brief: "old video prompt",
 		},
 	})
@@ -503,7 +503,7 @@ func TestPlanService_UpdateVideoConfigStoresVideoInputOnly(t *testing.T) {
 	updated, err := svc.Update(ctx, UpdatePlanParams{
 		ID:     created.ID,
 		Prompt: "updated video prompt",
-		VideoInput: &model.VideoInput{
+		VideoCreatorInput: &model.VideoInput{
 			Brief: "updated video prompt",
 			References: []model.VideoReferenceAsset{{
 				Type: "image_url",
@@ -550,12 +550,12 @@ func TestPlanService_UpdateVideoInputRejectsNonVideoPlans(t *testing.T) {
 
 	_, err = svc.Update(ctx, UpdatePlanParams{
 		ID: created.ID,
-		VideoInput: &model.VideoInput{
+		VideoCreatorInput: &model.VideoInput{
 			Brief: "should not attach to article plan",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "video_input can only be set on videocreator plans") {
-		t.Fatalf("Update error = %v, want video_input rejection for non-video plan", err)
+	if err == nil || !strings.Contains(err.Error(), "video_creator_input can only be set on videocreator plans") {
+		t.Fatalf("Update error = %v, want video_creator_input rejection for non-video plan", err)
 	}
 
 	found, err := repo.Plans().FindByID(ctx, created.ID)
@@ -563,7 +563,7 @@ func TestPlanService_UpdateVideoInputRejectsNonVideoPlans(t *testing.T) {
 		t.Fatalf("find plan: %v", err)
 	}
 	if vi := found.VideoInput.Data(); vi.Brief != "" {
-		t.Fatalf("article plan video_input = %#v, want empty", vi)
+		t.Fatalf("article plan video creator input = %#v, want empty", vi)
 	}
 }
 

@@ -1,29 +1,37 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   AlertTriangle,
   ArrowRight,
+  Clock3,
+  Cloud,
   FileText,
   ImageIcon,
+  Monitor,
   Paperclip,
   Send,
-  Sparkles,
+  Settings,
+  Plus,
   X,
+  type LucideIcon,
 } from 'lucide-react'
 
+import { PlatformAvatar } from '@/components/PlatformAvatar'
 import QueryErrorState from '@/components/QueryErrorState'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/common/button'
 import { api } from '@/lib/api'
 import type { AIEntryAttachment, AIEntryAttachmentType } from '@/lib/api/ai-entry'
-import { hasUsableModelConfig } from '@/lib/command-center'
+import { createTaskHref, hasUsableModelConfig, projectsReturnHref } from '@/lib/command-center'
 import { uploadToOSS } from '@/lib/direct-upload'
 import { contentTypeLabel } from '@/lib/labels'
 import { queryKeys } from '@/lib/query-keys'
-import { buildDashboardBlocker } from '@/lib/studio-ux'
+import { buildDashboardBlocker, buildProjectReadinessSummary } from '@/lib/studio-ux'
 import { getLocalExecutorStatus, isDesktop } from '@/lib/tauri'
+import { cn } from '@/lib/utils'
+import { isVideoCreator } from '@/lib/video-platforms'
+import type { Project } from '@/types'
 
 const MEDIA_LIMIT = 50 * 1024 * 1024
 const DOCUMENT_LIMIT = 25 * 1024 * 1024
@@ -82,6 +90,12 @@ export default function DashboardPage() {
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
   const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
   const localExecutionReady = desktopMode && Boolean(localExecutorStatus?.available)
+  const dashboardTitle = selectedProject ? `今天用「${selectedProject.name}」创作什么？` : '先创建一个项目，再开始创作。'
+  const newTaskHref = selectedProject ? createTaskHref({ type: selectedProject.platform, projectId: selectedProject.id, intent: 'new' }) : createTaskHref()
+  const scheduleHref = selectedProject ? planCreateHref(selectedProject) : '/plans?create=true'
+  const canCreateSchedule = canCreatePlanForProject(selectedProject)
+  const ExecutionIcon = localExecutionReady ? Monitor : Cloud
+  const executionLabel = localExecutionReady ? '本地模式' : '云端模式'
 
   useEffect(() => {
     if (activeProjects.length === 0) {
@@ -208,23 +222,28 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-1 pb-8">
-      <section className="flex min-h-[58vh] flex-col justify-center gap-6 py-6 md:py-10">
-        <div className="mx-auto flex w-full max-w-4xl flex-col items-center text-center">
-          <div className="mb-4 flex size-11 items-center justify-center rounded-full border border-border bg-background shadow-sm">
-            <Sparkles className="size-5 text-primary" />
-          </div>
-          <h1 className="text-balance text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-            今天想让 Anban 帮你创作什么？
+    <div className="mx-auto flex w-full max-w-5xl flex-col px-1 pb-8">
+      <section className="mx-auto flex min-h-[calc(100dvh-9rem)] w-full max-w-4xl flex-col justify-center gap-5 py-8 md:py-12">
+        <div className="mx-auto flex w-full flex-col items-center text-center">
+          <h1 className="text-balance text-[1.7rem] font-semibold leading-tight tracking-normal text-foreground md:text-3xl">
+            {dashboardTitle}
           </h1>
         </div>
 
-        <div className="mx-auto w-full max-w-4xl rounded-xl border border-border bg-background shadow-sm">
+        {activeProjects.length > 0 && (
+          <ProjectPicker
+            projects={activeProjects}
+            selectedProject={selectedProject}
+            onSelect={setSelectedProjectId}
+          />
+        )}
+
+        <div className="mx-auto w-full overflow-hidden rounded-xl border border-border/80 bg-white shadow-[0_10px_35px_rgba(15,23,42,0.10)] dark:bg-card">
           <textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             placeholder="描述你想创作的内容、目标和素材要求..."
-            className="min-h-[180px] w-full resize-none rounded-t-xl bg-transparent px-5 py-5 text-base leading-7 text-foreground outline-none placeholder:text-muted-foreground md:min-h-[210px]"
+            className="min-h-[116px] w-full resize-none bg-transparent px-5 py-4 text-[15px] leading-7 text-foreground outline-none placeholder:text-muted-foreground md:min-h-[132px]"
           />
 
           {(attachments.length > 0 || uploading.length > 0) && (
@@ -248,11 +267,11 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <div className="flex flex-col gap-3 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent" htmlFor="ai-entry-attachments">
+          <div className="flex items-start justify-between gap-3 border-t border-border/80 bg-muted/20 px-3 py-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <label className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" htmlFor="ai-entry-attachments">
                 <Paperclip className="size-4" />
-                上传参考素材
+                <span className="sr-only">上传参考素材</span>
               </label>
               <input
                 id="ai-entry-attachments"
@@ -262,42 +281,69 @@ export default function DashboardPage() {
                 onChange={handleFileChange}
               />
 
-              <div className="relative">
-                <select
-                  className="h-9 min-w-[180px] appearance-none rounded-md border border-border bg-background py-0 pl-3 pr-8 text-sm font-medium text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50"
-                  value={selectedProject?.id ?? ''}
-                  onChange={(event) => setSelectedProjectId(event.target.value)}
-                  disabled={projectsLoading || activeProjects.length === 0}
-                  aria-label="选择项目"
-                >
-                  {activeProjects.length === 0 ? (
-                    <option value="">暂无活跃项目</option>
-                  ) : activeProjects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-                <ArrowRight className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 rotate-90 text-muted-foreground" />
-              </div>
-
               {selectedProject && (
-                <Badge variant="secondary" className="h-9 rounded-md px-3">
-                  {contentTypeLabel[selectedProject.platform]}
-                </Badge>
+                <>
+                  <ComposerMetaItem>
+                    <PlatformAvatar avatarUrl={selectedProject.avatar_url} name={selectedProject.name} platform={selectedProject.platform} size="sm" />
+                    <span className="truncate">项目：{selectedProject.name}</span>
+                  </ComposerMetaItem>
+                  <ComposerMetaItem>
+                    {contentTypeLabel[selectedProject.platform] || selectedProject.platform}
+                  </ComposerMetaItem>
+                </>
               )}
+              <ComposerMetaItem>
+                <ExecutionIcon className="size-3.5" />
+                {executionLabel}
+              </ComposerMetaItem>
             </div>
 
             <Button
               type="button"
+              aria-label="发送创建任务"
               onClick={() => { void handleSubmit() }}
               disabled={!canSubmit}
               loading={submitMutation.isPending}
+              className="size-9 rounded-full bg-foreground p-0 text-background hover:bg-foreground/90 disabled:bg-muted disabled:text-muted-foreground"
             >
               <Send className="size-4" />
-              发送创建任务
+              <span className="sr-only">发送创建任务</span>
             </Button>
           </div>
+        </div>
+
+        <div className="mx-auto grid w-full gap-3 md:grid-cols-3">
+          {selectedProject ? (
+            <>
+              <DashboardActionCard
+                to={newTaskHref}
+                icon={Plus}
+                title="新建创作任务"
+                description={`使用项目：${selectedProject.name}`}
+              />
+              {canCreateSchedule && (
+                <DashboardActionCard
+                  to={scheduleHref}
+                  icon={Clock3}
+                  title="安排自动计划"
+                  description="设置周期内容生产"
+                />
+              )}
+              <DashboardActionCard
+                to="/projects"
+                icon={Settings}
+                title="管理项目配置"
+                description="调整定位、风格和发布"
+              />
+            </>
+          ) : (
+            <DashboardActionCard
+              to={projectsReturnHref({ type: 'seednote', intent: 'new' })}
+              icon={Plus}
+              title="创建第一个项目"
+              description="先建立创作上下文"
+            />
+          )}
         </div>
 
         {dashboardBlocker && !entryError && (
@@ -329,6 +375,100 @@ export default function DashboardPage() {
       ) : null}
     </div>
   )
+}
+
+function ProjectPicker({
+  projects,
+  selectedProject,
+  onSelect,
+}: {
+  projects: Project[]
+  selectedProject?: Project
+  onSelect: (id: string) => void
+}) {
+  return (
+    <div role="region" aria-label="首页项目选择" className="mx-auto flex w-full flex-wrap justify-center gap-2">
+      {projects.map((project) => {
+        const selected = project.id === selectedProject?.id
+        const readiness = buildProjectReadinessSummary(project)
+        return (
+          <button
+            key={project.id}
+            type="button"
+            aria-label={`选择项目 ${project.name}`}
+            aria-pressed={selected}
+            onClick={() => onSelect(project.id)}
+            className={cn(
+              'inline-flex min-h-12 max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+              selected
+                ? 'border-foreground/20 bg-white text-foreground shadow-sm dark:bg-card'
+                : 'border-border/80 bg-white/70 text-muted-foreground hover:bg-white hover:text-foreground dark:bg-card/70 dark:hover:bg-card',
+            )}
+          >
+            <PlatformAvatar avatarUrl={project.avatar_url} name={project.name} platform={project.platform} size="sm" />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{project.name}</span>
+              <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                <span>{contentTypeLabel[project.platform] || project.platform}</span>
+                <span aria-hidden="true">·</span>
+                <span>{readiness.headline}</span>
+              </span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function ComposerMetaItem({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground">
+      {children}
+    </span>
+  )
+}
+
+function DashboardActionCard({
+  to,
+  icon: Icon,
+  title,
+  description,
+}: {
+  to: string
+  icon: LucideIcon
+  title: string
+  description: string
+}) {
+  return (
+    <Link
+      to={to}
+      aria-label={title}
+      className="group flex min-h-[86px] items-center gap-3 rounded-lg border border-border/80 bg-white px-4 py-3 text-left shadow-sm transition-colors hover:border-foreground/20 hover:bg-white dark:bg-card dark:hover:bg-card"
+    >
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-md text-foreground">
+        <Icon className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground">{title}</span>
+        <span className="mt-1 block truncate text-sm text-muted-foreground">{description}</span>
+      </span>
+      <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+    </Link>
+  )
+}
+
+function planCreateHref(project: Project) {
+  const params = new URLSearchParams()
+  params.set('create', 'true')
+  params.set('type', project.platform)
+  params.set('project_id', project.id)
+  params.set('intent', 'schedule')
+  return `/plans?${params.toString()}`
+}
+
+function canCreatePlanForProject(project?: Project) {
+  return Boolean(project && (project.platform === 'article' || project.platform === 'seednote' || isVideoCreator(project.platform)))
 }
 
 function AttachmentChip({ attachment, onRemove }: { attachment: AIEntryAttachment; onRemove: () => void }) {

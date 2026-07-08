@@ -90,7 +90,8 @@ export const createTaskSchema = z.object({
   target_platform: z.string().optional(),
   selling_points: z.string().max(2000, "卖点不能超过 2000 个字符").optional(),
   language: z.string().optional(),
-  video_input: videoInputSchema,
+  video_creator_input: videoInputSchema,
+  video_editor_input: videoInputSchema,
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -124,13 +125,13 @@ export const createTaskSchema = z.object({
   }
 
   if (data.type === "videoeditor") {
-    const refs = data.video_input?.references ?? []
+    const refs = data.video_editor_input?.references ?? []
     const hasVideoSource = refs.some((ref) => ref.type === "video_url" && Boolean(ref.url || ref.task_file_id))
     if (!hasVideoSource) {
       ctx.addIssue({
         code: "custom",
         message: "请至少上传一个源视频素材",
-        path: ["video_input", "references"],
+        path: ["video_editor_input", "references"],
       })
     }
   }
@@ -177,7 +178,7 @@ export const planSchema = z.object({
   // article tasks inherit them; non-article plans ignore them server-side.
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
-  video_input: videoInputSchema,
+  video_creator_input: videoInputSchema,
 }).superRefine((data, ctx) => {
   if (data.goal_mode) {
     const goal = data.goal?.trim() || ""

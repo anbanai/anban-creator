@@ -170,7 +170,7 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 
 func ResolveVideoGenerationPlanWithBilling(req VideoGenerationRequest, defaults model.VideoDefaults, policy model.VideoModelPolicy, catalog VideoModelCatalog, billing VideoBillingOptions) (VideoGenerationPlan, error) {
 	if defaults == (model.VideoDefaults{}) || policy.DefaultModel == "" || len(policy.AllowedModels) == 0 {
-		return VideoGenerationPlan{}, fmt.Errorf("project video profile is not configured")
+		return VideoGenerationPlan{}, fmt.Errorf("project videocreator profile is not configured")
 	}
 	if catalog == nil {
 		catalog = VideoModelCatalog{}

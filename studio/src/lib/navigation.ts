@@ -23,7 +23,7 @@ export interface NavItem {
 }
 
 export const todayItems: NavItem[] = [
-  { to: '/', label: '今日', icon: LayoutDashboard, end: true },
+  { to: '/', label: 'Anban 智能体', icon: LayoutDashboard, end: true },
 ]
 
 export const creationItems: NavItem[] = [

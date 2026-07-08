@@ -285,6 +285,41 @@ func TestAIEntryServiceSubmitStoresVideoInputReferences(t *testing.T) {
 	}
 }
 
+func TestAIEntryServiceSubmitVideoEditorRequiresVideoAttachment(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+	llm := &fakeAIEntryLLM{responses: []string{
+		`{"prompt":"加字幕并剪成 30 秒短视频"}`,
+	}}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID:    userID,
+		ProjectID: projectID,
+		Channel:   "studio",
+		Text:      "把素材剪成 30 秒短视频",
+		Attachments: []model.EntryAttachment{{
+			Type:        "image",
+			URL:         "https://cdn.example.com/frame.png",
+			FileName:    "frame.png",
+			ContentType: "image/png",
+			Size:        1024,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusNeedsConfiguration || result.Task != nil {
+		t.Fatalf("result = %#v, want needs configuration without task", result)
+	}
+	if !strings.Contains(result.Message, "视频素材") {
+		t.Fatalf("message = %q, want source video hint", result.Message)
+	}
+}
+
 func TestAIEntryServiceSubmitDropsInvalidVideoHardConstraints(t *testing.T) {
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
