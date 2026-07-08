@@ -23,10 +23,14 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		"material-analysis.md",
 		"content.md",
 		"quality-review.md",
-		"guizang-social-card",
 	} {
 		if !strings.Contains(claudeAgent, want) {
 			t.Fatalf("claudecode moments agent missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card"} {
+		if strings.Contains(claudeAgent, forbidden) {
+			t.Fatalf("claudecode moments agent still contains removed visual handoff %q", forbidden)
 		}
 	}
 
@@ -35,7 +39,6 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		`name = "moments"`,
 		"skills/moments/SKILL.md",
 		"skills/humanizer/SKILL.md",
-		"skills/guizang-social-card/SKILL.md",
 		`list_projects(platform="moments")`,
 		`get_project_profile(project_id="$PROJECT_ID", scope="moments", task_id="$TASK_ID")`,
 		`prepare_workspace(content_type="moments", task_id=$TASK_ID)`,
@@ -43,6 +46,11 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 	} {
 		if !strings.Contains(codexAgent, want) {
 			t.Fatalf("codex moments agent missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card"} {
+		if strings.Contains(codexAgent, forbidden) {
+			t.Fatalf("codex moments agent still contains removed visual handoff %q", forbidden)
 		}
 	}
 
@@ -120,12 +128,16 @@ func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 				"material-analysis.md",
 				"content.md",
 				"quality-review.md",
-				"guizang-social-card",
 				"不默认使用“彩卉”人设",
 				"不伪造客户案例、成交数据、用户反馈",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing moments contract term %q", skillPath, want)
+				}
+			}
+			for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card"} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("%s still contains removed visual handoff %q", skillPath, forbidden)
 				}
 			}
 

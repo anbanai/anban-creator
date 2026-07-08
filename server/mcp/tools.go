@@ -418,7 +418,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
 			"default_ratio":       firstNonEmpty(ch.ImageRatio, "3:4"),
-			"optional_skill":      "guizang-social-card",
 		}
 		info["moments"] = map[string]any{
 			"required_artifacts": []string{
@@ -430,7 +429,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 				"六类素材：发售、人设、产品、案例、生活、认知",
 				"四层提炼：观点层、框架层、风格层、人设层",
 			},
-			"image_skill":       "guizang-social-card",
 			"auto_publish":      false,
 			"scheduled_plans":   false,
 			"falsification_ban": "不伪造客户案例、成交数据、用户反馈",

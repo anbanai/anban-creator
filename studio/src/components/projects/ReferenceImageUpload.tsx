@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, ZoomIn, Upload } from 'lucide-react'
+import { Loader2, X, ZoomIn, Upload } from 'lucide-react'
 import http from '@/lib/http-client'
 import { uploadToOSS, type DirectUploadPurpose } from '@/lib/direct-upload'
 import { isInternalStorageUrl, normalizeStorageUrl } from '@/lib/storage-url'
@@ -123,10 +123,12 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
   return (
     <>
       {previewUrl ? (
-        <div className="relative group">
-          <div
-            className="relative cursor-pointer"
+        <div className={compact ? 'flex items-center gap-1.5' : 'relative group'}>
+          <button
+            type="button"
+            className="group/preview relative block rounded-lg p-0"
             onClick={() => setEnlargeOpen(true)}
+            aria-label="查看参考图"
           >
             <img
               src={previewUrl}
@@ -134,16 +136,20 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
               className={`${thumbSize} rounded-lg border object-cover`}
               onError={() => setPreviewError(true)}
             />
-            <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/0 transition-colors group-hover:bg-black/30">
-              <ZoomIn className={`${compact ? 'h-3 w-3' : 'h-5 w-5'} text-white opacity-0 transition-opacity group-hover:opacity-100`} />
+            <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/0 transition-colors group-hover/preview:bg-black/30">
+              <ZoomIn className={`${compact ? 'h-3 w-3' : 'h-5 w-5'} text-white opacity-0 transition-opacity group-hover/preview:opacity-100`} />
             </div>
-          </div>
+          </button>
           <button
             type="button"
+            aria-label="移除参考图"
             onClick={() => onChange?.('')}
-            className={`absolute -right-2 -top-2 flex ${compact ? 'h-4 w-4' : 'h-5 w-5'} items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-sm transition-colors hover:bg-destructive/90`}
+            className={compact
+              ? 'flex h-7 w-7 items-center justify-center rounded-md border border-input text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground'
+              : 'absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-background text-muted-foreground shadow-sm ring-1 ring-border transition-colors hover:text-foreground'
+            }
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            <X className={compact ? 'h-3.5 w-3.5' : 'h-3 w-3'} />
           </button>
         </div>
       ) : previewLoading ? (

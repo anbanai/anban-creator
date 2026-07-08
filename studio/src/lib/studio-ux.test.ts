@@ -112,7 +112,7 @@ describe('studio business UX helpers', () => {
     })
   })
 
-  it('calculates creation cost with local execution and goal multiplier', () => {
+  it('calculates creation cost with goal multiplier and ignores legacy runtime reserve pricing', () => {
     expect(
       taskCreationCostPreview({
         pricing: {
@@ -125,7 +125,6 @@ describe('studio business UX helpers', () => {
         type: 'article',
         quantity: 2,
         goalMode: true,
-        runLocally: false,
         balance: 30000,
       }),
     ).toMatchObject({
@@ -133,9 +132,7 @@ describe('studio business UX helpers', () => {
       billableQuantity: 2,
       multiplier: 3,
       totalCost: 24000,
-      runtimeReserve: 3000,
-      creationTotal: 27000,
-      remaining: 3000,
+      remaining: 6000,
       insufficient: false,
     })
   })

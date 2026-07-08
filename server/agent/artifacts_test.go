@@ -119,8 +119,8 @@ func TestValidateMomentsArtifactsFromWorkDir(t *testing.T) {
 			valid: true,
 		},
 		{
-			name:  "optional social card does not change required package",
-			files: []string{"output/material-analysis.md", "output/content.md", "output/quality-review.md", "output/social-card.png"},
+			name:  "optional extra file does not change required package",
+			files: []string{"output/material-analysis.md", "output/content.md", "output/quality-review.md", "output/extra.png"},
 			valid: true,
 		},
 	}

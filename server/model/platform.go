@@ -81,7 +81,7 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "avatar_url", Label: "头像", Placeholder: "手动填写或上传", Type: "url", Group: "basic"},
 			{Key: "instructions", Label: "项目定位", Placeholder: "例如 面向高信任私域成交的生活化朋友圈", Type: "textarea", Group: "basic"},
 			{Key: "keywords", Label: "关键词", Placeholder: "例如 私域, 成交, 咨询, 生活方式", Type: "textarea", Group: "advanced"},
-			{Key: "visual_style", Label: "视觉风格", Placeholder: "例如 归藏社交卡、真实手机随拍、Swiss editorial", Type: "textarea", Group: "advanced"},
+			{Key: "visual_style", Label: "视觉风格", Placeholder: "例如 真实手机随拍、自然光、生活化构图", Type: "textarea", Group: "advanced"},
 			{Key: "author", Label: "人设称呼", Placeholder: "例如 主理人、顾问昵称", Type: "text", Group: "advanced"},
 			{Key: "reference_image_url", Label: "视觉参考图", Placeholder: "粘贴图片 URL（支持 JPG, PNG）", Type: "url", Group: "advanced"},
 			{Key: "image_ratio", Label: "图片比例", Placeholder: "3:4（朋友圈默认）", Type: "select", Group: "advanced"},

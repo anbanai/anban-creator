@@ -150,7 +150,7 @@ function SeednoteAnalyticsContent({ analytics }: { analytics: SeednoteAnalytics 
           </div>
         </div>
         {tracking.note_url && (
-          <Button size="sm" variant="outline" render={<a href={tracking.note_url} target="_blank" rel="noreferrer" />}>
+          <Button size="sm" variant="outline" nativeButton={false} render={<a href={tracking.note_url} target="_blank" rel="noreferrer" />}>
             <ExternalLink className="h-4 w-4" />
             打开笔记
           </Button>

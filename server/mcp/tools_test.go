@@ -276,7 +276,7 @@ func TestBuildAccountInfo_MomentsProfileIncludesDeliveryContract(t *testing.T) {
 		Status:            model.ProjectStatusActive,
 		Instructions:      "高信任成交内容",
 		Keywords:          "私域,成交,生活方式",
-		VisualStyle:       "归藏社交卡，Swiss editorial",
+		VisualStyle:       "真实手机随拍，自然光",
 		ReferenceImageURL: "/api/v1/files/ref-card.png",
 		ImageRatio:        "3:4",
 	}
@@ -314,8 +314,15 @@ func TestBuildAccountInfo_MomentsProfileIncludesDeliveryContract(t *testing.T) {
 	if strings.Join(artifacts, ",") != "material-analysis.md,content.md,quality-review.md" {
 		t.Fatalf("required artifacts = %#v", artifacts)
 	}
-	if moments["image_skill"] != "guizang-social-card" {
-		t.Fatalf("image_skill = %v, want guizang-social-card", moments["image_skill"])
+	if _, ok := moments["image_skill"]; ok {
+		t.Fatalf("image_skill should not be advertised for moments profile: %v", moments["image_skill"])
+	}
+	imgCfg := info["image_config"].(map[string]any)
+	if got := imgCfg["default_ratio"]; got != "3:4" {
+		t.Fatalf("default_ratio = %v, want 3:4", got)
+	}
+	if _, ok := imgCfg["optional_skill"]; ok {
+		t.Fatalf("optional_skill should not be advertised for moments image_config: %v", imgCfg["optional_skill"])
 	}
 }
 

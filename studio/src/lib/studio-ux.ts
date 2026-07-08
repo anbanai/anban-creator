@@ -2,7 +2,7 @@ import type { CreditPricing } from '@/types/credits'
 import type { Project, ProjectStats, Task, TaskType } from '@/types'
 import { projectsReturnHref } from '@/lib/command-center'
 import { contentTypeLabel, platformDefaultRatio } from '@/lib/labels'
-import { agentRuntimeReserveFor, taskCostFor } from '@/lib/pricing'
+import { taskCostFor } from '@/lib/pricing'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
 
 export interface DashboardBlocker {
@@ -81,8 +81,6 @@ export interface CreationCostPreview {
   billableQuantity: number
   multiplier: number
   totalCost: number
-  runtimeReserve: number
-  creationTotal: number
   remaining: number
   insufficient: boolean
 }
@@ -92,14 +90,12 @@ export function taskCreationCostPreview({
   type,
   quantity,
   goalMode,
-  runLocally,
   balance,
 }: {
   pricing?: CreditPricing
   type: string
   quantity: number
   goalMode: boolean
-  runLocally: boolean
   balance: number
 }): CreationCostPreview {
   const isEcommerce = type === 'ecommerce'
@@ -107,16 +103,12 @@ export function taskCreationCostPreview({
   const billableQuantity = isEcommerce ? 1 : quantity
   const multiplier = isEcommerce ? 1 : goalMode ? 3 : 1
   const totalCost = baseCost * billableQuantity * multiplier
-  const runtimeReserve = runLocally ? 0 : agentRuntimeReserveFor(pricing, type) * billableQuantity * multiplier
-  const creationTotal = totalCost + runtimeReserve
-  const remaining = balance - creationTotal
+  const remaining = balance - totalCost
   return {
     baseCost,
     billableQuantity,
     multiplier,
     totalCost,
-    runtimeReserve,
-    creationTotal,
     remaining,
     insufficient: remaining < 0,
   }

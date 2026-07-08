@@ -472,7 +472,6 @@ export default function TasksPage() {
     type: watchedType,
     quantity,
     goalMode,
-    runLocally,
     balance: creditsBalance?.balance ?? 0,
   })
 
@@ -506,7 +505,7 @@ export default function TasksPage() {
             <h2 className="text-base font-semibold text-foreground">恢复工作台</h2>
             <p className="mt-1 text-sm text-muted-foreground">把运行、失败、待发布和最近完成的任务先排成队列。</p>
           </div>
-          <Button variant="outline" size="sm" render={<Link to="/settings" />}>
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/settings" />}>
             <Settings className="h-4 w-4" />
             检查设置
           </Button>
@@ -1266,14 +1265,9 @@ export default function TasksPage() {
                     {costPreview.multiplier > 1 && ` × ${costPreview.multiplier}`} = <span className="font-medium text-foreground">{costPreview.totalCost}</span> 积分
                     {costPreview.multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
                   </p>
-                  {runLocally ? (
-                    <p className="text-xs text-muted-foreground">本机运行使用你的 Claude Code 环境，不收平台 Claude Code 运行预留。</p>
-                  ) : (
-                    <p className="text-muted-foreground">
-                      Claude Code 运行预留：<span className="font-medium text-foreground">{costPreview.runtimeReserve.toLocaleString()}</span> 积分
-                      <span className="ml-1 text-xs text-muted-foreground">完成后按实际 token 多退少补</span>
-                    </p>
-                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {runLocally ? '本机运行使用你的 Claude Code 环境。' : '云端 Claude Code 运行成本由平台承担，不额外预留或补扣。'}
+                  </p>
                   {watchedType === 'ecommerce' ? (
                     <p className="text-xs text-muted-foreground">所选交付模块会影响后续图片生成和理解操作用量，最终以交易明细汇总为准。</p>
                   ) : (
