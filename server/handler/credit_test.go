@@ -136,7 +136,7 @@ func TestCreditPricingReturnsEnabledRechargeTiers(t *testing.T) {
 	}
 }
 
-func TestCreditPricingReturnsAgentRuntimeReserve(t *testing.T) {
+func TestCreditPricingDoesNotExposeAgentRuntimeReserve(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -173,7 +173,7 @@ func TestCreditPricingReturnsAgentRuntimeReserve(t *testing.T) {
 	if err := json.Unmarshal(raw, &data); err != nil {
 		t.Fatalf("decode data: %v", err)
 	}
-	if data.AgentRuntimeReserve["article"] != 4000 || data.AgentRuntimeReserve["video"] != 2000 {
-		t.Fatalf("agent_runtime_reserve = %#v, want article=4000 video=2000", data.AgentRuntimeReserve)
+	if len(data.AgentRuntimeReserve) != 0 {
+		t.Fatalf("agent_runtime_reserve = %#v, want empty because Claude Code runtime is platform-paid", data.AgentRuntimeReserve)
 	}
 }

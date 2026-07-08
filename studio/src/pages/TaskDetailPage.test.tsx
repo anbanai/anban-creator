@@ -34,6 +34,7 @@ vi.mock('@/lib/api', async () => {
         clone: vi.fn(),
         resume: vi.fn(),
         files: vi.fn().mockResolvedValue([]),
+        downloadZipBlob: vi.fn(),
         videoProduction: vi.fn(),
       },
       projects: {
@@ -82,6 +83,7 @@ describe('TaskDetailPage', () => {
     })
     vi.mocked(api.tasks.clone).mockResolvedValue(taskWith({ id: 'task-clone', status: 'pending' }))
     vi.mocked(api.tasks.resume).mockResolvedValue(taskWith({ id: 'task-1', status: 'pending' }))
+    vi.mocked(api.tasks.downloadZipBlob).mockResolvedValue(new Blob(['zip'], { type: 'application/zip' }))
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
   })
@@ -163,6 +165,36 @@ describe('TaskDetailPage', () => {
     expect(review.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByText('03-draft.md')).toBeInTheDocument()
+  })
+
+  it('keeps delivery controls available for legacy payment-required tasks', async () => {
+    mockTask(taskWith({
+      status: 'completed',
+      billing_status: 'payment_required',
+      billing_shortfall_credits: 3200,
+      result: { files: null, output: '' },
+    }))
+    vi.mocked(api.tasks.files).mockResolvedValue([
+      {
+        id: 'file-1',
+        task_id: 'task-1',
+        role: 'output',
+        file_name: 'article.html',
+        mime_type: 'text/html',
+        file_size: 1024,
+        url: '/api/v1/files/file-1',
+        created_at: '2026-07-06T03:00:00Z',
+      },
+    ])
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('生成文件 (1)')).toBeInTheDocument()
+    expect(screen.queryByText('交付已锁定')).not.toBeInTheDocument()
+    const zipButton = screen.getByRole('button', { name: /下载全部/ })
+    expect(zipButton).toBeEnabled()
+    expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /^下载$/ })).toBeEnabled()
   })
 
   it('lets completed tasks be cloned as a fresh task', async () => {

@@ -299,7 +299,6 @@ export default function CreditsPage() {
 
 function PricingGuide({ pricing }: { pricing: CreditPricing }) {
   const taskCosts = Object.entries(pricing.task_costs)
-  const runtimeReserve = Object.entries(pricing.agent_runtime_reserve ?? {})
   const modelOps = Object.entries(pricing.model_costs)
   const income = { ...FALLBACK_INCOME, ...pricing.income }
 
@@ -346,23 +345,6 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
             </p>
           </AccordionContent>
         </AccordionItem>
-
-        {runtimeReserve.length > 0 && (
-          <AccordionItem>
-            <AccordionTrigger>Claude Code 运行预留</AccordionTrigger>
-            <AccordionContent>
-              <PricingTable
-                rows={runtimeReserve.map(([type, cost]) => ({
-                  label: taskTypeLabelCN[type] ?? type,
-                  value: `${cost.toLocaleString()} 积分`,
-                }))}
-              />
-              <p className="mt-2 text-xs text-muted-foreground">
-                云端任务创建时预扣运行额度，执行完成后按 Claude Code 返回的实际 token/成本多退少补；本机运行不收平台 Claude Code 运行费。
-              </p>
-            </AccordionContent>
-          </AccordionItem>
-        )}
 
         {/* E-commerce module estimates */}
         {ecommerceRows.length > 0 && (

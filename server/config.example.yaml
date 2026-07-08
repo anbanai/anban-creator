@@ -266,12 +266,6 @@ credits:
     ecommerce: 3000
     video: 2000
     viral_analysis: 1200
-  agent_runtime_reserve:
-    article: 4000
-    seednote: 3600
-    ecommerce: 3000
-    video: 2000
-    viral_analysis: 1200
   admin_api_key: "${ANBAN_CREDITS_ADMIN_API_KEY}"
 
 image_presets:

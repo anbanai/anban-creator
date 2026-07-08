@@ -938,7 +938,7 @@ type CreditsConfig struct {
 	RegisterBonus       int                       `yaml:"register_bonus"`                                     // credits awarded on registration (default 1000)
 	InviteReward        int                       `yaml:"invite_reward"`                                      // credits awarded to inviter when invitee registers (default 1000)
 	TaskCosts           map[string]int            `yaml:"task_costs"`                                         // base service fees by task type, e.g. {"article": 4000, "seednote": 3600, "ecommerce": 3000, "video": 2000}
-	AgentRuntimeReserve map[string]int            `yaml:"agent_runtime_reserve" json:"agent_runtime_reserve"` // Claude Code runtime reserve by task type
+	AgentRuntimeReserve map[string]int            `yaml:"agent_runtime_reserve" json:"agent_runtime_reserve"` // legacy/ignored; Claude Code runtime is platform-paid
 	ModelCosts          map[string]map[string]int `yaml:"model_costs"`                                        // per-model costs, key format: "provider/model"
 	AdminAPIKey         string                    `yaml:"admin_api_key"`                                      // API key for admin credit grant endpoint
 
@@ -1251,15 +1251,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Credits.AgentRuntimeReserve == nil {
 		c.Credits.AgentRuntimeReserve = map[string]int{}
-		for taskType, cost := range defaultTaskCosts {
-			c.Credits.AgentRuntimeReserve[taskType] = cost
-		}
-	} else {
-		for taskType, cost := range defaultTaskCosts {
-			if _, ok := c.Credits.AgentRuntimeReserve[taskType]; !ok {
-				c.Credits.AgentRuntimeReserve[taskType] = cost
-			}
-		}
 	}
 	if c.Credits.GoalModeMultiplier <= 0 {
 		c.Credits.GoalModeMultiplier = 3

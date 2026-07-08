@@ -103,6 +103,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     }])
     vi.mocked(api.credits.pricing).mockResolvedValue({
       task_costs: {},
+      agent_runtime_reserve: { article: 4000 },
       model_costs: {},
       recharge_tiers: [
         { key: 'basic', label: '基础包', price_cny: 10, credits: 10000, bonus_credits: 0, enabled: true },
@@ -236,11 +237,16 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
   })
 
   it('uses backend-matching fallback pricing for article plans when pricing omits task costs', async () => {
+    vi.mocked(api.credits.balance).mockResolvedValueOnce({ balance: 5000 })
     window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
 
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     expect(await within(dialog).findByText(/每次执行基础任务费：4000 =/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/余额：5,000 →/)).toBeInTheDocument()
+    expect(within(dialog).getByText('1,000')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/运行预留/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/积分不足/)).not.toBeInTheDocument()
   })
 })

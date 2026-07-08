@@ -125,12 +125,6 @@ export default function TaskDetailPage() {
     enabled: !!id && task?.status === 'completed',
   })
 
-  const { data: videoProduction } = useQuery({
-    queryKey: ['task-video-production', id],
-    queryFn: () => api.tasks.videoProduction(id!),
-    enabled: !!id && task?.type === 'video',
-  })
-
   // Resolve project info for the task
   const { data: projectDetail } = useQuery({
     queryKey: ['project', task?.project_id],
@@ -174,8 +168,11 @@ export default function TaskDetailPage() {
   const operationConsumedCredits = creditSummary?.operation_consumed ?? 0
   const refundedCredits = creditSummary?.refunded ?? 0
   const netConsumedCredits = creditSummary?.net_consumed ?? task?.credits_charged ?? 0
-  const billingShortfallCredits = task?.billing_shortfall_credits ?? 0
-  const billingLocked = task?.billing_status === 'payment_required' || billingShortfallCredits > 0
+  const { data: videoProduction } = useQuery({
+    queryKey: ['task-video-production', id],
+    queryFn: () => api.tasks.videoProduction(id!),
+    enabled: !!id && task?.type === 'video',
+  })
   const showCreditDetails = Boolean(
     task && (
       typeof task.credits_charged === 'number' ||
@@ -707,7 +704,6 @@ export default function TaskDetailPage() {
               variant={task.published ? 'outline' : 'default'}
               size="sm"
               loading={togglePublished.isPending}
-              disabled={billingLocked}
               onClick={() => { void submit(async () => togglePublished.mutateAsync({ published: !task.published })).catch(() => {}) }}
             >
               <Eye className="h-4 w-4" />
@@ -750,22 +746,6 @@ export default function TaskDetailPage() {
           )}
         </div>
       </div>
-
-      {billingLocked && (
-        <Card className="border-red-500/40 bg-red-500/10">
-          <CardContent className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-medium text-red-200">交付已锁定，需补扣 Claude Code 运行费用</p>
-              <p className="mt-1 text-xs text-red-100/80">
-                待补积分 {billingShortfallCredits.toLocaleString()}。充值后系统会自动补扣并恢复下载、预览和发布。
-              </p>
-            </div>
-            <Button variant="outline" size="sm" render={<Link to="/credits" />}>
-              去充值
-            </Button>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Publish-approval gate (Batch 4A): the project requires human review
           before publishing, so a completed article draft is held here until the
@@ -1277,7 +1257,10 @@ export default function TaskDetailPage() {
           </div>
           <div className="p-4 space-y-4">
             {task.type === 'ecommerce' ? (
-              <EcommerceFilesGallery files={files} taskId={task.id} />
+              <EcommerceFilesGallery
+                files={files}
+                taskId={task.id}
+              />
             ) : (
               <>
                 {/* Image files in compact grid */}
@@ -1286,7 +1269,11 @@ export default function TaskDetailPage() {
                   if (imageFiles.length === 0) return null
                   return (
                     <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-                      <FilePreviewGallery files={imageFiles} taskId={task.id} inlineItemClassName="shrink-0 snap-start" />
+                      <FilePreviewGallery
+                        files={imageFiles}
+                        taskId={task.id}
+                        inlineItemClassName="shrink-0 snap-start"
+                                      />
                     </div>
                   )
                 })()}
@@ -1299,7 +1286,7 @@ export default function TaskDetailPage() {
                       <FilePreviewGallery
                         files={nonImageFiles}
                         taskId={task.id}
-                        renderPreviewDetails={renderVideoPreviewDetails}
+                                        renderPreviewDetails={renderVideoPreviewDetails}
                       />
                     </div>
                   )

@@ -432,8 +432,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 				taskIDs[i] = generateTaskID()
 			}
 
-			// Deduct total base service fees (plus runtime reserve for cloud tasks)
-			// in a single atomic transaction.
+			// Deduct total base service fees in a single atomic transaction.
+			// Claude Code runtime cost is platform-paid and is not reserved or
+			// settled against the user's balance.
 			var deductErr error
 			if p.ExecutionTarget == model.ExecutionTargetLocal {
 				if multiplier > 1 {

@@ -598,10 +598,6 @@ func (h *TaskHandler) PublishApprove(c fiber.Ctx) error {
 	if task.UserID != userID {
 		return Forbidden(c, "you do not have access to this task")
 	}
-	if !h.ensureTaskBillingUnlocked(c, task) {
-		return nil
-	}
-
 	if err := h.service.ApprovePublish(c.Context(), id); err != nil {
 		h.logger.Error().Err(err).Str("task_id", id).Msg("approve publish failed")
 		switch {
@@ -869,10 +865,6 @@ func (h *TaskHandler) MarkPublished(c fiber.Ctx) error {
 	if task.UserID != userID {
 		return Forbidden(c, "you do not have access to this task")
 	}
-	if !h.ensureTaskBillingUnlocked(c, task) {
-		return nil
-	}
-
 	if err := h.service.SetPublished(c.Context(), userID, id, body.Published); err != nil {
 		h.logger.Error().Err(err).Msg("mark published failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update published status")
@@ -907,7 +899,6 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Msg("get task files failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to get task files")
 	}
-
 	return Success(c, files)
 }
 
@@ -925,7 +916,6 @@ func (h *TaskHandler) GetVideoProduction(c fiber.Ctx) error {
 	if task.Type != model.PlatformVideo {
 		return Error(c, fiber.StatusBadRequest, "task is not a video task")
 	}
-
 	files, err := h.service.GetFiles(c.Context(), id)
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", id).Msg("get task files for video production failed")
@@ -1213,23 +1203,6 @@ func (h *TaskHandler) verifyTaskOwnership(c fiber.Ctx, taskID string) (*model.Ta
 	return task, nil
 }
 
-func (h *TaskHandler) ensureTaskBillingUnlocked(c fiber.Ctx, task *model.Task) bool {
-	if task == nil || (task.BillingStatus != model.TaskBillingStatusPaymentRequired && task.BillingShortfallCredits <= 0) {
-		return true
-	}
-	shortfall := task.BillingShortfallCredits
-	_ = c.Status(fiber.StatusPaymentRequired).JSON(Response{
-		Code: 40200,
-		Msg:  "payment_required",
-		Data: fiber.Map{
-			"task_id":                   task.ID,
-			"billing_status":            task.BillingStatus,
-			"billing_shortfall_credits": shortfall,
-		},
-	})
-	return false
-}
-
 // DownloadFile handles GET /api/v1/tasks/:id/files/:fileId/download.
 // It streams the file content as an attachment download.
 func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
@@ -1242,14 +1215,9 @@ func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
 		return err
 	}
 
-	task, err := h.verifyTaskOwnership(c, taskID)
-	if err != nil {
+	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
 		return nil // error response already written
 	}
-	if !h.ensureTaskBillingUnlocked(c, task) {
-		return nil
-	}
-
 	// Verify the file belongs to the task.
 	if err := h.service.VerifyFileBelongsToTask(c.Context(), taskID, fileID); err != nil {
 		return Error(c, fiber.StatusNotFound, "file not found")
@@ -1286,14 +1254,9 @@ func (h *TaskHandler) PreviewHTML(c fiber.Ctx) error {
 		return err
 	}
 
-	task, err := h.verifyTaskOwnership(c, taskID)
-	if err != nil {
+	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
 		return nil // error response already written
 	}
-	if !h.ensureTaskBillingUnlocked(c, task) {
-		return nil
-	}
-
 	// Find all files for the task and locate the HTML one.
 	files, err := h.service.GetFiles(c.Context(), taskID)
 	if err != nil {
@@ -1358,14 +1321,9 @@ func (h *TaskHandler) DownloadZip(c fiber.Ctx) error {
 		return err
 	}
 
-	task, err := h.verifyTaskOwnership(c, taskID)
-	if err != nil {
+	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
 		return nil // error response already written
 	}
-	if !h.ensureTaskBillingUnlocked(c, task) {
-		return nil
-	}
-
 	buf, zipName, err := h.service.DownloadZip(c.Context(), taskID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", taskID).Msg("download zip failed")
@@ -1408,9 +1366,6 @@ func (h *TaskHandler) DownloadTasksZip(c fiber.Ctx) error {
 		}
 		if task.UserID != userID {
 			return Forbidden(c, "you do not have access to this task")
-		}
-		if !h.ensureTaskBillingUnlocked(c, task) {
-			return nil
 		}
 	}
 
