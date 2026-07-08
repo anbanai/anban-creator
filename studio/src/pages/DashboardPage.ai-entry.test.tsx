@@ -137,6 +137,29 @@ describe('DashboardPage AI entry', () => {
     navigateMock.mockClear()
   })
 
+  it('sends first-time users to project creation from the AI entry', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([])
+
+    render(<DashboardPage />)
+
+    expect(await screen.findByText('先创建一个项目，再开始创作。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '创建项目' })).toHaveAttribute(
+      'href',
+      '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
+    )
+    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+  })
+
+  it('blocks creation when model configuration is not ready', async () => {
+    vi.mocked(api.modelConfig.get).mockResolvedValueOnce({})
+
+    render(<DashboardPage />)
+
+    expect(await screen.findByText('模型配置未就绪，先选择可用模型。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '去设置' })).toHaveAttribute('href', '/settings#model-key-settings')
+    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+  })
+
   it('renders a Codex-style AI entry and creates a task with uploaded attachments', async () => {
     render(<DashboardPage />)
 

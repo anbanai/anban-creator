@@ -18,10 +18,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/common/button'
 import { api } from '@/lib/api'
 import type { AIEntryAttachment, AIEntryAttachmentType } from '@/lib/api/ai-entry'
-import { projectsReturnHref } from '@/lib/command-center'
+import { hasUsableModelConfig } from '@/lib/command-center'
 import { uploadToOSS } from '@/lib/direct-upload'
 import { contentTypeLabel } from '@/lib/labels'
 import { queryKeys } from '@/lib/query-keys'
+import { buildDashboardBlocker } from '@/lib/studio-ux'
 import { getLocalExecutorStatus, isDesktop } from '@/lib/tauri'
 
 const MEDIA_LIMIT = 50 * 1024 * 1024
@@ -66,6 +67,18 @@ export default function DashboardPage() {
     staleTime: 30_000,
   })
 
+  const { data: apiKeysResponse } = useQuery({
+    queryKey: queryKeys.apiKeys.all,
+    queryFn: () => api.apiKeys.list(),
+    staleTime: 60_000,
+  })
+
+  const { data: modelConfig } = useQuery({
+    queryKey: queryKeys.modelConfig.all,
+    queryFn: () => api.modelConfig.get(),
+    staleTime: 60_000,
+  })
+
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
   const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
   const localExecutionReady = desktopMode && Boolean(localExecutorStatus?.available)
@@ -105,8 +118,14 @@ export default function DashboardPage() {
   })
 
   const hasError = projectsError
-  const canSubmit = Boolean(selectedProject) && !submitMutation.isPending && uploading.length === 0
-  const showProjectBlocker = !projectsLoading && activeProjects.length === 0 && !projectsError
+  const dashboardBlocker = buildDashboardBlocker({
+    projectsLoading,
+    projectsError,
+    activeProjectCount: activeProjects.length,
+    apiKeysReady: apiKeysResponse ? (apiKeysResponse.items || []).length > 0 : null,
+    modelConfigReady: modelConfig ? hasUsableModelConfig(modelConfig) : null,
+  })
+  const canSubmit = Boolean(selectedProject) && !dashboardBlocker?.blocking && !submitMutation.isPending && uploading.length === 0
 
   async function handleSubmit() {
     const text = prompt.trim()
@@ -281,11 +300,11 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {showProjectBlocker && !entryError && (
+        {dashboardBlocker && !entryError && (
           <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm">
-            <span className="min-w-0 text-muted-foreground">先创建一个项目，再开始创作。</span>
-            <Link className="shrink-0 font-medium text-primary hover:text-primary/80" to={projectsReturnHref({ type: 'seednote', intent: 'new' })}>
-              创建项目
+            <span className="min-w-0 text-muted-foreground">{dashboardBlocker.message}</span>
+            <Link className="shrink-0 font-medium text-primary hover:text-primary/80" to={dashboardBlocker.actionHref}>
+              {dashboardBlocker.actionLabel}
             </Link>
           </div>
         )}
