@@ -284,9 +284,12 @@ claude:
   sandbox: true
   plugin_dir: "/anbanai"
   max_turns:
-    article: 100
-    seednote: 100
-    video: 150
+    moments: 25
+    viral_analysis: 30
+    seednote: 50
+    article: 60
+    video: 80
+    ecommerce: 90
   task_log_dir: "./data/logs/tasks"
   env:
     ANTHROPIC_AUTH_TOKEN: "${CLAUDE_CODE_AUTH_TOKEN}"

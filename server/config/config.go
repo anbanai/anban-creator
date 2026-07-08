@@ -906,7 +906,7 @@ type ClaudeConfig struct {
 	PluginDir      string            `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
 	Sandbox        bool              `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
-	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 300, "seednote": 150}
+	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 50}
 	TaskLogDir     string            `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
 	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
@@ -1002,7 +1002,7 @@ type AsynqConfig struct {
 	// Redis-down fallback goroutine deadline. Must comfortably exceed the
 	// realistic pipeline wall-clock time so the agent reaches 100% delivery
 	// before the asynq ctx expires. Default 60m (the wechatarticle pipeline
-	// with 8 vision-verified images runs ~35-40m at max_turns.article=300).
+	// with vision-verified images can run ~35-40m when max_turns.article is high.
 	ContentGenerateTimeout time.Duration `yaml:"content_generate_timeout"` // default 60m
 
 	// PersistTimeout bounds the post-execution DB writes (result, workspace
@@ -1336,15 +1336,22 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Executor == "" {
 		c.Claude.Executor = "local"
 	}
+	defaultMaxTurns := map[string]int{
+		"moments":        25,
+		"viral_analysis": 30,
+		"seednote":       50,
+		"article":        60,
+		"video":          80,
+		"ecommerce":      90,
+	}
 	if c.Claude.MaxTurns == nil {
-		c.Claude.MaxTurns = map[string]int{
-			"article":   100,
-			"seednote":  60,
-			"moments":   60,
-			"ecommerce": 120, // 多产品图 → 产品档案 → 主图/详情/封面/分享/SKU 批量 + 视觉自检循环，给足余量
+		c.Claude.MaxTurns = defaultMaxTurns
+	} else {
+		for taskType, maxTurns := range defaultMaxTurns {
+			if _, ok := c.Claude.MaxTurns[taskType]; !ok {
+				c.Claude.MaxTurns[taskType] = maxTurns
+			}
 		}
-	} else if _, ok := c.Claude.MaxTurns["moments"]; !ok {
-		c.Claude.MaxTurns["moments"] = 60
 	}
 	if c.Claude.Docker.Image == "" {
 		c.Claude.Docker.Image = "anban-creator-agent:latest"
