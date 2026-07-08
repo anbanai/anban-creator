@@ -26,7 +26,7 @@ describe('TasksPage recovery workspace contract', () => {
     expect(source).toContain('可删除')
   })
 
-  it('uses a compact stepped sheet for task creation', () => {
+  it('uses a project-aware compact sheet for task creation', () => {
     const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
 
     expect(source).toContain('SheetContent')
@@ -36,12 +36,16 @@ describe('TasksPage recovery workspace contract', () => {
     expect(source).toContain('目标/提示词')
     expect(source).toContain('图片/高级')
     expect(source).toContain('基础任务费预估')
+    expect(source).toContain('getProjectCreationDefaults')
+    expect(source).toContain('taskCreationCostPreview')
+    expect(source).toContain('creationBlocker')
   })
 
   it('keeps ecommerce creation on the base-fee path even if goal mode state is stale', () => {
     const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
 
     expect(source).toContain("goal_mode: values.type !== 'ecommerce' && goalMode ? true : undefined")
-    expect(source).toContain('const multiplier = isEcom ? 1 : goalMode ? 3 : 1')
+    expect(source).toContain('taskCreationCostPreview')
+    expect(source).toContain("watchedType === 'ecommerce'")
   })
 })

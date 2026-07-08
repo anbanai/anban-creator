@@ -48,7 +48,7 @@ import { useImageModels } from '@/hooks/useImageModels'
 import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
-import { taskCostFor } from '@/lib/pricing'
+import { getProjectCreationDefaults, taskCreationCostPreview } from '@/lib/studio-ux'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -316,23 +316,24 @@ export default function TasksPage() {
       return
     }
     const selectedIntentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
-    const defaultType = createIntent.type ?? selectedIntentProject?.platform ?? 'seednote'
+    const defaults = getProjectCreationDefaults(selectedIntentProject)
+    const defaultType = createIntent.type ?? defaults.type
     form.reset({
-      type: defaultType as TaskType,
+      type: defaultType,
       prompt: '',
       project_id: selectedIntentProject?.id ?? '',
-      image_ratio: (selectedIntentProject?.image_ratio || '') as CreateTaskFormValues['image_ratio'],
-      image_model_key: '',
+      image_ratio: defaults.imageRatio as CreateTaskFormValues['image_ratio'],
+      image_model_key: defaults.imageModelKey,
       product_photos: [],
-      selected_modules: selectedIntentProject?.ecommerce_defaults?.default_selected_modules ?? {},
-      target_platform: selectedIntentProject?.ecommerce_defaults?.target_platform ?? '',
+      selected_modules: defaults.selectedModules,
+      target_platform: defaults.targetPlatform,
       selling_points: '',
       language: '',
-      video_input: selectedIntentProject?.platform === 'video' ? initialVideoInput('') : undefined,
+      video_input: defaultType === 'video' ? initialVideoInput('') : undefined,
     })
     setQuantity(1)
     setWatermark(false)
-    setProjectImageRatio(selectedIntentProject?.image_ratio || '')
+    setProjectImageRatio(defaults.imageRatio)
     setHasContentImage(true)
     setHasTailImage(false)
     setArticleWithCover(true)
@@ -466,6 +467,23 @@ export default function TasksPage() {
     approval: tasks.filter((t) => t.publish_approval_state === 'pending').length,
     completed: tasks.filter((t) => t.status === 'completed').length,
   }), [tasks])
+
+  const costPreview = taskCreationCostPreview({
+    pricing,
+    type: watchedType,
+    quantity,
+    goalMode,
+    runLocally,
+    balance: creditsBalance?.balance ?? 0,
+  })
+
+  const creationBlocker = costPreview.insufficient
+    ? { message: '积分不足，补充积分后再创建。', href: '/credits', actionLabel: '查看积分' }
+    : watchedType !== 'ecommerce' && goalMode && !goalText.trim()
+      ? { message: '强目标模式需要填写目标条件。', href: '', actionLabel: '' }
+      : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
+        ? { message: '电商出图需要先上传产品图。', href: '', actionLabel: '' }
+        : null
 
   return (
     <div className="space-y-6">
@@ -804,13 +822,9 @@ export default function TasksPage() {
           <SheetHeader className="border-b border-border px-4 py-3">
             <SheetTitle>新建任务</SheetTitle>
             <SheetDescription>任务创建路径：类型 → 项目 → 目标/提示词 → 图片/高级 → 基础任务费预估</SheetDescription>
-            <div className="grid grid-cols-5 gap-1 pt-2 text-[11px] text-muted-foreground">
-              {['类型', '项目', '目标/提示词', '图片/高级', '基础任务费预估'].map((label, index) => (
-                <span key={label} className="truncate rounded-md bg-muted px-2 py-1">
-                  {index + 1}. {label}
-                </span>
-              ))}
-            </div>
+            <p className="pt-2 text-[11px] text-muted-foreground">
+              类型 / 项目 / 目标/提示词 / 图片/高级 / 基础任务费预估
+            </p>
           </SheetHeader>
           <Form {...form}>
             <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -834,23 +848,18 @@ export default function TasksPage() {
                   <FormControl>
                     <ProjectSelector
                       value={field.value || ''}
-                      onChange={(id, platform) => {
+                      onChange={(id) => {
                         field.onChange(id)
                         if (id) {
-                          form.setValue('type', platform as TaskType)
-                          form.setValue('image_ratio', '')
                           const ch = projects.find((c) => c.id === id)
-                          setProjectImageRatio(ch?.image_ratio || platformDefaultRatio[platform] || '3:4')
-                          if (platform === 'ecommerce' && ch?.ecommerce_defaults) {
-                            form.setValue('selected_modules', ch.ecommerce_defaults.default_selected_modules || {}, { shouldDirty: false })
-                            form.setValue('target_platform', ch.ecommerce_defaults.target_platform || '', { shouldDirty: false })
-                            form.setValue('image_model_key', ch.ecommerce_defaults.image_model_key || '', { shouldDirty: false })
-                          }
-                          if (platform === 'video') {
-                            form.setValue('video_input', initialVideoInput(form.getValues('prompt') || ''), { shouldDirty: false })
-                          } else {
-                            form.setValue('video_input', undefined, { shouldDirty: false })
-                          }
+                          const defaults = getProjectCreationDefaults(ch)
+                          setProjectImageRatio(defaults.imageRatio)
+                          form.setValue('type', defaults.type)
+                          form.setValue('image_ratio', defaults.imageRatio as CreateTaskFormValues['image_ratio'], { shouldDirty: false })
+                          form.setValue('selected_modules', defaults.selectedModules, { shouldDirty: false })
+                          form.setValue('target_platform', defaults.targetPlatform, { shouldDirty: false })
+                          form.setValue('image_model_key', defaults.imageModelKey, { shouldDirty: false })
+                          form.setValue('video_input', defaults.type === 'video' ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
                         } else {
                           setProjectImageRatio('')
                           form.setValue('video_input', undefined, { shouldDirty: false })
@@ -1263,41 +1272,37 @@ export default function TasksPage() {
               {/* Cost display */}
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 基础任务费预估</p>
-              {(() => {
-                const isEcom = watchedType === 'ecommerce'
-                const cost = taskCostFor(pricing, watchedType)
-                const multiplier = isEcom ? 1 : goalMode ? 3 : 1
-                const billableQuantity = isEcom ? 1 : quantity
-                const totalCost = cost * billableQuantity * multiplier
-                const balance = creditsBalance?.balance ?? 0
-                const remaining = balance - totalCost
-                return (
-                  <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
+                <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
+                  <p className="text-muted-foreground">
+                    基础任务费：{costPreview.baseCost} × {costPreview.billableQuantity}
+                    {costPreview.multiplier > 1 && ` × ${costPreview.multiplier}`} = <span className="font-medium text-foreground">{costPreview.totalCost}</span> 积分
+                    {costPreview.multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
+                  </p>
+                  {runLocally ? (
+                    <p className="text-xs text-muted-foreground">本机运行使用你的 Claude Code 环境，不收平台 Claude Code 运行预留。</p>
+                  ) : (
                     <p className="text-muted-foreground">
-                      基础任务费：{cost} × {billableQuantity}
-                      {multiplier > 1 && ` × ${multiplier}`} = <span className="font-medium text-foreground">{totalCost}</span> 积分
-                      {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
+                      Claude Code 运行预留：<span className="font-medium text-foreground">{costPreview.runtimeReserve.toLocaleString()}</span> 积分
+                      <span className="ml-1 text-xs text-muted-foreground">完成后按实际 token 多退少补</span>
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {runLocally ? '本机运行使用你的 Claude Code 环境。' : '云端 Claude Code 运行成本由平台承担，不额外预留或补扣。'}
+                  )}
+                  {watchedType === 'ecommerce' ? (
+                    <p className="text-xs text-muted-foreground">所选交付模块会影响后续图片生成和理解操作用量，最终以交易明细汇总为准。</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">模型、图片、视频等 MCP 操作费用按实际用量另计。</p>
+                  )}
+                  <p className="text-muted-foreground">
+                    余额：{(creditsBalance?.balance ?? 0).toLocaleString()} →{' '}
+                    <span className={`font-medium ${costPreview.remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
+                      {costPreview.remaining.toLocaleString()}
+                    </span>
+                  </p>
+                  {creationBlocker && (
+                    <p className="text-sm font-medium text-red-500">
+                      {creationBlocker.href ? <Link to={creationBlocker.href}>{creationBlocker.message}</Link> : creationBlocker.message}
                     </p>
-                    {isEcom ? (
-                      <p className="text-xs text-muted-foreground">所选交付模块会影响后续图片生成和理解操作用量，最终以交易明细汇总为准。</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">模型、图片、视频等 MCP 操作费用按实际用量另计。</p>
-                    )}
-                    <p className="text-muted-foreground">
-                      余额：{balance.toLocaleString()} →{' '}
-                      <span className={`font-medium ${remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
-                        {remaining.toLocaleString()}
-                      </span>
-                    </p>
-                    {remaining < 0 && (
-                      <p className="text-sm font-medium text-red-500">积分不足</p>
-                    )}
-                  </div>
-                )
-              })()}
+                  )}
+                </div>
               </div>
             </form>
           </Form>
@@ -1318,20 +1323,7 @@ export default function TasksPage() {
               type="submit"
               form="task-create-form"
               loading={createMutation.isPending}
-              disabled={(() => {
-                const isEcom = watchedType === 'ecommerce'
-                const cost = taskCostFor(pricing, watchedType)
-                const multiplier = isEcom ? 1 : goalMode ? 3 : 1
-                const billableQuantity = isEcom ? 1 : quantity
-                const totalCost = cost * billableQuantity * multiplier
-                const balance = creditsBalance?.balance ?? 0
-                if (balance - totalCost < 0) return true
-                if (!isEcom && goalMode && !goalText.trim()) return true
-                if (isEcom) {
-                  if (!watchedProductPhotos || watchedProductPhotos.length === 0) return true
-                }
-                return false
-              })()}
+              disabled={Boolean(creationBlocker)}
             >
               {runLocally && localExecutorStatus?.state === 'ready_stopped'
                 ? '启动并创建'

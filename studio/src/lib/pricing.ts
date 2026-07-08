@@ -12,3 +12,7 @@ export const DEFAULT_TASK_COSTS: Record<string, number> = {
 export function taskCostFor(pricing: CreditPricing | undefined, type: string) {
   return pricing?.task_costs[type] ?? DEFAULT_TASK_COSTS[type] ?? 3600
 }
+
+export function agentRuntimeReserveFor(pricing: CreditPricing | undefined, type: string) {
+  return pricing?.agent_runtime_reserve?.[type] ?? DEFAULT_TASK_COSTS[type] ?? 0
+}
