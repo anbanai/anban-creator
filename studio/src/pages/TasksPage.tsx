@@ -47,8 +47,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
 import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
-import { workflowReadinessLabel } from '@/lib/workflow-readiness'
-import { getProjectCreationDefaults, taskCreationCostPreview } from '@/lib/studio-ux'
+import { getProjectCreationDefaults, taskActionSignal, taskCreationCostPreview } from '@/lib/studio-ux'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -518,14 +517,14 @@ export default function TasksPage() {
             icon={Clock3}
             label="运行队列"
             value={queueStats.active}
-            description="待执行 / 运行中"
+            description="查看正在推进或等待执行的任务"
           />
           <TaskQueueLink
             to="/tasks?status=failed"
             icon={AlertTriangle}
             label="失败待恢复"
             value={queueStats.failed}
-            description="进入详情查看日志、重试或克隆"
+            description="进入详情查看失败原因，重试或克隆"
             urgent={queueStats.failed > 0}
           />
           <TaskQueueLink
@@ -540,7 +539,7 @@ export default function TasksPage() {
             icon={CheckCircle2}
             label="最近完成"
             value={queueStats.completed}
-            description="可下载、发布或复用"
+            description="下载、发布标记或复用配置"
           />
         </div>
       </section>
@@ -698,6 +697,7 @@ export default function TasksPage() {
             const borderColor = platformBorderColor[task.type] || ''
             const hoverBorderColor = platformHoverBorderColor[task.type] || ''
             const selected = selectedTaskIdSet.has(task.id)
+            const actionSignal = taskActionSignal(task)
 
             return (
               <Link key={task.id} to={`/tasks/${task.id}`} className="block">
@@ -726,49 +726,12 @@ export default function TasksPage() {
                           <Badge variant={statusBadgeVariant(task.status)}>
                             {taskStatusLabel[task.status] || task.status}
                           </Badge>
-                          {(task.execution_target === 'local' || task.execution_target === 'local_claimed') && (
-                            <Badge variant="outline" className="text-[10px]">
-                              本地{task.execution_target === 'local' ? '待认领' : '运行中'}
-                            </Badge>
-                          )}
-                          {task.status === 'completed' && (
-                            <button
-                              type="button"
-                              disabled={togglePublished.isPending}
-                              onClick={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                void submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published })).catch(() => {})
-                              }}
-                              className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                                task.published
-                                  ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
-                                  : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                              }`}
-                            >
-                              {togglePublished.isPending ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : task.published ? (
-                                <Check className="h-3 w-3" />
-                              ) : null}
-                              {task.published ? '已发布' : '标记发布'}
-                            </button>
-                          )}
-                          {task.publish_approval_state === 'pending' && (
-                            <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-500">
-                              待发布确认
-                            </Badge>
-                          )}
-                          {task.publish_approval_state === 'rejected' && (
-                            <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                              已驳回发布
-                            </Badge>
-                          )}
-                          {task.status === 'completed' && workflowReadinessLabel(task.workflow_status) && (
-                            <Badge variant="outline">
-                              {workflowReadinessLabel(task.workflow_status)}
-                            </Badge>
-                          )}
+                          <Badge
+                            variant={actionSignal.tone === 'risk' ? 'destructive' : actionSignal.tone === 'success' ? 'secondary' : 'outline'}
+                            className="text-[10px]"
+                          >
+                            {actionSignal.label}
+                          </Badge>
                         </div>
                       </div>
                       {project?.name && (
@@ -778,16 +741,41 @@ export default function TasksPage() {
                         <Badge variant="outline" className="text-[10px]">
                           {contentTypeLabel[task.type] || task.type}
                         </Badge>
-                        {task.status === 'running' && (task.progress ?? 0) > 0 && (
-                          <Badge variant="secondary" className="text-[10px]">
-                            {task.progress ?? 0}%
-                          </Badge>
+                        <span>{actionSignal.hint}</span>
+                        {(task.execution_target === 'local' || task.execution_target === 'local_claimed') && (
+                          <span>本地{task.execution_target === 'local' ? '待认领' : '运行中'}</span>
+                        )}
+                        {task.publish_approval_state === 'rejected' && (
+                          <span>已驳回发布</span>
                         )}
                         <span>创建：{formatDateTimeCN(task.created_at)}</span>
                         {task.completed_at && (
                           <span>完成：{formatDateTimeCN(task.completed_at)}</span>
                         )}
                       </div>
+                      {task.status === 'completed' && (
+                        <button
+                          type="button"
+                          disabled={togglePublished.isPending}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            void submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published })).catch(() => {})
+                          }}
+                          className={`mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
+                            task.published
+                              ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                              : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                          }`}
+                        >
+                          {togglePublished.isPending ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : task.published ? (
+                            <Check className="h-3 w-3" />
+                          ) : null}
+                          {task.published ? '已发布' : '标记发布'}
+                        </button>
+                      )}
                       {task.status === 'running' && (
                         <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
                           <div

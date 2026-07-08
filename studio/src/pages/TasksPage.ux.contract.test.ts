@@ -48,4 +48,14 @@ describe('TasksPage recovery workspace contract', () => {
     expect(source).toContain('taskCreationCostPreview')
     expect(source).toContain("watchedType === 'ecommerce'")
   })
+
+  it('keeps task rows focused on the primary business action', () => {
+    const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
+    const helperSource = readFileSync(join(here, '../lib/studio-ux.ts'), 'utf8')
+
+    expect(source).toContain('taskActionSignal')
+    expect(helperSource).toContain('处理发布审批')
+    expect(helperSource).toContain('查看失败原因')
+    expect(helperSource).toContain('可下载、发布或复用')
+  })
 })
