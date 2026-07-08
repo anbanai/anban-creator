@@ -157,7 +157,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     })
   })
 
-  it('uses the same publish approval and readiness labels in the recovery queue and task cards', async () => {
+  it('uses publish approval recovery labels and task card action signals', async () => {
     vi.mocked(api.tasks.list).mockResolvedValue({
       items: [fixtures.failedTask as Task, fixtures.approvalTask as Task],
       total: 2,
@@ -166,8 +166,8 @@ describe('TasksPage URL-driven recovery filters', () => {
     renderTasksPage()
 
     expect(await screen.findByRole('link', { name: /待发布确认/ })).toBeInTheDocument()
-    expect((await screen.findAllByText('待发布确认')).length).toBeGreaterThan(0)
-    expect(await screen.findByText('可发布')).toBeInTheDocument()
+    expect(await screen.findByText('处理发布审批')).toBeInTheDocument()
+    expect((await screen.findAllByText('审核后放行到公众号草稿箱')).length).toBeGreaterThan(0)
   })
 
   it('uses backend-matching fallback pricing for article tasks when pricing omits task costs', async () => {
@@ -176,10 +176,11 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
     expect(await screen.findByText(/基础任务费：4000 × 1 =/)).toBeInTheDocument()
+    expect(await screen.findByText(/Claude Code 运行预留：/)).toBeInTheDocument()
+    expect(screen.getByText('4,000')).toBeInTheDocument()
     expect(screen.getByText(/余额：5,000 →/)).toBeInTheDocument()
-    expect(screen.getByText('1,000')).toBeInTheDocument()
-    expect(screen.queryByText(/运行预留/)).not.toBeInTheDocument()
-    expect(screen.queryByText('积分不足')).not.toBeInTheDocument()
+    expect(screen.getByText('-3,000')).toBeInTheDocument()
+    expect(screen.getByText('积分不足，补充积分后再创建。')).toBeInTheDocument()
   })
 
   it('shows ecommerce creation as a base task fee instead of a module package charge', async () => {

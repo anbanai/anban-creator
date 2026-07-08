@@ -6,11 +6,10 @@ import { describe, expect, it } from 'vitest'
 const here = dirname(fileURLToPath(import.meta.url))
 
 describe('ProjectsPage layout contracts', () => {
-  it('places visual template import before the visual style field for image-based project types', () => {
+  it('keeps visual settings flat and free of social-card preset jargon', () => {
     const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
 
     const visualTemplateType = source.indexOf('visualTemplateType')
-    const visualConfigSection = source.indexOf('图文视觉配置')
     const visualTemplatePicker = source.indexOf('<TemplatePicker type={visualTemplateType}')
     const referenceUpload = source.indexOf('<ReferenceImageUpload')
     const visualStyleField = source.indexOf('name="visual_style"')
@@ -21,13 +20,17 @@ describe('ProjectsPage layout contracts', () => {
     expect(source).toContain("isEcommerce ? 'ecommerce'")
     expect(source).toContain('supportsVisualReference')
     expect(source).not.toContain('(isSeednote || isEcommerce)')
-    expect(visualConfigSection).toBeGreaterThan(-1)
     expect(visualTemplatePicker).toBeGreaterThan(-1)
     expect(referenceUpload).toBeGreaterThan(-1)
     expect(visualStyleField).toBeGreaterThan(-1)
-    expect(visualConfigSection).toBeLessThan(visualTemplatePicker)
-    expect(visualTemplatePicker).toBeLessThan(visualStyleField)
     expect(referenceUpload).toBeLessThan(visualStyleField)
+    expect(visualTemplatePicker).toBeLessThan(visualStyleField)
+    expect(source).not.toContain('图文视觉配置')
+    expect(source).not.toContain('GUIZANG_SOCIAL_CARD_STYLE')
+    expect(source).not.toContain('applyGuizangSocialCardPreset')
+    expect(source).not.toContain('归藏社交卡')
+    expect(source).not.toContain('Guizang social card')
+    expect(source).not.toContain('社交卡片')
     expect(source).not.toContain('<TemplatePicker type="article"')
     expect(source).not.toContain('<TemplatePicker type="ecommerce"')
   })

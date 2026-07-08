@@ -4,7 +4,7 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Inbox, Loader2, Minus, Sparkles } from 'lucide-react'
+import { Plus, Inbox, Loader2, Minus } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -94,7 +94,6 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
 
 const defaultVideoDefaults = CHANNEL_FORM_DEFAULTS.video_defaults!
 const defaultVideoPolicy = CHANNEL_FORM_DEFAULTS.video_model_policy!
-const GUIZANG_SOCIAL_CARD_STYLE = '归藏社交卡 / Guizang social card：Swiss editorial card + 杂志式小红书组图；用于朋友圈 3:4 社交卡片、1080x1440 图文笔记卡片，以及微信公众号 21:9 封面 + 1:1 分享图。'
 
 function projectToForm(ch: Project, configuredVideoModels: VideoModelSpec[] = []): ProjectFormValues {
   const configuredKeys = new Set(configuredVideoModels.map((model) => model.key))
@@ -215,11 +214,6 @@ export default function ProjectsPage() {
     if (qty >= 1) next[key] = qty
     else delete next[key]
     form.setValue('ecommerce_default_selected_modules', next, { shouldDirty: true })
-  }
-
-  const applyGuizangSocialCardPreset = () => {
-    styleManuallyEditedRef.current = true
-    form.setValue('visual_style', GUIZANG_SOCIAL_CARD_STYLE, { shouldDirty: true })
   }
 
   // Auto-focus profile_url field when dialog opens
@@ -676,7 +670,7 @@ export default function ProjectsPage() {
             <DialogTitle>{editingProject ? '编辑项目' : '新建项目'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
-            <form id="project-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto p-1">
+            <form id="project-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="platform" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">平台</FormLabel>
@@ -900,13 +894,13 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
-              {supportsVisualReference ? (
-                <section className="space-y-3 rounded-lg border border-border p-3">
-                  <div className="flex items-start justify-between gap-3">
+              {supportsVisualReference && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">图文视觉配置</p>
+                      <p className="text-sm font-medium text-foreground">视觉参考</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        {isMoments ? '上传参考图或填写风格，让 Agent 判断是否生成社交卡片。' : '先选视觉模板，再用参考图识别和 prompt 微调最终风格。'}
+                        上传一张参考图，系统会尝试识别色彩、质感和构图。
                       </p>
                     </div>
                     <ReferenceImageUpload
@@ -920,75 +914,49 @@ export default function ProjectsPage() {
                   {visualTemplateType && (
                     <TemplatePicker type={visualTemplateType} selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
                   )}
+                </div>
+              )}
 
-                  <FormField control={form.control} name="visual_style" render={({ field }) => (
-                    <FormItem>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <FormLabel>视觉风格</FormLabel>
-                        {(isWechat || isSeednote || isMoments) && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-1.5 px-2 text-xs"
-                            onClick={applyGuizangSocialCardPreset}
-                          >
-                            <Sparkles className="h-3.5 w-3.5" />
-                            归藏社交卡
-                          </Button>
-                        )}
-                      </div>
-                      <FormControl>
-                        <div className="relative">
-                          <Textarea
-                            placeholder={isSeednote
-                              ? '描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格'
-                              : isMoments
-                                ? '描述朋友圈社交卡片的视觉风格，如：真实生活感、轻杂志排版、暖色自然光、不过度营销'
-                              : isEcommerce
-                                ? '描述品牌视觉风格基线，如：高端极简白底、国潮暖橙插画、电商爆款高饱和促销感。作为主图/详情/封面跨图一致的视觉锚点'
-                                : '描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由项目定位与内容主题三维分析自动确定'}
-                            className={analyzingStyle ? 'pr-10' : ''}
-                            {...field}
-                            onChange={(e) => {
-                              styleManuallyEditedRef.current = true
-                              field.onChange(e)
-                            }}
-                          />
-                          {analyzingStyle && (
-                            <div className="absolute right-2 top-2">
-                              <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                            </div>
-                          )}
-                        </div>
-                      </FormControl>
-                      {analyzingStyle && (
-                        <p className="text-xs text-muted-foreground">正在分析参考图...</p>
-                      )}
-                      <FormDescription>
-                        {isSeednote
-                          ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示'
-                          : isMoments
-                            ? '朋友圈视觉维度——用于 Agent 判断是否生成可配发的社交卡片，不增加独立图片开关'
-                          : isEcommerce
-                            ? '品牌视觉维度——作为电商素材跨图一致的视觉基线（产品图在任务级上传）'
-                            : '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                </section>
-              ) : !isVideo ? (
+              {!isVideo ? (
                 <FormField control={form.control} name="visual_style" render={({ field }) => (
                   <FormItem>
                     <FormLabel>视觉风格</FormLabel>
                     <FormControl>
-                      <Textarea
-                        placeholder="描述图片视觉风格、构图、色彩与禁忌"
-                        {...field}
-                      />
+                      <div className="relative">
+                        <Textarea
+                          placeholder={isSeednote
+                            ? '描述图片视觉风格，如：手绘感、暖色调、小清新、治愈系水彩插画风格'
+                            : isMoments
+                              ? '描述图片视觉风格，如：真实生活感、轻杂志排版、暖色自然光、不过度营销'
+                            : isEcommerce
+                              ? '描述品牌视觉风格基线，如：高端极简白底、国潮暖橙插画、电商爆款高饱和促销感。作为主图/详情/封面跨图一致的视觉锚点'
+                              : '描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由项目定位与内容主题三维分析自动确定'}
+                          className={analyzingStyle ? 'pr-10' : ''}
+                          {...field}
+                          onChange={(e) => {
+                            styleManuallyEditedRef.current = true
+                            field.onChange(e)
+                          }}
+                        />
+                        {analyzingStyle && (
+                          <div className="absolute right-2 top-2">
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                          </div>
+                        )}
+                      </div>
                     </FormControl>
-                    <FormDescription>图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立。</FormDescription>
+                    {analyzingStyle && (
+                      <p className="text-xs text-muted-foreground">正在分析参考图...</p>
+                    )}
+                    <FormDescription>
+                      {isSeednote
+                        ? '用于封面和内容图的风格提示。'
+                        : isMoments
+                          ? '用于保持朋友圈素材的画面调性；留空则由内容自动判断。'
+                        : isEcommerce
+                          ? '作为电商素材跨图一致的视觉基线，产品图仍在任务里上传。'
+                          : '仅决定封面与配图的视觉，与写作风格、排版样式相互独立。'}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )} />
