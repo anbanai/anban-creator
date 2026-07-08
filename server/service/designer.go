@@ -1148,22 +1148,22 @@ func (s *DesignerService) designerPricing(providerKey, modelName string) Designe
 }
 
 func designerCapabilities(provider, modelName string) DesignerProviderCapabilities {
-	switch provider {
-	case "openai":
-		if strings.HasPrefix(strings.ToLower(modelName), "gpt-image-") {
-			return DesignerProviderCapabilities{
-				QualityLevels:      []string{"auto", "low", "medium", "high"},
-				SizePresets:        []string{"auto", "1024x1024", "1536x1024", "1024x1536"},
-				DefaultSize:        "auto",
-				MaxBatch:           10,
-				MaxReferenceImages: 16,
-				SupportsReference:  true,
-				SupportsMask:       true,
-				OutputFormats:      []string{"png", "jpeg", "webp"},
-				HasBackground:      true,
-				HasCompression:     true,
-			}
+	if isDesignerGPTImageModel(modelName) {
+		return DesignerProviderCapabilities{
+			QualityLevels:      []string{"auto", "low", "medium", "high"},
+			SizePresets:        []string{"auto", "1024x1024", "1536x1024", "1024x1536"},
+			DefaultSize:        "auto",
+			MaxBatch:           10,
+			MaxReferenceImages: 16,
+			SupportsReference:  true,
+			SupportsMask:       true,
+			OutputFormats:      []string{"png", "jpeg", "webp"},
+			HasBackground:      true,
+			HasCompression:     true,
 		}
+	}
+
+	switch provider {
 	case "volcengine":
 		return DesignerProviderCapabilities{
 			SizePresets:        []string{"1:1", "3:4", "4:3", "16:9", "9:16"},
@@ -1185,6 +1185,11 @@ func designerCapabilities(provider, modelName string) DesignerProviderCapabiliti
 		}
 	}
 	return DesignerProviderCapabilities{MaxBatch: 1}
+}
+
+func isDesignerGPTImageModel(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	return strings.HasPrefix(modelName, "gpt-image-") || modelName == "chatgpt-image-latest"
 }
 
 // resolveCredits returns the per-image credit cost for the given provider+model combination.

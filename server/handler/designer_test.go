@@ -55,7 +55,7 @@ func setupDesignerHandlerTest() *fiber.App {
 				"test-openai": {
 					Alias:    "Test OpenAI",
 					Enable:   &enabled,
-					Provider: "openai",
+					Provider: "wangcai_openai",
 					Model:    "gpt-image-2",
 				},
 			},

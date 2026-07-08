@@ -79,6 +79,7 @@ describe('Designer provider contract', () => {
     render(createElement(DesignerPage))
 
     await screen.findAllByText('GPT Image 2')
+    expect(await screen.findByRole('button', { name: /自动\s*智能选择/ })).toBeInTheDocument()
     const prompt = await screen.findByPlaceholderText('描述你想要生成的图片...')
     fireEvent.change(prompt, {
       target: { value: '给下周奶做一张竖版海报' },
