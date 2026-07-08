@@ -57,11 +57,11 @@ type aiEntryIntent struct {
 	Language        string         `json:"language"`
 	ImageRatio      string         `json:"image_ratio"`
 	ImageModelKey   string         `json:"image_model_key"`
-	Video           struct {
+	VideoCreator    struct {
 		Ratio     string `json:"ratio"`
 		Duration  int64  `json:"duration"`
 		Watermark *bool  `json:"watermark"`
-	} `json:"video"`
+	} `json:"video_creator"`
 }
 
 var aiEntryEcommerceModuleMax = map[string]int{
@@ -165,9 +165,9 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			Brief:      prompt,
 			References: videoReferencesFromEntryAttachments(req.Attachments),
 			HardConstraints: model.VideoHardConstraints{
-				Ratio:     normalizeAIEntryVideoRatio(intent.Video.Ratio),
-				Duration:  normalizeAIEntryVideoDuration(intent.Video.Duration),
-				Watermark: intent.Video.Watermark,
+				Ratio:     normalizeAIEntryVideoRatio(intent.VideoCreator.Ratio),
+				Duration:  normalizeAIEntryVideoDuration(intent.VideoCreator.Duration),
+				Watermark: intent.VideoCreator.Watermark,
 			},
 		}
 	case model.PlatformVideoEditor:
@@ -222,7 +222,7 @@ func (s *AIEntryService) parseIntent(ctx context.Context, llm LLMClient, project
   "target_platform": "电商平台，可选",
   "language": "语言，可选",
   "image_ratio": "3:4|1:1|4:3|16:9，可选",
-  "video": {"ratio": "9:16|16:9|1:1，可选", "duration": 12}
+  "video_creator": {"ratio": "9:16|16:9|1:1，可选", "duration": 12, "watermark": false}
 }
 缺失字段请省略。`)
 	userPrompt := aiEntryPrompt(project, req)
@@ -277,7 +277,7 @@ func parseAIEntryIntentJSON(raw string) (aiEntryIntent, error) {
 	intent.Language = strings.TrimSpace(intent.Language)
 	intent.ImageRatio = strings.TrimSpace(intent.ImageRatio)
 	intent.ImageModelKey = strings.TrimSpace(intent.ImageModelKey)
-	intent.Video.Ratio = strings.TrimSpace(intent.Video.Ratio)
+	intent.VideoCreator.Ratio = strings.TrimSpace(intent.VideoCreator.Ratio)
 	return intent, nil
 }
 

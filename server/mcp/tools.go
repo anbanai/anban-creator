@@ -126,7 +126,7 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get the resolved project runtime profile for AI content generation. This is the single project facts entrypoint: the server applies task snapshots, sanitizes secrets, resolves style/theme/author dimensions, and returns platform-specific blocks such as video or ecommerce. Video projects include resolved_profile, agent_brief, and video defaults/policy/model_catalog/pricing/references. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials or unavailable models.",
+		Description: "Get the resolved project runtime profile for AI content generation. This is the single project facts entrypoint: the server applies task snapshots, sanitizes secrets, resolves style/theme/author dimensions, and returns platform-specific blocks such as videocreator, videoeditor, or ecommerce. Videocreator projects include resolved_profile, agent_brief, defaults, policy, model_catalog, pricing, and references; videoeditor projects expose editing-source and delivery requirements. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials or unavailable models.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

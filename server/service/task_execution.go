@@ -392,7 +392,8 @@ func (s *TaskService) validateVideoCreatorCompletionArtifacts(ctx context.Contex
 func validateVideoEditorCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
 	hasEDL := false
 	hasRenderedVideo := false
-	hasDraft := false
+	hasDraftInfo := false
+	hasDraftMeta := false
 	meaningful := 0
 	for _, file := range files {
 		if file == nil || file.FileSize <= 0 {
@@ -410,26 +411,36 @@ func validateVideoEditorCompletionArtifacts(files []*model.TaskFile) agent.Artif
 			meaningful++
 			continue
 		}
-		if isVideoEditorDraftPath(name) || isVideoEditorDraftPath(path) {
-			hasDraft = true
+		if isVideoEditorDraftInfoPath(name) || isVideoEditorDraftInfoPath(path) {
+			hasDraftInfo = true
+			meaningful++
+			continue
+		}
+		if isVideoEditorDraftMetaPath(name) || isVideoEditorDraftMetaPath(path) {
+			hasDraftMeta = true
 			meaningful++
 		}
 	}
-	var missing []string
-	if !hasEDL {
-		missing = append(missing, "edit/edl.json")
+	hasRenderedDelivery := hasEDL && hasRenderedVideo
+	hasDraftPackage := hasDraftInfo && hasDraftMeta
+	if hasRenderedDelivery || hasDraftPackage {
+		return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
 	}
-	if !hasRenderedVideo && !hasDraft {
-		missing = append(missing, "final.mp4 or preview.mp4 or CapCut draft")
+	var missing []string
+	if !hasRenderedDelivery {
+		missing = append(missing, "edit/edl.json plus final.mp4 or preview.mp4")
+	}
+	if !hasDraftPackage {
+		missing = append(missing, "CapCut draft package")
 	}
 	if len(missing) > 0 {
 		return agent.ArtifactValidation{
 			MeaningfulFileCount: meaningful,
 			Missing:             missing,
-			Reason:              "videoeditor missing required deliverables: " + strings.Join(missing, ", "),
+			Reason:              "videoeditor missing required deliverables: " + strings.Join(missing, " or "),
 		}
 	}
-	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
+	return agent.ArtifactValidation{Reason: "videoeditor missing required deliverables"}
 }
 
 func normalizeVideoDeliveryPath(path string) string {
@@ -437,8 +448,16 @@ func normalizeVideoDeliveryPath(path string) string {
 	return strings.TrimPrefix(path, "output/")
 }
 
-func isVideoEditorDraftPath(path string) bool {
-	if !strings.HasSuffix(path, ".json") {
+func isVideoEditorDraftInfoPath(path string) bool {
+	return isVideoEditorDraftPackagePath(path, "draft_info.json")
+}
+
+func isVideoEditorDraftMetaPath(path string) bool {
+	return isVideoEditorDraftPackagePath(path, "draft_meta_info.json")
+}
+
+func isVideoEditorDraftPackagePath(path, base string) bool {
+	if filepath.Base(path) != base {
 		return false
 	}
 	return strings.HasPrefix(path, "capcut/") || strings.HasPrefix(path, "capcut-draft/")

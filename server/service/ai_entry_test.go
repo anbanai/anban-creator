@@ -245,7 +245,7 @@ func TestAIEntryServiceSubmitStoresVideoInputReferences(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	llm := &fakeAIEntryLLM{responses: []string{
-		`{"prompt":"生成一条咖啡杯种草短视频","video":{"ratio":"9:16","duration":12}}`,
+		`{"prompt":"生成一条咖啡杯种草短视频","video_creator":{"ratio":"9:16","duration":12}}`,
 	}}
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
@@ -326,7 +326,7 @@ func TestAIEntryServiceSubmitDropsInvalidVideoHardConstraints(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	llm := &fakeAIEntryLLM{responses: []string{
-		`{"prompt":"生成一条咖啡杯短视频","video":{"ratio":"2:1","duration":9999}}`,
+		`{"prompt":"生成一条咖啡杯短视频","video_creator":{"ratio":"2:1","duration":9999}}`,
 	}}
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)

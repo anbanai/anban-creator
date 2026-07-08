@@ -1701,6 +1701,131 @@ func TestTaskServiceHandleExecutionAcceptsVideoEditorEDLAndPreview(t *testing.T)
 	}
 }
 
+func TestTaskServiceHandleExecutionAcceptsVideoEditorCapCutDraftPackage(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformVideoEditor,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for _, file := range []*model.TaskFile{
+		{
+			ID:       uuid.New().String(),
+			TaskID:   task.ID,
+			Role:     model.FileRoleOther,
+			FileName: "draft_info.json",
+			FilePath: "output/capcut/MyDraft/draft_info.json",
+			MimeType: "application/json",
+			FileSize: 4096,
+		},
+		{
+			ID:       uuid.New().String(),
+			TaskID:   task.ID,
+			Role:     model.FileRoleOther,
+			FileName: "draft_meta_info.json",
+			FilePath: "output/capcut/MyDraft/draft_meta_info.json",
+			MimeType: "application/json",
+			FileSize: 1024,
+		},
+	} {
+		if err := repo.TaskFiles().Create(ctx, file); err != nil {
+			t.Fatalf("create task file: %v", err)
+		}
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+		ToolUseSummary: map[string]int{
+			"Write": 2,
+		},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q error=%q, want completed with CapCut draft package", found.Status, found.ErrorMessage)
+	}
+	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 || found.VideoGenerationID != "" {
+		t.Fatalf("editor task should not carry video_gen billing state: estimated=%d charged=%d generation=%q", found.VideoEstimatedCredits, found.VideoCreditsCharged, found.VideoGenerationID)
+	}
+}
+
+func TestTaskServiceHandleExecutionRejectsVideoEditorPartialCapCutDraft(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformVideoEditor,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID:       uuid.New().String(),
+		TaskID:   task.ID,
+		Role:     model.FileRoleOther,
+		FileName: "draft_info.json",
+		FilePath: "output/capcut/MyDraft/draft_info.json",
+		MimeType: "application/json",
+		FileSize: 4096,
+	}); err != nil {
+		t.Fatalf("create task file: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+		ToolUseSummary: map[string]int{
+			"Write": 1,
+		},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", found.Status)
+	}
+	if !strings.Contains(found.ErrorMessage, "CapCut draft package") {
+		t.Fatalf("error = %q, want CapCut draft package guidance", found.ErrorMessage)
+	}
+}
+
 func TestTaskService_HandleExecutionCompletesWithSeednoteDeliverables(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {

@@ -151,7 +151,7 @@ func TestCodexSplitVideoHookQualityGatesAreRegistered(t *testing.T) {
 		}
 	}
 	editorScript := readRepoFile(t, "../../codex/hooks/videoeditor-quality-gate.sh")
-	for _, want := range []string{"videoeditor", "video-use", "edl.json", "task_id not in text"} {
+	for _, want := range []string{"videoeditor", "video-use", "edl.json", "draft_info.json", "draft_meta_info.json", "task_id not in text"} {
 		if !strings.Contains(editorScript, want) {
 			t.Fatalf("codex videoeditor quality gate missing %q", want)
 		}
