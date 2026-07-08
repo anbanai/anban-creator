@@ -269,8 +269,8 @@ func validateDesignerGenerateRequest(req DesignerGenerateRequest, caps DesignerP
 	}
 	if len(caps.SizePresets) > 0 {
 		size := strings.TrimSpace(req.Size)
-		if size != "" && !strings.EqualFold(size, "auto") {
-			size = strings.SplitN(size, ":", 2)[0]
+		if size != "" {
+			size = designerCapabilitySize(size)
 			if !stringInSet(size, caps.SizePresets) {
 				return fmt.Errorf("size %q is not supported by selected provider", size)
 			}
@@ -355,11 +355,10 @@ func imageCreditMetadata(providerKey, modelName, routeName string, cost srvconfi
 }
 
 func resolvedDesignerSize(size, modelName string) string {
-	size = strings.TrimSpace(size)
+	size = designerCapabilitySize(size)
 	if size == "" || strings.EqualFold(size, "auto") {
 		return "1024x1024"
 	}
-	size = strings.SplitN(size, ":", 2)[0]
 	if strings.Contains(size, "x") {
 		return size
 	}
@@ -371,6 +370,29 @@ func resolvedDesignerSize(size, modelName string) string {
 			return "1024x1536"
 		}
 		return "1024x1024"
+	}
+	return size
+}
+
+func designerCapabilitySize(size string) string {
+	size = strings.TrimSpace(size)
+	if size == "" {
+		return ""
+	}
+	lower := strings.ToLower(size)
+	if lower == "auto" || strings.HasPrefix(lower, "auto:") {
+		return "auto"
+	}
+	if image.IsPixelSize(size) {
+		return size
+	}
+
+	upper := strings.ToUpper(size)
+	for _, tier := range []string{"4K", "2K", "1K"} {
+		suffix := ":" + tier
+		if strings.HasSuffix(upper, suffix) {
+			return strings.TrimSpace(size[:len(size)-len(suffix)])
+		}
 	}
 	return size
 }

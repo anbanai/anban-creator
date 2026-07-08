@@ -247,20 +247,29 @@ func registerVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest
 }
 
 type videoInputContract struct {
-	ProjectID              string                        `json:"project_id"`
-	TaskID                 string                        `json:"task_id"`
-	InferredMode           string                        `json:"inferred_mode"`
-	StrictRemake           bool                          `json:"strict_remake"`
-	References             []videoInputContractReference `json:"references"`
-	RequiredReferenceRoles []string                      `json:"required_reference_roles,omitempty"`
-	RequiredReferenceCount int                           `json:"required_reference_count"`
-	RequiredVideoReference bool                          `json:"required_video_reference"`
-	TargetDurationSeconds  int64                         `json:"target_duration_seconds,omitempty"`
-	TargetDurationSource   string                        `json:"target_duration_source,omitempty"`
-	TargetDurationReason   string                        `json:"target_duration_reason,omitempty"`
-	VideoInputContractFile string                        `json:"video_creator_input_contract_file"`
-	VideoUnderstandingFile string                        `json:"video_understanding_file,omitempty"`
-	PreparationWarnings    []string                      `json:"preparation_warnings,omitempty"`
+	ProjectID               string                           `json:"project_id"`
+	TaskID                  string                           `json:"task_id"`
+	InferredMode            string                           `json:"inferred_mode"`
+	StrictRemake            bool                             `json:"strict_remake"`
+	References              []videoInputContractReference    `json:"references"`
+	RequiredReferenceRoles  []string                         `json:"required_reference_roles,omitempty"`
+	RequiredReferenceCount  int                              `json:"required_reference_count"`
+	RequiredVideoReference  bool                             `json:"required_video_reference"`
+	TargetDurationSeconds   int64                            `json:"target_duration_seconds,omitempty"`
+	TargetDurationSource    string                           `json:"target_duration_source,omitempty"`
+	TargetDurationReason    string                           `json:"target_duration_reason,omitempty"`
+	VideoInputContractFile  string                           `json:"video_creator_input_contract_file"`
+	VideoUnderstandingFile  string                           `json:"video_understanding_file,omitempty"`
+	VideoUnderstandingFiles []videoUnderstandingContractFile `json:"video_understanding_files,omitempty"`
+	PreparationWarnings     []string                         `json:"preparation_warnings,omitempty"`
+}
+
+type videoUnderstandingContractFile struct {
+	FileName      string `json:"file_name"`
+	TaskFileID    string `json:"task_file_id,omitempty"`
+	SourceURL     string `json:"source_url"`
+	ReferenceRole string `json:"reference_role,omitempty"`
+	AnalysisMode  string `json:"analysis_mode"`
 }
 
 type videoInputContractReference struct {
@@ -300,7 +309,7 @@ func prepareVideoGenerationInputsHandler(ctx context.Context, req *mcp.CallToolR
 	if err := materializeOwnedVideoInputReferences(ctx, task, contract); err != nil {
 		return errorResult(err.Error()), nil
 	}
-	if err := analyzeStrictRemakeReferencesDuringPrepare(ctx, task, contract); err != nil {
+	if err := analyzeRequiredVideoReferencesDuringPrepare(ctx, task, contract); err != nil {
 		return errorResult(err.Error()), nil
 	}
 	payload, err := json.MarshalIndent(contract, "", "  ")
@@ -322,6 +331,7 @@ func prepareVideoGenerationInputsHandler(ctx context.Context, req *mcp.CallToolR
 		"inferred_mode":                      contract.InferredMode,
 		"target_duration_seconds":            contract.TargetDurationSeconds,
 		"target_duration_source":             contract.TargetDurationSource,
+		"video_understanding_files":          contract.VideoUnderstandingFiles,
 	}
 	return textResult(resp)
 }
@@ -415,12 +425,12 @@ func videoInputContractMimeType(ref videoInputContractReference, fallback string
 	}
 }
 
-func analyzeStrictRemakeReferencesDuringPrepare(ctx context.Context, task *model.Task, contract *videoInputContract) error {
-	if task == nil || contract == nil || !contract.StrictRemake || !contract.RequiredVideoReference {
+func analyzeRequiredVideoReferencesDuringPrepare(ctx context.Context, task *model.Task, contract *videoInputContract) error {
+	if task == nil || contract == nil || !contract.RequiredVideoReference {
 		return nil
 	}
 	if svcs == nil || svcs.WritingSvc == nil || svcs.TaskSvc == nil {
-		return nil
+		return fmt.Errorf("required video references must be understood with model_routes.video_understanding via native_video; writing/video understanding service not available")
 	}
 	analyzed := 0
 	for _, ref := range contract.References {
@@ -432,32 +442,41 @@ func analyzeStrictRemakeReferencesDuringPrepare(ctx context.Context, task *model
 		if analyzed > 1 {
 			fileName = fmt.Sprintf("video-understanding-%02d.json", analyzed)
 		}
-		taskFileID, err := analyzeAndRegisterVideoUnderstanding(ctx, task.ID, ref, fileName)
+		understandingFile, err := analyzeAndRegisterVideoUnderstanding(ctx, task.ID, ref, fileName, contract.InferredMode)
 		if err != nil {
 			return err
 		}
 		if contract.VideoUnderstandingFile == "" {
 			contract.VideoUnderstandingFile = fileName
 		}
-		if taskFileID != "" {
-			contract.PreparationWarnings = append(contract.PreparationWarnings, fmt.Sprintf("registered %s task_file_id=%s", fileName, taskFileID))
+		contract.VideoUnderstandingFiles = append(contract.VideoUnderstandingFiles, understandingFile)
+		if understandingFile.TaskFileID != "" {
+			contract.PreparationWarnings = append(contract.PreparationWarnings, fmt.Sprintf("registered %s task_file_id=%s", fileName, understandingFile.TaskFileID))
 		}
 	}
 	return nil
 }
 
-func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, ref videoInputContractReference, fileName string) (string, error) {
+func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, ref videoInputContractReference, fileName, inferredMode string) (videoUnderstandingContractFile, error) {
 	if err := service.ValidatePublicHTTPSURLForVideoReference(ref.URL); err != nil {
-		return "", err
+		return videoUnderstandingContractFile{}, err
 	}
 	userID := getUserID(ctx)
 	if err := preflightUnderstandingTokenBilling(ctx, userID, taskID, model.CreditTypeVideoUnderstanding); err != nil {
-		return "", err
+		return videoUnderstandingContractFile{}, err
 	}
-	prompt := buildVideoUnderstandingPrompt(ref.ReferenceRole, "strict_remake", "Extract the full reference timeline, joke structure, visual beats, camera, action, expression, rhythm, must_keep, can_change, and must_not_change for reference-timeline.json.")
+	inferredMode = strings.TrimSpace(inferredMode)
+	if inferredMode == "" {
+		inferredMode = "standard"
+	}
+	purposeHint := ""
+	if strings.TrimSpace(ref.ReferenceRole) != "" {
+		purposeHint = ref.ReferenceRole
+	}
+	prompt := buildVideoUnderstandingPrompt(ref.ReferenceRole, purposeHint, "Extract the full reference timeline, surface facts, deep intent, business intent, latent subtext, joke or reversal structure, visual beats, camera, action, expression, rhythm, must_keep, must_keep_meaning, can_change, can_adapt_meaning, must_not_change, and must_not_break_meaning for reference-timeline.json and shot-plan.md.")
 	analysis, err := svcs.WritingSvc.AnalyzeVideoURLDetailed(ctx, userID, ref.URL, prompt)
 	if err != nil {
-		return "", fmt.Errorf("analyze video reference during preparation: %w", err)
+		return videoUnderstandingContractFile{}, fmt.Errorf("analyze video reference during preparation: %w", err)
 	}
 	understanding := normalizeVideoUnderstanding(analysis.Text)
 	understanding["metadata"] = map[string]any{"source_url": ref.URL}
@@ -465,20 +484,29 @@ func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, re
 	understanding["analysis_mode"] = "native_video"
 	understanding["source_url"] = ref.URL
 	understanding["reference_role"] = strings.TrimSpace(ref.ReferenceRole)
-	understanding["purpose_hint"] = "strict_remake"
+	understanding["purpose_hint"] = inferredMode
 	understanding["usage"] = analysis.Usage
+	if err := validateDeepVideoUnderstanding(understanding); err != nil {
+		return videoUnderstandingContractFile{}, fmt.Errorf("analyze video reference during preparation returned insufficient native video understanding: %w", err)
+	}
 	creditsCharged, err := maybeDeductUnderstandingTokens(ctx, userID, taskID, model.CreditTypeVideoUnderstanding, analysis.Usage)
 	if err != nil {
-		return "", fmt.Errorf("bill video understanding during preparation: %w", err)
+		return videoUnderstandingContractFile{}, fmt.Errorf("bill video understanding during preparation: %w", err)
 	}
 	understanding["credits_charged"] = creditsCharged
 	payload, _ := json.MarshalIndent(understanding, "", "  ")
 	tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, taskID, userID, fileName, strings.NewReader(string(payload)), "application/json", int64(len(payload)))
 	if err != nil {
-		return "", fmt.Errorf("register %s: %w", fileName, err)
+		return videoUnderstandingContractFile{}, fmt.Errorf("register %s: %w", fileName, err)
 	}
 	svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
-	return tf.ID, nil
+	return videoUnderstandingContractFile{
+		FileName:      fileName,
+		TaskFileID:    tf.ID,
+		SourceURL:     ref.URL,
+		ReferenceRole: strings.TrimSpace(ref.ReferenceRole),
+		AnalysisMode:  "native_video",
+	}, nil
 }
 
 func buildVideoInputContract(ctx context.Context, projectID string, task *model.Task, allowNativeAnalysis bool) (*videoInputContract, error) {
@@ -528,10 +556,6 @@ func buildVideoInputContract(ctx context.Context, projectID string, task *model.
 		contract.TargetDurationSeconds = input.HardConstraints.Duration
 		contract.TargetDurationSource = service.VideoDurationSourceUser
 		contract.TargetDurationReason = "user requested explicit target duration"
-	}
-	if allowNativeAnalysis && strict && contract.RequiredVideoReference && svcs != nil && svcs.WritingSvc != nil {
-		contract.VideoUnderstandingFile = "video-understanding.json"
-		contract.PreparationWarnings = append(contract.PreparationWarnings, "native video understanding should be attached to the strict remake plan")
 	}
 	return contract, nil
 }
@@ -720,6 +744,9 @@ func analyzeVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest)
 	understanding["reference_role"] = strings.TrimSpace(referenceRole)
 	understanding["purpose_hint"] = strings.TrimSpace(purposeHint)
 	understanding["usage"] = analysis.Usage
+	if err := validateDeepVideoUnderstanding(understanding); err != nil {
+		return errorResult("analyze video reference returned insufficient native video understanding: " + err.Error()), nil
+	}
 	creditsCharged, err := maybeDeductUnderstandingTokens(ctx, userID, taskID, model.CreditTypeVideoUnderstanding, analysis.Usage)
 	if err != nil {
 		return errorResult("bill video understanding: " + err.Error()), nil
@@ -751,6 +778,7 @@ func buildVideoUnderstandingPrompt(referenceRole, purposeHint, extra string) str
 	var b strings.Builder
 	b.WriteString("你是资深短视频导演和多模态视频理解专家。请完整理解这个参考视频，不要只总结文案或录音。")
 	b.WriteString("从画面、人物、表情、动作、场景、镜头运动、节奏、主体一致性、可复刻点和不可改变点分析。")
+	b.WriteString("更重要的是，请判断视频的潜在内涵和真实意图：创作者想让观众产生什么误会、共情、发笑、信任、焦虑、向往或购买冲动；笑点、反转、隐喻、社会语境、商业转化暗线和必须保留的潜台词是什么。")
 	if strings.TrimSpace(referenceRole) != "" {
 		fmt.Fprintf(&b, "\nreference_role: %s", referenceRole)
 	}
@@ -765,6 +793,9 @@ func buildVideoUnderstandingPrompt(referenceRole, purposeHint, extra string) str
 Return strict JSON only with these fields:
 {
   "visual_summary": "one concise but specific visual summary",
+  "surface_facts": {"people":[],"visuals":[],"actions":[],"expressions":[],"scenes":[],"camera":[],"rhythm":[]},
+  "deep_intent": {"creator_intent":"","subtext":"","emotional_arc":[],"audience_expectation":"","joke_or_twist_mechanism":"","metaphor_or_social_context":""},
+  "business_intent": {"trust_building":[],"pain_points":[],"conversion_triggers":[],"cta_subtext":""},
   "timeline": [{"time_range":"0-3s","visual":"","action":"","expression":"","camera":"","rhythm":"","creative_function":""}],
   "subjects": [],
   "people": [{"role":"","appearance":"","expression":"","gesture":"","consistency_anchors":[]}],
@@ -776,6 +807,9 @@ Return strict JSON only with these fields:
   "must_keep": [],
   "can_change": [],
   "must_not_change": [],
+  "must_keep_meaning": [],
+  "can_adapt_meaning": [],
+  "must_not_break_meaning": [],
   "planning_hints": []
 }`)
 	return b.String()
@@ -808,6 +842,50 @@ func normalizeVideoUnderstanding(raw string) map[string]any {
 		"can_change":      []any{},
 		"must_not_change": []any{},
 		"planning_hints":  []any{"vision response was not valid JSON; raw text preserved in visual_summary"},
+	}
+}
+
+func validateDeepVideoUnderstanding(understanding map[string]any) error {
+	if understanding == nil {
+		return fmt.Errorf("video understanding JSON is empty")
+	}
+	var missing []string
+	for _, field := range []string{"deep_intent", "must_keep_meaning"} {
+		if !meaningfulJSONValue(understanding[field]) {
+			missing = append(missing, field)
+		}
+	}
+	if mode, _ := understanding["analysis_mode"].(string); strings.TrimSpace(mode) != "" && mode != "native_video" {
+		missing = append(missing, "analysis_mode=native_video")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing or empty %s; do not continue with frame sampling, screenshots, image understanding, transcript-only analysis, or marketing-copy guesses", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func meaningfulJSONValue(value any) bool {
+	switch v := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(v) != ""
+	case []any:
+		for _, item := range v {
+			if meaningfulJSONValue(item) {
+				return true
+			}
+		}
+		return false
+	case map[string]any:
+		for _, item := range v {
+			if meaningfulJSONValue(item) {
+				return true
+			}
+		}
+		return false
+	default:
+		return true
 	}
 }
 
@@ -1463,6 +1541,9 @@ func applyVideoInputContractToRequest(ctx context.Context, projectID string, tas
 		if !hasVideo {
 			return nil, fmt.Errorf("video_creator_input.references contains a required video reference, but final references[] contains no video_url")
 		}
+		if err := validatePreparedVideoUnderstandingFiles(ctx, task.ID, contract); err != nil {
+			return nil, err
+		}
 	}
 	return contract, nil
 }
@@ -1519,6 +1600,112 @@ func validateVideoInputContractPlan(contract *videoInputContract, plan *service.
 		}
 	}
 	return nil
+}
+
+func validatePreparedVideoUnderstandingFiles(ctx context.Context, taskID string, contract *videoInputContract) error {
+	if contract == nil || !contract.RequiredVideoReference {
+		return nil
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return fmt.Errorf("video-understanding native_video validation requires task_id")
+	}
+	files, err := videoUnderstandingFilesForValidation(ctx, taskID, contract)
+	if err != nil {
+		return err
+	}
+	for _, required := range contract.References {
+		if !required.Required || required.Type != service.VideoReferenceVideo {
+			continue
+		}
+		info, ok := findUnderstandingFileForReference(files, required)
+		if !ok {
+			return fmt.Errorf("video_creator_input.references video reference %s requires a matching native_video video-understanding artifact before generation", contractReferenceLabel(required))
+		}
+		if strings.TrimSpace(info.AnalysisMode) != "native_video" {
+			return fmt.Errorf("video-understanding artifact for %s must have analysis_mode=native_video", contractReferenceLabel(required))
+		}
+		understanding, err := loadVideoUnderstandingArtifact(ctx, taskID, info)
+		if err != nil {
+			return err
+		}
+		if err := validateDeepVideoUnderstanding(understanding); err != nil {
+			return fmt.Errorf("video-understanding artifact for %s is insufficient: %w", contractReferenceLabel(required), err)
+		}
+	}
+	return nil
+}
+
+func videoUnderstandingFilesForValidation(ctx context.Context, taskID string, contract *videoInputContract) ([]videoUnderstandingContractFile, error) {
+	if len(contract.VideoUnderstandingFiles) > 0 {
+		return contract.VideoUnderstandingFiles, nil
+	}
+	if strings.TrimSpace(contract.VideoUnderstandingFile) == "" {
+		return nil, fmt.Errorf("video_creator_input.references include a required video reference but native_video video-understanding.json is missing; call prepare_video_generation_inputs/analyze_video_reference with model_routes.video_understanding")
+	}
+	var videoRefs []videoInputContractReference
+	for _, ref := range contract.References {
+		if ref.Required && ref.Type == service.VideoReferenceVideo {
+			videoRefs = append(videoRefs, ref)
+		}
+	}
+	if len(videoRefs) != 1 {
+		return nil, fmt.Errorf("video-understanding files must be source_url matched for multiple video references")
+	}
+	return []videoUnderstandingContractFile{{
+		FileName:      contract.VideoUnderstandingFile,
+		SourceURL:     videoRefs[0].URL,
+		ReferenceRole: videoRefs[0].ReferenceRole,
+		AnalysisMode:  "native_video",
+	}}, nil
+}
+
+func findUnderstandingFileForReference(files []videoUnderstandingContractFile, required videoInputContractReference) (videoUnderstandingContractFile, bool) {
+	for _, file := range files {
+		if strings.TrimSpace(file.SourceURL) != "" && strings.TrimSpace(file.SourceURL) == strings.TrimSpace(required.URL) {
+			return file, true
+		}
+	}
+	return videoUnderstandingContractFile{}, false
+}
+
+func loadVideoUnderstandingArtifact(ctx context.Context, taskID string, info videoUnderstandingContractFile) (map[string]any, error) {
+	if svcs == nil || svcs.TaskSvc == nil || svcs.TaskSvc.Repository() == nil || svcs.TaskSvc.Repository().TaskFiles() == nil {
+		return nil, fmt.Errorf("task file repository is required to validate video-understanding artifacts")
+	}
+	taskFileID := strings.TrimSpace(info.TaskFileID)
+	if taskFileID == "" {
+		files, err := svcs.TaskSvc.Repository().TaskFiles().FindByTaskID(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range files {
+			if file == nil {
+				continue
+			}
+			if filepath.Base(strings.TrimSpace(file.FileName)) == filepath.Base(strings.TrimSpace(info.FileName)) ||
+				filepath.Base(strings.TrimSpace(file.FilePath)) == filepath.Base(strings.TrimSpace(info.FileName)) {
+				taskFileID = file.ID
+				break
+			}
+		}
+	}
+	if taskFileID == "" {
+		return nil, fmt.Errorf("video-understanding artifact %s is not registered as a task file", strings.TrimSpace(info.FileName))
+	}
+	stream, _, err := svcs.TaskSvc.GetFileStream(ctx, taskFileID)
+	if err != nil {
+		return nil, fmt.Errorf("load video-understanding artifact %s: %w", strings.TrimSpace(info.FileName), err)
+	}
+	defer stream.Close()
+	payload, err := io.ReadAll(stream)
+	if err != nil {
+		return nil, fmt.Errorf("read video-understanding artifact %s: %w", strings.TrimSpace(info.FileName), err)
+	}
+	var understanding map[string]any
+	if err := json.Unmarshal(payload, &understanding); err != nil {
+		return nil, fmt.Errorf("parse video-understanding artifact %s: %w", strings.TrimSpace(info.FileName), err)
+	}
+	return understanding, nil
 }
 
 func findVideoReferenceInRequest(refs []service.VideoReferenceInput, required videoInputContractReference) int {

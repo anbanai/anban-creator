@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -27,9 +27,8 @@ import { createTaskHref, hasUsableModelConfig, projectsReturnHref } from '@/lib/
 import { uploadToOSS } from '@/lib/direct-upload'
 import { contentTypeLabel } from '@/lib/labels'
 import { queryKeys } from '@/lib/query-keys'
-import { buildDashboardBlocker, buildProjectReadinessSummary } from '@/lib/studio-ux'
+import { buildDashboardBlocker } from '@/lib/studio-ux'
 import { getLocalExecutorStatus, isDesktop } from '@/lib/tauri'
-import { cn } from '@/lib/utils'
 import { isVideoCreator } from '@/lib/video-platforms'
 import type { Project } from '@/types'
 
@@ -55,7 +54,6 @@ export default function DashboardPage() {
   const desktopMode = isDesktop()
 
   const [prompt, setPrompt] = useState('')
-  const [selectedProjectId, setSelectedProjectId] = useState('')
   const [attachments, setAttachments] = useState<AIEntryAttachment[]>([])
   const [uploading, setUploading] = useState<UploadingFile[]>([])
   const [entryError, setEntryError] = useState<EntryError | null>(null)
@@ -88,7 +86,7 @@ export default function DashboardPage() {
   })
 
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
-  const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
+  const selectedProject = activeProjects[0]
   const localExecutionReady = desktopMode && Boolean(localExecutorStatus?.available)
   const dashboardTitle = selectedProject ? `今天用「${selectedProject.name}」创作什么？` : '先创建一个项目，再开始创作。'
   const newTaskHref = selectedProject ? createTaskHref({ type: selectedProject.platform, projectId: selectedProject.id, intent: 'new' }) : createTaskHref()
@@ -96,16 +94,6 @@ export default function DashboardPage() {
   const canCreateSchedule = canCreatePlanForProject(selectedProject)
   const ExecutionIcon = localExecutionReady ? Monitor : Cloud
   const executionLabel = localExecutionReady ? '本地模式' : '云端模式'
-
-  useEffect(() => {
-    if (activeProjects.length === 0) {
-      setSelectedProjectId('')
-      return
-    }
-    if (!selectedProjectId || !activeProjects.some((project) => project.id === selectedProjectId)) {
-      setSelectedProjectId(activeProjects[0].id)
-    }
-  }, [activeProjects, selectedProjectId])
 
   const submitMutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.aiEntry.submit>[0]) => api.aiEntry.submit(payload),
@@ -229,14 +217,6 @@ export default function DashboardPage() {
             {dashboardTitle}
           </h1>
         </div>
-
-        {activeProjects.length > 0 && (
-          <ProjectPicker
-            projects={activeProjects}
-            selectedProject={selectedProject}
-            onSelect={setSelectedProjectId}
-          />
-        )}
 
         <div className="mx-auto w-full overflow-hidden rounded-xl border border-border/80 bg-white shadow-[0_10px_35px_rgba(15,23,42,0.10)] dark:bg-card">
           <textarea
@@ -373,50 +353,6 @@ export default function DashboardPage() {
       {hasError ? (
         <QueryErrorState onRetry={() => { refetchProjects() }} />
       ) : null}
-    </div>
-  )
-}
-
-function ProjectPicker({
-  projects,
-  selectedProject,
-  onSelect,
-}: {
-  projects: Project[]
-  selectedProject?: Project
-  onSelect: (id: string) => void
-}) {
-  return (
-    <div role="region" aria-label="首页项目选择" className="mx-auto flex w-full flex-wrap justify-center gap-2">
-      {projects.map((project) => {
-        const selected = project.id === selectedProject?.id
-        const readiness = buildProjectReadinessSummary(project)
-        return (
-          <button
-            key={project.id}
-            type="button"
-            aria-label={`选择项目 ${project.name}`}
-            aria-pressed={selected}
-            onClick={() => onSelect(project.id)}
-            className={cn(
-              'inline-flex min-h-12 max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-              selected
-                ? 'border-foreground/20 bg-white text-foreground shadow-sm dark:bg-card'
-                : 'border-border/80 bg-white/70 text-muted-foreground hover:bg-white hover:text-foreground dark:bg-card/70 dark:hover:bg-card',
-            )}
-          >
-            <PlatformAvatar avatarUrl={project.avatar_url} name={project.name} platform={project.platform} size="sm" />
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-medium">{project.name}</span>
-              <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                <span>{contentTypeLabel[project.platform] || project.platform}</span>
-                <span aria-hidden="true">·</span>
-                <span>{readiness.headline}</span>
-              </span>
-            </span>
-          </button>
-        )
-      })}
     </div>
   )
 }

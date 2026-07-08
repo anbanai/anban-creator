@@ -26,6 +26,9 @@ func TestVideoAgentsUseDedicatedCreatorAndEditorContracts(t *testing.T) {
 	for _, want := range []string{
 		"name: videocreator",
 		"seedance-20",
+		"analyze_video_reference",
+		"video-understanding.json",
+		"深层意图",
 		"create_video_generation_job",
 		"query_video_generation_job",
 		"download_video_generation_results",
@@ -63,7 +66,7 @@ func TestVideoAgentsUseDedicatedCreatorAndEditorContracts(t *testing.T) {
 
 	codexCreator := readRepoFile(t, "../../codex/agents/videocreator.toml")
 	codexEditor := readRepoFile(t, "../../codex/agents/videoeditor.toml")
-	for _, want := range []string{`name = "videocreator"`, "seedance-20", "submit_agent_feedback(agent_name=\"videocreator\""} {
+	for _, want := range []string{`name = "videocreator"`, "seedance-20", "analyze_video_reference", "video-understanding.json", "深层意图", "submit_agent_feedback(agent_name=\"videocreator\""} {
 		if !strings.Contains(codexCreator, want) {
 			t.Fatalf("codex videocreator.toml missing %q", want)
 		}
@@ -91,6 +94,9 @@ func TestVideoSkillContractsUseVideoCreatorInputReferences(t *testing.T) {
 		for _, want := range []string{
 			"videocreator.input",
 			"video_creator_input.references",
+			"deep_intent",
+			"must_keep_meaning",
+			"Never fall back to frame sampling",
 		} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("%s missing %q", path, want)

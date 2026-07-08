@@ -559,7 +559,7 @@ func main() {
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
 		}
 		if repo != nil {
-			if writingLLMClient != nil {
+			if writingLLMClient != nil || imageUnderstandingClient != nil || videoUnderstandingClient != nil {
 				writersDir := ""
 				if cfg.Claude.PluginDir != "" {
 					writersDir = filepath.Join(cfg.Claude.PluginDir, "writers")
@@ -573,6 +573,9 @@ func main() {
 				}
 				if modelConfigSvc != nil {
 					writingSvc.SetModelConfigService(modelConfigSvc)
+				}
+				if writingLLMClient == nil {
+					log.Warn().Msg("writing LLM client not configured; understanding-only MCP tools remain available when image/video understanding routes are configured")
 				}
 			} else {
 				log.Warn().Msg("LLM client not configured (set model_routes.writing provider/model), writing tools unavailable")

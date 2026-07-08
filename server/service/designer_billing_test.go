@@ -230,6 +230,31 @@ func TestDesignerCreateGenerationValidatesProviderCapabilities(t *testing.T) {
 	}
 }
 
+func TestDesignerValidateProviderCapabilitiesAcceptsRatioWithResolutionTier(t *testing.T) {
+	caps := DesignerProviderCapabilities{
+		SizePresets: []string{"1:1", "3:4", "4:3", "16:9"},
+		MaxBatch:    1,
+	}
+
+	err := validateDesignerGenerateRequest(DesignerGenerateRequest{
+		Prompt: "poster",
+		Size:   "3:4:4K",
+		N:      1,
+	}, caps)
+	if err != nil {
+		t.Fatalf("validateDesignerGenerateRequest() error = %v, want 3:4:4K to match 3:4 preset", err)
+	}
+}
+
+func TestResolvedDesignerSizeStripsResolutionTierWithoutBreakingRatios(t *testing.T) {
+	if got := resolvedDesignerSize("3:4:4K", "gpt-image-2"); got != "1024x1536" {
+		t.Fatalf("resolvedDesignerSize(3:4:4K, gpt-image-2) = %q, want 1024x1536", got)
+	}
+	if got := resolvedDesignerSize("3:4:4K", "gemini-2.5-flash-image-preview"); got != "3:4" {
+		t.Fatalf("resolvedDesignerSize(3:4:4K, gemini) = %q, want 3:4", got)
+	}
+}
+
 func TestDesignerExecuteGenerationFailsAndRefundsWhenGPTImage2UsageMissing(t *testing.T) {
 	svc, repo, db := setupDesignerBillingTest(t)
 	ctx := context.Background()

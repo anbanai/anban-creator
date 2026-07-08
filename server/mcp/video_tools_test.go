@@ -355,6 +355,31 @@ func createMCPVideoTaskWithInput(t *testing.T, repo repository.Repository, userI
 	return task.ID
 }
 
+func readMCPTaskFileText(t *testing.T, ctx context.Context, repo repository.Repository, taskID, fileName string) string {
+	t.Helper()
+	files, err := repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("find task files: %v", err)
+	}
+	for _, file := range files {
+		if file == nil || filepath.Base(file.FileName) != fileName {
+			continue
+		}
+		stream, _, err := svcs.TaskSvc.GetFileStream(ctx, file.ID)
+		if err != nil {
+			t.Fatalf("open task file %s: %v", fileName, err)
+		}
+		defer stream.Close()
+		payload, err := io.ReadAll(stream)
+		if err != nil {
+			t.Fatalf("read task file %s: %v", fileName, err)
+		}
+		return string(payload)
+	}
+	t.Fatalf("task file %s not found", fileName)
+	return ""
+}
+
 func modelIDForVideoKey(t *testing.T, key string) string {
 	t.Helper()
 	spec, ok := service.DefaultVideoModelCatalog()[key]
@@ -449,6 +474,9 @@ func (f *fakeVideoVisionLLM) videoResponse() (string, error) {
 	}
 	return `{
 		"visual_summary":"办公室里一位效率博主面对镜头讲解会议记录方法。",
+		"surface_facts":{"people":["效率博主"],"visuals":["办公室白板"],"actions":["指向白板","讲解"],"expressions":["自信","亲和"],"camera":["中景固定镜头"],"rhythm":["快节奏口播"]},
+		"deep_intent":{"creator_intent":"用高密度口播建立专业可信感，让观众相信会议记录方法可以立刻提升效率。","subtext":"真正卖点不是白板，而是把混乱会议变成可控流程的安全感。","emotional_arc":["问题压力","方法出现","获得掌控感"],"audience_expectation":"观众期待快速拿到可复制技巧。","joke_or_twist_mechanism":"无笑点，依靠利益点反差。","metaphor_or_social_context":"会议低效代表职场失控。"},
+		"business_intent":{"trust_building":["专业场景","清晰手势"],"pain_points":["会议混乱","记录低效"],"conversion_triggers":["开头三秒利益点"],"cta_subtext":"继续了解工具或方法。"},
 		"timeline":[{"time_range":"0-3s","visual":"人物看向镜头，右手指向白板","action":"开场钩子"}],
 		"subjects":["效率博主"],
 		"people":[{"role":"主体","appearance":"黑色衬衫，短发","expression":"自信、亲和"}],
@@ -460,8 +488,23 @@ func (f *fakeVideoVisionLLM) videoResponse() (string, error) {
 		"must_keep":["黑色衬衫主体身份","办公室场景","快节奏口播"],
 		"can_change":["手势细节","白板内容"],
 		"must_not_change":["主体年龄气质","职业场景"],
+		"must_keep_meaning":["职场混乱被方法重新掌控","开头三秒必须给明确效率收益"],
+		"can_adapt_meaning":["白板内容可以替换成其他效率工具画面"],
+		"must_not_break_meaning":["不能拍成纯展示空间的空镜","不能削弱专业可信感"],
 		"planning_hints":["每个镜头重复主体身份锚点","开头三秒给明确利益点"]
 	}`, nil
+}
+
+func installFakeVideoUnderstanding(t *testing.T, repo repository.Repository, vision *fakeVideoVisionLLM) *fakeVideoVisionLLM {
+	t.Helper()
+	if vision == nil {
+		vision = &fakeVideoVisionLLM{}
+	}
+	logger := zerolog.New(io.Discard)
+	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
+	writingSvc.SetVideoUnderstandingClient(vision)
+	svcs.WritingSvc = writingSvc
+	return vision
 }
 
 func TestAnalyzeVideoReferenceUsesVisionModelAndRegistersArtifact(t *testing.T) {
@@ -511,6 +554,128 @@ func TestAnalyzeVideoReferenceUsesVisionModelAndRegistersArtifact(t *testing.T) 
 	}
 	if !found {
 		t.Fatalf("registered task files did not include video-understanding.json: %#v", files)
+	}
+}
+
+func TestPrepareVideoGenerationInputsAnalyzesAnyRequiredVideoReference(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/video-artifact.json"}
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	prompt := "基于这个上传素材的节奏和镜头语言生成一条种草短视频"
+	taskID := createMCPVideoTaskWithInput(t, repo, userID, projectID, prompt, model.VideoInput{
+		Brief: prompt,
+		References: []model.VideoReferenceAsset{{
+			Type:                 service.VideoReferenceVideo,
+			URL:                  "https://cdn.example.com/reference.mp4",
+			ReferenceRole:        "motion reference",
+			InputDurationSeconds: 9,
+		}},
+	})
+	vision := &fakeVideoVisionLLM{}
+	logger := zerolog.New(io.Discard)
+	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
+	writingSvc.SetVideoUnderstandingClient(vision)
+	svcs.WritingSvc = writingSvc
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(taskID) + `
+	}`)}}
+	result, err := prepareVideoGenerationInputsHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("prepareVideoGenerationInputsHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected prepare error: %s", callToolText(result))
+	}
+	if len(vision.calls) != 1 || vision.calls[0].kind != "video" {
+		t.Fatalf("vision calls = %#v, want one native video analysis", vision.calls)
+	}
+	text := callToolText(result)
+	for _, want := range []string{`"analysis_mode":"native_video"`, `"video_understanding_files"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("prepare response missing %q: %s", want, text)
+		}
+	}
+	understanding := readMCPTaskFileText(t, ctx, repo, taskID, "video-understanding.json")
+	for _, want := range []string{`"deep_intent"`, `"must_keep_meaning"`, `"purpose_hint": "standard"`} {
+		if !strings.Contains(understanding, want) {
+			t.Fatalf("video-understanding artifact missing %q: %s", want, understanding)
+		}
+	}
+}
+
+func TestPrepareVideoGenerationInputsRejectsShallowVideoUnderstanding(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/video-artifact.json"}
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	prompt := "主体不变，照着这个段子完全复刻"
+	taskID := createMCPVideoTaskWithInput(t, repo, userID, projectID, prompt, model.VideoInput{
+		Brief: prompt,
+		References: []model.VideoReferenceAsset{{
+			Type:                 service.VideoReferenceVideo,
+			URL:                  "https://cdn.example.com/reference.mp4",
+			ReferenceRole:        "joke timeline",
+			InputDurationSeconds: 12,
+		}},
+	})
+	vision := &fakeVideoVisionLLM{response: `{"visual_summary":"一个人在办公室说话。","timeline":[{"time_range":"0-3s","visual":"说话"}]}`}
+	logger := zerolog.New(io.Discard)
+	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
+	writingSvc.SetVideoUnderstandingClient(vision)
+	svcs.WritingSvc = writingSvc
+
+	result, err := prepareVideoGenerationInputsHandler(ctx, &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(taskID) + `
+	}`)}})
+	if err != nil {
+		t.Fatalf("prepareVideoGenerationInputsHandler returned error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected shallow video understanding to fail closed")
+	}
+	text := callToolText(result)
+	if !strings.Contains(text, "deep_intent") || !strings.Contains(text, "must_keep_meaning") {
+		t.Fatalf("unexpected error text: %q", text)
+	}
+}
+
+func TestPrepareVideoGenerationInputsAnalyzesMultipleVideoReferences(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/video-artifact.json"}
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	prompt := "结合两个上传素材的镜头节奏和情绪结构，生成一条推广短视频"
+	taskID := createMCPVideoTaskWithInput(t, repo, userID, projectID, prompt, model.VideoInput{
+		Brief: prompt,
+		References: []model.VideoReferenceAsset{
+			{Type: service.VideoReferenceVideo, URL: "https://cdn.example.com/reference-a.mp4", ReferenceRole: "rhythm reference", InputDurationSeconds: 8},
+			{Type: service.VideoReferenceVideo, URL: "https://cdn.example.com/reference-b.mp4", ReferenceRole: "emotion reference", InputDurationSeconds: 7},
+		},
+	})
+	vision := installFakeVideoUnderstanding(t, repo, nil)
+
+	result, err := prepareVideoGenerationInputsHandler(ctx, &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(taskID) + `
+	}`)}})
+	if err != nil {
+		t.Fatalf("prepareVideoGenerationInputsHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected prepare error: %s", callToolText(result))
+	}
+	if len(vision.calls) != 2 {
+		t.Fatalf("vision calls = %#v, want two native video analyses", vision.calls)
+	}
+	text := callToolText(result)
+	for _, want := range []string{"video-understanding.json", "video-understanding-02.json", "https://cdn.example.com/reference-a.mp4", "https://cdn.example.com/reference-b.mp4"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("prepare response missing %q: %s", want, text)
+		}
 	}
 }
 
@@ -1258,6 +1423,7 @@ func TestPrepareVideoGenerationInputsWritesStrictReferenceContract(t *testing.T)
 			{Type: service.VideoReferenceVideo, URL: "https://cdn.example.com/reference.mp4", FileName: "reference.mp4", InputDurationSeconds: 45},
 		},
 	})
+	installFakeVideoUnderstanding(t, repo, nil)
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
@@ -1320,6 +1486,7 @@ func TestPrepareVideoGenerationInputsMaterializesOwnedStudioReferences(t *testin
 			{Type: service.VideoReferenceVideo, URL: "https://oss.example.com/uploads/video-references/user-1/reference.mp4", FileName: "reference.mp4", InputDurationSeconds: 45},
 		},
 	})
+	installFakeVideoUnderstanding(t, repo, nil)
 
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 		"project_id":` + strconv.Quote(projectID) + `,
@@ -1434,6 +1601,7 @@ func TestBuildVideoPlanRequiresTaskVideoInputReferences(t *testing.T) {
 			{Type: service.VideoReferenceVideo, URL: "https://cdn.example.com/reference.mp4", ReferenceRole: "joke timeline", InputDurationSeconds: 45},
 		},
 	})
+	installFakeVideoUnderstanding(t, repo, nil)
 	prepareReq := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 		"project_id":` + strconv.Quote(projectID) + `,
 		"task_id":` + strconv.Quote(taskID) + `
@@ -1518,6 +1686,80 @@ func TestBuildVideoPlanRequiresPreparedVideoInputContract(t *testing.T) {
 	}
 }
 
+func TestBuildVideoPlanRequiresNativeVideoUnderstandingArtifact(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/video-input-contract.json"}
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0"},
+		DefaultModel:  "seedance-2.0",
+		MaxResolution: "1080p",
+		MaxDuration:   120,
+	})
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	prompt := "主体不变，照着这个段子完全复刻"
+	taskID := createMCPVideoTaskWithInput(t, repo, userID, projectID, prompt, model.VideoInput{
+		Brief: prompt,
+		References: []model.VideoReferenceAsset{{
+			Type:                 service.VideoReferenceVideo,
+			URL:                  "https://cdn.example.com/reference.mp4",
+			ReferenceRole:        "joke timeline",
+			InputDurationSeconds: 10,
+		}},
+	})
+	contract := `{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(taskID) + `,
+		"inferred_mode":"strict_remake",
+		"strict_remake":true,
+		"references":[{
+			"type":"video_url",
+			"url":"https://cdn.example.com/reference.mp4",
+			"reference_role":"joke timeline",
+			"input_duration_seconds":10,
+			"required":true
+		}],
+		"required_reference_roles":["joke timeline"],
+		"required_reference_count":1,
+		"required_video_reference":true,
+		"target_duration_seconds":10,
+		"target_duration_source":"reference_video",
+		"video_creator_input_contract_file":"video-input-contract.json"
+	}`
+	if _, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, taskID, userID, "video-input-contract.json", strings.NewReader(contract), "application/json", int64(len(contract))); err != nil {
+		t.Fatalf("upload prepared contract: %v", err)
+	}
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
+			"prompt":"主体不变，照着这个段子完全复刻",
+			"references":[
+				{"type":"video_url","url":"https://cdn.example.com/reference.mp4","reference_role":"joke timeline","input_duration_seconds":10}
+			]
+		}`)},
+	}
+	result, err := buildVideoGenerationPlanHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("buildVideoGenerationPlanHandler returned error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected build to require native video-understanding artifact")
+	}
+	text := callToolText(result)
+	if !strings.Contains(text, "video-understanding") || !strings.Contains(text, "native_video") {
+		t.Fatalf("unexpected error text: %q", text)
+	}
+}
+
 func TestBuildVideoPlanUsesPreparedMaterializedReferences(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
@@ -1550,6 +1792,7 @@ func TestBuildVideoPlanUsesPreparedMaterializedReferences(t *testing.T) {
 			{Type: service.VideoReferenceVideo, URL: "https://oss.example.com/uploads/video-references/user-1/reference.mp4", FileName: "reference.mp4", InputDurationSeconds: 45},
 		},
 	})
+	installFakeVideoUnderstanding(t, repo, nil)
 	prepareReq := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 		"project_id":` + strconv.Quote(projectID) + `,
 		"task_id":` + strconv.Quote(taskID) + `
@@ -1617,6 +1860,7 @@ func TestBuildVideoPlanUsesTaskVideoInputReferenceDurationForStrictRemake(t *tes
 			{Type: service.VideoReferenceVideo, URL: "https://cdn.example.com/reference.mp4", ReferenceRole: "full remake reference", InputDurationSeconds: 45},
 		},
 	})
+	installFakeVideoUnderstanding(t, repo, nil)
 	prepareReq := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 		"project_id":` + strconv.Quote(projectID) + `,
 		"task_id":` + strconv.Quote(taskID) + `

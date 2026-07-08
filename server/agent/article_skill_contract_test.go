@@ -295,6 +295,118 @@ func TestArticleSkillContracts_WechatVisualsForbidDiversionCues(t *testing.T) {
 	}
 }
 
+func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
+	root := articleContractRepoRoot(t)
+
+	for _, path := range []string{
+		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
+		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
+	} {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{
+				"cover_hook",
+				"visual_metaphor",
+				"thumbnail_strategy",
+				"anti_generic_constraints",
+				"cover_quality_gate",
+				"cover-prompt.md",
+				"final-review.md",
+				"viral-audit.md",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing visual quality gate term %q", path, term)
+				}
+			}
+		})
+	}
+
+	for _, path := range []string{
+		filepath.Join(root, "claudecode", "skills", "article-cover-design", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "article-cover-design", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "article-cover-design", "SKILL.md"),
+	} {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{
+				"final_title",
+				"digest_hook",
+				"cover_hook",
+				"thumbnail_strategy",
+				"anti_generic_constraints",
+				"visual_quality_scorecard",
+				"title_cover_digest_alignment",
+				"thumbnail_readability",
+				"contrast_focus",
+				"specificity_not_generic",
+				"series_distinctiveness",
+				"hard_no_forbidden_cues",
+				"通用养生水墨背景",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing cover quality scorecard term %q", path, term)
+				}
+			}
+		})
+	}
+
+	for _, path := range []string{
+		filepath.Join(root, "claudecode", "skills", "article-visual-design", "references", "cover.md"),
+		filepath.Join(root, "openclaw", "skills", "article-visual-design", "references", "cover.md"),
+		filepath.Join(root, "codex", "skills", "article-visual-design", "references", "cover.md"),
+	} {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			if !strings.Contains(text, "受控文字策略") {
+				t.Fatalf("%s must point cover prompts at the controlled text policy", path)
+			}
+			if strings.Contains(text, "no text overlays") {
+				t.Fatalf("%s must not retain stale unconditional no-text prompt language", path)
+			}
+		})
+	}
+
+	for _, path := range []string{
+		filepath.Join(root, "claudecode", "skills", "article-visual-design", "references", "content.md"),
+		filepath.Join(root, "openclaw", "skills", "article-visual-design", "references", "content.md"),
+		filepath.Join(root, "codex", "skills", "article-visual-design", "references", "content.md"),
+	} {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{
+				"反同质化",
+				"连续 3 张",
+				"ref_image_path 只传递\"风格语言\"",
+				"不得复刻封面主体",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing content visual diversity term %q", path, term)
+				}
+			}
+		})
+	}
+
+	for _, path := range []string{
+		filepath.Join(root, "claudecode", "skills", "article-cover-design", "references", "examples.md"),
+		filepath.Join(root, "openclaw", "skills", "article-cover-design", "references", "examples.md"),
+		filepath.Join(root, "codex", "skills", "article-cover-design", "references", "examples.md"),
+	} {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{
+				"泛水墨模板感",
+				"三伏贴重复",
+				"绿豆汤主题不清",
+				"黑白人像风格漂移",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing screenshot-derived cover example %q", path, term)
+				}
+			}
+		})
+	}
+}
+
 func TestArticleSkillContracts_InspectArticleMCPRemoved(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, path := range []string{
