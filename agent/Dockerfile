@@ -30,8 +30,10 @@ RUN npm install -g @anthropic-ai/claude-code
 
 COPY --from=builder /out/anban /usr/local/bin/anban
 COPY claudecode/   /anbanai/
+COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
 
 ENV CLAUDE_PLUGIN_ROOT=/anbanai
+ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage
 
 USER node
 RUN git config --global http.version HTTP/1.1

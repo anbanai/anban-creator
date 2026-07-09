@@ -534,7 +534,7 @@ func buildMontageProfileBlock(ch *model.Project, task *model.Task) map[string]an
 		"output_dir":            "output/montage",
 		"required_artifacts":    []string{"final.mp4", "delivery-manifest.json"},
 		"artifact_roles":        []string{"final_video", "delivery_manifest", "source_manifest", "timeline", "subtitles", "audio", "run_log", "failure_diagnosis"},
-		"runner_contract":       "Agent prepares montage-input.json and montage-project.json, runs the Montage adapter against third_party/OpenMontage, then registers task files by artifact role.",
+		"runner_contract":       "Agent prepares montage-input.json and montage-project.json, runs the Montage adapter from $ANBAN_MONTAGE_SUBMODULE_PATH when set, otherwise third_party/OpenMontage, then registers task files by artifact role.",
 	}
 }
 

@@ -42,8 +42,10 @@ COPY --from=builder /anban /usr/local/bin/anban
 
 # Copy plugin files (claudecode/ contains agents/, skills/, hooks/, writers/)
 COPY claudecode/ /anbanai/
+COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
 
 ENV CLAUDE_PLUGIN_ROOT=/anbanai
+ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage
 
 # Install plugin as non-root user (Claude CLI requires this for --scope user)
 USER node

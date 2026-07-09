@@ -351,6 +351,7 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 		env = append(env, fmt.Sprintf("ANBAN_DEFAULT_PROJECT=%s", opts.Project.ID))
 	}
 	env = append(env, fmt.Sprintf("ANBAN_API_URL=%s", e.serverURL))
+	env = append(env, fmt.Sprintf("%s=%s", MontageSubmoduleEnvName, ContainerMontageSubmodulePath))
 	return env
 }
 

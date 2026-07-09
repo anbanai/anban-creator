@@ -2,6 +2,7 @@ package agent
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -41,6 +42,19 @@ func TestDockerExecutorPassesContainerAutoMemoryDirectory(t *testing.T) {
 	cmd := e.buildAgentCommand(opts, "sonnet", 100, "/workspace/task-1", "key")
 	if got, want := flagValue(cmd, "--auto-memory-directory"), "/workspace/task-1/.claude/memory"; got != want {
 		t.Fatalf("--auto-memory-directory = %q, want %q", got, want)
+	}
+}
+
+func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
+	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
+
+	env := e.buildAgentEnv(&ExecutionOptions{
+		Task:    &model.Task{ID: "task-1", Type: model.PlatformMontage},
+		Project: &model.Project{ID: "project-1"},
+	})
+
+	if !slices.Contains(env, "ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage") {
+		t.Fatalf("env = %#v, want Montage runtime path", env)
 	}
 }
 

@@ -1092,6 +1092,9 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	if !ok || defaults.DefaultPipeline != "social-short" || defaults.Preferences.DurationSeconds != 45 {
 		t.Fatalf("montage.defaults = %#v, want project montage defaults", montage["defaults"])
 	}
+	if contract, ok := montage["runner_contract"].(string); !ok || !strings.Contains(contract, "ANBAN_MONTAGE_SUBMODULE_PATH") {
+		t.Fatalf("runner_contract = %#v, want Montage runtime env path hint", montage["runner_contract"])
+	}
 }
 
 func TestParseStringArray(t *testing.T) {

@@ -34,6 +34,18 @@ func filterAgentEnv(env map[string]string) map[string]string {
 	return filtered
 }
 
+func montageSubmoduleRuntimePath(pluginDir string) string {
+	if strings.TrimSpace(pluginDir) != "" {
+		if absPluginDir, err := filepath.Abs(pluginDir); err == nil {
+			candidate := filepath.Join(filepath.Dir(absPluginDir), "third_party", "OpenMontage")
+			if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+				return candidate
+			}
+		}
+	}
+	return ContainerMontageSubmodulePath
+}
+
 // UserPromptParams holds the inputs for BuildUserPrompt. Struct keeps call sites
 // readable as fields are added and prevents argument-order bugs.
 //
@@ -599,6 +611,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 	// Environment variables (auth tokens, API keys, etc.).
 	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
+	sdkOpts = append(sdkOpts, claudecode.WithEnvVar(MontageSubmoduleEnvName, montageSubmoduleRuntimePath(e.pluginDir)))
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
 	// ${ANBAN_API_KEY} for the Anban Creator MCP server.

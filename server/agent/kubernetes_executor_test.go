@@ -101,6 +101,7 @@ func TestKubernetesAgentEnvIncludesServerProjectAndClaudeEnv(t *testing.T) {
 		"ANTHROPIC_BASE_URL=https://anthropic.example.com",
 		"ANBAN_API_URL=http://anban-server:8080",
 		"ANBAN_DEFAULT_PROJECT=project-1",
+		"ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage",
 	} {
 		if !slices.Contains(env, want) {
 			t.Fatalf("env missing %q in %#v", want, env)

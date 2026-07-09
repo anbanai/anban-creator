@@ -43,6 +43,34 @@ func TestExecutionOptionsDoesNotExposeModelOverride(t *testing.T) {
 	}
 }
 
+func TestMontageSubmoduleRuntimePathUsesRepoSiblingWhenAvailable(t *testing.T) {
+	root := t.TempDir()
+	pluginDir := filepath.Join(root, "claudecode")
+	montageDir := filepath.Join(root, "third_party", "OpenMontage")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatalf("create plugin dir: %v", err)
+	}
+	if err := os.MkdirAll(montageDir, 0o755); err != nil {
+		t.Fatalf("create montage dir: %v", err)
+	}
+
+	got := montageSubmoduleRuntimePath(pluginDir)
+	want, err := filepath.Abs(montageDir)
+	if err != nil {
+		t.Fatalf("abs montage dir: %v", err)
+	}
+	if got != want {
+		t.Fatalf("montageSubmoduleRuntimePath = %q, want %q", got, want)
+	}
+}
+
+func TestMontageSubmoduleRuntimePathFallsBackToContainerPath(t *testing.T) {
+	got := montageSubmoduleRuntimePath(filepath.Join(t.TempDir(), "claudecode"))
+	if got != ContainerMontageSubmodulePath {
+		t.Fatalf("montageSubmoduleRuntimePath = %q, want %q", got, ContainerMontageSubmodulePath)
+	}
+}
+
 func TestBuildAppConfig(t *testing.T) {
 	tests := []struct {
 		name         string

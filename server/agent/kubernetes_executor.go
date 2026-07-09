@@ -313,6 +313,7 @@ func (e *KubernetesExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 		env = append(env, fmt.Sprintf("ANBAN_DEFAULT_PROJECT=%s", opts.Project.ID))
 	}
 	env = append(env, fmt.Sprintf("ANBAN_API_URL=%s", strings.TrimRight(e.serverURL, "/")))
+	env = append(env, fmt.Sprintf("%s=%s", MontageSubmoduleEnvName, ContainerMontageSubmodulePath))
 	return env
 }
 
