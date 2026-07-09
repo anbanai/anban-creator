@@ -51,6 +51,7 @@ type TaskService struct {
 	videoCatalog          VideoModelCatalog
 	videoCreditMultiplier int
 	videoBilling          srvconfig.BillingConfig
+	openmontageCfg        srvconfig.OpenMontageConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
 	ilinkNotifier  *IlinkNotifier
@@ -102,6 +103,7 @@ func NewTaskService(
 		executionTimeout: 60 * time.Minute,
 		persistTimeout:   10 * time.Minute,
 	}
+	svc.openmontageCfg = defaultOpenMontageServiceConfig()
 
 	// Start listening for cross-replica cancel events.
 	if pubsub != nil && pubsub.Available() {
@@ -139,6 +141,19 @@ func (s *TaskService) SetVideoBillingConfig(billing srvconfig.BillingConfig) {
 		return
 	}
 	s.videoBilling = billing
+}
+
+func (s *TaskService) SetOpenMontageConfig(cfg srvconfig.OpenMontageConfig) {
+	if s == nil {
+		return
+	}
+	s.openmontageCfg = cfg
+}
+
+func defaultOpenMontageServiceConfig() srvconfig.OpenMontageConfig {
+	cfg := srvconfig.OpenMontageConfig{}
+	cfg.ApplyDefaults()
+	return cfg
 }
 
 func (s *TaskService) resolvedVideoCatalog() VideoModelCatalog {
@@ -419,6 +434,16 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.OpenMontageInput == nil || strings.TrimSpace(p.OpenMontageInput.Brief) == "" {
 			return nil, fmt.Errorf("%w: openmontage task requires brief", ErrOpenMontageInput)
 		}
+		target, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
+			Config:          s.openmontageCfg,
+			TaskType:        taskType,
+			CloudAvailable:  true,
+			AssetsCloudSafe: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		p.ExecutionTarget = target
 	}
 	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(videoInput, p.InputAttachments) {
 		return nil, fmt.Errorf("videoeditor task requires at least one source video")
@@ -830,9 +855,22 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		planVideoInput = &vi
 	}
 	var planOpenMontageInput *model.OpenMontageInput
+	openMontageExecutionTarget := model.ExecutionTargetCloud
 	if model.IsOpenMontagePlatform(taskType) {
 		input := plan.OpenMontageInput.Data()
 		planOpenMontageInput = &input
+		target, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
+			Config:          s.openmontageCfg,
+			TaskType:        taskType,
+			FromPlan:        true,
+			CloudAvailable:  true,
+			AssetsCloudSafe: true,
+		})
+		if err != nil {
+			s.logger.Warn().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping openmontage plan task due to execution target policy")
+			return nil, nil
+		}
+		openMontageExecutionTarget = target
 	}
 
 	// Deduct credits for the plan task.
@@ -876,6 +914,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		HasTailImage:             plan.HasTailImage,
 		ArticleWithCover:         plan.ArticleWithCover,
 		ArticleWithContentImages: plan.ArticleWithContentImages,
+	}
+	if model.IsOpenMontagePlatform(taskType) {
+		task.ExecutionTarget = openMontageExecutionTarget
 	}
 	if project != nil {
 		task.SetProjectSnapshot(model.SnapshotProject(project))

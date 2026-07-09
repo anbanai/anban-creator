@@ -136,6 +136,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if !validReferenceImageURL(req.ReferenceImageURL) {
 		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
 	}
+	if err := validateOpenMontageSourceAssetURLs(req.OpenMontageInput); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 
 	userID := GetUserID(c)
 	if userID == "" {
@@ -155,6 +158,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 	}
@@ -281,6 +287,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if req.ReferenceImageURL != nil && !validReferenceImageURL(*req.ReferenceImageURL) {
 		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
 	}
+	if err := validateOpenMontageSourceAssetURLs(req.OpenMontageInput); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	if req.OpenMontageInput != nil && strings.TrimSpace(req.OpenMontageInput.Brief) == "" {
 		return Error(c, fiber.StatusBadRequest, "openmontage task requires brief")
 	}
@@ -312,6 +321,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 			}
 		}
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 	}

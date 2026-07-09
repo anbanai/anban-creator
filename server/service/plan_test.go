@@ -270,6 +270,95 @@ func TestPlanServiceCreateOpenMontagePlanStoresInput(t *testing.T) {
 	}
 }
 
+func TestPlanServiceUpdateOpenMontagePlanStoresInput(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	userID := "user-om-plan-update"
+	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		CronExpr:  "0 10 * * *",
+		OpenMontageInput: &model.OpenMontageInput{
+			Brief:       "旧短片",
+			PipelineKey: "default",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create openmontage plan: %v", err)
+	}
+
+	updated, err := svc.Update(ctx, UpdatePlanParams{
+		ID: plan.ID,
+		OpenMontageInput: &model.OpenMontageInput{
+			Brief:       "更新后的短片",
+			PipelineKey: "social-short",
+			Preferences: model.OpenMontagePreferences{
+				AspectRatio:     "1:1",
+				DurationSeconds: 20,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update openmontage plan: %v", err)
+	}
+	got := updated.OpenMontageInput.Data()
+	if got.Brief != "更新后的短片" || got.PipelineKey != "social-short" {
+		t.Fatalf("openmontage input = %#v", got)
+	}
+	if got.Preferences.AspectRatio != "1:1" || got.Preferences.DurationSeconds != 20 {
+		t.Fatalf("preferences = %#v", got.Preferences)
+	}
+
+	updated, err = svc.Update(ctx, UpdatePlanParams{ID: plan.ID, Prompt: "只改提示"})
+	if err != nil {
+		t.Fatalf("Update without openmontage input: %v", err)
+	}
+	got = updated.OpenMontageInput.Data()
+	if got.Brief != "更新后的短片" || got.PipelineKey != "social-short" {
+		t.Fatalf("openmontage input changed when omitted: %#v", got)
+	}
+}
+
+func TestPlanServiceRejectsOpenMontageInputForOtherPlatforms(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	userID := "user-om-plan-reject"
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+
+	_, err := svc.Create(ctx, CreatePlanParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		CronExpr:  "0 10 * * *",
+		OpenMontageInput: &model.OpenMontageInput{
+			Brief: "错误平台",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "openmontage_input can only be set on openmontage plans") {
+		t.Fatalf("Create error = %v, want openmontage input rejection", err)
+	}
+
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		CronExpr:  "0 10 * * *",
+		Prompt:    "正常文章计划",
+	})
+	if err != nil {
+		t.Fatalf("Create article plan: %v", err)
+	}
+	_, err = svc.Update(ctx, UpdatePlanParams{
+		ID: plan.ID,
+		OpenMontageInput: &model.OpenMontageInput{
+			Brief: "错误平台更新",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "openmontage_input can only be set on openmontage plans") {
+		t.Fatalf("Update error = %v, want openmontage input rejection", err)
+	}
+}
+
 func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()

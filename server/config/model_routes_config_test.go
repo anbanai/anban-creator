@@ -499,6 +499,7 @@ func TestTaskCostDefaultsFillPartialMap(t *testing.T) {
 		"ecommerce":      3000,
 		"videocreator":   2000,
 		"videoeditor":    2000,
+		"openmontage":    2000,
 		"viral_analysis": 1200,
 	}
 	for key, value := range want {

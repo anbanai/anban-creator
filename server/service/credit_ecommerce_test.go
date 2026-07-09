@@ -25,6 +25,7 @@ func newPricedCreditService(repo repository.Repository) *CreditService {
 			model.PlatformEcommerce:    3000,
 			model.PlatformVideoCreator: 2000,
 			model.PlatformVideoEditor:  2000,
+			model.PlatformOpenMontage:  2000,
 			"viral_analysis":           1200,
 		},
 		EcommerceModulePrices: map[string]int{
@@ -35,6 +36,17 @@ func newPricedCreditService(repo repository.Repository) *CreditService {
 			"sku_images":   300,
 		},
 	}, &logger)
+}
+
+func TestCreditServiceIncludesOpenMontageTaskCost(t *testing.T) {
+	svc := NewCreditService(nil, nil, nil)
+	cost, ok := svc.TaskCost(model.PlatformOpenMontage)
+	if !ok {
+		t.Fatal("TaskCost(openmontage) ok = false")
+	}
+	if cost != 2000 {
+		t.Fatalf("TaskCost(openmontage) = %d, want 2000", cost)
+	}
 }
 
 func TestEcommercePackageCost(t *testing.T) {

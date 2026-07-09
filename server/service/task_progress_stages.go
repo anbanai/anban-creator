@@ -53,6 +53,14 @@ var stagePercentByType = map[string]map[string]int{
 		"compliance":       90,
 		"archive":          97,
 	},
+	model.ScopeOpenMontage: {
+		"prepare":   10,
+		"assets":    20,
+		"pipeline":  35,
+		"render":    70,
+		"delivery":  90,
+		"completed": 100,
+	},
 }
 
 // defaultPercentForStage returns the percent for a (taskType, stage) pair.

@@ -33,7 +33,7 @@ type CreditService struct {
 
 // NewCreditService creates a new CreditService.
 func NewCreditService(repo repository.Repository, cfg *config.CreditsConfig, logger *zerolog.Logger) *CreditService {
-	return &CreditService{repo: repo, cfg: cfg, logger: logger}
+	return &CreditService{repo: repo, cfg: normalizeCreditsConfig(cfg), logger: logger}
 }
 
 // SetFullConfig wires pricing inputs needed by dynamic usage billing while
@@ -42,7 +42,36 @@ func (s *CreditService) SetFullConfig(cfg *config.Config) {
 	if s == nil || cfg == nil {
 		return
 	}
-	s.cfg = &cfg.Credits
+	s.cfg = normalizeCreditsConfig(&cfg.Credits)
+}
+
+func normalizeCreditsConfig(cfg *config.CreditsConfig) *config.CreditsConfig {
+	if cfg == nil {
+		cfg = &config.CreditsConfig{}
+	}
+	if cfg.TaskCosts == nil {
+		cfg.TaskCosts = defaultCreditTaskCosts()
+		return cfg
+	}
+	for taskType, cost := range defaultCreditTaskCosts() {
+		if _, ok := cfg.TaskCosts[taskType]; !ok {
+			cfg.TaskCosts[taskType] = cost
+		}
+	}
+	return cfg
+}
+
+func defaultCreditTaskCosts() map[string]int {
+	return map[string]int{
+		model.PlatformArticle:         4000,
+		model.PlatformSeednote:        3600,
+		model.PlatformMoments:         3000,
+		model.PlatformEcommerce:       3000,
+		model.PlatformVideoCreator:    2000,
+		model.PlatformVideoEditor:     2000,
+		model.PlatformOpenMontage:     2000,
+		model.CreditTypeViralAnalysis: 1200,
+	}
 }
 
 func creditTaskLabel(taskType string) string {
@@ -59,6 +88,8 @@ func creditTaskLabel(taskType string) string {
 		return "AI 视频生成"
 	case model.ScopeVideoEditor:
 		return "视频剪辑后期"
+	case model.ScopeOpenMontage:
+		return "OpenMontage 视频"
 	case model.CreditTypeViralAnalysis:
 		return "爆文拆解"
 	default:

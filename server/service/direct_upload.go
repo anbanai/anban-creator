@@ -25,6 +25,7 @@ const (
 	DirectUploadPurposeTaskReference     = "task_reference"
 	DirectUploadPurposeEcommercePhoto    = "ecommerce_product_photo"
 	DirectUploadPurposeVideoReference    = "video_reference"
+	DirectUploadPurposeOpenMontageAsset  = "openmontage_asset"
 	DirectUploadPurposeDesignerReference = "designer_reference"
 	DirectUploadPurposeAIEntryAttachment = "ai_entry_attachment"
 	DirectUploadPurposeTaskArtifact      = "task_artifact"
@@ -124,6 +125,7 @@ var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeEcommercePhoto:    {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeDesignerReference: {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeVideoReference:    {maxSize: 50 * 1024 * 1024, validate: isDirectUploadVideoReference},
+	DirectUploadPurposeOpenMontageAsset:  {maxSize: 50 * 1024 * 1024, validate: isDirectUploadVideoReference},
 	DirectUploadPurposeAIEntryAttachment: {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -154,6 +155,82 @@ func TestCreatePlan_VideoPlanAllowsLowBalanceWithoutLegacyMinimumGate(t *testing
 	}
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestCreatePlanOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	uploadID := uuid.New().String()
+	assetURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "omplanasset",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformOpenMontage,
+		Name:     "OpenMontage",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+		ID:          uploadID,
+		UserID:      userID,
+		Purpose:     service.DirectUploadPurposeOpenMontageAsset,
+		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
+		PublicURL:   assetURL,
+		FileName:    "clip.mp4",
+		ContentType: "video/mp4",
+		Size:        1234,
+		Status:      model.PendingUploadStatusPending,
+		ExpiresAt:   time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("create pending upload: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	planSvc := service.NewPlanService(repo, &logger)
+	h := NewPlanHandler(planSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/plans", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	req := httptest.NewRequest("POST", "/plans", strings.NewReader(`{
+		"project_id": "`+projectID+`",
+		"cron_expr": "0 9 * * *",
+		"openmontage_input": {
+			"brief": "每天剪一条发布会短片",
+			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	if err != nil {
+		t.Fatalf("find pending upload: %v", err)
+	}
+	if upload.Status != model.PendingUploadStatusFinalized {
+		t.Fatalf("upload status = %q, want finalized", upload.Status)
 	}
 }
 

@@ -289,6 +289,7 @@ credits:
     ecommerce: 3000
     videocreator: 2000
     videoeditor: 2000
+    openmontage: 2000
     viral_analysis: 1200
   admin_api_key: "${ANBAN_CREDITS_ADMIN_API_KEY}"
 

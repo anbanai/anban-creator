@@ -219,6 +219,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, "product_photos must be internal file paths or http(s) URLs")
 		}
 	}
+	if err := validateOpenMontageSourceAssetURLs(req.OpenMontageInput); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 
 	// Validate image_model_key against the caller's tier.
 	if err := h.validateImageModelKeyForUser(c, userID, req.ImageModelKey); err != nil {
@@ -243,6 +246,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 	}
@@ -299,8 +305,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to create task")
 	}
 
-	// Return single task for quantity=1 (frontend expects Task, not Task[]).
-	if quantity == 1 && len(tasks) > 0 {
+	// Return single task when the service produced one task. Some platforms
+	// clamp quantity internally because they create one deliverable package.
+	if len(tasks) == 1 {
 		return Success(c, taskAPIResponse(tasks[0]))
 	}
 	return Success(c, taskAPIResponses(tasks))

@@ -531,6 +531,132 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	}
 }
 
+func TestCreateTaskOpenMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "omhandler",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformOpenMontage,
+		Name:     "OpenMontage",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{
+		"project_id": "`+projectID+`",
+		"quantity": 3,
+		"openmontage_input": {
+			"brief": "做一条新品发布短片",
+			"pipeline_key": "default"
+		}
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	data := decodeEnvelopeRawData(t, resp)
+	if _, ok := data["id"]; !ok {
+		t.Fatalf("response data should be a single task object, got keys %#v", data)
+	}
+	if _, ok := data["openmontage_input"]; !ok {
+		t.Fatalf("response missing openmontage_input: keys %#v", data)
+	}
+}
+
+func TestCreateTaskOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	uploadID := uuid.New().String()
+	assetURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "omasset",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformOpenMontage,
+		Name:     "OpenMontage",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+		ID:          uploadID,
+		UserID:      userID,
+		Purpose:     service.DirectUploadPurposeOpenMontageAsset,
+		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
+		PublicURL:   assetURL,
+		FileName:    "clip.mp4",
+		ContentType: "video/mp4",
+		Size:        1234,
+		Status:      model.PendingUploadStatusPending,
+		ExpiresAt:   time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("create pending upload: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{
+		"project_id": "`+projectID+`",
+		"openmontage_input": {
+			"brief": "剪成一条发布会短片",
+			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
+		}
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	if err != nil {
+		t.Fatalf("find pending upload: %v", err)
+	}
+	if upload.Status != model.PendingUploadStatusFinalized {
+		t.Fatalf("upload status = %q, want finalized", upload.Status)
+	}
+}
+
 func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
