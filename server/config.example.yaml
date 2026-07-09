@@ -154,6 +154,38 @@ model_routes:
         max_duration: 15
         supports_video_input: true
 
+# Montage 视频工作流配置。
+# 生产建议：
+# - 保持 enabled=true。
+# - execution_targets 只保留 cloud，避免生产任务依赖桌面本机执行器。
+# - claude.executor 使用 kubernetes 或 docker，并确保镜像内已初始化 third_party/OpenMontage。
+montage:
+  # 是否启用 Montage 平台。显式 false 会关闭任务/计划创建入口。
+  enabled: true
+  # 上游 OpenMontage git submodule 路径。生产镜像构建时必须执行
+  # `git submodule update --init --recursive third_party/OpenMontage`。
+  submodule_path: "third_party/OpenMontage"
+  # 未指定 pipeline_key 时使用的默认 pipeline；必须包含在 allowed_pipelines 中。
+  default_pipeline: "default"
+  # 允许 Studio/API 选择的 pipeline 白名单。新增上游 pipeline 后先做 adapter contract test。
+  allowed_pipelines: ["default"]
+  # 单个 Montage 任务允许的最长成片时长，单位秒。
+  max_duration_seconds: 600
+  # 单个 Montage 任务允许引用/上传的最大素材数量。
+  max_assets: 20
+  # Agent/Montage runner 的业务超时，单位分钟；应小于或等于 executor/pod 超时。
+  timeout_minutes: 90
+  # 系统允许的执行目标。生产推荐 ["cloud"]；本地开发可临时加入 "local"。
+  execution_targets: ["cloud"]
+  # 系统默认执行目标。cloud 表示进入云端 Agent 队列；local 仅用于开发/桌面调试。
+  default_execution_target: "cloud"
+  # Montage 基础任务服务费，单位 credits；同时保持 credits.task_costs.montage 一致。
+  credit_cost: 2000
+  runner:
+    # 预留的 Montage 云端 runner 镜像名。当前执行器主要读取 claude.kubernetes.agent_image
+    # 或 claude.docker.image；生产可将该值同步为同一个包含 Montage 依赖的镜像 tag。
+    cloud_image: "${ANBAN_MONTAGE_RUNNER_IMAGE:-anban/montage-runner:latest}"
+
 model_prices:
   currency_rates:
     USD:
@@ -289,6 +321,8 @@ credits:
     ecommerce: 3000
     videocreator: 2000
     videoeditor: 2000
+    # Montage 手动任务/计划触发时扣除的基础服务费。
+    # 如果调整 montage.credit_cost，这里也要同步调整，避免 Studio 展示和服务扣费不一致。
     montage: 2000
     viral_analysis: 1200
   admin_api_key: "${ANBAN_CREDITS_ADMIN_API_KEY}"
@@ -304,25 +338,38 @@ image_presets:
     min_tier: "pro"
 
 claude:
+  # Agent Pod/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc:8080}"
+  # Agent 执行器类型：local 用于开发；docker 用于单机容器；kubernetes 用于生产队列。
   executor: local
+  # 是否启用 agent 沙箱隔离。生产建议 true。
   sandbox: true
+  # Agent 插件目录，必须包含 agents/、skills/ 等分发资产。
   plugin_dir: "/anbanai"
   kubernetes:
+    # Agent Pod 所在命名空间。
     namespace: "${ANBAN_AGENT_NAMESPACE:-anban}"
-    # ACK production defaults to the existing server runtime image because it
-    # already contains Claude Code, Anban plugin assets, and agent binary.
+    # Agent 镜像。生产镜像必须包含 anban agent 二进制、Claude/Codex 运行时、
+    # Anban 插件资产、ffmpeg/浏览器/Node/Python 以及 third_party/OpenMontage。
     agent_image: "${ANBAN_AGENT_IMAGE:-anban-creator-server:latest}"
+    # Agent Pod 使用的 Kubernetes ServiceAccount。
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-anban-agent-runner}"
+    # 私有镜像仓库拉取 secret；公开镜像可留空。
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
+    # Agent Pod 内工作区挂载路径，必须是绝对路径。
     workspace_mount_path: "/workspace"
+    # 持久化工作区 PVC，建议绑定 NAS/云盘，便于大素材和执行日志留存。
     workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-agent-nas}"
+    # 空闲 Agent Pod 保留时间，单位秒。
     pod_ttl_seconds: 86400
+    # 单次任务执行超时，单位秒；应大于 montage.timeout_minutes * 60。
     exec_timeout_seconds: 3600
     resources:
+      # Agent Pod 资源请求，影响调度保证。
       requests:
         cpu: "500m"
         memory: "1Gi"
+      # Agent Pod 资源上限。Montage 处理视频建议至少 4C/8Gi 起。
       limits:
         cpu: "4"
         memory: "8Gi"
@@ -334,12 +381,20 @@ claude:
     videocreator: 80
     videoeditor: 80
     ecommerce: 90
+    # Montage pipeline 编排通常会调用多轮 MCP/文件登记，生产建议 90 起。
+    montage: 90
+  # Agent 执行日志目录。生产建议挂载持久卷，便于失败诊断和审计。
   task_log_dir: "./data/logs/tasks"
   env:
+    # Claude Code/兼容模型认证 token。必须通过环境变量注入，禁止写明文密钥。
     ANTHROPIC_AUTH_TOKEN: "${CLAUDE_CODE_AUTH_TOKEN}"
+    # Claude Code 兼容 API base URL。
     ANTHROPIC_BASE_URL: "https://ark.cn-beijing.volces.com/api/compatible"
+    # Agent 默认模型。
     ANTHROPIC_MODEL: "doubao-seed-evolving"
+    # 关闭非必要遥测流量，生产建议保持 1。
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    # 允许 Claude Code 使用项目记忆；如需完全无状态执行可改为 1。
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
 
 email:
