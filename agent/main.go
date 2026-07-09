@@ -98,6 +98,21 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 		}
 	}
 
+	if cfg.ArtifactUploadMode == ArtifactUploadDirect {
+		uploader := NewArtifactUploader(cfg, reporter)
+		if uploadErr := uploader.UploadWorkspaceArtifacts(context.Background(), result); uploadErr != nil {
+			_ = reporter.ReportProgress(context.Background(), "artifact upload failed: "+uploadErr.Error())
+			fmt.Fprintf(stderr, "failed to upload artifacts: %v\n", uploadErr)
+			if result.Success {
+				result.Success = false
+				result.Error = "artifact upload failed: " + uploadErr.Error()
+			}
+			if runErr == nil {
+				runErr = uploadErr
+			}
+		}
+	}
+
 	if reportErr := reporter.ReportResult(context.Background(), result); reportErr != nil {
 		fmt.Fprintf(stderr, "failed to report result: %v\n", reportErr)
 	}

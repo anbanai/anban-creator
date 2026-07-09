@@ -14,6 +14,12 @@ import (
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
 
+type apiEnvelope[T any] struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data T      `json:"data"`
+}
+
 // httpStatusError carries the HTTP status of a failed report so the retry layer
 // can decide retryability without re-parsing the message string.
 type httpStatusError struct{ code int }
@@ -76,6 +82,18 @@ func (r *Reporter) ReportResult(ctx context.Context, result *serveragent.Executi
 	})
 }
 
+func (r *Reporter) PrepareArtifactUpload(ctx context.Context, req ArtifactPrepareRequest) (*ArtifactPrepareResponse, error) {
+	var env apiEnvelope[ArtifactPrepareResponse]
+	if err := r.postJSONDecode(ctx, "/api/v1/agent/artifacts/prepare", req, &env); err != nil {
+		return nil, err
+	}
+	return &env.Data, nil
+}
+
+func (r *Reporter) ReportArtifactManifest(ctx context.Context, req ArtifactManifestRequest) error {
+	return r.postJSON(ctx, "/api/v1/agent/artifacts/manifest", req)
+}
+
 // ReportComplete signals terminal completion to the server. The server finalizes
 // the task ONLY when it is a local_claimed task still in the running state
 // (guarded CAS) — so calling this from the cloud Docker path is a safe no-op
@@ -133,6 +151,10 @@ func (r *Reporter) postJSONWithRetry(ctx context.Context, path string, payload a
 }
 
 func (r *Reporter) postJSON(ctx context.Context, path string, payload any) error {
+	return r.postJSONDecode(ctx, path, payload, nil)
+}
+
+func (r *Reporter) postJSONDecode(ctx context.Context, path string, payload any, out any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal report payload: %w", err)
@@ -153,6 +175,11 @@ func (r *Reporter) postJSON(ctx context.Context, path string, payload any) error
 
 	if resp.StatusCode >= 300 {
 		return &httpStatusError{code: resp.StatusCode}
+	}
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return fmt.Errorf("decode report response: %w", err)
+		}
 	}
 	return nil
 }

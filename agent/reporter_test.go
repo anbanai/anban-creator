@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -68,6 +69,83 @@ func TestReportHeartbeatUpdatesProgressWithoutLogMessage(t *testing.T) {
 	}
 	if _, ok := gotBody["message"]; ok {
 		t.Fatalf("heartbeat should not include message: %#v", gotBody)
+	}
+}
+
+func TestPrepareArtifactUploadPostsRequestAndDecodesEnvelope(t *testing.T) {
+	var gotPath string
+	var gotAuth string
+	var gotBody ArtifactPrepareRequest
+	rep, _ := newTestReporter(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"msg":  "success",
+			"data": map[string]any{
+				"key":                   "uploads/users/u/projects/p/tasks/t1/artifacts/output/article.md",
+				"bucket":                "bucket",
+				"endpoint":              "oss-cn-hangzhou.aliyuncs.com",
+				"headers":               map[string]string{"Content-Type": "text/markdown"},
+				"sts_access_key_id":     "sts-ak",
+				"sts_access_key_secret": "sts-secret",
+				"sts_security_token":    "sts-token",
+				"max_size":              512,
+			},
+		})
+	})
+
+	got, err := rep.PrepareArtifactUpload(context.Background(), ArtifactPrepareRequest{
+		TaskID:       "t1",
+		RelativePath: "output/article.md",
+		Filename:     "article.md",
+		ContentType:  "text/markdown",
+		Size:         9,
+		SHA256:       strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatalf("PrepareArtifactUpload: %v", err)
+	}
+	if gotPath != "/api/v1/agent/artifacts/prepare" || gotAuth != "Bearer k" {
+		t.Fatalf("path/auth = %q/%q, want prepare endpoint with bearer auth", gotPath, gotAuth)
+	}
+	if gotBody.TaskID != "t1" || gotBody.RelativePath != "output/article.md" {
+		t.Fatalf("request body = %+v, want task and relative path", gotBody)
+	}
+	if got.Key == "" || got.STSAccessKeyID != "sts-ak" || got.STSSecurityToken != "sts-token" {
+		t.Fatalf("decoded prepare response = %+v, want key and sts credentials", got)
+	}
+}
+
+func TestReportArtifactManifestPostsEndpoint(t *testing.T) {
+	var gotPath string
+	var gotBody ArtifactManifestRequest
+	rep, _ := newTestReporter(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	err := rep.ReportArtifactManifest(context.Background(), ArtifactManifestRequest{
+		TaskID: "t1",
+		Files: []ArtifactManifestFile{{
+			RelativePath: "output/article.md",
+			ObjectKey:    "uploads/users/u/projects/p/tasks/t1/artifacts/output/article.md",
+			ContentType:  "text/markdown",
+			Size:         9,
+			SHA256:       strings.Repeat("a", 64),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ReportArtifactManifest: %v", err)
+	}
+	if gotPath != "/api/v1/agent/artifacts/manifest" || gotBody.TaskID != "t1" || len(gotBody.Files) != 1 {
+		t.Fatalf("manifest request = path %q body %+v, want one file on manifest endpoint", gotPath, gotBody)
 	}
 }
 
