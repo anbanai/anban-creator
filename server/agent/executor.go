@@ -489,6 +489,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
 		}
 	}
+	if err := writeOpenMontageInputJSON(workDir, opts.Task); err != nil {
+		return nil, err
+	}
 
 	// 3.5. Resolve API key for MCP authentication.
 	// Tries per-user key first, falls back to system key.
@@ -915,6 +918,21 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		populateUsageFields(result, resultMsg)
 	}
 	return result, nil
+}
+
+func writeOpenMontageInputJSON(workDir string, task *model.Task) error {
+	if task == nil || !model.IsOpenMontagePlatform(task.Type) {
+		return nil
+	}
+	input := task.OpenMontageInput.Data()
+	data, err := json.MarshalIndent(input, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal openmontage input: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "openmontage-input.json"), data, 0o644); err != nil {
+		return fmt.Errorf("write openmontage-input.json: %w", err)
+	}
+	return nil
 }
 
 // ListWorkDirFiles returns a recursive listing of files in workDir.

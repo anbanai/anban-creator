@@ -1913,6 +1913,128 @@ func TestTaskServiceHandleExecutionRejectsVideoEditorPartialCapCutDraft(t *testi
 	}
 }
 
+func TestTaskServiceHandleExecutionRejectsOpenMontageWithoutDeliveryManifest(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	task := &model.Task{
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		ProjectID:  projectID,
+		Type:       model.PlatformOpenMontage,
+		Status:     model.TaskStatusRunning,
+		MaxRetries: model.DefaultRetries,
+		RetryCount: model.DefaultRetries,
+	}
+	task.SetOpenMontageInput(model.OpenMontageInput{Brief: "做短片"})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID:       uuid.New().String(),
+		TaskID:   task.ID,
+		Role:     model.FileRoleVideo,
+		FileName: "final.mp4",
+		FilePath: "remote/tasks/" + task.ID + "/output/openmontage/final.mp4",
+		MimeType: "video/mp4",
+		FileSize: 4096,
+	}); err != nil {
+		t.Fatalf("create task file: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success:         true,
+		RemoteArtifacts: true,
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", found.Status)
+	}
+	if !strings.Contains(found.ErrorMessage, "openmontage missing required deliverables") {
+		t.Fatalf("error = %q, want openmontage missing required deliverables", found.ErrorMessage)
+	}
+}
+
+func TestTaskServiceHandleExecutionAcceptsOpenMontageRemoteArtifacts(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformOpenMontage,
+		Status:    model.TaskStatusRunning,
+	}
+	task.SetOpenMontageInput(model.OpenMontageInput{Brief: "做短片"})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for _, file := range []*model.TaskFile{
+		{
+			ID:       uuid.New().String(),
+			TaskID:   task.ID,
+			Role:     "final_video",
+			FileName: "final_video.mp4",
+			FilePath: "remote/tasks/" + task.ID + "/output/openmontage/final_video.mp4",
+			MimeType: "video/mp4",
+			FileSize: 4096,
+		},
+		{
+			ID:       uuid.New().String(),
+			TaskID:   task.ID,
+			Role:     "delivery_manifest",
+			FileName: "delivery-manifest.json",
+			FilePath: "remote/tasks/" + task.ID + "/output/openmontage/delivery-manifest.json",
+			MimeType: "application/json",
+			FileSize: 128,
+		},
+	} {
+		if err := repo.TaskFiles().Create(ctx, file); err != nil {
+			t.Fatalf("create task file: %v", err)
+		}
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success:         true,
+		RemoteArtifacts: true,
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q error=%q, want completed with openmontage deliverables", found.Status, found.ErrorMessage)
+	}
+}
+
 func TestTaskService_HandleExecutionCompletesWithSeednoteDeliverables(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {

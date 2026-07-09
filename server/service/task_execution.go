@@ -230,7 +230,15 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	artifactValidation := agent.ArtifactValidation{Valid: true}
-	if model.IsVideoPlatform(task.Type) {
+	if model.IsOpenMontagePlatform(task.Type) {
+		files, err := s.repo.TaskFiles().FindByTaskID(persistCtx, task.ID)
+		if err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("list openmontage task files for artifact validation")
+			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("list openmontage task files: %w", err))
+			return nil
+		}
+		artifactValidation = validateOpenMontageCompletionArtifacts(files)
+	} else if model.IsVideoPlatform(task.Type) {
 		var err error
 		artifactValidation, err = s.validateVideoCompletionArtifacts(persistCtx, task)
 		if err != nil {
@@ -471,6 +479,52 @@ func validateVideoEditorCompletionArtifacts(files []*model.TaskFile) agent.Artif
 		}
 	}
 	return agent.ArtifactValidation{Reason: "videoeditor missing required deliverables"}
+}
+
+func validateOpenMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
+	hasFinal := false
+	hasManifest := false
+	meaningful := 0
+	for _, file := range files {
+		if file == nil || file.FileSize <= 0 {
+			continue
+		}
+		role := strings.TrimSpace(file.Role)
+		name := strings.ToLower(strings.TrimSpace(file.FileName))
+		path := strings.ToLower(filepath.ToSlash(strings.TrimSpace(file.FilePath)))
+		switch {
+		case role == "final_video" || isOpenMontageFinalVideoPath(name) || isOpenMontageFinalVideoPath(path):
+			hasFinal = true
+			meaningful++
+		case role == "delivery_manifest" || name == "delivery-manifest.json" || strings.HasSuffix(path, "/delivery-manifest.json"):
+			hasManifest = true
+			meaningful++
+		}
+	}
+	var missing []string
+	if !hasFinal {
+		missing = append(missing, "final_video")
+	}
+	if !hasManifest {
+		missing = append(missing, "delivery-manifest.json")
+	}
+	if len(missing) > 0 {
+		return agent.ArtifactValidation{
+			MeaningfulFileCount: meaningful,
+			Missing:             missing,
+			Reason:              "openmontage missing required deliverables: " + strings.Join(missing, ", "),
+		}
+	}
+	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
+}
+
+func isOpenMontageFinalVideoPath(path string) bool {
+	switch filepath.Base(path) {
+	case "final.mp4", "final_video.mp4", "final-video.mp4":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeVideoDeliveryPath(path string) string {

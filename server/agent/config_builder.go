@@ -229,6 +229,8 @@ func TaskTypeToAgent(taskType string) string {
 		return "videocreator"
 	case model.ScopeVideoEditor:
 		return "videoeditor"
+	case model.ScopeOpenMontage:
+		return "openmontage"
 	default:
 		return "seednote"
 	}

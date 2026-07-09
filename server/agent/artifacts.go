@@ -94,6 +94,22 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		result.Valid = true
 		return result
 	}
+	if task != nil && model.IsOpenMontagePlatform(task.Type) {
+		var missing []string
+		if !files["final.mp4"] && !files["final_video.mp4"] && !files["final-video.mp4"] {
+			missing = append(missing, "final_video")
+		}
+		if !files["delivery-manifest.json"] {
+			missing = append(missing, "delivery-manifest.json")
+		}
+		if len(missing) > 0 {
+			result.Missing = missing
+			result.Reason = "openmontage missing required deliverables: " + strings.Join(missing, ", ")
+			return result
+		}
+		result.Valid = true
+		return result
+	}
 	if task == nil || task.Type != model.PlatformSeednote {
 		result.Valid = meaningful > 0
 		if !result.Valid {
