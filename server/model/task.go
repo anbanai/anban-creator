@@ -239,17 +239,18 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		return ProjectSnapshot{}
 	}
 	return ProjectSnapshot{
-		ProjectName:       p.Name,
-		Platform:          p.Platform,
-		Instructions:      p.Instructions,
-		Keywords:          p.Keywords,
-		VisualStyle:       p.VisualStyle,
-		ReferenceImageURL: p.ReferenceImageURL,
-		ImageRatio:        p.ImageRatio,
-		Writer:            p.Writer,
-		Theme:             p.Theme,
-		Author:            p.Author,
-		EcommerceDefaults: p.EcommerceDefaults.Data(),
+		ProjectName:         p.Name,
+		Platform:            p.Platform,
+		Instructions:        p.Instructions,
+		Keywords:            p.Keywords,
+		VisualStyle:         p.VisualStyle,
+		ReferenceImageURL:   p.ReferenceImageURL,
+		ImageRatio:          p.ImageRatio,
+		Writer:              p.Writer,
+		Theme:               p.Theme,
+		Author:              p.Author,
+		EcommerceDefaults:   p.EcommerceDefaults.Data(),
+		OpenMontageDefaults: p.OpenMontageDefaults.Data(),
 	}
 }
 
@@ -274,5 +275,6 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.Theme = snap.Theme
 	p.Author = snap.Author
 	p.SetEcommerceDefaults(snap.EcommerceDefaults)
+	p.SetOpenMontageDefaults(snap.OpenMontageDefaults)
 	return &p
 }

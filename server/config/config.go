@@ -198,6 +198,7 @@ type VideoModelCatalogEntry struct {
 
 type OpenMontageConfig struct {
 	Enabled                bool                    `yaml:"enabled"`
+	enabledSet             bool                    `yaml:"-"`
 	SubmodulePath          string                  `yaml:"submodule_path"`
 	DefaultPipeline        string                  `yaml:"default_pipeline"`
 	AllowedPipelines       []string                `yaml:"allowed_pipelines"`
@@ -214,8 +215,26 @@ type OpenMontageRunnerConfig struct {
 	CloudImage string `yaml:"cloud_image"`
 }
 
+func (c *OpenMontageConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawOpenMontageConfig OpenMontageConfig
+	var raw rawOpenMontageConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == "enabled" {
+			raw.enabledSet = true
+			break
+		}
+	}
+	*c = OpenMontageConfig(raw)
+	return nil
+}
+
 func (c *OpenMontageConfig) ApplyDefaults() {
-	c.Enabled = true
+	if !c.enabledSet {
+		c.Enabled = true
+	}
 	if c.SubmodulePath == "" {
 		c.SubmodulePath = "third_party/OpenMontage"
 	}

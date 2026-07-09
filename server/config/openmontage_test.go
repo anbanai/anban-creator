@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
 
 func TestOpenMontageConfigDefaults(t *testing.T) {
 	cfg := OpenMontageConfig{}
@@ -55,5 +59,21 @@ func TestOpenMontageConfigValidate(t *testing.T) {
 	cfg.DefaultPipeline = "missing"
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate succeeded with default pipeline outside allowed list")
+	}
+}
+
+func TestOpenMontageConfigDefaultsPreserveExplicitDisabled(t *testing.T) {
+	var cfg Config
+	if err := yaml.Unmarshal([]byte("openmontage:\n  enabled: false\n"), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	cfg.applyDefaults()
+
+	if cfg.OpenMontage.Enabled {
+		t.Fatal("Enabled = true, want explicit false preserved")
+	}
+	if cfg.OpenMontage.SubmodulePath != "third_party/OpenMontage" {
+		t.Fatalf("SubmodulePath = %q, want default path", cfg.OpenMontage.SubmodulePath)
 	}
 }
