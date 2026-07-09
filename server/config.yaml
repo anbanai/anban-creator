@@ -1,0 +1,380 @@
+server:
+  port: 8080
+  host: "0.0.0.0"
+
+logging:
+  level: info
+
+database:
+  dsn: "${ANBAN_DATABASE_DSN}"
+  max_open_conns: 20
+  max_idle_conns: 10
+  conn_max_lifetime: 3600
+
+redis:
+  addr: "${ANBAN_REDIS_ADDR}"
+  password: "${ANBAN_REDIS_PASSWORD}"
+  db: ${ANBAN_REDIS_DB:-0}
+
+jwt:
+  secret_key: "${ANBAN_JWT_SECRET_KEY}"
+  access_expiry: "24h"
+  refresh_expiry: "168h"
+
+wechat:
+  app_id: "${ANBAN_WECHAT_APP_ID}"
+  app_secret: "${ANBAN_WECHAT_APP_SECRET}"
+
+storage:
+  provider: "oss"
+  endpoint: "${ANBAN_OSS_ENDPOINT}"
+  access_key_id: "${ANBAN_OSS_ACCESS_KEY_ID}"
+  access_key_secret: "${ANBAN_OSS_ACCESS_KEY_SECRET}"
+  bucket_name: "anbancreator"
+  region: "cn-chengdu"
+  # Optional public CDN/OSS custom domain only, e.g. "cdn.example.com".
+  # Leave empty to return default https://{bucket}.{endpoint}/... OSS URLs.
+  # Do not point this at the Studio/API domain or the /api/v1/files proxy.
+  custom_domain: "${ANBAN_OSS_CDN_DOMAIN}"
+  sts_role_arn: "${ANBAN_OSS_STS_ROLE_ARN}"
+  sts_session_name: "anban-direct-upload"
+  sts_endpoint: "${ANBAN_OSS_STS_ENDPOINT}"
+  direct_upload_expires_seconds: 900
+  local_data_dir: "./data/files"
+
+mcp:
+  api_key: "${ANBAN_MCP_API_KEY}"
+
+model_providers:
+  moonshot:
+    protocol: "openai_compatible"
+    base_url: "https://api.moonshot.cn/v1"
+    api_key: "${MOONSHOT_API_KEY}"
+
+  volcengine_ark:
+    protocol: "openai_compatible"
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    api_key: "${VOLCENGINE_ARK_API_KEY}"
+
+  wangcai_openai:
+    protocol: "openai_compatible"
+    base_url: "http://18.141.196.64:18888/v1"
+    api_key: "${WANGCAI_OPENAI_API_KEY}"
+
+model_routes:
+  writing:
+    provider: "moonshot"
+    model: "kimi-k2.7-code"
+    timeout: 5m
+
+  image_understanding:
+    provider: "moonshot"
+    model: "kimi-k2.7-code-highspeed"
+    timeout: 90s
+    require_usage: true
+
+  video_understanding:
+    provider: "moonshot"
+    model: "kimi-k2.7-code-highspeed"
+    timeout: 180s
+    require_usage: true
+    require_native_video: true
+    max_recommended_resolution: "1920x1080"
+
+  image_generation:
+    cover:
+      provider: "volcengine_ark"
+      model: "doubao-seedream-5-0-pro-260628"
+    content:
+      provider: "volcengine_ark"
+      model: "doubao-seedream-5-0-pro-260628"
+    designer:
+      seedream:
+        alias: "豆包 Seedream"
+        provider: "volcengine_ark"
+        model: "doubao-seedream-5-0-pro-260628"
+        enabled: true
+        capabilities:
+          size_presets: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
+          default_size: "1:1"
+          max_batch: 1
+          max_reference_images: 10
+          supports_reference: true
+          supports_mask: false
+          output_formats: ["png", "jpeg"]
+          has_background: false
+          has_compression: false
+          watermark: true
+      gpt_image_2:
+        alias: "GPT Image 2"
+        provider: "wangcai_openai"
+        model: "gpt-image-2"
+        enabled: true
+        response_format: "url"
+        capabilities:
+          quality_levels: ["auto", "low", "medium", "high"]
+          size_presets: ["auto", "1024x1024", "1536x1024", "1024x1536"]
+          default_size: "auto"
+          max_batch: 10
+          max_reference_images: 16
+          supports_reference: true
+          supports_mask: true
+          output_formats: ["png", "jpeg", "webp"]
+          has_background: true
+          has_compression: true
+          watermark: false
+  video_generation:
+    provider: "volcengine_ark"
+    timeout: 10m
+    default_model: "seedance-2.0-mini"
+    model_catalog:
+      - key: "seedance-2.0"
+        display_name: "Doubao Seedance 2.0"
+        model: "doubao-seedance-2-0-260128"
+        supported_resolutions: ["480p", "720p", "1080p", "4k"]
+        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
+        min_duration: 1
+        max_duration: 15
+        supports_video_input: true
+        supports_4k: true
+      - key: "seedance-2.0-fast"
+        display_name: "Doubao Seedance 2.0 Fast"
+        model: "doubao-seedance-2-0-fast-260128"
+        supported_resolutions: ["480p", "720p"]
+        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
+        min_duration: 1
+        max_duration: 15
+        supports_video_input: true
+      - key: "seedance-2.0-mini"
+        display_name: "Doubao Seedance 2.0 Mini"
+        model: "doubao-seedance-2-0-mini-260615"
+        supported_resolutions: ["480p", "720p"]
+        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
+        min_duration: 1
+        max_duration: 15
+        supports_video_input: true
+
+openmontage:
+  enabled: true
+  submodule_path: "third_party/OpenMontage"
+  default_pipeline: "default"
+  allowed_pipelines: ["default"]
+  max_duration_seconds: 600
+  max_assets: 20
+  timeout_minutes: 90
+  execution_targets: ["cloud", "local"]
+  default_execution_target: "cloud"
+  credit_cost: 2000
+  runner:
+    cloud_image: "${ANBAN_OPENMONTAGE_RUNNER_IMAGE:-anban/openmontage-runner:latest}"
+
+model_prices:
+  currency_rates:
+    USD:
+      to_cny: 7.20
+    CNY:
+      to_cny: 1.0
+
+  token_models:
+    moonshot/kimi-k2.7-code:
+      currency: USD
+      unit: 1000000
+      cached_input: 0.19
+      cache_read_input: 0.19
+      cache_creation_input: 0.95
+      input: 0.95
+      output: 4.00
+    moonshot/kimi-k2.7-code-highspeed:
+      currency: USD
+      unit: 1000000
+      cached_input: 0.38
+      cache_read_input: 0.38
+      cache_creation_input: 1.90
+      input: 1.90
+      output: 8.00
+
+  image_generation:
+    volcengine_ark/doubao-seedream-5-0-pro-260628:
+      pricing_type: per_image
+      currency: CNY
+      unit: image
+      price: 0.22
+    wangcai_openai/gpt-image-2:
+      pricing_type: openai_image_usage
+      currency: USD
+      unit: 1000000
+      require_usage: true
+      text_input: 5.00
+      text_cached_input: 1.25
+      image_input: 8.00
+      image_cached_input: 2.00
+      image_output: 30.00
+      estimate_table:
+        "1024x1024":
+          low: 0.006
+          medium: 0.053
+          high: 0.211
+        "1024x1536":
+          low: 0.005
+          medium: 0.041
+          high: 0.165
+        "1536x1024":
+          low: 0.005
+          medium: 0.041
+          high: 0.165
+
+  video_generation:
+    volcengine_ark/doubao-seedance-2-0-260128:
+      currency: CNY
+      no_input_price_per_second:
+        480p: 0.462
+        720p: 0.994
+        1080p: 2.478
+        4k: 5.054
+      video_input_5s_min_price:
+        480p: 2.53
+        720p: 5.44
+        1080p: 13.56
+        4k: 27.99
+      video_input_5s_max_price:
+        480p: 5.62
+        720p: 12.10
+        1080p: 30.13
+        4k: 62.21
+    volcengine_ark/doubao-seedance-2-0-fast-260128:
+      currency: CNY
+      no_input_price_per_second:
+        480p: 0.372
+        720p: 0.800
+      video_input_5s_min_price:
+        480p: 1.99
+        720p: 4.28
+      video_input_5s_max_price:
+        480p: 4.42
+        720p: 9.50
+    volcengine_ark/doubao-seedance-2-0-mini-260615:
+      currency: CNY
+      no_input_price_per_second:
+        480p: 0.232
+        720p: 0.496
+      video_input_5s_min_price:
+        480p: 1.27
+        720p: 2.72
+      video_input_5s_max_price:
+        480p: 2.81
+        720p: 6.05
+
+billing:
+  credits_per_cny: 1600
+  tier_multipliers:
+    free: 1.35
+    pro: 1.20
+    enterprise: 1.05
+  default_user_multiplier: 1.00
+  minimum_charge_credits: 1
+
+recharge_tiers:
+  - key: "basic"
+    label: "基础包"
+    price_cny: 10
+    credits: 10000
+    bonus_credits: 0
+    enabled: true
+  - key: "standard"
+    label: "标准包"
+    price_cny: 50
+    credits: 52000
+    bonus_credits: 2000
+    enabled: true
+  - key: "pro"
+    label: "进阶包"
+    price_cny: 100
+    credits: 110000
+    bonus_credits: 10000
+    enabled: true
+
+credits:
+  daily_sign_in: 100
+  register_bonus: 1000
+  invite_reward: 1000
+  task_costs:
+    article: 4000
+    seednote: 3600
+    ecommerce: 3000
+    videocreator: 2000
+    videoeditor: 2000
+    viral_analysis: 1200
+  admin_api_key: "${ANBAN_CREDITS_ADMIN_API_KEY}"
+
+image_presets:
+  - key: "volcengine-standard"
+    display_name: "豆包 Seedream"
+    provider_route: "image_generation.designer.seedream"
+    min_tier: "free"
+  - key: "openai-standard"
+    display_name: "GPT Image 2"
+    provider_route: "image_generation.designer.gpt_image_2"
+    min_tier: "pro"
+
+claude:
+  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc:8080}"
+  executor: local
+  sandbox: true
+  plugin_dir: "/anbanai"
+  max_turns:
+    moments: 25
+    viral_analysis: 30
+    seednote: 50
+    article: 60
+    videocreator: 80
+    videoeditor: 80
+    ecommerce: 90
+  task_log_dir: "./data/logs/tasks"
+  env:
+    ANTHROPIC_AUTH_TOKEN: "${CLAUDE_CODE_AUTH_TOKEN}"
+    ANTHROPIC_BASE_URL: "https://ark.cn-beijing.volces.com/api/compatible"
+    ANTHROPIC_MODEL: "doubao-seed-evolving"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
+
+email:
+  smtp_host: "smtp.163.com"
+  smtp_port: 465
+  smtp_username: "${ANBAN_SMTP_USERNAME}"
+  smtp_password: "${ANBAN_SMTP_PASSWORD}"
+  from_address: "${ANBAN_SMTP_FROM_ADDRESS}"
+  from_name: "Anban 智能创作助手"
+  code_ttl: 5m
+  code_length: 6
+
+funasr:
+  base_url: "${ANBAN_FUNASR_BASE_URL}"
+  api_key: "${ANBAN_FUNASR_API_KEY}"
+  model: "fun-asr"
+  timeout: 10m
+
+seednote:
+  base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://seednote:18060}"
+  timeout: 30
+
+ilink:
+  enabled: ${ANBAN_ILINK_ENABLED:-true}
+  base_url: "${ANBAN_ILINK_BASE_URL:-http://wcflink:18070}"
+  timeout: 30
+  poll_interval: 2
+  notification_retry_max: 5
+  assistant_account_id: "${ANBAN_ILINK_ASSISTANT_ACCOUNT_ID:-}"
+  assistant_name: "${ANBAN_ILINK_ASSISTANT_NAME:-Anban 微信助手}"
+  assistant_wechat_id: "${ANBAN_ILINK_ASSISTANT_WECHAT_ID:-}"
+  assistant_qrcode_url: "${ANBAN_ILINK_ASSISTANT_QRCODE_URL:-}"
+
+cors:
+  allowed_origins:
+    - "https://creator.anbanai.com"
+
+asynq:
+  concurrency: 3
+
+invitation:
+  enabled: true
+  max_per_user: 10

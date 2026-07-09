@@ -86,12 +86,14 @@ type Project struct {
 	EcommerceDefaultsSet bool                                         `gorm:"-" json:"-"`
 	// VideoDefaults and VideoModelPolicy configure Seedance video generation for
 	// videocreator projects. Plans/tasks copy resolved values into snapshots.
-	VideoDefaults    datatypes.JSONType[VideoDefaults]    `gorm:"type:json" json:"video_defaults"`
-	VideoModelPolicy datatypes.JSONType[VideoModelPolicy] `gorm:"type:json" json:"video_model_policy"`
-	VideoProfileSet  bool                                 `gorm:"-" json:"-"`
-	Status           string                               `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
-	CreatedAt        time.Time                            `json:"created_at"`
-	UpdatedAt        time.Time                            `json:"updated_at"`
+	VideoDefaults          datatypes.JSONType[VideoDefaults]       `gorm:"type:json" json:"video_defaults"`
+	VideoModelPolicy       datatypes.JSONType[VideoModelPolicy]    `gorm:"type:json" json:"video_model_policy"`
+	OpenMontageDefaults    datatypes.JSONType[OpenMontageDefaults] `gorm:"type:json" json:"openmontage_defaults"`
+	OpenMontageDefaultsSet bool                                    `gorm:"-" json:"-"`
+	VideoProfileSet        bool                                    `gorm:"-" json:"-"`
+	Status                 string                                  `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
+	CreatedAt              time.Time                               `json:"created_at"`
+	UpdatedAt              time.Time                               `json:"updated_at"`
 }
 
 func (Project) TableName() string { return "projects" }

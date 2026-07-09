@@ -63,17 +63,18 @@ type StyleOverrides struct {
 // creation time. Runtime surfaces (MCP/settings/UI) read this when present so
 // later project edits do not change an already-created task.
 type ProjectSnapshot struct {
-	ProjectName       string                   `json:"project_name,omitempty"`
-	Platform          string                   `json:"platform,omitempty"`
-	Instructions      string                   `json:"instructions,omitempty"`
-	Keywords          string                   `json:"keywords,omitempty"`
-	VisualStyle       string                   `json:"visual_style,omitempty"`
-	ReferenceImageURL string                   `json:"reference_image_url,omitempty"`
-	ImageRatio        string                   `json:"image_ratio,omitempty"`
-	Writer            string                   `json:"writer,omitempty"`
-	Theme             string                   `json:"theme,omitempty"`
-	Author            string                   `json:"author,omitempty"`
-	EcommerceDefaults EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
+	ProjectName         string                   `json:"project_name,omitempty"`
+	Platform            string                   `json:"platform,omitempty"`
+	Instructions        string                   `json:"instructions,omitempty"`
+	Keywords            string                   `json:"keywords,omitempty"`
+	VisualStyle         string                   `json:"visual_style,omitempty"`
+	ReferenceImageURL   string                   `json:"reference_image_url,omitempty"`
+	ImageRatio          string                   `json:"image_ratio,omitempty"`
+	Writer              string                   `json:"writer,omitempty"`
+	Theme               string                   `json:"theme,omitempty"`
+	Author              string                   `json:"author,omitempty"`
+	EcommerceDefaults   EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
+	OpenMontageDefaults OpenMontageDefaults      `json:"openmontage_defaults,omitempty"`
 }
 
 // Task represents a content generation task.
@@ -117,6 +118,7 @@ type Task struct {
 	Ecommerce               datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
 	InputAttachments        datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
 	VideoInput              datatypes.JSONType[VideoInput]        `gorm:"type:json" json:"video_input"`
+	OpenMontageInput        datatypes.JSONType[OpenMontageInput]  `gorm:"type:json" json:"openmontage_input"`
 	VideoConfig             datatypes.JSONType[VideoTaskConfig]   `gorm:"type:json" json:"video_config"`
 	VideoGenerationID       string                                `gorm:"type:varchar(100);default:''" json:"video_generation_id,omitempty"`
 	VideoEstimatedCredits   int                                   `gorm:"default:0" json:"video_estimated_credits,omitempty"`

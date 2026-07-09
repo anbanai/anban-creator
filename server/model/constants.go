@@ -57,6 +57,7 @@ const (
 	ScopeEcommerce    = "ecommerce"
 	ScopeVideoCreator = "videocreator"
 	ScopeVideoEditor  = "videoeditor"
+	ScopeOpenMontage  = "openmontage"
 )
 
 // File role constants.
@@ -90,6 +91,7 @@ const (
 	PlatformEcommerce    = "ecommerce"
 	PlatformVideoCreator = "videocreator"
 	PlatformVideoEditor  = "videoeditor"
+	PlatformOpenMontage  = "openmontage"
 )
 
 func IsVideoPlatform(platform string) bool {
@@ -102,6 +104,10 @@ func IsVideoCreatorPlatform(platform string) bool {
 
 func IsVideoEditorPlatform(platform string) bool {
 	return platform == PlatformVideoEditor
+}
+
+func IsOpenMontagePlatform(platform string) bool {
+	return platform == PlatformOpenMontage
 }
 
 // ValidImageRatios is the set of allowed image aspect ratios.

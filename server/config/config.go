@@ -28,6 +28,7 @@ type Config struct {
 	MCP                MCPConfig                       `yaml:"mcp"`
 	ImageAPI           ImageAPIConfig                  `yaml:"image_api"`
 	VideoAPI           VideoAPIConfig                  `yaml:"video_api"`
+	OpenMontage        OpenMontageConfig               `yaml:"openmontage"`
 	ImagePresets       []ImageModelPreset              `yaml:"image_presets"`
 	Writing            WritingConfig                   `yaml:"writing"`
 	Vision             VisionConfig                    `yaml:"vision"`
@@ -193,6 +194,107 @@ type VideoModelCatalogEntry struct {
 	NoInputPricePerSecond map[string]float64 `yaml:"no_input_price_per_second"`
 	VideoInput5sMinPrice  map[string]float64 `yaml:"video_input_5s_min_price"`
 	VideoInput5sMaxPrice  map[string]float64 `yaml:"video_input_5s_max_price"`
+}
+
+type OpenMontageConfig struct {
+	Enabled                bool                    `yaml:"enabled"`
+	SubmodulePath          string                  `yaml:"submodule_path"`
+	DefaultPipeline        string                  `yaml:"default_pipeline"`
+	AllowedPipelines       []string                `yaml:"allowed_pipelines"`
+	MaxDurationSeconds     int64                   `yaml:"max_duration_seconds"`
+	MaxAssets              int                     `yaml:"max_assets"`
+	TimeoutMinutes         int                     `yaml:"timeout_minutes"`
+	ExecutionTargets       []string                `yaml:"execution_targets"`
+	DefaultExecutionTarget string                  `yaml:"default_execution_target"`
+	CreditCost             int                     `yaml:"credit_cost"`
+	Runner                 OpenMontageRunnerConfig `yaml:"runner"`
+}
+
+type OpenMontageRunnerConfig struct {
+	CloudImage string `yaml:"cloud_image"`
+}
+
+func (c *OpenMontageConfig) ApplyDefaults() {
+	c.Enabled = true
+	if c.SubmodulePath == "" {
+		c.SubmodulePath = "third_party/OpenMontage"
+	}
+	if c.DefaultPipeline == "" {
+		c.DefaultPipeline = "default"
+	}
+	if len(c.AllowedPipelines) == 0 {
+		c.AllowedPipelines = []string{c.DefaultPipeline}
+	}
+	if c.MaxDurationSeconds <= 0 {
+		c.MaxDurationSeconds = 600
+	}
+	if c.MaxAssets <= 0 {
+		c.MaxAssets = 20
+	}
+	if c.TimeoutMinutes <= 0 {
+		c.TimeoutMinutes = 90
+	}
+	if len(c.ExecutionTargets) == 0 {
+		c.ExecutionTargets = []string{"cloud", "local"}
+	}
+	if c.DefaultExecutionTarget == "" {
+		c.DefaultExecutionTarget = "cloud"
+	}
+	if c.CreditCost <= 0 {
+		c.CreditCost = 2000
+	}
+	if c.Runner.CloudImage == "" {
+		c.Runner.CloudImage = "anban/openmontage-runner:latest"
+	}
+}
+
+func (c OpenMontageConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(c.SubmodulePath) == "" {
+		return fmt.Errorf("openmontage.submodule_path is required")
+	}
+	if strings.TrimSpace(c.DefaultPipeline) == "" {
+		return fmt.Errorf("openmontage.default_pipeline is required")
+	}
+	if c.MaxDurationSeconds <= 0 {
+		return fmt.Errorf("openmontage.max_duration_seconds must be positive")
+	}
+	if c.MaxAssets <= 0 {
+		return fmt.Errorf("openmontage.max_assets must be positive")
+	}
+	if c.TimeoutMinutes <= 0 {
+		return fmt.Errorf("openmontage.timeout_minutes must be positive")
+	}
+	if !openMontageStringSliceContains(c.AllowedPipelines, c.DefaultPipeline) {
+		return fmt.Errorf("openmontage.default_pipeline must be in openmontage.allowed_pipelines")
+	}
+	if !validOpenMontageTarget(c.DefaultExecutionTarget) {
+		return fmt.Errorf("openmontage.default_execution_target must be cloud or local")
+	}
+	if !openMontageStringSliceContains(c.ExecutionTargets, c.DefaultExecutionTarget) {
+		return fmt.Errorf("openmontage.default_execution_target must be in openmontage.execution_targets")
+	}
+	for _, target := range c.ExecutionTargets {
+		if !validOpenMontageTarget(target) {
+			return fmt.Errorf("openmontage.execution_targets contains invalid target %q", target)
+		}
+	}
+	return nil
+}
+
+func validOpenMontageTarget(target string) bool {
+	return target == "cloud" || target == "local"
+}
+
+func openMontageStringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ModelProviderConfig describes a reusable provider endpoint/key.
@@ -1114,6 +1216,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"wechat":          true,
 		"storage":         true,
 		"mcp":             true,
+		"openmontage":     true,
 		"image_presets":   true,
 		"model_providers": true,
 		"model_routes":    true,
@@ -1241,6 +1344,7 @@ func (c *Config) applyDefaults() {
 	if c.VideoAPI.CreditMultiplier == 0 {
 		c.VideoAPI.CreditMultiplier = 1000
 	}
+	c.OpenMontage.ApplyDefaults()
 	if c.Billing.CreditsPerCNY == 0 {
 		c.Billing.CreditsPerCNY = 1600
 	}
@@ -1827,6 +1931,10 @@ func (c *Config) Validate() error {
 		if c.Memory.LockTTL <= 0 {
 			errs = append(errs, "memory.lock_ttl must be positive")
 		}
+	}
+
+	if err := c.OpenMontage.Validate(); err != nil {
+		errs = append(errs, err.Error())
 	}
 
 	if !c.TingWu.Empty() {

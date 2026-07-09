@@ -37,11 +37,12 @@ type Plan struct {
 	// ArticleWithCover / ArticleWithContentImages are plan-level 公众号 article image
 	// toggles copied to Task on CreateFromPlan. Nullable *bool, DB default true (nil =
 	// generate). See model.Task.ArticleWithCover for why *bool is required.
-	ArticleWithCover         *bool                               `gorm:"default:true;not null" json:"article_with_cover"`
-	ArticleWithContentImages *bool                               `gorm:"default:true;not null" json:"article_with_content_images"`
-	VideoInput               datatypes.JSONType[VideoInput]      `gorm:"type:json" json:"video_input"`
-	VideoConfig              datatypes.JSONType[VideoTaskConfig] `gorm:"type:json" json:"video_config"`
-	VideoEstimatedCredits    int                                 `gorm:"default:0" json:"video_estimated_credits,omitempty"`
+	ArticleWithCover         *bool                                `gorm:"default:true;not null" json:"article_with_cover"`
+	ArticleWithContentImages *bool                                `gorm:"default:true;not null" json:"article_with_content_images"`
+	VideoInput               datatypes.JSONType[VideoInput]       `gorm:"type:json" json:"video_input"`
+	OpenMontageInput         datatypes.JSONType[OpenMontageInput] `gorm:"type:json" json:"openmontage_input"`
+	VideoConfig              datatypes.JSONType[VideoTaskConfig]  `gorm:"type:json" json:"video_config"`
+	VideoEstimatedCredits    int                                  `gorm:"default:0" json:"video_estimated_credits,omitempty"`
 
 	// Legacy style/author/theme columns. New code no longer writes or reads these;
 	// task runtime config is frozen from the owning project into Task.ProjectSnapshot.
