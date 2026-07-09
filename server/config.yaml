@@ -154,7 +154,7 @@ model_routes:
         max_duration: 15
         supports_video_input: true
 
-openmontage:
+montage:
   enabled: true
   submodule_path: "third_party/OpenMontage"
   default_pipeline: "default"
@@ -166,7 +166,7 @@ openmontage:
   default_execution_target: "cloud"
   credit_cost: 2000
   runner:
-    cloud_image: "${ANBAN_OPENMONTAGE_RUNNER_IMAGE:-anban/openmontage-runner:latest}"
+    cloud_image: "${ANBAN_MONTAGE_RUNNER_IMAGE:-anban/montage-runner:latest}"
 
 model_prices:
   currency_rates:
@@ -303,7 +303,7 @@ credits:
     ecommerce: 3000
     videocreator: 2000
     videoeditor: 2000
-    openmontage: 2000
+    montage: 2000
     viral_analysis: 1200
   admin_api_key: "${ANBAN_CREDITS_ADMIN_API_KEY}"
 
