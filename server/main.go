@@ -471,6 +471,9 @@ func main() {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
+		agentHandler.SetDirectUploadConfig(service.DirectUploadConfig{
+			Storage: cfg.Storage,
+		})
 		if store != nil {
 			fileHandler = handler.NewFileHandler(store, log)
 			fileHandler.SetPendingUploadRepository(repo.PendingUploads())

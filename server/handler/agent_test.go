@@ -2,8 +2,12 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +16,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 // setupAgentClaimApp wires an AgentHandler (real API-key auth via APIKeyService)
@@ -73,6 +79,192 @@ func seedClaimableLocalTask(t *testing.T, repo repository.Repository, userID, pr
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+type fakeAgentArtifactStorage struct {
+	uploadKey         string
+	uploadContentType string
+	stats             map[string]*storage.ObjectInfo
+}
+
+func (f *fakeAgentArtifactStorage) Name() string { return "oss" }
+func (f *fakeAgentArtifactStorage) Upload(context.Context, string, io.Reader, string) (*storage.UploadResult, error) {
+	return nil, nil
+}
+func (f *fakeAgentArtifactStorage) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {
+	return nil, nil
+}
+func (f *fakeAgentArtifactStorage) UploadURL(_ context.Context, key string, contentType string, _ int) (string, error) {
+	f.uploadKey = key
+	f.uploadContentType = contentType
+	return "https://upload.example.com/" + key, nil
+}
+func (f *fakeAgentArtifactStorage) GetURL(key string) string { return "https://cdn.example.com/" + key }
+func (f *fakeAgentArtifactStorage) Read(context.Context, string) ([]byte, error) {
+	return nil, os.ErrNotExist
+}
+func (f *fakeAgentArtifactStorage) Delete(context.Context, string) error { return nil }
+func (f *fakeAgentArtifactStorage) DownloadURL(_ context.Context, key string, _ int) (string, error) {
+	return "https://download.example.com/" + key, nil
+}
+func (f *fakeAgentArtifactStorage) HasCustomDomain() bool { return true }
+func (f *fakeAgentArtifactStorage) IsOwnedURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "https://cdn.example.com/")
+}
+func (f *fakeAgentArtifactStorage) StatObject(_ context.Context, key string) (*storage.ObjectInfo, error) {
+	if f.stats == nil || f.stats[key] == nil {
+		return nil, os.ErrNotExist
+	}
+	cp := *f.stats[key]
+	return &cp, nil
+}
+
+func setupAgentArtifactApp(t *testing.T) (*fiber.App, repository.Repository, *model.Task, *fakeAgentArtifactStorage, string, string) {
+	t.Helper()
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	otherUserID := uuid.New().String()
+	projectID := uuid.New().String()
+	for _, user := range []*model.User{
+		{ID: userID, Email: "artifact@example.com", Password: "x", InviteCode: "artifact"},
+		{ID: otherUserID, Email: "other-artifact@example.com", Password: "x", InviteCode: "other-artifact"},
+	} {
+		if err := repo.Users().Create(ctx, user); err != nil {
+			t.Fatalf("create user: %v", err)
+		}
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "P", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	store := &fakeAgentArtifactStorage{}
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	apiKeySvc := service.NewAPIKeyService(repo, &logger)
+	_, rawKey, err := apiKeySvc.Create(ctx, userID, "artifact")
+	if err != nil {
+		t.Fatalf("create api key: %v", err)
+	}
+	_, otherRawKey, err := apiKeySvc.Create(ctx, otherUserID, "artifact-other")
+	if err != nil {
+		t.Fatalf("create other api key: %v", err)
+	}
+	h := NewAgentHandler(taskSvc, apiKeySvc, store, "", &logger)
+	h.SetDirectUploadConfig(service.DirectUploadConfig{
+		Storage: config.StorageConfig{
+			Provider:       "oss",
+			Endpoint:       "oss-cn-hangzhou.aliyuncs.com",
+			BucketName:     "anban-test",
+			Region:         "oss-cn-hangzhou",
+			STSRoleArn:     "acs:ram::1:role/upload",
+			STSSessionName: "agent-artifact-upload",
+		},
+		CredentialIssuer: service.StaticUploadCredentialIssuer(func(context.Context, service.UploadCredentialRequest) (*service.UploadCredential, error) {
+			return &service.UploadCredential{
+				AccessKeyID:     "sts-ak",
+				AccessKeySecret: "sts-secret",
+				SecurityToken:   "sts-token",
+				ExpiresAt:       time.Now().Add(15 * time.Minute),
+			}, nil
+		}),
+	})
+
+	app := fiber.New()
+	app.Post("/agent/artifacts/prepare", h.AuthMiddleware, h.PrepareArtifactUpload)
+	app.Post("/agent/artifacts/manifest", h.AuthMiddleware, h.ReportArtifactManifest)
+	return app, repo, task, store, rawKey, otherRawKey
+}
+
+func TestAgentArtifactPrepareAndManifest(t *testing.T) {
+	app, repo, task, store, rawKey, _ := setupAgentArtifactApp(t)
+
+	prepareBody := `{"task_id":"` + task.ID + `","relative_path":"output/article.md","filename":"article.md","content_type":"text/markdown","size":123}`
+	req := httptest.NewRequest("POST", "/agent/artifacts/prepare", strings.NewReader(prepareBody))
+	req.Header.Set("Authorization", "Bearer "+rawKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("prepare request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("prepare status = %d, want 200; body=%s", resp.StatusCode, body)
+	}
+	var env struct {
+		Data struct {
+			Key                string `json:"key"`
+			STSAccessKeyID     string `json:"sts_access_key_id"`
+			STSSecurityToken   string `json:"sts_security_token"`
+			STSAccessKeySecret string `json:"sts_access_key_secret"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+	wantKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/output/article.md"
+	if env.Data.Key != wantKey || store.uploadKey != wantKey || store.uploadContentType != "text/markdown" {
+		t.Fatalf("prepared key/store = %q/%q/%q, want %q", env.Data.Key, store.uploadKey, store.uploadContentType, wantKey)
+	}
+	if env.Data.STSAccessKeyID != "sts-ak" || env.Data.STSSecurityToken != "sts-token" || env.Data.STSAccessKeySecret == "" {
+		t.Fatalf("missing sts credentials: %#v", env.Data)
+	}
+
+	body := []byte("# title\n\nbody")
+	sum := sha256.Sum256(body)
+	hash := hex.EncodeToString(sum[:])
+	store.stats = map[string]*storage.ObjectInfo{
+		wantKey: {Key: wantKey, Size: int64(len(body)), ContentType: "text/markdown", ETag: "etag"},
+	}
+	manifestBody := `{"task_id":"` + task.ID + `","files":[{"relative_path":"output/article.md","object_key":"` + wantKey + `","content_type":"text/markdown","size":` + "13" + `,"sha256":"` + hash + `","etag":"etag"}]}`
+	req = httptest.NewRequest("POST", "/agent/artifacts/manifest", strings.NewReader(manifestBody))
+	req.Header.Set("Authorization", "Bearer "+rawKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatalf("manifest request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("manifest status = %d, want 200; body=%s", resp.StatusCode, body)
+	}
+	files, err := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("find task files: %v", err)
+	}
+	if len(files) != 1 || files[0].OSSKey != wantKey {
+		t.Fatalf("task files = %#v, want one file with key %q", files, wantKey)
+	}
+}
+
+func TestAgentArtifactPrepareRejectsCrossUser(t *testing.T) {
+	app, _, task, _, _, otherRawKey := setupAgentArtifactApp(t)
+
+	body := `{"task_id":"` + task.ID + `","relative_path":"output/article.md","filename":"article.md","content_type":"text/markdown","size":123}`
+	req := httptest.NewRequest("POST", "/agent/artifacts/prepare", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+otherRawKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 403; body=%s", resp.StatusCode, body)
+	}
+}
 
 // TestAgentClaim_RequiresAuth confirms a missing token is rejected.
 func TestAgentClaim_RequiresAuth(t *testing.T) {

@@ -19,11 +19,12 @@ const agentUserIDContextKey = "agent_user_id"
 
 // AgentHandler handles agent-to-server communication endpoints.
 type AgentHandler struct {
-	taskSvc   *service.TaskService
-	apiKeySvc *service.APIKeyService
-	store     storage.Provider
-	staticKey string
-	logger    *zerolog.Logger
+	taskSvc         *service.TaskService
+	apiKeySvc       *service.APIKeyService
+	store           storage.Provider
+	staticKey       string
+	directUploadCfg service.DirectUploadConfig
+	logger          *zerolog.Logger
 }
 
 // NewAgentHandler creates a new AgentHandler.
@@ -35,6 +36,12 @@ func NewAgentHandler(taskSvc *service.TaskService, apiKeySvc *service.APIKeyServ
 		staticKey: staticKey,
 		logger:    logger,
 	}
+}
+
+// SetDirectUploadConfig configures server-issued OSS STS credentials for agent
+// artifact uploads.
+func (h *AgentHandler) SetDirectUploadConfig(cfg service.DirectUploadConfig) {
+	h.directUploadCfg = cfg
 }
 
 // AuthMiddleware validates bearer-style API keys for agent endpoints.
@@ -137,6 +144,62 @@ func (h *AgentHandler) Upload(c fiber.Ctx) error {
 	}
 
 	return Success(c, taskFile)
+}
+
+// PrepareArtifactUpload handles POST /api/v1/agent/artifacts/prepare.
+func (h *AgentHandler) PrepareArtifactUpload(c fiber.Ctx) error {
+	if h.taskSvc == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
+	}
+	var req service.TaskArtifactPrepareRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if strings.TrimSpace(req.TaskID) == "" {
+		return Error(c, fiber.StatusBadRequest, "task_id is required")
+	}
+	result, err := h.taskSvc.PrepareTaskArtifactUpload(c.Context(), req.TaskID, h.authenticatedUserID(c), h.directUploadCfg, req)
+	if err != nil {
+		if isAgentTaskAccessError(err) {
+			return Error(c, fiber.StatusForbidden, "task access denied")
+		}
+		if strings.Contains(err.Error(), "storage provider") || strings.Contains(err.Error(), "OSS storage") || strings.Contains(err.Error(), "credential") {
+			h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("prepare agent artifact upload unavailable")
+			return Error(c, fiber.StatusServiceUnavailable, err.Error())
+		}
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	return Success(c, result)
+}
+
+// ReportArtifactManifest handles POST /api/v1/agent/artifacts/manifest.
+func (h *AgentHandler) ReportArtifactManifest(c fiber.Ctx) error {
+	if h.taskSvc == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
+	}
+	var req service.TaskArtifactManifestRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if strings.TrimSpace(req.TaskID) == "" {
+		return Error(c, fiber.StatusBadRequest, "task_id is required")
+	}
+	if err := h.taskSvc.FinalizeTaskArtifactManifest(c.Context(), req.TaskID, h.authenticatedUserID(c), req); err != nil {
+		if isAgentTaskAccessError(err) {
+			return Error(c, fiber.StatusForbidden, "task access denied")
+		}
+		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("agent artifact manifest rejected")
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	return Success(c, fiber.Map{"ok": true})
+}
+
+func isAgentTaskAccessError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "task does not belong to authenticated user")
 }
 
 type agentProgressRequest struct {
