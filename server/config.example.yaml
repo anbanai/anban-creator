@@ -284,6 +284,22 @@ claude:
   executor: local
   sandbox: true
   plugin_dir: "/anbanai"
+  kubernetes:
+    namespace: "${ANBAN_AGENT_NAMESPACE:-anban}"
+    agent_image: "${ANBAN_AGENT_IMAGE:-anban-creator-agent:latest}"
+    service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-anban-agent-runner}"
+    image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
+    workspace_mount_path: "/workspace"
+    workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-agent-nas}"
+    pod_ttl_seconds: 86400
+    exec_timeout_seconds: 3600
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "4"
+        memory: "8Gi"
   max_turns:
     moments: 25
     viral_analysis: 30

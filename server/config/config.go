@@ -901,11 +901,12 @@ func (c FunASRConfig) Complete() bool {
 // supporting auth tokens, base URLs, model overrides, etc.
 type ClaudeConfig struct {
 	Model          string            `yaml:"model"`    // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
-	Executor       string            `yaml:"executor"` // "local" (default) or "docker"
+	Executor       string            `yaml:"executor"` // "local" (default), "docker", or "kubernetes"
 	Env            map[string]string `yaml:"env"`
 	PluginDir      string            `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
 	Sandbox        bool              `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
+	Kubernetes     KubernetesConfig  `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
 	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 50}
 	TaskLogDir     string            `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
 	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
@@ -919,6 +920,26 @@ type DockerConfig struct {
 	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
 	ContainerName string `yaml:"container_name"` // Name of a persistent container to reuse via docker exec (empty = create+destroy per task)
 	WorkspaceDir  string `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
+}
+
+// KubernetesConfig holds ACK/Kubernetes executor settings for project Agent Pods.
+type KubernetesConfig struct {
+	Namespace          string                   `yaml:"namespace"`            // Namespace where project Agent Pods run.
+	AgentImage         string                   `yaml:"agent_image"`          // Agent image containing the anban binary and Claude runtime.
+	ServiceAccount     string                   `yaml:"service_account"`      // Service account used by Agent Pods.
+	ImagePullSecret    string                   `yaml:"image_pull_secret"`    // Optional image pull secret for private registries.
+	WorkspaceMountPath string                   `yaml:"workspace_mount_path"` // Container path where NAS is mounted.
+	WorkspacePVCName   string                   `yaml:"workspace_pvc_name"`   // NAS-backed PVC mounted by Agent Pods.
+	PodTTLSeconds      int                      `yaml:"pod_ttl_seconds"`      // Idle TTL for project Agent Pods.
+	ExecTimeoutSec     int                      `yaml:"exec_timeout_seconds"` // Per-task exec timeout.
+	Resources          KubernetesResourceConfig `yaml:"resources"`            // Agent Pod requests and limits.
+}
+
+// KubernetesResourceConfig mirrors Kubernetes resource maps without importing
+// client-go types into the config package.
+type KubernetesResourceConfig struct {
+	Requests map[string]string `yaml:"requests"`
+	Limits   map[string]string `yaml:"limits"`
 }
 
 // MemoryConfig holds Claude Code project memory projection settings.
@@ -1370,6 +1391,21 @@ func (c *Config) applyDefaults() {
 		// before the agent finishes (silent partial failure).
 		c.Claude.Docker.TimeoutSec = 3600
 	}
+	if c.Claude.Kubernetes.Namespace == "" {
+		c.Claude.Kubernetes.Namespace = "default"
+	}
+	if c.Claude.Kubernetes.AgentImage == "" {
+		c.Claude.Kubernetes.AgentImage = c.Claude.Docker.Image
+	}
+	if c.Claude.Kubernetes.WorkspaceMountPath == "" {
+		c.Claude.Kubernetes.WorkspaceMountPath = "/workspace"
+	}
+	if c.Claude.Kubernetes.PodTTLSeconds == 0 {
+		c.Claude.Kubernetes.PodTTLSeconds = 24 * 3600
+	}
+	if c.Claude.Kubernetes.ExecTimeoutSec == 0 {
+		c.Claude.Kubernetes.ExecTimeoutSec = c.Claude.Docker.TimeoutSec
+	}
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
 		c.Claude.PluginDir = detectPluginDir()
@@ -1752,8 +1788,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Claude.Executor != "local" && c.Claude.Executor != "docker" {
-		errs = append(errs, fmt.Sprintf("claude.executor must be 'local' or 'docker', got %q", c.Claude.Executor))
+	switch c.Claude.Executor {
+	case "local", "docker", "kubernetes":
+	default:
+		errs = append(errs, fmt.Sprintf("claude.executor must be 'local', 'docker', or 'kubernetes', got %q", c.Claude.Executor))
 	}
 
 	// When using the Docker executor, the container timeout must be at least as
@@ -1764,6 +1802,38 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Sprintf(
 				"claude.docker.timeout_sec (%ds) must be >= asynq.content_generate_timeout (%s); otherwise the container is killed before the task deadline",
 				c.Claude.Docker.TimeoutSec, c.Asynq.ContentGenerateTimeout))
+		}
+	}
+
+	if c.Claude.Executor == "kubernetes" {
+		if c.Storage.Provider != "oss" {
+			errs = append(errs, "claude.kubernetes requires storage.provider to be \"oss\"")
+		}
+		if strings.TrimSpace(c.Storage.STSRoleArn) == "" {
+			errs = append(errs, "storage.sts_role_arn is required when claude.executor is \"kubernetes\"")
+		}
+		if strings.TrimSpace(c.Claude.AgentServerURL) == "" {
+			errs = append(errs, "claude.agent_server_url is required when claude.executor is \"kubernetes\"")
+		}
+		if strings.TrimSpace(c.Claude.Kubernetes.Namespace) == "" {
+			errs = append(errs, "claude.kubernetes.namespace is required")
+		}
+		if strings.TrimSpace(c.Claude.Kubernetes.AgentImage) == "" {
+			errs = append(errs, "claude.kubernetes.agent_image is required")
+		}
+		if strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath) == "" {
+			errs = append(errs, "claude.kubernetes.workspace_mount_path is required")
+		} else if !strings.HasPrefix(strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath), "/") {
+			errs = append(errs, "claude.kubernetes.workspace_mount_path must be absolute")
+		}
+		if strings.TrimSpace(c.Claude.Kubernetes.WorkspacePVCName) == "" {
+			errs = append(errs, "claude.kubernetes.workspace_pvc_name is required")
+		}
+		if c.Claude.Kubernetes.ExecTimeoutSec <= 0 {
+			errs = append(errs, "claude.kubernetes.exec_timeout_seconds must be positive")
+		}
+		if c.Claude.Kubernetes.PodTTLSeconds <= 0 {
+			errs = append(errs, "claude.kubernetes.pod_ttl_seconds must be positive")
 		}
 	}
 
