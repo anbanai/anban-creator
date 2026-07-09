@@ -35,6 +35,25 @@ func newLocalSeedTask(t *testing.T, repo repository.Repository, userID, projectI
 	return task
 }
 
+func newLocalOpenMontageTask(t *testing.T, repo repository.Repository, userID, projectID string, deadline *time.Time) *model.Task {
+	t.Helper()
+	task := &model.Task{
+		ID:                 uuid.New().String(),
+		UserID:             userID,
+		ProjectID:          projectID,
+		Type:               model.PlatformOpenMontage,
+		Status:             model.TaskStatusPending,
+		Prompt:             "做一条品牌短片",
+		ExecutionTarget:    model.ExecutionTargetLocal,
+		LocalClaimDeadline: deadline,
+	}
+	task.SetOpenMontageInput(model.OpenMontageInput{Brief: "做一条品牌短片"})
+	if err := repo.Tasks().Create(context.Background(), task); err != nil {
+		t.Fatalf("create openmontage task: %v", err)
+	}
+	return task
+}
+
 // TestClaimLocalTask_HappyPath verifies a pending local-target task is claimed
 // atomically (status→running, target→local_claimed) and its config is returned
 // with the agent argv inputs resolved.
@@ -316,6 +335,17 @@ func addLocalSeednoteDeliverables(t *testing.T, repo repository.Repository, task
 	}
 }
 
+func claimOneLocalOpenMontage(t *testing.T, svc *TaskService, repo repository.Repository, userID, projectID string) string {
+	t.Helper()
+	deadline := time.Now().Add(LocalClaimWindow)
+	task := newLocalOpenMontageTask(t, repo, userID, projectID, &deadline)
+	cfg, err := svc.ClaimLocalTask(context.Background(), userID, `{}`)
+	if err != nil || cfg == nil {
+		t.Fatalf("claim failed: cfg=%v err=%v", cfg, err)
+	}
+	return task.ID
+}
+
 // TestCompleteLocalTask_Success verifies a claimed local task transitions to
 // completed (terminal) and records completed_at — the core fix for the
 // "local tasks never complete" gap.
@@ -366,6 +396,36 @@ func TestCompleteLocalTask_SuccessWithoutDeliverablesFails(t *testing.T) {
 	}
 	if got.ErrorMessage == "" {
 		t.Fatalf("expected error message for missing deliverables")
+	}
+}
+
+func TestCompleteLocalTask_OpenMontageRejectsZeroByteDeliverables(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	taskID := claimOneLocalOpenMontage(t, svc, repo, userID, projectID)
+
+	files := []*model.TaskFile{
+		{TaskID: taskID, Role: "final_video", FileName: "final.mp4", FilePath: "output/openmontage/final.mp4", FileSize: 0},
+		{TaskID: taskID, Role: "delivery_manifest", FileName: "delivery-manifest.json", FilePath: "output/openmontage/delivery-manifest.json", FileSize: 0},
+	}
+	if err := repo.TaskFiles().BatchCreate(ctx, files); err != nil {
+		t.Fatalf("create zero-byte openmontage files: %v", err)
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+		t.Fatalf("CompleteLocalTask: %v", err)
+	}
+
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if got.ErrorMessage == "" {
+		t.Fatal("expected error message for zero-byte OpenMontage deliverables")
 	}
 }
 
