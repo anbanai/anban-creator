@@ -9,7 +9,7 @@ const taskLabels: Record<string, string> = {
   viral_analysis: '爆文拆解',
   videocreator: 'AI 视频生成',
   videoeditor: '视频剪辑后期',
-  openmontage: 'OpenMontage',
+  montage: 'Montage',
 }
 
 function creditAmount(tx: CreditTransaction, fallback?: string): number {

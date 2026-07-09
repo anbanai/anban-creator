@@ -1,10 +1,10 @@
-# OpenMontage Integration Implementation Plan
+# Montage Integration Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add OpenMontage as an independent Anban platform with its own server input model, Studio flow, agent contract, artifact validation, and submodule-based upgrade path.
+**Goal:** Add Montage as an independent Anban platform with its own server input model, Studio flow, agent contract, artifact validation, and submodule-based upgrade path.
 
-**Architecture:** OpenMontage is a peer platform named `openmontage`, independent from `videocreator` and `videoeditor`. Anban stores a stable `openmontage_input`, resolves execution target by system policy, runs a dedicated `openmontage` agent against the `third_party/OpenMontage` submodule, and validates normalized Anban task files.
+**Architecture:** Montage is a peer platform named `montage`, independent from `videocreator` and `videoeditor`. Anban stores a stable `montage_input`, resolves execution target by system policy, runs a dedicated `montage` agent against the `third_party/OpenMontage` submodule, and validates normalized Anban task files.
 
 **Tech Stack:** Go 1.26, Fiber v3, GORM typed JSON columns, React 19, TypeScript, Vite 8, Bun, Vitest, Claude/Codex/OpenClaw plugin assets, git submodule.
 
@@ -14,58 +14,58 @@
 
 Create:
 
-- `server/model/openmontage.go` - OpenMontage input, asset, preferences, defaults, and helper setters.
-- `server/config/openmontage_test.go` - config defaults and validation tests.
-- `server/service/openmontage_execution_target.go` - system-owned execution target resolver.
-- `server/service/openmontage_execution_target_test.go` - resolver behavior tests.
-- `server/agent/openmontage_contract_test.go` - agent/plugin contract tests.
-- `studio/src/types/openmontage.ts` - Studio OpenMontage TypeScript types.
-- `studio/src/lib/openmontage-form.ts` - Studio form defaults and submit normalization.
-- `studio/src/lib/openmontage-form.test.ts` - Studio form normalization tests.
-- `studio/src/components/openmontage/OpenMontageCreationPanel.tsx` - dedicated OpenMontage input panel.
-- `studio/src/components/openmontage/OpenMontageCreationPanel.test.tsx` - panel interaction tests.
-- `claudecode/agents/openmontage.md` - Claude Code OpenMontage agent.
-- `codex/agents/openmontage.toml` - Codex OpenMontage agent.
-- `claudecode/skills/openmontage/SKILL.md` - Claude Code OpenMontage skill.
-- `codex/skills/openmontage/SKILL.md` - Codex OpenMontage skill.
-- `openclaw/skills/openmontage/SKILL.md` - OpenClaw OpenMontage skill.
-- `docs/openmontage-upgrade.md` - submodule update and contract-test procedure.
+- `server/model/montage.go` - Montage input, asset, preferences, defaults, and helper setters.
+- `server/config/montage_test.go` - config defaults and validation tests.
+- `server/service/montage_execution_target.go` - system-owned execution target resolver.
+- `server/service/montage_execution_target_test.go` - resolver behavior tests.
+- `server/agent/montage_contract_test.go` - agent/plugin contract tests.
+- `studio/src/types/montage.ts` - Studio Montage TypeScript types.
+- `studio/src/lib/montage-form.ts` - Studio form defaults and submit normalization.
+- `studio/src/lib/montage-form.test.ts` - Studio form normalization tests.
+- `studio/src/components/montage/MontageCreationPanel.tsx` - dedicated Montage input panel.
+- `studio/src/components/montage/MontageCreationPanel.test.tsx` - panel interaction tests.
+- `claudecode/agents/montage.md` - Claude Code Montage agent.
+- `codex/agents/montage.toml` - Codex Montage agent.
+- `claudecode/skills/montage/SKILL.md` - Claude Code Montage skill.
+- `codex/skills/montage/SKILL.md` - Codex Montage skill.
+- `openclaw/skills/montage/SKILL.md` - OpenClaw Montage skill.
+- `docs/montage-upgrade.md` - submodule update and contract-test procedure.
 
 Modify:
 
-- `server/model/constants.go` - add `ScopeOpenMontage`, `PlatformOpenMontage`, `IsOpenMontagePlatform`.
-- `server/model/task.go` - add `OpenMontageInput` typed JSON column and setter.
-- `server/model/plan.go` - add `OpenMontageInput` typed JSON column and setter.
-- `server/model/project.go` - add OpenMontage project defaults to project snapshot.
-- `server/config/config.go` - add `OpenMontageConfig`.
-- `server/config.yaml` - add `openmontage` block.
-- `server/service/project.go` - accept OpenMontage as a valid project platform.
-- `server/service/task.go` - accept and validate `openmontage_input`, clamp quantity to one, resolve execution target.
-- `server/service/plan.go` - support OpenMontage plans and stored input.
-- `server/service/task_execution.go` - validate OpenMontage deliverables.
-- `server/service/task_progress_stages.go` - add OpenMontage progress defaults.
+- `server/model/constants.go` - add `ScopeMontage`, `PlatformMontage`, `IsMontagePlatform`.
+- `server/model/task.go` - add `MontageInput` typed JSON column and setter.
+- `server/model/plan.go` - add `MontageInput` typed JSON column and setter.
+- `server/model/project.go` - add Montage project defaults to project snapshot.
+- `server/config/config.go` - add `MontageConfig`.
+- `server/config.yaml` - add `montage` block.
+- `server/service/project.go` - accept Montage as a valid project platform.
+- `server/service/task.go` - accept and validate `montage_input`, clamp quantity to one, resolve execution target.
+- `server/service/plan.go` - support Montage plans and stored input.
+- `server/service/task_execution.go` - validate Montage deliverables.
+- `server/service/task_progress_stages.go` - add Montage progress defaults.
 - `server/service/credit.go` and related credit tests/config - add base task pricing.
-- `server/handler/task.go` - bind, validate, and respond with `openmontage_input`.
-- `server/handler/plan.go` - bind and respond with `openmontage_input`.
-- `server/handler/project.go` - accept OpenMontage project defaults.
-- `server/agent/config_builder.go` - map OpenMontage tasks to `openmontage` agent.
-- `server/agent/executor.go` - write `openmontage-input.json` into task workspace.
+- `server/handler/task.go` - bind, validate, and respond with `montage_input`.
+- `server/handler/plan.go` - bind and respond with `montage_input`.
+- `server/handler/project.go` - accept Montage project defaults.
+- `server/agent/config_builder.go` - map Montage tasks to `montage` agent.
+- `server/agent/executor.go` - write `montage-input.json` into task workspace.
 - `server/agent/artifacts.go` - artifact validation for local/workdir fallback.
-- `studio/src/types/task.ts`, `studio/src/types/project.ts`, `studio/src/types/plan.ts`, `studio/src/types/index.ts` - add OpenMontage types.
+- `studio/src/types/task.ts`, `studio/src/types/project.ts`, `studio/src/types/plan.ts`, `studio/src/types/index.ts` - add Montage types.
 - `studio/src/lib/schemas.ts` and `studio/src/lib/schemas.test.ts` - add schema support.
 - `studio/src/lib/labels.ts`, `studio/src/lib/pricing.ts`, `studio/src/lib/credit-display.ts`, `studio/src/lib/PlatformIcon.tsx`, `studio/src/lib/command-center.ts` - labels and navigation.
-- `studio/src/pages/TasksPage.tsx` - show OpenMontage panel and submit payload.
-- `studio/src/pages/PlansPage.tsx` - show OpenMontage plan panel and submit payload.
-- `studio/src/components/FilePreview.tsx` - display OpenMontage final video and manifests.
-- `codex/install/agents-registration.toml` - register Codex OpenMontage agent.
+- `studio/src/pages/TasksPage.tsx` - show Montage panel and submit payload.
+- `studio/src/pages/PlansPage.tsx` - show Montage plan panel and submit payload.
+- `studio/src/components/FilePreview.tsx` - display Montage final video and manifests.
+- `codex/install/agents-registration.toml` - register Codex Montage agent.
 - `claudecode/.claude-plugin/plugin.json`, `openclaw/openclaw.plugin.json`, `codex/.codex-plugin/plugin.json` - patch version bump and description update.
-- `.gitmodules` - add OpenMontage submodule.
+- `.gitmodules` - add Montage submodule.
 
 ## Task 1: Submodule, Config, And Model Foundation
 
 **Files:**
-- Create: `server/model/openmontage.go`
-- Create: `server/config/openmontage_test.go`
+- Create: `server/model/montage.go`
+- Create: `server/config/montage_test.go`
 - Modify: `.gitmodules`
 - Modify: `server/model/constants.go`
 - Modify: `server/model/task.go`
@@ -73,10 +73,10 @@ Modify:
 - Modify: `server/model/project.go`
 - Modify: `server/config/config.go`
 - Modify: `server/config.yaml`
-- Test: `server/config/openmontage_test.go`
+- Test: `server/config/montage_test.go`
 - Test: existing `server/service/channel_test.go`
 
-- [ ] **Step 1: Add OpenMontage as a git submodule**
+- [ ] **Step 1: Add Montage as a git submodule**
 
 Run:
 
@@ -94,15 +94,15 @@ Expected: `.gitmodules` is created or updated with:
 
 - [ ] **Step 2: Write failing config test**
 
-Create `server/config/openmontage_test.go`:
+Create `server/config/montage_test.go`:
 
 ```go
 package config
 
 import "testing"
 
-func TestOpenMontageConfigDefaults(t *testing.T) {
-	cfg := OpenMontageConfig{}
+func TestMontageConfigDefaults(t *testing.T) {
+	cfg := MontageConfig{}
 	cfg.ApplyDefaults()
 
 	if !cfg.Enabled {
@@ -126,13 +126,13 @@ func TestOpenMontageConfigDefaults(t *testing.T) {
 	if cfg.DefaultExecutionTarget != "cloud" {
 		t.Fatalf("DefaultExecutionTarget = %q, want cloud", cfg.DefaultExecutionTarget)
 	}
-	if cfg.Runner.CloudImage != "anban/openmontage-runner:latest" {
+	if cfg.Runner.CloudImage != "anban/montage-runner:latest" {
 		t.Fatalf("CloudImage = %q, want default runner image", cfg.Runner.CloudImage)
 	}
 }
 
-func TestOpenMontageConfigValidate(t *testing.T) {
-	cfg := OpenMontageConfig{
+func TestMontageConfigValidate(t *testing.T) {
+	cfg := MontageConfig{
 		Enabled:                true,
 		SubmodulePath:          "third_party/OpenMontage",
 		DefaultPipeline:        "default",
@@ -142,8 +142,8 @@ func TestOpenMontageConfigValidate(t *testing.T) {
 		TimeoutMinutes:         90,
 		ExecutionTargets:       []string{"cloud", "local"},
 		DefaultExecutionTarget: "cloud",
-		Runner: OpenMontageRunnerConfig{
-			CloudImage: "anban/openmontage-runner:latest",
+		Runner: MontageRunnerConfig{
+			CloudImage: "anban/montage-runner:latest",
 		},
 	}
 
@@ -163,30 +163,30 @@ func TestOpenMontageConfigValidate(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/config -run TestOpenMontageConfig -count=1
+go test ./server/config -run TestMontageConfig -count=1
 ```
 
-Expected: FAIL with `undefined: OpenMontageConfig`.
+Expected: FAIL with `undefined: MontageConfig`.
 
-- [ ] **Step 4: Add OpenMontage model types**
+- [ ] **Step 4: Add Montage model types**
 
-Create `server/model/openmontage.go`:
+Create `server/model/montage.go`:
 
 ```go
 package model
 
 import "gorm.io/datatypes"
 
-type OpenMontageInput struct {
+type MontageInput struct {
 	Brief           string                  `json:"brief,omitempty"`
 	PipelineKey     string                  `json:"pipeline_key,omitempty"`
-	SourceAssets    []OpenMontageAsset      `json:"source_assets,omitempty"`
-	Preferences     OpenMontagePreferences  `json:"preferences,omitempty"`
+	SourceAssets    []MontageAsset      `json:"source_assets,omitempty"`
+	Preferences     MontagePreferences  `json:"preferences,omitempty"`
 	DeliveryTargets []string                `json:"delivery_targets,omitempty"`
 	Advanced        map[string]any          `json:"advanced,omitempty"`
 }
 
-type OpenMontageAsset struct {
+type MontageAsset struct {
 	Type       string `json:"type"`
 	URL        string `json:"url,omitempty"`
 	TaskFileID string `json:"task_file_id,omitempty"`
@@ -196,7 +196,7 @@ type OpenMontageAsset struct {
 	FileSize   int64  `json:"file_size,omitempty"`
 }
 
-type OpenMontagePreferences struct {
+type MontagePreferences struct {
 	AspectRatio     string `json:"aspect_ratio,omitempty"`
 	DurationSeconds int64  `json:"duration_seconds,omitempty"`
 	Style           string `json:"style,omitempty"`
@@ -205,23 +205,23 @@ type OpenMontagePreferences struct {
 	VoiceoverMode   string `json:"voiceover_mode,omitempty"`
 }
 
-type OpenMontageDefaults struct {
+type MontageDefaults struct {
 	DefaultPipeline  string                 `json:"default_pipeline,omitempty"`
-	Preferences      OpenMontagePreferences `json:"preferences,omitempty"`
+	Preferences      MontagePreferences `json:"preferences,omitempty"`
 	AssetGuidance    string                 `json:"asset_guidance,omitempty"`
 	DeliveryTargets  []string               `json:"delivery_targets,omitempty"`
 }
 
-func (t *Task) SetOpenMontageInput(input OpenMontageInput) {
-	t.OpenMontageInput = datatypes.NewJSONType(input)
+func (t *Task) SetMontageInput(input MontageInput) {
+	t.MontageInput = datatypes.NewJSONType(input)
 }
 
-func (p *Plan) SetOpenMontageInput(input OpenMontageInput) {
-	p.OpenMontageInput = datatypes.NewJSONType(input)
+func (p *Plan) SetMontageInput(input MontageInput) {
+	p.MontageInput = datatypes.NewJSONType(input)
 }
 
-func (p *Project) SetOpenMontageDefaults(defaults OpenMontageDefaults) {
-	p.OpenMontageDefaults = datatypes.NewJSONType(defaults)
+func (p *Project) SetMontageDefaults(defaults MontageDefaults) {
+	p.MontageDefaults = datatypes.NewJSONType(defaults)
 }
 ```
 
@@ -237,7 +237,7 @@ const (
 	ScopeEcommerce    = "ecommerce"
 	ScopeVideoCreator = "videocreator"
 	ScopeVideoEditor  = "videoeditor"
-	ScopeOpenMontage  = "openmontage"
+	ScopeMontage  = "montage"
 )
 
 const (
@@ -247,37 +247,37 @@ const (
 	PlatformEcommerce    = "ecommerce"
 	PlatformVideoCreator = "videocreator"
 	PlatformVideoEditor  = "videoeditor"
-	PlatformOpenMontage  = "openmontage"
+	PlatformMontage  = "montage"
 )
 
-func IsOpenMontagePlatform(platform string) bool {
-	return platform == PlatformOpenMontage
+func IsMontagePlatform(platform string) bool {
+	return platform == PlatformMontage
 }
 ```
 
 Modify `server/model/task.go` by adding the typed JSON field near `VideoInput`:
 
 ```go
-OpenMontageInput datatypes.JSONType[OpenMontageInput] `gorm:"type:json" json:"openmontage_input"`
+MontageInput datatypes.JSONType[MontageInput] `gorm:"type:json" json:"montage_input"`
 ```
 
 Modify `server/model/plan.go` by adding the typed JSON field near `VideoInput`:
 
 ```go
-OpenMontageInput datatypes.JSONType[OpenMontageInput] `gorm:"type:json" json:"openmontage_input"`
+MontageInput datatypes.JSONType[MontageInput] `gorm:"type:json" json:"montage_input"`
 ```
 
 Modify `server/model/project.go`:
 
 ```go
-OpenMontageDefaults datatypes.JSONType[OpenMontageDefaults] `gorm:"type:json" json:"openmontage_defaults"`
-OpenMontageDefaultsSet bool                                 `gorm:"-" json:"-"`
+MontageDefaults datatypes.JSONType[MontageDefaults] `gorm:"type:json" json:"montage_defaults"`
+MontageDefaultsSet bool                                 `gorm:"-" json:"-"`
 ```
 
 Extend `ProjectSnapshot` in `server/model/task.go`:
 
 ```go
-OpenMontageDefaults OpenMontageDefaults `json:"openmontage_defaults,omitempty"`
+MontageDefaults MontageDefaults `json:"montage_defaults,omitempty"`
 ```
 
 - [ ] **Step 6: Implement config structs**
@@ -296,7 +296,7 @@ type Config struct {
 	MCP          MCPConfig          `yaml:"mcp"`
 	ImageAPI     ImageAPIConfig     `yaml:"image_api"`
 	VideoAPI     VideoAPIConfig     `yaml:"video_api"`
-	OpenMontage  OpenMontageConfig  `yaml:"openmontage"`
+	Montage  MontageConfig  `yaml:"montage"`
 	ImagePresets []ImageModelPreset `yaml:"image_presets"`
 }
 ```
@@ -306,7 +306,7 @@ Keep the existing fields after `ImagePresets`; this snippet only shows the inser
 Add structs:
 
 ```go
-type OpenMontageConfig struct {
+type MontageConfig struct {
 	Enabled                bool                      `yaml:"enabled"`
 	SubmodulePath          string                    `yaml:"submodule_path"`
 	DefaultPipeline         string                    `yaml:"default_pipeline"`
@@ -317,14 +317,14 @@ type OpenMontageConfig struct {
 	ExecutionTargets        []string                  `yaml:"execution_targets"`
 	DefaultExecutionTarget  string                    `yaml:"default_execution_target"`
 	CreditCost              int                       `yaml:"credit_cost"`
-	Runner                  OpenMontageRunnerConfig   `yaml:"runner"`
+	Runner                  MontageRunnerConfig   `yaml:"runner"`
 }
 
-type OpenMontageRunnerConfig struct {
+type MontageRunnerConfig struct {
 	CloudImage string `yaml:"cloud_image"`
 }
 
-func (c *OpenMontageConfig) ApplyDefaults() {
+func (c *MontageConfig) ApplyDefaults() {
 	c.Enabled = true
 	if c.SubmodulePath == "" {
 		c.SubmodulePath = "third_party/OpenMontage"
@@ -354,47 +354,47 @@ func (c *OpenMontageConfig) ApplyDefaults() {
 		c.CreditCost = 2000
 	}
 	if c.Runner.CloudImage == "" {
-		c.Runner.CloudImage = "anban/openmontage-runner:latest"
+		c.Runner.CloudImage = "anban/montage-runner:latest"
 	}
 }
 
-func (c OpenMontageConfig) Validate() error {
+func (c MontageConfig) Validate() error {
 	if !c.Enabled {
 		return nil
 	}
 	if strings.TrimSpace(c.SubmodulePath) == "" {
-		return fmt.Errorf("openmontage.submodule_path is required")
+		return fmt.Errorf("montage.submodule_path is required")
 	}
 	if strings.TrimSpace(c.DefaultPipeline) == "" {
-		return fmt.Errorf("openmontage.default_pipeline is required")
+		return fmt.Errorf("montage.default_pipeline is required")
 	}
 	if c.MaxDurationSeconds <= 0 {
-		return fmt.Errorf("openmontage.max_duration_seconds must be positive")
+		return fmt.Errorf("montage.max_duration_seconds must be positive")
 	}
 	if c.MaxAssets <= 0 {
-		return fmt.Errorf("openmontage.max_assets must be positive")
+		return fmt.Errorf("montage.max_assets must be positive")
 	}
 	if c.TimeoutMinutes <= 0 {
-		return fmt.Errorf("openmontage.timeout_minutes must be positive")
+		return fmt.Errorf("montage.timeout_minutes must be positive")
 	}
 	if !stringSliceContains(c.AllowedPipelines, c.DefaultPipeline) {
-		return fmt.Errorf("openmontage.default_pipeline must be in openmontage.allowed_pipelines")
+		return fmt.Errorf("montage.default_pipeline must be in montage.allowed_pipelines")
 	}
-	if !validOpenMontageTarget(c.DefaultExecutionTarget) {
-		return fmt.Errorf("openmontage.default_execution_target must be cloud or local")
+	if !validMontageTarget(c.DefaultExecutionTarget) {
+		return fmt.Errorf("montage.default_execution_target must be cloud or local")
 	}
 	if !stringSliceContains(c.ExecutionTargets, c.DefaultExecutionTarget) {
-		return fmt.Errorf("openmontage.default_execution_target must be in openmontage.execution_targets")
+		return fmt.Errorf("montage.default_execution_target must be in montage.execution_targets")
 	}
 	for _, target := range c.ExecutionTargets {
-		if !validOpenMontageTarget(target) {
-			return fmt.Errorf("openmontage.execution_targets contains invalid target %q", target)
+		if !validMontageTarget(target) {
+			return fmt.Errorf("montage.execution_targets contains invalid target %q", target)
 		}
 	}
 	return nil
 }
 
-func validOpenMontageTarget(target string) bool {
+func validMontageTarget(target string) bool {
 	return target == "cloud" || target == "local"
 }
 
@@ -415,8 +415,8 @@ If `config.go` already has a helper equivalent to `stringSliceContains`, reuse i
 Find the config load/defaulting function in `server/config/config.go`. Add:
 
 ```go
-cfg.OpenMontage.ApplyDefaults()
-if err := cfg.OpenMontage.Validate(); err != nil {
+cfg.Montage.ApplyDefaults()
+if err := cfg.Montage.Validate(); err != nil {
 	return nil, err
 }
 ```
@@ -428,7 +428,7 @@ Place it next to other per-section default/validation calls.
 Modify `server/config.yaml` after `video_generation` or near video settings:
 
 ```yaml
-openmontage:
+montage:
   enabled: true
   submodule_path: "third_party/OpenMontage"
   default_pipeline: "default"
@@ -440,7 +440,7 @@ openmontage:
   default_execution_target: "cloud"
   credit_cost: 2000
   runner:
-    cloud_image: "${ANBAN_OPENMONTAGE_RUNNER_IMAGE:-anban/openmontage-runner:latest}"
+    cloud_image: "${ANBAN_MONTAGE_RUNNER_IMAGE:-anban/montage-runner:latest}"
 ```
 
 - [ ] **Step 9: Run model/config tests**
@@ -448,7 +448,7 @@ openmontage:
 Run:
 
 ```bash
-go test ./server/config -run TestOpenMontageConfig -count=1
+go test ./server/config -run TestMontageConfig -count=1
 go test ./server/model -count=1
 ```
 
@@ -459,8 +459,8 @@ Expected: PASS.
 Run:
 
 ```bash
-git add .gitmodules third_party/OpenMontage server/model/openmontage.go server/model/constants.go server/model/task.go server/model/plan.go server/model/project.go server/config/config.go server/config.yaml server/config/openmontage_test.go
-git commit -m "feat: add openmontage model and config"
+git add .gitmodules third_party/OpenMontage server/model/montage.go server/model/constants.go server/model/task.go server/model/plan.go server/model/project.go server/config/config.go server/config.yaml server/config/montage_test.go
+git commit -m "feat: add montage model and config"
 ```
 
 ## Task 2: Server Task Creation And Plan Flow
@@ -483,20 +483,20 @@ git commit -m "feat: add openmontage model and config"
 Append to `server/service/task_test.go`:
 
 ```go
-func TestTaskServiceCreateManualOpenMontageStoresInputAndClampsQuantity(t *testing.T) {
+func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T) {
 	repo := setupTestRepo(t)
 	userID := "user-om"
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 	svc := newTestTaskService(repo)
 
 	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  3,
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief:       "做一条新品发布短片",
 			PipelineKey: "default",
-			Preferences: model.OpenMontagePreferences{
+			Preferences: model.MontagePreferences{
 				AspectRatio:     "9:16",
 				DurationSeconds: 30,
 			},
@@ -508,16 +508,16 @@ func TestTaskServiceCreateManualOpenMontageStoresInputAndClampsQuantity(t *testi
 	if len(tasks) != 1 {
 		t.Fatalf("len(tasks) = %d, want 1", len(tasks))
 	}
-	got := tasks[0].OpenMontageInput.Data()
+	got := tasks[0].MontageInput.Data()
 	if got.Brief != "做一条新品发布短片" || got.PipelineKey != "default" {
-		t.Fatalf("openmontage input = %#v", got)
+		t.Fatalf("montage input = %#v", got)
 	}
 	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 30 {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 }
 
-func TestTaskServiceCreateManualRejectsOpenMontageInputForOtherPlatforms(t *testing.T) {
+func TestTaskServiceCreateManualRejectsMontageInputForOtherPlatforms(t *testing.T) {
 	repo := setupTestRepo(t)
 	userID := "user-om-reject"
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
@@ -527,12 +527,12 @@ func TestTaskServiceCreateManualRejectsOpenMontageInputForOtherPlatforms(t *test
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "春季穿搭",
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief: "错误平台",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "openmontage_input can only be set on openmontage tasks") {
-		t.Fatalf("CreateManual error = %v, want openmontage input rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "montage_input can only be set on montage tasks") {
+		t.Fatalf("CreateManual error = %v, want montage input rejection", err)
 	}
 }
 ```
@@ -542,29 +542,29 @@ func TestTaskServiceCreateManualRejectsOpenMontageInputForOtherPlatforms(t *test
 Run:
 
 ```bash
-go test ./server/service -run 'TestTaskServiceCreateManualOpenMontage' -count=1
+go test ./server/service -run 'TestTaskServiceCreateManualMontage' -count=1
 ```
 
-Expected: FAIL with `unknown field OpenMontageInput`.
+Expected: FAIL with `unknown field MontageInput`.
 
 - [ ] **Step 3: Add service params and validation**
 
 Modify `server/service/task.go` `CreateManualParams`:
 
 ```go
-OpenMontageInput *model.OpenMontageInput
+MontageInput *model.MontageInput
 ```
 
 In `CreateManual`, after resolving `taskType`, add:
 
 ```go
-if p.OpenMontageInput != nil && !model.IsOpenMontagePlatform(taskType) {
-	return nil, fmt.Errorf("%w: openmontage_input can only be set on openmontage tasks", ErrVideoTaskInput)
+if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
+	return nil, fmt.Errorf("%w: montage_input can only be set on montage tasks", ErrVideoTaskInput)
 }
-if model.IsOpenMontagePlatform(taskType) {
+if model.IsMontagePlatform(taskType) {
 	quantity = 1
-	if p.OpenMontageInput == nil || strings.TrimSpace(p.OpenMontageInput.Brief) == "" {
-		return nil, fmt.Errorf("openmontage task requires brief")
+	if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
+		return nil, fmt.Errorf("montage task requires brief")
 	}
 }
 ```
@@ -572,8 +572,8 @@ if model.IsOpenMontagePlatform(taskType) {
 In task construction, after `SetVideoInput` block, add:
 
 ```go
-if model.IsOpenMontagePlatform(taskType) && p.OpenMontageInput != nil {
-	task.SetOpenMontageInput(*p.OpenMontageInput)
+if model.IsMontagePlatform(taskType) && p.MontageInput != nil {
+	task.SetMontageInput(*p.MontageInput)
 }
 ```
 
@@ -582,20 +582,20 @@ if model.IsOpenMontagePlatform(taskType) && p.OpenMontageInput != nil {
 Modify `server/handler/task.go` `createTaskRequest`:
 
 ```go
-OpenMontageInput *model.OpenMontageInput `json:"openmontage_input,omitempty"`
+MontageInput *model.MontageInput `json:"montage_input,omitempty"`
 ```
 
 Pass it into `service.CreateManualParams`:
 
 ```go
-OpenMontageInput: req.OpenMontageInput,
+MontageInput: req.MontageInput,
 ```
 
 Add request guard after video field validation:
 
 ```go
-if req.OpenMontageInput != nil && strings.TrimSpace(req.OpenMontageInput.Brief) == "" {
-	return Error(c, fiber.StatusBadRequest, "openmontage_input.brief is required")
+if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
+	return Error(c, fiber.StatusBadRequest, "montage_input.brief is required")
 }
 ```
 
@@ -604,8 +604,8 @@ if req.OpenMontageInput != nil && strings.TrimSpace(req.OpenMontageInput.Brief) 
 Find `taskAPIResponse` in `server/handler/task.go`. Add:
 
 ```go
-if model.IsOpenMontagePlatform(task.Type) {
-	resp["openmontage_input"] = task.OpenMontageInput.Data()
+if model.IsMontagePlatform(task.Type) {
+	resp["montage_input"] = task.MontageInput.Data()
 }
 ```
 
@@ -614,17 +614,17 @@ if model.IsOpenMontagePlatform(task.Type) {
 Append to `server/service/plan_test.go`:
 
 ```go
-func TestPlanServiceCreateOpenMontagePlanStoresInput(t *testing.T) {
+func TestPlanServiceCreateMontagePlanStoresInput(t *testing.T) {
 	repo := setupTestRepo(t)
 	userID := "plan-om-user"
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 	svc := NewPlanService(repo, testLogger())
 
 	plan, err := svc.Create(context.Background(), CreatePlanParams{
 		UserID:    userID,
 		ProjectID: projectID,
 		CronExpr:  "0 10 * * *",
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief:       "每天做一条新品短片",
 			PipelineKey: "default",
 		},
@@ -632,12 +632,12 @@ func TestPlanServiceCreateOpenMontagePlanStoresInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create error = %v", err)
 	}
-	if plan.Type != model.PlatformOpenMontage {
-		t.Fatalf("plan.Type = %q, want openmontage", plan.Type)
+	if plan.Type != model.PlatformMontage {
+		t.Fatalf("plan.Type = %q, want montage", plan.Type)
 	}
-	got := plan.OpenMontageInput.Data()
+	got := plan.MontageInput.Data()
 	if got.Brief != "每天做一条新品短片" || got.PipelineKey != "default" {
-		t.Fatalf("openmontage input = %#v", got)
+		t.Fatalf("montage input = %#v", got)
 	}
 }
 ```
@@ -647,10 +647,10 @@ func TestPlanServiceCreateOpenMontagePlanStoresInput(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/service -run TestPlanServiceCreateOpenMontagePlanStoresInput -count=1
+go test ./server/service -run TestPlanServiceCreateMontagePlanStoresInput -count=1
 ```
 
-Expected: FAIL with `unknown field OpenMontageInput`.
+Expected: FAIL with `unknown field MontageInput`.
 
 - [ ] **Step 8: Add plan support**
 
@@ -674,50 +674,50 @@ type CreatePlanParams struct {
 	ArticleWithContentImages *bool
 	VideoCreatorConfig *model.VideoTaskConfig
 	VideoCreatorInput  *model.VideoInput
-	OpenMontageInput   *model.OpenMontageInput
+	MontageInput   *model.MontageInput
 }
 ```
 
 Add validation:
 
 ```go
-if p.OpenMontageInput != nil && !model.IsOpenMontagePlatform(project.Platform) {
-	return nil, fmt.Errorf("%w: openmontage_input can only be set on openmontage plans", ErrVideoTaskInput)
+if p.MontageInput != nil && !model.IsMontagePlatform(project.Platform) {
+	return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrVideoTaskInput)
 }
-if model.IsOpenMontagePlatform(project.Platform) && (p.OpenMontageInput == nil || strings.TrimSpace(p.OpenMontageInput.Brief) == "") {
-	return nil, fmt.Errorf("openmontage plan requires openmontage_input.brief")
+if model.IsMontagePlatform(project.Platform) && (p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "") {
+	return nil, fmt.Errorf("montage plan requires montage_input.brief")
 }
 ```
 
 Store input:
 
 ```go
-if model.IsOpenMontagePlatform(project.Platform) && p.OpenMontageInput != nil {
-	plan.SetOpenMontageInput(*p.OpenMontageInput)
+if model.IsMontagePlatform(project.Platform) && p.MontageInput != nil {
+	plan.SetMontageInput(*p.MontageInput)
 }
 ```
 
-Ensure the existing unsupported-platform switch does not reject `PlatformOpenMontage`.
+Ensure the existing unsupported-platform switch does not reject `PlatformMontage`.
 
-- [ ] **Step 9: Bind OpenMontage input in plan handler**
+- [ ] **Step 9: Bind Montage input in plan handler**
 
 Modify `server/handler/plan.go` `createPlanRequest` and `updatePlanRequest`:
 
 ```go
-OpenMontageInput *model.OpenMontageInput `json:"openmontage_input,omitempty"`
+MontageInput *model.MontageInput `json:"montage_input,omitempty"`
 ```
 
 Pass it to service create/update params:
 
 ```go
-OpenMontageInput: req.OpenMontageInput,
+MontageInput: req.MontageInput,
 ```
 
 Add API response:
 
 ```go
-if model.IsOpenMontagePlatform(plan.Type) {
-	resp["openmontage_input"] = plan.OpenMontageInput.Data()
+if model.IsMontagePlatform(plan.Type) {
+	resp["montage_input"] = plan.MontageInput.Data()
 }
 ```
 
@@ -726,9 +726,9 @@ if model.IsOpenMontagePlatform(plan.Type) {
 Find `CreateFromPlan` in `server/service/task.go`. Add:
 
 ```go
-if model.IsOpenMontagePlatform(plan.Type) {
-	input := plan.OpenMontageInput.Data()
-	params.OpenMontageInput = &input
+if model.IsMontagePlatform(plan.Type) {
+	input := plan.MontageInput.Data()
+	params.MontageInput = &input
 }
 ```
 
@@ -736,12 +736,12 @@ Place it next to existing video plan propagation.
 
 - [ ] **Step 11: Add retry/clone propagation**
 
-Modify `server/service/task_retry.go` so OpenMontage retries preserve input:
+Modify `server/service/task_retry.go` so Montage retries preserve input:
 
 ```go
-if model.IsOpenMontagePlatform(src.Type) {
-	input := src.OpenMontageInput.Data()
-	params.OpenMontageInput = &input
+if model.IsMontagePlatform(src.Type) {
+	input := src.MontageInput.Data()
+	params.MontageInput = &input
 }
 ```
 
@@ -750,11 +750,11 @@ if model.IsOpenMontagePlatform(src.Type) {
 Run:
 
 ```bash
-go test ./server/service -run 'OpenMontage|CreateFromPlan|Retry' -count=1
-go test ./server/handler -run 'OpenMontage|Task|Plan' -count=1
+go test ./server/service -run 'Montage|CreateFromPlan|Retry' -count=1
+go test ./server/handler -run 'Montage|Task|Plan' -count=1
 ```
 
-Expected: PASS for OpenMontage tests. Existing unrelated handler tests may also run; fix any compile errors caused by new fields.
+Expected: PASS for Montage tests. Existing unrelated handler tests may also run; fix any compile errors caused by new fields.
 
 - [ ] **Step 13: Commit server creation flow**
 
@@ -762,14 +762,14 @@ Run:
 
 ```bash
 git add server/handler/task.go server/handler/plan.go server/service/task.go server/service/plan.go server/service/task_retry.go server/service/task_test.go server/service/plan_test.go
-git commit -m "feat: support openmontage task and plan input"
+git commit -m "feat: support montage task and plan input"
 ```
 
 ## Task 3: Execution Target Resolver, Billing, And Progress
 
 **Files:**
-- Create: `server/service/openmontage_execution_target.go`
-- Create: `server/service/openmontage_execution_target_test.go`
+- Create: `server/service/montage_execution_target.go`
+- Create: `server/service/montage_execution_target_test.go`
 - Modify: `server/service/credit.go`
 - Modify: `server/service/credit_test.go`
 - Modify: `server/service/task_progress_stages.go`
@@ -777,7 +777,7 @@ git commit -m "feat: support openmontage task and plan input"
 
 - [ ] **Step 1: Write failing resolver test**
 
-Create `server/service/openmontage_execution_target_test.go`:
+Create `server/service/montage_execution_target_test.go`:
 
 ```go
 package service
@@ -789,45 +789,45 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-func TestResolveOpenMontageExecutionTargetDefaultsCloud(t *testing.T) {
-	got, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-		Config: srvconfig.OpenMontageConfig{
+func TestResolveMontageExecutionTargetDefaultsCloud(t *testing.T) {
+	got, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+		Config: srvconfig.MontageConfig{
 			Enabled:                true,
 			ExecutionTargets:       []string{"cloud", "local"},
 			DefaultExecutionTarget: "cloud",
 		},
-		TaskType: model.PlatformOpenMontage,
+		TaskType: model.PlatformMontage,
 	})
 	if err != nil {
-		t.Fatalf("ResolveOpenMontageExecutionTarget error = %v", err)
+		t.Fatalf("ResolveMontageExecutionTarget error = %v", err)
 	}
 	if got != model.ExecutionTargetCloud {
 		t.Fatalf("target = %q, want cloud empty target", got)
 	}
 }
 
-func TestResolveOpenMontageExecutionTargetRejectsWhenDisabled(t *testing.T) {
-	_, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-		Config: srvconfig.OpenMontageConfig{Enabled: false},
-		TaskType: model.PlatformOpenMontage,
+func TestResolveMontageExecutionTargetRejectsWhenDisabled(t *testing.T) {
+	_, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+		Config: srvconfig.MontageConfig{Enabled: false},
+		TaskType: model.PlatformMontage,
 	})
 	if err == nil {
-		t.Fatal("ResolveOpenMontageExecutionTarget succeeded when disabled")
+		t.Fatal("ResolveMontageExecutionTarget succeeded when disabled")
 	}
 }
 
-func TestResolveOpenMontageExecutionTargetKeepsLocalDisabledWithoutCapability(t *testing.T) {
-	_, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-		Config: srvconfig.OpenMontageConfig{
+func TestResolveMontageExecutionTargetKeepsLocalDisabledWithoutCapability(t *testing.T) {
+	_, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+		Config: srvconfig.MontageConfig{
 			Enabled:                true,
 			ExecutionTargets:       []string{"local"},
 			DefaultExecutionTarget: "local",
 		},
-		TaskType:       model.PlatformOpenMontage,
+		TaskType:       model.PlatformMontage,
 		LocalAvailable: false,
 	})
 	if err == nil {
-		t.Fatal("ResolveOpenMontageExecutionTarget succeeded without local capability")
+		t.Fatal("ResolveMontageExecutionTarget succeeded without local capability")
 	}
 }
 ```
@@ -837,14 +837,14 @@ func TestResolveOpenMontageExecutionTargetKeepsLocalDisabledWithoutCapability(t 
 Run:
 
 ```bash
-go test ./server/service -run TestResolveOpenMontageExecutionTarget -count=1
+go test ./server/service -run TestResolveMontageExecutionTarget -count=1
 ```
 
-Expected: FAIL with `undefined: ResolveOpenMontageExecutionTarget`.
+Expected: FAIL with `undefined: ResolveMontageExecutionTarget`.
 
 - [ ] **Step 3: Implement resolver**
 
-Create `server/service/openmontage_execution_target.go`:
+Create `server/service/montage_execution_target.go`:
 
 ```go
 package service
@@ -856,8 +856,8 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-type OpenMontageExecutionTargetRequest struct {
-	Config          srvconfig.OpenMontageConfig
+type MontageExecutionTargetRequest struct {
+	Config          srvconfig.MontageConfig
 	TaskType        string
 	FromPlan        bool
 	LocalAvailable  bool
@@ -865,20 +865,20 @@ type OpenMontageExecutionTargetRequest struct {
 	AssetsCloudSafe bool
 }
 
-func ResolveOpenMontageExecutionTarget(req OpenMontageExecutionTargetRequest) (string, error) {
-	if !model.IsOpenMontagePlatform(req.TaskType) {
+func ResolveMontageExecutionTarget(req MontageExecutionTargetRequest) (string, error) {
+	if !model.IsMontagePlatform(req.TaskType) {
 		return model.ExecutionTargetCloud, nil
 	}
 	cfg := req.Config
 	cfg.ApplyDefaults()
 	if !cfg.Enabled {
-		return "", fmt.Errorf("openmontage is disabled")
+		return "", fmt.Errorf("montage is disabled")
 	}
 	if req.FromPlan {
-		if containsOpenMontageTarget(cfg.ExecutionTargets, "cloud") {
+		if containsMontageTarget(cfg.ExecutionTargets, "cloud") {
 			return model.ExecutionTargetCloud, nil
 		}
-		return "", fmt.Errorf("openmontage plans require an available cloud execution target")
+		return "", fmt.Errorf("montage plans require an available cloud execution target")
 	}
 	target := cfg.DefaultExecutionTarget
 	if target == "cloud" {
@@ -888,15 +888,15 @@ func ResolveOpenMontageExecutionTarget(req OpenMontageExecutionTargetRequest) (s
 		if req.LocalAvailable {
 			return model.ExecutionTargetLocal, nil
 		}
-		if containsOpenMontageTarget(cfg.ExecutionTargets, "cloud") {
+		if containsMontageTarget(cfg.ExecutionTargets, "cloud") {
 			return model.ExecutionTargetCloud, nil
 		}
-		return "", fmt.Errorf("openmontage local execution is unavailable")
+		return "", fmt.Errorf("montage local execution is unavailable")
 	}
-	return "", fmt.Errorf("invalid openmontage execution target %q", target)
+	return "", fmt.Errorf("invalid montage execution target %q", target)
 }
 
-func containsOpenMontageTarget(values []string, want string) bool {
+func containsMontageTarget(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
 			return true
@@ -908,23 +908,23 @@ func containsOpenMontageTarget(values []string, want string) bool {
 
 - [ ] **Step 4: Wire resolver into task creation**
 
-Add `openmontageCfg srvconfig.OpenMontageConfig` field to `TaskService` and a setter:
+Add `montageCfg srvconfig.MontageConfig` field to `TaskService` and a setter:
 
 ```go
-func (s *TaskService) SetOpenMontageConfig(cfg srvconfig.OpenMontageConfig) {
+func (s *TaskService) SetMontageConfig(cfg srvconfig.MontageConfig) {
 	if s == nil {
 		return
 	}
 	cfg.ApplyDefaults()
-	s.openmontageCfg = cfg
+	s.montageCfg = cfg
 }
 ```
 
-In `CreateManual`, when task type is OpenMontage:
+In `CreateManual`, when task type is Montage:
 
 ```go
-target, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-	Config:          s.openmontageCfg,
+target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+	Config:          s.montageCfg,
 	TaskType:        taskType,
 	LocalAvailable:  false,
 	CloudAvailable:  true,
@@ -943,27 +943,27 @@ This intentionally does not expose target choice to Studio. Later local capabili
 Modify credit task-cost defaults in `server/service/credit.go`:
 
 ```go
-case model.ScopeOpenMontage:
+case model.ScopeMontage:
 	return 2000, true
 ```
 
 If the code uses a map, add:
 
 ```go
-model.PlatformOpenMontage: 2000,
+model.PlatformMontage: 2000,
 ```
 
 Append to `server/service/credit_test.go`:
 
 ```go
-func TestCreditServiceIncludesOpenMontageTaskCost(t *testing.T) {
+func TestCreditServiceIncludesMontageTaskCost(t *testing.T) {
 	svc := NewCreditService(nil, nil)
-	cost, ok := svc.TaskCost(model.PlatformOpenMontage)
+	cost, ok := svc.TaskCost(model.PlatformMontage)
 	if !ok {
-		t.Fatal("TaskCost(openmontage) ok = false")
+		t.Fatal("TaskCost(montage) ok = false")
 	}
 	if cost != 2000 {
-		t.Fatalf("TaskCost(openmontage) = %d, want 2000", cost)
+		t.Fatalf("TaskCost(montage) = %d, want 2000", cost)
 	}
 }
 ```
@@ -986,7 +986,7 @@ var openMontageStagePercent = map[string]int{
 In `defaultPercentForStage`:
 
 ```go
-case model.PlatformOpenMontage:
+case model.PlatformMontage:
 	return openMontageStagePercent[stage]
 ```
 
@@ -995,7 +995,7 @@ case model.PlatformOpenMontage:
 Run:
 
 ```bash
-go test ./server/service -run 'OpenMontage|CreditServiceIncludesOpenMontage|Progress' -count=1
+go test ./server/service -run 'Montage|CreditServiceIncludesMontage|Progress' -count=1
 ```
 
 Expected: PASS.
@@ -1005,24 +1005,24 @@ Expected: PASS.
 Run:
 
 ```bash
-git add server/service/openmontage_execution_target.go server/service/openmontage_execution_target_test.go server/service/task.go server/service/credit.go server/service/credit_test.go server/service/task_progress_stages.go
-git commit -m "feat: resolve openmontage execution and billing"
+git add server/service/montage_execution_target.go server/service/montage_execution_target_test.go server/service/task.go server/service/credit.go server/service/credit_test.go server/service/task_progress_stages.go
+git commit -m "feat: resolve montage execution and billing"
 ```
 
 ## Task 4: Agent Workspace, Mapping, And Artifact Validation
 
 **Files:**
-- Create: `server/agent/openmontage_contract_test.go`
+- Create: `server/agent/montage_contract_test.go`
 - Modify: `server/agent/config_builder.go`
 - Modify: `server/agent/executor.go`
 - Modify: `server/agent/artifacts.go`
 - Modify: `server/service/task_execution.go`
-- Test: `server/agent/openmontage_contract_test.go`
+- Test: `server/agent/montage_contract_test.go`
 - Test: `server/service/task_test.go`
 
 - [ ] **Step 1: Write failing agent mapping test**
 
-Create `server/agent/openmontage_contract_test.go`:
+Create `server/agent/montage_contract_test.go`:
 
 ```go
 package agent
@@ -1035,24 +1035,24 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-func TestOpenMontageTaskMapsToDedicatedAgent(t *testing.T) {
-	if got := TaskTypeToAgent(model.PlatformOpenMontage); got != "openmontage" {
-		t.Fatalf("TaskTypeToAgent(openmontage) = %q, want openmontage", got)
+func TestMontageTaskMapsToDedicatedAgent(t *testing.T) {
+	if got := TaskTypeToAgent(model.PlatformMontage); got != "montage" {
+		t.Fatalf("TaskTypeToAgent(montage) = %q, want montage", got)
 	}
 }
 
-func TestOpenMontagePluginContractsExist(t *testing.T) {
+func TestMontagePluginContractsExist(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "claudecode", "agents", "openmontage.md"),
-		filepath.Join(root, "codex", "agents", "openmontage.toml"),
-		filepath.Join(root, "claudecode", "skills", "openmontage", "SKILL.md"),
-		filepath.Join(root, "codex", "skills", "openmontage", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "openmontage", "SKILL.md"),
+		filepath.Join(root, "claudecode", "agents", "montage.md"),
+		filepath.Join(root, "codex", "agents", "montage.toml"),
+		filepath.Join(root, "claudecode", "skills", "montage", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "montage", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "montage", "SKILL.md"),
 	}
 	for _, path := range paths {
 		text := readRepoFile(t, path)
-		for _, want := range []string{"OpenMontage", "openmontage-input.json", "delivery-manifest.json", "final_video"} {
+		for _, want := range []string{"Montage", "montage-input.json", "delivery-manifest.json", "final_video"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("%s missing %q", path, want)
 			}
@@ -1071,18 +1071,18 @@ func TestOpenMontagePluginContractsExist(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/agent -run TestOpenMontage -count=1
+go test ./server/agent -run TestMontage -count=1
 ```
 
-Expected: FAIL because `TaskTypeToAgent(openmontage)` returns the fallback or plugin files are missing.
+Expected: FAIL because `TaskTypeToAgent(montage)` returns the fallback or plugin files are missing.
 
 - [ ] **Step 3: Add agent mapping**
 
 Modify `server/agent/config_builder.go`:
 
 ```go
-case model.ScopeOpenMontage:
-	return "openmontage"
+case model.ScopeMontage:
+	return "montage"
 ```
 
 - [ ] **Step 4: Write workspace input file**
@@ -1090,14 +1090,14 @@ case model.ScopeOpenMontage:
 Modify `server/agent/executor.go` where task-specific JSON files are prepared. Add:
 
 ```go
-if model.IsOpenMontagePlatform(task.Type) {
-	input := task.OpenMontageInput.Data()
+if model.IsMontagePlatform(task.Type) {
+	input := task.MontageInput.Data()
 	data, err := json.MarshalIndent(input, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal openmontage input: %w", err)
+		return fmt.Errorf("marshal montage input: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(workDir, "openmontage-input.json"), data, 0o644); err != nil {
-		return fmt.Errorf("write openmontage-input.json: %w", err)
+	if err := os.WriteFile(filepath.Join(workDir, "montage-input.json"), data, 0o644); err != nil {
+		return fmt.Errorf("write montage-input.json: %w", err)
 	}
 }
 ```
@@ -1109,7 +1109,7 @@ Use existing `workDir`, `task`, and imports. If `executor.go` has a helper for t
 Modify `server/agent/artifacts.go` `validateTaskArtifacts` before the generic non-seednote path:
 
 ```go
-if task != nil && model.IsOpenMontagePlatform(task.Type) {
+if task != nil && model.IsMontagePlatform(task.Type) {
 	missing := []string{}
 	if !files["final.mp4"] && !files["final_video.mp4"] && !files["final-video.mp4"] {
 		missing = append(missing, "final_video")
@@ -1119,7 +1119,7 @@ if task != nil && model.IsOpenMontagePlatform(task.Type) {
 	}
 	if len(missing) > 0 {
 		result.Missing = missing
-		result.Reason = "openmontage missing required deliverables: " + strings.Join(missing, ", ")
+		result.Reason = "montage missing required deliverables: " + strings.Join(missing, ", ")
 		return result
 	}
 	result.Valid = true
@@ -1132,18 +1132,18 @@ if task != nil && model.IsOpenMontagePlatform(task.Type) {
 Append to `server/service/task_test.go`:
 
 ```go
-func TestTaskServiceHandleExecutionRejectsOpenMontageWithoutDeliveryManifest(t *testing.T) {
+func TestTaskServiceHandleExecutionRejectsMontageWithoutDeliveryManifest(t *testing.T) {
 	repo := setupTestRepo(t)
 	userID := "om-artifacts"
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 	task := &model.Task{
 		ID:        generateTaskID(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformOpenMontage,
+		Type:      model.PlatformMontage,
 		Status:    model.TaskStatusRunning,
 	}
-	task.SetOpenMontageInput(model.OpenMontageInput{Brief: "做短片"})
+	task.SetMontageInput(model.MontageInput{Brief: "做短片"})
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1152,7 +1152,7 @@ func TestTaskServiceHandleExecutionRejectsOpenMontageWithoutDeliveryManifest(t *
 		TaskID:   task.ID,
 		Role:     model.FileRoleVideo,
 		FileName: "final.mp4",
-		FilePath: "output/openmontage/final.mp4",
+		FilePath: "output/montage/final.mp4",
 	}); err != nil {
 		t.Fatalf("create task file: %v", err)
 	}
@@ -1172,15 +1172,15 @@ Use the existing helper name for execution completion if it differs from `Handle
 Modify `server/service/task_execution.go`:
 
 ```go
-if model.IsOpenMontagePlatform(task.Type) {
-	return validateOpenMontageCompletionArtifacts(files), nil
+if model.IsMontagePlatform(task.Type) {
+	return validateMontageCompletionArtifacts(files), nil
 }
 ```
 
 Add helper:
 
 ```go
-func validateOpenMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
+func validateMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
 	hasFinal := false
 	hasManifest := false
 	for _, file := range files {
@@ -1205,7 +1205,7 @@ func validateOpenMontageCompletionArtifacts(files []*model.TaskFile) agent.Artif
 		missing = append(missing, "delivery_manifest")
 	}
 	if len(missing) > 0 {
-		return agent.ArtifactValidation{Reason: "openmontage missing required deliverables: " + strings.Join(missing, ", "), Missing: missing}
+		return agent.ArtifactValidation{Reason: "montage missing required deliverables: " + strings.Join(missing, ", "), Missing: missing}
 	}
 	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: 2}
 }
@@ -1216,8 +1216,8 @@ func validateOpenMontageCompletionArtifacts(files []*model.TaskFile) agent.Artif
 Run:
 
 ```bash
-go test ./server/agent -run TestOpenMontage -count=1
-go test ./server/service -run 'OpenMontage.*Artifact|HandleExecution' -count=1
+go test ./server/agent -run TestMontage -count=1
+go test ./server/service -run 'Montage.*Artifact|HandleExecution' -count=1
 ```
 
 Expected: PASS.
@@ -1227,56 +1227,56 @@ Expected: PASS.
 Run:
 
 ```bash
-git add server/agent/openmontage_contract_test.go server/agent/config_builder.go server/agent/executor.go server/agent/artifacts.go server/service/task_execution.go server/service/task_test.go
-git commit -m "feat: validate openmontage agent delivery"
+git add server/agent/montage_contract_test.go server/agent/config_builder.go server/agent/executor.go server/agent/artifacts.go server/service/task_execution.go server/service/task_test.go
+git commit -m "feat: validate montage agent delivery"
 ```
 
 ## Task 5: Plugin Agents, Skills, And Manifest Versions
 
 **Files:**
-- Create: `claudecode/agents/openmontage.md`
-- Create: `codex/agents/openmontage.toml`
-- Create: `claudecode/skills/openmontage/SKILL.md`
-- Create: `codex/skills/openmontage/SKILL.md`
-- Create: `openclaw/skills/openmontage/SKILL.md`
+- Create: `claudecode/agents/montage.md`
+- Create: `codex/agents/montage.toml`
+- Create: `claudecode/skills/montage/SKILL.md`
+- Create: `codex/skills/montage/SKILL.md`
+- Create: `openclaw/skills/montage/SKILL.md`
 - Modify: `codex/install/agents-registration.toml`
 - Modify: `claudecode/.claude-plugin/plugin.json`
 - Modify: `openclaw/openclaw.plugin.json`
 - Modify: `codex/.codex-plugin/plugin.json`
-- Test: `server/agent/openmontage_contract_test.go`
+- Test: `server/agent/montage_contract_test.go`
 
 - [ ] **Step 1: Create Claude Code agent**
 
-Create `claudecode/agents/openmontage.md`:
+Create `claudecode/agents/montage.md`:
 
 ```markdown
 ---
-name: openmontage
-description: OpenMontage 视频生产专用 agent。读取 Anban 的 openmontage-input.json，准备 OpenMontage adapter manifest，运行上游 OpenMontage pipeline，并交付 final_video 与 delivery-manifest.json。
+name: montage
+description: Montage 视频生产专用 agent。读取 Anban 的 montage-input.json，准备 Montage adapter manifest，运行上游 Montage pipeline，并交付 final_video 与 delivery-manifest.json。
 model: inherit
 memory: project
 skills:
-  - openmontage
+  - montage
 maxTurns: 180
 ---
 
-# OpenMontage
+# Montage
 
 ## 角色
 
-你是 Anban Creator 的 OpenMontage agent。你只处理 `openmontage` 平台任务，负责把 Anban 的业务输入转换为 OpenMontage 项目 manifest，运行 OpenMontage，并把结果登记回 Anban。
+你是 Anban Creator 的 Montage agent。你只处理 `montage` 平台任务，负责把 Anban 的业务输入转换为 Montage 项目 manifest，运行 Montage，并把结果登记回 Anban。
 
 ## 硬边界
 
-- 禁止调用 Claude `Agent` 工具来执行本次主工作流；必须在当前 openmontage 上下文内完成。
+- 禁止调用 Claude `Agent` 工具来执行本次主工作流；必须在当前 montage 上下文内完成。
 - 不得调用现有 `videocreator`、`videoeditor`、Seedance、Dreamina 或 video-use 主链路。
 - 不得自写 provider HTTP 客户端绕过 Anban MCP。
 - 不得修改 `third_party/OpenMontage` 上游源码；需要临时项目文件时复制到任务工作目录。
 
 ## 必需产物
 
-- `openmontage-input.json`
-- `openmontage-project.json`
+- `montage-input.json`
+- `montage-project.json`
 - `delivery-manifest.json`
 - `final.mp4` 或等价的 `final_video` task file
 - 失败时写 `failure-diagnosis.md`
@@ -1284,64 +1284,64 @@ maxTurns: 180
 ## 工作流
 
 1. 获取 `$TASK_ID` 与 `$PROJECT_ID`。
-2. 调用 `prepare_workspace(content_type="openmontage", task_id=$TASK_ID)` 并进入返回的目录。
-3. 读取工作区根目录的 `openmontage-input.json`。
-4. 调用 `get_project_profile(project_id=$PROJECT_ID, task_id=$TASK_ID)` 获取项目定位和 OpenMontage 默认值。
+2. 调用 `prepare_workspace(content_type="montage", task_id=$TASK_ID)` 并进入返回的目录。
+3. 读取工作区根目录的 `montage-input.json`。
+4. 调用 `get_project_profile(project_id=$PROJECT_ID, task_id=$TASK_ID)` 获取项目定位和 Montage 默认值。
 5. 解析 pipeline：优先任务 `pipeline_key`，其次项目默认，最后服务端默认。
-6. 写入 `openmontage-project.json`，包含 task_id、project_id、brief、pipeline_key、assets、preferences、limits 和 output_dir。
-7. 从配置的 OpenMontage submodule 或 runner 环境运行 OpenMontage，不修改上游源码。
-8. 收集 OpenMontage 输出，写 `delivery-manifest.json`。
+6. 写入 `montage-project.json`，包含 task_id、project_id、brief、pipeline_key、assets、preferences、limits 和 output_dir。
+7. 从配置的 Montage submodule 或 runner 环境运行 Montage，不修改上游源码。
+8. 收集 Montage 输出，写 `delivery-manifest.json`。
 9. 使用 Anban MCP 上传并登记最终视频、manifest、timeline、subtitles、audio、run log 和 failure diagnosis。
 10. 完成前确认 `final_video` 与 `delivery-manifest.json` 已登记为 task files。
-11. 调用 `submit_agent_feedback(agent_name="openmontage", status="completed", summary="OpenMontage delivery registered")`。
+11. 调用 `submit_agent_feedback(agent_name="montage", status="completed", summary="Montage delivery registered")`。
 ```
 
 - [ ] **Step 2: Create shared skill in three distributions**
 
 Create the same `SKILL.md` content at:
 
-- `claudecode/skills/openmontage/SKILL.md`
-- `codex/skills/openmontage/SKILL.md`
-- `openclaw/skills/openmontage/SKILL.md`
+- `claudecode/skills/montage/SKILL.md`
+- `codex/skills/montage/SKILL.md`
+- `openclaw/skills/montage/SKILL.md`
 
 Content:
 
 ```markdown
 ---
-name: openmontage
-description: Use for Anban OpenMontage tasks. Converts openmontage-input.json into an OpenMontage adapter manifest, runs the upstream OpenMontage pipeline, and registers normalized Anban deliverables.
+name: montage
+description: Use for Anban Montage tasks. Converts montage-input.json into an Montage adapter manifest, runs the upstream Montage pipeline, and registers normalized Anban deliverables.
 ---
 
-# OpenMontage Skill
+# Montage Skill
 
-Use this skill only for Anban `openmontage` tasks.
+Use this skill only for Anban `montage` tasks.
 
 ## Inputs
 
 - `$TASK_ID`
 - `$PROJECT_ID`
-- `openmontage-input.json`
+- `montage-input.json`
 - project profile from Anban MCP
-- configured OpenMontage submodule or runner path
+- configured Montage submodule or runner path
 
 ## Required Files
 
-- `openmontage-project.json`: adapter manifest sent to OpenMontage
+- `montage-project.json`: adapter manifest sent to Montage
 - `delivery-manifest.json`: normalized Anban delivery manifest
 - `final.mp4`: final video when the pipeline succeeds
 - `failure-diagnosis.md`: required when the pipeline cannot complete
 
 ## Rules
 
-- Keep OpenMontage independent from existing Anban video generation and video editing flows.
+- Keep Montage independent from existing Anban video generation and video editing flows.
 - Do not call `create_video_generation_job`, `validate_video_delivery`, Seedance skills, Dreamina skills, or `video-use`.
-- Do not expose raw OpenMontage pipeline internals as Anban stable schema.
+- Do not expose raw Montage pipeline internals as Anban stable schema.
 - Do not modify files under `third_party/OpenMontage`.
 - Use Anban MCP tools for project profile, workspace preparation, progress, uploads, task files, and feedback.
 
 ## Adapter Manifest
 
-Write `openmontage-project.json` with:
+Write `montage-project.json` with:
 
 ```json
 {
@@ -1352,27 +1352,27 @@ Write `openmontage-project.json` with:
   "assets": [],
   "preferences": {},
   "limits": {},
-  "output_dir": "output/openmontage/$TASK_ID"
+  "output_dir": "output/montage/$TASK_ID"
 }
 ```
 
-The adapter maps this stable manifest into the current upstream OpenMontage project format.
+The adapter maps this stable manifest into the current upstream Montage project format.
 ```
 
 - [ ] **Step 3: Create Codex agent**
 
-Create `codex/agents/openmontage.toml`:
+Create `codex/agents/montage.toml`:
 
 ```toml
-name = "openmontage"
-description = "OpenMontage 视频生产专用 agent：读取 openmontage-input.json，准备 OpenMontage adapter manifest，运行上游 OpenMontage pipeline，并登记 final_video 与 delivery-manifest.json。"
-nickname_candidates = ["OpenMontage", "Montage", "视频生产"]
+name = "montage"
+description = "Montage 视频生产专用 agent：读取 montage-input.json，准备 Montage adapter manifest，运行上游 Montage pipeline，并登记 final_video 与 delivery-manifest.json。"
+nickname_candidates = ["Montage", "Montage", "视频生产"]
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
-# OpenMontage
+# Montage
 
-你是 Anban Creator 的 OpenMontage agent。只处理 openmontage 平台任务。
+你是 Anban Creator 的 Montage agent。只处理 montage 平台任务。
 
 硬边界：
 - 禁止调用嵌套 Agent 工具执行主工作流。
@@ -1381,20 +1381,20 @@ developer_instructions = """
 - 所有服务端交互必须走 Anban MCP。
 
 必需产物：
-- openmontage-input.json
-- openmontage-project.json
+- montage-input.json
+- montage-project.json
 - delivery-manifest.json
 - final.mp4 或 final_video task file
 - 失败时 failure-diagnosis.md
 
 工作流：
-1. 读取 TASK_ID、PROJECT_ID 和 openmontage-input.json。
-2. 调用 prepare_workspace(content_type=\"openmontage\", task_id=$TASK_ID)。
+1. 读取 TASK_ID、PROJECT_ID 和 montage-input.json。
+2. 调用 prepare_workspace(content_type=\"montage\", task_id=$TASK_ID)。
 3. 调用 get_project_profile(project_id=$PROJECT_ID, task_id=$TASK_ID)。
-4. 写 openmontage-project.json。
-5. 在配置的 OpenMontage submodule/runner 环境中运行上游 pipeline。
+4. 写 montage-project.json。
+5. 在配置的 Montage submodule/runner 环境中运行上游 pipeline。
 6. 写 delivery-manifest.json，登记 final_video 和 manifest task files。
-7. 调用 submit_agent_feedback(agent_name=\"openmontage\", status=\"completed\", summary=\"OpenMontage delivery registered\")。
+7. 调用 submit_agent_feedback(agent_name=\"montage\", status=\"completed\", summary=\"Montage delivery registered\")。
 """
 
 [mcp_servers.creator]
@@ -1402,7 +1402,7 @@ url = "${ANBAN_API_URL:-https://api.creator.anbanai.com}/mcp"
 bearer_token_env_var = "ANBAN_API_KEY"
 
 [[skills.config]]
-path = "__PLUGIN_ROOT__/skills/openmontage/SKILL.md"
+path = "__PLUGIN_ROOT__/skills/montage/SKILL.md"
 enabled = true
 ```
 
@@ -1411,10 +1411,10 @@ enabled = true
 Modify `codex/install/agents-registration.toml`:
 
 ```toml
-[agents.openmontage]
-description = "OpenMontage 视频生产引擎（业务 brief + 素材 → OpenMontage pipeline → 成片交付）"
-config_file = "~/.codex/agents/openmontage.toml"
-nickname_candidates = ["OpenMontage", "Montage", "视频生产"]
+[agents.montage]
+description = "Montage 视频生产引擎（业务 brief + 素材 → Montage pipeline → 成片交付）"
+config_file = "~/.codex/agents/montage.toml"
+nickname_candidates = ["Montage", "Montage", "视频生产"]
 ```
 
 Also update the comment and `[agents] max_threads` if the file tracks agent count explicitly.
@@ -1438,14 +1438,14 @@ Modify versions:
 "version": "2.10.46"
 ```
 
-Update descriptions to include `OpenMontage`.
+Update descriptions to include `Montage`.
 
 - [ ] **Step 6: Run plugin contract tests**
 
 Run:
 
 ```bash
-go test ./server/agent -run 'OpenMontage|NamingContract' -count=1
+go test ./server/agent -run 'Montage|NamingContract' -count=1
 ```
 
 Expected: PASS.
@@ -1455,18 +1455,18 @@ Expected: PASS.
 Run:
 
 ```bash
-git add claudecode/agents/openmontage.md codex/agents/openmontage.toml claudecode/skills/openmontage/SKILL.md codex/skills/openmontage/SKILL.md openclaw/skills/openmontage/SKILL.md codex/install/agents-registration.toml claudecode/.claude-plugin/plugin.json openclaw/openclaw.plugin.json codex/.codex-plugin/plugin.json server/agent/openmontage_contract_test.go
-git commit -m "feat: add openmontage agent contracts"
+git add claudecode/agents/montage.md codex/agents/montage.toml claudecode/skills/montage/SKILL.md codex/skills/montage/SKILL.md openclaw/skills/montage/SKILL.md codex/install/agents-registration.toml claudecode/.claude-plugin/plugin.json openclaw/openclaw.plugin.json codex/.codex-plugin/plugin.json server/agent/montage_contract_test.go
+git commit -m "feat: add montage agent contracts"
 ```
 
 ## Task 6: Studio Types, Schemas, And Form Panel
 
 **Files:**
-- Create: `studio/src/types/openmontage.ts`
-- Create: `studio/src/lib/openmontage-form.ts`
-- Create: `studio/src/lib/openmontage-form.test.ts`
-- Create: `studio/src/components/openmontage/OpenMontageCreationPanel.tsx`
-- Create: `studio/src/components/openmontage/OpenMontageCreationPanel.test.tsx`
+- Create: `studio/src/types/montage.ts`
+- Create: `studio/src/lib/montage-form.ts`
+- Create: `studio/src/lib/montage-form.test.ts`
+- Create: `studio/src/components/montage/MontageCreationPanel.tsx`
+- Create: `studio/src/components/montage/MontageCreationPanel.test.tsx`
 - Modify: `studio/src/types/index.ts`
 - Modify: `studio/src/types/task.ts`
 - Modify: `studio/src/types/project.ts`
@@ -1484,11 +1484,11 @@ git commit -m "feat: add openmontage agent contracts"
 Append to `studio/src/lib/schemas.test.ts`:
 
 ```ts
-it('accepts openmontage task input without exposing execution target choice', () => {
+it('accepts montage task input without exposing execution target choice', () => {
   const result = createTaskSchema.safeParse({
-    project_id: 'project-openmontage',
-    type: 'openmontage',
-    openmontage_input: {
+    project_id: 'project-montage',
+    type: 'montage',
+    montage_input: {
       brief: '做一条新品发布短片',
       pipeline_key: 'default',
       preferences: {
@@ -1504,11 +1504,11 @@ it('accepts openmontage task input without exposing execution target choice', ()
   }
 })
 
-it('requires brief for openmontage tasks', () => {
+it('requires brief for montage tasks', () => {
   const result = createTaskSchema.safeParse({
-    project_id: 'project-openmontage',
-    type: 'openmontage',
-    openmontage_input: {
+    project_id: 'project-montage',
+    type: 'montage',
+    montage_input: {
       brief: '',
     },
   })
@@ -1516,12 +1516,12 @@ it('requires brief for openmontage tasks', () => {
   expect(result.success).toBe(false)
 })
 
-it('accepts openmontage plans', () => {
+it('accepts montage plans', () => {
   const result = planSchema.safeParse({
-    project_id: 'project-openmontage',
-    type: 'openmontage',
+    project_id: 'project-montage',
+    type: 'montage',
     cron_expr: '0 10 * * *',
-    openmontage_input: {
+    montage_input: {
       brief: '每天生成一条品牌短片',
     },
   })
@@ -1538,17 +1538,17 @@ Run:
 cd studio && bun run test -- src/lib/schemas.test.ts
 ```
 
-Expected: FAIL because `openmontage` is not in enums and `openmontage_input` is unknown.
+Expected: FAIL because `montage` is not in enums and `montage_input` is unknown.
 
-- [ ] **Step 3: Add Studio OpenMontage types**
+- [ ] **Step 3: Add Studio Montage types**
 
-Create `studio/src/types/openmontage.ts`:
+Create `studio/src/types/montage.ts`:
 
 ```ts
-export type OpenMontageAssetType = 'text' | 'image_url' | 'video_url' | 'audio_url' | 'document_url'
+export type MontageAssetType = 'text' | 'image_url' | 'video_url' | 'audio_url' | 'document_url'
 
-export interface OpenMontageAsset {
-  type: OpenMontageAssetType
+export interface MontageAsset {
+  type: MontageAssetType
   url?: string
   task_file_id?: string
   text?: string
@@ -1557,7 +1557,7 @@ export interface OpenMontageAsset {
   file_size?: number
 }
 
-export interface OpenMontagePreferences {
+export interface MontagePreferences {
   aspect_ratio?: string
   duration_seconds?: number
   style?: string
@@ -1566,11 +1566,11 @@ export interface OpenMontagePreferences {
   voiceover_mode?: string
 }
 
-export interface OpenMontageInput {
+export interface MontageInput {
   brief?: string
   pipeline_key?: string
-  source_assets?: OpenMontageAsset[]
-  preferences?: OpenMontagePreferences
+  source_assets?: MontageAsset[]
+  preferences?: MontagePreferences
   delivery_targets?: string[]
   advanced?: Record<string, unknown>
 }
@@ -1580,11 +1580,11 @@ Export it from `studio/src/types/index.ts`:
 
 ```ts
 export type {
-  OpenMontageAsset,
-  OpenMontageAssetType,
-  OpenMontageInput,
-  OpenMontagePreferences,
-} from './openmontage'
+  MontageAsset,
+  MontageAssetType,
+  MontageInput,
+  MontagePreferences,
+} from './montage'
 ```
 
 - [ ] **Step 4: Extend task/project/plan unions**
@@ -1592,16 +1592,16 @@ export type {
 Modify `studio/src/types/task.ts`:
 
 ```ts
-import type { OpenMontageInput } from './openmontage'
+import type { MontageInput } from './montage'
 
-export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'openmontage'
+export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'montage'
 
 export interface Task {
-  openmontage_input?: OpenMontageInput
+  montage_input?: MontageInput
 }
 
 export interface CreateTaskRequest {
-  openmontage_input?: OpenMontageInput
+  montage_input?: MontageInput
 }
 ```
 
@@ -1610,29 +1610,29 @@ Add the fields to the existing interfaces rather than creating duplicate interfa
 Modify `studio/src/types/project.ts`:
 
 ```ts
-import type { OpenMontageInput, OpenMontagePreferences } from './openmontage'
+import type { MontageInput, MontagePreferences } from './montage'
 
-export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'openmontage'
+export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'montage'
 
-export interface OpenMontageProjectDefaults {
+export interface MontageProjectDefaults {
   default_pipeline?: string
-  preferences?: OpenMontagePreferences
+  preferences?: MontagePreferences
   asset_guidance?: string
   delivery_targets?: string[]
 }
 ```
 
-Add `openmontage_defaults?: OpenMontageProjectDefaults` to `Project` and `CreateProjectRequest`.
+Add `montage_defaults?: MontageProjectDefaults` to `Project` and `CreateProjectRequest`.
 
 Modify `studio/src/types/plan.ts`:
 
 ```ts
-import type { OpenMontageInput } from './openmontage'
+import type { MontageInput } from './montage'
 
-export type PlanType = 'seednote' | 'article' | 'videocreator' | 'openmontage'
+export type PlanType = 'seednote' | 'article' | 'videocreator' | 'montage'
 ```
 
-Add `openmontage_input?: OpenMontageInput` to `Plan`, `CreatePlanRequest`, and `UpdatePlanRequest`.
+Add `montage_input?: MontageInput` to `Plan`, `CreatePlanRequest`, and `UpdatePlanRequest`.
 
 - [ ] **Step 5: Add schemas**
 
@@ -1669,37 +1669,37 @@ const openMontageInputSchema = z.object({
 Extend enums:
 
 ```ts
-type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "videocreator", "videoeditor", "openmontage"])
+type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "videocreator", "videoeditor", "montage"])
 ```
 
 Plan enum:
 
 ```ts
-type: z.enum(["seednote", "article", "videocreator", "openmontage"])
+type: z.enum(["seednote", "article", "videocreator", "montage"])
 ```
 
 Project enum:
 
 ```ts
-platform: z.enum(["seednote", "article", "moments", "ecommerce", "videocreator", "videoeditor", "openmontage"])
+platform: z.enum(["seednote", "article", "moments", "ecommerce", "videocreator", "videoeditor", "montage"])
 ```
 
 Add fields:
 
 ```ts
-openmontage_input: openMontageInputSchema,
+montage_input: openMontageInputSchema,
 ```
 
 In `superRefine`:
 
 ```ts
-if (data.type === "openmontage") {
-  const brief = data.openmontage_input?.brief?.trim() || ""
+if (data.type === "montage") {
+  const brief = data.montage_input?.brief?.trim() || ""
   if (!brief) {
     ctx.addIssue({
       code: "custom",
-      message: "请填写 OpenMontage 视频 brief",
-      path: ["openmontage_input", "brief"],
+      message: "请填写 Montage 视频 brief",
+      path: ["montage_input", "brief"],
     })
   }
 }
@@ -1707,12 +1707,12 @@ if (data.type === "openmontage") {
 
 - [ ] **Step 6: Add form helpers**
 
-Create `studio/src/lib/openmontage-form.ts`:
+Create `studio/src/lib/montage-form.ts`:
 
 ```ts
-import type { OpenMontageInput } from '@/types'
+import type { MontageInput } from '@/types'
 
-export function initialOpenMontageInput(brief = '', input?: OpenMontageInput): OpenMontageInput {
+export function initialMontageInput(brief = '', input?: MontageInput): MontageInput {
   return {
     brief: input?.brief ?? brief,
     pipeline_key: input?.pipeline_key ?? '',
@@ -1730,8 +1730,8 @@ export function initialOpenMontageInput(brief = '', input?: OpenMontageInput): O
   }
 }
 
-export function buildOpenMontageInputForSubmit(brief: string | undefined, input?: OpenMontageInput): OpenMontageInput {
-  const next = initialOpenMontageInput(brief ?? '', input)
+export function buildMontageInputForSubmit(brief: string | undefined, input?: MontageInput): MontageInput {
+  const next = initialMontageInput(brief ?? '', input)
   return {
     ...next,
     brief: (next.brief ?? '').trim(),
@@ -1753,15 +1753,15 @@ export function buildOpenMontageInputForSubmit(brief: string | undefined, input?
 
 - [ ] **Step 7: Add helper tests**
 
-Create `studio/src/lib/openmontage-form.test.ts`:
+Create `studio/src/lib/montage-form.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest'
-import { buildOpenMontageInputForSubmit, initialOpenMontageInput } from './openmontage-form'
+import { buildMontageInputForSubmit, initialMontageInput } from './montage-form'
 
-describe('openmontage form helpers', () => {
+describe('montage form helpers', () => {
   it('creates stable defaults', () => {
-    expect(initialOpenMontageInput('新品短片')).toMatchObject({
+    expect(initialMontageInput('新品短片')).toMatchObject({
       brief: '新品短片',
       pipeline_key: '',
       source_assets: [],
@@ -1773,7 +1773,7 @@ describe('openmontage form helpers', () => {
   })
 
   it('trims submit fields without adding execution target', () => {
-    const result = buildOpenMontageInputForSubmit('', {
+    const result = buildMontageInputForSubmit('', {
       brief: '  新品短片  ',
       pipeline_key: '  default  ',
       source_assets: [],
@@ -1792,7 +1792,7 @@ describe('openmontage form helpers', () => {
 
 - [ ] **Step 8: Add dedicated panel**
 
-Create `studio/src/components/openmontage/OpenMontageCreationPanel.tsx`:
+Create `studio/src/components/montage/MontageCreationPanel.tsx`:
 
 ```tsx
 import { Controller, type Control } from 'react-hook-form'
@@ -1802,12 +1802,12 @@ import type { CreateTaskFormValues, PlanFormValues } from '@/lib/schemas'
 
 type FormValues = CreateTaskFormValues | PlanFormValues
 
-interface OpenMontageCreationPanelProps {
+interface MontageCreationPanelProps {
   control: Control<FormValues>
-  fieldRoot: 'openmontage_input'
+  fieldRoot: 'montage_input'
 }
 
-export function OpenMontageCreationPanel({ control, fieldRoot }: OpenMontageCreationPanelProps) {
+export function MontageCreationPanel({ control, fieldRoot }: MontageCreationPanelProps) {
   return (
     <div className="space-y-4">
       <Controller
@@ -1869,13 +1869,13 @@ export function OpenMontageCreationPanel({ control, fieldRoot }: OpenMontageCrea
 Modify `studio/src/lib/labels.ts`:
 
 ```ts
-openmontage: 'OpenMontage',
+montage: 'Montage',
 ```
 
 Add to `contentTypeOptions`:
 
 ```ts
-{ value: 'openmontage', label: 'OpenMontage' },
+{ value: 'montage', label: 'Montage' },
 ```
 
 Modify `studio/src/lib/PlatformIcon.tsx`:
@@ -1883,17 +1883,17 @@ Modify `studio/src/lib/PlatformIcon.tsx`:
 ```tsx
 import { Clapperboard } from 'lucide-react'
 
-openmontage: Clapperboard,
+montage: Clapperboard,
 ```
 
 Add color entries:
 
 ```ts
-openmontage: 'text-[#9333EA]',
-openmontage: 'border-l-[#9333EA]',
-openmontage: 'hover:border-l-[#9333EA]/50',
-openmontage: 'outline',
-openmontage: 'bg-[#9333EA]/10',
+montage: 'text-[#9333EA]',
+montage: 'border-l-[#9333EA]',
+montage: 'hover:border-l-[#9333EA]/50',
+montage: 'outline',
+montage: 'bg-[#9333EA]/10',
 ```
 
 - [ ] **Step 10: Run Studio tests**
@@ -1901,7 +1901,7 @@ openmontage: 'bg-[#9333EA]/10',
 Run:
 
 ```bash
-cd studio && bun run test -- src/lib/schemas.test.ts src/lib/openmontage-form.test.ts
+cd studio && bun run test -- src/lib/schemas.test.ts src/lib/montage-form.test.ts
 ```
 
 Expected: PASS.
@@ -1911,8 +1911,8 @@ Expected: PASS.
 Run:
 
 ```bash
-git add studio/src/types/openmontage.ts studio/src/types/index.ts studio/src/types/task.ts studio/src/types/project.ts studio/src/types/plan.ts studio/src/lib/schemas.ts studio/src/lib/schemas.test.ts studio/src/lib/openmontage-form.ts studio/src/lib/openmontage-form.test.ts studio/src/components/openmontage/OpenMontageCreationPanel.tsx studio/src/lib/labels.ts studio/src/lib/pricing.ts studio/src/lib/credit-display.ts studio/src/lib/PlatformIcon.tsx studio/src/lib/command-center.ts
-git commit -m "feat: add openmontage studio schema"
+git add studio/src/types/montage.ts studio/src/types/index.ts studio/src/types/task.ts studio/src/types/project.ts studio/src/types/plan.ts studio/src/lib/schemas.ts studio/src/lib/schemas.test.ts studio/src/lib/montage-form.ts studio/src/lib/montage-form.test.ts studio/src/components/montage/MontageCreationPanel.tsx studio/src/lib/labels.ts studio/src/lib/pricing.ts studio/src/lib/credit-display.ts studio/src/lib/PlatformIcon.tsx studio/src/lib/command-center.ts
+git commit -m "feat: add montage studio schema"
 ```
 
 ## Task 7: Studio Task And Plan Page Integration
@@ -1922,28 +1922,28 @@ git commit -m "feat: add openmontage studio schema"
 - Modify: `studio/src/pages/PlansPage.tsx`
 - Modify: `studio/src/pages/VideoGenerationUx.contract.test.ts`
 - Modify: `studio/src/components/FilePreview.tsx`
-- Test: `studio/src/pages/OpenMontageUx.contract.test.ts`
+- Test: `studio/src/pages/MontageUx.contract.test.ts`
 
 - [ ] **Step 1: Add UX contract test**
 
-Create `studio/src/pages/OpenMontageUx.contract.test.ts`:
+Create `studio/src/pages/MontageUx.contract.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 
-describe('openmontage UX contracts', () => {
-  it('tasks page uses dedicated openmontage input and no user execution target selector', () => {
+describe('montage UX contracts', () => {
+  it('tasks page uses dedicated montage input and no user execution target selector', () => {
     const source = readFileSync('src/pages/TasksPage.tsx', 'utf8')
-    expect(source).toContain('openmontage_input')
-    expect(source).toContain('OpenMontageCreationPanel')
-    expect(source).not.toContain('OpenMontageExecutionTarget')
+    expect(source).toContain('montage_input')
+    expect(source).toContain('MontageCreationPanel')
+    expect(source).not.toContain('MontageExecutionTarget')
   })
 
-  it('plans page supports openmontage input', () => {
+  it('plans page supports montage input', () => {
     const source = readFileSync('src/pages/PlansPage.tsx', 'utf8')
-    expect(source).toContain('openmontage_input')
-    expect(source).toContain('OpenMontageCreationPanel')
+    expect(source).toContain('montage_input')
+    expect(source).toContain('MontageCreationPanel')
   })
 })
 ```
@@ -1953,99 +1953,99 @@ describe('openmontage UX contracts', () => {
 Run:
 
 ```bash
-cd studio && bun run test -- src/pages/OpenMontageUx.contract.test.ts
+cd studio && bun run test -- src/pages/MontageUx.contract.test.ts
 ```
 
-Expected: FAIL because pages do not contain OpenMontage fields.
+Expected: FAIL because pages do not contain Montage fields.
 
 - [ ] **Step 3: Integrate TasksPage**
 
 Modify `studio/src/pages/TasksPage.tsx` imports:
 
 ```tsx
-import { OpenMontageCreationPanel } from '@/components/openmontage/OpenMontageCreationPanel'
-import { buildOpenMontageInputForSubmit, initialOpenMontageInput } from '@/lib/openmontage-form'
+import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
+import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 ```
 
 Add helpers:
 
 ```ts
-const isOpenMontageTask = watchedType === 'openmontage'
+const isMontageTask = watchedType === 'montage'
 ```
 
 Default values:
 
 ```ts
-openmontage_input: defaultType === 'openmontage' ? initialOpenMontageInput('') : undefined,
+montage_input: defaultType === 'montage' ? initialMontageInput('') : undefined,
 ```
 
 On platform/project type change:
 
 ```ts
-form.setValue('openmontage_input', defaults.type === 'openmontage' ? initialOpenMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+form.setValue('montage_input', defaults.type === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
 ```
 
 Submit payload:
 
 ```ts
-openmontage_input: values.type === 'openmontage'
-  ? buildOpenMontageInputForSubmit(values.prompt, values.openmontage_input)
+montage_input: values.type === 'montage'
+  ? buildMontageInputForSubmit(values.prompt, values.montage_input)
   : undefined,
 ```
 
 Render panel:
 
 ```tsx
-{isOpenMontageTask && (
-  <OpenMontageCreationPanel
+{isMontageTask && (
+  <MontageCreationPanel
     control={form.control}
-    fieldRoot="openmontage_input"
+    fieldRoot="montage_input"
   />
 )}
 ```
 
-Ensure OpenMontage does not render `VideoCreationPanel`.
+Ensure Montage does not render `VideoCreationPanel`.
 
 - [ ] **Step 4: Integrate PlansPage**
 
 Modify `studio/src/pages/PlansPage.tsx` similarly:
 
 ```tsx
-import { OpenMontageCreationPanel } from '@/components/openmontage/OpenMontageCreationPanel'
-import { buildOpenMontageInputForSubmit, initialOpenMontageInput } from '@/lib/openmontage-form'
+import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
+import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 ```
 
 Extend `planTypeOptions`:
 
 ```ts
-{ value: 'openmontage', label: 'OpenMontage' },
+{ value: 'montage', label: 'Montage' },
 ```
 
 In `planToFormValues`:
 
 ```ts
-openmontage_input: plan.type === 'openmontage' ? initialOpenMontageInput(plan.prompt || '', plan.openmontage_input) : undefined,
+montage_input: plan.type === 'montage' ? initialMontageInput(plan.prompt || '', plan.montage_input) : undefined,
 ```
 
 Submit payload:
 
 ```ts
-openmontage_input: values.type === 'openmontage'
-  ? buildOpenMontageInputForSubmit(values.prompt, values.openmontage_input)
+montage_input: values.type === 'montage'
+  ? buildMontageInputForSubmit(values.prompt, values.montage_input)
   : undefined,
 ```
 
 Render panel:
 
 ```tsx
-{watchedType === 'openmontage' && (
-  <OpenMontageCreationPanel control={form.control} fieldRoot="openmontage_input" />
+{watchedType === 'montage' && (
+  <MontageCreationPanel control={form.control} fieldRoot="montage_input" />
 )}
 ```
 
 - [ ] **Step 5: Add task file preview labels**
 
-Find the existing file preview component. Add OpenMontage role labels:
+Find the existing file preview component. Add Montage role labels:
 
 ```ts
 const openMontageRoleLabel: Record<string, string> = {
@@ -2060,14 +2060,14 @@ const openMontageRoleLabel: Record<string, string> = {
 }
 ```
 
-Use the labels when `task.type === 'openmontage'`.
+Use the labels when `task.type === 'montage'`.
 
 - [ ] **Step 6: Run Studio page tests**
 
 Run:
 
 ```bash
-cd studio && bun run test -- src/pages/OpenMontageUx.contract.test.ts src/lib/schemas.test.ts
+cd studio && bun run test -- src/pages/MontageUx.contract.test.ts src/lib/schemas.test.ts
 ```
 
 Expected: PASS.
@@ -2077,26 +2077,26 @@ Expected: PASS.
 Run:
 
 ```bash
-git add studio/src/pages/TasksPage.tsx studio/src/pages/PlansPage.tsx studio/src/pages/OpenMontageUx.contract.test.ts studio/src/components/FilePreview.tsx
-git commit -m "feat: wire openmontage studio workflow"
+git add studio/src/pages/TasksPage.tsx studio/src/pages/PlansPage.tsx studio/src/pages/MontageUx.contract.test.ts studio/src/components/FilePreview.tsx
+git commit -m "feat: wire montage studio workflow"
 ```
 
 ## Task 8: Upgrade Documentation And Full Verification
 
 **Files:**
-- Create: `docs/openmontage-upgrade.md`
-- Modify: `server/agent/openmontage_contract_test.go`
-- Test: `server/agent/openmontage_contract_test.go`
+- Create: `docs/montage-upgrade.md`
+- Modify: `server/agent/montage_contract_test.go`
+- Test: `server/agent/montage_contract_test.go`
 
 - [ ] **Step 1: Add upgrade docs**
 
-Create `docs/openmontage-upgrade.md`:
+Create `docs/montage-upgrade.md`:
 
 ```markdown
-# OpenMontage Upgrade Procedure
+# Montage Upgrade Procedure
 
-OpenMontage is integrated as a git submodule at `third_party/OpenMontage`.
-Anban owns the adapter contract and does not modify upstream OpenMontage source
+Montage is integrated as a git submodule at `third_party/OpenMontage`.
+Anban owns the adapter contract and does not modify upstream Montage source
 files during normal feature work.
 
 ## Update
@@ -2116,30 +2116,30 @@ git diff --submodule=log
 ## Verify
 
 ```bash
-go test ./server/agent -run OpenMontage -count=1
-go test ./server/service -run OpenMontage -count=1
-cd studio && bun run test -- src/lib/openmontage-form.test.ts src/pages/OpenMontageUx.contract.test.ts
+go test ./server/agent -run Montage -count=1
+go test ./server/service -run Montage -count=1
+cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.contract.test.ts
 ```
 
 ## Adapter Rule
 
-If upstream pipeline metadata changes, update only Anban's OpenMontage adapter
-mapping and tests. Do not copy OpenMontage internals into Studio schemas.
+If upstream pipeline metadata changes, update only Anban's Montage adapter
+mapping and tests. Do not copy Montage internals into Studio schemas.
 ```
 
 - [ ] **Step 2: Add submodule contract test**
 
-Append to `server/agent/openmontage_contract_test.go`:
+Append to `server/agent/montage_contract_test.go`:
 
 ```go
-func TestOpenMontageSubmodulePathIsDeclared(t *testing.T) {
+func TestMontageSubmodulePathIsDeclared(t *testing.T) {
 	root := repoRoot(t)
 	gitmodules := readRepoFile(t, filepath.Join(root, ".gitmodules"))
 	if !strings.Contains(gitmodules, "third_party/OpenMontage") {
 		t.Fatal(".gitmodules missing third_party/OpenMontage submodule")
 	}
 	if !strings.Contains(gitmodules, "https://github.com/calesthio/OpenMontage.git") {
-		t.Fatal(".gitmodules missing OpenMontage upstream URL")
+		t.Fatal(".gitmodules missing Montage upstream URL")
 	}
 }
 ```
@@ -2149,10 +2149,10 @@ func TestOpenMontageSubmodulePathIsDeclared(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/agent -run OpenMontage -count=1
-go test ./server/service -run OpenMontage -count=1
-go test ./server/config -run OpenMontage -count=1
-cd studio && bun run test -- src/lib/openmontage-form.test.ts src/pages/OpenMontageUx.contract.test.ts src/lib/schemas.test.ts
+go test ./server/agent -run Montage -count=1
+go test ./server/service -run Montage -count=1
+go test ./server/config -run Montage -count=1
+cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.contract.test.ts src/lib/schemas.test.ts
 ```
 
 Expected: PASS.
@@ -2176,15 +2176,15 @@ Expected: PASS. If unrelated pre-existing tests fail, capture the exact failing 
 Run:
 
 ```bash
-git add docs/openmontage-upgrade.md server/agent/openmontage_contract_test.go
-git commit -m "docs: add openmontage upgrade procedure"
+git add docs/montage-upgrade.md server/agent/montage_contract_test.go
+git commit -m "docs: add montage upgrade procedure"
 ```
 
 ## Self-Review Checklist
 
 - [ ] Spec coverage: platform, config, model, Studio input, task creation, plans, agent, artifacts, billing, submodule upgrade, and tests are covered.
 - [ ] No user-facing cloud/local selector is introduced.
-- [ ] OpenMontage does not reuse `video_creator_input`, `video_editor_input`, `VideoCreationPanel`, `create_video_generation_job`, Seedance skills, or `video-use`.
+- [ ] Montage does not reuse `video_creator_input`, `video_editor_input`, `VideoCreationPanel`, `create_video_generation_job`, Seedance skills, or `video-use`.
 - [ ] All plugin distribution asset changes include manifest patch version bumps.
 - [ ] All production code tasks start with failing tests.
 - [ ] Final verification includes Go tests/builds and Studio tests/build.

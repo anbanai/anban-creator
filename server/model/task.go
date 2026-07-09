@@ -74,7 +74,7 @@ type ProjectSnapshot struct {
 	Theme               string                   `json:"theme,omitempty"`
 	Author              string                   `json:"author,omitempty"`
 	EcommerceDefaults   EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
-	OpenMontageDefaults OpenMontageDefaults      `json:"openmontage_defaults,omitempty"`
+	MontageDefaults MontageDefaults      `json:"montage_defaults,omitempty"`
 }
 
 // Task represents a content generation task.
@@ -118,7 +118,7 @@ type Task struct {
 	Ecommerce               datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
 	InputAttachments        datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
 	VideoInput              datatypes.JSONType[VideoInput]        `gorm:"type:json" json:"video_input"`
-	OpenMontageInput        datatypes.JSONType[OpenMontageInput]  `gorm:"type:json" json:"openmontage_input"`
+	MontageInput        datatypes.JSONType[MontageInput]  `gorm:"type:json" json:"montage_input"`
 	VideoConfig             datatypes.JSONType[VideoTaskConfig]   `gorm:"type:json" json:"video_config"`
 	VideoGenerationID       string                                `gorm:"type:varchar(100);default:''" json:"video_generation_id,omitempty"`
 	VideoEstimatedCredits   int                                   `gorm:"default:0" json:"video_estimated_credits,omitempty"`
@@ -250,7 +250,7 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		Theme:               p.Theme,
 		Author:              p.Author,
 		EcommerceDefaults:   p.EcommerceDefaults.Data(),
-		OpenMontageDefaults: p.OpenMontageDefaults.Data(),
+		MontageDefaults: p.MontageDefaults.Data(),
 	}
 }
 
@@ -275,6 +275,6 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.Theme = snap.Theme
 	p.Author = snap.Author
 	p.SetEcommerceDefaults(snap.EcommerceDefaults)
-	p.SetOpenMontageDefaults(snap.OpenMontageDefaults)
+	p.SetMontageDefaults(snap.MontageDefaults)
 	return &p
 }

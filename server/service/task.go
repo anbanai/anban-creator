@@ -51,7 +51,7 @@ type TaskService struct {
 	videoCatalog          VideoModelCatalog
 	videoCreditMultiplier int
 	videoBilling          srvconfig.BillingConfig
-	openmontageCfg        srvconfig.OpenMontageConfig
+	montageCfg        srvconfig.MontageConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
 	ilinkNotifier  *IlinkNotifier
@@ -103,7 +103,7 @@ func NewTaskService(
 		executionTimeout: 60 * time.Minute,
 		persistTimeout:   10 * time.Minute,
 	}
-	svc.openmontageCfg = defaultOpenMontageServiceConfig()
+	svc.montageCfg = defaultMontageServiceConfig()
 
 	// Start listening for cross-replica cancel events.
 	if pubsub != nil && pubsub.Available() {
@@ -143,15 +143,15 @@ func (s *TaskService) SetVideoBillingConfig(billing srvconfig.BillingConfig) {
 	s.videoBilling = billing
 }
 
-func (s *TaskService) SetOpenMontageConfig(cfg srvconfig.OpenMontageConfig) {
+func (s *TaskService) SetMontageConfig(cfg srvconfig.MontageConfig) {
 	if s == nil {
 		return
 	}
-	s.openmontageCfg = cfg
+	s.montageCfg = cfg
 }
 
-func defaultOpenMontageServiceConfig() srvconfig.OpenMontageConfig {
-	cfg := srvconfig.OpenMontageConfig{}
+func defaultMontageServiceConfig() srvconfig.MontageConfig {
+	cfg := srvconfig.MontageConfig{}
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -291,7 +291,7 @@ func (s *TaskService) StorageProviderName() string {
 	return s.store.Name()
 }
 
-var ErrOpenMontageInput = errors.New("openmontage input invalid")
+var ErrMontageInput = errors.New("montage input invalid")
 
 // CreateManualParams holds the inputs for CreateManual. Fields map 1:1 to the
 // model.Task attributes that callers can supply at creation time. Using a struct
@@ -344,10 +344,10 @@ type CreateManualParams struct {
 	// videoeditor tasks. They are rejected for creator projects and vice versa.
 	VideoEditorConfig *model.VideoTaskConfig
 	VideoEditorInput  *model.VideoInput
-	// OpenMontageInput carries the OpenMontage-specific creation contract.
+	// MontageInput carries the Montage-specific creation contract.
 	// It is independent from video creator/editor payloads and is only valid
-	// for openmontage projects.
-	OpenMontageInput *model.OpenMontageInput
+	// for montage projects.
+	MontageInput *model.MontageInput
 	// ExecutionTarget, when model.ExecutionTargetLocal, routes the task to a
 	// desktop local executor instead of cloud Asynq/Docker. The task is created
 	// pending with a LocalClaimDeadline and is NOT enqueued; a desktop claims it
@@ -398,8 +398,8 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
-	if p.OpenMontageInput != nil && !model.IsOpenMontagePlatform(taskType) {
-		return nil, fmt.Errorf("%w: openmontage_input can only be set on openmontage tasks", ErrOpenMontageInput)
+	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
+		return nil, fmt.Errorf("%w: montage_input can only be set on montage tasks", ErrMontageInput)
 	}
 
 	// E-commerce: merge the PROJECT's reusable e-commerce defaults (default
@@ -429,15 +429,15 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if model.IsVideoPlatform(taskType) {
 		quantity = 1
 	}
-	if model.IsOpenMontagePlatform(taskType) {
+	if model.IsMontagePlatform(taskType) {
 		quantity = 1
-		if p.OpenMontageInput == nil || strings.TrimSpace(p.OpenMontageInput.Brief) == "" {
-			return nil, fmt.Errorf("%w: openmontage task requires brief", ErrOpenMontageInput)
+		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
+			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
-		target, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-			Config:          s.openmontageCfg,
+		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+			Config:          s.montageCfg,
 			TaskType:        taskType,
-			LocalAvailable:  containsOpenMontageTarget(s.openmontageCfg.ExecutionTargets, model.ExecutionTargetLocal),
+			LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
 			CloudAvailable:  true,
 			AssetsCloudSafe: true,
 		})
@@ -599,8 +599,8 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
 			}
 		}
-		if model.IsOpenMontagePlatform(taskType) && p.OpenMontageInput != nil {
-			task.SetOpenMontageInput(*p.OpenMontageInput)
+		if model.IsMontagePlatform(taskType) && p.MontageInput != nil {
+			task.SetMontageInput(*p.MontageInput)
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -855,20 +855,20 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		}
 		planVideoInput = &vi
 	}
-	var planOpenMontageInput *model.OpenMontageInput
+	var planMontageInput *model.MontageInput
 	openMontageExecutionTarget := model.ExecutionTargetCloud
-	if model.IsOpenMontagePlatform(taskType) {
-		input := plan.OpenMontageInput.Data()
-		planOpenMontageInput = &input
-		target, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-			Config:          s.openmontageCfg,
+	if model.IsMontagePlatform(taskType) {
+		input := plan.MontageInput.Data()
+		planMontageInput = &input
+		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+			Config:          s.montageCfg,
 			TaskType:        taskType,
 			FromPlan:        true,
 			CloudAvailable:  true,
 			AssetsCloudSafe: true,
 		})
 		if err != nil {
-			s.logger.Warn().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping openmontage plan task due to execution target policy")
+			s.logger.Warn().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping montage plan task due to execution target policy")
 			return nil, nil
 		}
 		openMontageExecutionTarget = target
@@ -916,7 +916,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ArticleWithCover:         plan.ArticleWithCover,
 		ArticleWithContentImages: plan.ArticleWithContentImages,
 	}
-	if model.IsOpenMontagePlatform(taskType) {
+	if model.IsMontagePlatform(taskType) {
 		task.ExecutionTarget = openMontageExecutionTarget
 	}
 	if project != nil {
@@ -925,8 +925,8 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if planVideoInput != nil {
 		task.SetVideoInput(*planVideoInput)
 	}
-	if planOpenMontageInput != nil {
-		task.SetOpenMontageInput(*planOpenMontageInput)
+	if planMontageInput != nil {
+		task.SetMontageInput(*planMontageInput)
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {

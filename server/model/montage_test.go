@@ -2,14 +2,14 @@ package model
 
 import "testing"
 
-func TestOpenMontageDefaultsSurviveProjectSnapshotRoundTrip(t *testing.T) {
+func TestMontageDefaultsSurviveProjectSnapshotRoundTrip(t *testing.T) {
 	project := &Project{
 		Name:     "Launch Clips",
-		Platform: PlatformOpenMontage,
+		Platform: PlatformMontage,
 	}
-	project.SetOpenMontageDefaults(OpenMontageDefaults{
+	project.SetMontageDefaults(MontageDefaults{
 		DefaultPipeline: "social-short",
-		Preferences: OpenMontagePreferences{
+		Preferences: MontagePreferences{
 			AspectRatio:     "9:16",
 			DurationSeconds: 45,
 			SubtitleMode:    "burned-in",
@@ -21,7 +21,7 @@ func TestOpenMontageDefaultsSurviveProjectSnapshotRoundTrip(t *testing.T) {
 	snapshot := SnapshotProject(project)
 	restored := ProjectFromSnapshot(&Project{ID: "project-1"}, snapshot)
 
-	got := restored.OpenMontageDefaults.Data()
+	got := restored.MontageDefaults.Data()
 	if got.DefaultPipeline != "social-short" {
 		t.Fatalf("DefaultPipeline = %q, want social-short", got.DefaultPipeline)
 	}

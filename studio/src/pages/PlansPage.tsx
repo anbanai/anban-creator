@@ -29,7 +29,7 @@ import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } f
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { buildVideoInputForSubmit, initialVideoInput } from '@/lib/video-form'
-import { buildOpenMontageInputForSubmit, initialOpenMontageInput } from '@/lib/openmontage-form'
+import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 import { isVideoCreator } from '@/lib/video-platforms'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
@@ -38,7 +38,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
-import { OpenMontageCreationPanel } from '@/components/openmontage/OpenMontageCreationPanel'
+import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { cn } from '@/lib/utils'
 import { parseCreationIntent } from '@/lib/command-center'
 import { taskCostFor } from '@/lib/pricing'
@@ -47,7 +47,7 @@ const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
   { value: 'videocreator', label: 'AI 视频生成' },
-  { value: 'openmontage', label: 'OpenMontage' },
+  { value: 'montage', label: 'Montage' },
 ]
 
 function planToFormValues(plan: Plan): PlanFormValues {
@@ -66,7 +66,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
     video_creator_input: isVideoCreator(plan.type) ? initialVideoInput(plan.prompt || '', plan.video_creator_input) : undefined,
-    openmontage_input: plan.type === 'openmontage' ? initialOpenMontageInput(plan.prompt || '', plan.openmontage_input) : undefined,
+    montage_input: plan.type === 'montage' ? initialMontageInput(plan.prompt || '', plan.montage_input) : undefined,
   }
 }
 
@@ -99,7 +99,7 @@ export default function PlansPage() {
       article_with_cover: true,
       article_with_content_images: true,
       video_creator_input: undefined,
-      openmontage_input: undefined,
+      montage_input: undefined,
     },
   })
 
@@ -113,7 +113,7 @@ export default function PlansPage() {
   const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedGoalMode = useWatch({ control: form.control, name: 'goal_mode' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
-  const isOpenMontagePlan = watchedType === 'openmontage'
+  const isMontagePlan = watchedType === 'montage'
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -233,7 +233,7 @@ export default function PlansPage() {
   })
 
   const openCreate = useCallback(() => {
-    const requestedType: PlanType = createIntent.type === 'article' || createIntent.type === 'openmontage' || isVideoCreator(createIntent.type)
+    const requestedType: PlanType = createIntent.type === 'article' || createIntent.type === 'montage' || isVideoCreator(createIntent.type)
       ? createIntent.type
       : 'seednote'
     setEditingPlan(null)
@@ -248,7 +248,7 @@ export default function PlansPage() {
       article_with_cover: true,
       article_with_content_images: true,
       video_creator_input: isVideoCreator(requestedType) ? initialVideoInput('') : undefined,
-      openmontage_input: requestedType === 'openmontage' ? initialOpenMontageInput('') : undefined,
+      montage_input: requestedType === 'montage' ? initialMontageInput('') : undefined,
     })
     setModalOpen(true)
   }, [createIntent.projectId, createIntent.type, form, projectMap])
@@ -289,7 +289,7 @@ export default function PlansPage() {
       article_with_cover: true,
       article_with_content_images: true,
       video_creator_input: undefined,
-      openmontage_input: undefined,
+      montage_input: undefined,
     })
   }
 
@@ -305,15 +305,15 @@ export default function PlansPage() {
       project_id: values.project_id || undefined,
       image_model_key: values.image_model_key,
       watermark: values.watermark || undefined,
-      goal_mode: values.type !== 'openmontage' && values.goal_mode ? true : undefined,
-      goal: values.type !== 'openmontage' && values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
+      goal_mode: values.type !== 'montage' && values.goal_mode ? true : undefined,
+      goal: values.type !== 'montage' && values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
       has_content_image: values.type === 'seednote' ? values.has_content_image : undefined,
       has_tail_image: values.type === 'seednote' ? values.has_tail_image : undefined,
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
       video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_creator_input) : undefined,
-      openmontage_input: values.type === 'openmontage' ? buildOpenMontageInputForSubmit(values.prompt, values.openmontage_input) : undefined,
+      montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
     if (editingPlan) {
@@ -489,10 +489,10 @@ export default function PlansPage() {
                           } else {
                             form.setValue('video_creator_input', undefined, { shouldDirty: false })
                           }
-                          form.setValue('openmontage_input', platform === 'openmontage' ? initialOpenMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+                          form.setValue('montage_input', platform === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
                         } else {
                           form.setValue('video_creator_input', undefined, { shouldDirty: false })
-                          form.setValue('openmontage_input', undefined, { shouldDirty: false })
+                          form.setValue('montage_input', undefined, { shouldDirty: false })
                         }
                       }}
                       excludePlatforms={['moments', 'ecommerce', 'videoeditor']}
@@ -516,7 +516,7 @@ export default function PlansPage() {
                         const nextType = v as PlanType
                         field.onChange(nextType)
                         form.setValue('video_creator_input', isVideoCreator(nextType) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: true })
-                        form.setValue('openmontage_input', nextType === 'openmontage' ? initialOpenMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: true })
+                        form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: true })
                       }}
                       disabled={!!editingPlan || !!form.watch('project_id')}
                     >
@@ -547,7 +547,7 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              {!isVideoCreator(watchedType) && !isOpenMontagePlan && <FormField control={form.control} name="prompt" render={({ field }) => (
+              {!isVideoCreator(watchedType) && !isMontagePlan && <FormField control={form.control} name="prompt" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Prompt（可选）</FormLabel>
                   <FormControl>
@@ -557,7 +557,7 @@ export default function PlansPage() {
                 </FormItem>
               )} />}
 
-              {!isVideoCreator(watchedType) && !isOpenMontagePlan && <FormField control={form.control} name="image_model_key" render={({ field }) => (
+              {!isVideoCreator(watchedType) && !isMontagePlan && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
                   <FormLabel>图像模型</FormLabel>
                   <FormControl>
@@ -594,11 +594,11 @@ export default function PlansPage() {
                 />
               )}
 
-              {isOpenMontagePlan && (
-                <OpenMontageCreationPanel form={form} fieldRoot="openmontage_input" />
+              {isMontagePlan && (
+                <MontageCreationPanel form={form} fieldRoot="montage_input" />
               )}
 
-              {!isVideoCreator(watchedType) && !isOpenMontagePlan && <FormField control={form.control} name="watermark" render={({ field }) => (
+              {!isVideoCreator(watchedType) && !isMontagePlan && <FormField control={form.control} name="watermark" render={({ field }) => (
                 <FormItem>
                   <button
                     type="button"
@@ -721,7 +721,7 @@ export default function PlansPage() {
               )}
 
 
-              {!isOpenMontagePlan && <FormField control={form.control} name="goal_mode" render={({ field }) => (
+              {!isMontagePlan && <FormField control={form.control} name="goal_mode" render={({ field }) => (
                 <FormItem>
                   <div className={`rounded-lg border p-3 transition-colors ${
                     field.value ? 'border-primary bg-primary/5' : 'border-border'
@@ -767,7 +767,7 @@ export default function PlansPage() {
                   模型、图片、视频等额外 MCP 操作按实际用量结算。 */}
               {(() => {
                 const cost = taskCostFor(pricing, watchedType as string)
-                const multiplier = !isOpenMontagePlan && watchedGoalMode ? 3 : 1
+                const multiplier = !isMontagePlan && watchedGoalMode ? 3 : 1
                 const perRun = cost * multiplier
                 const balance = creditsBalance?.balance ?? 0
                 const remaining = balance - perRun

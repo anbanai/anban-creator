@@ -109,7 +109,7 @@ type createTaskRequest struct {
 	VideoCreatorInput        *model.VideoInput       `json:"video_creator_input,omitempty"`
 	VideoEditorConfig        *model.VideoTaskConfig  `json:"video_editor_config,omitempty"`
 	VideoEditorInput         *model.VideoInput       `json:"video_editor_input,omitempty"`
-	OpenMontageInput         *model.OpenMontageInput `json:"openmontage_input,omitempty"`
+	MontageInput         *model.MontageInput `json:"montage_input,omitempty"`
 	// ExecutionTarget, when "local", routes the task to the caller's desktop
 	// local executor instead of cloud execution. Set by the desktop studio build
 	// when a local executor is available. Empty = cloud (default). See
@@ -185,8 +185,8 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
-	if req.OpenMontageInput != nil && strings.TrimSpace(req.OpenMontageInput.Brief) == "" {
-		return Error(c, fiber.StatusBadRequest, "openmontage task requires brief")
+	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
+		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
 	}
 
 	prompt := strings.TrimSpace(req.Prompt)
@@ -219,7 +219,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, "product_photos must be internal file paths or http(s) URLs")
 		}
 	}
-	if err := validateOpenMontageSourceAssetURLs(req.OpenMontageInput); err != nil {
+	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -248,8 +248,8 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if isOpenMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
+		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, openMontageSourceAssetURLs(req.MontageInput)); err != nil {
 				return Error(c, fiber.StatusBadRequest, err.Error())
 			}
 		}
@@ -290,12 +290,12 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		VideoCreatorInput:        req.VideoCreatorInput,
 		VideoEditorConfig:        req.VideoEditorConfig,
 		VideoEditorInput:         req.VideoEditorInput,
-		OpenMontageInput:         req.OpenMontageInput,
+		MontageInput:         req.MontageInput,
 		ExecutionTarget:          req.ExecutionTarget,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrOpenMontageInput) {
+		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrInsufficientCredits) {
@@ -307,9 +307,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to create task")
 	}
 
-	// OpenMontage is always a single deliverable and Studio expects one task
+	// Montage is always a single deliverable and Studio expects one task
 	// object even when the request quantity is clamped by the service.
-	if len(tasks) == 1 && (quantity == 1 || req.OpenMontageInput != nil) {
+	if len(tasks) == 1 && (quantity == 1 || req.MontageInput != nil) {
 		return Success(c, taskAPIResponse(tasks[0]))
 	}
 	return Success(c, taskAPIResponses(tasks))

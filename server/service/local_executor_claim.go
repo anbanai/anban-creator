@@ -219,12 +219,12 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 	}
 
 	var artifactValidation agent.ArtifactValidation
-	if model.IsOpenMontagePlatform(task.Type) {
+	if model.IsMontagePlatform(task.Type) {
 		files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
 		if err != nil {
-			return fmt.Errorf("local complete: list openmontage task files: %w", err)
+			return fmt.Errorf("local complete: list montage task files: %w", err)
 		}
-		artifactValidation = validateOpenMontageCompletionArtifacts(files)
+		artifactValidation = validateMontageCompletionArtifacts(files)
 	} else if model.IsVideoPlatform(task.Type) {
 		var err error
 		artifactValidation, err = s.validateVideoCompletionArtifacts(ctx, task)

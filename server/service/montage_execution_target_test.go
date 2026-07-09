@@ -8,103 +8,103 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-func TestResolveOpenMontageExecutionTargetDefaultsCloud(t *testing.T) {
-	got, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-		Config: srvconfig.OpenMontageConfig{
+func TestResolveMontageExecutionTargetDefaultsCloud(t *testing.T) {
+	got, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+		Config: srvconfig.MontageConfig{
 			Enabled:                true,
 			ExecutionTargets:       []string{"cloud", "local"},
 			DefaultExecutionTarget: "cloud",
 		},
-		TaskType: model.PlatformOpenMontage,
+		TaskType: model.PlatformMontage,
 	})
 	if err != nil {
-		t.Fatalf("ResolveOpenMontageExecutionTarget error = %v", err)
+		t.Fatalf("ResolveMontageExecutionTarget error = %v", err)
 	}
 	if got != model.ExecutionTargetCloud {
 		t.Fatalf("target = %q, want cloud empty target", got)
 	}
 }
 
-func TestResolveOpenMontageExecutionTargetRejectsWhenDisabled(t *testing.T) {
-	_, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-		Config:   srvconfig.OpenMontageConfig{Enabled: false},
-		TaskType: model.PlatformOpenMontage,
+func TestResolveMontageExecutionTargetRejectsWhenDisabled(t *testing.T) {
+	_, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+		Config:   srvconfig.MontageConfig{Enabled: false},
+		TaskType: model.PlatformMontage,
 	})
 	if err == nil {
-		t.Fatal("ResolveOpenMontageExecutionTarget succeeded when disabled")
+		t.Fatal("ResolveMontageExecutionTarget succeeded when disabled")
 	}
 }
 
-func TestResolveOpenMontageExecutionTargetKeepsLocalDisabledWithoutCapability(t *testing.T) {
-	_, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-		Config: srvconfig.OpenMontageConfig{
+func TestResolveMontageExecutionTargetKeepsLocalDisabledWithoutCapability(t *testing.T) {
+	_, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+		Config: srvconfig.MontageConfig{
 			Enabled:                true,
 			ExecutionTargets:       []string{"local"},
 			DefaultExecutionTarget: "local",
 		},
-		TaskType:       model.PlatformOpenMontage,
+		TaskType:       model.PlatformMontage,
 		LocalAvailable: false,
 	})
 	if err == nil {
-		t.Fatal("ResolveOpenMontageExecutionTarget succeeded without local capability")
+		t.Fatal("ResolveMontageExecutionTarget succeeded without local capability")
 	}
 }
 
-func TestResolveOpenMontageExecutionTargetFallsBackFromLocalToCloud(t *testing.T) {
-	got, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
-		Config: srvconfig.OpenMontageConfig{
+func TestResolveMontageExecutionTargetFallsBackFromLocalToCloud(t *testing.T) {
+	got, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+		Config: srvconfig.MontageConfig{
 			Enabled:                true,
 			ExecutionTargets:       []string{"cloud", "local"},
 			DefaultExecutionTarget: "local",
 		},
-		TaskType:       model.PlatformOpenMontage,
+		TaskType:       model.PlatformMontage,
 		LocalAvailable: false,
 	})
 	if err != nil {
-		t.Fatalf("ResolveOpenMontageExecutionTarget error = %v", err)
+		t.Fatalf("ResolveMontageExecutionTarget error = %v", err)
 	}
 	if got != model.ExecutionTargetCloud {
 		t.Fatalf("target = %q, want cloud fallback", got)
 	}
 }
 
-func TestTaskServiceCreateManualOpenMontageRejectsWhenDisabled(t *testing.T) {
+func TestTaskServiceCreateManualMontageRejectsWhenDisabled(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
-	cfg := srvconfig.OpenMontageConfig{Enabled: true}
+	cfg := srvconfig.MontageConfig{Enabled: true}
 	cfg.ApplyDefaults()
 	cfg.Enabled = false
-	svc.SetOpenMontageConfig(cfg)
+	svc.SetMontageConfig(cfg)
 
 	userID := "user-om-disabled"
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
 	_, err := svc.CreateManual(t.Context(), CreateManualParams{
 		UserID:    userID,
 		ProjectID: projectID,
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief: "应该被禁用拒绝",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "openmontage is disabled") {
+	if err == nil || !strings.Contains(err.Error(), "montage is disabled") {
 		t.Fatalf("CreateManual error = %v, want disabled rejection", err)
 	}
 }
 
-func TestTaskServiceCreateManualOpenMontageUsesConfiguredLocalTarget(t *testing.T) {
+func TestTaskServiceCreateManualMontageUsesConfiguredLocalTarget(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
-	cfg := srvconfig.OpenMontageConfig{Enabled: true}
+	cfg := srvconfig.MontageConfig{Enabled: true}
 	cfg.ApplyDefaults()
 	cfg.DefaultExecutionTarget = "local"
 	cfg.ExecutionTargets = []string{"cloud", "local"}
-	svc.SetOpenMontageConfig(cfg)
+	svc.SetMontageConfig(cfg)
 
 	userID := "user-om-local"
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
 	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{
 		UserID:    userID,
 		ProjectID: projectID,
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief: "本机执行短片",
 		},
 	})

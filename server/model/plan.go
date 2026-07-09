@@ -40,7 +40,7 @@ type Plan struct {
 	ArticleWithCover         *bool                                `gorm:"default:true;not null" json:"article_with_cover"`
 	ArticleWithContentImages *bool                                `gorm:"default:true;not null" json:"article_with_content_images"`
 	VideoInput               datatypes.JSONType[VideoInput]       `gorm:"type:json" json:"video_input"`
-	OpenMontageInput         datatypes.JSONType[OpenMontageInput] `gorm:"type:json" json:"openmontage_input"`
+	MontageInput         datatypes.JSONType[MontageInput] `gorm:"type:json" json:"montage_input"`
 	VideoConfig              datatypes.JSONType[VideoTaskConfig]  `gorm:"type:json" json:"video_config"`
 	VideoEstimatedCredits    int                                  `gorm:"default:0" json:"video_estimated_credits,omitempty"`
 

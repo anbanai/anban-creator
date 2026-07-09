@@ -95,7 +95,7 @@ type createPlanRequest struct {
 	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
 	VideoCreatorConfig       *model.VideoTaskConfig  `json:"video_creator_config,omitempty"`
 	VideoCreatorInput        *model.VideoInput       `json:"video_creator_input,omitempty"`
-	OpenMontageInput         *model.OpenMontageInput `json:"openmontage_input,omitempty"`
+	MontageInput         *model.MontageInput `json:"montage_input,omitempty"`
 }
 
 type updatePlanRequest struct {
@@ -113,7 +113,7 @@ type updatePlanRequest struct {
 	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
 	VideoCreatorConfig       *model.VideoTaskConfig  `json:"video_creator_config,omitempty"`
 	VideoCreatorInput        *model.VideoInput       `json:"video_creator_input,omitempty"`
-	OpenMontageInput         *model.OpenMontageInput `json:"openmontage_input,omitempty"`
+	MontageInput         *model.MontageInput `json:"montage_input,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -129,14 +129,14 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
-	if req.OpenMontageInput != nil && strings.TrimSpace(req.OpenMontageInput.Brief) == "" {
-		return Error(c, fiber.StatusBadRequest, "openmontage task requires brief")
+	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
+		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
 	}
 
 	if !validReferenceImageURL(req.ReferenceImageURL) {
 		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
 	}
-	if err := validateOpenMontageSourceAssetURLs(req.OpenMontageInput); err != nil {
+	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -160,8 +160,8 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if isOpenMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
+		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, openMontageSourceAssetURLs(req.MontageInput)); err != nil {
 				return Error(c, fiber.StatusBadRequest, err.Error())
 			}
 		}
@@ -184,11 +184,11 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		VideoCreatorConfig:       req.VideoCreatorConfig,
 		VideoCreatorInput:        req.VideoCreatorInput,
-		OpenMontageInput:         req.OpenMontageInput,
+		MontageInput:         req.MontageInput,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrOpenMontageInput) {
+		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
@@ -289,11 +289,11 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if req.ReferenceImageURL != nil && !validReferenceImageURL(*req.ReferenceImageURL) {
 		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
 	}
-	if err := validateOpenMontageSourceAssetURLs(req.OpenMontageInput); err != nil {
+	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	if req.OpenMontageInput != nil && strings.TrimSpace(req.OpenMontageInput.Brief) == "" {
-		return Error(c, fiber.StatusBadRequest, "openmontage task requires brief")
+	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
+		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
 	}
 
 	// Verify ownership before update.
@@ -325,8 +325,8 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if model.IsOpenMontagePlatform(existing.Type) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
+		if model.IsMontagePlatform(existing.Type) {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, openMontageSourceAssetURLs(req.MontageInput)); err != nil {
 				return Error(c, fiber.StatusBadRequest, err.Error())
 			}
 		}
@@ -348,11 +348,11 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		VideoCreatorConfig:       req.VideoCreatorConfig,
 		VideoCreatorInput:        req.VideoCreatorInput,
-		OpenMontageInput:         req.OpenMontageInput,
+		MontageInput:         req.MontageInput,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrOpenMontageInput) {
+		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")

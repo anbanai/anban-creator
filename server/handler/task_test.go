@@ -531,7 +531,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	}
 }
 
-func TestCreateTaskOpenMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.T) {
+func TestCreateTaskMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -548,8 +548,8 @@ func TestCreateTaskOpenMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformOpenMontage,
-		Name:     "OpenMontage",
+		Platform: model.PlatformMontage,
+		Name:     "Montage",
 		Status:   model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -567,7 +567,7 @@ func TestCreateTaskOpenMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.
 	resp := postJSON(t, app, "/tasks", `{
 		"project_id": "`+projectID+`",
 		"quantity": 3,
-		"openmontage_input": {
+		"montage_input": {
 			"brief": "做一条新品发布短片",
 			"pipeline_key": "default"
 		}
@@ -581,8 +581,8 @@ func TestCreateTaskOpenMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.
 	if _, ok := data["id"]; !ok {
 		t.Fatalf("response data should be a single task object, got keys %#v", data)
 	}
-	if _, ok := data["openmontage_input"]; !ok {
-		t.Fatalf("response missing openmontage_input: keys %#v", data)
+	if _, ok := data["montage_input"]; !ok {
+		t.Fatalf("response missing montage_input: keys %#v", data)
 	}
 }
 
@@ -641,7 +641,7 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	}
 }
 
-func TestCreateTaskOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
+func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -660,8 +660,8 @@ func TestCreateTaskOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformOpenMontage,
-		Name:     "OpenMontage",
+		Platform: model.PlatformMontage,
+		Name:     "Montage",
 		Status:   model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -669,7 +669,7 @@ func TestCreateTaskOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
 		ID:          uploadID,
 		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeOpenMontageAsset,
+		Purpose:     service.DirectUploadPurposeMontageAsset,
 		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
 		PublicURL:   assetURL,
 		FileName:    "clip.mp4",
@@ -693,7 +693,7 @@ func TestCreateTaskOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 
 	resp := postJSON(t, app, "/tasks", `{
 		"project_id": "`+projectID+`",
-		"openmontage_input": {
+		"montage_input": {
 			"brief": "剪成一条发布会短片",
 			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
 		}
@@ -712,7 +712,7 @@ func TestCreateTaskOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 	}
 }
 
-func TestCreateTaskRejectsOpenMontageAssetOnOtherPlatformWithoutFinalizing(t *testing.T) {
+func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -740,7 +740,7 @@ func TestCreateTaskRejectsOpenMontageAssetOnOtherPlatformWithoutFinalizing(t *te
 	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
 		ID:          uploadID,
 		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeOpenMontageAsset,
+		Purpose:     service.DirectUploadPurposeMontageAsset,
 		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
 		PublicURL:   assetURL,
 		FileName:    "clip.mp4",
@@ -764,7 +764,7 @@ func TestCreateTaskRejectsOpenMontageAssetOnOtherPlatformWithoutFinalizing(t *te
 
 	resp := postJSON(t, app, "/tasks", `{
 		"project_id": "`+projectID+`",
-		"openmontage_input": {
+		"montage_input": {
 			"brief": "错误平台",
 			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
 		}

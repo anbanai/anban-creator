@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildOpenMontageInputForSubmit, initialOpenMontageInput } from './openmontage-form'
+import { buildMontageInputForSubmit, initialMontageInput } from './montage-form'
 
-describe('openmontage form helpers', () => {
+describe('montage form helpers', () => {
   it('creates stable defaults', () => {
-    expect(initialOpenMontageInput('新品短片')).toMatchObject({
+    expect(initialMontageInput('新品短片')).toMatchObject({
       brief: '新品短片',
       pipeline_key: '',
       source_assets: [],
@@ -15,7 +15,7 @@ describe('openmontage form helpers', () => {
   })
 
   it('trims submit fields without adding execution target', () => {
-    const result = buildOpenMontageInputForSubmit('', {
+    const result = buildMontageInputForSubmit('', {
       brief: '  新品短片  ',
       pipeline_key: '  default  ',
       source_assets: [],

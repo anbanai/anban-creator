@@ -294,11 +294,11 @@ describe('createTaskSchema', () => {
     expect('moments_with_image' in result).toBe(false)
   })
 
-  it('accepts openmontage task input without exposing execution target choice', () => {
+  it('accepts montage task input without exposing execution target choice', () => {
     const result = createTaskSchema.safeParse({
-      project_id: 'project-openmontage',
-      type: 'openmontage',
-      openmontage_input: {
+      project_id: 'project-montage',
+      type: 'montage',
+      montage_input: {
         brief: '做一条新品发布短片',
         pipeline_key: 'default',
         preferences: {
@@ -314,11 +314,11 @@ describe('createTaskSchema', () => {
     }
   })
 
-  it('requires brief for openmontage tasks', () => {
+  it('requires brief for montage tasks', () => {
     const result = createTaskSchema.safeParse({
-      project_id: 'project-openmontage',
-      type: 'openmontage',
-      openmontage_input: {
+      project_id: 'project-montage',
+      type: 'montage',
+      montage_input: {
         brief: '',
       },
     })
@@ -409,12 +409,12 @@ describe('planSchema', () => {
     expect(result.article_with_content_images).toBe(true)
   })
 
-  it('accepts openmontage plans', () => {
+  it('accepts montage plans', () => {
     const result = planSchema.safeParse({
-      project_id: 'project-openmontage',
-      type: 'openmontage',
+      project_id: 'project-montage',
+      type: 'montage',
       cron_expr: '0 10 * * *',
-      openmontage_input: {
+      montage_input: {
         brief: '每天生成一条品牌短片',
       },
     })
@@ -462,11 +462,11 @@ describe('projectSchema', () => {
     }).success).toBe(true)
   })
 
-  it('accepts openmontage project defaults', () => {
+  it('accepts montage project defaults', () => {
     expect(projectSchema.safeParse({
-      platform: 'openmontage',
-      name: 'OpenMontage 项目',
-      openmontage_defaults: {
+      platform: 'montage',
+      name: 'Montage 项目',
+      montage_defaults: {
         default_pipeline: 'social-short',
         preferences: {
           aspect_ratio: '9:16',

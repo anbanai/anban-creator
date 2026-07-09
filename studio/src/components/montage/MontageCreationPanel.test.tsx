@@ -2,17 +2,17 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { useForm, useWatch } from 'react-hook-form'
 import { describe, expect, it } from 'vitest'
 import { Form } from '@/components/ui/form'
-import type { OpenMontageInput } from '@/types'
-import { OpenMontageCreationPanel } from './OpenMontageCreationPanel'
+import type { MontageInput } from '@/types'
+import { MontageCreationPanel } from './MontageCreationPanel'
 
 type PanelFormValues = {
-  openmontage_input: OpenMontageInput
+  montage_input: MontageInput
 }
 
 function PanelHarness() {
   const form = useForm<PanelFormValues>({
     defaultValues: {
-      openmontage_input: {
+      montage_input: {
         brief: '',
         pipeline_key: '',
         preferences: {
@@ -23,18 +23,18 @@ function PanelHarness() {
       },
     },
   })
-  const input = useWatch({ control: form.control, name: 'openmontage_input' })
+  const input = useWatch({ control: form.control, name: 'montage_input' })
 
   return (
     <Form {...form}>
-      <OpenMontageCreationPanel form={form} fieldRoot="openmontage_input" />
-      <output data-testid="openmontage-input">{JSON.stringify(input)}</output>
+      <MontageCreationPanel form={form} fieldRoot="montage_input" />
+      <output data-testid="montage-input">{JSON.stringify(input)}</output>
     </Form>
   )
 }
 
-describe('OpenMontageCreationPanel', () => {
-  it('edits stable openmontage fields without execution target controls', () => {
+describe('MontageCreationPanel', () => {
+  it('edits stable montage fields without execution target controls', () => {
     render(<PanelHarness />)
 
     fireEvent.change(screen.getByPlaceholderText('描述这次要生产的视频内容、素材用途、节奏和交付目标'), {
@@ -47,10 +47,10 @@ describe('OpenMontageCreationPanel', () => {
       target: { value: '45' },
     })
 
-    expect(screen.getByTestId('openmontage-input')).toHaveTextContent('"brief":"新品发布短片"')
-    expect(screen.getByTestId('openmontage-input')).toHaveTextContent('"pipeline_key":"social-short"')
-    expect(screen.getByTestId('openmontage-input')).toHaveTextContent('"duration_seconds":45')
+    expect(screen.getByTestId('montage-input')).toHaveTextContent('"brief":"新品发布短片"')
+    expect(screen.getByTestId('montage-input')).toHaveTextContent('"pipeline_key":"social-short"')
+    expect(screen.getByTestId('montage-input')).toHaveTextContent('"duration_seconds":45')
     expect(screen.queryByText('执行位置')).not.toBeInTheDocument()
-    expect(screen.getByTestId('openmontage-input')).not.toHaveTextContent('execution_target')
+    expect(screen.getByTestId('montage-input')).not.toHaveTextContent('execution_target')
   })
 })

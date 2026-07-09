@@ -53,7 +53,7 @@ var stagePercentByType = map[string]map[string]int{
 		"compliance":       90,
 		"archive":          97,
 	},
-	model.ScopeOpenMontage: {
+	model.ScopeMontage: {
 		"prepare":   10,
 		"assets":    20,
 		"pipeline":  35,

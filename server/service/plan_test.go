@@ -236,76 +236,76 @@ func TestPlanService_Create(t *testing.T) {
 	}
 }
 
-func TestPlanServiceCreateOpenMontagePlanStoresInput(t *testing.T) {
+func TestPlanServiceCreateMontagePlanStoresInput(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	userID := "user-om-plan"
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
 	plan, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    userID,
 		ProjectID: projectID,
 		CronExpr:  "0 10 * * *",
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief:       "每日生成新品短片",
 			PipelineKey: "default",
-			Preferences: model.OpenMontagePreferences{
+			Preferences: model.MontagePreferences{
 				AspectRatio:     "9:16",
 				DurationSeconds: 30,
 			},
 		},
 	})
 	if err != nil {
-		t.Fatalf("Create openmontage plan: %v", err)
+		t.Fatalf("Create montage plan: %v", err)
 	}
-	if plan.Type != model.PlatformOpenMontage {
-		t.Fatalf("plan type = %q, want openmontage", plan.Type)
+	if plan.Type != model.PlatformMontage {
+		t.Fatalf("plan type = %q, want montage", plan.Type)
 	}
-	got := plan.OpenMontageInput.Data()
+	got := plan.MontageInput.Data()
 	if got.Brief != "每日生成新品短片" || got.PipelineKey != "default" {
-		t.Fatalf("openmontage input = %#v", got)
+		t.Fatalf("montage input = %#v", got)
 	}
 	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 30 {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 }
 
-func TestPlanServiceUpdateOpenMontagePlanStoresInput(t *testing.T) {
+func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	userID := "user-om-plan-update"
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
 	plan, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    userID,
 		ProjectID: projectID,
 		CronExpr:  "0 10 * * *",
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief:       "旧短片",
 			PipelineKey: "default",
 		},
 	})
 	if err != nil {
-		t.Fatalf("Create openmontage plan: %v", err)
+		t.Fatalf("Create montage plan: %v", err)
 	}
 
 	updated, err := svc.Update(ctx, UpdatePlanParams{
 		ID: plan.ID,
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief:       "更新后的短片",
 			PipelineKey: "social-short",
-			Preferences: model.OpenMontagePreferences{
+			Preferences: model.MontagePreferences{
 				AspectRatio:     "1:1",
 				DurationSeconds: 20,
 			},
 		},
 	})
 	if err != nil {
-		t.Fatalf("Update openmontage plan: %v", err)
+		t.Fatalf("Update montage plan: %v", err)
 	}
-	got := updated.OpenMontageInput.Data()
+	got := updated.MontageInput.Data()
 	if got.Brief != "更新后的短片" || got.PipelineKey != "social-short" {
-		t.Fatalf("openmontage input = %#v", got)
+		t.Fatalf("montage input = %#v", got)
 	}
 	if got.Preferences.AspectRatio != "1:1" || got.Preferences.DurationSeconds != 20 {
 		t.Fatalf("preferences = %#v", got.Preferences)
@@ -313,15 +313,15 @@ func TestPlanServiceUpdateOpenMontagePlanStoresInput(t *testing.T) {
 
 	updated, err = svc.Update(ctx, UpdatePlanParams{ID: plan.ID, Prompt: "只改提示"})
 	if err != nil {
-		t.Fatalf("Update without openmontage input: %v", err)
+		t.Fatalf("Update without montage input: %v", err)
 	}
-	got = updated.OpenMontageInput.Data()
+	got = updated.MontageInput.Data()
 	if got.Brief != "更新后的短片" || got.PipelineKey != "social-short" {
-		t.Fatalf("openmontage input changed when omitted: %#v", got)
+		t.Fatalf("montage input changed when omitted: %#v", got)
 	}
 }
 
-func TestPlanServiceRejectsOpenMontageInputForOtherPlatforms(t *testing.T) {
+func TestPlanServiceRejectsMontageInputForOtherPlatforms(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	userID := "user-om-plan-reject"
@@ -331,12 +331,12 @@ func TestPlanServiceRejectsOpenMontageInputForOtherPlatforms(t *testing.T) {
 		UserID:    userID,
 		ProjectID: projectID,
 		CronExpr:  "0 10 * * *",
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief: "错误平台",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "openmontage_input can only be set on openmontage plans") {
-		t.Fatalf("Create error = %v, want openmontage input rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "montage_input can only be set on montage plans") {
+		t.Fatalf("Create error = %v, want montage input rejection", err)
 	}
 
 	plan, err := svc.Create(ctx, CreatePlanParams{
@@ -350,12 +350,12 @@ func TestPlanServiceRejectsOpenMontageInputForOtherPlatforms(t *testing.T) {
 	}
 	_, err = svc.Update(ctx, UpdatePlanParams{
 		ID: plan.ID,
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief: "错误平台更新",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "openmontage_input can only be set on openmontage plans") {
-		t.Fatalf("Update error = %v, want openmontage input rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "montage_input can only be set on montage plans") {
+		t.Fatalf("Update error = %v, want montage input rejection", err)
 	}
 }
 

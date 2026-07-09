@@ -69,7 +69,7 @@ func defaultCreditTaskCosts() map[string]int {
 		model.PlatformEcommerce:       3000,
 		model.PlatformVideoCreator:    2000,
 		model.PlatformVideoEditor:     2000,
-		model.PlatformOpenMontage:     2000,
+		model.PlatformMontage:     2000,
 		model.CreditTypeViralAnalysis: 1200,
 	}
 }
@@ -88,8 +88,8 @@ func creditTaskLabel(taskType string) string {
 		return "AI 视频生成"
 	case model.ScopeVideoEditor:
 		return "视频剪辑后期"
-	case model.ScopeOpenMontage:
-		return "OpenMontage 视频"
+	case model.ScopeMontage:
+		return "Montage 视频"
 	case model.CreditTypeViralAnalysis:
 		return "爆文拆解"
 	default:

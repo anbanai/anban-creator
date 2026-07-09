@@ -28,7 +28,7 @@ type Config struct {
 	MCP                MCPConfig                       `yaml:"mcp"`
 	ImageAPI           ImageAPIConfig                  `yaml:"image_api"`
 	VideoAPI           VideoAPIConfig                  `yaml:"video_api"`
-	OpenMontage        OpenMontageConfig               `yaml:"openmontage"`
+	Montage        MontageConfig               `yaml:"montage"`
 	ImagePresets       []ImageModelPreset              `yaml:"image_presets"`
 	Writing            WritingConfig                   `yaml:"writing"`
 	Vision             VisionConfig                    `yaml:"vision"`
@@ -196,7 +196,7 @@ type VideoModelCatalogEntry struct {
 	VideoInput5sMaxPrice  map[string]float64 `yaml:"video_input_5s_max_price"`
 }
 
-type OpenMontageConfig struct {
+type MontageConfig struct {
 	Enabled                bool                    `yaml:"enabled"`
 	enabledSet             bool                    `yaml:"-"`
 	SubmodulePath          string                  `yaml:"submodule_path"`
@@ -208,16 +208,16 @@ type OpenMontageConfig struct {
 	ExecutionTargets       []string                `yaml:"execution_targets"`
 	DefaultExecutionTarget string                  `yaml:"default_execution_target"`
 	CreditCost             int                     `yaml:"credit_cost"`
-	Runner                 OpenMontageRunnerConfig `yaml:"runner"`
+	Runner                 MontageRunnerConfig `yaml:"runner"`
 }
 
-type OpenMontageRunnerConfig struct {
+type MontageRunnerConfig struct {
 	CloudImage string `yaml:"cloud_image"`
 }
 
-func (c *OpenMontageConfig) UnmarshalYAML(value *yaml.Node) error {
-	type rawOpenMontageConfig OpenMontageConfig
-	var raw rawOpenMontageConfig
+func (c *MontageConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawMontageConfig MontageConfig
+	var raw rawMontageConfig
 	if err := value.Decode(&raw); err != nil {
 		return err
 	}
@@ -227,11 +227,11 @@ func (c *OpenMontageConfig) UnmarshalYAML(value *yaml.Node) error {
 			break
 		}
 	}
-	*c = OpenMontageConfig(raw)
+	*c = MontageConfig(raw)
 	return nil
 }
 
-func (c *OpenMontageConfig) ApplyDefaults() {
+func (c *MontageConfig) ApplyDefaults() {
 	if !c.enabledSet {
 		c.Enabled = true
 	}
@@ -263,47 +263,47 @@ func (c *OpenMontageConfig) ApplyDefaults() {
 		c.CreditCost = 2000
 	}
 	if c.Runner.CloudImage == "" {
-		c.Runner.CloudImage = "anban/openmontage-runner:latest"
+		c.Runner.CloudImage = "anban/montage-runner:latest"
 	}
 }
 
-func (c OpenMontageConfig) Validate() error {
+func (c MontageConfig) Validate() error {
 	if !c.Enabled {
 		return nil
 	}
 	if strings.TrimSpace(c.SubmodulePath) == "" {
-		return fmt.Errorf("openmontage.submodule_path is required")
+		return fmt.Errorf("montage.submodule_path is required")
 	}
 	if strings.TrimSpace(c.DefaultPipeline) == "" {
-		return fmt.Errorf("openmontage.default_pipeline is required")
+		return fmt.Errorf("montage.default_pipeline is required")
 	}
 	if c.MaxDurationSeconds <= 0 {
-		return fmt.Errorf("openmontage.max_duration_seconds must be positive")
+		return fmt.Errorf("montage.max_duration_seconds must be positive")
 	}
 	if c.MaxAssets <= 0 {
-		return fmt.Errorf("openmontage.max_assets must be positive")
+		return fmt.Errorf("montage.max_assets must be positive")
 	}
 	if c.TimeoutMinutes <= 0 {
-		return fmt.Errorf("openmontage.timeout_minutes must be positive")
+		return fmt.Errorf("montage.timeout_minutes must be positive")
 	}
 	if !openMontageStringSliceContains(c.AllowedPipelines, c.DefaultPipeline) {
-		return fmt.Errorf("openmontage.default_pipeline must be in openmontage.allowed_pipelines")
+		return fmt.Errorf("montage.default_pipeline must be in montage.allowed_pipelines")
 	}
-	if !validOpenMontageTarget(c.DefaultExecutionTarget) {
-		return fmt.Errorf("openmontage.default_execution_target must be cloud or local")
+	if !validMontageTarget(c.DefaultExecutionTarget) {
+		return fmt.Errorf("montage.default_execution_target must be cloud or local")
 	}
 	if !openMontageStringSliceContains(c.ExecutionTargets, c.DefaultExecutionTarget) {
-		return fmt.Errorf("openmontage.default_execution_target must be in openmontage.execution_targets")
+		return fmt.Errorf("montage.default_execution_target must be in montage.execution_targets")
 	}
 	for _, target := range c.ExecutionTargets {
-		if !validOpenMontageTarget(target) {
-			return fmt.Errorf("openmontage.execution_targets contains invalid target %q", target)
+		if !validMontageTarget(target) {
+			return fmt.Errorf("montage.execution_targets contains invalid target %q", target)
 		}
 	}
 	return nil
 }
 
-func validOpenMontageTarget(target string) bool {
+func validMontageTarget(target string) bool {
 	return target == "cloud" || target == "local"
 }
 
@@ -1235,7 +1235,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"wechat":          true,
 		"storage":         true,
 		"mcp":             true,
-		"openmontage":     true,
+		"montage":     true,
 		"image_presets":   true,
 		"model_providers": true,
 		"model_routes":    true,
@@ -1363,7 +1363,16 @@ func (c *Config) applyDefaults() {
 	if c.VideoAPI.CreditMultiplier == 0 {
 		c.VideoAPI.CreditMultiplier = 1000
 	}
-	c.OpenMontage.ApplyDefaults()
+	c.Montage.ApplyDefaults()
+	if c.ModelPrices.CurrencyRates == nil {
+		c.ModelPrices.CurrencyRates = map[string]CurrencyRate{}
+	}
+	if c.ModelPrices.CurrencyRates["USD"].ToCNY.Float64() <= 0 {
+		c.ModelPrices.CurrencyRates["USD"] = CurrencyRate{ToCNY: FlexibleFloat(7.2)}
+	}
+	if c.ModelPrices.CurrencyRates["CNY"].ToCNY.Float64() <= 0 {
+		c.ModelPrices.CurrencyRates["CNY"] = CurrencyRate{ToCNY: FlexibleFloat(1)}
+	}
 	if c.Billing.CreditsPerCNY == 0 {
 		c.Billing.CreditsPerCNY = 1600
 	}
@@ -1398,7 +1407,7 @@ func (c *Config) applyDefaults() {
 		"ecommerce":      3000,
 		"videocreator":   2000,
 		"videoeditor":    2000,
-		"openmontage":    2000,
+		"montage":    2000,
 		"viral_analysis": 1200,
 	}
 	if c.Credits.TaskCosts == nil {
@@ -1953,7 +1962,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if err := c.OpenMontage.Validate(); err != nil {
+	if err := c.Montage.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
 

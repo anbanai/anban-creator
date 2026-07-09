@@ -90,7 +90,7 @@ describe('FilePreviewGallery', () => {
     expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
   })
 
-  it('uses openmontage role labels when task type is openmontage', () => {
+  it('uses montage role labels when task type is montage', () => {
     render(
       <FilePreviewGallery
         files={[fileWith({
@@ -99,8 +99,8 @@ describe('FilePreviewGallery', () => {
           mime_type: 'video/mp4',
           url: 'https://cdn.example.com/final.mp4',
         })]}
-        taskId="task-openmontage"
-        taskType="openmontage"
+        taskId="task-montage"
+        taskType="montage"
       />,
     )
 

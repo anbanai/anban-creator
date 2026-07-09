@@ -54,7 +54,7 @@ func splitVideoReferenceURLs(creatorCfg *model.VideoTaskConfig, creatorInput *mo
 	return urls
 }
 
-func openMontageSourceAssetURLs(input *model.OpenMontageInput) []string {
+func openMontageSourceAssetURLs(input *model.MontageInput) []string {
 	if input == nil || len(input.SourceAssets) == 0 {
 		return nil
 	}
@@ -67,10 +67,10 @@ func openMontageSourceAssetURLs(input *model.OpenMontageInput) []string {
 	return urls
 }
 
-func validateOpenMontageSourceAssetURLs(input *model.OpenMontageInput) error {
+func validateMontageSourceAssetURLs(input *model.MontageInput) error {
 	for _, url := range openMontageSourceAssetURLs(input) {
 		if !validReferenceImageURL(url) {
-			return fmt.Errorf("openmontage_input.source_assets.url must be an internal file path or an http(s) URL")
+			return fmt.Errorf("montage_input.source_assets.url must be an internal file path or an http(s) URL")
 		}
 	}
 	return nil
@@ -90,7 +90,7 @@ func taskAPIResponse(task *model.Task) map[string]any {
 	}
 	resp := modelAPIMap(task)
 	rewriteVideoAPIFields(resp, task.Type, task.VideoInput.Data(), task.VideoConfig.Data())
-	rewriteOpenMontageAPIField(resp, task.Type, task.OpenMontageInput.Data())
+	rewriteMontageAPIField(resp, task.Type, task.MontageInput.Data())
 	return resp
 }
 
@@ -108,7 +108,7 @@ func planAPIResponse(plan *model.Plan) map[string]any {
 	}
 	resp := modelAPIMap(plan)
 	rewriteVideoAPIFields(resp, plan.Type, plan.VideoInput.Data(), plan.VideoConfig.Data())
-	rewriteOpenMontageAPIField(resp, plan.Type, plan.OpenMontageInput.Data())
+	rewriteMontageAPIField(resp, plan.Type, plan.MontageInput.Data())
 	return resp
 }
 
@@ -137,9 +137,9 @@ func rewriteVideoAPIFields(resp map[string]any, platform string, input model.Vid
 	}
 }
 
-func rewriteOpenMontageAPIField(resp map[string]any, platform string, input model.OpenMontageInput) {
-	delete(resp, "openmontage_input")
-	if model.IsOpenMontagePlatform(platform) {
-		resp["openmontage_input"] = input
+func rewriteMontageAPIField(resp map[string]any, platform string, input model.MontageInput) {
+	delete(resp, "montage_input")
+	if model.IsMontagePlatform(platform) {
+		resp["montage_input"] = input
 	}
 }

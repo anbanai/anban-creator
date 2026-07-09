@@ -231,7 +231,7 @@ export const taskTypeLabelCN: Record<string, string> = {
   viral_analysis: '爆文拆解',
   videocreator: 'AI 视频生成',
   videoeditor: '视频剪辑后期',
-  openmontage: 'OpenMontage',
+  montage: 'Montage',
 }
 
 // --- Content Types ---
@@ -247,7 +247,7 @@ export const contentTypeLabel: Record<string, string> = {
   viral_analysis: '爆文拆解',
   videocreator: 'AI 视频生成',
   videoeditor: '视频剪辑后期',
-  openmontage: 'OpenMontage',
+  montage: 'Montage',
 }
 
 // Pipeline stage → 中文标签。stage 取值来自 server/service/task_progress_stages.go
@@ -285,7 +285,7 @@ export const contentTypeOptions = [
   { value: 'moments', label: '朋友圈' },
   { value: 'videocreator', label: 'AI 视频生成' },
   { value: 'videoeditor', label: '视频剪辑后期' },
-  { value: 'openmontage', label: 'OpenMontage' },
+  { value: 'montage', label: 'Montage' },
   { value: 'ecommerce', label: '电商出图' },
 ]
 
@@ -296,7 +296,7 @@ export const platformLabels: Record<string, string> = {
   ecommerce: '电商出图',
   videocreator: 'AI 视频生成',
   videoeditor: '视频剪辑后期',
-  openmontage: 'OpenMontage',
+  montage: 'Montage',
 }
 
 export const platformDefaultRatio: Record<string, string> = {
@@ -306,7 +306,7 @@ export const platformDefaultRatio: Record<string, string> = {
   ecommerce: '1:1',
   videocreator: '9:16',
   videoeditor: '9:16',
-  openmontage: '9:16',
+  montage: '9:16',
 }
 
 export const platformRatioLabel: Record<string, string> = {

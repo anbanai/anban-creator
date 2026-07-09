@@ -499,7 +499,7 @@ func TestTaskCostDefaultsFillPartialMap(t *testing.T) {
 		"ecommerce":      3000,
 		"videocreator":   2000,
 		"videoeditor":    2000,
-		"openmontage":    2000,
+		"montage":    2000,
 		"viral_analysis": 1200,
 	}
 	for key, value := range want {
@@ -672,6 +672,36 @@ func TestImageGenerationUsageCreditsRequireUsageForGPTImage2(t *testing.T) {
 	}, "free", 1)
 	if err == nil || !strings.Contains(err.Error(), "usage is required") {
 		t.Fatalf("error = %v, want usage required", err)
+	}
+}
+
+func TestImageGenerationEstimateCreditsUsesDefaultUSDRate(t *testing.T) {
+	cfg := &Config{
+		ModelPrices: ModelPricesConfig{
+			ImageGeneration: map[string]ImageGenerationPrice{
+				"wangcai_openai/gpt-image-2": {
+					PricingType:  ImagePricingTypeOpenAIUsage,
+					Currency:     "USD",
+					Unit:         1_000_000,
+					RequireUsage: true,
+					EstimateTable: map[string]map[string]FlexibleFloat{
+						"1024x1024": {"medium": FlexibleFloat(0.053)},
+					},
+				},
+			},
+		},
+		Billing: BillingConfig{CreditsPerCNY: 1000, MinimumChargeCredits: 1},
+	}
+	cfg.applyDefaults()
+
+	estimate, err := cfg.CalculateImageGenerationEstimateCredits("wangcai_openai", "gpt-image-2", ImageGenerationUsage{
+		Size: "1024x1024", Quality: "medium", Count: 1,
+	}, "free", 1)
+	if err != nil {
+		t.Fatalf("CalculateImageGenerationEstimateCredits() error = %v", err)
+	}
+	if estimate.PriceSnapshot.Currency != "USD" || estimate.PriceSnapshot.CurrencyToCNY != 7.2 {
+		t.Fatalf("price snapshot = %#v, want USD at 7.2", estimate.PriceSnapshot)
 	}
 }
 

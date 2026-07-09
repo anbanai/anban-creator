@@ -1,7 +1,7 @@
-export type OpenMontageAssetType = 'text' | 'image_url' | 'video_url' | 'audio_url' | 'document_url'
+export type MontageAssetType = 'text' | 'image_url' | 'video_url' | 'audio_url' | 'document_url'
 
-export interface OpenMontageAsset {
-  type: OpenMontageAssetType
+export interface MontageAsset {
+  type: MontageAssetType
   url?: string
   task_file_id?: string
   text?: string
@@ -10,7 +10,7 @@ export interface OpenMontageAsset {
   file_size?: number
 }
 
-export interface OpenMontagePreferences {
+export interface MontagePreferences {
   aspect_ratio?: string
   duration_seconds?: number
   style?: string
@@ -19,11 +19,11 @@ export interface OpenMontagePreferences {
   voiceover_mode?: string
 }
 
-export interface OpenMontageInput {
+export interface MontageInput {
   brief?: string
   pipeline_key?: string
-  source_assets?: OpenMontageAsset[]
-  preferences?: OpenMontagePreferences
+  source_assets?: MontageAsset[]
+  preferences?: MontagePreferences
   delivery_targets?: string[]
   advanced?: Record<string, unknown>
 }

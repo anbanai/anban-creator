@@ -230,14 +230,14 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	artifactValidation := agent.ArtifactValidation{Valid: true}
-	if model.IsOpenMontagePlatform(task.Type) {
+	if model.IsMontagePlatform(task.Type) {
 		files, err := s.repo.TaskFiles().FindByTaskID(persistCtx, task.ID)
 		if err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("list openmontage task files for artifact validation")
-			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("list openmontage task files: %w", err))
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("list montage task files for artifact validation")
+			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("list montage task files: %w", err))
 			return nil
 		}
-		artifactValidation = validateOpenMontageCompletionArtifacts(files)
+		artifactValidation = validateMontageCompletionArtifacts(files)
 	} else if model.IsVideoPlatform(task.Type) {
 		var err error
 		artifactValidation, err = s.validateVideoCompletionArtifacts(persistCtx, task)
@@ -481,7 +481,7 @@ func validateVideoEditorCompletionArtifacts(files []*model.TaskFile) agent.Artif
 	return agent.ArtifactValidation{Reason: "videoeditor missing required deliverables"}
 }
 
-func validateOpenMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
+func validateMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
 	hasFinal := false
 	hasManifest := false
 	meaningful := 0
@@ -493,7 +493,7 @@ func validateOpenMontageCompletionArtifacts(files []*model.TaskFile) agent.Artif
 		name := strings.ToLower(strings.TrimSpace(file.FileName))
 		path := strings.ToLower(filepath.ToSlash(strings.TrimSpace(file.FilePath)))
 		switch {
-		case role == "final_video" || isOpenMontageFinalVideoPath(name) || isOpenMontageFinalVideoPath(path):
+		case role == "final_video" || isMontageFinalVideoPath(name) || isMontageFinalVideoPath(path):
 			hasFinal = true
 			meaningful++
 		case role == "delivery_manifest" || name == "delivery-manifest.json" || strings.HasSuffix(path, "/delivery-manifest.json"):
@@ -512,13 +512,13 @@ func validateOpenMontageCompletionArtifacts(files []*model.TaskFile) agent.Artif
 		return agent.ArtifactValidation{
 			MeaningfulFileCount: meaningful,
 			Missing:             missing,
-			Reason:              "openmontage missing required deliverables: " + strings.Join(missing, ", "),
+			Reason:              "montage missing required deliverables: " + strings.Join(missing, ", "),
 		}
 	}
 	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
 }
 
-func isOpenMontageFinalVideoPath(path string) bool {
+func isMontageFinalVideoPath(path string) bool {
 	switch filepath.Base(path) {
 	case "final.mp4", "final_video.mp4", "final-video.mp4":
 		return true

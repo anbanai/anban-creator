@@ -10,35 +10,44 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-func TestOpenMontageTaskMapsToDedicatedAgent(t *testing.T) {
-	if got := TaskTypeToAgent(model.PlatformOpenMontage); got != "openmontage" {
-		t.Fatalf("TaskTypeToAgent(openmontage) = %q, want openmontage", got)
+func TestMontageTaskMapsToDedicatedAgent(t *testing.T) {
+	if got := TaskTypeToAgent(model.PlatformMontage); got != "montage" {
+		t.Fatalf("TaskTypeToAgent(montage) = %q, want montage", got)
 	}
 }
 
-func TestOpenMontageWorkspaceInputFileIsWritten(t *testing.T) {
+func TestMontageIsCanonicalAgentName(t *testing.T) {
+	if got := TaskTypeToAgent("montage"); got != "montage" {
+		t.Fatalf("TaskTypeToAgent(montage) = %q, want montage", got)
+	}
+	if got := TaskTypeToAgent("open" + "montage"); got == "montage" {
+		t.Fatalf("TaskTypeToAgent(%s) = %q, old %s name must not remain canonical", "open"+"montage", got, "open"+"montage")
+	}
+}
+
+func TestMontageWorkspaceInputFileIsWritten(t *testing.T) {
 	workDir := t.TempDir()
-	task := &model.Task{Type: model.PlatformOpenMontage}
-	task.SetOpenMontageInput(model.OpenMontageInput{
+	task := &model.Task{Type: model.PlatformMontage}
+	task.SetMontageInput(model.MontageInput{
 		Brief:       "make a launch video",
 		PipelineKey: "social-short",
-		Preferences: model.OpenMontagePreferences{
+		Preferences: model.MontagePreferences{
 			AspectRatio:     "9:16",
 			DurationSeconds: 30,
 		},
 	})
 
-	if err := writeOpenMontageInputJSON(workDir, task); err != nil {
-		t.Fatalf("writeOpenMontageInputJSON: %v", err)
+	if err := writeMontageInputJSON(workDir, task); err != nil {
+		t.Fatalf("writeMontageInputJSON: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(workDir, "openmontage-input.json"))
+	data, err := os.ReadFile(filepath.Join(workDir, "montage-input.json"))
 	if err != nil {
-		t.Fatalf("read openmontage-input.json: %v", err)
+		t.Fatalf("read montage-input.json: %v", err)
 	}
-	var got model.OpenMontageInput
+	var got model.MontageInput
 	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("unmarshal openmontage-input.json: %v", err)
+		t.Fatalf("unmarshal montage-input.json: %v", err)
 	}
 	if got.Brief != "make a launch video" {
 		t.Fatalf("Brief = %q, want make a launch video", got.Brief)
@@ -51,8 +60,8 @@ func TestOpenMontageWorkspaceInputFileIsWritten(t *testing.T) {
 	}
 }
 
-func TestOpenMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
-	task := &model.Task{Type: model.PlatformOpenMontage}
+func TestMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
+	task := &model.Task{Type: model.PlatformMontage}
 
 	t.Run("missing manifest", func(t *testing.T) {
 		workDir := t.TempDir()
@@ -64,7 +73,7 @@ func TestOpenMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
 		if got.Valid {
 			t.Fatal("ValidateTaskArtifactsFromWorkDir valid = true, want false")
 		}
-		if got.Reason != "openmontage missing required deliverables: delivery-manifest.json" {
+		if got.Reason != "montage missing required deliverables: delivery-manifest.json" {
 			t.Fatalf("Reason = %q, want missing delivery manifest", got.Reason)
 		}
 	})
@@ -89,21 +98,21 @@ func TestOpenMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
 	})
 }
 
-func TestOpenMontagePluginContractsAreDistributed(t *testing.T) {
+func TestMontagePluginContractsAreDistributed(t *testing.T) {
 	root := repoRoot(t)
-	claudeAgent := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "openmontage.md"))
+	claudeAgent := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "montage.md"))
 	for _, want := range []string{
-		"name: openmontage",
+		"name: montage",
 		"skills:",
-		"- openmontage",
-		"openmontage-input.json",
-		"openmontage-project.json",
+		"- montage",
+		"montage-input.json",
+		"montage-project.json",
 		"delivery-manifest.json",
 		"final.mp4",
 		"submit_agent_feedback",
 	} {
 		if !strings.Contains(claudeAgent, want) {
-			t.Fatalf("claudecode openmontage agent missing %q", want)
+			t.Fatalf("claudecode montage agent missing %q", want)
 		}
 	}
 	for _, forbidden := range []string{
@@ -113,30 +122,30 @@ func TestOpenMontagePluginContractsAreDistributed(t *testing.T) {
 		"skills/video-use/SKILL.md",
 	} {
 		if strings.Contains(claudeAgent, forbidden) {
-			t.Fatalf("claudecode openmontage agent must not reference existing video workflow %q", forbidden)
+			t.Fatalf("claudecode montage agent must not reference existing video workflow %q", forbidden)
 		}
 	}
 
-	codexAgent := readRepoFile(t, filepath.Join(root, "codex", "agents", "openmontage.toml"))
+	codexAgent := readRepoFile(t, filepath.Join(root, "codex", "agents", "montage.toml"))
 	for _, want := range []string{
-		`name = "openmontage"`,
-		"openmontage-input.json",
-		"openmontage-project.json",
+		`name = "montage"`,
+		"montage-input.json",
+		"montage-project.json",
 		"delivery-manifest.json",
 		"final_video",
-		`submit_agent_feedback(agent_name=\"openmontage\"`,
-		"__PLUGIN_ROOT__/skills/openmontage/SKILL.md",
+		`submit_agent_feedback(agent_name=\"montage\"`,
+		"__PLUGIN_ROOT__/skills/montage/SKILL.md",
 	} {
 		if !strings.Contains(codexAgent, want) {
-			t.Fatalf("codex openmontage agent missing %q", want)
+			t.Fatalf("codex montage agent missing %q", want)
 		}
 	}
 
 	reg := readRepoFile(t, filepath.Join(root, "codex", "install", "agents-registration.toml"))
 	for _, want := range []string{
-		"[agents.openmontage]",
-		"openmontage.toml",
-		"OpenMontage 视频生产引擎",
+		"[agents.montage]",
+		"montage.toml",
+		"Montage 视频生产引擎",
 	} {
 		if !strings.Contains(reg, want) {
 			t.Fatalf("codex agents registration missing %q", want)
@@ -144,31 +153,31 @@ func TestOpenMontagePluginContractsAreDistributed(t *testing.T) {
 	}
 }
 
-func TestOpenMontageSkillMirrorsStayInSync(t *testing.T) {
+func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 	root := repoRoot(t)
-	canonical := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "openmontage", "SKILL.md"))
+	canonical := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "montage", "SKILL.md"))
 	for _, distro := range []string{"codex", "openclaw"} {
-		path := filepath.Join(root, distro, "skills", "openmontage", "SKILL.md")
+		path := filepath.Join(root, distro, "skills", "montage", "SKILL.md")
 		if got := readRepoFile(t, path); got != canonical {
-			t.Fatalf("%s must match claudecode openmontage skill", path)
+			t.Fatalf("%s must match claudecode montage skill", path)
 		}
 	}
 	for _, want := range []string{
-		"name: openmontage",
-		"openmontage-input.json",
-		"openmontage-project.json",
+		"name: montage",
+		"montage-input.json",
+		"montage-project.json",
 		"delivery-manifest.json",
 		"third_party/OpenMontage",
 		"Do not call `create_video_generation_job`",
 		"Do not modify files under `third_party/OpenMontage`",
 	} {
 		if !strings.Contains(canonical, want) {
-			t.Fatalf("openmontage skill missing %q", want)
+			t.Fatalf("montage skill missing %q", want)
 		}
 	}
 }
 
-func TestOpenMontagePluginManifestsAdvertiseSupport(t *testing.T) {
+func TestMontagePluginManifestsAdvertiseSupport(t *testing.T) {
 	root := repoRoot(t)
 	for _, path := range []string{
 		filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"),
@@ -176,19 +185,19 @@ func TestOpenMontagePluginManifestsAdvertiseSupport(t *testing.T) {
 		filepath.Join(root, "openclaw", "openclaw.plugin.json"),
 	} {
 		body := readRepoFile(t, path)
-		if !strings.Contains(body, "OpenMontage") {
-			t.Fatalf("%s must advertise OpenMontage support", path)
+		if !strings.Contains(body, "Montage") {
+			t.Fatalf("%s must advertise Montage support", path)
 		}
 	}
 }
 
-func TestOpenMontageSubmodulePathIsDeclared(t *testing.T) {
+func TestMontageSubmodulePathIsDeclared(t *testing.T) {
 	root := repoRoot(t)
 	gitmodules := readRepoFile(t, filepath.Join(root, ".gitmodules"))
 	if !strings.Contains(gitmodules, "third_party/OpenMontage") {
 		t.Fatal(".gitmodules missing third_party/OpenMontage submodule")
 	}
 	if !strings.Contains(gitmodules, "https://github.com/calesthio/OpenMontage.git") {
-		t.Fatal(".gitmodules missing OpenMontage upstream URL")
+		t.Fatal(".gitmodules missing Montage upstream URL")
 	}
 }

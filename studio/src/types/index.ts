@@ -112,11 +112,11 @@ export type {
 } from './video'
 
 export type {
-  OpenMontageAsset,
-  OpenMontageAssetType,
-  OpenMontageInput,
-  OpenMontagePreferences,
-} from './openmontage'
+  MontageAsset,
+  MontageAssetType,
+  MontageInput,
+  MontagePreferences,
+} from './montage'
 
 // Topic Pool
 export type { TopicPoolStatus, TopicPool } from './topic-pool'

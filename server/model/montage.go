@@ -2,16 +2,16 @@ package model
 
 import "gorm.io/datatypes"
 
-type OpenMontageInput struct {
+type MontageInput struct {
 	Brief           string                 `json:"brief,omitempty"`
 	PipelineKey     string                 `json:"pipeline_key,omitempty"`
-	SourceAssets    []OpenMontageAsset     `json:"source_assets,omitempty"`
-	Preferences     OpenMontagePreferences `json:"preferences,omitempty"`
+	SourceAssets    []MontageAsset     `json:"source_assets,omitempty"`
+	Preferences     MontagePreferences `json:"preferences,omitempty"`
 	DeliveryTargets []string               `json:"delivery_targets,omitempty"`
 	Advanced        map[string]any         `json:"advanced,omitempty"`
 }
 
-type OpenMontageAsset struct {
+type MontageAsset struct {
 	Type       string `json:"type"`
 	URL        string `json:"url,omitempty"`
 	TaskFileID string `json:"task_file_id,omitempty"`
@@ -21,7 +21,7 @@ type OpenMontageAsset struct {
 	FileSize   int64  `json:"file_size,omitempty"`
 }
 
-type OpenMontagePreferences struct {
+type MontagePreferences struct {
 	AspectRatio     string `json:"aspect_ratio,omitempty"`
 	DurationSeconds int64  `json:"duration_seconds,omitempty"`
 	Style           string `json:"style,omitempty"`
@@ -30,21 +30,21 @@ type OpenMontagePreferences struct {
 	VoiceoverMode   string `json:"voiceover_mode,omitempty"`
 }
 
-type OpenMontageDefaults struct {
+type MontageDefaults struct {
 	DefaultPipeline string                 `json:"default_pipeline,omitempty"`
-	Preferences     OpenMontagePreferences `json:"preferences,omitempty"`
+	Preferences     MontagePreferences `json:"preferences,omitempty"`
 	AssetGuidance   string                 `json:"asset_guidance,omitempty"`
 	DeliveryTargets []string               `json:"delivery_targets,omitempty"`
 }
 
-func (t *Task) SetOpenMontageInput(input OpenMontageInput) {
-	t.OpenMontageInput = datatypes.NewJSONType(input)
+func (t *Task) SetMontageInput(input MontageInput) {
+	t.MontageInput = datatypes.NewJSONType(input)
 }
 
-func (p *Plan) SetOpenMontageInput(input OpenMontageInput) {
-	p.OpenMontageInput = datatypes.NewJSONType(input)
+func (p *Plan) SetMontageInput(input MontageInput) {
+	p.MontageInput = datatypes.NewJSONType(input)
 }
 
-func (p *Project) SetOpenMontageDefaults(defaults OpenMontageDefaults) {
-	p.OpenMontageDefaults = datatypes.NewJSONType(defaults)
+func (p *Project) SetMontageDefaults(defaults MontageDefaults) {
+	p.MontageDefaults = datatypes.NewJSONType(defaults)
 }

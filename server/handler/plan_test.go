@@ -158,7 +158,7 @@ func TestCreatePlan_VideoPlanAllowsLowBalanceWithoutLegacyMinimumGate(t *testing
 	}
 }
 
-func TestCreatePlanOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
+func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -177,8 +177,8 @@ func TestCreatePlanOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformOpenMontage,
-		Name:     "OpenMontage",
+		Platform: model.PlatformMontage,
+		Name:     "Montage",
 		Status:   model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -186,7 +186,7 @@ func TestCreatePlanOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
 		ID:          uploadID,
 		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeOpenMontageAsset,
+		Purpose:     service.DirectUploadPurposeMontageAsset,
 		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
 		PublicURL:   assetURL,
 		FileName:    "clip.mp4",
@@ -211,7 +211,7 @@ func TestCreatePlanOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(`{
 		"project_id": "`+projectID+`",
 		"cron_expr": "0 9 * * *",
-		"openmontage_input": {
+		"montage_input": {
 			"brief": "每天剪一条发布会短片",
 			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
 		}
@@ -234,7 +234,7 @@ func TestCreatePlanOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 	}
 }
 
-func TestCreatePlanRejectsOpenMontageAssetOnOtherPlatformWithoutFinalizing(t *testing.T) {
+func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -262,7 +262,7 @@ func TestCreatePlanRejectsOpenMontageAssetOnOtherPlatformWithoutFinalizing(t *te
 	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
 		ID:          uploadID,
 		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeOpenMontageAsset,
+		Purpose:     service.DirectUploadPurposeMontageAsset,
 		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
 		PublicURL:   assetURL,
 		FileName:    "clip.mp4",
@@ -287,7 +287,7 @@ func TestCreatePlanRejectsOpenMontageAssetOnOtherPlatformWithoutFinalizing(t *te
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(`{
 		"project_id": "`+projectID+`",
 		"cron_expr": "0 9 * * *",
-		"openmontage_input": {
+		"montage_input": {
 			"brief": "错误平台",
 			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
 		}

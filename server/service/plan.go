@@ -124,7 +124,7 @@ type CreatePlanParams struct {
 	ArticleWithContentImages *bool
 	VideoCreatorConfig       *model.VideoTaskConfig
 	VideoCreatorInput        *model.VideoInput
-	OpenMontageInput         *model.OpenMontageInput
+	MontageInput         *model.MontageInput
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -170,12 +170,12 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if !model.IsVideoCreatorPlatform(project.Platform) && (p.VideoCreatorInput != nil || p.VideoCreatorConfig != nil) {
 		return nil, fmt.Errorf("%w: video_creator_input/video_creator_config can only be set on videocreator plans", ErrVideoTaskInput)
 	}
-	if p.OpenMontageInput != nil && !model.IsOpenMontagePlatform(project.Platform) {
-		return nil, fmt.Errorf("%w: openmontage_input can only be set on openmontage plans", ErrOpenMontageInput)
+	if p.MontageInput != nil && !model.IsMontagePlatform(project.Platform) {
+		return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrMontageInput)
 	}
-	if model.IsOpenMontagePlatform(project.Platform) {
-		if p.OpenMontageInput == nil || strings.TrimSpace(p.OpenMontageInput.Brief) == "" {
-			return nil, fmt.Errorf("%w: openmontage task requires brief", ErrOpenMontageInput)
+	if model.IsMontagePlatform(project.Platform) {
+		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
+			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
 	}
 
@@ -235,8 +235,8 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 			plan.SetVideoInput(model.VideoInput{Brief: p.Prompt})
 		}
 	}
-	if model.IsOpenMontagePlatform(project.Platform) && p.OpenMontageInput != nil {
-		plan.SetOpenMontageInput(*p.OpenMontageInput)
+	if model.IsMontagePlatform(project.Platform) && p.MontageInput != nil {
+		plan.SetMontageInput(*p.MontageInput)
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -300,7 +300,7 @@ type UpdatePlanParams struct {
 	ArticleWithContentImages *bool
 	VideoCreatorConfig       *model.VideoTaskConfig
 	VideoCreatorInput        *model.VideoInput
-	OpenMontageInput         *model.OpenMontageInput
+	MontageInput         *model.MontageInput
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -363,18 +363,18 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		plan.SetVideoInput(videoInputFromTaskConfig(plan.Prompt, p.VideoCreatorConfig))
 		plan.VideoEstimatedCredits = 0
 	}
-	if p.OpenMontageInput != nil {
+	if p.MontageInput != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
 		if err != nil {
 			return nil, fmt.Errorf("find project: %w", err)
 		}
-		if !model.IsOpenMontagePlatform(project.Platform) {
-			return nil, fmt.Errorf("%w: openmontage_input can only be set on openmontage plans", ErrOpenMontageInput)
+		if !model.IsMontagePlatform(project.Platform) {
+			return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrMontageInput)
 		}
-		if strings.TrimSpace(p.OpenMontageInput.Brief) == "" {
-			return nil, fmt.Errorf("%w: openmontage task requires brief", ErrOpenMontageInput)
+		if strings.TrimSpace(p.MontageInput.Brief) == "" {
+			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
-		plan.SetOpenMontageInput(*p.OpenMontageInput)
+		plan.SetMontageInput(*p.MontageInput)
 	}
 	// If cron expression changed, validate and recompute next run.
 	if p.CronExpr != "" && p.CronExpr != plan.CronExpr {

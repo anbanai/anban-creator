@@ -1,7 +1,7 @@
 import type { VideoInput, VideoTaskConfig } from './video'
-import type { OpenMontageInput } from './openmontage'
+import type { MontageInput } from './montage'
 
-export type PlanType = 'seednote' | 'article' | 'videocreator' | 'openmontage'
+export type PlanType = 'seednote' | 'article' | 'videocreator' | 'montage'
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
 export interface Plan {
@@ -29,7 +29,7 @@ export interface Plan {
   article_with_content_images?: boolean
   video_creator_input?: VideoInput
   video_creator_config?: VideoTaskConfig
-  openmontage_input?: OpenMontageInput
+  montage_input?: MontageInput
   video_estimated_credits?: number
   created_at: string
   updated_at: string
@@ -55,7 +55,7 @@ export interface CreatePlanRequest {
   article_with_content_images?: boolean
   video_creator_input?: VideoInput
   video_creator_config?: VideoTaskConfig
-  openmontage_input?: OpenMontageInput
+  montage_input?: MontageInput
 }
 
 export interface UpdatePlanRequest {
@@ -74,5 +74,5 @@ export interface UpdatePlanRequest {
   article_with_content_images?: boolean
   video_creator_input?: VideoInput
   video_creator_config?: VideoTaskConfig
-  openmontage_input?: OpenMontageInput
+  montage_input?: MontageInput
 }

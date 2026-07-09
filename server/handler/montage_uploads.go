@@ -7,7 +7,7 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
-func isOpenMontageProjectForUser(ctx context.Context, repo repository.Repository, userID, projectID string) bool {
+func isMontageProjectForUser(ctx context.Context, repo repository.Repository, userID, projectID string) bool {
 	if repo == nil || userID == "" || projectID == "" {
 		return false
 	}
@@ -15,5 +15,5 @@ func isOpenMontageProjectForUser(ctx context.Context, repo repository.Repository
 	if err != nil || project.UserID != userID {
 		return false
 	}
-	return model.IsOpenMontagePlatform(project.Platform)
+	return model.IsMontagePlatform(project.Platform)
 }

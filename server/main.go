@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -307,7 +310,7 @@ func main() {
 		taskSvc.SetProjectMemoryManager(memoryMgr)
 		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
 		taskSvc.SetVideoBillingConfig(cfg.Billing)
-		taskSvc.SetOpenMontageConfig(cfg.OpenMontage)
+		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		// Wire executor defaults so local-executor claim responses carry the same
 		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
@@ -858,6 +861,10 @@ func awaitSidecar(log *zerolog.Logger, name string, check func(context.Context) 
 			}
 			return true
 		}
+		if isUnresolvableHost(err) {
+			log.Error().Err(err).Str("sidecar", name).Msg("sidecar host 不可解析，对应功能将不可用")
+			return false
+		}
 		if time.Now().After(end) {
 			log.Error().Err(err).Str("sidecar", name).Msg("sidecar 不可用，对应功能将不可用")
 			return false
@@ -865,6 +872,16 @@ func awaitSidecar(log *zerolog.Logger, name string, check func(context.Context) 
 		log.Warn().Err(err).Str("sidecar", name).Msg("sidecar 尚未就绪，重试中")
 		time.Sleep(interval)
 	}
+}
+
+func isUnresolvableHost(err error) bool {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+
+	var dnsErr *net.DNSError
+	return errors.As(err, &dnsErr) && dnsErr.IsNotFound
 }
 
 func createTaskLogDir(dir string, log *zerolog.Logger) {

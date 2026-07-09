@@ -85,7 +85,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
-  type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "videocreator", "videoeditor", "openmontage"]),
+  type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "videocreator", "videoeditor", "montage"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -120,7 +120,7 @@ export const createTaskSchema = z.object({
   language: z.string().optional(),
   video_creator_input: videoInputSchema,
   video_editor_input: videoInputSchema,
-  openmontage_input: openMontageInputSchema,
+  montage_input: openMontageInputSchema,
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -165,13 +165,13 @@ export const createTaskSchema = z.object({
     }
   }
 
-  if (data.type === "openmontage") {
-    const brief = data.openmontage_input?.brief?.trim() || ""
+  if (data.type === "montage") {
+    const brief = data.montage_input?.brief?.trim() || ""
     if (!brief) {
       ctx.addIssue({
         code: "custom",
-        message: "请填写 OpenMontage 视频 brief",
-        path: ["openmontage_input", "brief"],
+        message: "请填写 Montage 视频 brief",
+        path: ["montage_input", "brief"],
       })
     }
   }
@@ -199,7 +199,7 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
 export const planSchema = z.object({
   project_id: z.string().optional(),
-  type: z.enum(["seednote", "article", "videocreator", "openmontage"]),
+  type: z.enum(["seednote", "article", "videocreator", "montage"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   image_model_key: z.string().max(50).optional(),
@@ -219,15 +219,15 @@ export const planSchema = z.object({
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
   video_creator_input: videoInputSchema,
-  openmontage_input: openMontageInputSchema,
+  montage_input: openMontageInputSchema,
 }).superRefine((data, ctx) => {
-  if (data.type === "openmontage") {
-    const brief = data.openmontage_input?.brief?.trim() || ""
+  if (data.type === "montage") {
+    const brief = data.montage_input?.brief?.trim() || ""
     if (!brief) {
       ctx.addIssue({
         code: "custom",
-        message: "请填写 OpenMontage 视频 brief",
-        path: ["openmontage_input", "brief"],
+        message: "请填写 Montage 视频 brief",
+        path: ["montage_input", "brief"],
       })
     }
   }
@@ -246,7 +246,7 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-  platform: z.enum(["seednote", "article", "moments", "ecommerce", "videocreator", "videoeditor", "openmontage"]),
+  platform: z.enum(["seednote", "article", "moments", "ecommerce", "videocreator", "videoeditor", "montage"]),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
@@ -266,7 +266,7 @@ export const projectSchema = z.object({
   ecommerce_target_platform: z.string().optional(),
   ecommerce_brand_brief: z.string().max(2000, "品牌 brief 不能超过 2000 个字符").optional(),
   ecommerce_image_model_key: z.string().max(50).optional(),
-  openmontage_defaults: z.object({
+  montage_defaults: z.object({
     default_pipeline: z.string().max(100).optional(),
     preferences: openMontagePreferencesSchema,
     asset_guidance: z.string().max(2000).optional(),

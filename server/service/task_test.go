@@ -626,19 +626,19 @@ func TestTaskService_CreateManualVideoTaskStoresInputAndChargesOnlyBaseFee(t *te
 	}
 }
 
-func TestTaskServiceCreateManualOpenMontageStoresInputAndClampsQuantity(t *testing.T) {
+func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := "user-om"
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
 	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  3,
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief:       "做一条新品发布短片",
 			PipelineKey: "default",
-			Preferences: model.OpenMontagePreferences{
+			Preferences: model.MontagePreferences{
 				AspectRatio:     "9:16",
 				DurationSeconds: 30,
 			},
@@ -650,16 +650,16 @@ func TestTaskServiceCreateManualOpenMontageStoresInputAndClampsQuantity(t *testi
 	if len(tasks) != 1 {
 		t.Fatalf("len(tasks) = %d, want 1", len(tasks))
 	}
-	got := tasks[0].OpenMontageInput.Data()
+	got := tasks[0].MontageInput.Data()
 	if got.Brief != "做一条新品发布短片" || got.PipelineKey != "default" {
-		t.Fatalf("openmontage input = %#v", got)
+		t.Fatalf("montage input = %#v", got)
 	}
 	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 30 {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 }
 
-func TestTaskServiceCreateManualRejectsOpenMontageInputForOtherPlatforms(t *testing.T) {
+func TestTaskServiceCreateManualRejectsMontageInputForOtherPlatforms(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := "user-om-reject"
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
@@ -668,12 +668,12 @@ func TestTaskServiceCreateManualRejectsOpenMontageInputForOtherPlatforms(t *test
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "春季穿搭",
-		OpenMontageInput: &model.OpenMontageInput{
+		MontageInput: &model.MontageInput{
 			Brief: "错误平台",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "openmontage_input can only be set on openmontage tasks") {
-		t.Fatalf("CreateManual error = %v, want openmontage input rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "montage_input can only be set on montage tasks") {
+		t.Fatalf("CreateManual error = %v, want montage input rejection", err)
 	}
 }
 
@@ -1083,24 +1083,24 @@ func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInputAndChargesOnlyBaseFe
 	}
 }
 
-func TestTaskServiceCreateFromPlanOpenMontageCopiesInput(t *testing.T) {
+func TestTaskServiceCreateFromPlanMontageCopiesInput(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
 	plan := &model.Plan{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformOpenMontage,
+		Type:      model.PlatformMontage,
 		Status:    model.PlanStatusActive,
 		Prompt:    "计划提示",
 	}
-	plan.SetOpenMontageInput(model.OpenMontageInput{
+	plan.SetMontageInput(model.MontageInput{
 		Brief:       "从计划生成发布会短片",
 		PipelineKey: "default",
-		Preferences: model.OpenMontagePreferences{
+		Preferences: model.MontagePreferences{
 			AspectRatio:     "9:16",
 			DurationSeconds: 45,
 		},
@@ -1110,9 +1110,9 @@ func TestTaskServiceCreateFromPlanOpenMontageCopiesInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFromPlan: %v", err)
 	}
-	got := task.OpenMontageInput.Data()
+	got := task.MontageInput.Data()
 	if got.Brief != "从计划生成发布会短片" || got.PipelineKey != "default" {
-		t.Fatalf("openmontage input = %#v", got)
+		t.Fatalf("montage input = %#v", got)
 	}
 	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 45 {
 		t.Fatalf("preferences = %#v", got.Preferences)
@@ -1913,7 +1913,7 @@ func TestTaskServiceHandleExecutionRejectsVideoEditorPartialCapCutDraft(t *testi
 	}
 }
 
-func TestTaskServiceHandleExecutionRejectsOpenMontageWithoutDeliveryManifest(t *testing.T) {
+func TestTaskServiceHandleExecutionRejectsMontageWithoutDeliveryManifest(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
@@ -1925,17 +1925,17 @@ func TestTaskServiceHandleExecutionRejectsOpenMontageWithoutDeliveryManifest(t *
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 	task := &model.Task{
 		ID:         uuid.New().String(),
 		UserID:     userID,
 		ProjectID:  projectID,
-		Type:       model.PlatformOpenMontage,
+		Type:       model.PlatformMontage,
 		Status:     model.TaskStatusRunning,
 		MaxRetries: model.DefaultRetries,
 		RetryCount: model.DefaultRetries,
 	}
-	task.SetOpenMontageInput(model.OpenMontageInput{Brief: "做短片"})
+	task.SetMontageInput(model.MontageInput{Brief: "做短片"})
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1944,7 +1944,7 @@ func TestTaskServiceHandleExecutionRejectsOpenMontageWithoutDeliveryManifest(t *
 		TaskID:   task.ID,
 		Role:     model.FileRoleVideo,
 		FileName: "final.mp4",
-		FilePath: "remote/tasks/" + task.ID + "/output/openmontage/final.mp4",
+		FilePath: "remote/tasks/" + task.ID + "/output/montage/final.mp4",
 		MimeType: "video/mp4",
 		FileSize: 4096,
 	}); err != nil {
@@ -1965,12 +1965,12 @@ func TestTaskServiceHandleExecutionRejectsOpenMontageWithoutDeliveryManifest(t *
 	if found.Status != model.TaskStatusFailed {
 		t.Fatalf("status = %q, want failed", found.Status)
 	}
-	if !strings.Contains(found.ErrorMessage, "openmontage missing required deliverables") {
-		t.Fatalf("error = %q, want openmontage missing required deliverables", found.ErrorMessage)
+	if !strings.Contains(found.ErrorMessage, "montage missing required deliverables") {
+		t.Fatalf("error = %q, want montage missing required deliverables", found.ErrorMessage)
 	}
 }
 
-func TestTaskServiceHandleExecutionAcceptsOpenMontageRemoteArtifacts(t *testing.T) {
+func TestTaskServiceHandleExecutionAcceptsMontageRemoteArtifacts(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
@@ -1982,15 +1982,15 @@ func TestTaskServiceHandleExecutionAcceptsOpenMontageRemoteArtifacts(t *testing.
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformOpenMontage,
+		Type:      model.PlatformMontage,
 		Status:    model.TaskStatusRunning,
 	}
-	task.SetOpenMontageInput(model.OpenMontageInput{Brief: "做短片"})
+	task.SetMontageInput(model.MontageInput{Brief: "做短片"})
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -2000,7 +2000,7 @@ func TestTaskServiceHandleExecutionAcceptsOpenMontageRemoteArtifacts(t *testing.
 			TaskID:   task.ID,
 			Role:     "final_video",
 			FileName: "final_video.mp4",
-			FilePath: "remote/tasks/" + task.ID + "/output/openmontage/final_video.mp4",
+			FilePath: "remote/tasks/" + task.ID + "/output/montage/final_video.mp4",
 			MimeType: "video/mp4",
 			FileSize: 4096,
 		},
@@ -2009,7 +2009,7 @@ func TestTaskServiceHandleExecutionAcceptsOpenMontageRemoteArtifacts(t *testing.
 			TaskID:   task.ID,
 			Role:     "delivery_manifest",
 			FileName: "delivery-manifest.json",
-			FilePath: "remote/tasks/" + task.ID + "/output/openmontage/delivery-manifest.json",
+			FilePath: "remote/tasks/" + task.ID + "/output/montage/delivery-manifest.json",
 			MimeType: "application/json",
 			FileSize: 128,
 		},
@@ -2031,7 +2031,7 @@ func TestTaskServiceHandleExecutionAcceptsOpenMontageRemoteArtifacts(t *testing.
 		t.Fatalf("find task: %v", err)
 	}
 	if found.Status != model.TaskStatusCompleted {
-		t.Fatalf("status = %q error=%q, want completed with openmontage deliverables", found.Status, found.ErrorMessage)
+		t.Fatalf("status = %q error=%q, want completed with montage deliverables", found.Status, found.ErrorMessage)
 	}
 }
 
@@ -2255,23 +2255,23 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 }
 
-func TestTaskServiceClonePreservesOpenMontageInput(t *testing.T) {
+func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 	src := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformOpenMontage,
+		Type:      model.PlatformMontage,
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "source prompt",
 	}
-	src.SetOpenMontageInput(model.OpenMontageInput{
+	src.SetMontageInput(model.MontageInput{
 		Brief:       "保留克隆输入",
 		PipelineKey: "default",
-		Preferences: model.OpenMontagePreferences{
+		Preferences: model.MontagePreferences{
 			AspectRatio:     "1:1",
 			DurationSeconds: 20,
 		},
@@ -2282,11 +2282,11 @@ func TestTaskServiceClonePreservesOpenMontageInput(t *testing.T) {
 
 	clone, err := svc.Clone(ctx, src.ID)
 	if err != nil {
-		t.Fatalf("Clone openmontage task: %v", err)
+		t.Fatalf("Clone montage task: %v", err)
 	}
-	got := clone.OpenMontageInput.Data()
+	got := clone.MontageInput.Data()
 	if got.Brief != "保留克隆输入" || got.PipelineKey != "default" {
-		t.Fatalf("openmontage input = %#v", got)
+		t.Fatalf("montage input = %#v", got)
 	}
 	if got.Preferences.AspectRatio != "1:1" || got.Preferences.DurationSeconds != 20 {
 		t.Fatalf("preferences = %#v", got.Preferences)

@@ -3,12 +3,12 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 
-interface OpenMontageCreationPanelProps {
+interface MontageCreationPanelProps {
   form: UseFormReturn<any>
-  fieldRoot: 'openmontage_input'
+  fieldRoot: 'montage_input'
 }
 
-export function OpenMontageCreationPanel({ form, fieldRoot }: OpenMontageCreationPanelProps) {
+export function MontageCreationPanel({ form, fieldRoot }: MontageCreationPanelProps) {
   const control = form.control
 
   return (

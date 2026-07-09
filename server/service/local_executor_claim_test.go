@@ -35,21 +35,21 @@ func newLocalSeedTask(t *testing.T, repo repository.Repository, userID, projectI
 	return task
 }
 
-func newLocalOpenMontageTask(t *testing.T, repo repository.Repository, userID, projectID string, deadline *time.Time) *model.Task {
+func newLocalMontageTask(t *testing.T, repo repository.Repository, userID, projectID string, deadline *time.Time) *model.Task {
 	t.Helper()
 	task := &model.Task{
 		ID:                 uuid.New().String(),
 		UserID:             userID,
 		ProjectID:          projectID,
-		Type:               model.PlatformOpenMontage,
+		Type:               model.PlatformMontage,
 		Status:             model.TaskStatusPending,
 		Prompt:             "做一条品牌短片",
 		ExecutionTarget:    model.ExecutionTargetLocal,
 		LocalClaimDeadline: deadline,
 	}
-	task.SetOpenMontageInput(model.OpenMontageInput{Brief: "做一条品牌短片"})
+	task.SetMontageInput(model.MontageInput{Brief: "做一条品牌短片"})
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
-		t.Fatalf("create openmontage task: %v", err)
+		t.Fatalf("create montage task: %v", err)
 	}
 	return task
 }
@@ -335,10 +335,10 @@ func addLocalSeednoteDeliverables(t *testing.T, repo repository.Repository, task
 	}
 }
 
-func claimOneLocalOpenMontage(t *testing.T, svc *TaskService, repo repository.Repository, userID, projectID string) string {
+func claimOneLocalMontage(t *testing.T, svc *TaskService, repo repository.Repository, userID, projectID string) string {
 	t.Helper()
 	deadline := time.Now().Add(LocalClaimWindow)
-	task := newLocalOpenMontageTask(t, repo, userID, projectID, &deadline)
+	task := newLocalMontageTask(t, repo, userID, projectID, &deadline)
 	cfg, err := svc.ClaimLocalTask(context.Background(), userID, `{}`)
 	if err != nil || cfg == nil {
 		t.Fatalf("claim failed: cfg=%v err=%v", cfg, err)
@@ -399,19 +399,19 @@ func TestCompleteLocalTask_SuccessWithoutDeliverablesFails(t *testing.T) {
 	}
 }
 
-func TestCompleteLocalTask_OpenMontageRejectsZeroByteDeliverables(t *testing.T) {
+func TestCompleteLocalTask_MontageRejectsZeroByteDeliverables(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
-	taskID := claimOneLocalOpenMontage(t, svc, repo, userID, projectID)
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
+	taskID := claimOneLocalMontage(t, svc, repo, userID, projectID)
 
 	files := []*model.TaskFile{
-		{TaskID: taskID, Role: "final_video", FileName: "final.mp4", FilePath: "output/openmontage/final.mp4", FileSize: 0},
-		{TaskID: taskID, Role: "delivery_manifest", FileName: "delivery-manifest.json", FilePath: "output/openmontage/delivery-manifest.json", FileSize: 0},
+		{TaskID: taskID, Role: "final_video", FileName: "final.mp4", FilePath: "output/montage/final.mp4", FileSize: 0},
+		{TaskID: taskID, Role: "delivery_manifest", FileName: "delivery-manifest.json", FilePath: "output/montage/delivery-manifest.json", FileSize: 0},
 	}
 	if err := repo.TaskFiles().BatchCreate(ctx, files); err != nil {
-		t.Fatalf("create zero-byte openmontage files: %v", err)
+		t.Fatalf("create zero-byte montage files: %v", err)
 	}
 	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
@@ -425,7 +425,7 @@ func TestCompleteLocalTask_OpenMontageRejectsZeroByteDeliverables(t *testing.T) 
 		t.Fatalf("status = %q, want failed", got.Status)
 	}
 	if got.ErrorMessage == "" {
-		t.Fatal("expected error message for zero-byte OpenMontage deliverables")
+		t.Fatal("expected error message for zero-byte Montage deliverables")
 	}
 }
 

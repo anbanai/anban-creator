@@ -6,8 +6,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestOpenMontageConfigDefaults(t *testing.T) {
-	cfg := OpenMontageConfig{}
+func TestMontageConfigDefaults(t *testing.T) {
+	cfg := MontageConfig{}
 	cfg.ApplyDefaults()
 
 	if !cfg.Enabled {
@@ -31,13 +31,13 @@ func TestOpenMontageConfigDefaults(t *testing.T) {
 	if cfg.DefaultExecutionTarget != "cloud" {
 		t.Fatalf("DefaultExecutionTarget = %q, want cloud", cfg.DefaultExecutionTarget)
 	}
-	if cfg.Runner.CloudImage != "anban/openmontage-runner:latest" {
+	if cfg.Runner.CloudImage != "anban/montage-runner:latest" {
 		t.Fatalf("CloudImage = %q, want default runner image", cfg.Runner.CloudImage)
 	}
 }
 
-func TestOpenMontageConfigValidate(t *testing.T) {
-	cfg := OpenMontageConfig{
+func TestMontageConfigValidate(t *testing.T) {
+	cfg := MontageConfig{
 		Enabled:                true,
 		SubmodulePath:          "third_party/OpenMontage",
 		DefaultPipeline:        "default",
@@ -47,8 +47,8 @@ func TestOpenMontageConfigValidate(t *testing.T) {
 		TimeoutMinutes:         90,
 		ExecutionTargets:       []string{"cloud", "local"},
 		DefaultExecutionTarget: "cloud",
-		Runner: OpenMontageRunnerConfig{
-			CloudImage: "anban/openmontage-runner:latest",
+		Runner: MontageRunnerConfig{
+			CloudImage: "anban/montage-runner:latest",
 		},
 	}
 
@@ -62,18 +62,18 @@ func TestOpenMontageConfigValidate(t *testing.T) {
 	}
 }
 
-func TestOpenMontageConfigDefaultsPreserveExplicitDisabled(t *testing.T) {
+func TestMontageConfigDefaultsPreserveExplicitDisabled(t *testing.T) {
 	var cfg Config
-	if err := yaml.Unmarshal([]byte("openmontage:\n  enabled: false\n"), &cfg); err != nil {
+	if err := yaml.Unmarshal([]byte("montage:\n  enabled: false\n"), &cfg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
 	cfg.applyDefaults()
 
-	if cfg.OpenMontage.Enabled {
+	if cfg.Montage.Enabled {
 		t.Fatal("Enabled = true, want explicit false preserved")
 	}
-	if cfg.OpenMontage.SubmodulePath != "third_party/OpenMontage" {
-		t.Fatalf("SubmodulePath = %q, want default path", cfg.OpenMontage.SubmodulePath)
+	if cfg.Montage.SubmodulePath != "third_party/OpenMontage" {
+		t.Fatalf("SubmodulePath = %q, want default path", cfg.Montage.SubmodulePath)
 	}
 }

@@ -58,7 +58,7 @@ const openMontageRoleLabel: Record<string, string> = {
 }
 
 function taskFileRoleLabel(file: TaskFile, taskType?: string) {
-  if (taskType === 'openmontage') {
+  if (taskType === 'montage') {
     return openMontageRoleLabel[file.role] ?? ''
   }
   return ''
