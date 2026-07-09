@@ -118,12 +118,39 @@ model_routes:
       provider: volcengine_ark
       model: doubao-seedream-5-0-260128
     designer:
+      seedream:
+        alias: Doubao Seedream
+        provider: volcengine_ark
+        model: doubao-seedream-5-0-260128
+        enabled: true
+        capabilities:
+          size_presets: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
+          default_size: "1:1"
+          max_batch: 1
+          max_reference_images: 10
+          supports_reference: true
+          supports_mask: false
+          output_formats: [png, jpeg]
+          has_background: false
+          has_compression: false
+          watermark: true
       gpt_image_2:
         alias: GPT Image 2
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
         response_format: url
+        capabilities:
+          quality_levels: [auto, low, medium, high]
+          size_presets: [auto, 1024x1024, 1536x1024, 1024x1536]
+          default_size: auto
+          max_batch: 10
+          max_reference_images: 16
+          supports_reference: true
+          supports_mask: true
+          output_formats: [png, jpeg, webp]
+          has_background: true
+          has_compression: true
   video_generation:
     provider: volcengine_ark
     timeout: 10m
@@ -203,6 +230,101 @@ claude:
 	}
 	if len(cfg.ImagePresets) != 1 || cfg.ImagePresets[0].Provider != "openai" || cfg.ImagePresets[0].Endpoint != "http://18.141.196.64:18888/v1" || cfg.ImagePresets[0].APIKey != "wangcai-test" {
 		t.Fatalf("derived image preset route = %#v", cfg.ImagePresets)
+	}
+	designerRoute := cfg.ModelRoutes.ImageGeneration.Designer["gpt_image_2"]
+	if designerRoute.Capabilities.DefaultSize != "auto" {
+		t.Fatalf("designer default size = %q, want auto", designerRoute.Capabilities.DefaultSize)
+	}
+	if got := designerRoute.Capabilities.SizePresets; len(got) != 4 || got[0] != "auto" || got[1] != "1024x1024" || got[2] != "1536x1024" || got[3] != "1024x1536" {
+		t.Fatalf("designer size presets = %#v, want GPT Image official presets", got)
+	}
+	if designerRoute.Capabilities.MaxBatch != 10 || designerRoute.Capabilities.MaxReferenceImages != 16 || !designerRoute.Capabilities.SupportsMask {
+		t.Fatalf("designer capabilities = %#v", designerRoute.Capabilities)
+	}
+	seedreamRoute := cfg.ModelRoutes.ImageGeneration.Designer["seedream"]
+	if seedreamRoute.Capabilities.DefaultSize != "1:1" {
+		t.Fatalf("seedream default size = %q, want 1:1", seedreamRoute.Capabilities.DefaultSize)
+	}
+	if got := seedreamRoute.Capabilities.SizePresets; len(got) != 8 || got[0] != "1:1" || got[5] != "3:2" || got[6] != "2:3" || got[7] != "21:9" {
+		t.Fatalf("seedream size presets = %#v, want official Seedream 5.0 ratio presets", got)
+	}
+	if seedreamRoute.Capabilities.MaxBatch != 1 || seedreamRoute.Capabilities.MaxReferenceImages != 10 || !seedreamRoute.Capabilities.SupportsReference || seedreamRoute.Capabilities.SupportsMask {
+		t.Fatalf("seedream capabilities = %#v", seedreamRoute.Capabilities)
+	}
+	if got := seedreamRoute.Capabilities.OutputFormats; len(got) != 2 || got[0] != "png" || got[1] != "jpeg" {
+		t.Fatalf("seedream output formats = %#v, want png/jpeg", got)
+	}
+	if !seedreamRoute.Capabilities.Watermark {
+		t.Fatalf("seedream watermark capability = false, want true")
+	}
+}
+
+func TestSemanticModelConfigRejectsDesignerRoutesWithoutCapabilities(t *testing.T) {
+	t.Setenv("WANGCAI_OPENAI_API_KEY", "wangcai-test")
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+
+	for name, routeExtra := range map[string]string{
+		"missing capabilities": "",
+		"missing default size": `
+        capabilities:
+          size_presets: [auto, 1024x1024]
+          max_batch: 1
+`,
+		"missing size presets": `
+        capabilities:
+          default_size: auto
+          max_batch: 1
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfgPath := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".yaml")
+			body := []byte(`
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_providers:
+  wangcai_openai:
+    protocol: openai_compatible
+    base_url: http://18.141.196.64:18888/v1
+    api_key: "${WANGCAI_OPENAI_API_KEY}"
+model_routes:
+  image_generation:
+    designer:
+      gpt_image_2:
+        alias: GPT Image 2
+        provider: wangcai_openai
+        model: gpt-image-2
+        enabled: true
+` + routeExtra + `
+model_prices:
+  image_generation:
+    wangcai_openai/gpt-image-2:
+      pricing_type: openai_image_usage
+      currency: USD
+      unit: 1000000
+      require_usage: true
+      text_input: 5.00
+      text_cached_input: 1.25
+      image_input: 8.00
+      image_cached_input: 2.00
+      image_output: 30.00
+      estimate_table:
+        "1024x1024": {medium: 0.053}
+claude:
+  plugin_dir: "` + pluginDir + `"
+`)
+			if err := os.WriteFile(cfgPath, body, 0644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			_, err := NewConfig(cfgPath)
+			if err == nil || !strings.Contains(err.Error(), "model_routes.image_generation.designer.gpt_image_2.capabilities") {
+				t.Fatalf("error = %v, want designer capabilities validation error", err)
+			}
+		})
 	}
 }
 
@@ -576,6 +698,17 @@ model_routes:
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
+        capabilities:
+          quality_levels: [auto, low, medium, high]
+          size_presets: [auto, 1024x1024, 1536x1024, 1024x1536]
+          default_size: auto
+          max_batch: 10
+          max_reference_images: 16
+          supports_reference: true
+          supports_mask: true
+          output_formats: [png, jpeg, webp]
+          has_background: true
+          has_compression: true
 model_prices:
   image_generation:
     wangcai_openai/gpt-image-2:

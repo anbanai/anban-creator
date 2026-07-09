@@ -221,17 +221,32 @@ type VideoUnderstandingRouteConfig struct {
 }
 
 type ImageGenerationRouteConfig struct {
-	Provider       string `yaml:"provider"`
-	Model          string `yaml:"model"`
-	Alias          string `yaml:"alias"`
-	Enabled        bool   `yaml:"enabled"`
-	ResponseFormat string `yaml:"response_format"`
+	Provider       string                       `yaml:"provider"`
+	Model          string                       `yaml:"model"`
+	Alias          string                       `yaml:"alias"`
+	Enabled        bool                         `yaml:"enabled"`
+	ResponseFormat string                       `yaml:"response_format"`
+	Capabilities   DesignerProviderCapabilities `yaml:"capabilities" json:"capabilities"`
 }
 
 type ImageGenerationRoutesConfig struct {
 	Cover    ImageGenerationRouteConfig            `yaml:"cover"`
 	Content  ImageGenerationRouteConfig            `yaml:"content"`
 	Designer map[string]ImageGenerationRouteConfig `yaml:"designer"`
+}
+
+type DesignerProviderCapabilities struct {
+	QualityLevels      []string `yaml:"quality_levels" json:"quality_levels"`
+	SizePresets        []string `yaml:"size_presets" json:"size_presets"`
+	DefaultSize        string   `yaml:"default_size" json:"default_size"`
+	MaxBatch           int      `yaml:"max_batch" json:"max_batch"`
+	MaxReferenceImages int      `yaml:"max_reference_images" json:"max_reference_images"`
+	SupportsReference  bool     `yaml:"supports_reference" json:"supports_reference"`
+	SupportsMask       bool     `yaml:"supports_mask" json:"supports_mask"`
+	OutputFormats      []string `yaml:"output_formats" json:"output_formats"`
+	HasBackground      bool     `yaml:"has_background" json:"has_background"`
+	HasCompression     bool     `yaml:"has_compression" json:"has_compression"`
+	Watermark          bool     `yaml:"watermark" json:"watermark"`
 }
 
 type VideoGenerationRouteConfig struct {
@@ -1480,7 +1495,11 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		c.ImageAPI.Designer = map[string]*appconfig.ImageAPI{}
 		c.ImageAPI.designerOrder = c.ImageAPI.designerOrder[:0]
 		for key, route := range c.ModelRoutes.ImageGeneration.Designer {
-			cfg, err := c.imageAPIFromRoute("model_routes.image_generation.designer."+key, route)
+			routeName := "model_routes.image_generation.designer." + key
+			if err := validateDesignerProviderCapabilities(routeName+".capabilities", route.Capabilities); err != nil {
+				return err
+			}
+			cfg, err := c.imageAPIFromRoute(routeName, route)
 			if err != nil {
 				return err
 			}
@@ -1533,6 +1552,55 @@ func (c *Config) resolveImagePresetRoutes() error {
 		preset.Model = route.Model
 		preset.Endpoint = provider.BaseURL
 		preset.APIKey = provider.APIKey
+	}
+	return nil
+}
+
+func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapabilities) error {
+	var errs []string
+	defaultSize := strings.TrimSpace(caps.DefaultSize)
+	if defaultSize == "" {
+		errs = append(errs, "default_size is required")
+	}
+	if len(caps.SizePresets) == 0 {
+		errs = append(errs, "size_presets is required")
+	}
+	if caps.MaxBatch <= 0 {
+		errs = append(errs, "max_batch must be positive")
+	}
+	if caps.MaxReferenceImages < 0 {
+		errs = append(errs, "max_reference_images must not be negative")
+	}
+	if len(caps.OutputFormats) == 0 {
+		errs = append(errs, "output_formats is required")
+	}
+
+	hasDefaultSize := false
+	for _, preset := range caps.SizePresets {
+		preset = strings.TrimSpace(preset)
+		if preset == "" {
+			errs = append(errs, "size_presets must not contain empty values")
+			continue
+		}
+		if strings.EqualFold(preset, defaultSize) {
+			hasDefaultSize = true
+		}
+	}
+	if defaultSize != "" && len(caps.SizePresets) > 0 && !hasDefaultSize {
+		errs = append(errs, "default_size must be included in size_presets")
+	}
+	for _, format := range caps.OutputFormats {
+		if strings.TrimSpace(format) == "" {
+			errs = append(errs, "output_formats must not contain empty values")
+		}
+	}
+	for _, quality := range caps.QualityLevels {
+		if strings.TrimSpace(quality) == "" {
+			errs = append(errs, "quality_levels must not contain empty values")
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s invalid: %s", path, strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -1788,10 +1856,16 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+		if err := validateDesignerProviderCapabilities("model_routes.image_generation.designer."+key+".capabilities", route.Capabilities); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+
 	switch c.Claude.Executor {
-	case "local", "docker", "kubernetes":
+	case "local", "docker":
 	default:
-		errs = append(errs, fmt.Sprintf("claude.executor must be 'local', 'docker', or 'kubernetes', got %q", c.Claude.Executor))
+		errs = append(errs, fmt.Sprintf("claude.executor must be 'local' or 'docker' until a Kubernetes executor is wired, got %q", c.Claude.Executor))
 	}
 
 	// When using the Docker executor, the container timeout must be at least as

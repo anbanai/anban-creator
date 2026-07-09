@@ -91,8 +91,7 @@ func (p *Processor) SetRefImage(path string) {
 }
 
 // SetRefImages 设置多张参考图路径（多参考图模式）。
-// 与 SetRefImage 可并存：OpenAI/Gemini 合并单张 + 多张全部作为参考图输入（≤16）；
-// Volcengine/Seedream 仅取单张（refImagePath），无单张时退回多张首张。
+// 与 SetRefImage 可并存：OpenAI/Gemini/Seedream 合并单张 + 多张全部作为参考图输入。
 func (p *Processor) SetRefImages(paths []string) {
 	p.refImagePaths = paths
 }

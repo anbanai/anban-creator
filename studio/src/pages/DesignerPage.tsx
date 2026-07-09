@@ -313,37 +313,39 @@ export default function DesignerPage() {
         onHistoryToggle={() => setHistoryOpen(true)}
       />
 
-      {/* Main area: canvas + prompt */}
+      {/* Main area: canvas workspace */}
       <div className="relative flex min-h-0 flex-1 flex-col p-3 pl-0">
         <div
-          className="relative flex-1 overflow-y-auto rounded-2xl border border-border/70 bg-card/35 p-4 shadow-inner md:p-6"
+          className="relative flex-1 overflow-hidden rounded-2xl border border-border/70 bg-card/35 shadow-inner"
           style={editingImage ? undefined : { backgroundImage: 'radial-gradient(circle, color-mix(in oklch, var(--color-border) 55%, transparent) 0.5px, transparent 0.5px)', backgroundSize: '20px 20px' }}
         >
-          {editingImage ? (
-            <InlineMaskEditor
-              ref={maskEditorRef}
-              imageUrl={editingImage.url}
-              onClose={() => setEditingImage(null)}
-            />
-          ) : (
-            <DesignerCanvas
-              images={currentImages}
-              isGenerating={isGenerating}
-              canInpaint={canInpaint}
-              onImageClick={(img) => setPreviewImage(img.url)}
-              onEdit={(img) => setEditingImage(img)}
-            />
-          )}
+          <div className="h-full overflow-y-auto p-4 pb-24 md:p-6 md:pb-28">
+            {editingImage ? (
+              <InlineMaskEditor
+                ref={maskEditorRef}
+                imageUrl={editingImage.url}
+                onClose={() => setEditingImage(null)}
+              />
+            ) : (
+              <DesignerCanvas
+                images={currentImages}
+                isGenerating={isGenerating}
+                canInpaint={canInpaint}
+                onImageClick={(img) => setPreviewImage(img.url)}
+                onEdit={(img) => setEditingImage(img)}
+              />
+            )}
+          </div>
+          <DesignerPromptBar
+            onSubmit={editingImage ? handleEditSubmit : handleGenerate}
+            isGenerating={isGenerating}
+            onCancel={handleCancel}
+            initialPrompt={prefillPrompt}
+            initialPromptKey={prefillKey}
+            onInitialPromptConsumed={() => { setPrefillPrompt(''); setPrefillKey('') }}
+            editMode={!!editingImage}
+          />
         </div>
-        <DesignerPromptBar
-          onSubmit={editingImage ? handleEditSubmit : handleGenerate}
-          isGenerating={isGenerating}
-          onCancel={handleCancel}
-          initialPrompt={prefillPrompt}
-          initialPromptKey={prefillKey}
-          onInitialPromptConsumed={() => { setPrefillPrompt(''); setPrefillKey('') }}
-          editMode={!!editingImage}
-        />
       </div>
 
       {/* History drawer */}

@@ -305,10 +305,22 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
 			for _, term := range []string{
+				"cover_strategy",
+				"target_reader",
+				"reader_pain_or_job",
+				"article_promise",
+				"content_proof_points",
+				"click_trigger",
+				"cover_concept_candidates",
+				"selected_cover_concept",
 				"cover_hook",
 				"visual_metaphor",
 				"thumbnail_strategy",
 				"anti_generic_constraints",
+				"cover_effectiveness_scorecard",
+				"generic_swap_test",
+				"promise_proof_test",
+				"audience_motivation_test",
 				"cover_quality_gate",
 				"cover-prompt.md",
 				"final-review.md",
@@ -331,10 +343,30 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 			for _, term := range []string{
 				"final_title",
 				"digest_hook",
+				"cover_strategy",
+				"target_reader",
+				"reader_pain_or_job",
+				"article_promise",
+				"content_proof_points",
+				"click_trigger",
+				"cover_concept_candidates",
+				"selected_cover_concept",
+				"generic_swap_test",
+				"promise_proof_test",
+				"audience_motivation_test",
 				"cover_hook",
 				"thumbnail_strategy",
 				"anti_generic_constraints",
 				"visual_quality_scorecard",
+				"cover_effectiveness_scorecard",
+				"information_scent_alignment",
+				"audience_motivation",
+				"content_specificity",
+				"thumbnail_attention",
+				"truthfulness_not_clickbait",
+				"brand_style_fit",
+				"visual_distinctiveness",
+				"safe_zone_text_policy",
 				"title_cover_digest_alignment",
 				"thumbnail_readability",
 				"contrast_focus",
@@ -398,12 +430,91 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 				"三伏贴重复",
 				"绿豆汤主题不清",
 				"黑白人像风格漂移",
+				"企业做 AI 内容，别从买工具开始",
+				"静水孤舟",
+				"散落 AI 工具年卡",
+				"空白选题库",
+				"SOP 流程线",
+				"阅读对折",
 			} {
 				if !strings.Contains(text, term) {
 					t.Fatalf("%s missing screenshot-derived cover example %q", path, term)
 				}
 			}
 		})
+	}
+}
+
+func TestArticleSkillContracts_WechatCoverEffectivenessReference(t *testing.T) {
+	root := articleContractRepoRoot(t)
+
+	for _, plugin := range []string{"claudecode", "openclaw", "codex"} {
+		t.Run(plugin, func(t *testing.T) {
+			main := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "article-cover-design", "SKILL.md"))
+			if !strings.Contains(main, "references/cover-effectiveness.md") {
+				t.Fatalf("%s article-cover-design must link cover-effectiveness reference", plugin)
+			}
+			ref := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "article-cover-design", "references", "cover-effectiveness.md"))
+			for _, term := range []string{
+				"information scent",
+				"ABCD",
+				"准确但有吸引力",
+				"明确受众",
+				"cover_strategy",
+				"cover_concept_candidates",
+				"cover_effectiveness_scorecard",
+				"generic_swap_test",
+				"promise_proof_test",
+				"audience_motivation_test",
+				"仅有旧的 6 维 vision 全 high 不得通过",
+				"缺 `viral-audit.md` 不得发布",
+			} {
+				if !strings.Contains(ref, term) {
+					t.Fatalf("%s cover-effectiveness reference missing %q", plugin, term)
+				}
+			}
+		})
+	}
+}
+
+func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffectiveness(t *testing.T) {
+	root := articleContractRepoRoot(t)
+
+	for _, path := range []string{
+		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
+		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
+		filepath.Join(root, "claudecode", "skills", "article", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "article", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "article", "SKILL.md"),
+	} {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{
+				"cover_effectiveness_scorecard",
+				"cover_quality_gate",
+				"visual_quality_scorecard",
+				"viral-audit.md",
+				"缺 `viral-audit.md` 不得发布",
+				"仅有旧的 6 维 vision 全 high 不得通过",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing hard publish gate term %q", path, term)
+				}
+			}
+		})
+	}
+
+	viral := readArticleContractFile(t, filepath.Join(root, "claudecode", "skills", "article-viral-strategy", "references", "viral-audit.md"))
+	for _, term := range []string{
+		"cover_effectiveness_scorecard",
+		"information_scent_alignment",
+		"audience_motivation",
+		"content_specificity",
+		"不得只凭\"风格统一\"给高分",
+	} {
+		if !strings.Contains(viral, term) {
+			t.Fatalf("article-viral-strategy viral-audit reference missing %q", term)
+		}
 	}
 }
 

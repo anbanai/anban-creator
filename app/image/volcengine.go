@@ -85,7 +85,7 @@ func (p *VolcengineProvider) Name() string {
 // Capabilities returns Volcengine provider capabilities
 func (p *VolcengineProvider) Capabilities() *ProviderCapabilities {
 	return &ProviderCapabilities{
-		MaxRefImages:  1,
+		MaxRefImages:  10,
 		Batch:         false,
 		MaxBatch:      1,
 		Streaming:     false,
@@ -158,27 +158,12 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 		}
 	}
 
-	// 有参考图时，添加 image 字段（data URI）
-	refPath := ""
 	if opts != nil {
-		if opts.RefImagePath != "" {
-			refPath = opts.RefImagePath
-		} else if len(opts.RefImagePaths) > 0 {
-			refPath = opts.RefImagePaths[0]
-		}
-	}
-	if refPath != "" {
-		data, mimeType, err := ReadRefImage(refPath)
+		imageInput, err := p.buildReferenceImageInput(opts)
 		if err != nil {
-			return nil, &GenerateError{
-				Provider: p.Name(),
-				Code:     "refer_error",
-				Message:  "读取参考图失败",
-				Original: err,
-			}
+			return nil, err
 		}
-		dataURI := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
-		req.Image = dataURI
+		req.Image = imageInput
 	}
 
 	resp, err := p.client.GenerateImages(ctx, req)
@@ -211,6 +196,35 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 		ResponseType:    "url",
 		ResponsePreview: *resp.Data[0].Url,
 	}, nil
+}
+
+func (p *VolcengineProvider) buildReferenceImageInput(opts *GenerateOptions) (any, error) {
+	paths := make([]string, 0, len(opts.RefImagePaths)+1)
+	if opts.RefImagePath != "" {
+		paths = append(paths, opts.RefImagePath)
+	}
+	paths = append(paths, opts.RefImagePaths...)
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	dataURIs := make([]string, 0, len(paths))
+	for _, path := range paths {
+		data, mimeType, err := ReadRefImage(path)
+		if err != nil {
+			return nil, &GenerateError{
+				Provider: p.Name(),
+				Code:     "refer_error",
+				Message:  "读取参考图失败",
+				Original: err,
+			}
+		}
+		dataURIs = append(dataURIs, "data:"+mimeType+";base64,"+base64.StdEncoding.EncodeToString(data))
+	}
+	if len(dataURIs) == 1 {
+		return dataURIs[0], nil
+	}
+	return dataURIs, nil
 }
 
 // convertSDKError 将 SDK 错误转换为 GenerateError

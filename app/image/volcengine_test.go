@@ -2,9 +2,12 @@ package image
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -201,6 +204,51 @@ func TestVolcengineGenerate_WithAdvancedOptions(t *testing.T) {
 	}
 	if v, ok := capturedBody["output_format"]; !ok || v != "png" {
 		t.Errorf("expected output_format=png in request body, got %v", capturedBody["output_format"])
+	}
+}
+
+func TestVolcengineGenerate_SendsMultipleReferenceImages(t *testing.T) {
+	var capturedBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"url": "https://example.com/image.png"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	refOne := filepath.Join(dir, "one.png")
+	refTwo := filepath.Join(dir, "two.jpg")
+	if err := os.WriteFile(refOne, []byte("one"), 0644); err != nil {
+		t.Fatalf("write ref one: %v", err)
+	}
+	if err := os.WriteFile(refTwo, []byte("two"), 0644); err != nil {
+		t.Fatalf("write ref two: %v", err)
+	}
+
+	p := makeVolcengineProvider(t, srv.URL, nil)
+	_, err := p.Generate(context.Background(), "a product scene", &GenerateOptions{
+		RefImagePaths: []string{refOne, refTwo},
+	})
+	if err != nil {
+		t.Fatalf("Generate() unexpected error: %v", err)
+	}
+
+	images, ok := capturedBody["image"].([]any)
+	if !ok {
+		t.Fatalf("request image = %#v, want array", capturedBody["image"])
+	}
+	if len(images) != 2 {
+		t.Fatalf("request image count = %d, want 2", len(images))
+	}
+	wantOne := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("one"))
+	wantTwo := "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString([]byte("two"))
+	if images[0] != wantOne || images[1] != wantTwo {
+		t.Fatalf("request image = %#v, want [%q %q]", images, wantOne, wantTwo)
 	}
 }
 
