@@ -45,36 +45,27 @@ const SIZE_PRESET_LABELS: Record<string, { label: string; desc: string }> = {
   '1024x1536': { label: '2:3', desc: '1024×1536 · 竖屏' },
 }
 
-function validateCustomSize(w: number, h: number): string | null {
-  if (w < 256 || h < 256) return '最小边长 256px'
-  if (w > 3840 || h > 3840) return '最大边长 3840px'
-  if (w % 16 !== 0 || h % 16 !== 0) return '必须是 16 的倍数'
-  if (Math.max(w, h) / Math.min(w, h) > 3) return '长宽比不能超过 3:1'
-  if (w * h < 655360) return '总像素数不能少于 655,360'
-  if (w * h > 8294400) return '总像素数不能超过 8,294,400'
-  return null
+const PIXEL_SIZE_PATTERN = /^\d+x\d+$/i
+const RATIO_SIZE_PATTERN = /^\d+:\d+$/i
+
+function isPixelSizePreset(preset: string): boolean {
+  return PIXEL_SIZE_PATTERN.test(preset.trim())
 }
 
-// Size preset section for GPT-Image models with pixel-size presets and custom input
+function isRatioSizePreset(preset: string): boolean {
+  return RATIO_SIZE_PATTERN.test(preset.trim())
+}
+
+function ratioPresetInfo(preset: string): { value: string; label: string; desc: string } {
+  return SIZE_OPTIONS.find((opt) => opt.value === preset) ?? { value: preset, label: preset, desc: '' }
+}
+
+// Size preset section for configured auto/pixel-size presets.
 function SizePresetSection({ presets, value, onChange }: {
   presets: string[]
   value: string
   onChange: (size: string) => void
 }) {
-  const [customW, setCustomW] = useState('1280')
-  const [customH, setCustomH] = useState('1280')
-  const isCustom = value === 'custom' || (value !== 'auto' && !presets.includes(value))
-
-  const wNum = parseInt(customW, 10) || 0
-  const hNum = parseInt(customH, 10) || 0
-  const customError = isCustom ? validateCustomSize(wNum, hNum) : null
-
-  function handleCustomApply() {
-    if (!customError) {
-      onChange(`${wNum}x${hNum}`)
-    }
-  }
-
   return (
     <div className="space-y-2">
       <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -100,64 +91,77 @@ function SizePresetSection({ presets, value, onChange }: {
             </button>
           )
         })}
-        {/* Custom size button */}
-        <button
-          type="button"
-          onClick={() => {
-            if (!isCustom) onChange(`${wNum}x${hNum}`)
-          }}
-          className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
-            isCustom
-              ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-              : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
-          }`}
-        >
-          <span className="font-medium">自定义</span>
-          <span className="text-[10px] opacity-60">W×H</span>
-        </button>
       </div>
+    </div>
+  )
+}
 
-      {/* Custom size inputs */}
-      {isCustom && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <input
-              type="number"
-              value={customW}
-              onChange={(e) => setCustomW(e.target.value)}
-              min={256}
-              max={3840}
-              step={16}
-              className="w-full rounded-md border border-border/50 bg-muted/20 px-2 py-1 text-center text-xs tabular-nums focus:border-primary/50 focus:outline-none"
-              placeholder="宽度"
-            />
-            <span className="text-[10px] text-muted-foreground">×</span>
-            <input
-              type="number"
-              value={customH}
-              onChange={(e) => setCustomH(e.target.value)}
-              min={256}
-              max={3840}
-              step={16}
-              className="w-full rounded-md border border-border/50 bg-muted/20 px-2 py-1 text-center text-xs tabular-nums focus:border-primary/50 focus:outline-none"
-              placeholder="高度"
-            />
-          </div>
-          {customError && (
-            <p className="text-[10px] text-destructive">{customError}</p>
-          )}
-          {!customError && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full text-[11px] text-primary"
-              onClick={handleCustomApply}
+function RatioSizeSection({ presets, value, onChange, sectionHeader }: {
+  presets: string[]
+  value: string
+  onChange: (size: string) => void
+  sectionHeader: string
+}) {
+  const options = presets.length > 0 ? presets : SIZE_OPTIONS.map((opt) => opt.value)
+
+  return (
+    <div className="space-y-2">
+      <h4 className={sectionHeader}>
+        <Proportions className="h-3 w-3" />
+        尺寸
+      </h4>
+      <div className="grid grid-cols-3 gap-1">
+        {options.map((preset) => {
+          const info = ratioPresetInfo(preset)
+          return (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => onChange(preset)}
+              className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+                value === preset
+                  ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                  : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
+              }`}
             >
-              应用 {wNum}×{hNum}
-            </Button>
-          )}
-        </div>
-      )}
+              <span className="font-medium">{info.label}</span>
+              <span className="text-[10px] opacity-60">{info.desc}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ResolutionSection({ value, onChange, sectionHeader }: {
+  value: string
+  onChange: (resolution: string) => void
+  sectionHeader: string
+}) {
+  return (
+    <div className="space-y-2">
+      <h4 className={sectionHeader}>
+        <Maximize className="h-3 w-3" />
+        分辨率
+      </h4>
+      <div className="grid grid-cols-3 gap-1">
+        {RESOLUTION_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+              value === opt.value
+                ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
+            }`}
+          >
+            <span className="font-medium">{opt.label}</span>
+            <span className="text-[10px] opacity-60">{opt.desc}</span>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -211,6 +215,10 @@ export default function DesignerToolbar({
   const showQuality = (caps?.qualityLevels.length ?? 0) > 0
   const showFormat = (caps?.outputFormats.length ?? 0) > 1
   const showRefs = (caps?.supportsReference ?? false) && (caps?.maxReferenceImages ?? 0) > 0
+  const configuredSizePresets = caps?.sizePresets ?? []
+  const pixelSizePresets = configuredSizePresets.filter((preset) => preset.trim().toLowerCase() === 'auto' || isPixelSizePreset(preset))
+  const ratioSizePresets = configuredSizePresets.filter(isRatioSizePreset)
+  const showPixelSizePresets = pixelSizePresets.length > 0
 
   // Generate object URLs for reference image previews
   const [refPreviewUrls, setRefPreviewUrls] = useState<string[]>([])
@@ -262,64 +270,26 @@ export default function DesignerToolbar({
 
             <Separator />
 
-            {/* Size — pixel presets for GPT-Image, ratio grid for others */}
-            {caps && caps.sizePresets.length > 0 ? (
+            {/* Size — render exactly from configured capability shapes */}
+            {showPixelSizePresets ? (
               <SizePresetSection
-                presets={caps.sizePresets}
+                presets={pixelSizePresets}
                 value={settings.size}
                 onChange={(size) => update({ size })}
               />
             ) : (
               <>
-                {/* Ratio grid */}
-                <div className="space-y-2">
-                  <h4 className={sectionHeader}>
-                    <Proportions className="h-3 w-3" />
-                    尺寸
-                  </h4>
-                  <div className="grid grid-cols-3 gap-1">
-                    {SIZE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => update({ size: opt.value })}
-                        className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
-                          settings.size === opt.value
-                            ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                            : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
-                        }`}
-                      >
-                        <span className="font-medium">{opt.label}</span>
-                        <span className="text-[10px] opacity-60">{opt.desc}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Resolution */}
-                <div className="space-y-2">
-                  <h4 className={sectionHeader}>
-                    <Maximize className="h-3 w-3" />
-                    分辨率
-                  </h4>
-                  <div className="grid grid-cols-3 gap-1">
-                    {RESOLUTION_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => update({ resolution: opt.value })}
-                        className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
-                          settings.resolution === opt.value
-                            ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                            : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
-                        }`}
-                      >
-                        <span className="font-medium">{opt.label}</span>
-                        <span className="text-[10px] opacity-60">{opt.desc}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <RatioSizeSection
+                  presets={ratioSizePresets}
+                  value={settings.size}
+                  onChange={(size) => update({ size })}
+                  sectionHeader={sectionHeader}
+                />
+                <ResolutionSection
+                  value={settings.resolution}
+                  onChange={(resolution) => update({ resolution })}
+                  sectionHeader={sectionHeader}
+                />
               </>
             )}
 
@@ -528,8 +498,8 @@ export default function DesignerToolbar({
 
           {/* Mobile settings row */}
           <div className="flex gap-1 overflow-x-auto">
-            {caps && caps.sizePresets.length > 0 ? (
-              caps.sizePresets.map((preset) => {
+            {showPixelSizePresets ? (
+              pixelSizePresets.map((preset) => {
                 const info = SIZE_PRESET_LABELS[preset]
                 return (
                   <button
@@ -547,7 +517,7 @@ export default function DesignerToolbar({
                 )
               })
             ) : (
-              SIZE_OPTIONS.map((opt) => (
+              (ratioSizePresets.length > 0 ? ratioSizePresets.map(ratioPresetInfo) : SIZE_OPTIONS).map((opt) => (
                 <button
                   key={opt.value}
                   type="button"

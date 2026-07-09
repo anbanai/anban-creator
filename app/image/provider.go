@@ -16,7 +16,7 @@ import (
 const (
 	DefaultGeminiModel       = "gemini-3-pro-image-preview"
 	DefaultOpenAIModel       = "gpt-image-2"
-	DefaultVolcengineModel   = "doubao-seedream-5-0-260128"
+	DefaultVolcengineModel   = "doubao-seedream-5-0-pro-260628"
 	DefaultVolcengineBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 )
 

@@ -113,15 +113,15 @@ model_routes:
   image_generation:
     cover:
       provider: volcengine_ark
-      model: doubao-seedream-5-0-260128
+      model: doubao-seedream-5-0-pro-260628
     content:
       provider: volcengine_ark
-      model: doubao-seedream-5-0-260128
+      model: doubao-seedream-5-0-pro-260628
     designer:
       seedream:
         alias: Doubao Seedream
         provider: volcengine_ark
-        model: doubao-seedream-5-0-260128
+        model: doubao-seedream-5-0-pro-260628
         enabled: true
         capabilities:
           size_presets: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
@@ -222,7 +222,7 @@ claude:
 	if cfg.VideoUnderstanding.Model != "kimi-k2.7-code-highspeed" || !cfg.VideoUnderstanding.RequireNativeVideo {
 		t.Fatalf("video understanding route = %#v", cfg.VideoUnderstanding)
 	}
-	if cfg.ImageAPI.Cover == nil || cfg.ImageAPI.Cover.Provider != "volcengine" || cfg.ImageAPI.Cover.Model != "doubao-seedream-5-0-260128" {
+	if cfg.ImageAPI.Cover == nil || cfg.ImageAPI.Cover.Provider != "volcengine" || cfg.ImageAPI.Cover.Model != "doubao-seedream-5-0-pro-260628" {
 		t.Fatalf("derived image cover config = %#v", cfg.ImageAPI.Cover)
 	}
 	if cfg.VideoAPI.Key != "ark-test" || len(cfg.VideoAPI.ModelCatalog) != 1 || cfg.VideoAPI.ModelCatalog[0].ModelID != "doubao-seedance-2-0-mini-260615" {
@@ -355,7 +355,7 @@ model_routes:
   image_generation:
     cover:
       provider: volcengine_ark
-      model: doubao-seedream-5-0-260128
+      model: doubao-seedream-5-0-pro-260628
       size: "16:9"
 claude:
   plugin_dir: "` + pluginDir + `"

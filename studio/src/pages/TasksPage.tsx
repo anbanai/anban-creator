@@ -16,7 +16,7 @@ import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
@@ -812,18 +812,18 @@ export default function TasksPage() {
         </>
       )}
 
-      {/* Create Task Sheet */}
-      <Sheet open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
-        <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-2xl">
-          <SheetHeader className="border-b border-border px-4 py-3">
-            <SheetTitle>新建任务</SheetTitle>
-            <SheetDescription>任务创建路径：类型 → 项目 → 目标/提示词 → 图片/高级 → 基础任务费预估</SheetDescription>
+      {/* Create Task Dialog */}
+      <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
+        <DialogContent className="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-5xl">
+          <DialogHeader className="border-b border-border px-4 py-3">
+            <DialogTitle>新建任务</DialogTitle>
+            <DialogDescription>任务创建路径：类型 → 项目 → 目标/提示词 → 图片/高级 → 基础任务费预估</DialogDescription>
             <p className="pt-2 text-[11px] text-muted-foreground">
               类型 / 项目 / 目标/提示词 / 图片/高级 / 基础任务费预估
             </p>
-          </SheetHeader>
+          </DialogHeader>
           <Form {...form}>
-            <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
               <div className="rounded-lg border border-border bg-muted/30 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -1306,7 +1306,7 @@ export default function TasksPage() {
               </div>
             </form>
           </Form>
-          <SheetFooter className="border-t border-border bg-popover px-4 py-3 sm:flex-row sm:items-center sm:justify-end">
+          <DialogFooter className="mx-0 mb-0 border-t border-border bg-popover px-4 py-3 sm:flex-row sm:items-center sm:justify-end">
             {localExecutorAvailable && (
               <div className="mr-auto flex min-w-0 items-center gap-2 text-xs">
                 <label className="flex cursor-pointer items-center gap-2 text-muted-foreground" title="在本机运行：使用桌面端内置的 Claude Code + ffmpeg，可剪辑本地视频、执行本地命令。关闭则改为云端执行。">
@@ -1329,9 +1329,9 @@ export default function TasksPage() {
                 ? '启动并创建'
                 : quantity > 1 ? `创建 ${quantity} 个任务` : '创建'}
             </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dirty form confirmation */}
       <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>

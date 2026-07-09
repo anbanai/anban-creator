@@ -230,7 +230,7 @@ model_prices:
       input: 0.95
       output: 4.00
   image_generation:
-    volcengine_ark/doubao-seedream-5-0-260128:
+    volcengine_ark/doubao-seedream-5-0-pro-260628:
       pricing_type: per_image
       currency: CNY
       unit: image

@@ -84,15 +84,15 @@ model_routes:
   image_generation:
     cover:
       provider: "volcengine_ark"
-      model: "doubao-seedream-5-0-260128"
+      model: "doubao-seedream-5-0-pro-260628"
     content:
       provider: "volcengine_ark"
-      model: "doubao-seedream-5-0-260128"
+      model: "doubao-seedream-5-0-pro-260628"
     designer:
       seedream:
         alias: "豆包 Seedream"
         provider: "volcengine_ark"
-        model: "doubao-seedream-5-0-260128"
+        model: "doubao-seedream-5-0-pro-260628"
         enabled: true
         capabilities:
           size_presets: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
@@ -180,7 +180,7 @@ model_prices:
       output: 8.00
 
   image_generation:
-    volcengine_ark/doubao-seedream-5-0-260128:
+    volcengine_ark/doubao-seedream-5-0-pro-260628:
       pricing_type: per_image
       currency: CNY
       unit: image

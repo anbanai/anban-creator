@@ -36,11 +36,10 @@ func baseKubernetesConfigForTest() Config {
 	return cfg
 }
 
-func TestValidateRejectsKubernetesExecutorUntilExecutorIsWired(t *testing.T) {
+func TestValidateAcceptsKubernetesExecutor(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "until a Kubernetes executor is wired") {
-		t.Fatalf("Validate() error = %v, want fail-closed executor rejection", err)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want kubernetes executor accepted", err)
 	}
 }
 

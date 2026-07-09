@@ -236,6 +236,20 @@ func main() {
 			Int("timeout_sec", cfg.Claude.Docker.TimeoutSec).
 			Bool("per_user_mcp", apiKeySvc != nil).
 			Msg("docker agent executor created")
+	case "kubernetes":
+		kubeExec, err := agent.NewKubernetesExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Kubernetes, cfg.AgentServerURL(), cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create Kubernetes executor")
+		}
+		agentExecutor = kubeExec
+		log.Info().
+			Str("namespace", cfg.Claude.Kubernetes.Namespace).
+			Str("image", cfg.Claude.Kubernetes.AgentImage).
+			Str("workspace_pvc", cfg.Claude.Kubernetes.WorkspacePVCName).
+			Str("workspace_mount_path", cfg.Claude.Kubernetes.WorkspaceMountPath).
+			Int("exec_timeout_sec", cfg.Claude.Kubernetes.ExecTimeoutSec).
+			Bool("per_user_mcp", apiKeySvc != nil).
+			Msg("kubernetes agent executor created")
 	default:
 		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)
 		log.Info().

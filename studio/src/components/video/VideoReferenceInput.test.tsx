@@ -105,7 +105,7 @@ describe('VideoReferenceInput', () => {
 
     fireEvent.click(screen.getAllByRole('combobox')[0])
 
-    expect(screen.getByText('完整复刻参考')).toBeInTheDocument()
+    expect(screen.getAllByText('完整复刻参考').length).toBeGreaterThan(1)
     expect(screen.getByText('段子/时间轴结构')).toBeInTheDocument()
   })
 

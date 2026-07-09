@@ -1863,9 +1863,9 @@ func (c *Config) Validate() error {
 	}
 
 	switch c.Claude.Executor {
-	case "local", "docker":
+	case "local", "docker", "kubernetes":
 	default:
-		errs = append(errs, fmt.Sprintf("claude.executor must be 'local' or 'docker' until a Kubernetes executor is wired, got %q", c.Claude.Executor))
+		errs = append(errs, fmt.Sprintf("claude.executor must be 'local', 'docker', or 'kubernetes', got %q", c.Claude.Executor))
 	}
 
 	// When using the Docker executor, the container timeout must be at least as

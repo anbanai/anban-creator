@@ -166,14 +166,67 @@ func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 func TestPrepareTaskArtifactUploadRejectsUnsafeRelativePath(t *testing.T) {
 	svc, _, _, task := newTaskArtifactTestService(t)
 
-	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
-		RelativePath: "../secret.md",
-		Filename:     "secret.md",
+	for _, tt := range []struct {
+		name        string
+		relPath     string
+		wantMessage string
+	}{
+		{name: "parent traversal", relPath: "../secret.md", wantMessage: "invalid relative path"},
+		{name: "dotfile", relPath: "output/.env", wantMessage: "refusing to upload dotfile"},
+		{name: "runtime directory", relPath: ".git/config", wantMessage: "refusing to upload runtime directory"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+				RelativePath: tt.relPath,
+				Filename:     "secret.md",
+				ContentType:  "text/markdown",
+				Size:         12,
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("PrepareTaskArtifactUpload error = %v, want %q", err, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestPrepareTaskArtifactUploadRejectsWrongUserAndNonOSSStorage(t *testing.T) {
+	svc, _, store, task := newTaskArtifactTestService(t)
+
+	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, uuid.NewString(), taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid relative path") {
-		t.Fatalf("PrepareTaskArtifactUpload error = %v, want invalid relative path", err)
+	if err == nil || !strings.Contains(err.Error(), "authenticated user") {
+		t.Fatalf("PrepareTaskArtifactUpload wrong user error = %v, want access rejection", err)
+	}
+
+	store.name = "local"
+	_, err = svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		RelativePath: "output/article.md",
+		ContentType:  "text/markdown",
+		Size:         12,
+	})
+	if err == nil || !strings.Contains(err.Error(), "require OSS storage") {
+		t.Fatalf("PrepareTaskArtifactUpload non-OSS error = %v, want OSS rejection", err)
+	}
+}
+
+func TestPrepareTaskArtifactUploadRejectsMissingSTSRole(t *testing.T) {
+	svc, _, _, task := newTaskArtifactTestService(t)
+	cfg := taskArtifactDirectUploadConfig(t)
+	cfg.Storage.STSRoleArn = ""
+	cfg.CredentialIssuer = nil
+	cfg.Storage.AccessKeyID = "ak"
+	cfg.Storage.AccessKeySecret = "secret"
+
+	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, cfg, TaskArtifactPrepareRequest{
+		RelativePath: "output/article.md",
+		ContentType:  "text/markdown",
+		Size:         12,
+	})
+	if err == nil || !strings.Contains(err.Error(), "storage.sts_role_arn") {
+		t.Fatalf("PrepareTaskArtifactUpload missing STS role error = %v, want sts_role_arn rejection", err)
 	}
 }
 

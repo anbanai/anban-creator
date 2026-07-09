@@ -122,7 +122,7 @@ describe('Designer provider contract', () => {
         provider: 'volcengine',
         providerKey: 'volcengine_ark',
         route: 'image_generation.designer.seedream',
-        model: 'doubao-seedream-5-0-260128',
+        model: 'doubao-seedream-5-0-pro-260628',
         credits: 50,
         enabled: true,
         idx: 0,

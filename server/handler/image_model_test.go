@@ -11,7 +11,7 @@ import (
 
 func TestValidateImageModelKey(t *testing.T) {
 	presets := []config.ImageModelPreset{
-		{Key: "volcengine-standard", DisplayName: "Volcengine", Provider: "volcengine", Model: "doubao-seedream-5-0-260128", MinTier: "free"},
+		{Key: "volcengine-standard", DisplayName: "Volcengine", Provider: "volcengine", Model: "doubao-seedream-5-0-pro-260628", MinTier: "free"},
 		{Key: "gemini-pro", DisplayName: "Gemini Pro", Provider: "gemini", Model: "gemini-3-pro-image-preview", MinTier: "pro"},
 	}
 

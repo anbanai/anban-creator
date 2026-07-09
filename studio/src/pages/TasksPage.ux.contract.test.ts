@@ -26,10 +26,11 @@ describe('TasksPage recovery workspace contract', () => {
     expect(source).toContain('可删除')
   })
 
-  it('uses a project-aware compact sheet for task creation', () => {
+  it('uses a project-aware centered dialog for task creation', () => {
     const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
 
-    expect(source).toContain('SheetContent')
+    expect(source).toContain('DialogContent')
+    expect(source).not.toContain('SheetContent')
     expect(source).toContain('任务创建路径')
     expect(source).toContain('类型')
     expect(source).toContain('项目')

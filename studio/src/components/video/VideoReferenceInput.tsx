@@ -14,6 +14,44 @@ import type { VideoReferenceAsset, VideoReferenceType } from '@/types'
 const MAX_REFERENCE_FILE_SIZE = 50 * 1024 * 1024
 const AUTO_REFERENCE_ROLE = '__agent_auto__'
 
+const quickReferenceActions = [
+  {
+    role: 'subject identity',
+    label: '主体不变',
+    text: '主体必须保持一致；如果没有主体图片或视频，按文字描述凭空创作。',
+  },
+  {
+    role: 'full remake reference',
+    label: '完整复刻参考',
+    text: '参考素材用于复刻结构、节奏和镜头，不自动继承原人物、logo 或无关场景。',
+  },
+  {
+    role: 'product appearance',
+    label: '产品外观',
+    text: '产品外观、材质、颜色和关键细节必须保持准确。',
+  },
+  {
+    role: 'action',
+    label: '动作参考',
+    text: '动作作为参考，主体和场景以本次任务要求为准。',
+  },
+  {
+    role: 'camera movement',
+    label: '镜头运动',
+    text: '镜头运动作为参考，构图和主体由 Agent 根据任务判断。',
+  },
+  {
+    role: 'rhythm',
+    label: '节奏参考',
+    text: '剪辑节奏、转场和时间轴作为参考。',
+  },
+  {
+    role: 'voice tone',
+    label: '声音/BGM',
+    text: '声音或 BGM 作为参考，画面主体和视觉风格由其他素材或任务要求决定。',
+  },
+]
+
 type UploadProgressItem = {
   id: string
   name: string
@@ -288,6 +326,14 @@ export function VideoReferenceInput({
     onChange(next)
   }
 
+  const addQuickTextReference = (action: typeof quickReferenceActions[number]) => {
+    appendReference({
+      type: 'text',
+      text: action.text,
+      reference_role: action.role,
+    })
+  }
+
   const uploadFiles = async (files: File[]) => {
     if (files.length === 0) return
     setUploading(true)
@@ -350,6 +396,13 @@ export function VideoReferenceInput({
     setTextRef('')
   }
 
+  const hasSubjectIdentity = value.some((ref) => ref.reference_role === 'subject identity')
+  const hasSubjectMedia = value.some((ref) =>
+    ref.reference_role === 'subject identity' &&
+    (ref.type === 'image_url' || ref.type === 'video_url') &&
+    Boolean(ref.url || ref.task_file_id),
+  )
+
   return (
     <div className="flex flex-col gap-3">
       <input
@@ -367,6 +420,27 @@ export function VideoReferenceInput({
         onDropFiles={(files) => void uploadFiles(files)}
         onDragStateChange={setIsDragging}
       />
+      <div className="rounded-lg border border-border bg-muted/10 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">素材角色快捷入口</span>
+          {quickReferenceActions.map((action) => (
+            <Button
+              key={action.role}
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => addQuickTextReference(action)}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
+        {hasSubjectIdentity && !hasSubjectMedia && (
+          <p className="mt-2 text-xs text-amber-600">
+            主体不变最好上传主体图片或视频；没有素材也可以继续凭空创作，Agent 会按文字约束执行。
+          </p>
+        )}
+      </div>
       {uploadErrors.length > 0 && (
         <div className="flex flex-col gap-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {uploadErrors.map((item) => <p key={item}>{item}</p>)}

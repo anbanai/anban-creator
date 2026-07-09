@@ -9,7 +9,6 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Badge } from '@/components/ui/badge'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { DesignerProvider } from '@/types/designer'
 import { cn } from '@/lib/utils'
 
@@ -57,15 +56,14 @@ export default function ModelSelector({
             </Badge>
           )}
           {selected && selected.pricing.pricingType !== 'openai_image_usage' && selected.credits > 0 && (
-            <Tooltip>
-              <TooltipTrigger>
-                <Badge variant="secondary" className="h-4 shrink-0 gap-0.5 px-1.5 text-[9px]">
-                  <Coins className="h-2.5 w-2.5" />
-                  {selected.credits}
-                </Badge>
-              </TooltipTrigger>
-              <TooltipContent>每次生成消耗 {selected.credits} 积分</TooltipContent>
-            </Tooltip>
+            <Badge
+              variant="secondary"
+              className="h-4 shrink-0 gap-0.5 px-1.5 text-[9px]"
+              title={`每次生成消耗 ${selected.credits} 积分`}
+            >
+              <Coins className="h-2.5 w-2.5" />
+              {selected.credits}
+            </Badge>
           )}
         </div>
         <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -121,15 +119,14 @@ export default function ModelSelector({
                       </Badge>
                     )}
                     {!isDisabled && p.pricing.pricingType !== 'openai_image_usage' && p.credits > 0 && (
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
-                            <Coins className="h-2.5 w-2.5" />
-                            {p.credits}
-                          </Badge>
-                        </TooltipTrigger>
-                        <TooltipContent>每次生成消耗 {p.credits} 积分</TooltipContent>
-                      </Tooltip>
+                      <Badge
+                        variant="secondary"
+                        className="h-4 px-1.5 text-[9px]"
+                        title={`每次生成消耗 ${p.credits} 积分`}
+                      >
+                        <Coins className="h-2.5 w-2.5" />
+                        {p.credits}
+                      </Badge>
                     )}
                   </div>
                   {caps && !isDisabled && ((caps.maxBatch ?? 1) > 1 || caps.supportsMask) && (

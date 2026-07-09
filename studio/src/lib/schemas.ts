@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 
 export const PROMPT_MAX_LENGTH = 5120
 export const GOAL_TEXT_MAX_LENGTH = 4000
