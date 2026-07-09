@@ -193,10 +193,10 @@ func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 	for _, want := range []string{
 		"ca-certificates curl git jq fontconfig fonts-noto-cjk python3",
 		"git config --global http.version HTTP/1.1",
-		"npx -y skills@1.5.14 add heygen-com/hyperframes",
+		"npx -y skills@latest add heygen-com/hyperframes",
 		"--skill music-to-video",
 		"--skill slideshow",
-		"npx -y skills@1.5.14 add remotion-dev/skills",
+		"npx -y skills@latest add remotion-dev/skills",
 		"--skill remotion-best-practices",
 		"--agent claude-code",
 		"--copy",
@@ -207,7 +207,7 @@ func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 			t.Fatalf("server Dockerfile should install official video overlay skills, missing %q", want)
 		}
 	}
-	if strings.Index(body, "USER node") > strings.Index(body, "npx -y skills@1.5.14 add heygen-com/hyperframes") {
+	if strings.Index(body, "USER node") > strings.Index(body, "npx -y skills@latest add heygen-com/hyperframes") {
 		t.Fatalf("server Dockerfile should install official skills as the node user")
 	}
 }

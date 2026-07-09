@@ -33,10 +33,10 @@ func TestDockerfilesUseOpenHandsAgentRuntime(t *testing.T) {
 				"npm install -g @anthropic-ai/claude-code",
 				"COPY claudecode/",
 				"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
-				"npx -y skills@1.5.14 add heygen-com/hyperframes",
+				"npx -y skills@latest add heygen-com/hyperframes",
 				"--skill music-to-video",
 				"--skill slideshow",
-				"npx -y skills@1.5.14 add remotion-dev/skills",
+				"npx -y skills@latest add remotion-dev/skills",
 				"--skill remotion-best-practices",
 				"claude plugin install --scope user anban@anbanai",
 			} {
