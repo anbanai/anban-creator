@@ -239,6 +239,71 @@ func TestProjectMemoryMergeSkipsWhenLockUnavailable(t *testing.T) {
 	}
 }
 
+func TestProjectMemoryMergeArchiveWritesCurrentManifestAndVersion(t *testing.T) {
+	store := newMemoryStore()
+	locker := &fakeMemoryLocker{locked: true}
+	mgr := NewProjectMemoryManager(store, config.MemoryConfig{
+		Enabled:         true,
+		OSSPrefix:       "claude-memory/projects",
+		RuntimeDir:      ".claude/memory",
+		MaxArchiveBytes: 262144,
+		LockTTL:         time.Minute,
+	}, locker, zerolog.Nop())
+	archive := mustTarGzWithRoot(t, map[string]string{
+		"./MEMORY.md":               "# Remote Updated\n",
+		"./topics/project-notes.md": "- from pod\n",
+	})
+
+	merged, err := mgr.MergeArchive(context.Background(), "project-1", "task-1", archive)
+	if err != nil {
+		t.Fatalf("MergeArchive() error = %v", err)
+	}
+	if !merged {
+		t.Fatal("MergeArchive() merged = false, want true")
+	}
+	names := tarGzNames(t, store.objects["claude-memory/projects/project-1/current.tar.gz"])
+	if !containsName(names, "MEMORY.md") || !containsName(names, "topics/project-notes.md") {
+		t.Fatalf("archive names = %v, want remote memory files", names)
+	}
+	if got := string(store.objects["claude-memory/projects/project-1/manifest.json"]); !strings.Contains(got, `"last_task_id":"task-1"`) {
+		t.Fatalf("manifest = %s, want last_task_id", got)
+	}
+	foundVersion := false
+	for key := range store.objects {
+		if strings.HasPrefix(key, "claude-memory/projects/project-1/versions/") && strings.HasSuffix(key, "-task-1.tar.gz") {
+			foundVersion = true
+		}
+	}
+	if !foundVersion {
+		t.Fatal("version archive was not uploaded")
+	}
+	if !locker.released {
+		t.Fatal("lock was not released")
+	}
+}
+
+func TestProjectMemoryMergeArchiveRejectsTraversal(t *testing.T) {
+	store := newMemoryStore()
+	mgr := NewProjectMemoryManager(store, config.MemoryConfig{
+		Enabled:         true,
+		OSSPrefix:       "claude-memory/projects",
+		RuntimeDir:      ".claude/memory",
+		MaxArchiveBytes: 262144,
+	}, nil, zerolog.Nop())
+	archive := mustTarGz(t, map[string]string{"../secret": "oops"})
+
+	merged, err := mgr.MergeArchive(context.Background(), "project-1", "task-1", archive)
+	if err == nil || !strings.Contains(err.Error(), "unsafe archive path") {
+		t.Fatalf("MergeArchive() error = %v, want unsafe archive path", err)
+	}
+	if merged {
+		t.Fatal("MergeArchive() merged = true, want false")
+	}
+	if len(store.objects) != 0 {
+		t.Fatalf("store objects = %v, want none", store.objects)
+	}
+}
+
 type memoryStore struct {
 	objects map[string][]byte
 }
@@ -301,6 +366,32 @@ func mustTarGz(t *testing.T, entries map[string]string) []byte {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
+	for name, body := range entries {
+		data := []byte(body)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func mustTarGzWithRoot(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "./", Mode: 0o755, Typeflag: tar.TypeDir}); err != nil {
+		t.Fatal(err)
+	}
 	for name, body := range entries {
 		data := []byte(body)
 		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +36,11 @@ import (
 
 var _ TaskExecutor = (*KubernetesExecutor)(nil)
 
-const kubernetesAgentContainerName = "agent"
+const (
+	kubernetesAgentContainerName      = "agent"
+	kubernetesPodTTLAnnotation        = "anban.ai/pod-ttl-seconds"
+	kubernetesPodConfigHashAnnotation = "anban.ai/pod-config-hash"
+)
 
 type KubernetesExecutor struct {
 	logger            *zerolog.Logger
@@ -152,6 +157,15 @@ func (e *KubernetesExecutor) Execute(ctx context.Context, opts *ExecutionOptions
 			opts.LogWriter.WriteResult(false, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
 		}
 		return result, nil
+	}
+	if result.Success && e.memoryMgr != nil && e.memoryMgr.Enabled() && strings.TrimSpace(opts.AutoMemoryDirectory) != "" {
+		if archive, err := e.captureProjectMemoryArchive(ctx, podName, opts.AutoMemoryDirectory); err != nil {
+			if e.logger != nil {
+				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to capture remote project memory archive")
+			}
+		} else if len(archive) > 0 {
+			result.RemoteMemoryArchive = archive
+		}
 	}
 	if opts.LogWriter != nil {
 		opts.LogWriter.WriteResult(result.Success, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
@@ -310,7 +324,8 @@ func (e *KubernetesExecutor) buildAgentPod(opts *ExecutionOptions) *corev1.Pod {
 			Name:   kubernetesAgentPodName(task),
 			Labels: labels,
 			Annotations: map[string]string{
-				"anban.ai/pod-ttl-seconds": fmt.Sprintf("%d", e.kubeCfg.PodTTLSeconds),
+				kubernetesPodTTLAnnotation:        fmt.Sprintf("%d", e.kubeCfg.PodTTLSeconds),
+				kubernetesPodConfigHashAnnotation: e.kubernetesPodConfigHash(opts),
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -345,6 +360,48 @@ func (e *KubernetesExecutor) buildAgentPod(opts *ExecutionOptions) *corev1.Pod {
 		pod.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: e.kubeCfg.ImagePullSecret}}
 	}
 	return pod
+}
+
+func (e *KubernetesExecutor) kubernetesPodConfigHash(opts *ExecutionOptions) string {
+	var parts []string
+	parts = append(parts,
+		"image="+e.kubeCfg.AgentImage,
+		"serviceAccount="+e.kubeCfg.ServiceAccount,
+		"imagePullSecret="+e.kubeCfg.ImagePullSecret,
+		"workspaceMountPath="+e.kubeCfg.WorkspaceMountPath,
+		"workspacePVCName="+e.kubeCfg.WorkspacePVCName,
+		"serverURL="+strings.TrimRight(e.serverURL, "/"),
+	)
+	parts = appendResourceParts(parts, "requests", e.kubeCfg.Resources.Requests)
+	parts = appendResourceParts(parts, "limits", e.kubeCfg.Resources.Limits)
+	env := e.buildAgentEnv(opts)
+	sort.Strings(env)
+	for _, pair := range env {
+		parts = append(parts, "env="+pair)
+	}
+	return kubernetesHashSuffix(strings.Join(parts, "\x00"))
+}
+
+func appendResourceParts(parts []string, prefix string, values map[string]string) []string {
+	if len(values) == 0 {
+		return parts
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		parts = append(parts, prefix+"."+key+"="+values[key])
+	}
+	return parts
+}
+
+func kubernetesPodConfigMatches(existing, desired *corev1.Pod) bool {
+	if existing == nil || desired == nil {
+		return false
+	}
+	return existing.Annotations[kubernetesPodConfigHashAnnotation] == desired.Annotations[kubernetesPodConfigHashAnnotation]
 }
 
 func kubernetesEnvVars(env []string) []corev1.EnvVar {
@@ -388,11 +445,34 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 		}
 	} else if existing != nil && existing.DeletionTimestamp != nil {
 		return "", fmt.Errorf("agent pod %s is being deleted", pod.Name)
+	} else if !kubernetesPodConfigMatches(existing, pod) {
+		if err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return "", fmt.Errorf("delete drifted agent pod: %w", err)
+		}
+		if err := e.waitForAgentPodDeleted(ctx, pod.Name); err != nil {
+			return "", err
+		}
+		if _, err := pods.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+			return "", fmt.Errorf("recreate agent pod: %w", err)
+		}
 	}
 	if err := e.waitForAgentPodReady(ctx, pod.Name); err != nil {
 		return "", err
 	}
 	return pod.Name, nil
+}
+
+func (e *KubernetesExecutor) waitForAgentPodDeleted(ctx context.Context, podName string) error {
+	return wait.PollUntilContextTimeout(ctx, time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		_, err := e.kube.CoreV1().Pods(e.kubeCfg.Namespace).Get(ctx, podName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return false, nil
+	})
 }
 
 func (e *KubernetesExecutor) waitForAgentPodReady(ctx context.Context, podName string) error {
@@ -444,6 +524,19 @@ func (e *KubernetesExecutor) copyWorkspaceBundle(ctx context.Context, podName, w
 		return fmt.Errorf("copy workspace bundle to pod: %w", res.err)
 	}
 	return nil
+}
+
+func (e *KubernetesExecutor) captureProjectMemoryArchive(ctx context.Context, podName, memoryDir string) ([]byte, error) {
+	memoryDir = strings.TrimSpace(memoryDir)
+	if memoryDir == "" {
+		return nil, nil
+	}
+	script := "if [ -d " + shellQuote(memoryDir) + " ]; then tar -C " + shellQuote(memoryDir) + " -czf - .; fi"
+	res := e.execShell(ctx, podName, script)
+	if res.err != nil {
+		return nil, fmt.Errorf("archive remote project memory: %w", res.err)
+	}
+	return res.stdout.Bytes(), nil
 }
 
 func writeTarDirectory(w io.Writer, root string) error {

@@ -348,14 +348,15 @@ type ExecutionResult struct {
 	TokenUsage    *TokenUsage `json:"token_usage,omitempty"`
 
 	// Post-execution diagnostics.
-	NoOutputFiles     bool           `json:"no_output_files,omitempty"`
-	AgentLikelyFailed bool           `json:"agent_likely_failed,omitempty"`
-	ToolUseCount      int            `json:"tool_use_count,omitempty"`
-	ToolUseSummary    map[string]int `json:"tool_use_summary,omitempty"`
-	ToolErrorCount    int            `json:"tool_error_count,omitempty"`
-	LastToolErrorTool string         `json:"last_tool_error_tool,omitempty"`
-	LastToolError     string         `json:"last_tool_error,omitempty"`
-	Model             string         `json:"model,omitempty"` // Claude Code agent model (from config.yaml claude.model)
+	NoOutputFiles       bool           `json:"no_output_files,omitempty"`
+	AgentLikelyFailed   bool           `json:"agent_likely_failed,omitempty"`
+	ToolUseCount        int            `json:"tool_use_count,omitempty"`
+	ToolUseSummary      map[string]int `json:"tool_use_summary,omitempty"`
+	ToolErrorCount      int            `json:"tool_error_count,omitempty"`
+	LastToolErrorTool   string         `json:"last_tool_error_tool,omitempty"`
+	LastToolError       string         `json:"last_tool_error,omitempty"`
+	Model               string         `json:"model,omitempty"` // Claude Code agent model (from config.yaml claude.model)
+	RemoteMemoryArchive []byte         `json:"-"`
 }
 
 // Execute runs the Claude Code agent for the given task.

@@ -342,11 +342,19 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	if err := s.repo.Tasks().SetCompletedAt(persistCtx, taskID); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
 	}
-	if s.memoryMgr != nil && result.WorkDir != "" && !remoteArtifacts && task.ProjectID != "" {
-		if merged, err := s.memoryMgr.Merge(persistCtx, task.ProjectID, taskID, result.WorkDir); err != nil {
-			s.logger.Warn().Err(err).Str("task_id", taskID).Str("project_id", task.ProjectID).Msg("project memory merge failed")
-		} else if merged {
-			s.logger.Info().Str("task_id", taskID).Str("project_id", task.ProjectID).Msg("project memory merged")
+	if s.memoryMgr != nil && task.ProjectID != "" {
+		if remoteArtifacts && len(result.RemoteMemoryArchive) > 0 {
+			if merged, err := s.memoryMgr.MergeArchive(persistCtx, task.ProjectID, taskID, result.RemoteMemoryArchive); err != nil {
+				s.logger.Warn().Err(err).Str("task_id", taskID).Str("project_id", task.ProjectID).Msg("remote project memory merge failed")
+			} else if merged {
+				s.logger.Info().Str("task_id", taskID).Str("project_id", task.ProjectID).Msg("remote project memory merged")
+			}
+		} else if result.WorkDir != "" && !remoteArtifacts {
+			if merged, err := s.memoryMgr.Merge(persistCtx, task.ProjectID, taskID, result.WorkDir); err != nil {
+				s.logger.Warn().Err(err).Str("task_id", taskID).Str("project_id", task.ProjectID).Msg("project memory merge failed")
+			} else if merged {
+				s.logger.Info().Str("task_id", taskID).Str("project_id", task.ProjectID).Msg("project memory merged")
+			}
 		}
 	}
 

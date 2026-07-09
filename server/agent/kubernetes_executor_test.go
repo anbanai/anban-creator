@@ -137,6 +137,44 @@ func TestKubernetesPodSpecUsesConfiguredImageAndPVC(t *testing.T) {
 	if len(pod.Spec.ImagePullSecrets) != 1 || pod.Spec.ImagePullSecrets[0].Name != "acr-secret" {
 		t.Fatalf("image pull secrets = %#v, want configured secret", pod.Spec.ImagePullSecrets)
 	}
+	if pod.Annotations[kubernetesPodConfigHashAnnotation] == "" {
+		t.Fatalf("pod annotations = %#v, want config hash", pod.Annotations)
+	}
+}
+
+func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
+	opts := &ExecutionOptions{
+		Task:    &model.Task{UserID: "user-1", ProjectID: "project-1"},
+		Project: &model.Project{ID: "project-1"},
+	}
+	oldExec := &KubernetesExecutor{
+		kubeCfg: srvconfig.KubernetesConfig{
+			AgentImage:         "registry.example.com/anban-agent:v1",
+			ServiceAccount:     "anban-agent-runner",
+			WorkspaceMountPath: "/workspace",
+			WorkspacePVCName:   "anban-agent-nas",
+		},
+		serverURL: "http://anban-server:8080",
+	}
+	newExec := &KubernetesExecutor{
+		kubeCfg: srvconfig.KubernetesConfig{
+			AgentImage:         "registry.example.com/anban-agent:v2",
+			ServiceAccount:     "anban-agent-runner",
+			WorkspaceMountPath: "/workspace",
+			WorkspacePVCName:   "anban-agent-nas",
+		},
+		serverURL: "http://anban-server:8080",
+	}
+
+	existing := oldExec.buildAgentPod(opts)
+	desired := newExec.buildAgentPod(opts)
+
+	if kubernetesPodConfigMatches(existing, desired) {
+		t.Fatalf("config match = true, want image drift to require pod recreation")
+	}
+	if !kubernetesPodConfigMatches(existing, oldExec.buildAgentPod(opts)) {
+		t.Fatalf("config match = false, want identical config to reuse pod")
+	}
 }
 
 func TestKubernetesPrepareWorkspaceBundleMatchesDockerWorkspaceInputs(t *testing.T) {

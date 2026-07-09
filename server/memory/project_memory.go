@@ -102,21 +102,6 @@ func (m *ProjectMemoryManager) Merge(ctx context.Context, projectID, taskID, wor
 	if !m.Enabled() || strings.TrimSpace(projectID) == "" || strings.TrimSpace(workDir) == "" {
 		return false, nil
 	}
-	release := func() {}
-	if m.locker != nil {
-		var ok bool
-		var err error
-		release, ok, err = m.locker.TryLock(ctx, "memory:project:"+projectID, m.cfg.LockTTL)
-		if err != nil {
-			return false, fmt.Errorf("project memory lock: %w", err)
-		}
-		if !ok {
-			m.log.Warn().Str("project_id", projectID).Str("task_id", taskID).Msg("project memory merge skipped because lock is busy")
-			return false, nil
-		}
-	}
-	defer release()
-
 	runtimeDir := m.RuntimeDir(workDir)
 	info, err := os.Stat(runtimeDir)
 	if err != nil {
@@ -135,6 +120,56 @@ func (m *ProjectMemoryManager) Merge(ctx context.Context, projectID, taskID, wor
 	if m.cfg.MaxArchiveBytes > 0 && int64(len(archive)) > m.cfg.MaxArchiveBytes {
 		return false, fmt.Errorf("runtime memory archive exceeds max_archive_bytes (%d > %d)", len(archive), m.cfg.MaxArchiveBytes)
 	}
+	return m.storeArchive(ctx, projectID, taskID, archive)
+}
+
+// MergeArchive validates and persists a project memory archive captured from a
+// remote agent workspace. It lets remote executors keep the same memory behavior
+// as local/docker without mounting the workspace filesystem on the server.
+func (m *ProjectMemoryManager) MergeArchive(ctx context.Context, projectID, taskID string, archive []byte) (bool, error) {
+	if !m.Enabled() || strings.TrimSpace(projectID) == "" || len(archive) == 0 {
+		return false, nil
+	}
+	if m.cfg.MaxArchiveBytes > 0 && int64(len(archive)) > m.cfg.MaxArchiveBytes {
+		return false, fmt.Errorf("remote memory archive exceeds max_archive_bytes (%d > %d)", len(archive), m.cfg.MaxArchiveBytes)
+	}
+	normalized, err := m.normalizeArchive(archive)
+	if err != nil {
+		return false, err
+	}
+	if m.cfg.MaxArchiveBytes > 0 && int64(len(normalized)) > m.cfg.MaxArchiveBytes {
+		return false, fmt.Errorf("remote memory archive exceeds max_archive_bytes after normalization (%d > %d)", len(normalized), m.cfg.MaxArchiveBytes)
+	}
+	return m.storeArchive(ctx, projectID, taskID, normalized)
+}
+
+func (m *ProjectMemoryManager) normalizeArchive(archive []byte) ([]byte, error) {
+	dir, err := os.MkdirTemp("", "anban-project-memory-*")
+	if err != nil {
+		return nil, fmt.Errorf("create project memory normalize dir: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	if err := extractTarGz(bytes.NewReader(archive), dir, m.cfg.MaxArchiveBytes); err != nil {
+		return nil, err
+	}
+	return createTarGz(dir, m.cfg.MaxArchiveBytes)
+}
+
+func (m *ProjectMemoryManager) storeArchive(ctx context.Context, projectID, taskID string, archive []byte) (bool, error) {
+	release := func() {}
+	if m.locker != nil {
+		var ok bool
+		var err error
+		release, ok, err = m.locker.TryLock(ctx, "memory:project:"+projectID, m.cfg.LockTTL)
+		if err != nil {
+			return false, fmt.Errorf("project memory lock: %w", err)
+		}
+		if !ok {
+			m.log.Warn().Str("project_id", projectID).Str("task_id", taskID).Msg("project memory merge skipped because lock is busy")
+			return false, nil
+		}
+	}
+	defer release()
 
 	now := time.Now().UTC()
 	versionKey := m.versionKey(projectID, taskID, now)
@@ -212,6 +247,9 @@ func extractTarGz(r io.Reader, destDir string, maxBytes int64) error {
 		if err != nil {
 			return fmt.Errorf("read project memory tar: %w", err)
 		}
+		if isArchiveRootEntry(h.Name) {
+			continue
+		}
 		target, err := safeArchiveTarget(destDir, h.Name)
 		if err != nil {
 			return err
@@ -248,6 +286,11 @@ func extractTarGz(r io.Reader, destDir string, maxBytes int64) error {
 			return fmt.Errorf("unsupported project memory archive entry type %d for %q", h.Typeflag, h.Name)
 		}
 	}
+}
+
+func isArchiveRootEntry(name string) bool {
+	name = strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+	return name == "." || name == "./"
 }
 
 func safeArchiveTarget(destDir, name string) (string, error) {

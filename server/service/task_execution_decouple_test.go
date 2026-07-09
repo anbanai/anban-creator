@@ -1,6 +1,9 @@
 package service
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +19,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/config"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -276,6 +281,67 @@ func TestHandleExecutionRemoteArticleApprovalReadsDraftFromTaskFiles(t *testing.
 	}
 }
 
+func TestHandleExecutionRemoteArtifactsMergesRemoteProjectMemory(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	createRemoteTaskFile(t, repo, store, task.ID, "output/article.md", "text/markdown", "# remote article")
+	memoryArchive := mustRemoteMemoryArchive(t, map[string]string{
+		"MEMORY.md": "# Remote memory\n",
+	})
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success:             true,
+		RemoteArtifacts:     true,
+		RemoteMemoryArchive: memoryArchive,
+		ToolUseSummary:      map[string]int{"Bash": 1},
+	}}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc.SetProjectMemoryManager(projectmemory.NewProjectMemoryManager(store, config.MemoryConfig{
+		Enabled:         true,
+		OSSPrefix:       "claude-memory/projects",
+		RuntimeDir:      ".claude/memory",
+		MaxArchiveBytes: 262144,
+	}, nil, logger))
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	if _, ok := store.files["claude-memory/projects/"+projectID+"/current.tar.gz"]; !ok {
+		t.Fatal("remote project memory current archive was not uploaded")
+	}
+	manifest := string(store.files["claude-memory/projects/"+projectID+"/manifest.json"])
+	if !strings.Contains(manifest, `"last_task_id":"`+task.ID+`"`) {
+		t.Fatalf("memory manifest = %s, want task id %s", manifest, task.ID)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q, want completed; err=%q", found.Status, found.ErrorMessage)
+	}
+}
+
 func createRemoteTaskFile(t *testing.T, repo repository.Repository, store *fakeAudioASRStorage, taskID, relPath, mimeType, body string) {
 	t.Helper()
 	key := "uploads/test/" + taskID + "/" + relPath
@@ -298,4 +364,27 @@ func createRemoteTaskFile(t *testing.T, repo repository.Repository, store *fakeA
 	}); err != nil {
 		t.Fatalf("create remote task file %s: %v", relPath, err)
 	}
+}
+
+func mustRemoteMemoryArchive(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for name, body := range entries {
+		data := []byte(body)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
