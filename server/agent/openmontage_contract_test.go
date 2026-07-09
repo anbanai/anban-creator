@@ -181,3 +181,14 @@ func TestOpenMontagePluginManifestsAdvertiseSupport(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenMontageSubmodulePathIsDeclared(t *testing.T) {
+	root := repoRoot(t)
+	gitmodules := readRepoFile(t, filepath.Join(root, ".gitmodules"))
+	if !strings.Contains(gitmodules, "third_party/OpenMontage") {
+		t.Fatal(".gitmodules missing third_party/OpenMontage submodule")
+	}
+	if !strings.Contains(gitmodules, "https://github.com/calesthio/OpenMontage.git") {
+		t.Fatal(".gitmodules missing OpenMontage upstream URL")
+	}
+}
