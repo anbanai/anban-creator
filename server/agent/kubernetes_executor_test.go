@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -118,18 +120,40 @@ func TestKubernetesPodSpecUsesConfiguredImageAndPVC(t *testing.T) {
 		serverURL: "http://anban-server:8080",
 	}
 	pod := e.buildAgentPod(&ExecutionOptions{
-		Task:    &model.Task{UserID: "user-1", ProjectID: "project-1"},
+		Task:    &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"},
 		Project: &model.Project{ID: "project-1"},
 	})
 
 	if pod.Name == "" || pod.Namespace != "" {
 		t.Fatalf("pod identity = %q/%q, want generated name and namespace filled by caller", pod.Namespace, pod.Name)
 	}
+	if _, ok := pod.Labels[kubernetesTaskIDLabel]; ok {
+		t.Fatalf("project-scoped agent pod labels include stale task id: %#v", pod.Labels)
+	}
 	if len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Image != e.kubeCfg.AgentImage {
 		t.Fatalf("container spec = %#v, want configured image", pod.Spec.Containers)
 	}
+	if pod.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways {
+		t.Fatalf("imagePullPolicy = %q, want Always for production latest-tag rollouts", pod.Spec.Containers[0].ImagePullPolicy)
+	}
 	if pod.Spec.ServiceAccountName != "anban-agent-runner" {
 		t.Fatalf("service account = %q, want configured", pod.Spec.ServiceAccountName)
+	}
+	if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
+		t.Fatalf("automount service account token = %#v, want disabled for agent pods", pod.Spec.AutomountServiceAccountToken)
+	}
+	if pod.Spec.SecurityContext == nil || pod.Spec.SecurityContext.FSGroup == nil || *pod.Spec.SecurityContext.FSGroup != 1000 {
+		t.Fatalf("pod security context = %#v, want fsGroup 1000 for NAS write access", pod.Spec.SecurityContext)
+	}
+	if len(pod.Spec.InitContainers) != 1 {
+		t.Fatalf("init containers = %#v, want workspace permission initializer", pod.Spec.InitContainers)
+	}
+	init := pod.Spec.InitContainers[0]
+	if init.SecurityContext == nil || init.SecurityContext.RunAsUser == nil || *init.SecurityContext.RunAsUser != 0 {
+		t.Fatalf("init container security context = %#v, want root initializer", init.SecurityContext)
+	}
+	if strings.Join(init.Command, " ") == "" || !strings.Contains(strings.Join(init.Command, " "), "chown -R node:node") {
+		t.Fatalf("init container command = %#v, want node ownership setup", init.Command)
 	}
 	if len(pod.Spec.Volumes) != 1 || pod.Spec.Volumes[0].PersistentVolumeClaim == nil || pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName != "anban-agent-nas" {
 		t.Fatalf("volumes = %#v, want workspace PVC", pod.Spec.Volumes)
@@ -142,6 +166,19 @@ func TestKubernetesPodSpecUsesConfiguredImageAndPVC(t *testing.T) {
 	}
 }
 
+func TestKubernetesWorkspaceInitRunsAsRootAndChownsWorkdir(t *testing.T) {
+	projectDir := "/workspace/users/user-1/projects/project-1"
+	script := kubernetesWorkspaceInitScript(projectDir)
+	for _, want := range []string{
+		"mkdir -p '/workspace/users/user-1/projects/project-1'",
+		"chown -R node:node '/workspace/users/user-1/projects/project-1'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("workspace init script missing %q in %q", want, script)
+		}
+	}
+}
+
 func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 	opts := &ExecutionOptions{
 		Task:    &model.Task{UserID: "user-1", ProjectID: "project-1"},
@@ -150,6 +187,7 @@ func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 	oldExec := &KubernetesExecutor{
 		kubeCfg: srvconfig.KubernetesConfig{
 			AgentImage:         "registry.example.com/anban-agent:v1",
+			PodRevision:        "rev-1",
 			ServiceAccount:     "anban-agent-runner",
 			WorkspaceMountPath: "/workspace",
 			WorkspacePVCName:   "anban-agent-nas",
@@ -158,7 +196,8 @@ func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 	}
 	newExec := &KubernetesExecutor{
 		kubeCfg: srvconfig.KubernetesConfig{
-			AgentImage:         "registry.example.com/anban-agent:v2",
+			AgentImage:         "registry.example.com/anban-agent:v1",
+			PodRevision:        "rev-2",
 			ServiceAccount:     "anban-agent-runner",
 			WorkspaceMountPath: "/workspace",
 			WorkspacePVCName:   "anban-agent-nas",
@@ -170,7 +209,7 @@ func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 	desired := newExec.buildAgentPod(opts)
 
 	if kubernetesPodConfigMatches(existing, desired) {
-		t.Fatalf("config match = true, want image drift to require pod recreation")
+		t.Fatalf("config match = true, want revision drift to require pod recreation")
 	}
 	if !kubernetesPodConfigMatches(existing, oldExec.buildAgentPod(opts)) {
 		t.Fatalf("config match = false, want identical config to reuse pod")

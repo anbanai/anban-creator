@@ -1066,6 +1066,7 @@ type KubernetesConfig struct {
 	ImagePullSecret    string                   `yaml:"image_pull_secret"`    // Optional image pull secret for private registries.
 	WorkspaceMountPath string                   `yaml:"workspace_mount_path"` // Container path where NAS is mounted.
 	WorkspacePVCName   string                   `yaml:"workspace_pvc_name"`   // NAS-backed PVC mounted by Agent Pods.
+	PodRevision        string                   `yaml:"pod_revision"`         // Deployment/image revision that forces project Pod recreation when changed.
 	PodTTLSeconds      int                      `yaml:"pod_ttl_seconds"`      // Idle TTL for project Agent Pods.
 	ExecTimeoutSec     int                      `yaml:"exec_timeout_seconds"` // Per-task exec timeout.
 	Resources          KubernetesResourceConfig `yaml:"resources"`            // Agent Pod requests and limits.
@@ -1547,6 +1548,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Claude.Kubernetes.WorkspaceMountPath == "" {
 		c.Claude.Kubernetes.WorkspaceMountPath = "/workspace"
+	}
+	if c.Claude.Kubernetes.PodRevision == "" {
+		c.Claude.Kubernetes.PodRevision = strings.TrimSpace(os.Getenv("ANBAN_AGENT_POD_REVISION"))
+		if c.Claude.Kubernetes.PodRevision == "" {
+			c.Claude.Kubernetes.PodRevision = strings.TrimSpace(os.Getenv("version_switch"))
+		}
 	}
 	if c.Claude.Kubernetes.PodTTLSeconds == 0 {
 		c.Claude.Kubernetes.PodTTLSeconds = 24 * 3600

@@ -39,6 +39,7 @@ var _ TaskExecutor = (*KubernetesExecutor)(nil)
 const (
 	kubernetesAgentContainerName      = "agent"
 	kubernetesPodTTLAnnotation        = "anban.ai/pod-ttl-seconds"
+	kubernetesPodRevisionAnnotation   = "anban.ai/pod-revision"
 	kubernetesPodConfigHashAnnotation = "anban.ai/pod-config-hash"
 )
 
@@ -318,23 +319,44 @@ func (e *KubernetesExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 func (e *KubernetesExecutor) buildAgentPod(opts *ExecutionOptions) *corev1.Pod {
 	task := opts.Task
 	labels := kubernetesAgentLabels(task)
+	delete(labels, kubernetesTaskIDLabel)
 	labels[kubernetesProjectIDLabel] = kubernetesLabelValue(task.ProjectID)
+	fsGroup := int64(1000)
+	rootUser := int64(0)
+	automountServiceAccountToken := false
+	projectDir := kubernetesProjectWorkspaceRoot(e.kubeCfg.WorkspaceMountPath, task)
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   kubernetesAgentPodName(task),
 			Labels: labels,
 			Annotations: map[string]string{
 				kubernetesPodTTLAnnotation:        fmt.Sprintf("%d", e.kubeCfg.PodTTLSeconds),
+				kubernetesPodRevisionAnnotation:   e.kubeCfg.PodRevision,
 				kubernetesPodConfigHashAnnotation: e.kubernetesPodConfigHash(opts),
 			},
 		},
 		Spec: corev1.PodSpec{
-			ServiceAccountName: e.kubeCfg.ServiceAccount,
-			RestartPolicy:      corev1.RestartPolicyAlways,
+			ServiceAccountName:           e.kubeCfg.ServiceAccount,
+			AutomountServiceAccountToken: &automountServiceAccountToken,
+			RestartPolicy:                corev1.RestartPolicyAlways,
+			SecurityContext: &corev1.PodSecurityContext{
+				FSGroup: &fsGroup,
+			},
+			InitContainers: []corev1.Container{{
+				Name:            "workspace-permissions",
+				Image:           e.kubeCfg.AgentImage,
+				ImagePullPolicy: corev1.PullAlways,
+				Command:         []string{"/bin/sh", "-lc", kubernetesWorkspaceInitScript(projectDir)},
+				SecurityContext: &corev1.SecurityContext{RunAsUser: &rootUser},
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      kubernetesWorkspaceMountName,
+					MountPath: e.kubeCfg.WorkspaceMountPath,
+				}},
+			}},
 			Containers: []corev1.Container{{
 				Name:            kubernetesAgentContainerName,
 				Image:           e.kubeCfg.AgentImage,
-				ImagePullPolicy: corev1.PullIfNotPresent,
+				ImagePullPolicy: corev1.PullAlways,
 				Command:         []string{"/bin/sh", "-c", "trap : TERM INT; sleep infinity & wait"},
 				Env:             kubernetesEnvVars(e.buildAgentEnv(opts)),
 				VolumeMounts: []corev1.VolumeMount{{
@@ -362,12 +384,31 @@ func (e *KubernetesExecutor) buildAgentPod(opts *ExecutionOptions) *corev1.Pod {
 	return pod
 }
 
+func kubernetesProjectWorkspaceRoot(mountPath string, task *model.Task) string {
+	userID := "unknown-user"
+	projectID := "unknown-project"
+	if task != nil {
+		if task.UserID != "" {
+			userID = task.UserID
+		}
+		if task.ProjectID != "" {
+			projectID = task.ProjectID
+		}
+	}
+	return path.Join(strings.TrimRight(mountPath, "/"), "users", kubernetesSafePathPart(userID), "projects", kubernetesSafePathPart(projectID))
+}
+
+func kubernetesWorkspaceInitScript(projectDir string) string {
+	return "mkdir -p " + shellQuote(projectDir) + " && chown -R node:node " + shellQuote(projectDir)
+}
+
 func (e *KubernetesExecutor) kubernetesPodConfigHash(opts *ExecutionOptions) string {
 	var parts []string
 	parts = append(parts,
 		"image="+e.kubeCfg.AgentImage,
 		"serviceAccount="+e.kubeCfg.ServiceAccount,
 		"imagePullSecret="+e.kubeCfg.ImagePullSecret,
+		"podRevision="+e.kubeCfg.PodRevision,
 		"workspaceMountPath="+e.kubeCfg.WorkspaceMountPath,
 		"workspacePVCName="+e.kubeCfg.WorkspacePVCName,
 		"serverURL="+strings.TrimRight(e.serverURL, "/"),

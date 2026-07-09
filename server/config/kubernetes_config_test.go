@@ -54,6 +54,15 @@ func TestKubernetesAgentImageDefaultsToServerRuntimeImage(t *testing.T) {
 	}
 }
 
+func TestKubernetesPodRevisionDefaultsFromDeploymentVersion(t *testing.T) {
+	t.Setenv("version_switch", "release-20260709")
+	cfg := Config{}
+	cfg.applyDefaults()
+	if cfg.Claude.Kubernetes.PodRevision != "release-20260709" {
+		t.Fatalf("pod revision = %q, want deployment version_switch", cfg.Claude.Kubernetes.PodRevision)
+	}
+}
+
 func TestValidateKubernetesRequiresOSS(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	cfg.Storage.Provider = "local"

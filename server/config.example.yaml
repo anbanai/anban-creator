@@ -360,6 +360,9 @@ claude:
     workspace_mount_path: "/workspace"
     # 持久化工作区 PVC，建议绑定 NAS/云盘，便于大素材和执行日志留存。
     workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-agent-nas}"
+    # Agent Pod 版本标识；ACK 发布时建议设为当前 version_switch 或镜像 digest，
+    # 这样使用 latest tag 时，已有项目 Pod 也会被检测为漂移并重建。
+    pod_revision: "${ANBAN_AGENT_POD_REVISION}"
     # 空闲 Agent Pod 保留时间，单位秒。
     pod_ttl_seconds: 86400
     # 单次任务执行超时，单位秒；应大于 montage.timeout_minutes * 60。

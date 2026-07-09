@@ -346,6 +346,36 @@ claude:
   sandbox: true
   # Agent 插件目录，必须包含 agents/、skills/ 等分发资产。
   plugin_dir: "/anbanai"
+  kubernetes:
+    # Agent Pod 所在命名空间。
+    namespace: "${ANBAN_AGENT_NAMESPACE:-anban}"
+    # Agent 镜像。生产镜像必须包含 anban agent 二进制、Claude/Codex 运行时、
+    # Anban 插件资产、ffmpeg/浏览器/Node/Python 以及 third_party/OpenMontage。
+    agent_image: "${ANBAN_AGENT_IMAGE:-anban-creator-server:latest}"
+    # Agent Pod 使用的 Kubernetes ServiceAccount。
+    service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-anban-agent-runner}"
+    # 私有镜像仓库拉取 secret；公开镜像可留空。
+    image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
+    # Agent Pod 内工作区挂载路径，必须是绝对路径。
+    workspace_mount_path: "/workspace"
+    # 持久化工作区 PVC，建议绑定 NAS/云盘，便于大素材和执行日志留存。
+    workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-agent-nas}"
+    # Agent Pod 版本标识；ACK 发布时建议设为当前 version_switch 或镜像 digest，
+    # 这样使用 latest tag 时，已有项目 Pod 也会被检测为漂移并重建。
+    pod_revision: "${ANBAN_AGENT_POD_REVISION}"
+    # 空闲 Agent Pod 保留时间，单位秒。
+    pod_ttl_seconds: 86400
+    # 单次任务执行超时，单位秒；应大于 montage.timeout_minutes * 60。
+    exec_timeout_seconds: 3600
+    resources:
+      # Agent Pod 资源请求，影响调度保证。
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      # Agent Pod 资源上限，生产建议按任务类型和模型上下文调大内存。
+      limits:
+        cpu: "4"
+        memory: "8Gi"
   max_turns:
     moments: 25
     viral_analysis: 30

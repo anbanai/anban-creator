@@ -6,6 +6,15 @@ metadata:
   labels:
     app: anban-server
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: anban-agent-runner
+  namespace: ${namespace}
+  labels:
+    app: anban-agent
+automountServiceAccountToken: false
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
