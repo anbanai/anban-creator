@@ -46,6 +46,24 @@ function filePreviewIcon(file: TaskFile) {
   return File
 }
 
+const openMontageRoleLabel: Record<string, string> = {
+  final_video: '最终视频',
+  delivery_manifest: '交付清单',
+  source_manifest: '素材清单',
+  timeline: '时间线',
+  subtitles: '字幕',
+  audio: '音频',
+  run_log: '运行日志',
+  failure_diagnosis: '失败诊断',
+}
+
+function taskFileRoleLabel(file: TaskFile, taskType?: string) {
+  if (taskType === 'openmontage') {
+    return openMontageRoleLabel[file.role] ?? ''
+  }
+  return ''
+}
+
 // --- Modal Content Renderer (stateless per-file renderer) ---
 
 function FilePreviewModalContent({
@@ -340,6 +358,7 @@ function FilePreviewModalContent({
 export function FilePreviewGallery({
   files,
   taskId,
+  taskType,
   inlineItemClassName,
   renderPreviewDetails,
   accessLocked = false,
@@ -347,6 +366,7 @@ export function FilePreviewGallery({
 }: {
   files: TaskFile[]
   taskId: string
+  taskType?: string
   inlineItemClassName?: string
   renderPreviewDetails?: (file: TaskFile) => React.ReactNode
   accessLocked?: boolean
@@ -399,6 +419,7 @@ export function FilePreviewGallery({
             <FilePreviewInline
               file={file}
               taskId={taskId}
+              taskType={taskType}
               accessLocked={accessLocked}
               lockedMessage={lockedMessage}
               onClick={() => handleOpen(index)}
@@ -409,6 +430,7 @@ export function FilePreviewGallery({
             key={file.id}
             file={file}
             taskId={taskId}
+            taskType={taskType}
             accessLocked={accessLocked}
             lockedMessage={lockedMessage}
             onClick={() => handleOpen(index)}
@@ -462,12 +484,14 @@ export function FilePreviewGallery({
 function FilePreviewInline({
   file,
   taskId,
+  taskType,
   accessLocked = false,
   lockedMessage = '交付已锁定，充值后可恢复下载、预览和发布。',
   onClick,
 }: {
   file: TaskFile
   taskId: string
+  taskType?: string
   accessLocked?: boolean
   lockedMessage?: string
   onClick: () => void
@@ -564,13 +588,16 @@ function FilePreviewInline({
   const tone = filePreviewTone(file)
   const Icon = filePreviewIcon(file)
   const canPreview = isVideo || isText || isHTML
+  const roleLabel = taskFileRoleLabel(file, taskType)
   return (
     <div className="space-y-2">
       <div className={`flex items-center justify-between rounded-lg border p-3 ${tone}`}>
         <div className="flex min-w-0 items-center gap-3">
           <Icon className="h-5 w-5 shrink-0" />
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-foreground" title={file.file_name}>{file.file_name}</p>
+            <p className="truncate text-sm font-medium text-foreground" title={file.file_name}>
+              {roleLabel ? `${roleLabel} · ${file.file_name}` : file.file_name}
+            </p>
             <p className="text-xs text-muted-foreground">{file.mime_type} &middot; {formatSize(file.file_size)}</p>
           </div>
         </div>

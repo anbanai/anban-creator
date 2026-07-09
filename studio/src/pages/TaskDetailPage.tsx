@@ -1314,6 +1314,7 @@ export default function TaskDetailPage() {
                       <FilePreviewGallery
                         files={imageFiles}
                         taskId={task.id}
+                        taskType={task.type}
                         inlineItemClassName="shrink-0 snap-start"
                         accessLocked={billingLocked}
                         lockedMessage={lockedDeliveryMessage}
@@ -1330,6 +1331,7 @@ export default function TaskDetailPage() {
                       <FilePreviewGallery
                         files={nonImageFiles}
                         taskId={task.id}
+                        taskType={task.type}
                         renderPreviewDetails={renderVideoPreviewDetails}
                         accessLocked={billingLocked}
                         lockedMessage={lockedDeliveryMessage}

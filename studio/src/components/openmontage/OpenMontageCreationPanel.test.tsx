@@ -27,7 +27,7 @@ function PanelHarness() {
 
   return (
     <Form {...form}>
-      <OpenMontageCreationPanel control={form.control} fieldRoot="openmontage_input" />
+      <OpenMontageCreationPanel form={form} fieldRoot="openmontage_input" />
       <output data-testid="openmontage-input">{JSON.stringify(input)}</output>
     </Form>
   )

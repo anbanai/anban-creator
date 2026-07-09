@@ -89,4 +89,21 @@ describe('FilePreviewGallery', () => {
     expect(screen.queryByRole('img', { name: 'seednote.png' })).not.toBeInTheDocument()
     expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
   })
+
+  it('uses openmontage role labels when task type is openmontage', () => {
+    render(
+      <FilePreviewGallery
+        files={[fileWith({
+          role: 'final_video',
+          file_name: 'final.mp4',
+          mime_type: 'video/mp4',
+          url: 'https://cdn.example.com/final.mp4',
+        })]}
+        taskId="task-openmontage"
+        taskType="openmontage"
+      />,
+    )
+
+    expect(screen.getByText(/最终视频/)).toBeInTheDocument()
+  })
 })

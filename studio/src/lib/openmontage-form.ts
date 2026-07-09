@@ -1,6 +1,11 @@
 import type { OpenMontageInput } from '@/types'
 
-export function initialOpenMontageInput(brief = '', input?: OpenMontageInput): OpenMontageInput {
+export type OpenMontageFormInput = Omit<OpenMontageInput, 'source_assets' | 'delivery_targets'> & {
+  source_assets: NonNullable<OpenMontageInput['source_assets']>
+  delivery_targets: NonNullable<OpenMontageInput['delivery_targets']>
+}
+
+export function initialOpenMontageInput(brief = '', input?: Partial<OpenMontageInput>): OpenMontageFormInput {
   return {
     brief: input?.brief ?? brief,
     pipeline_key: input?.pipeline_key ?? '',
@@ -18,7 +23,7 @@ export function initialOpenMontageInput(brief = '', input?: OpenMontageInput): O
   }
 }
 
-export function buildOpenMontageInputForSubmit(brief: string | undefined, input?: OpenMontageInput): OpenMontageInput {
+export function buildOpenMontageInputForSubmit(brief: string | undefined, input?: Partial<OpenMontageInput>): OpenMontageInput {
   const next = initialOpenMontageInput(brief ?? '', input)
   return {
     ...next,

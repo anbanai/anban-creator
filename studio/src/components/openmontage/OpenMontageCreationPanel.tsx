@@ -1,14 +1,16 @@
-import type { Control } from 'react-hook-form'
+import type { UseFormReturn } from 'react-hook-form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 
 interface OpenMontageCreationPanelProps {
-  control: Control<any>
+  form: UseFormReturn<any>
   fieldRoot: 'openmontage_input'
 }
 
-export function OpenMontageCreationPanel({ control, fieldRoot }: OpenMontageCreationPanelProps) {
+export function OpenMontageCreationPanel({ form, fieldRoot }: OpenMontageCreationPanelProps) {
+  const control = form.control
+
   return (
     <div className="space-y-4">
       <FormField control={control} name={`${fieldRoot}.brief`} render={({ field }) => (
