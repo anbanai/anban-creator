@@ -75,6 +75,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		input := src.VideoInput.Data()
 		params.VideoEditorInput = &input
 	}
+	if model.IsOpenMontagePlatform(src.Type) {
+		input := src.OpenMontageInput.Data()
+		params.OpenMontageInput = &input
+	}
 
 	tasks, err := s.CreateManual(ctx, params)
 	if err != nil {

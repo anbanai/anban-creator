@@ -99,16 +99,17 @@ type createTaskRequest struct {
 	// fee, and selected modules only guide later image/vision MCP usage.
 	// ProductPhotos are server-owned storage URLs materialized into the agent
 	// workspace by the executor.
-	ProductPhotos            []string               `json:"product_photos,omitempty"`
-	SelectedModules          map[string]int         `json:"selected_modules,omitempty"`
-	TargetPlatform           string                 `json:"target_platform,omitempty"`
-	SellingPoints            string                 `json:"selling_points,omitempty"`
-	Language                 string                 `json:"language,omitempty"`
-	ProviderStrategyOverride string                 `json:"provider_strategy_override,omitempty"`
-	VideoCreatorConfig       *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
-	VideoCreatorInput        *model.VideoInput      `json:"video_creator_input,omitempty"`
-	VideoEditorConfig        *model.VideoTaskConfig `json:"video_editor_config,omitempty"`
-	VideoEditorInput         *model.VideoInput      `json:"video_editor_input,omitempty"`
+	ProductPhotos            []string                `json:"product_photos,omitempty"`
+	SelectedModules          map[string]int          `json:"selected_modules,omitempty"`
+	TargetPlatform           string                  `json:"target_platform,omitempty"`
+	SellingPoints            string                  `json:"selling_points,omitempty"`
+	Language                 string                  `json:"language,omitempty"`
+	ProviderStrategyOverride string                  `json:"provider_strategy_override,omitempty"`
+	VideoCreatorConfig       *model.VideoTaskConfig  `json:"video_creator_config,omitempty"`
+	VideoCreatorInput        *model.VideoInput       `json:"video_creator_input,omitempty"`
+	VideoEditorConfig        *model.VideoTaskConfig  `json:"video_editor_config,omitempty"`
+	VideoEditorInput         *model.VideoInput       `json:"video_editor_input,omitempty"`
+	OpenMontageInput         *model.OpenMontageInput `json:"openmontage_input,omitempty"`
 	// ExecutionTarget, when "local", routes the task to the caller's desktop
 	// local executor instead of cloud execution. Set by the desktop studio build
 	// when a local executor is available. Empty = cloud (default). See
@@ -183,6 +184,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
+	}
+	if req.OpenMontageInput != nil && strings.TrimSpace(req.OpenMontageInput.Brief) == "" {
+		return Error(c, fiber.StatusBadRequest, "openmontage task requires brief")
 	}
 
 	prompt := strings.TrimSpace(req.Prompt)
@@ -278,11 +282,12 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		VideoCreatorInput:        req.VideoCreatorInput,
 		VideoEditorConfig:        req.VideoEditorConfig,
 		VideoEditorInput:         req.VideoEditorInput,
+		OpenMontageInput:         req.OpenMontageInput,
 		ExecutionTarget:          req.ExecutionTarget,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) {
+		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrOpenMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrInsufficientCredits) {

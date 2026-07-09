@@ -236,6 +236,40 @@ func TestPlanService_Create(t *testing.T) {
 	}
 }
 
+func TestPlanServiceCreateOpenMontagePlanStoresInput(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	userID := "user-om-plan"
+	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		CronExpr:  "0 10 * * *",
+		OpenMontageInput: &model.OpenMontageInput{
+			Brief:       "每日生成新品短片",
+			PipelineKey: "default",
+			Preferences: model.OpenMontagePreferences{
+				AspectRatio:     "9:16",
+				DurationSeconds: 30,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create openmontage plan: %v", err)
+	}
+	if plan.Type != model.PlatformOpenMontage {
+		t.Fatalf("plan type = %q, want openmontage", plan.Type)
+	}
+	got := plan.OpenMontageInput.Data()
+	if got.Brief != "每日生成新品短片" || got.PipelineKey != "default" {
+		t.Fatalf("openmontage input = %#v", got)
+	}
+	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 30 {
+		t.Fatalf("preferences = %#v", got.Preferences)
+	}
+}
+
 func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()

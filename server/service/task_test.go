@@ -626,6 +626,57 @@ func TestTaskService_CreateManualVideoTaskStoresInputAndChargesOnlyBaseFee(t *te
 	}
 }
 
+func TestTaskServiceCreateManualOpenMontageStoresInputAndClampsQuantity(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := "user-om"
+	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Quantity:  3,
+		OpenMontageInput: &model.OpenMontageInput{
+			Brief:       "做一条新品发布短片",
+			PipelineKey: "default",
+			Preferences: model.OpenMontagePreferences{
+				AspectRatio:     "9:16",
+				DurationSeconds: 30,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual error = %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("len(tasks) = %d, want 1", len(tasks))
+	}
+	got := tasks[0].OpenMontageInput.Data()
+	if got.Brief != "做一条新品发布短片" || got.PipelineKey != "default" {
+		t.Fatalf("openmontage input = %#v", got)
+	}
+	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 30 {
+		t.Fatalf("preferences = %#v", got.Preferences)
+	}
+}
+
+func TestTaskServiceCreateManualRejectsOpenMontageInputForOtherPlatforms(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := "user-om-reject"
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "春季穿搭",
+		OpenMontageInput: &model.OpenMontageInput{
+			Brief: "错误平台",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "openmontage_input can only be set on openmontage tasks") {
+		t.Fatalf("CreateManual error = %v, want openmontage input rejection", err)
+	}
+}
+
 func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
 	repoForCredits := setupCreditTestRepo(t)
 	creditSvc := newPricedCreditService(repoForCredits)
@@ -1029,6 +1080,42 @@ func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInputAndChargesOnlyBaseFe
 	}
 	if bal != 200_000-2000 {
 		t.Fatalf("balance = %d, want base fee %d", bal, 200_000-2000)
+	}
+}
+
+func TestTaskServiceCreateFromPlanOpenMontageCopiesInput(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+
+	plan := &model.Plan{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformOpenMontage,
+		Status:    model.PlanStatusActive,
+		Prompt:    "计划提示",
+	}
+	plan.SetOpenMontageInput(model.OpenMontageInput{
+		Brief:       "从计划生成发布会短片",
+		PipelineKey: "default",
+		Preferences: model.OpenMontagePreferences{
+			AspectRatio:     "9:16",
+			DurationSeconds: 45,
+		},
+	})
+
+	task, err := svc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("CreateFromPlan: %v", err)
+	}
+	got := task.OpenMontageInput.Data()
+	if got.Brief != "从计划生成发布会短片" || got.PipelineKey != "default" {
+		t.Fatalf("openmontage input = %#v", got)
+	}
+	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 45 {
+		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 }
 
@@ -2043,6 +2130,44 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 	if foundSrc.Status != model.TaskStatusCompleted {
 		t.Fatalf("source status = %q, want completed", foundSrc.Status)
+	}
+}
+
+func TestTaskServiceClonePreservesOpenMontageInput(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+	src := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformOpenMontage,
+		Status:    model.TaskStatusCompleted,
+		Prompt:    "source prompt",
+	}
+	src.SetOpenMontageInput(model.OpenMontageInput{
+		Brief:       "保留克隆输入",
+		PipelineKey: "default",
+		Preferences: model.OpenMontagePreferences{
+			AspectRatio:     "1:1",
+			DurationSeconds: 20,
+		},
+	})
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+
+	clone, err := svc.Clone(ctx, src.ID)
+	if err != nil {
+		t.Fatalf("Clone openmontage task: %v", err)
+	}
+	got := clone.OpenMontageInput.Data()
+	if got.Brief != "保留克隆输入" || got.PipelineKey != "default" {
+		t.Fatalf("openmontage input = %#v", got)
+	}
+	if got.Preferences.AspectRatio != "1:1" || got.Preferences.DurationSeconds != 20 {
+		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 }
 

@@ -68,6 +68,7 @@ func taskAPIResponse(task *model.Task) map[string]any {
 	}
 	resp := modelAPIMap(task)
 	rewriteVideoAPIFields(resp, task.Type, task.VideoInput.Data(), task.VideoConfig.Data())
+	rewriteOpenMontageAPIField(resp, task.Type, task.OpenMontageInput.Data())
 	return resp
 }
 
@@ -85,6 +86,7 @@ func planAPIResponse(plan *model.Plan) map[string]any {
 	}
 	resp := modelAPIMap(plan)
 	rewriteVideoAPIFields(resp, plan.Type, plan.VideoInput.Data(), plan.VideoConfig.Data())
+	rewriteOpenMontageAPIField(resp, plan.Type, plan.OpenMontageInput.Data())
 	return resp
 }
 
@@ -110,5 +112,12 @@ func rewriteVideoAPIFields(resp map[string]any, platform string, input model.Vid
 	case model.IsVideoEditorPlatform(platform):
 		resp["video_editor_input"] = input
 		resp["video_editor_config"] = cfg
+	}
+}
+
+func rewriteOpenMontageAPIField(resp map[string]any, platform string, input model.OpenMontageInput) {
+	delete(resp, "openmontage_input")
+	if model.IsOpenMontagePlatform(platform) {
+		resp["openmontage_input"] = input
 	}
 }

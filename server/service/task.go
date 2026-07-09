@@ -276,6 +276,8 @@ func (s *TaskService) StorageProviderName() string {
 	return s.store.Name()
 }
 
+var ErrOpenMontageInput = errors.New("openmontage input invalid")
+
 // CreateManualParams holds the inputs for CreateManual. Fields map 1:1 to the
 // model.Task attributes that callers can supply at creation time. Using a struct
 // instead of a long positional signature keeps call sites readable as fields are
@@ -327,6 +329,10 @@ type CreateManualParams struct {
 	// videoeditor tasks. They are rejected for creator projects and vice versa.
 	VideoEditorConfig *model.VideoTaskConfig
 	VideoEditorInput  *model.VideoInput
+	// OpenMontageInput carries the OpenMontage-specific creation contract.
+	// It is independent from video creator/editor payloads and is only valid
+	// for openmontage projects.
+	OpenMontageInput *model.OpenMontageInput
 	// ExecutionTarget, when model.ExecutionTargetLocal, routes the task to a
 	// desktop local executor instead of cloud Asynq/Docker. The task is created
 	// pending with a LocalClaimDeadline and is NOT enqueued; a desktop claims it
@@ -377,6 +383,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
+	if p.OpenMontageInput != nil && !model.IsOpenMontagePlatform(taskType) {
+		return nil, fmt.Errorf("%w: openmontage_input can only be set on openmontage tasks", ErrOpenMontageInput)
+	}
 
 	// E-commerce: merge the PROJECT's reusable e-commerce defaults (default
 	// modules, target platform, brand brief, image model key) into the task config
@@ -404,6 +413,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	if model.IsVideoPlatform(taskType) {
 		quantity = 1
+	}
+	if model.IsOpenMontagePlatform(taskType) {
+		quantity = 1
+		if p.OpenMontageInput == nil || strings.TrimSpace(p.OpenMontageInput.Brief) == "" {
+			return nil, fmt.Errorf("%w: openmontage task requires brief", ErrOpenMontageInput)
+		}
 	}
 	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(videoInput, p.InputAttachments) {
 		return nil, fmt.Errorf("videoeditor task requires at least one source video")
@@ -557,6 +572,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			} else if model.IsVideoCreatorPlatform(taskType) && strings.TrimSpace(taskPrompt) != "" {
 				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
 			}
+		}
+		if model.IsOpenMontagePlatform(taskType) && p.OpenMontageInput != nil {
+			task.SetOpenMontageInput(*p.OpenMontageInput)
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -811,6 +829,11 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		}
 		planVideoInput = &vi
 	}
+	var planOpenMontageInput *model.OpenMontageInput
+	if model.IsOpenMontagePlatform(taskType) {
+		input := plan.OpenMontageInput.Data()
+		planOpenMontageInput = &input
+	}
 
 	// Deduct credits for the plan task.
 	// Plan-level goal mode (plan.GoalMode) propagates to the task and scales
@@ -859,6 +882,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 	if planVideoInput != nil {
 		task.SetVideoInput(*planVideoInput)
+	}
+	if planOpenMontageInput != nil {
+		task.SetOpenMontageInput(*planOpenMontageInput)
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {
