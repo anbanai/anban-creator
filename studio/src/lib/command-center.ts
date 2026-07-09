@@ -94,7 +94,7 @@ export interface NextBestAction {
 const UPCOMING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const LOW_CREDIT_THRESHOLD = 200
 const CRITICAL_CREDIT_THRESHOLD = 50
-const taskTypes = new Set<TaskType>(['seednote', 'article', 'moments', 'viral_analysis', 'ecommerce', 'videocreator', 'videoeditor'])
+const taskTypes = new Set<TaskType>(['seednote', 'article', 'moments', 'viral_analysis', 'ecommerce', 'videocreator', 'videoeditor', 'openmontage'])
 const creationIntents = new Set(['new', 'retry', 'schedule'])
 
 export function hasUsableModelConfig(config?: ModelConfigLike | null) {

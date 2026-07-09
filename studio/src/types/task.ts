@@ -1,7 +1,8 @@
 import type { VideoInput, VideoTaskConfig } from './video'
 import type { CreditTransaction } from './credits'
+import type { OpenMontageInput } from './openmontage'
 
-export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'videocreator' | 'videoeditor'
+export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'openmontage'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection
@@ -85,6 +86,7 @@ export interface Task {
   video_creator_config?: VideoTaskConfig
   video_editor_input?: VideoInput
   video_editor_config?: VideoTaskConfig
+  openmontage_input?: OpenMontageInput
   video_generation_id?: string
   video_estimated_credits?: number
   video_credits_charged?: number
@@ -185,6 +187,7 @@ export interface CreateTaskRequest {
   video_creator_config?: VideoTaskConfig
   video_editor_input?: VideoInput
   video_editor_config?: VideoTaskConfig
+  openmontage_input?: OpenMontageInput
   // ''/'cloud' (default) → cloud execution; 'local' → claim by the desktop
   // local executor and run on the user's machine (enables ffmpeg/local-shell).
   // The desktop sets this when a local executor is available; web always omits.

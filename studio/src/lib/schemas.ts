@@ -40,6 +40,34 @@ const videoInputSchema = z.object({
   }).optional(),
 }).optional()
 
+const openMontageAssetSchema = z.object({
+  type: z.enum(["text", "image_url", "video_url", "audio_url", "document_url"]),
+  url: z.string().optional(),
+  task_file_id: z.string().optional(),
+  text: z.string().optional(),
+  file_name: z.string().optional(),
+  mime_type: z.string().optional(),
+  file_size: z.number().optional(),
+})
+
+const openMontagePreferencesSchema = z.object({
+  aspect_ratio: z.string().optional(),
+  duration_seconds: z.number().int().min(1).max(600).optional(),
+  style: z.string().max(1000).optional(),
+  music_prompt: z.string().max(1000).optional(),
+  subtitle_mode: z.string().optional(),
+  voiceover_mode: z.string().optional(),
+}).optional()
+
+const openMontageInputSchema = z.object({
+  brief: promptSchema.optional(),
+  pipeline_key: z.string().max(100).optional(),
+  source_assets: z.array(openMontageAssetSchema).default([]),
+  preferences: openMontagePreferencesSchema,
+  delivery_targets: z.array(z.string()).default([]),
+  advanced: z.record(z.string(), z.unknown()).optional(),
+}).optional()
+
 export const loginSchema = z.object({
   email: z.string().min(1, "邮箱不能为空").email("请输入有效的邮箱地址"),
   password: z.string().min(1, "密码不能为空"),
@@ -57,7 +85,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
-  type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "videocreator", "videoeditor"]),
+  type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "videocreator", "videoeditor", "openmontage"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -92,6 +120,7 @@ export const createTaskSchema = z.object({
   language: z.string().optional(),
   video_creator_input: videoInputSchema,
   video_editor_input: videoInputSchema,
+  openmontage_input: openMontageInputSchema,
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -136,6 +165,17 @@ export const createTaskSchema = z.object({
     }
   }
 
+  if (data.type === "openmontage") {
+    const brief = data.openmontage_input?.brief?.trim() || ""
+    if (!brief) {
+      ctx.addIssue({
+        code: "custom",
+        message: "请填写 OpenMontage 视频 brief",
+        path: ["openmontage_input", "brief"],
+      })
+    }
+  }
+
   if (!data.project_id?.trim()) {
     ctx.addIssue({
       code: "custom",
@@ -159,7 +199,7 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
 export const planSchema = z.object({
   project_id: z.string().optional(),
-  type: z.enum(["seednote", "article", "videocreator"]),
+  type: z.enum(["seednote", "article", "videocreator", "openmontage"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   image_model_key: z.string().max(50).optional(),
@@ -179,7 +219,19 @@ export const planSchema = z.object({
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
   video_creator_input: videoInputSchema,
+  openmontage_input: openMontageInputSchema,
 }).superRefine((data, ctx) => {
+  if (data.type === "openmontage") {
+    const brief = data.openmontage_input?.brief?.trim() || ""
+    if (!brief) {
+      ctx.addIssue({
+        code: "custom",
+        message: "请填写 OpenMontage 视频 brief",
+        path: ["openmontage_input", "brief"],
+      })
+    }
+  }
+
   if (data.goal_mode) {
     const goal = data.goal?.trim() || ""
     if (!goal) {
@@ -194,7 +246,7 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-  platform: z.enum(["seednote", "article", "moments", "ecommerce", "videocreator", "videoeditor"]),
+  platform: z.enum(["seednote", "article", "moments", "ecommerce", "videocreator", "videoeditor", "openmontage"]),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
@@ -214,6 +266,12 @@ export const projectSchema = z.object({
   ecommerce_target_platform: z.string().optional(),
   ecommerce_brand_brief: z.string().max(2000, "品牌 brief 不能超过 2000 个字符").optional(),
   ecommerce_image_model_key: z.string().max(50).optional(),
+  openmontage_defaults: z.object({
+    default_pipeline: z.string().max(100).optional(),
+    preferences: openMontagePreferencesSchema,
+    asset_guidance: z.string().max(2000).optional(),
+    delivery_targets: z.array(z.string()).default([]),
+  }).optional(),
   video_defaults: z.object({
     purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).default("planting"),
     model_key: z.string().default(""),

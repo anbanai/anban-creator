@@ -1,6 +1,7 @@
 import type { VideoDefaults, VideoModelPolicy } from './video'
+import type { OpenMontagePreferences } from './openmontage'
 
-export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'videocreator' | 'videoeditor'
+export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'openmontage'
 export type ProjectStatus = 'active' | 'archived'
 
 export interface ProjectConfig {
@@ -33,6 +34,7 @@ export interface Project {
   reference_image_url: string
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
+  openmontage_defaults?: OpenMontageProjectDefaults
   video_defaults?: VideoDefaults
   video_model_policy?: VideoModelPolicy
   max_concurrent_tasks: number
@@ -48,6 +50,13 @@ export interface EcommerceProjectDefaults {
   target_platform?: string
   brand_brief?: string
   image_model_key?: string
+}
+
+export interface OpenMontageProjectDefaults {
+  default_pipeline?: string
+  preferences?: OpenMontagePreferences
+  asset_guidance?: string
+  delivery_targets?: string[]
 }
 
 export interface ProjectStats {
@@ -82,6 +91,7 @@ export interface CreateProjectRequest {
   reference_image_url?: string
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults
+  openmontage_defaults?: OpenMontageProjectDefaults
   video_defaults?: VideoDefaults
   video_model_policy?: VideoModelPolicy
   max_concurrent_tasks?: number

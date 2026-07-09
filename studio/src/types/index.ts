@@ -111,6 +111,13 @@ export type {
   VideoTaskConfig,
 } from './video'
 
+export type {
+  OpenMontageAsset,
+  OpenMontageAssetType,
+  OpenMontageInput,
+  OpenMontagePreferences,
+} from './openmontage'
+
 // Topic Pool
 export type { TopicPoolStatus, TopicPool } from './topic-pool'
 

@@ -1,4 +1,4 @@
-import { BookOpen, MessageCircle, Scissors, ShoppingBag, Signature, Video } from 'lucide-react'
+import { BookOpen, Clapperboard, MessageCircle, Scissors, ShoppingBag, Signature, Video } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { TaskType } from '@/types'
 
@@ -10,6 +10,7 @@ export const platformIcon: Record<TaskType, LucideIcon> = {
   viral_analysis: BookOpen,
   videocreator: Video,
   videoeditor: Scissors,
+  openmontage: Clapperboard,
 }
 
 export const platformIconColor: Record<TaskType, string> = {
@@ -20,6 +21,7 @@ export const platformIconColor: Record<TaskType, string> = {
   viral_analysis: 'text-[#7C3AED]',
   videocreator: 'text-[#2563EB]',
   videoeditor: 'text-[#0F766E]',
+  openmontage: 'text-[#9333EA]',
 }
 
 export const platformBorderColor: Record<string, string> = {
@@ -30,6 +32,7 @@ export const platformBorderColor: Record<string, string> = {
   viral_analysis: 'border-l-[#7C3AED]',
   videocreator: 'border-l-[#2563EB]',
   videoeditor: 'border-l-[#0F766E]',
+  openmontage: 'border-l-[#9333EA]',
 }
 
 export const platformHoverBorderColor: Record<string, string> = {
@@ -40,6 +43,7 @@ export const platformHoverBorderColor: Record<string, string> = {
   viral_analysis: 'hover:border-l-[#7C3AED]/50',
   videocreator: 'hover:border-l-[#2563EB]/50',
   videoeditor: 'hover:border-l-[#0F766E]/50',
+  openmontage: 'hover:border-l-[#9333EA]/50',
 }
 
 export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -50,6 +54,7 @@ export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'des
   viral_analysis: 'outline',
   videocreator: 'outline',
   videoeditor: 'secondary',
+  openmontage: 'outline',
 }
 
 export const platformBgColor: Record<string, string> = {
@@ -60,6 +65,7 @@ export const platformBgColor: Record<string, string> = {
   viral_analysis: 'bg-[#7C3AED]/10',
   videocreator: 'bg-[#2563EB]/10',
   videoeditor: 'bg-[#0F766E]/10',
+  openmontage: 'bg-[#9333EA]/10',
 }
 
 export function renderPlatformIcon(type: string) {

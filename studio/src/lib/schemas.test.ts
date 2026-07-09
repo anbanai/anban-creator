@@ -293,6 +293,38 @@ describe('createTaskSchema', () => {
     expect(result.image_ratio).toBe('3:4')
     expect('moments_with_image' in result).toBe(false)
   })
+
+  it('accepts openmontage task input without exposing execution target choice', () => {
+    const result = createTaskSchema.safeParse({
+      project_id: 'project-openmontage',
+      type: 'openmontage',
+      openmontage_input: {
+        brief: '做一条新品发布短片',
+        pipeline_key: 'default',
+        preferences: {
+          aspect_ratio: '9:16',
+          duration_seconds: 30,
+        },
+      },
+    })
+
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).not.toHaveProperty('execution_target')
+    }
+  })
+
+  it('requires brief for openmontage tasks', () => {
+    const result = createTaskSchema.safeParse({
+      project_id: 'project-openmontage',
+      type: 'openmontage',
+      openmontage_input: {
+        brief: '',
+      },
+    })
+
+    expect(result.success).toBe(false)
+  })
 })
 
 describe('planSchema', () => {
@@ -376,6 +408,19 @@ describe('planSchema', () => {
     expect(result.article_with_cover).toBe(true)
     expect(result.article_with_content_images).toBe(true)
   })
+
+  it('accepts openmontage plans', () => {
+    const result = planSchema.safeParse({
+      project_id: 'project-openmontage',
+      type: 'openmontage',
+      cron_expr: '0 10 * * *',
+      openmontage_input: {
+        brief: '每天生成一条品牌短片',
+      },
+    })
+
+    expect(result.success).toBe(true)
+  })
 })
 
 describe('projectSchema', () => {
@@ -414,6 +459,21 @@ describe('projectSchema', () => {
       name: '朋友圈项目',
       instructions: '私域成交内容',
       image_ratio: '3:4',
+    }).success).toBe(true)
+  })
+
+  it('accepts openmontage project defaults', () => {
+    expect(projectSchema.safeParse({
+      platform: 'openmontage',
+      name: 'OpenMontage 项目',
+      openmontage_defaults: {
+        default_pipeline: 'social-short',
+        preferences: {
+          aspect_ratio: '9:16',
+          duration_seconds: 30,
+        },
+        delivery_targets: ['final_video'],
+      },
     }).success).toBe(true)
   })
 
