@@ -2,9 +2,14 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -93,5 +98,204 @@ func TestHandleExecution_PersistsOutcomeOnExpiredContext(t *testing.T) {
 	}
 	if found.CompletedAt == nil {
 		t.Fatalf("completed_at not set — cancel-path writes failed on expired ctx; status=%q", found.Status)
+	}
+}
+
+func TestHandleExecutionRemoteArtifactsSkipsHostWorkspaceUpload(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	createRemoteTaskFile(t, repo, store, task.ID, "output/article.md", "text/markdown", "# remote article")
+	workDir := t.TempDir()
+	writeWorkspaceFile(t, workDir, "output/local-only.md", "# should not be uploaded by server")
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success:         true,
+		WorkDir:         workDir,
+		RemoteArtifacts: true,
+		ToolUseSummary:  map[string]int{"Bash": 1},
+	}}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	files, err := repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find files: %v", err)
+	}
+	var paths []string
+	for _, file := range files {
+		paths = append(paths, file.FilePath)
+	}
+	sort.Strings(paths)
+	if got, want := strings.Join(paths, ","), "output/article.md"; got != want {
+		t.Fatalf("task file paths = %q, want only remote manifest file %q", got, want)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q, want completed; err=%q", found.Status, found.ErrorMessage)
+	}
+}
+
+func TestHandleExecutionRemoteSeednoteValidatesTaskFilesWithoutWorkDir(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	task := &model.Task{
+		ID:              uuid.New().String(),
+		UserID:          userID,
+		ProjectID:       projectID,
+		Type:            model.PlatformSeednote,
+		Status:          model.TaskStatusRunning,
+		HasContentImage: true,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	createRemoteTaskFile(t, repo, store, task.ID, "output/content.md", "text/markdown", "# 标题\n\n正文")
+	createRemoteTaskFile(t, repo, store, task.ID, "output/image-plan.md", "text/markdown", "# 图片规划")
+	createRemoteTaskFile(t, repo, store, task.ID, "output/cover.png", "image/png", "png")
+	createRemoteTaskFile(t, repo, store, task.ID, "output/image_01.png", "image/png", "png")
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success:         true,
+		RemoteArtifacts: true,
+		ToolUseSummary:  map[string]int{"generate_image": 2, "Bash": 1},
+	}}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q, want completed; err=%q", found.Status, found.ErrorMessage)
+	}
+}
+
+func TestHandleExecutionRemoteArticleApprovalReadsDraftFromTaskFiles(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Remote approval",
+		Status:   model.ProjectStatusActive,
+		Config: model.ProjectConfig{
+			EnablePublishing:       true,
+			RequirePublishApproval: true,
+		},
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	createRemoteTaskFile(t, repo, store, task.ID, "output/draft.json", "application/json", `{"articles":[{"title":"远端标题","content":"<p>远端正文</p>"}]}`)
+	pubSvc := NewPublishingService(repo, &logger)
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success:         true,
+		RemoteArtifacts: true,
+		ToolUseSummary:  map[string]int{"Bash": 1},
+	}}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, pubSvc)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q, want completed; err=%q", found.Status, found.ErrorMessage)
+	}
+	if found.PublishApprovalState != model.PublishApprovalStatePending {
+		t.Fatalf("publish approval state = %q, want pending", found.PublishApprovalState)
+	}
+	var articles []DraftArticleInput
+	if err := json.Unmarshal(found.PendingDraftArticles, &articles); err != nil {
+		t.Fatalf("unmarshal pending articles: %v", err)
+	}
+	if len(articles) != 1 || articles[0].Title != "远端标题" || articles[0].Content != "<p>远端正文</p>" {
+		t.Fatalf("pending articles = %+v, want remote draft data", articles)
+	}
+}
+
+func createRemoteTaskFile(t *testing.T, repo repository.Repository, store *fakeAudioASRStorage, taskID, relPath, mimeType, body string) {
+	t.Helper()
+	key := "uploads/test/" + taskID + "/" + relPath
+	if store.files == nil {
+		store.files = map[string][]byte{}
+	}
+	store.files[key] = []byte(body)
+	sum := sha256.Sum256([]byte(body))
+	if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{
+		TaskID:          taskID,
+		Role:            DetermineTaskFileRole(filepath.Base(relPath), mimeType),
+		FilePath:        relPath,
+		FileName:        filepath.Base(relPath),
+		MimeType:        mimeType,
+		FileSize:        int64(len(body)),
+		ContentHash:     hex.EncodeToString(sum[:]),
+		OSSKey:          key,
+		OSSURL:          store.GetURL(key),
+		StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatalf("create remote task file %s: %v", relPath, err)
 	}
 }

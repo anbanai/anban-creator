@@ -146,16 +146,22 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		}
 	}
 
-	// Upload workspace files from the host side regardless of agent success.
-	// The agent binary's in-container upload may fail (e.g. Docker networking),
-	// so we always attempt host-side upload as a safety net. Files already
-	// recorded via agent upload or MCP tool calls are skipped.
-	if result.WorkDir != "" {
+	remoteArtifacts := result != nil && result.RemoteArtifacts
+
+	// Local/Docker executors leave a host-readable WorkDir, so the server keeps
+	// the existing upload safety net. Remote Agent Pods report OSS-backed
+	// task_files through their manifest; the server must not try to read the pod
+	// filesystem path.
+	if result.WorkDir != "" && !remoteArtifacts {
 		if err := s.uploadMissingTaskFiles(persistCtx, taskID, userID, result.WorkDir); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("workspace file upload failed")
 		}
 		if err := s.RebuildWorkflowStatus(persistCtx, taskID); err != nil {
 			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to rebuild workflow status")
+		}
+	} else if remoteArtifacts {
+		if err := s.RebuildWorkflowStatus(persistCtx, taskID); err != nil {
+			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to rebuild workflow status for remote artifacts")
 		}
 	}
 
@@ -232,6 +238,14 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("list video task files: %w", err))
 			return nil
 		}
+	} else if remoteArtifacts {
+		files, err := s.repo.TaskFiles().FindByTaskID(persistCtx, task.ID)
+		if err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("list remote task files for artifact validation")
+			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("list remote task files: %w", err))
+			return nil
+		}
+		artifactValidation = agent.ValidateTaskArtifactsFromTaskFiles(task, files)
 	} else if result.WorkDir != "" || task.Type == model.PlatformSeednote {
 		artifactValidation = agent.ValidateTaskArtifactsFromWorkDir(task, result.WorkDir)
 	}
@@ -248,8 +262,10 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		if toolSummaryStr := formatToolUseSummary(result.ToolUseSummary); toolSummaryStr != "" {
 			errEvt = errEvt.Str("tools_used", toolSummaryStr)
 		}
-		if files, listErr := agent.ListWorkDirFiles(result.WorkDir); listErr == nil {
-			errEvt = errEvt.Interface("files", files)
+		if !remoteArtifacts && result.WorkDir != "" {
+			if files, listErr := agent.ListWorkDirFiles(result.WorkDir); listErr == nil {
+				errEvt = errEvt.Interface("files", files)
+			}
 		}
 		errEvt.Msg(errMsg)
 		_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("%s", errMsg))
@@ -268,7 +284,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	s.logger.Info().Str("task_id", taskID).Str("work_dir", result.WorkDir).Msg("task completed successfully")
 
 	// Log workspace file count for diagnostics.
-	if result.WorkDir != "" {
+	if result.WorkDir != "" && !remoteArtifacts {
 		s.logger.Info().
 			Str("task_id", taskID).
 			Int("file_count", meaningfulFileCount).
@@ -281,7 +297,13 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	if s.publishingSvc != nil && project != nil && project.GetEnablePublishing() {
 		published := wasPublishedByAgent(result.LogText)
 		var articles []DraftArticleInput
-		if !published && task.Type == model.ScopeArticle && result.WorkDir != "" {
+		if !published && task.Type == model.ScopeArticle && remoteArtifacts {
+			var extractErr error
+			articles, extractErr = s.extractArticleDraftFromTaskFiles(persistCtx, taskID)
+			if extractErr != nil {
+				s.logger.Error().Err(extractErr).Str("task_id", taskID).Msg("failed to extract remote article draft for auto-publish")
+			}
+		} else if !published && task.Type == model.ScopeArticle && result.WorkDir != "" {
 			var extractErr error
 			articles, extractErr = extractArticleDraftFromWorkspace(result.WorkDir)
 			if extractErr != nil {
@@ -320,7 +342,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	if err := s.repo.Tasks().SetCompletedAt(persistCtx, taskID); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
 	}
-	if s.memoryMgr != nil && result.WorkDir != "" && task.ProjectID != "" {
+	if s.memoryMgr != nil && result.WorkDir != "" && !remoteArtifacts && task.ProjectID != "" {
 		if merged, err := s.memoryMgr.Merge(persistCtx, task.ProjectID, taskID, result.WorkDir); err != nil {
 			s.logger.Warn().Err(err).Str("task_id", taskID).Str("project_id", task.ProjectID).Msg("project memory merge failed")
 		} else if merged {
@@ -659,6 +681,114 @@ func (s *TaskService) autoPublishWithData(ctx context.Context, task *model.Task,
 // already called a publish MCP tool during execution.
 func wasPublishedByAgent(logText string) bool {
 	return strings.Contains(logText, "publish_draft")
+}
+
+func (s *TaskService) extractArticleDraftFromTaskFiles(ctx context.Context, taskID string) ([]DraftArticleInput, error) {
+	if s.store == nil {
+		return nil, fmt.Errorf("storage provider is not available")
+	}
+	files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("find task files: %w", err)
+	}
+	sortTaskFilesForDraftExtraction(files)
+
+	for _, file := range files {
+		if normalizedTaskFileBase(file) != "draft.json" {
+			continue
+		}
+		data, err := s.getFileContent(ctx, file)
+		if err != nil {
+			return nil, fmt.Errorf("read draft.json task file: %w", err)
+		}
+		var draft struct {
+			Articles []DraftArticleInput `json:"articles"`
+		}
+		if err := json.Unmarshal(data, &draft); err != nil {
+			return nil, fmt.Errorf("parse draft.json task file: %w", err)
+		}
+		if len(draft.Articles) > 0 {
+			return draft.Articles, nil
+		}
+	}
+
+	for _, file := range files {
+		ext := strings.ToLower(filepath.Ext(normalizedTaskFilePath(file)))
+		if ext != ".html" && ext != ".htm" {
+			continue
+		}
+		data, err := s.getFileContent(ctx, file)
+		if err != nil {
+			return nil, fmt.Errorf("read HTML task file: %w", err)
+		}
+		content := string(data)
+		return []DraftArticleInput{{
+			Title:   extractTitleFromHTMLContent(content),
+			Content: content,
+		}}, nil
+	}
+
+	for _, file := range files {
+		ext := strings.ToLower(filepath.Ext(normalizedTaskFilePath(file)))
+		if ext != ".md" && ext != ".markdown" {
+			continue
+		}
+		data, err := s.getFileContent(ctx, file)
+		if err != nil {
+			return nil, fmt.Errorf("read Markdown task file: %w", err)
+		}
+		content := string(data)
+		return []DraftArticleInput{{
+			Title:   extractTitleFromMarkdownContent(content),
+			Content: content,
+		}}, nil
+	}
+
+	return nil, fmt.Errorf("no draft.json, HTML, or Markdown task file found")
+}
+
+func sortTaskFilesForDraftExtraction(files []*model.TaskFile) {
+	sort.Slice(files, func(i, j int) bool {
+		return normalizedTaskFilePath(files[i]) < normalizedTaskFilePath(files[j])
+	})
+}
+
+func normalizedTaskFilePath(file *model.TaskFile) string {
+	if file == nil {
+		return ""
+	}
+	path := strings.TrimSpace(file.FilePath)
+	if path == "" {
+		path = file.FileName
+	}
+	return strings.ToLower(filepath.ToSlash(path))
+}
+
+func normalizedTaskFileBase(file *model.TaskFile) string {
+	return filepath.Base(normalizedTaskFilePath(file))
+}
+
+func extractTitleFromHTMLContent(content string) string {
+	if m := h1Re.FindStringSubmatch(content); len(m) > 1 {
+		if t := cleanTitle(m[1]); t != "" {
+			return t
+		}
+	}
+	if m := titleRe.FindStringSubmatch(content); len(m) > 1 {
+		if t := cleanTitle(m[1]); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+func extractTitleFromMarkdownContent(content string) string {
+	for line := range strings.SplitSeq(content, "\n") {
+		if m := headingRe.FindStringSubmatch(line); len(m) > 1 {
+			return strings.TrimSpace(m[1])
+		}
+	}
+	return ""
 }
 
 // extractArticleDraftFromWorkspace reads the agent's draft.json from the workspace

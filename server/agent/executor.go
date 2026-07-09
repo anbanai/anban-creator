@@ -333,13 +333,14 @@ type TokenUsage struct {
 
 // ExecutionResult captures the outcome of an agent execution.
 type ExecutionResult struct {
-	Success    bool   `json:"success"`
-	Error      string `json:"error,omitempty"`
-	WorkDir    string `json:"work_dir,omitempty"`
-	LogText    string `json:"log_text,omitempty"`
-	NumTurns   int    `json:"num_turns,omitempty"`
-	SessionID  string `json:"session_id,omitempty"`
-	DurationMs int    `json:"duration_ms,omitempty"`
+	Success         bool   `json:"success"`
+	Error           string `json:"error,omitempty"`
+	WorkDir         string `json:"work_dir,omitempty"`
+	RemoteArtifacts bool   `json:"remote_artifacts,omitempty"`
+	LogText         string `json:"log_text,omitempty"`
+	NumTurns        int    `json:"num_turns,omitempty"`
+	SessionID       string `json:"session_id,omitempty"`
+	DurationMs      int    `json:"duration_ms,omitempty"`
 
 	// LLM usage metrics (populated from SDK ResultMessage).
 	DurationAPIMs int         `json:"duration_api_ms,omitempty"`
