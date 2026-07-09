@@ -2,6 +2,10 @@ package wechat
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -67,5 +71,66 @@ func TestIsRetryable(t *testing.T) {
 				t.Errorf("IsRetryable() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDownloadFileUsesBrowserCompatibleHeaders(t *testing.T) {
+	const pngHeader = "\x89PNG\r\n\x1a\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.UserAgent(), "Go-http-client") {
+			http.Error(w, "default go client blocked", http.StatusForbidden)
+			return
+		}
+		if !strings.Contains(r.Header.Get("Accept"), "image/") {
+			http.Error(w, "image accept header required", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte(pngHeader + "image-bytes"))
+	}))
+	defer srv.Close()
+
+	path, err := DownloadFile(srv.URL + "/generated.png")
+	if err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	defer os.Remove(path)
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read downloaded file: %v", err)
+	}
+	if !strings.HasPrefix(string(got), pngHeader) {
+		t.Fatalf("downloaded data = %q, want PNG bytes", string(got))
+	}
+}
+
+func TestDownloadFileReturnsDiagnosticsOnHTTPFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Server", "cloudflare")
+		w.Header().Set("Cf-Ray", "test-ray")
+		w.Header().Set("Location", "https://example.com/blocked")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("blocked by edge policy with a long body that should be truncated"))
+	}))
+	defer srv.Close()
+
+	_, err := DownloadFile(srv.URL + "/generated.png")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var dlErr *DownloadError
+	if !errors.As(err, &dlErr) {
+		t.Fatalf("error type = %T, want *DownloadError", err)
+	}
+	if dlErr.StatusCode != http.StatusForbidden {
+		t.Fatalf("StatusCode = %d, want 403", dlErr.StatusCode)
+	}
+	if dlErr.ContentType != "text/plain; charset=utf-8" || dlErr.Server != "cloudflare" || dlErr.CFRay != "test-ray" {
+		t.Fatalf("diagnostics = %#v", dlErr)
+	}
+	if dlErr.BodyPreview == "" || len(dlErr.BodyPreview) > 80 {
+		t.Fatalf("BodyPreview = %q, want short preview", dlErr.BodyPreview)
 	}
 }

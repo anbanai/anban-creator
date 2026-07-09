@@ -10,7 +10,7 @@ import ImagePreview from '@/components/designer/ImagePreview'
 import type { DesignerSettings, DesignerProvider } from '@/types/designer'
 import type { InlineMaskEditorHandle } from '@/components/designer/InlineMaskEditor'
 import { designerApi } from '@/lib/api/designer'
-import { getApiErrorMessage } from '@/lib/http-client'
+import { getApiErrorMessage, sanitizeUserFacingErrorMessage } from '@/lib/http-client'
 import type { GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types/designer'
 import { saveActiveGeneration, loadActiveGeneration, clearActiveGeneration } from '@/lib/designer-session'
 import { buildDesignerRequestSize } from '@/lib/designer-size'
@@ -137,7 +137,7 @@ export default function DesignerPage() {
         } else if (gen.status === 'failed') {
           stopPolling()
           setIsGenerating(false)
-          toast.error(gen.error || '图片生成失败')
+          toast.error(sanitizeUserFacingErrorMessage(gen.error, '图片生成失败，请稍后重试'))
           clearActiveGeneration()
         }
       } catch {
@@ -166,7 +166,7 @@ export default function DesignerPage() {
         setSelectedGenerationId(generationId)
         clearActiveGeneration()
       } else if (gen.status === 'failed') {
-        toast.error(gen.error || '图片生成失败')
+        toast.error(sanitizeUserFacingErrorMessage(gen.error, '图片生成失败，请稍后重试'))
         clearActiveGeneration()
       } else {
         setSelectedGenerationId(generationId)

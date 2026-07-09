@@ -78,9 +78,25 @@ func seednoteUnavailable() (*mcp.CallToolResult, error) {
 	})
 }
 
-func searchSeednoteFeedsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func requireSeednoteClient() (*seednote.Client, *mcp.CallToolResult, error) {
 	if svcs == nil || svcs.SeednoteClient == nil {
-		return seednoteUnavailable()
+		result, err := seednoteUnavailable()
+		return nil, result, err
+	}
+	if svcs.SeednoteReadiness != nil && !svcs.SeednoteReadiness.Ready() {
+		result, err := textResult(map[string]any{
+			"available": false,
+			"message":   "Seednote sidecar 暂不可用，正在后台连接",
+		})
+		return nil, result, err
+	}
+	return svcs.SeednoteClient, nil, nil
+}
+
+func searchSeednoteFeedsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, unavailable, err := requireSeednoteClient()
+	if unavailable != nil || err != nil {
+		return unavailable, err
 	}
 
 	args := parseArgs(req.Params.Arguments)
@@ -100,7 +116,7 @@ func searchSeednoteFeedsHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		searchReq.Filters.PublishTime = v
 	}
 
-	feeds, err := svcs.SeednoteClient.SearchFeeds(ctx, searchReq)
+	feeds, err := client.SearchFeeds(ctx, searchReq)
 	if err != nil {
 		return nil, fmt.Errorf("搜索失败: %w", err)
 	}
@@ -125,8 +141,9 @@ func searchSeednoteFeedsHandler(ctx context.Context, req *mcp.CallToolRequest) (
 }
 
 func getSeednoteFeedDetailHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.SeednoteClient == nil {
-		return seednoteUnavailable()
+	client, unavailable, err := requireSeednoteClient()
+	if unavailable != nil || err != nil {
+		return unavailable, err
 	}
 
 	args := parseArgs(req.Params.Arguments)
@@ -145,7 +162,7 @@ func getSeednoteFeedDetailHandler(ctx context.Context, req *mcp.CallToolRequest)
 		detailReq.LoadAllComments = true
 	}
 
-	detail, err := svcs.SeednoteClient.GetFeedDetail(ctx, detailReq)
+	detail, err := client.GetFeedDetail(ctx, detailReq)
 	if err != nil {
 		return nil, fmt.Errorf("获取笔记详情失败: %w", err)
 	}
@@ -185,6 +202,9 @@ func checkSeednoteLoginStatusHandler(ctx context.Context, req *mcp.CallToolReque
 	if svcs == nil || svcs.SeednoteClient == nil {
 		return textResult(map[string]any{"available": false, "logged_in": false, "message": "Seednote sidecar 未配置"})
 	}
+	if svcs.SeednoteReadiness != nil && !svcs.SeednoteReadiness.Ready() {
+		return textResult(map[string]any{"available": false, "logged_in": false, "message": "Seednote sidecar 暂不可用，正在后台连接"})
+	}
 
 	loggedIn, err := svcs.SeednoteClient.CheckLoginStatus(ctx)
 	if err != nil {
@@ -199,11 +219,12 @@ func checkSeednoteLoginStatusHandler(ctx context.Context, req *mcp.CallToolReque
 }
 
 func getSeednoteLoginQRCodeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.SeednoteClient == nil {
-		return seednoteUnavailable()
+	client, unavailable, err := requireSeednoteClient()
+	if unavailable != nil || err != nil {
+		return unavailable, err
 	}
 
-	qrBase64, err := svcs.SeednoteClient.GetLoginQRCode(ctx)
+	qrBase64, err := client.GetLoginQRCode(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("获取二维码失败: %w", err)
 	}
@@ -217,8 +238,9 @@ func getSeednoteLoginQRCodeHandler(ctx context.Context, req *mcp.CallToolRequest
 }
 
 func getSeednoteUserProfileHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.SeednoteClient == nil {
-		return seednoteUnavailable()
+	client, unavailable, err := requireSeednoteClient()
+	if unavailable != nil || err != nil {
+		return unavailable, err
 	}
 
 	args := parseArgs(req.Params.Arguments)
@@ -229,7 +251,7 @@ func getSeednoteUserProfileHandler(ctx context.Context, req *mcp.CallToolRequest
 		return errorResult("user_id is required"), nil
 	}
 
-	profile, err := svcs.SeednoteClient.GetUserProfile(ctx, userID, xsecToken)
+	profile, err := client.GetUserProfile(ctx, userID, xsecToken)
 	if err != nil {
 		return nil, fmt.Errorf("获取用户资料失败: %w", err)
 	}

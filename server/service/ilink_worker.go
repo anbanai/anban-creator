@@ -10,9 +10,17 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
+type ilinkNotificationClaimer interface {
+	ClaimDue(ctx context.Context, limit int, leaseUntil time.Time) ([]*model.IlinkNotification, error)
+	MarkDelivered(ctx context.Context, id string) error
+	MarkRetry(ctx context.Context, id string, attempts int, next time.Time, errMsg string) error
+	MarkFailed(ctx context.Context, id string, attempts int, errMsg string) error
+}
+
 type IlinkNotificationWorker struct {
-	repo       repository.Repository
+	repo       ilinkNotificationClaimer
 	sender     ilinkSender
+	readiness  Readiness
 	retryMax   int
 	interval   time.Duration
 	batchLimit int
@@ -20,6 +28,14 @@ type IlinkNotificationWorker struct {
 }
 
 func NewIlinkNotificationWorker(repo repository.Repository, sender ilinkSender, retryMax int, interval time.Duration, logger *zerolog.Logger) *IlinkNotificationWorker {
+	var notifications ilinkNotificationClaimer
+	if repo != nil {
+		notifications = repo.IlinkNotifications()
+	}
+	return NewIlinkNotificationWorkerWithStore(notifications, sender, retryMax, interval, logger)
+}
+
+func NewIlinkNotificationWorkerWithStore(repo ilinkNotificationClaimer, sender ilinkSender, retryMax int, interval time.Duration, logger *zerolog.Logger) *IlinkNotificationWorker {
 	if retryMax <= 0 {
 		retryMax = 5
 	}
@@ -27,6 +43,13 @@ func NewIlinkNotificationWorker(repo repository.Repository, sender ilinkSender, 
 		interval = 2 * time.Second
 	}
 	return &IlinkNotificationWorker{repo: repo, sender: sender, retryMax: retryMax, interval: interval, batchLimit: 50, logger: logger}
+}
+
+func (w *IlinkNotificationWorker) SetReadiness(readiness Readiness) {
+	if w == nil {
+		return
+	}
+	w.readiness = readiness
 }
 
 func (w *IlinkNotificationWorker) Run(ctx context.Context) {
@@ -46,7 +69,10 @@ func (w *IlinkNotificationWorker) Run(ctx context.Context) {
 }
 
 func (w *IlinkNotificationWorker) SendDue(ctx context.Context) {
-	items, err := w.repo.IlinkNotifications().ClaimDue(ctx, w.batchLimit, time.Now().Add(2*time.Minute))
+	if !w.ready() {
+		return
+	}
+	items, err := w.repo.ClaimDue(ctx, w.batchLimit, time.Now().Add(2*time.Minute))
 	if err != nil {
 		if w.logger != nil {
 			w.logger.Warn().Err(err).Msg("list due ilink notifications failed")
@@ -64,16 +90,20 @@ func (w *IlinkNotificationWorker) sendOne(ctx context.Context, item *model.Ilink
 	}
 	err := w.sender.SendText(ctx, item.PlatformAccountID, item.ExternalUserID, item.Body)
 	if err == nil {
-		_ = w.repo.IlinkNotifications().MarkDelivered(ctx, item.ID)
+		_ = w.repo.MarkDelivered(ctx, item.ID)
 		return
 	}
 	attempts := item.Attempts + 1
 	if attempts >= w.retryMax {
-		_ = w.repo.IlinkNotifications().MarkFailed(ctx, item.ID, attempts, err.Error())
+		_ = w.repo.MarkFailed(ctx, item.ID, attempts, err.Error())
 		return
 	}
 	delay := time.Duration(1<<min(attempts, 6)) * time.Second
-	_ = w.repo.IlinkNotifications().MarkRetry(ctx, item.ID, attempts, time.Now().Add(delay), err.Error())
+	_ = w.repo.MarkRetry(ctx, item.ID, attempts, time.Now().Add(delay), err.Error())
+}
+
+func (w *IlinkNotificationWorker) ready() bool {
+	return w != nil && (w.readiness == nil || w.readiness.Ready())
 }
 
 func min(a, b int) int {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"time"
 )
 
 var errCodeRegexp = regexp.MustCompile(`errcode=(-?\d+)`)
@@ -29,6 +30,40 @@ func (e *WechatAPIError) Unwrap() error {
 }
 
 func (e *WechatAPIError) Hint() string { return e.HintMsg }
+
+// DownloadError carries diagnostics for server-side file downloads.
+type DownloadError struct {
+	URL           string
+	StatusCode    int
+	ContentType   string
+	ContentLength string
+	Server        string
+	CFRay         string
+	Location      string
+	BodyPreview   string
+	Elapsed       time.Duration
+	Original      error
+}
+
+func (e *DownloadError) Error() string {
+	if e == nil {
+		return "download failed"
+	}
+	if e.StatusCode > 0 {
+		return fmt.Sprintf("download failed with status: %d", e.StatusCode)
+	}
+	if e.Original != nil {
+		return fmt.Sprintf("download file: %v", e.Original)
+	}
+	return "download failed"
+}
+
+func (e *DownloadError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Original
+}
 
 // knownErrors 已知错误码映射表
 var knownErrors = map[int]struct {

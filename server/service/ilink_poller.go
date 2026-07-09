@@ -13,10 +13,15 @@ import (
 
 const IlinkCursorKey = "anban:ilink:last_event_id"
 
+type ilinkEventClient interface {
+	ListEvents(ctx context.Context, afterID int64, limit int) ([]wcf.Event, error)
+}
+
 type IlinkPoller struct {
-	client       *wcf.Client
+	client       ilinkEventClient
 	gateway      *IlinkGateway
 	redis        *redis.Client
+	readiness    Readiness
 	logger       *zerolog.Logger
 	pollInterval time.Duration
 	batchLimit   int
@@ -24,11 +29,18 @@ type IlinkPoller struct {
 	lastID       int64
 }
 
-func NewIlinkPoller(client *wcf.Client, gateway *IlinkGateway, redisClient *redis.Client, pollInterval time.Duration, logger *zerolog.Logger) *IlinkPoller {
+func NewIlinkPoller(client ilinkEventClient, gateway *IlinkGateway, redisClient *redis.Client, pollInterval time.Duration, logger *zerolog.Logger) *IlinkPoller {
 	if pollInterval <= 0 {
 		pollInterval = 2 * time.Second
 	}
 	return &IlinkPoller{client: client, gateway: gateway, redis: redisClient, pollInterval: pollInterval, batchLimit: 50, logger: logger}
+}
+
+func (p *IlinkPoller) SetReadiness(readiness Readiness) {
+	if p == nil {
+		return
+	}
+	p.readiness = readiness
 }
 
 func (p *IlinkPoller) Run(ctx context.Context) {
@@ -55,6 +67,9 @@ func (p *IlinkPoller) Run(ctx context.Context) {
 }
 
 func (p *IlinkPoller) prime(ctx context.Context) int64 {
+	if !p.ready() {
+		return 0
+	}
 	var max int64
 	afterID := int64(0)
 	for {
@@ -76,6 +91,9 @@ func (p *IlinkPoller) prime(ctx context.Context) int64 {
 }
 
 func (p *IlinkPoller) poll(ctx context.Context) error {
+	if !p.ready() {
+		return nil
+	}
 	events, err := p.client.ListEvents(ctx, p.lastID, p.batchLimit)
 	if err != nil {
 		return err
@@ -106,4 +124,8 @@ func (p *IlinkPoller) loadCursor(ctx context.Context) (bool, int64) {
 	}
 	id, err := p.redis.Get(ctx, IlinkCursorKey).Int64()
 	return err == nil, id
+}
+
+func (p *IlinkPoller) ready() bool {
+	return p != nil && (p.readiness == nil || p.readiness.Ready())
 }

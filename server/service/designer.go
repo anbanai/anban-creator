@@ -523,7 +523,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	providerInst, err := providerFactory(apiCfg, s.logger)
 	if err != nil {
 		s.logger.Error().Err(err).Str("gen_id", genID).Str("provider", provider).Msg("designer: failed to create image provider")
-		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
+		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, designerGenerationUserError(err))
 		refund()
 		return
 	}
@@ -574,7 +574,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 			Str("prompt_preview", truncate(gen.Prompt, 100)).
 			Dur("elapsed", time.Since(start)).
 			Msg("designer: image generation failed")
-		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
+		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, designerGenerationUserError(err))
 		refund()
 		return
 	}
@@ -1009,6 +1009,81 @@ func (s *DesignerService) updateGenerationStatus(genID, status, errMsg string) {
 		updates["completed_at"] = &now
 	}
 	s.db.Model(&model.ImageGeneration{}).Where("id = ?", genID).Updates(updates)
+}
+
+func designerGenerationUserError(err error) string {
+	const fallback = "图片生成失败，请稍后重试"
+	if err == nil {
+		return fallback
+	}
+
+	var genErr *image.GenerateError
+	if errors.As(err, &genErr) {
+		switch genErr.Code {
+		case "url_download_error":
+			return "图片已生成，但保存到作品库失败，请稍后重试"
+		case "content_policy_violation":
+			return "提示词可能不符合内容安全要求，请调整后重试"
+		case "rate_limit", "server_error", "network_error":
+			return "图片服务繁忙，请稍后重试"
+		case "no_image":
+			return "图片服务没有返回图片，请调整提示词后重试"
+		case "endpoint_protocol", "usage_required_missing":
+			return "图片服务配置异常，请联系管理员检查模型配置"
+		}
+		return sanitizeDesignerGenerationError(genErr.Message, fallback)
+	}
+
+	return sanitizeDesignerGenerationError(err.Error(), fallback)
+}
+
+func sanitizeDesignerGenerationError(raw, fallback string) string {
+	msg := strings.TrimSpace(raw)
+	if msg == "" {
+		return fallback
+	}
+	lower := strings.ToLower(msg)
+
+	if strings.Contains(msg, "下载失败") || strings.Contains(msg, "下载图片失败") || strings.Contains(lower, "url_download_error") {
+		return "图片已生成，但保存到作品库失败，请稍后重试"
+	}
+	if strings.Contains(lower, "content policy") || strings.Contains(lower, "content_filter") ||
+		strings.Contains(msg, "敏感") || strings.Contains(msg, "审核") || strings.Contains(msg, "不合规") {
+		return "提示词可能不符合内容安全要求，请调整后重试"
+	}
+	if strings.Contains(lower, "api key") || strings.Contains(lower, "base url") || strings.Contains(lower, "endpoint") ||
+		strings.Contains(msg, "配置文件") || strings.Contains(msg, "配置异常") {
+		return "图片服务配置异常，请联系管理员检查模型配置"
+	}
+	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "timeout") ||
+		strings.Contains(msg, "稍后重试") {
+		return "图片服务繁忙，请稍后重试"
+	}
+	if looksLikeInternalDesignerError(msg) {
+		return fallback
+	}
+
+	if i := strings.IndexAny(msg, "\r\n"); i >= 0 {
+		msg = strings.TrimSpace(msg[:i])
+	}
+	if len([]rune(msg)) > 120 {
+		return fallback
+	}
+	return msg
+}
+
+func looksLikeInternalDesignerError(msg string) bool {
+	lower := strings.ToLower(msg)
+	internalMarkers := []string{
+		"{\"level\"", "\"error\"", "<br/>", "revisedprompt", "http://", "https://",
+		"[openai]", "[gemini]", "[volcengine]", "stack trace", "panic:",
+	}
+	for _, marker := range internalMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 type DesignerProviderInfo struct {

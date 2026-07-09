@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime/multipart"
 	"net/http"
 	neturl "net/url"
@@ -20,6 +19,7 @@ import (
 	wechatconfig "github.com/silenceper/wechat/v2/officialaccount/config"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"github.com/silenceper/wechat/v2/officialaccount/material"
+	"resty.dev/v3"
 )
 
 // Service 微信服务
@@ -289,21 +289,12 @@ func (s *Service) UploadMaterialWithRetry(filePath string, maxRetries int) (*Upl
 
 // DownloadFile 下载文件到临时目录
 func DownloadFile(url string) (string, error) {
-	// 创建 HTTP 客户端
-	client := &http.Client{
-		Timeout: 60 * time.Second,
-	}
-
-	// 发起请求
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", fmt.Errorf("download file: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download failed with status: %d", resp.StatusCode)
-	}
+	client := resty.New().
+		SetTimeout(60*time.Second).
+		SetHeader("User-Agent", "Mozilla/5.0 (compatible; AnbanCreator/1.0; +https://anbanai.com)").
+		SetHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8").
+		SetHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	defer client.Close()
 
 	// 创建临时文件
 	// 从 URL 路径中提取扩展名，排除查询参数
@@ -317,16 +308,52 @@ func DownloadFile(url string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
-	defer tmpFile.Close()
 	tmpPath := tmpFile.Name()
-
-	// 写入文件
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+	if err := tmpFile.Close(); err != nil {
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("write file: %w", err)
+		return "", fmt.Errorf("close temp file: %w", err)
+	}
+
+	start := time.Now()
+	resp, err := client.R().
+		SetResponseSaveFileName(tmpPath).
+		Get(url)
+	elapsed := time.Since(start)
+	if err != nil {
+		os.Remove(tmpPath)
+		return "", &DownloadError{
+			URL:      url,
+			Elapsed:  elapsed,
+			Original: err,
+		}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		os.Remove(tmpPath)
+		return "", &DownloadError{
+			URL:           url,
+			StatusCode:    resp.StatusCode(),
+			ContentType:   resp.Header().Get("Content-Type"),
+			ContentLength: resp.Header().Get("Content-Length"),
+			Server:        resp.Header().Get("Server"),
+			CFRay:         resp.Header().Get("Cf-Ray"),
+			Location:      resp.Header().Get("Location"),
+			BodyPreview:   truncateDownloadBodyPreview(resp.Bytes(), 80),
+			Elapsed:       elapsed,
+		}
 	}
 
 	return tmpPath, nil
+}
+
+func truncateDownloadBodyPreview(body []byte, max int) string {
+	if len(body) == 0 || max <= 0 {
+		return ""
+	}
+	if len(body) > max {
+		body = body[:max]
+	}
+	return string(body)
 }
 
 // CreateMultipartFormData 创建 multipart 表单数据

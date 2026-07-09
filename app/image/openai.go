@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -637,6 +638,7 @@ func (p *OpenAIProvider) saveImageData(img openai.Image) (string, error) {
 	if img.URL != "" {
 		filePath, err := wechat.DownloadFile(img.URL)
 		if err != nil {
+			p.logImageDownloadFailure(img.URL, err)
 			return "", &GenerateError{
 				Provider: p.Name(),
 				Code:     "url_download_error",
@@ -676,6 +678,7 @@ func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, e
 		result.ResponsePreview = img.URL
 		filePath, err := wechat.DownloadFile(img.URL)
 		if err != nil {
+			p.logImageDownloadFailure(img.URL, err)
 			return nil, &GenerateError{
 				Provider: p.Name(),
 				Code:     "url_download_error",
@@ -695,6 +698,34 @@ func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, e
 		Message:  "响应中没有图片 URL 或 base64 数据",
 		HintMsg:  "请确认模型支持 OpenAI Images API 图片输出",
 	}
+}
+
+func (p *OpenAIProvider) logImageDownloadFailure(rawURL string, err error) {
+	if p == nil || p.log == nil || err == nil {
+		return
+	}
+	event := p.log.Error().Err(err).Str("url_host", downloadURLHost(rawURL))
+	var dlErr *wechat.DownloadError
+	if errors.As(err, &dlErr) {
+		event = event.
+			Int("status_code", dlErr.StatusCode).
+			Str("content_type", dlErr.ContentType).
+			Str("content_length", dlErr.ContentLength).
+			Str("server", dlErr.Server).
+			Str("cf_ray", dlErr.CFRay).
+			Str("location", dlErr.Location).
+			Str("body_preview", dlErr.BodyPreview).
+			Dur("download_elapsed", dlErr.Elapsed)
+	}
+	event.Msg("openai: failed to download generated image URL")
+}
+
+func downloadURLHost(rawURL string) string {
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }
 
 func usageFromImagesResponse(usage openai.ImagesResponseUsage) *ImageGenerationUsage {

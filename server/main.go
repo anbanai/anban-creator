@@ -2,12 +2,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -157,25 +154,27 @@ func main() {
 		log.Info().Msg("WeChat service initialized")
 	}
 
-	// 9.1 Create Seednote (种草笔记) sidecar client.
-	var seednoteClient *seednote.Client
-	seednoteClient = seednote.NewClient(cfg.Seednote.BaseURL, time.Duration(cfg.Seednote.Timeout)*time.Second)
-	if awaitSidecar(log, "seednote", seednoteClient.HealthCheck, 30*time.Second) {
-		log.Info().Str("base_url", cfg.Seednote.BaseURL).Msg("Seednote sidecar client initialized")
-	} else {
-		seednoteClient = nil
-	}
+	// 9.1 Create Seednote (种草笔记) sidecar client. The client is wired
+	// immediately; readiness is tracked asynchronously so optional sidecars never
+	// block the core HTTP server from binding its port.
+	seednoteClient := seednote.NewClient(cfg.Seednote.BaseURL, time.Duration(cfg.Seednote.Timeout)*time.Second)
+	seednoteMonitor := service.NewSidecarMonitor(service.SidecarMonitorConfig{
+		Name:        "seednote",
+		HealthCheck: seednoteClient.HealthCheck,
+	}, log)
+	log.Info().Str("base_url", cfg.Seednote.BaseURL).Msg("Seednote sidecar client configured")
 
 	// 9.2 Create ilink transport client. wcflink remains the underlying HTTP
 	// sidecar, while ilink is the platform channel name.
 	var wcfClient *wcf.Client
+	var ilinkMonitor *service.SidecarMonitor
 	if cfg.Ilink.Enabled {
 		wcfClient = wcf.NewClient(cfg.Ilink.BaseURL, time.Duration(cfg.Ilink.Timeout)*time.Second)
-		if awaitSidecar(log, "ilink", wcfClient.HealthCheck, 30*time.Second) {
-			log.Info().Str("base_url", cfg.Ilink.BaseURL).Msg("ilink transport client initialized")
-		} else {
-			wcfClient = nil
-		}
+		ilinkMonitor = service.NewSidecarMonitor(service.SidecarMonitorConfig{
+			Name:        "ilink",
+			HealthCheck: wcfClient.HealthCheck,
+		}, log)
+		log.Info().Str("base_url", cfg.Ilink.BaseURL).Msg("ilink transport client configured")
 	}
 
 	// 10. Create WebSocket hub.
@@ -372,7 +371,7 @@ func main() {
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("AI entry service initialized")
 	}
 
-	if repo != nil && seednoteClient != nil {
+	if repo != nil {
 		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("SeedNote tracking service initialized")
 		if taskSvc != nil {
@@ -395,7 +394,7 @@ func main() {
 			WechatID:    cfg.Ilink.AssistantWechatID,
 			QRCodeURL:   cfg.Ilink.AssistantQRCodeURL,
 		}
-		ilinkBindingSvc = service.NewIlinkBindingService(repo, cfg.Ilink.Enabled && wcfClient != nil, assistantAccount, log)
+		ilinkBindingSvc = service.NewIlinkBindingService(repo, cfg.Ilink.Enabled, assistantAccount, log)
 		if wcfClient != nil {
 			ilinkNotifier := service.NewIlinkNotifier(repo, true, log)
 			if taskSvc != nil {
@@ -405,9 +404,9 @@ func main() {
 			conversation.SetAIEntryService(aiEntrySvc)
 			gateway := service.NewIlinkGateway(repo, ilinkBindingSvc, conversation, wcfClient, log)
 			ilinkPoller = service.NewIlinkPoller(wcfClient, gateway, rdb, time.Duration(cfg.Ilink.PollInterval)*time.Second, log)
+			ilinkPoller.SetReadiness(ilinkMonitor)
 			ilinkWorker = service.NewIlinkNotificationWorker(repo, wcfClient, cfg.Ilink.NotificationRetryMax, 2*time.Second, log)
-		} else if cfg.Ilink.Enabled {
-			log.Warn().Msg("ilink enabled but transport sidecar unreachable; notifications + chat commands disabled")
+			ilinkWorker.SetReadiness(ilinkMonitor)
 		}
 	}
 
@@ -476,9 +475,8 @@ func main() {
 			projectHandler.SetStore(store)
 			projectHandler.SetPendingUploadRepository(repo.PendingUploads())
 		}
-		if seednoteClient != nil {
-			projectHandler.SetSeednoteClient(seednoteClient)
-		}
+		projectHandler.SetSeednoteClient(seednoteClient)
+		projectHandler.SetSeednoteReadiness(seednoteMonitor)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
 			creditHandler = handler.NewCreditHandler(creditSvc, cfg, cfg.Credits.AdminAPIKey, log)
@@ -617,24 +615,25 @@ func main() {
 		}
 
 		mcp.SetServices(&mcp.Services{
-			ProjectSvc:       projectSvc,
-			Store:            store,
-			TaskSvc:          taskSvc,
-			CreditSvc:        creditSvc,
-			PlanSvc:          planSvc,
-			ImageSvc:         imageSvc,
-			VideoSvc:         videoSvc,
-			AudioASRSvc:      audioASRSvc,
-			WritingSvc:       writingSvc,
-			PublishingSvc:    publishingSvc,
-			WorkspaceSvc:     workspaceSvc,
-			TemplateSvc:      templateSvc,
-			LiveSliceSvc:     liveSliceSvc,
-			SeednoteClient:   seednoteClient,
-			TopicPoolSvc:     topicPoolSvc,
-			AgentFeedbackSvc: agentFeedbackSvc,
-			TingWuConfigured: cfg.TingWu.Complete(),
-			FunASRConfigured: cfg.FunASR.Complete(),
+			ProjectSvc:        projectSvc,
+			Store:             store,
+			TaskSvc:           taskSvc,
+			CreditSvc:         creditSvc,
+			PlanSvc:           planSvc,
+			ImageSvc:          imageSvc,
+			VideoSvc:          videoSvc,
+			AudioASRSvc:       audioASRSvc,
+			WritingSvc:        writingSvc,
+			PublishingSvc:     publishingSvc,
+			WorkspaceSvc:      workspaceSvc,
+			TemplateSvc:       templateSvc,
+			LiveSliceSvc:      liveSliceSvc,
+			SeednoteClient:    seednoteClient,
+			SeednoteReadiness: seednoteMonitor,
+			TopicPoolSvc:      topicPoolSvc,
+			AgentFeedbackSvc:  agentFeedbackSvc,
+			TingWuConfigured:  cfg.TingWu.Complete(),
+			FunASRConfigured:  cfg.FunASR.Complete(),
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcp.SetLogger(log)
@@ -756,6 +755,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	go seednoteMonitor.Run(ctx)
+	if ilinkMonitor != nil {
+		go ilinkMonitor.Run(ctx)
+	}
+
 	shutdownDone := make(chan struct{})
 	go func() {
 		<-ctx.Done()
@@ -837,51 +841,6 @@ func main() {
 		log.Warn().Msg("graceful shutdown timed out after 60s, forcing exit")
 		os.Exit(1)
 	}
-}
-
-// createTaskLogDir ensures the task log directory exists if configured.
-// awaitSidecar retries a sidecar health check until it succeeds or the wait
-// deadline elapses. Sidecars (wcfLink, seednote) bind their port asynchronously
-// after their container starts; in Docker Compose the server only waits for
-// service_started (not service_healthy), so a single probe at startup races the
-// sidecar's readiness and would nil the client — silently disabling that
-// feature for the entire process lifetime — even though the sidecar becomes
-// healthy a few seconds later. Retry with backoff instead; on final failure the
-// caller still nils the client so the rest of the stack degrades gracefully.
-func awaitSidecar(log *zerolog.Logger, name string, check func(context.Context) error, wait time.Duration) bool {
-	const interval = 2 * time.Second
-	end := time.Now().Add(wait)
-	for attempt := 1; ; attempt++ {
-		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		err := check(c)
-		cancel()
-		if err == nil {
-			if attempt > 1 {
-				log.Info().Str("sidecar", name).Int("attempts", attempt).Msg("sidecar ready after retry")
-			}
-			return true
-		}
-		if isUnresolvableHost(err) {
-			log.Error().Err(err).Str("sidecar", name).Msg("sidecar host 不可解析，对应功能将不可用")
-			return false
-		}
-		if time.Now().After(end) {
-			log.Error().Err(err).Str("sidecar", name).Msg("sidecar 不可用，对应功能将不可用")
-			return false
-		}
-		log.Warn().Err(err).Str("sidecar", name).Msg("sidecar 尚未就绪，重试中")
-		time.Sleep(interval)
-	}
-}
-
-func isUnresolvableHost(err error) bool {
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
-		err = urlErr.Err
-	}
-
-	var dnsErr *net.DNSError
-	return errors.As(err, &dnsErr) && dnsErr.IsNotFound
 }
 
 func createTaskLogDir(dir string, log *zerolog.Logger) {

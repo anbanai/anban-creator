@@ -1,6 +1,7 @@
 package image
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/anbanai/anban-creator/app/config"
+	"github.com/openai/openai-go/v3"
 	"github.com/rs/zerolog"
 )
 
@@ -660,5 +662,45 @@ func TestOpenAIGenerateClassifies429AsRateLimit(t *testing.T) {
 	}
 	if !genErr.Retryable() {
 		t.Fatalf("Retryable() = false, want true for rate_limit")
+	}
+}
+
+func TestOpenAIImageURLDownloadFailureLogsDiagnostics(t *testing.T) {
+	downloadSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Server", "cloudflare")
+		w.Header().Set("Cf-Ray", "diag-ray")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("blocked"))
+	}))
+	defer downloadSrv.Close()
+
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+	provider, err := NewOpenAIProvider(&config.ImageAPI{
+		Key:      "test-key",
+		BaseURL:  "http://openai.invalid",
+		Provider: "openai",
+		Model:    "gpt-image-2",
+	}, &logger)
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider: %v", err)
+	}
+
+	_, err = provider.imageDataToResult(openai.Image{URL: downloadSrv.URL + "/generated.png"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	logged := buf.String()
+	for _, want := range []string{
+		`"status_code":403`,
+		`"content_type":"text/plain"`,
+		`"cf_ray":"diag-ray"`,
+		`"message":"openai: failed to download generated image URL"`,
+	} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("log %s missing %s", logged, want)
+		}
 	}
 }

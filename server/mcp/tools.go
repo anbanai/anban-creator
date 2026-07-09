@@ -18,25 +18,26 @@ import (
 
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ProjectSvc       *service.ProjectService
-	Store            storage.Provider
-	TaskSvc          *service.TaskService
-	CreditSvc        *service.CreditService
-	PlanSvc          *service.PlanService
-	ImageSvc         *service.ImageService
-	VideoSvc         *service.VideoService
-	AudioASRSvc      *service.AudioASRService
-	VideoASRSvc      *service.VideoASRService
-	WritingSvc       *service.WritingService
-	PublishingSvc    *service.PublishingService
-	WorkspaceSvc     *service.WorkspaceService
-	TemplateSvc      *service.TemplateService
-	LiveSliceSvc     *service.LiveSliceService
-	SeednoteClient   *seednote.Client
-	TopicPoolSvc     *service.TopicPoolService
-	AgentFeedbackSvc *service.AgentFeedbackService
-	TingWuConfigured bool
-	FunASRConfigured bool
+	ProjectSvc        *service.ProjectService
+	Store             storage.Provider
+	TaskSvc           *service.TaskService
+	CreditSvc         *service.CreditService
+	PlanSvc           *service.PlanService
+	ImageSvc          *service.ImageService
+	VideoSvc          *service.VideoService
+	AudioASRSvc       *service.AudioASRService
+	VideoASRSvc       *service.VideoASRService
+	WritingSvc        *service.WritingService
+	PublishingSvc     *service.PublishingService
+	WorkspaceSvc      *service.WorkspaceService
+	TemplateSvc       *service.TemplateService
+	LiveSliceSvc      *service.LiveSliceService
+	SeednoteClient    *seednote.Client
+	SeednoteReadiness service.Readiness
+	TopicPoolSvc      *service.TopicPoolService
+	AgentFeedbackSvc  *service.AgentFeedbackService
+	TingWuConfigured  bool
+	FunASRConfigured  bool
 }
 
 // RegisterTools registers all MCP tools on the server.

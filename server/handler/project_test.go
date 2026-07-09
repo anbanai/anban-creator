@@ -2,7 +2,10 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,8 +19,13 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/seednote"
 	"github.com/anbanai/anban-creator/server/service"
 )
+
+type projectReadiness bool
+
+func (r projectReadiness) Ready() bool { return bool(r) }
 
 func TestProjectRequestMapsRequirePublishApproval(t *testing.T) {
 	req := projectRequest{
@@ -73,6 +81,74 @@ func setupProjectDeleteHandlerTest(t *testing.T) (*fiber.App, repository.Reposit
 	app.Post("/api/v1/projects", injectUser, h.Create)
 	app.Put("/api/v1/projects/:id", injectUser, h.Update)
 	return app, repo
+}
+
+func TestProjectHandler_SeednoteLoginStatusUnavailableWhenSidecarNotReady(t *testing.T) {
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	h := NewProjectHandler(nil, &logger)
+	h.SetSeednoteClient(seednote.NewClient("http://127.0.0.1:1", time.Second))
+	h.SetSeednoteReadiness(projectReadiness(false))
+
+	app := fiber.New()
+	app.Get("/seednote/login-status", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.SeednoteLoginStatus(c)
+	})
+
+	req := httptest.NewRequest("GET", "/seednote/login-status", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var payload struct {
+		Data struct {
+			Available bool   `json:"available"`
+			LoggedIn  bool   `json:"logged_in"`
+			Message   string `json:"message"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode response %q: %v", string(body), err)
+	}
+	if payload.Data.Available || payload.Data.LoggedIn || !strings.Contains(payload.Data.Message, "后台连接") {
+		t.Fatalf("unexpected response: %s", string(body))
+	}
+}
+
+func TestProjectHandler_FetchProfileReturnsUnavailableWhenSeednoteNotReady(t *testing.T) {
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	h := NewProjectHandler(nil, &logger)
+	h.SetSeednoteClient(seednote.NewClient("http://127.0.0.1:1", time.Second))
+	h.SetSeednoteReadiness(projectReadiness(false))
+	if h.seednoteReady == nil || h.seednoteReady.Ready() {
+		t.Fatalf("seednote readiness not installed or unexpectedly ready: %#v", h.seednoteReady)
+	}
+
+	app := fiber.New()
+	app.Post("/projects/fetch-profile", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.FetchProfile(c)
+	})
+
+	body := strings.NewReader(`{"platform":"seednote","profile_url":"https://www.xiaohongshu.com/user/profile/abc?xsec_token=test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/projects/fetch-profile", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	got, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != fiber.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", resp.StatusCode, string(got))
+	}
+	if !strings.Contains(string(got), "后台连接") {
+		t.Fatalf("body = %s, want background connection hint", string(got))
+	}
 }
 
 func TestProjectHandler_CreateFinalizesPendingAvatarAndReference(t *testing.T) {

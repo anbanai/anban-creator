@@ -148,14 +148,74 @@ export async function unwrap<T>(request: Promise<{ data: ApiResponse<T> }>): Pro
   return response.data.data
 }
 
+/** Keep backend diagnostics out of toast/error surfaces. */
+export function sanitizeUserFacingErrorMessage(message: unknown, fallback: string): string {
+  if (typeof message !== 'string') return fallback
+  const raw = message.trim()
+  if (!raw) return fallback
+  const lower = raw.toLowerCase()
+
+  if (isGeneratedImageDownloadError(raw, lower)) {
+    return '图片已生成，但保存到作品库失败，请稍后重试'
+  }
+  if (
+    lower.includes('content policy') ||
+    lower.includes('content_filter') ||
+    raw.includes('敏感') ||
+    raw.includes('审核') ||
+    raw.includes('不合规')
+  ) {
+    return '提示词可能不符合内容安全要求，请调整后重试'
+  }
+  if (
+    lower.includes('api key') ||
+    lower.includes('base url') ||
+    lower.includes('endpoint') ||
+    raw.includes('配置文件') ||
+    raw.includes('配置异常')
+  ) {
+    return '图片服务配置异常，请联系管理员检查模型配置'
+  }
+  if (lower.includes('rate limit') || lower.includes('timeout')) {
+    return '图片服务繁忙，请稍后重试'
+  }
+
+  const internalMarkers = [
+    '{"level"',
+    '"error"',
+    '<br/>',
+    'revisedprompt',
+    'http://',
+    'https://',
+    '[openai]',
+    '[gemini]',
+    '[volcengine]',
+    'stack trace',
+    'panic:',
+  ]
+  if (internalMarkers.some((marker) => lower.includes(marker))) return fallback
+
+  const firstLine = raw.split(/\r?\n/, 1)[0]?.trim() || fallback
+  return firstLine.length > 120 ? fallback : firstLine
+}
+
+function isGeneratedImageDownloadError(raw: string, lower: string): boolean {
+  return (
+    lower.includes('url_download_error') ||
+    lower.includes('revisedprompt') ||
+    raw.includes('OpenAI 图片接口返回了 URL') ||
+    raw.includes('下载图片失败')
+  )
+}
+
 /** Extract user-friendly error message from an unknown error */
 export function getApiErrorMessage(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'response' in err) {
     const resp = (err as { response?: { data?: { msg?: string; error?: string } } }).response
-    if (resp?.data?.msg) return resp.data.msg
-    if (resp?.data?.error) return resp.data.error
+    if (resp?.data?.msg) return sanitizeUserFacingErrorMessage(resp.data.msg, fallback)
+    if (resp?.data?.error) return sanitizeUserFacingErrorMessage(resp.data.error, fallback)
   }
-  if (err instanceof Error) return err.message || fallback
+  if (err instanceof Error) return sanitizeUserFacingErrorMessage(err.message, fallback)
   return fallback
 }
 

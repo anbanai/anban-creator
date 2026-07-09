@@ -38,6 +38,7 @@ type ProjectHandler struct {
 	store          storage.Provider
 	pendingUploads service.PendingUploadRepository
 	seednoteClient *seednote.Client
+	seednoteReady  service.Readiness
 }
 
 // NewProjectHandler creates a new ProjectHandler.
@@ -91,6 +92,21 @@ func (h *ProjectHandler) signProjectURLs(ctx context.Context, ch *model.Project)
 // SetSeednoteClient injects the Seednote SDK client.
 func (h *ProjectHandler) SetSeednoteClient(client *seednote.Client) {
 	h.seednoteClient = client
+}
+
+// SetSeednoteReadiness injects optional sidecar readiness state.
+func (h *ProjectHandler) SetSeednoteReadiness(readiness service.Readiness) {
+	h.seednoteReady = readiness
+}
+
+func (h *ProjectHandler) ensureSeednoteReady(c fiber.Ctx) (bool, error) {
+	if h.seednoteClient == nil {
+		return false, Error(c, fiber.StatusServiceUnavailable, "Seednote sidecar 未配置")
+	}
+	if h.seednoteReady != nil && !h.seednoteReady.Ready() {
+		return false, Error(c, fiber.StatusServiceUnavailable, "Seednote sidecar 暂不可用，正在后台连接")
+	}
+	return true, nil
 }
 
 // projectRequest is the shared request body for creating and updating a project.
@@ -537,6 +553,9 @@ func (h *ProjectHandler) FetchProfile(c fiber.Ctx) error {
 	if req.Platform != model.PlatformSeednote {
 		return Error(c, fiber.StatusBadRequest, "profile auto-fetch is only available for Seednote")
 	}
+	if ready, err := h.ensureSeednoteReady(c); !ready || err != nil {
+		return err
+	}
 
 	// Validate URL matches the platform's expected pattern.
 	pc := model.GetPlatformConfig(req.Platform)
@@ -882,6 +901,13 @@ func (h *ProjectHandler) SeednoteLoginStatus(c fiber.Ctx) error {
 			"available": false,
 			"logged_in": false,
 			"message":   "Seednote sidecar 未配置",
+		})
+	}
+	if h.seednoteReady != nil && !h.seednoteReady.Ready() {
+		return Success(c, fiber.Map{
+			"available": false,
+			"logged_in": false,
+			"message":   "Seednote sidecar 暂不可用，正在后台连接",
 		})
 	}
 
