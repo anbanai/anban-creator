@@ -243,6 +243,31 @@ describe('VideoReferenceInput', () => {
     }])
   })
 
+  it('writes selected media reference role onto the same reference item', async () => {
+    const onChange = vi.fn()
+    render(<VideoReferenceInput value={[{
+      type: 'image_url',
+      url: 'https://cdn.example.com/person.png',
+      file_name: 'person.png',
+    }]} onChange={onChange} />)
+
+    fireEvent.click(screen.getAllByRole('combobox')[1])
+    const option = await screen.findByRole('option', { name: '主体不变' })
+    fireEvent.pointerDown(option)
+    fireEvent.mouseDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.mouseUp(option)
+    fireEvent.click(option)
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith([expect.objectContaining({
+        type: 'image_url',
+        url: 'https://cdn.example.com/person.png',
+        reference_role: 'subject identity',
+      })])
+    })
+  })
+
   it('edits explicit reference transfer rules for each asset', () => {
     const onChange = vi.fn()
     function Harness() {
