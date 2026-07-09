@@ -10,6 +10,7 @@ const (
 	DefaultWorkspaceBaseName     = "anban-creator"
 	EphemeralContainerNamePrefix = "anban-creator-task-"
 	DockerAgentImageDefault      = "anban-creator-agent:latest"
+	KubernetesAgentImageDefault  = "anban-creator-server:latest"
 	OrphanedContainerNameFilter  = "^/" + EphemeralContainerNamePrefix
 )
 

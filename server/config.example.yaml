@@ -310,7 +310,9 @@ claude:
   plugin_dir: "/anbanai"
   kubernetes:
     namespace: "${ANBAN_AGENT_NAMESPACE:-anban}"
-    agent_image: "${ANBAN_AGENT_IMAGE:-anban-creator-agent:latest}"
+    # ACK production defaults to the existing server runtime image because it
+    # already contains Claude Code, Anban plugin assets, and agent binary.
+    agent_image: "${ANBAN_AGENT_IMAGE:-anban-creator-server:latest}"
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-anban-agent-runner}"
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
     workspace_mount_path: "/workspace"

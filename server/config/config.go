@@ -1543,7 +1543,7 @@ func (c *Config) applyDefaults() {
 		c.Claude.Kubernetes.Namespace = "default"
 	}
 	if c.Claude.Kubernetes.AgentImage == "" {
-		c.Claude.Kubernetes.AgentImage = c.Claude.Docker.Image
+		c.Claude.Kubernetes.AgentImage = "anban-creator-server:latest"
 	}
 	if c.Claude.Kubernetes.WorkspaceMountPath == "" {
 		c.Claude.Kubernetes.WorkspaceMountPath = "/workspace"

@@ -43,6 +43,17 @@ func TestValidateAcceptsKubernetesExecutor(t *testing.T) {
 	}
 }
 
+func TestKubernetesAgentImageDefaultsToServerRuntimeImage(t *testing.T) {
+	cfg := Config{}
+	cfg.applyDefaults()
+	if cfg.Claude.Kubernetes.AgentImage != "anban-creator-server:latest" {
+		t.Fatalf("kubernetes agent image default = %q, want production server runtime image", cfg.Claude.Kubernetes.AgentImage)
+	}
+	if cfg.Claude.Docker.Image != "anban-creator-agent:latest" {
+		t.Fatalf("docker image default = %q, want Docker executor default unchanged", cfg.Claude.Docker.Image)
+	}
+}
+
 func TestValidateKubernetesRequiresOSS(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	cfg.Storage.Provider = "local"

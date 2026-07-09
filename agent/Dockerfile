@@ -31,9 +31,26 @@ RUN npm install -g @anthropic-ai/claude-code
 COPY --from=builder /out/anban /usr/local/bin/anban
 COPY claudecode/   /anbanai/
 
+ENV CLAUDE_PLUGIN_ROOT=/anbanai
+
 USER node
-RUN git config --global http.version HTTP/1.1 && \
-    claude plugin marketplace add /anbanai && \
+RUN git config --global http.version HTTP/1.1
+
+RUN npx -y skills@1.5.14 add heygen-com/hyperframes \
+        --agent claude-code \
+        --skill music-to-video \
+        --skill slideshow \
+        --copy \
+        -g \
+        -y && \
+    npx -y skills@1.5.14 add remotion-dev/skills \
+        --agent claude-code \
+        --skill remotion-best-practices \
+        --copy \
+        -g \
+        -y
+
+RUN claude plugin marketplace add /anbanai && \
     claude plugin install --scope user anban@anbanai
 USER root
 
