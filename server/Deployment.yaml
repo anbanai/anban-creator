@@ -17,6 +17,7 @@ spec:
         app: ${micro_service_name}
         version: ${version_switch}
     spec:
+      serviceAccountName: anban-server
       containers:
         - env:
             - name: aliyun_logs_log-${micro_service_name}-${version_switch}_logstore
