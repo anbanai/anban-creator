@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +137,24 @@ func (p *OSSProvider) UploadURL(_ context.Context, key string, contentType strin
 		return "", fmt.Errorf("oss sign upload url for %s: %w", key, err)
 	}
 	return signedURL, nil
+}
+
+// StatObject fetches object metadata without downloading the object body.
+func (p *OSSProvider) StatObject(_ context.Context, key string) (*ObjectInfo, error) {
+	meta, err := p.bucket.GetObjectDetailedMeta(key)
+	if err != nil {
+		return nil, fmt.Errorf("oss stat object %s: %w", key, err)
+	}
+	size, _ := strconv.ParseInt(meta.Get("Content-Length"), 10, 64)
+	contentType := meta.Get("Content-Type")
+	etag := strings.Trim(meta.Get("ETag"), `"`)
+	return &ObjectInfo{
+		Key:         key,
+		Size:        size,
+		MimeType:    contentType,
+		ContentType: contentType,
+		ETag:        etag,
+	}, nil
 }
 
 // GetURL returns the public URL for the given key.

@@ -27,6 +27,7 @@ const (
 	DirectUploadPurposeVideoReference    = "video_reference"
 	DirectUploadPurposeDesignerReference = "designer_reference"
 	DirectUploadPurposeAIEntryAttachment = "ai_entry_attachment"
+	DirectUploadPurposeTaskArtifact      = "task_artifact"
 
 	defaultDirectUploadTTLSeconds = 15 * 60
 )

@@ -13,6 +13,15 @@ type UploadResult struct {
 	MimeType string
 }
 
+// ObjectInfo describes a stored object without downloading its body.
+type ObjectInfo struct {
+	Key         string
+	Size        int64
+	MimeType    string
+	ContentType string
+	ETag        string
+}
+
 // Provider is the interface for file storage backends.
 type Provider interface {
 	Name() string
