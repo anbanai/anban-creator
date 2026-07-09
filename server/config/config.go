@@ -197,17 +197,27 @@ type VideoModelCatalogEntry struct {
 }
 
 type MontageConfig struct {
-	Enabled                bool     `yaml:"enabled"`
-	enabledSet             bool     `yaml:"-"`
-	SubmodulePath          string   `yaml:"submodule_path"`
-	DefaultPipeline        string   `yaml:"default_pipeline"`
-	AllowedPipelines       []string `yaml:"allowed_pipelines"`
-	MaxDurationSeconds     int64    `yaml:"max_duration_seconds"`
-	MaxAssets              int      `yaml:"max_assets"`
-	TimeoutMinutes         int      `yaml:"timeout_minutes"`
-	ExecutionTargets       []string `yaml:"execution_targets"`
-	DefaultExecutionTarget string   `yaml:"default_execution_target"`
-	CreditCost             int      `yaml:"credit_cost"`
+	Enabled                bool                                   `yaml:"enabled"`
+	enabledSet             bool                                   `yaml:"-"`
+	SubmodulePath          string                                 `yaml:"submodule_path"`
+	DefaultPipeline        string                                 `yaml:"default_pipeline"`
+	AllowedPipelines       []string                               `yaml:"allowed_pipelines"`
+	MaxDurationSeconds     int64                                  `yaml:"max_duration_seconds"`
+	MaxAssets              int                                    `yaml:"max_assets"`
+	TimeoutMinutes         int                                    `yaml:"timeout_minutes"`
+	ExecutionTargets       []string                               `yaml:"execution_targets"`
+	DefaultExecutionTarget string                                 `yaml:"default_execution_target"`
+	CreditCost             int                                    `yaml:"credit_cost"`
+	ProviderEnv            map[string]string                      `yaml:"provider_env"`
+	ToolPolicy             map[string]MontageToolCapabilityPolicy `yaml:"tool_policy"`
+	PipelineDefaults       map[string]map[string]any              `yaml:"pipeline_defaults"`
+}
+
+type MontageToolCapabilityPolicy struct {
+	Preferred []string `yaml:"preferred" json:"preferred,omitempty"`
+	Allowed   []string `yaml:"allowed" json:"allowed,omitempty"`
+	Disabled  []string `yaml:"disabled" json:"disabled,omitempty"`
+	Notes     string   `yaml:"notes" json:"notes,omitempty"`
 }
 
 func (c *MontageConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -234,10 +244,10 @@ func (c *MontageConfig) ApplyDefaults() {
 		c.SubmodulePath = "third_party/OpenMontage"
 	}
 	if c.DefaultPipeline == "" {
-		c.DefaultPipeline = "default"
+		c.DefaultPipeline = "cinematic"
 	}
 	if len(c.AllowedPipelines) == 0 {
-		c.AllowedPipelines = []string{c.DefaultPipeline}
+		c.AllowedPipelines = []string{"cinematic", "talking-head", "screen-demo", "clip-factory"}
 	}
 	if c.MaxDurationSeconds <= 0 {
 		c.MaxDurationSeconds = 600
@@ -256,6 +266,15 @@ func (c *MontageConfig) ApplyDefaults() {
 	}
 	if c.CreditCost <= 0 {
 		c.CreditCost = 2000
+	}
+	if c.ProviderEnv == nil {
+		c.ProviderEnv = map[string]string{}
+	}
+	if c.ToolPolicy == nil {
+		c.ToolPolicy = map[string]MontageToolCapabilityPolicy{}
+	}
+	if c.PipelineDefaults == nil {
+		c.PipelineDefaults = map[string]map[string]any{}
 	}
 }
 
@@ -292,7 +311,41 @@ func (c MontageConfig) Validate() error {
 			return fmt.Errorf("montage.execution_targets contains invalid target %q", target)
 		}
 	}
+	for key := range c.ProviderEnv {
+		if !IsSupportedMontageProviderEnv(key) {
+			return fmt.Errorf("montage.provider_env contains unsupported key %q", key)
+		}
+	}
 	return nil
+}
+
+func (c MontageConfig) RedactedProviderEnv() map[string]bool {
+	redacted := make(map[string]bool, len(c.ProviderEnv))
+	for key, value := range c.ProviderEnv {
+		redacted[key] = strings.TrimSpace(value) != ""
+	}
+	return redacted
+}
+
+func IsSupportedMontageProviderEnv(key string) bool {
+	_, ok := supportedMontageProviderEnv[key]
+	return ok
+}
+
+var supportedMontageProviderEnv = map[string]struct{}{
+	"FAL_KEY":                 {},
+	"PEXELS_API_KEY":          {},
+	"PIXABAY_API_KEY":         {},
+	"UNSPLASH_ACCESS_KEY":     {},
+	"SUNO_API_KEY":            {},
+	"ELEVENLABS_API_KEY":      {},
+	"OPENAI_API_KEY":          {},
+	"XAI_API_KEY":             {},
+	"GOOGLE_API_KEY":          {},
+	"HEYGEN_API_KEY":          {},
+	"RUNWAY_API_KEY":          {},
+	"VIDEO_GEN_LOCAL_ENABLED": {},
+	"VIDEO_GEN_LOCAL_MODEL":   {},
 }
 
 func validMontageTarget(target string) bool {

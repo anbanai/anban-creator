@@ -49,12 +49,29 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
 
 	env := e.buildAgentEnv(&ExecutionOptions{
-		Task:    &model.Task{ID: "task-1", Type: model.PlatformMontage},
-		Project: &model.Project{ID: "project-1"},
+		Task:               &model.Task{ID: "task-1", Type: model.PlatformMontage},
+		Project:            &model.Project{ID: "project-1"},
+		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
 	})
 
 	if !slices.Contains(env, "ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage") {
 		t.Fatalf("env = %#v, want Montage runtime path", env)
+	}
+	if !slices.Contains(env, "FAL_KEY=fal-secret") {
+		t.Fatalf("env = %#v, want Montage provider env", env)
+	}
+}
+
+func TestDockerExecutorDoesNotExposeMontageProviderEnvToOtherTasks(t *testing.T) {
+	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
+
+	env := e.buildAgentEnv(&ExecutionOptions{
+		Task:               &model.Task{ID: "task-1", Type: model.PlatformArticle},
+		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
+	})
+
+	if slices.Contains(env, "FAL_KEY=fal-secret") {
+		t.Fatalf("env = %#v, non-Montage task must not receive Montage provider env", env)
 	}
 }
 

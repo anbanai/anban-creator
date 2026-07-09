@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
 
@@ -60,6 +61,58 @@ func TestMontageWorkspaceInputFileIsWritten(t *testing.T) {
 	}
 }
 
+func TestMontageRuntimeManifestFilesAreWrittenWithoutSecrets(t *testing.T) {
+	workDir := t.TempDir()
+	task := &model.Task{Type: model.PlatformMontage}
+	opts := &ExecutionOptions{
+		Task: task,
+		MontageProviderEnv: map[string]string{
+			"FAL_KEY": "fal-secret",
+		},
+		MontageToolPolicy: map[string]srvconfig.MontageToolCapabilityPolicy{
+			"video_generation": {Preferred: []string{"fal"}},
+		},
+		MontagePipelineDefaults: map[string]map[string]any{
+			"cinematic": {"budget_usd": 2.0, "video_generation": "auto"},
+		},
+	}
+
+	if err := writeMontageRuntimeFiles(workDir, opts); err != nil {
+		t.Fatalf("writeMontageRuntimeFiles: %v", err)
+	}
+
+	policy := readRepoFile(t, filepath.Join(workDir, "montage-tool-policy.json"))
+	if !strings.Contains(policy, "video_generation") || !strings.Contains(policy, "fal") {
+		t.Fatalf("montage-tool-policy.json = %s, want configured policy", policy)
+	}
+	defaults := readRepoFile(t, filepath.Join(workDir, "montage-pipeline-defaults.json"))
+	if !strings.Contains(defaults, "cinematic") || !strings.Contains(defaults, "budget_usd") {
+		t.Fatalf("montage-pipeline-defaults.json = %s, want configured defaults", defaults)
+	}
+	combined := policy + defaults
+	if strings.Contains(combined, "fal-secret") {
+		t.Fatalf("runtime manifests leaked provider secret: %s", combined)
+	}
+}
+
+func TestMontageRuntimeManifestFilesUseEmptyObjectsWhenUnset(t *testing.T) {
+	workDir := t.TempDir()
+	opts := &ExecutionOptions{Task: &model.Task{Type: model.PlatformMontage}}
+
+	if err := writeMontageRuntimeFiles(workDir, opts); err != nil {
+		t.Fatalf("writeMontageRuntimeFiles: %v", err)
+	}
+	for _, name := range []string{"montage-tool-policy.json", "montage-pipeline-defaults.json"} {
+		data, err := os.ReadFile(filepath.Join(workDir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if strings.TrimSpace(string(data)) != "{}" {
+			t.Fatalf("%s = %q, want empty JSON object", name, data)
+		}
+	}
+}
+
 func TestMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
 	task := &model.Task{Type: model.PlatformMontage}
 
@@ -106,8 +159,11 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"skills:",
 		"- montage",
 		"montage-input.json",
+		"montage-tool-policy.json",
+		"montage-pipeline-defaults.json",
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"provider_menu_summary",
 		"delivery-manifest.json",
 		"final.mp4",
 		"submit_agent_feedback",
@@ -131,8 +187,11 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 	for _, want := range []string{
 		`name = "montage"`,
 		"montage-input.json",
+		"montage-tool-policy.json",
+		"montage-pipeline-defaults.json",
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"provider_menu_summary",
 		"delivery-manifest.json",
 		"final_video",
 		`submit_agent_feedback(agent_name=\"montage\"`,
@@ -167,8 +226,12 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 	for _, want := range []string{
 		"name: montage",
 		"montage-input.json",
+		"montage-tool-policy.json",
+		"montage-pipeline-defaults.json",
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"provider_menu_summary",
+		"Secrets only arrive through environment variables",
 		"delivery-manifest.json",
 		"third_party/OpenMontage",
 		"Do not call `create_video_generation_job`",

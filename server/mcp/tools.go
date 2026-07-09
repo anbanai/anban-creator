@@ -525,16 +525,33 @@ func buildMontageProfileBlock(ch *model.Project, task *model.Task) map[string]an
 	if task != nil && model.IsMontagePlatform(task.Type) {
 		input = task.MontageInput.Data()
 	}
+	providerEnv := map[string]bool{}
+	toolPolicy := map[string]any{}
+	pipelineDefaults := map[string]any{}
+	if billSvc != nil && billSvc.config != nil {
+		providerEnv = billSvc.config.Montage.RedactedProviderEnv()
+		for key, value := range billSvc.config.Montage.ToolPolicy {
+			toolPolicy[key] = value
+		}
+		for key, value := range billSvc.config.Montage.PipelineDefaults {
+			pipelineDefaults[key] = value
+		}
+	}
 	return map[string]any{
-		"defaults":              defaults,
-		"input":                 input,
-		"source_asset_count":    len(input.SourceAssets),
-		"workspace_input_file":  "montage-input.json",
-		"project_manifest_file": "montage-project.json",
-		"output_dir":            "output/montage",
-		"required_artifacts":    []string{"final.mp4", "delivery-manifest.json"},
-		"artifact_roles":        []string{"final_video", "delivery_manifest", "source_manifest", "timeline", "subtitles", "audio", "run_log", "failure_diagnosis"},
-		"runner_contract":       "Agent prepares montage-input.json and montage-project.json, runs the Montage adapter from $ANBAN_MONTAGE_SUBMODULE_PATH when set, otherwise third_party/OpenMontage, then registers task files by artifact role.",
+		"defaults":               defaults,
+		"input":                  input,
+		"source_asset_count":     len(input.SourceAssets),
+		"workspace_input_file":   "montage-input.json",
+		"tool_policy_file":       "montage-tool-policy.json",
+		"pipeline_defaults_file": "montage-pipeline-defaults.json",
+		"project_manifest_file":  "montage-project.json",
+		"output_dir":             "output/montage",
+		"required_artifacts":     []string{"final.mp4", "delivery-manifest.json"},
+		"artifact_roles":         []string{"final_video", "delivery_manifest", "source_manifest", "timeline", "subtitles", "audio", "run_log", "failure_diagnosis"},
+		"provider_env":           providerEnv,
+		"tool_policy":            toolPolicy,
+		"pipeline_defaults":      pipelineDefaults,
+		"runner_contract":        "Agent prepares montage-input.json and montage-project.json, runs the Montage adapter from $ANBAN_MONTAGE_SUBMODULE_PATH when set, otherwise third_party/OpenMontage, then registers task files by artifact role.",
 	}
 }
 

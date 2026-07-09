@@ -1205,10 +1205,74 @@ func TestTaskService_ClearArtifactTitles(t *testing.T) {
 type fakeTaskExecutor struct {
 	result *agent.ExecutionResult
 	err    error
+	opts   *agent.ExecutionOptions
 }
 
 func (f *fakeTaskExecutor) Execute(ctx context.Context, opts *agent.ExecutionOptions) (*agent.ExecutionResult, error) {
+	f.opts = opts
 	return f.result, f.err
+}
+
+func TestTaskServiceHandleExecutionPassesMontageRuntimeConfig(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformMontage,
+		Status:    model.TaskStatusRunning,
+	}
+	task.SetMontageInput(model.MontageInput{Brief: "做短片"})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	exec := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: false, Error: "stop after options"}}
+	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc.SetMontageConfig(config.MontageConfig{
+		Enabled:                true,
+		SubmodulePath:          "third_party/OpenMontage",
+		DefaultPipeline:        "cinematic",
+		AllowedPipelines:       []string{"cinematic"},
+		MaxDurationSeconds:     600,
+		MaxAssets:              20,
+		TimeoutMinutes:         90,
+		ExecutionTargets:       []string{"cloud"},
+		DefaultExecutionTarget: "cloud",
+		ProviderEnv:            map[string]string{"FAL_KEY": "fal-secret"},
+		ToolPolicy: map[string]config.MontageToolCapabilityPolicy{
+			"video_generation": {Preferred: []string{"fal"}},
+		},
+		PipelineDefaults: map[string]map[string]any{
+			"cinematic": {"budget_usd": 2.0},
+		},
+	})
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	if exec.opts == nil {
+		t.Fatal("executor options were not captured")
+	}
+	if exec.opts.MontageProviderEnv["FAL_KEY"] != "fal-secret" {
+		t.Fatalf("MontageProviderEnv = %#v, want FAL_KEY", exec.opts.MontageProviderEnv)
+	}
+	if exec.opts.MontageToolPolicy["video_generation"].Preferred[0] != "fal" {
+		t.Fatalf("MontageToolPolicy = %#v, want video_generation preference", exec.opts.MontageToolPolicy)
+	}
+	if exec.opts.MontagePipelineDefaults["cinematic"]["budget_usd"] != 2.0 {
+		t.Fatalf("MontagePipelineDefaults = %#v, want cinematic budget", exec.opts.MontagePipelineDefaults)
+	}
 }
 
 func TestTaskService_ExecuteDoesNotExtractTitleFromWorkspace(t *testing.T) {

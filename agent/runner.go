@@ -49,6 +49,9 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 			_ = r.reporter.ReportProgress(ctx, strings.TrimSpace(line))
 		}),
 	}
+	for key, value := range montageProviderEnvFromProcess(r.cfg.TaskType) {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
+	}
 	if r.cfg.Model != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithModel(r.cfg.Model))
 		_ = r.reporter.ReportProgress(ctx, fmt.Sprintf("agent model: %s", r.cfg.Model))

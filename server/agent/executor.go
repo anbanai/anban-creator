@@ -333,6 +333,12 @@ type ExecutionOptions struct {
 	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
 	// AutoMemoryDirectory is the Claude Code-visible memory directory for this task.
 	AutoMemoryDirectory string
+	// Montage runtime configuration is only used for montage tasks. ProviderEnv
+	// may contain secrets and must only be injected into the agent process env,
+	// never written to workspace files, MCP profile responses, or logs.
+	MontageProviderEnv      map[string]string
+	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
+	MontagePipelineDefaults map[string]map[string]any
 }
 
 // TokenUsage captures LLM token consumption for a task execution.
@@ -504,6 +510,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	if err := writeMontageInputJSON(workDir, opts.Task); err != nil {
 		return nil, err
 	}
+	if err := writeMontageRuntimeFiles(workDir, opts); err != nil {
+		return nil, err
+	}
 
 	// 3.5. Resolve API key for MCP authentication.
 	// Tries per-user key first, falls back to system key.
@@ -612,6 +621,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// Environment variables (auth tokens, API keys, etc.).
 	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
 	sdkOpts = append(sdkOpts, claudecode.WithEnvVar(MontageSubmoduleEnvName, montageSubmoduleRuntimePath(e.pluginDir)))
+	for key, value := range montageProviderEnvForTask(opts) {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
+	}
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
 	// ${ANBAN_API_KEY} for the Anban Creator MCP server.
@@ -946,6 +958,52 @@ func writeMontageInputJSON(workDir string, task *model.Task) error {
 		return fmt.Errorf("write montage-input.json: %w", err)
 	}
 	return nil
+}
+
+func writeMontageRuntimeFiles(workDir string, opts *ExecutionOptions) error {
+	if opts == nil || opts.Task == nil || !model.IsMontagePlatform(opts.Task.Type) {
+		return nil
+	}
+	toolPolicy := opts.MontageToolPolicy
+	if toolPolicy == nil {
+		toolPolicy = map[string]srvconfig.MontageToolCapabilityPolicy{}
+	}
+	pipelineDefaults := opts.MontagePipelineDefaults
+	if pipelineDefaults == nil {
+		pipelineDefaults = map[string]map[string]any{}
+	}
+	if err := writeJSONFile(filepath.Join(workDir, "montage-tool-policy.json"), toolPolicy); err != nil {
+		return fmt.Errorf("write montage-tool-policy.json: %w", err)
+	}
+	if err := writeJSONFile(filepath.Join(workDir, "montage-pipeline-defaults.json"), pipelineDefaults); err != nil {
+		return fmt.Errorf("write montage-pipeline-defaults.json: %w", err)
+	}
+	return nil
+}
+
+func writeJSONFile(path string, value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func montageProviderEnvForTask(opts *ExecutionOptions) map[string]string {
+	if opts == nil || opts.Task == nil || !model.IsMontagePlatform(opts.Task.Type) {
+		return nil
+	}
+	env := make(map[string]string, len(opts.MontageProviderEnv))
+	for key, value := range opts.MontageProviderEnv {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		if !srvconfig.IsSupportedMontageProviderEnv(key) {
+			continue
+		}
+		env[key] = value
+	}
+	return env
 }
 
 // ListWorkDirFiles returns a recursive listing of files in workDir.

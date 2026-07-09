@@ -165,10 +165,12 @@ montage:
   # 上游 OpenMontage git submodule 路径。生产镜像构建时必须执行
   # `git submodule update --init --recursive third_party/OpenMontage`。
   submodule_path: "third_party/OpenMontage"
-  # 未指定 pipeline_key 时使用的默认 pipeline；必须包含在 allowed_pipelines 中。
-  default_pipeline: "default"
-  # 允许 Studio/API 选择的 pipeline 白名单。新增上游 pipeline 后先做 adapter contract test。
-  allowed_pipelines: ["default"]
+  # 未指定 pipeline_key 时使用的默认 OpenMontage pipeline；必须包含在 allowed_pipelines 中。
+  # 生产建议选择已验证的上游 pipeline，例如 cinematic、talking-head、screen-demo、clip-factory。
+  default_pipeline: "cinematic"
+  # 允许 Studio/API 选择的 pipeline 白名单。新增上游 pipeline 后先做 adapter contract test，
+  # 并确认 third_party/OpenMontage/pipeline_defs/<name>.yaml 存在。
+  allowed_pipelines: ["cinematic", "talking-head", "screen-demo", "clip-factory"]
   # 单个 Montage 任务允许的最长成片时长，单位秒。
   max_duration_seconds: 600
   # 单个 Montage 任务允许引用/上传的最大素材数量。
@@ -176,11 +178,69 @@ montage:
   # Agent/Montage runner 的业务超时，单位分钟；应小于或等于 executor/pod 超时。
   timeout_minutes: 90
   # 系统允许的执行目标。生产推荐 ["cloud"]；本地开发可临时加入 "local"。
-  execution_targets: ["cloud", "local"]
+  execution_targets: ["cloud"]
   # 系统默认执行目标。cloud 表示进入云端 Agent 队列；local 仅用于开发/桌面调试。
   default_execution_target: "cloud"
   # Montage 基础任务服务费，单位 credits；同时保持 credits.task_costs.montage 一致。
   credit_cost: 2000
+  # OpenMontage 官方工具环境变量。这里只写环境变量引用，不写明文密钥。
+  # 这些值只会注入 montage 任务的 Agent/Claude SDK 进程，不会写入 MCP profile、日志或 task files。
+  provider_env:
+    # FAL：FLUX/Recraft 图片、Veo/Kling/MiniMax 等视频生成 provider。
+    FAL_KEY: "${MONTAGE_FAL_KEY}"
+    # Pexels：免费视频/图片素材搜索。
+    PEXELS_API_KEY: "${MONTAGE_PEXELS_API_KEY}"
+    # Pixabay：免费视频/图片素材搜索。
+    PIXABAY_API_KEY: "${MONTAGE_PIXABAY_API_KEY}"
+    # Unsplash：免费图片素材搜索。
+    UNSPLASH_ACCESS_KEY: "${MONTAGE_UNSPLASH_ACCESS_KEY}"
+    # Suno：歌曲、配乐、instrumental 音乐生成。
+    SUNO_API_KEY: "${MONTAGE_SUNO_API_KEY}"
+    # ElevenLabs：高质量 TTS、音乐、音效。
+    ELEVENLABS_API_KEY: "${MONTAGE_ELEVENLABS_API_KEY}"
+    # OpenAI：OpenAI TTS、GPT Image 等 provider。
+    OPENAI_API_KEY: "${MONTAGE_OPENAI_API_KEY}"
+    # xAI：Grok 图片/视频生成 provider。
+    XAI_API_KEY: "${MONTAGE_XAI_API_KEY}"
+    # Google：Imagen、Google TTS 等 provider。
+    GOOGLE_API_KEY: "${MONTAGE_GOOGLE_API_KEY}"
+    # HeyGen：VEO、Sora、Runway、Kling 网关型视频 provider。
+    HEYGEN_API_KEY: "${MONTAGE_HEYGEN_API_KEY}"
+    # Runway：Runway Gen-4 direct provider。
+    RUNWAY_API_KEY: "${MONTAGE_RUNWAY_API_KEY}"
+    # 本地 GPU 视频生成开关。仅当 Agent 镜像和节点确实具备对应模型/驱动时开启。
+    VIDEO_GEN_LOCAL_ENABLED: "${MONTAGE_VIDEO_GEN_LOCAL_ENABLED:-false}"
+    # 本地 GPU 视频模型名，例如 wan2.1-1.3b、wan2.1-14b、hunyuan-1.5、ltx2-local、cogvideo-5b。
+    VIDEO_GEN_LOCAL_MODEL: "${MONTAGE_VIDEO_GEN_LOCAL_MODEL:-}"
+  # OpenMontage 能力层策略。Anban 只传偏好；真实 provider 可用性和选择由 OpenMontage registry/selector 判断。
+  tool_policy:
+    video_generation:
+      preferred: ["fal", "runway", "heygen"]
+    image_generation:
+      preferred: ["fal", "openai", "google"]
+    tts:
+      preferred: ["elevenlabs", "openai", "google"]
+    music:
+      preferred: ["suno", "elevenlabs"]
+    stock_media:
+      preferred: ["pexels", "pixabay", "unsplash"]
+    render:
+      preferred: ["remotion"]
+  # pipeline 级默认非密钥参数。Agent 会写入 montage-pipeline-defaults.json，
+  # 再由 OpenMontage pipeline manifest 和 registry 解释；不要在这里放 API key。
+  pipeline_defaults:
+    cinematic:
+      budget_usd: 2.00
+      render: "remotion"
+      video_generation: "auto"
+      image_generation: "auto"
+      tts: "auto"
+      music: "auto"
+    talking-head:
+      budget_usd: 0.50
+      transcription: "auto"
+      subtitles: "burned_in"
+      audio_processing: "auto"
 
 model_prices:
   currency_rates:

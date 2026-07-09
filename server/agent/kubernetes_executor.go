@@ -230,6 +230,12 @@ func (e *KubernetesExecutor) prepareWorkspaceBundle(ctx context.Context, opts *E
 			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
 		}
 	}
+	if err := writeMontageInputJSON(bundleDir, opts.Task); err != nil {
+		return fail(err)
+	}
+	if err := writeMontageRuntimeFiles(bundleDir, opts); err != nil {
+		return fail(err)
+	}
 
 	return bundleDir, cleanup, nil
 }
@@ -314,6 +320,9 @@ func (e *KubernetesExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	}
 	env = append(env, fmt.Sprintf("ANBAN_API_URL=%s", strings.TrimRight(e.serverURL, "/")))
 	env = append(env, fmt.Sprintf("%s=%s", MontageSubmoduleEnvName, ContainerMontageSubmodulePath))
+	for key, value := range montageProviderEnvForTask(opts) {
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
 	return env
 }
 

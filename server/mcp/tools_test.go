@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/app/writer"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -1018,6 +1019,20 @@ func TestBuildAccountInfo_EcommerceProjectAutoReturnsEcommerceBlockWithoutScope(
 func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
+	oldBillSvc := billSvc
+	defer func() { billSvc = oldBillSvc }()
+	SetBillingServices(nil, nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{
+		ProviderEnv: map[string]string{
+			"FAL_KEY":        "fal-secret",
+			"RUNWAY_API_KEY": "",
+		},
+		ToolPolicy: map[string]srvconfig.MontageToolCapabilityPolicy{
+			"video_generation": {Preferred: []string{"fal"}},
+		},
+		PipelineDefaults: map[string]map[string]any{
+			"social-short": {"budget_usd": 2.0, "video_generation": "auto"},
+		},
+	}})
 	ctx := context.Background()
 	userID := uuid.New().String()
 	ch := &model.Project{
@@ -1092,9 +1107,67 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	if !ok || defaults.DefaultPipeline != "social-short" || defaults.Preferences.DurationSeconds != 45 {
 		t.Fatalf("montage.defaults = %#v, want project montage defaults", montage["defaults"])
 	}
-	if contract, ok := montage["runner_contract"].(string); !ok || !strings.Contains(contract, "ANBAN_MONTAGE_SUBMODULE_PATH") {
+	contract, ok := montage["runner_contract"].(string)
+	if !ok || !strings.Contains(contract, "ANBAN_MONTAGE_SUBMODULE_PATH") {
 		t.Fatalf("runner_contract = %#v, want Montage runtime env path hint", montage["runner_contract"])
 	}
+	providerEnv, ok := montage["provider_env"].(map[string]bool)
+	if !ok {
+		t.Fatalf("provider_env = %#v, want redacted map", montage["provider_env"])
+	}
+	if providerEnv["FAL_KEY"] != true || providerEnv["RUNWAY_API_KEY"] != false {
+		t.Fatalf("provider_env = %#v, want configured statuses", providerEnv)
+	}
+	toolPolicy, ok := montage["tool_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool_policy = %#v, want configured Montage tool policy", montage["tool_policy"])
+	}
+	videoPolicy, ok := toolPolicy["video_generation"].(srvconfig.MontageToolCapabilityPolicy)
+	if !ok || len(videoPolicy.Preferred) != 1 || videoPolicy.Preferred[0] != "fal" {
+		t.Fatalf("tool_policy.video_generation = %#v, want configured preference", toolPolicy["video_generation"])
+	}
+	pipelineDefaults, ok := montage["pipeline_defaults"].(map[string]any)
+	if !ok {
+		t.Fatalf("pipeline_defaults = %#v, want configured Montage pipeline defaults", montage["pipeline_defaults"])
+	}
+	socialShort, ok := pipelineDefaults["social-short"].(map[string]any)
+	if !ok || socialShort["video_generation"] != "auto" {
+		t.Fatalf("pipeline_defaults.social-short = %#v, want configured defaults", pipelineDefaults["social-short"])
+	}
+	if strings.Contains(strings.Join([]string{
+		contract,
+		toJSONForTest(t, montage["provider_env"]),
+		toJSONForTest(t, montage["tool_policy"]),
+		toJSONForTest(t, montage["pipeline_defaults"]),
+	}, "\n"), "fal-secret") {
+		t.Fatalf("montage profile leaked provider secret: %#v", montage)
+	}
+}
+
+func TestBuildMontageProfileBlockReturnsEmptyObjectsForUnsetRuntimeConfig(t *testing.T) {
+	oldBillSvc := billSvc
+	defer func() { billSvc = oldBillSvc }()
+	SetBillingServices(nil, nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{}})
+
+	block := buildMontageProfileBlock(&model.Project{Platform: model.PlatformMontage}, &model.Task{Type: model.PlatformMontage})
+	for _, key := range []string{"provider_env", "tool_policy", "pipeline_defaults"} {
+		data, err := json.Marshal(block[key])
+		if err != nil {
+			t.Fatalf("marshal %s: %v", key, err)
+		}
+		if string(data) != "{}" {
+			t.Fatalf("%s marshals to %s, want {}", key, data)
+		}
+	}
+}
+
+func toJSONForTest(t *testing.T, value any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal test value: %v", err)
+	}
+	return string(data)
 }
 
 func TestParseStringArray(t *testing.T) {

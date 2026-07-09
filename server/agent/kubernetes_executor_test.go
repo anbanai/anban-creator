@@ -93,7 +93,11 @@ func TestKubernetesAgentEnvIncludesServerProjectAndClaudeEnv(t *testing.T) {
 		},
 		serverURL: "http://anban-server:8080",
 	}
-	env := e.buildAgentEnv(&ExecutionOptions{Project: &model.Project{ID: "project-1"}})
+	env := e.buildAgentEnv(&ExecutionOptions{
+		Task:               &model.Task{ID: "task-1", Type: model.PlatformMontage},
+		Project:            &model.Project{ID: "project-1"},
+		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
+	})
 
 	for _, want := range []string{
 		"PATH=/usr/local/bin:/usr/bin:/bin",
@@ -102,10 +106,24 @@ func TestKubernetesAgentEnvIncludesServerProjectAndClaudeEnv(t *testing.T) {
 		"ANBAN_API_URL=http://anban-server:8080",
 		"ANBAN_DEFAULT_PROJECT=project-1",
 		"ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage",
+		"FAL_KEY=fal-secret",
 	} {
 		if !slices.Contains(env, want) {
 			t.Fatalf("env missing %q in %#v", want, env)
 		}
+	}
+}
+
+func TestKubernetesAgentEnvSkipsMontageProviderEnvForOtherTasks(t *testing.T) {
+	e := &KubernetesExecutor{serverURL: "http://anban-server:8080"}
+
+	env := e.buildAgentEnv(&ExecutionOptions{
+		Task:               &model.Task{ID: "task-1", Type: model.PlatformArticle},
+		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
+	})
+
+	if slices.Contains(env, "FAL_KEY=fal-secret") {
+		t.Fatalf("env = %#v, non-Montage task must not receive Montage provider env", env)
 	}
 }
 

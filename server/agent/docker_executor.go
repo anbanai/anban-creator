@@ -205,6 +205,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
 		}
 	}
+	if err := writeMontageInputJSON(workDir, opts.Task); err != nil {
+		return nil, err
+	}
+	if err := writeMontageRuntimeFiles(workDir, opts); err != nil {
+		return nil, err
+	}
 
 	apiKey, err := e.resolveAgentAPIKey(ctx, opts)
 	if err != nil {
@@ -352,6 +358,9 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	}
 	env = append(env, fmt.Sprintf("ANBAN_API_URL=%s", e.serverURL))
 	env = append(env, fmt.Sprintf("%s=%s", MontageSubmoduleEnvName, ContainerMontageSubmodulePath))
+	for key, value := range montageProviderEnvForTask(opts) {
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
 	return env
 }
 

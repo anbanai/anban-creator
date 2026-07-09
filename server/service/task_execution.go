@@ -126,6 +126,11 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 			}
 		},
 	}
+	if model.IsMontagePlatform(task.Type) {
+		opts.MontageProviderEnv = s.montageCfg.ProviderEnv
+		opts.MontageToolPolicy = s.montageCfg.ToolPolicy
+		opts.MontagePipelineDefaults = s.montageCfg.PipelineDefaults
+	}
 
 	result, execErr := s.executor.Execute(execCtx, opts)
 
