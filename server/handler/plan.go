@@ -91,29 +91,29 @@ type createPlanRequest struct {
 	HasTailImage    *bool `json:"has_tail_image,omitempty"`
 	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
 	// (cover NOT mandatory). nil → fall back to plan model defaults (both on).
-	ArticleWithCover         *bool                   `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
-	VideoCreatorConfig       *model.VideoTaskConfig  `json:"video_creator_config,omitempty"`
-	VideoCreatorInput        *model.VideoInput       `json:"video_creator_input,omitempty"`
-	MontageInput         *model.MontageInput `json:"montage_input,omitempty"`
+	ArticleWithCover         *bool                  `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool                  `json:"article_with_content_images,omitempty"`
+	VideoCreatorConfig       *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
+	VideoCreatorInput        *model.VideoInput      `json:"video_creator_input,omitempty"`
+	MontageInput             *model.MontageInput    `json:"montage_input,omitempty"`
 }
 
 type updatePlanRequest struct {
-	CronExpr                 string                  `json:"cron_expr"`
-	Prompt                   string                  `json:"prompt"`
-	ImageModelKey            *string                 `json:"image_model_key"`
-	SkipReferenceImage       *bool                   `json:"skip_reference_image"`
-	ReferenceImageURL        *string                 `json:"reference_image_url"`
-	Watermark                *bool                   `json:"watermark"`
-	Goal                     string                  `json:"goal"`
-	GoalMode                 *bool                   `json:"goal_mode"`
-	HasContentImage          *bool                   `json:"has_content_image,omitempty"`
-	HasTailImage             *bool                   `json:"has_tail_image,omitempty"`
-	ArticleWithCover         *bool                   `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
-	VideoCreatorConfig       *model.VideoTaskConfig  `json:"video_creator_config,omitempty"`
-	VideoCreatorInput        *model.VideoInput       `json:"video_creator_input,omitempty"`
-	MontageInput         *model.MontageInput `json:"montage_input,omitempty"`
+	CronExpr                 string                 `json:"cron_expr"`
+	Prompt                   string                 `json:"prompt"`
+	ImageModelKey            *string                `json:"image_model_key"`
+	SkipReferenceImage       *bool                  `json:"skip_reference_image"`
+	ReferenceImageURL        *string                `json:"reference_image_url"`
+	Watermark                *bool                  `json:"watermark"`
+	Goal                     string                 `json:"goal"`
+	GoalMode                 *bool                  `json:"goal_mode"`
+	HasContentImage          *bool                  `json:"has_content_image,omitempty"`
+	HasTailImage             *bool                  `json:"has_tail_image,omitempty"`
+	ArticleWithCover         *bool                  `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool                  `json:"article_with_content_images,omitempty"`
+	VideoCreatorConfig       *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
+	VideoCreatorInput        *model.VideoInput      `json:"video_creator_input,omitempty"`
+	MontageInput             *model.MontageInput    `json:"montage_input,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -161,7 +161,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, openMontageSourceAssetURLs(req.MontageInput)); err != nil {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput)); err != nil {
 				return Error(c, fiber.StatusBadRequest, err.Error())
 			}
 		}
@@ -184,7 +184,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		VideoCreatorConfig:       req.VideoCreatorConfig,
 		VideoCreatorInput:        req.VideoCreatorInput,
-		MontageInput:         req.MontageInput,
+		MontageInput:             req.MontageInput,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
@@ -326,7 +326,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if model.IsMontagePlatform(existing.Type) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, openMontageSourceAssetURLs(req.MontageInput)); err != nil {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput)); err != nil {
 				return Error(c, fiber.StatusBadRequest, err.Error())
 			}
 		}
@@ -348,7 +348,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		VideoCreatorConfig:       req.VideoCreatorConfig,
 		VideoCreatorInput:        req.VideoCreatorInput,
-		MontageInput:         req.MontageInput,
+		MontageInput:             req.MontageInput,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")

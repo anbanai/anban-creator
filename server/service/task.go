@@ -51,7 +51,7 @@ type TaskService struct {
 	videoCatalog          VideoModelCatalog
 	videoCreditMultiplier int
 	videoBilling          srvconfig.BillingConfig
-	montageCfg        srvconfig.MontageConfig
+	montageCfg            srvconfig.MontageConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
 	ilinkNotifier  *IlinkNotifier
@@ -154,6 +154,10 @@ func defaultMontageServiceConfig() srvconfig.MontageConfig {
 	cfg := srvconfig.MontageConfig{}
 	cfg.ApplyDefaults()
 	return cfg
+}
+
+func (s *TaskService) montageCloudAvailable() bool {
+	return s != nil && (s.enqueuer != nil || s.executor != nil)
 }
 
 func (s *TaskService) resolvedVideoCatalog() VideoModelCatalog {
@@ -438,7 +442,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Config:          s.montageCfg,
 			TaskType:        taskType,
 			LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
-			CloudAvailable:  true,
+			CloudAvailable:  s.montageCloudAvailable(),
 			AssetsCloudSafe: true,
 		})
 		if err != nil {
@@ -856,7 +860,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		planVideoInput = &vi
 	}
 	var planMontageInput *model.MontageInput
-	openMontageExecutionTarget := model.ExecutionTargetCloud
+	montageExecutionTarget := model.ExecutionTargetCloud
 	if model.IsMontagePlatform(taskType) {
 		input := plan.MontageInput.Data()
 		planMontageInput = &input
@@ -864,14 +868,14 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 			Config:          s.montageCfg,
 			TaskType:        taskType,
 			FromPlan:        true,
-			CloudAvailable:  true,
+			CloudAvailable:  s.montageCloudAvailable(),
 			AssetsCloudSafe: true,
 		})
 		if err != nil {
 			s.logger.Warn().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping montage plan task due to execution target policy")
 			return nil, nil
 		}
-		openMontageExecutionTarget = target
+		montageExecutionTarget = target
 	}
 
 	// Deduct credits for the plan task.
@@ -917,7 +921,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ArticleWithContentImages: plan.ArticleWithContentImages,
 	}
 	if model.IsMontagePlatform(taskType) {
-		task.ExecutionTarget = openMontageExecutionTarget
+		task.ExecutionTarget = montageExecutionTarget
 	}
 	if project != nil {
 		task.SetProjectSnapshot(model.SnapshotProject(project))

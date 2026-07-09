@@ -40,7 +40,7 @@ const videoInputSchema = z.object({
   }).optional(),
 }).optional()
 
-const openMontageAssetSchema = z.object({
+const montageAssetSchema = z.object({
   type: z.enum(["text", "image_url", "video_url", "audio_url", "document_url"]),
   url: z.string().optional(),
   task_file_id: z.string().optional(),
@@ -50,7 +50,7 @@ const openMontageAssetSchema = z.object({
   file_size: z.number().optional(),
 })
 
-const openMontagePreferencesSchema = z.object({
+const montagePreferencesSchema = z.object({
   aspect_ratio: z.string().optional(),
   duration_seconds: z.number().int().min(1).max(600).optional(),
   style: z.string().max(1000).optional(),
@@ -59,11 +59,11 @@ const openMontagePreferencesSchema = z.object({
   voiceover_mode: z.string().optional(),
 }).optional()
 
-const openMontageInputSchema = z.object({
+const montageInputSchema = z.object({
   brief: promptSchema.optional(),
   pipeline_key: z.string().max(100).optional(),
-  source_assets: z.array(openMontageAssetSchema).default([]),
-  preferences: openMontagePreferencesSchema,
+  source_assets: z.array(montageAssetSchema).default([]),
+  preferences: montagePreferencesSchema,
   delivery_targets: z.array(z.string()).default([]),
   advanced: z.record(z.string(), z.unknown()).optional(),
 }).optional()
@@ -120,7 +120,7 @@ export const createTaskSchema = z.object({
   language: z.string().optional(),
   video_creator_input: videoInputSchema,
   video_editor_input: videoInputSchema,
-  montage_input: openMontageInputSchema,
+  montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -219,7 +219,7 @@ export const planSchema = z.object({
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
   video_creator_input: videoInputSchema,
-  montage_input: openMontageInputSchema,
+  montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
   if (data.type === "montage") {
     const brief = data.montage_input?.brief?.trim() || ""
@@ -268,7 +268,7 @@ export const projectSchema = z.object({
   ecommerce_image_model_key: z.string().max(50).optional(),
   montage_defaults: z.object({
     default_pipeline: z.string().max(100).optional(),
-    preferences: openMontagePreferencesSchema,
+    preferences: montagePreferencesSchema,
     asset_guidance: z.string().max(2000).optional(),
     delivery_targets: z.array(z.string()).default([]),
   }).optional(),

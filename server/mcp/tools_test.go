@@ -1015,6 +1015,85 @@ func TestBuildAccountInfo_EcommerceProjectAutoReturnsEcommerceBlockWithoutScope(
 	}
 }
 
+func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := &model.Project{
+		ID:           uuid.New().String(),
+		UserID:       userID,
+		Platform:     model.PlatformMontage,
+		Name:         "montage-project",
+		Instructions: "短视频自动剪辑项目",
+	}
+	ch.SetMontageDefaults(model.MontageDefaults{
+		DefaultPipeline: "social-short",
+		Preferences: model.MontagePreferences{
+			AspectRatio:     "9:16",
+			DurationSeconds: 45,
+		},
+		AssetGuidance:   "优先使用用户上传的视频素材",
+		DeliveryTargets: []string{"final_video"},
+	})
+	if err := repo.Projects().Create(ctx, ch); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: ch.ID,
+		Type:      model.PlatformMontage,
+		Status:    model.TaskStatusPending,
+		Prompt:    "生成发布预告短片",
+	}
+	task.SetMontageInput(model.MontageInput{
+		Brief:       "生成发布预告短片",
+		PipelineKey: "social-short",
+		SourceAssets: []model.MontageAsset{{
+			Type: "video_url",
+			URL:  "/api/v1/files/source.mp4",
+		}},
+		Preferences: model.MontagePreferences{
+			AspectRatio:     "9:16",
+			DurationSeconds: 30,
+		},
+	})
+	task.SetProjectSnapshot(model.SnapshotProject(ch))
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"project_id": ch.ID,
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	montage, ok := info["montage"].(map[string]any)
+	if !ok {
+		t.Fatalf("montage block missing: %#v", info)
+	}
+	if got := montage["workspace_input_file"]; got != "montage-input.json" {
+		t.Fatalf("workspace_input_file = %v, want montage-input.json", got)
+	}
+	if got := montage["project_manifest_file"]; got != "montage-project.json" {
+		t.Fatalf("project_manifest_file = %v, want montage-project.json", got)
+	}
+	if got := montage["source_asset_count"]; got != 1 {
+		t.Fatalf("source_asset_count = %v, want 1", got)
+	}
+	input, ok := montage["input"].(model.MontageInput)
+	if !ok || input.Brief != "生成发布预告短片" || input.PipelineKey != "social-short" {
+		t.Fatalf("montage.input = %#v, want task montage input", montage["input"])
+	}
+	defaults, ok := montage["defaults"].(model.MontageDefaults)
+	if !ok || defaults.DefaultPipeline != "social-short" || defaults.Preferences.DurationSeconds != 45 {
+		t.Fatalf("montage.defaults = %#v, want project montage defaults", montage["defaults"])
+	}
+}
+
 func TestParseStringArray(t *testing.T) {
 	args := map[string]any{
 		"refs":   []any{"/a.png", "/b.png", "", 123, "/c.png"},

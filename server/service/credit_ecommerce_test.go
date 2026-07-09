@@ -25,7 +25,7 @@ func newPricedCreditService(repo repository.Repository) *CreditService {
 			model.PlatformEcommerce:    3000,
 			model.PlatformVideoCreator: 2000,
 			model.PlatformVideoEditor:  2000,
-			model.PlatformMontage:  2000,
+			model.PlatformMontage:      2000,
 			"viral_analysis":           1200,
 		},
 		EcommerceModulePrices: map[string]int{

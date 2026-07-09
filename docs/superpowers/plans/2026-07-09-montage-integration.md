@@ -973,7 +973,7 @@ func TestCreditServiceIncludesMontageTaskCost(t *testing.T) {
 Modify `server/service/task_progress_stages.go`:
 
 ```go
-var openMontageStagePercent = map[string]int{
+var montageStagePercent = map[string]int{
 	"prepare":   10,
 	"assets":    20,
 	"pipeline":  35,
@@ -987,7 +987,7 @@ In `defaultPercentForStage`:
 
 ```go
 case model.PlatformMontage:
-	return openMontageStagePercent[stage]
+	return montageStagePercent[stage]
 ```
 
 - [ ] **Step 7: Run tests**
@@ -1639,7 +1639,7 @@ Add `montage_input?: MontageInput` to `Plan`, `CreatePlanRequest`, and `UpdatePl
 Modify `studio/src/lib/schemas.ts`:
 
 ```ts
-const openMontageAssetSchema = z.object({
+const montageAssetSchema = z.object({
   type: z.enum(['text', 'image_url', 'video_url', 'audio_url', 'document_url']),
   url: z.string().optional(),
   task_file_id: z.string().optional(),
@@ -1649,10 +1649,10 @@ const openMontageAssetSchema = z.object({
   file_size: z.number().optional(),
 })
 
-const openMontageInputSchema = z.object({
+const montageInputSchema = z.object({
   brief: promptSchema.optional(),
   pipeline_key: z.string().max(100).optional(),
-  source_assets: z.array(openMontageAssetSchema).default([]),
+  source_assets: z.array(montageAssetSchema).default([]),
   preferences: z.object({
     aspect_ratio: z.string().optional(),
     duration_seconds: z.number().int().min(1).max(600).optional(),
@@ -1687,7 +1687,7 @@ platform: z.enum(["seednote", "article", "moments", "ecommerce", "videocreator",
 Add fields:
 
 ```ts
-montage_input: openMontageInputSchema,
+montage_input: montageInputSchema,
 ```
 
 In `superRefine`:
@@ -2048,7 +2048,7 @@ Render panel:
 Find the existing file preview component. Add Montage role labels:
 
 ```ts
-const openMontageRoleLabel: Record<string, string> = {
+const montageRoleLabel: Record<string, string> = {
   final_video: '最终视频',
   delivery_manifest: '交付清单',
   source_manifest: '素材清单',

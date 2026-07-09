@@ -57,7 +57,7 @@ const (
 	ScopeEcommerce    = "ecommerce"
 	ScopeVideoCreator = "videocreator"
 	ScopeVideoEditor  = "videoeditor"
-	ScopeMontage  = "montage"
+	ScopeMontage      = "montage"
 )
 
 // File role constants.
@@ -91,7 +91,7 @@ const (
 	PlatformEcommerce    = "ecommerce"
 	PlatformVideoCreator = "videocreator"
 	PlatformVideoEditor  = "videoeditor"
-	PlatformMontage  = "montage"
+	PlatformMontage      = "montage"
 )
 
 func IsVideoPlatform(platform string) bool {

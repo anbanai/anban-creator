@@ -108,7 +108,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"status":   map[string]any{"type": "string", "enum": []any{"active", "archived"}, "description": "Filter by status"},
-				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "videocreator", "videoeditor"}, "description": "Filter by platform type"},
+				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "videocreator", "videoeditor", "montage"}, "description": "Filter by platform type"},
 			},
 		},
 	}, projectListHandler)
@@ -127,12 +127,12 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get the resolved project runtime profile for AI content generation. This is the single project facts entrypoint: the server applies task snapshots, sanitizes secrets, resolves style/theme/author dimensions, and returns platform-specific blocks such as videocreator, videoeditor, or ecommerce. Videocreator projects include resolved_profile, agent_brief, defaults, policy, model_catalog, pricing, and references; videoeditor projects expose editing-source and delivery requirements. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials or unavailable models.",
+		Description: "Get the resolved project runtime profile for AI content generation. This is the single project facts entrypoint: the server applies task snapshots, sanitizes secrets, resolves style/theme/author dimensions, and returns platform-specific blocks such as videocreator, videoeditor, ecommerce, or montage. Videocreator projects include resolved_profile, agent_brief, defaults, policy, model_catalog, pricing, and references; videoeditor projects expose editing-source and delivery requirements; montage projects expose montage defaults and task input. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials or unavailable models.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "videocreator", "videoeditor"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "videocreator", "videoeditor", "montage"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, reads the task's frozen project_snapshot so historical tasks stay reproducible. The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists."},
 			},
 			"required": []any{"project_id"},
@@ -474,6 +474,8 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			}
 		}
 		info["ecommerce"] = ec
+	case model.PlatformMontage:
+		info["montage"] = buildMontageProfileBlock(ch, task)
 	}
 	if model.IsVideoCreatorPlatform(ch.Platform) {
 		videoBlock := buildVideoProfileBlock(ch, task)
@@ -512,6 +514,28 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	}
 
 	return info, ""
+}
+
+func buildMontageProfileBlock(ch *model.Project, task *model.Task) map[string]any {
+	defaults := model.MontageDefaults{}
+	if ch != nil {
+		defaults = ch.MontageDefaults.Data()
+	}
+	input := model.MontageInput{}
+	if task != nil && model.IsMontagePlatform(task.Type) {
+		input = task.MontageInput.Data()
+	}
+	return map[string]any{
+		"defaults":              defaults,
+		"input":                 input,
+		"source_asset_count":    len(input.SourceAssets),
+		"workspace_input_file":  "montage-input.json",
+		"project_manifest_file": "montage-project.json",
+		"output_dir":            "output/montage",
+		"required_artifacts":    []string{"final.mp4", "delivery-manifest.json"},
+		"artifact_roles":        []string{"final_video", "delivery_manifest", "source_manifest", "timeline", "subtitles", "audio", "run_log", "failure_diagnosis"},
+		"runner_contract":       "Agent prepares montage-input.json and montage-project.json, runs the Montage adapter against third_party/OpenMontage, then registers task files by artifact role.",
+	}
 }
 
 func profileSource(usesProjectSnapshot bool) string {

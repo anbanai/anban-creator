@@ -46,7 +46,7 @@ function filePreviewIcon(file: TaskFile) {
   return File
 }
 
-const openMontageRoleLabel: Record<string, string> = {
+const montageRoleLabel: Record<string, string> = {
   final_video: '最终视频',
   delivery_manifest: '交付清单',
   source_manifest: '素材清单',
@@ -59,7 +59,7 @@ const openMontageRoleLabel: Record<string, string> = {
 
 function taskFileRoleLabel(file: TaskFile, taskType?: string) {
   if (taskType === 'montage') {
-    return openMontageRoleLabel[file.role] ?? ''
+    return montageRoleLabel[file.role] ?? ''
   }
   return ''
 }

@@ -124,7 +124,7 @@ type CreatePlanParams struct {
 	ArticleWithContentImages *bool
 	VideoCreatorConfig       *model.VideoTaskConfig
 	VideoCreatorInput        *model.VideoInput
-	MontageInput         *model.MontageInput
+	MontageInput             *model.MontageInput
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -300,7 +300,7 @@ type UpdatePlanParams struct {
 	ArticleWithContentImages *bool
 	VideoCreatorConfig       *model.VideoTaskConfig
 	VideoCreatorInput        *model.VideoInput
-	MontageInput         *model.MontageInput
+	MontageInput             *model.MontageInput
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression

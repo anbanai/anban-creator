@@ -7,7 +7,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-const openMontageTargetCloud = "cloud"
+const montageTargetCloud = "cloud"
 
 type MontageExecutionTargetRequest struct {
 	Config          srvconfig.MontageConfig
@@ -27,21 +27,21 @@ func ResolveMontageExecutionTarget(req MontageExecutionTargetRequest) (string, e
 		return "", fmt.Errorf("montage is disabled")
 	}
 	if len(cfg.ExecutionTargets) == 0 {
-		cfg.ExecutionTargets = []string{openMontageTargetCloud}
+		cfg.ExecutionTargets = []string{montageTargetCloud}
 	}
 	if cfg.DefaultExecutionTarget == "" {
-		cfg.DefaultExecutionTarget = openMontageTargetCloud
+		cfg.DefaultExecutionTarget = montageTargetCloud
 	}
 	if req.FromPlan {
-		if containsMontageTarget(cfg.ExecutionTargets, openMontageTargetCloud) {
+		if montageCloudReady(req, cfg) {
 			return model.ExecutionTargetCloud, nil
 		}
 		return "", fmt.Errorf("montage plans require an available cloud execution target")
 	}
 
 	switch cfg.DefaultExecutionTarget {
-	case openMontageTargetCloud:
-		if containsMontageTarget(cfg.ExecutionTargets, openMontageTargetCloud) {
+	case montageTargetCloud:
+		if montageCloudReady(req, cfg) {
 			return model.ExecutionTargetCloud, nil
 		}
 		return "", fmt.Errorf("montage cloud execution is unavailable")
@@ -49,13 +49,17 @@ func ResolveMontageExecutionTarget(req MontageExecutionTargetRequest) (string, e
 		if req.LocalAvailable && containsMontageTarget(cfg.ExecutionTargets, model.ExecutionTargetLocal) {
 			return model.ExecutionTargetLocal, nil
 		}
-		if containsMontageTarget(cfg.ExecutionTargets, openMontageTargetCloud) {
+		if montageCloudReady(req, cfg) {
 			return model.ExecutionTargetCloud, nil
 		}
 		return "", fmt.Errorf("montage local execution is unavailable")
 	default:
 		return "", fmt.Errorf("invalid montage execution target %q", cfg.DefaultExecutionTarget)
 	}
+}
+
+func montageCloudReady(req MontageExecutionTargetRequest, cfg srvconfig.MontageConfig) bool {
+	return req.CloudAvailable && req.AssetsCloudSafe && containsMontageTarget(cfg.ExecutionTargets, montageTargetCloud)
 }
 
 func containsMontageTarget(values []string, want string) bool {

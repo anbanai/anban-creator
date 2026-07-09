@@ -54,7 +54,7 @@ func splitVideoReferenceURLs(creatorCfg *model.VideoTaskConfig, creatorInput *mo
 	return urls
 }
 
-func openMontageSourceAssetURLs(input *model.MontageInput) []string {
+func montageSourceAssetURLs(input *model.MontageInput) []string {
 	if input == nil || len(input.SourceAssets) == 0 {
 		return nil
 	}
@@ -68,7 +68,7 @@ func openMontageSourceAssetURLs(input *model.MontageInput) []string {
 }
 
 func validateMontageSourceAssetURLs(input *model.MontageInput) error {
-	for _, url := range openMontageSourceAssetURLs(input) {
+	for _, url := range montageSourceAssetURLs(input) {
 		if !validReferenceImageURL(url) {
 			return fmt.Errorf("montage_input.source_assets.url must be an internal file path or an http(s) URL")
 		}

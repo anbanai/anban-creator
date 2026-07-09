@@ -28,7 +28,7 @@ type Config struct {
 	MCP                MCPConfig                       `yaml:"mcp"`
 	ImageAPI           ImageAPIConfig                  `yaml:"image_api"`
 	VideoAPI           VideoAPIConfig                  `yaml:"video_api"`
-	Montage        MontageConfig               `yaml:"montage"`
+	Montage            MontageConfig                   `yaml:"montage"`
 	ImagePresets       []ImageModelPreset              `yaml:"image_presets"`
 	Writing            WritingConfig                   `yaml:"writing"`
 	Vision             VisionConfig                    `yaml:"vision"`
@@ -197,17 +197,17 @@ type VideoModelCatalogEntry struct {
 }
 
 type MontageConfig struct {
-	Enabled                bool                    `yaml:"enabled"`
-	enabledSet             bool                    `yaml:"-"`
-	SubmodulePath          string                  `yaml:"submodule_path"`
-	DefaultPipeline        string                  `yaml:"default_pipeline"`
-	AllowedPipelines       []string                `yaml:"allowed_pipelines"`
-	MaxDurationSeconds     int64                   `yaml:"max_duration_seconds"`
-	MaxAssets              int                     `yaml:"max_assets"`
-	TimeoutMinutes         int                     `yaml:"timeout_minutes"`
-	ExecutionTargets       []string                `yaml:"execution_targets"`
-	DefaultExecutionTarget string                  `yaml:"default_execution_target"`
-	CreditCost             int                     `yaml:"credit_cost"`
+	Enabled                bool                `yaml:"enabled"`
+	enabledSet             bool                `yaml:"-"`
+	SubmodulePath          string              `yaml:"submodule_path"`
+	DefaultPipeline        string              `yaml:"default_pipeline"`
+	AllowedPipelines       []string            `yaml:"allowed_pipelines"`
+	MaxDurationSeconds     int64               `yaml:"max_duration_seconds"`
+	MaxAssets              int                 `yaml:"max_assets"`
+	TimeoutMinutes         int                 `yaml:"timeout_minutes"`
+	ExecutionTargets       []string            `yaml:"execution_targets"`
+	DefaultExecutionTarget string              `yaml:"default_execution_target"`
+	CreditCost             int                 `yaml:"credit_cost"`
 	Runner                 MontageRunnerConfig `yaml:"runner"`
 }
 
@@ -286,13 +286,13 @@ func (c MontageConfig) Validate() error {
 	if c.TimeoutMinutes <= 0 {
 		return fmt.Errorf("montage.timeout_minutes must be positive")
 	}
-	if !openMontageStringSliceContains(c.AllowedPipelines, c.DefaultPipeline) {
+	if !montageStringSliceContains(c.AllowedPipelines, c.DefaultPipeline) {
 		return fmt.Errorf("montage.default_pipeline must be in montage.allowed_pipelines")
 	}
 	if !validMontageTarget(c.DefaultExecutionTarget) {
 		return fmt.Errorf("montage.default_execution_target must be cloud or local")
 	}
-	if !openMontageStringSliceContains(c.ExecutionTargets, c.DefaultExecutionTarget) {
+	if !montageStringSliceContains(c.ExecutionTargets, c.DefaultExecutionTarget) {
 		return fmt.Errorf("montage.default_execution_target must be in montage.execution_targets")
 	}
 	for _, target := range c.ExecutionTargets {
@@ -307,7 +307,7 @@ func validMontageTarget(target string) bool {
 	return target == "cloud" || target == "local"
 }
 
-func openMontageStringSliceContains(values []string, want string) bool {
+func montageStringSliceContains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
 			return true
@@ -1235,7 +1235,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"wechat":          true,
 		"storage":         true,
 		"mcp":             true,
-		"montage":     true,
+		"montage":         true,
 		"image_presets":   true,
 		"model_providers": true,
 		"model_routes":    true,
@@ -1407,7 +1407,7 @@ func (c *Config) applyDefaults() {
 		"ecommerce":      3000,
 		"videocreator":   2000,
 		"videoeditor":    2000,
-		"montage":    2000,
+		"montage":        2000,
 		"viral_analysis": 1200,
 	}
 	if c.Credits.TaskCosts == nil {

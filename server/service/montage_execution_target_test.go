@@ -15,13 +15,47 @@ func TestResolveMontageExecutionTargetDefaultsCloud(t *testing.T) {
 			ExecutionTargets:       []string{"cloud", "local"},
 			DefaultExecutionTarget: "cloud",
 		},
-		TaskType: model.PlatformMontage,
+		TaskType:        model.PlatformMontage,
+		CloudAvailable:  true,
+		AssetsCloudSafe: true,
 	})
 	if err != nil {
 		t.Fatalf("ResolveMontageExecutionTarget error = %v", err)
 	}
 	if got != model.ExecutionTargetCloud {
 		t.Fatalf("target = %q, want cloud empty target", got)
+	}
+}
+
+func TestResolveMontageExecutionTargetRejectsUnavailableCloud(t *testing.T) {
+	_, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+		Config: srvconfig.MontageConfig{
+			Enabled:                true,
+			ExecutionTargets:       []string{"cloud", "local"},
+			DefaultExecutionTarget: "cloud",
+		},
+		TaskType:        model.PlatformMontage,
+		CloudAvailable:  false,
+		AssetsCloudSafe: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "montage cloud execution is unavailable") {
+		t.Fatalf("ResolveMontageExecutionTarget error = %v, want unavailable cloud rejection", err)
+	}
+}
+
+func TestResolveMontageExecutionTargetRejectsCloudUnsafeAssets(t *testing.T) {
+	_, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+		Config: srvconfig.MontageConfig{
+			Enabled:                true,
+			ExecutionTargets:       []string{"cloud"},
+			DefaultExecutionTarget: "cloud",
+		},
+		TaskType:        model.PlatformMontage,
+		CloudAvailable:  true,
+		AssetsCloudSafe: false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "montage cloud execution is unavailable") {
+		t.Fatalf("ResolveMontageExecutionTarget error = %v, want cloud safety rejection", err)
 	}
 }
 
@@ -42,8 +76,10 @@ func TestResolveMontageExecutionTargetKeepsLocalDisabledWithoutCapability(t *tes
 			ExecutionTargets:       []string{"local"},
 			DefaultExecutionTarget: "local",
 		},
-		TaskType:       model.PlatformMontage,
-		LocalAvailable: false,
+		TaskType:        model.PlatformMontage,
+		LocalAvailable:  false,
+		CloudAvailable:  true,
+		AssetsCloudSafe: true,
 	})
 	if err == nil {
 		t.Fatal("ResolveMontageExecutionTarget succeeded without local capability")
@@ -57,8 +93,10 @@ func TestResolveMontageExecutionTargetFallsBackFromLocalToCloud(t *testing.T) {
 			ExecutionTargets:       []string{"cloud", "local"},
 			DefaultExecutionTarget: "local",
 		},
-		TaskType:       model.PlatformMontage,
-		LocalAvailable: false,
+		TaskType:        model.PlatformMontage,
+		LocalAvailable:  false,
+		CloudAvailable:  true,
+		AssetsCloudSafe: true,
 	})
 	if err != nil {
 		t.Fatalf("ResolveMontageExecutionTarget error = %v", err)
@@ -87,6 +125,31 @@ func TestTaskServiceCreateManualMontageRejectsWhenDisabled(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "montage is disabled") {
 		t.Fatalf("CreateManual error = %v, want disabled rejection", err)
+	}
+}
+
+func TestTaskServiceCreateManualMontageRejectsWhenCloudRuntimeMissing(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.enqueuer = nil
+	svc.executor = nil
+	cfg := srvconfig.MontageConfig{Enabled: true}
+	cfg.ApplyDefaults()
+	cfg.DefaultExecutionTarget = "cloud"
+	cfg.ExecutionTargets = []string{"cloud"}
+	svc.SetMontageConfig(cfg)
+
+	userID := "user-montage-no-cloud"
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
+
+	_, err := svc.CreateManual(t.Context(), CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		MontageInput: &model.MontageInput{
+			Brief: "云端能力缺失时不能创建",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "montage cloud execution is unavailable") {
+		t.Fatalf("CreateManual error = %v, want cloud runtime rejection", err)
 	}
 }
 

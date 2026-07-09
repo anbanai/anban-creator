@@ -220,6 +220,8 @@ func TestProjectToolSchemasIncludeMoments(t *testing.T) {
 
 	assertToolEnumContains("list_projects", "platform", "moments")
 	assertToolEnumContains("get_project_profile", "scope", "moments")
+	assertToolEnumContains("list_projects", "platform", "montage")
+	assertToolEnumContains("get_project_profile", "scope", "montage")
 }
 
 func TestMCPFilePathSchemaDescriptionsDeclareLocality(t *testing.T) {

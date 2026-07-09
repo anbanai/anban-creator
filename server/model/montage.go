@@ -3,12 +3,12 @@ package model
 import "gorm.io/datatypes"
 
 type MontageInput struct {
-	Brief           string                 `json:"brief,omitempty"`
-	PipelineKey     string                 `json:"pipeline_key,omitempty"`
+	Brief           string             `json:"brief,omitempty"`
+	PipelineKey     string             `json:"pipeline_key,omitempty"`
 	SourceAssets    []MontageAsset     `json:"source_assets,omitempty"`
 	Preferences     MontagePreferences `json:"preferences,omitempty"`
-	DeliveryTargets []string               `json:"delivery_targets,omitempty"`
-	Advanced        map[string]any         `json:"advanced,omitempty"`
+	DeliveryTargets []string           `json:"delivery_targets,omitempty"`
+	Advanced        map[string]any     `json:"advanced,omitempty"`
 }
 
 type MontageAsset struct {
@@ -31,10 +31,10 @@ type MontagePreferences struct {
 }
 
 type MontageDefaults struct {
-	DefaultPipeline string                 `json:"default_pipeline,omitempty"`
+	DefaultPipeline string             `json:"default_pipeline,omitempty"`
 	Preferences     MontagePreferences `json:"preferences,omitempty"`
-	AssetGuidance   string                 `json:"asset_guidance,omitempty"`
-	DeliveryTargets []string               `json:"delivery_targets,omitempty"`
+	AssetGuidance   string             `json:"asset_guidance,omitempty"`
+	DeliveryTargets []string           `json:"delivery_targets,omitempty"`
 }
 
 func (t *Task) SetMontageInput(input MontageInput) {

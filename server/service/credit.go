@@ -69,7 +69,7 @@ func defaultCreditTaskCosts() map[string]int {
 		model.PlatformEcommerce:       3000,
 		model.PlatformVideoCreator:    2000,
 		model.PlatformVideoEditor:     2000,
-		model.PlatformMontage:     2000,
+		model.PlatformMontage:         2000,
 		model.CreditTypeViralAnalysis: 1200,
 	}
 }
