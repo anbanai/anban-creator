@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -86,4 +87,97 @@ func TestOpenMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestOpenMontagePluginContractsAreDistributed(t *testing.T) {
+	root := repoRoot(t)
+	claudeAgent := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "openmontage.md"))
+	for _, want := range []string{
+		"name: openmontage",
+		"skills:",
+		"- openmontage",
+		"openmontage-input.json",
+		"openmontage-project.json",
+		"delivery-manifest.json",
+		"final.mp4",
+		"submit_agent_feedback",
+	} {
+		if !strings.Contains(claudeAgent, want) {
+			t.Fatalf("claudecode openmontage agent missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"create_video_generation_job",
+		"validate_video_delivery",
+		"- video-use",
+		"skills/video-use/SKILL.md",
+	} {
+		if strings.Contains(claudeAgent, forbidden) {
+			t.Fatalf("claudecode openmontage agent must not reference existing video workflow %q", forbidden)
+		}
+	}
+
+	codexAgent := readRepoFile(t, filepath.Join(root, "codex", "agents", "openmontage.toml"))
+	for _, want := range []string{
+		`name = "openmontage"`,
+		"openmontage-input.json",
+		"openmontage-project.json",
+		"delivery-manifest.json",
+		"final_video",
+		`submit_agent_feedback(agent_name=\"openmontage\"`,
+		"__PLUGIN_ROOT__/skills/openmontage/SKILL.md",
+	} {
+		if !strings.Contains(codexAgent, want) {
+			t.Fatalf("codex openmontage agent missing %q", want)
+		}
+	}
+
+	reg := readRepoFile(t, filepath.Join(root, "codex", "install", "agents-registration.toml"))
+	for _, want := range []string{
+		"[agents.openmontage]",
+		"openmontage.toml",
+		"OpenMontage 视频生产引擎",
+	} {
+		if !strings.Contains(reg, want) {
+			t.Fatalf("codex agents registration missing %q", want)
+		}
+	}
+}
+
+func TestOpenMontageSkillMirrorsStayInSync(t *testing.T) {
+	root := repoRoot(t)
+	canonical := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "openmontage", "SKILL.md"))
+	for _, distro := range []string{"codex", "openclaw"} {
+		path := filepath.Join(root, distro, "skills", "openmontage", "SKILL.md")
+		if got := readRepoFile(t, path); got != canonical {
+			t.Fatalf("%s must match claudecode openmontage skill", path)
+		}
+	}
+	for _, want := range []string{
+		"name: openmontage",
+		"openmontage-input.json",
+		"openmontage-project.json",
+		"delivery-manifest.json",
+		"third_party/OpenMontage",
+		"Do not call `create_video_generation_job`",
+		"Do not modify files under `third_party/OpenMontage`",
+	} {
+		if !strings.Contains(canonical, want) {
+			t.Fatalf("openmontage skill missing %q", want)
+		}
+	}
+}
+
+func TestOpenMontagePluginManifestsAdvertiseSupport(t *testing.T) {
+	root := repoRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"),
+		filepath.Join(root, "codex", ".codex-plugin", "plugin.json"),
+		filepath.Join(root, "openclaw", "openclaw.plugin.json"),
+	} {
+		body := readRepoFile(t, path)
+		if !strings.Contains(body, "OpenMontage") {
+			t.Fatalf("%s must advertise OpenMontage support", path)
+		}
+	}
 }
