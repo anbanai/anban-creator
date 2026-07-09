@@ -586,6 +586,61 @@ func TestCreateTaskOpenMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.
 	}
 }
 
+func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "ecommercearray",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformEcommerce,
+		Name:     "Ecommerce",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{
+		"project_id": "`+projectID+`",
+		"quantity": 3,
+		"selected_modules": {"main_images": 1},
+		"product_photos": ["https://cdn.example.com/cup.png"]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	var env struct {
+		Data []map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode array response: %v", err)
+	}
+	if len(env.Data) != 1 {
+		t.Fatalf("response data len = %d, want one clamped ecommerce task", len(env.Data))
+	}
+}
+
 func TestCreateTaskOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -654,6 +709,77 @@ func TestCreateTaskOpenMontageFinalizesSourceAssetUploads(t *testing.T) {
 	}
 	if upload.Status != model.PendingUploadStatusFinalized {
 		t.Fatalf("upload status = %q, want finalized", upload.Status)
+	}
+}
+
+func TestCreateTaskRejectsOpenMontageAssetOnOtherPlatformWithoutFinalizing(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	uploadID := uuid.New().String()
+	assetURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "omwrong",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+		ID:          uploadID,
+		UserID:      userID,
+		Purpose:     service.DirectUploadPurposeOpenMontageAsset,
+		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
+		PublicURL:   assetURL,
+		FileName:    "clip.mp4",
+		ContentType: "video/mp4",
+		Size:        1234,
+		Status:      model.PendingUploadStatusPending,
+		ExpiresAt:   time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("create pending upload: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{
+		"project_id": "`+projectID+`",
+		"openmontage_input": {
+			"brief": "错误平台",
+			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
+		}
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
+	}
+	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	if err != nil {
+		t.Fatalf("find pending upload: %v", err)
+	}
+	if upload.Status != model.PendingUploadStatusPending {
+		t.Fatalf("upload status = %q, want pending", upload.Status)
 	}
 }
 

@@ -160,8 +160,10 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		if isOpenMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
+				return Error(c, fiber.StatusBadRequest, err.Error())
+			}
 		}
 	}
 
@@ -323,8 +325,10 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		if model.IsOpenMontagePlatform(existing.Type) {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
+				return Error(c, fiber.StatusBadRequest, err.Error())
+			}
 		}
 	}
 

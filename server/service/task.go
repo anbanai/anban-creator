@@ -437,6 +437,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		target, err := ResolveOpenMontageExecutionTarget(OpenMontageExecutionTargetRequest{
 			Config:          s.openmontageCfg,
 			TaskType:        taskType,
+			LocalAvailable:  containsOpenMontageTarget(s.openmontageCfg.ExecutionTargets, model.ExecutionTargetLocal),
 			CloudAvailable:  true,
 			AssetsCloudSafe: true,
 		})

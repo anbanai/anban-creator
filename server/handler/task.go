@@ -248,8 +248,10 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		if isOpenMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeOpenMontageAsset, openMontageSourceAssetURLs(req.OpenMontageInput)); err != nil {
+				return Error(c, fiber.StatusBadRequest, err.Error())
+			}
 		}
 	}
 
@@ -305,9 +307,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to create task")
 	}
 
-	// Return single task when the service produced one task. Some platforms
-	// clamp quantity internally because they create one deliverable package.
-	if len(tasks) == 1 {
+	// OpenMontage is always a single deliverable and Studio expects one task
+	// object even when the request quantity is clamped by the service.
+	if len(tasks) == 1 && (quantity == 1 || req.OpenMontageInput != nil) {
 		return Success(c, taskAPIResponse(tasks[0]))
 	}
 	return Success(c, taskAPIResponses(tasks))

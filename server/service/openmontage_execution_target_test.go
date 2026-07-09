@@ -89,3 +89,35 @@ func TestTaskServiceCreateManualOpenMontageRejectsWhenDisabled(t *testing.T) {
 		t.Fatalf("CreateManual error = %v, want disabled rejection", err)
 	}
 }
+
+func TestTaskServiceCreateManualOpenMontageUsesConfiguredLocalTarget(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	cfg := srvconfig.OpenMontageConfig{Enabled: true}
+	cfg.ApplyDefaults()
+	cfg.DefaultExecutionTarget = "local"
+	cfg.ExecutionTargets = []string{"cloud", "local"}
+	svc.SetOpenMontageConfig(cfg)
+
+	userID := "user-om-local"
+	projectID := createTestProject(t, repo, userID, model.PlatformOpenMontage)
+
+	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		OpenMontageInput: &model.OpenMontageInput{
+			Brief: "本机执行短片",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual error = %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("len(tasks) = %d, want 1", len(tasks))
+	}
+	if tasks[0].ExecutionTarget != model.ExecutionTargetLocal {
+		t.Fatalf("execution_target = %q, want local", tasks[0].ExecutionTarget)
+	}
+	if tasks[0].LocalClaimDeadline == nil {
+		t.Fatal("LocalClaimDeadline = nil, want local claim deadline")
+	}
+}
