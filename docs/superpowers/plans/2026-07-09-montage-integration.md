@@ -126,9 +126,6 @@ func TestMontageConfigDefaults(t *testing.T) {
 	if cfg.DefaultExecutionTarget != "cloud" {
 		t.Fatalf("DefaultExecutionTarget = %q, want cloud", cfg.DefaultExecutionTarget)
 	}
-	if cfg.Runner.CloudImage != "anban/montage-runner:latest" {
-		t.Fatalf("CloudImage = %q, want default runner image", cfg.Runner.CloudImage)
-	}
 }
 
 func TestMontageConfigValidate(t *testing.T) {
@@ -142,9 +139,6 @@ func TestMontageConfigValidate(t *testing.T) {
 		TimeoutMinutes:         90,
 		ExecutionTargets:       []string{"cloud", "local"},
 		DefaultExecutionTarget: "cloud",
-		Runner: MontageRunnerConfig{
-			CloudImage: "anban/montage-runner:latest",
-		},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -317,11 +311,6 @@ type MontageConfig struct {
 	ExecutionTargets        []string                  `yaml:"execution_targets"`
 	DefaultExecutionTarget  string                    `yaml:"default_execution_target"`
 	CreditCost              int                       `yaml:"credit_cost"`
-	Runner                  MontageRunnerConfig   `yaml:"runner"`
-}
-
-type MontageRunnerConfig struct {
-	CloudImage string `yaml:"cloud_image"`
 }
 
 func (c *MontageConfig) ApplyDefaults() {
@@ -352,9 +341,6 @@ func (c *MontageConfig) ApplyDefaults() {
 	}
 	if c.CreditCost <= 0 {
 		c.CreditCost = 2000
-	}
-	if c.Runner.CloudImage == "" {
-		c.Runner.CloudImage = "anban/montage-runner:latest"
 	}
 }
 
@@ -439,8 +425,6 @@ montage:
   execution_targets: ["cloud", "local"]
   default_execution_target: "cloud"
   credit_cost: 2000
-  runner:
-    cloud_image: "${ANBAN_MONTAGE_RUNNER_IMAGE:-anban/montage-runner:latest}"
 ```
 
 - [ ] **Step 9: Run model/config tests**

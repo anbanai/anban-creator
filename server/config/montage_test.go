@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -31,9 +33,6 @@ func TestMontageConfigDefaults(t *testing.T) {
 	if cfg.DefaultExecutionTarget != "cloud" {
 		t.Fatalf("DefaultExecutionTarget = %q, want cloud", cfg.DefaultExecutionTarget)
 	}
-	if cfg.Runner.CloudImage != "anban/montage-runner:latest" {
-		t.Fatalf("CloudImage = %q, want default runner image", cfg.Runner.CloudImage)
-	}
 }
 
 func TestMontageConfigValidate(t *testing.T) {
@@ -47,9 +46,6 @@ func TestMontageConfigValidate(t *testing.T) {
 		TimeoutMinutes:         90,
 		ExecutionTargets:       []string{"cloud", "local"},
 		DefaultExecutionTarget: "cloud",
-		Runner: MontageRunnerConfig{
-			CloudImage: "anban/montage-runner:latest",
-		},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -75,5 +71,18 @@ func TestMontageConfigDefaultsPreserveExplicitDisabled(t *testing.T) {
 	}
 	if cfg.Montage.SubmodulePath != "third_party/OpenMontage" {
 		t.Fatalf("SubmodulePath = %q, want default path", cfg.Montage.SubmodulePath)
+	}
+}
+
+func TestMontageConfigFilesDoNotDeclareRunnerImage(t *testing.T) {
+	for _, path := range []string{"../config.yaml", "../config.example.yaml"} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		raw := string(body)
+		if strings.Contains(raw, "ANBAN_MONTAGE_RUNNER_IMAGE") || strings.Contains(raw, "cloud_image:") {
+			t.Fatalf("%s must not declare montage.runner.cloud_image; use claude.docker.image or claude.kubernetes.agent_image", path)
+		}
 	}
 }

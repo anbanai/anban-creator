@@ -193,8 +193,6 @@ montage:
     - local
   default_execution_target: cloud
   credit_cost: 2000
-  runner:
-    cloud_image: "${ANBAN_MONTAGE_RUNNER_IMAGE:-anban/montage-runner:latest}"
 ```
 
 Validation rules:
@@ -440,5 +438,5 @@ Agent/plugin tests:
 - Local dispatch remains disabled by resolver policy until capability checks
   report the configured Montage path, ffmpeg, browser runtime, and required
   language runtimes as available.
-- Cloud dispatch remains the production default and uses the configured
-  `montage.runner.cloud_image`.
+- Cloud dispatch remains the production default and uses the shared Agent image
+  selected by `claude.docker.image` or `claude.kubernetes.agent_image`.

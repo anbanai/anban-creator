@@ -197,22 +197,17 @@ type VideoModelCatalogEntry struct {
 }
 
 type MontageConfig struct {
-	Enabled                bool                `yaml:"enabled"`
-	enabledSet             bool                `yaml:"-"`
-	SubmodulePath          string              `yaml:"submodule_path"`
-	DefaultPipeline        string              `yaml:"default_pipeline"`
-	AllowedPipelines       []string            `yaml:"allowed_pipelines"`
-	MaxDurationSeconds     int64               `yaml:"max_duration_seconds"`
-	MaxAssets              int                 `yaml:"max_assets"`
-	TimeoutMinutes         int                 `yaml:"timeout_minutes"`
-	ExecutionTargets       []string            `yaml:"execution_targets"`
-	DefaultExecutionTarget string              `yaml:"default_execution_target"`
-	CreditCost             int                 `yaml:"credit_cost"`
-	Runner                 MontageRunnerConfig `yaml:"runner"`
-}
-
-type MontageRunnerConfig struct {
-	CloudImage string `yaml:"cloud_image"`
+	Enabled                bool     `yaml:"enabled"`
+	enabledSet             bool     `yaml:"-"`
+	SubmodulePath          string   `yaml:"submodule_path"`
+	DefaultPipeline        string   `yaml:"default_pipeline"`
+	AllowedPipelines       []string `yaml:"allowed_pipelines"`
+	MaxDurationSeconds     int64    `yaml:"max_duration_seconds"`
+	MaxAssets              int      `yaml:"max_assets"`
+	TimeoutMinutes         int      `yaml:"timeout_minutes"`
+	ExecutionTargets       []string `yaml:"execution_targets"`
+	DefaultExecutionTarget string   `yaml:"default_execution_target"`
+	CreditCost             int      `yaml:"credit_cost"`
 }
 
 func (c *MontageConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -261,9 +256,6 @@ func (c *MontageConfig) ApplyDefaults() {
 	}
 	if c.CreditCost <= 0 {
 		c.CreditCost = 2000
-	}
-	if c.Runner.CloudImage == "" {
-		c.Runner.CloudImage = "anban/montage-runner:latest"
 	}
 }
 

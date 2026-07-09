@@ -181,10 +181,6 @@ montage:
   default_execution_target: "cloud"
   # Montage 基础任务服务费，单位 credits；同时保持 credits.task_costs.montage 一致。
   credit_cost: 2000
-  runner:
-    # 预留的 Montage 云端 runner 镜像名。当前执行器主要读取 claude.kubernetes.agent_image
-    # 或 claude.docker.image；生产可将该值同步为同一个包含 Montage 依赖的镜像 tag。
-    cloud_image: "${ANBAN_MONTAGE_RUNNER_IMAGE:-anban/montage-runner:latest}"
 
 model_prices:
   currency_rates:
