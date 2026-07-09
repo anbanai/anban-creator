@@ -446,10 +446,10 @@ func resolveImageBillingModel(ctx context.Context, userID, imageModelKey string)
 // generate_image calls will actually use for this e-commerce task, so the agent
 // can adapt its reference-image strategy to the provider's capability rather
 // than a fixed per-module split:
-//   - openai: pass all product photos as reference images (≤16) for fidelity;
-//   - volcengine/seedream: single anchor reference + the product-bible text
-//     block — reusing one reference across many images repeats the scene (see
-//     the Seedream strong-i2i limitation).
+//   - openai: pass relevant product photos as reference images (≤16) for fidelity;
+//   - volcengine/seedream: pass the relevant product-photo subset supported by
+//     the configured provider limit, plus the product-bible text block. Avoid
+//     unrelated refs because Seedream's strong i2i can over-lock the scene.
 //
 // Resolution mirrors generate_image's generation path: Task.ImageModelKey (a
 // system image_preset or "custom", chosen by the user at task creation) wins,

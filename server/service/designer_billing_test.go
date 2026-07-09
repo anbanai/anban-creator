@@ -34,7 +34,24 @@ func setupDesignerBillingTest(t *testing.T) (*DesignerService, repository.Reposi
 		ModelRoutes: srvconfig.ModelRoutesConfig{
 			ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
 				Designer: map[string]srvconfig.ImageGenerationRouteConfig{
-					"gpt_image_2": {Alias: "GPT Image 2", Enabled: true, Provider: "wangcai_openai", Model: "gpt-image-2"},
+					"gpt_image_2": {
+						Alias:    "GPT Image 2",
+						Enabled:  true,
+						Provider: "wangcai_openai",
+						Model:    "gpt-image-2",
+						Capabilities: DesignerProviderCapabilities{
+							QualityLevels:      []string{"auto", "low", "medium", "high"},
+							SizePresets:        []string{"auto", "1024x1024", "1536x1024", "1024x1536"},
+							DefaultSize:        "auto",
+							MaxBatch:           10,
+							MaxReferenceImages: 16,
+							SupportsReference:  true,
+							SupportsMask:       true,
+							OutputFormats:      []string{"png", "jpeg", "webp"},
+							HasBackground:      true,
+							HasCompression:     true,
+						},
+					},
 				},
 			},
 		},
@@ -227,6 +244,44 @@ func TestDesignerCreateGenerationValidatesProviderCapabilities(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "max_batch") {
 		t.Fatalf("error = %v, want max_batch rejection", err)
+	}
+}
+
+func TestDesignerCreateGenerationUsesConfiguredProviderCapabilities(t *testing.T) {
+	svc, repo, _ := setupDesignerBillingTest(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 5000)
+
+	route := svc.fullCfg.ModelRoutes.ImageGeneration.Designer["gpt_image_2"]
+	route.Capabilities.SizePresets = []string{"auto"}
+	route.Capabilities.DefaultSize = "auto"
+	svc.fullCfg.ModelRoutes.ImageGeneration.Designer["gpt_image_2"] = route
+
+	_, err := svc.CreateGenerationRecord(ctx, userID, DesignerGenerateRequest{
+		ProjectID:  "default",
+		Prompt:     "a cat",
+		ProviderID: "gpt_image_2",
+		Quality:    "medium",
+		Size:       "1024x1024",
+		N:          1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "size") {
+		t.Fatalf("error = %v, want configured size preset rejection", err)
+	}
+
+	created, err := svc.CreateGenerationRecord(ctx, userID, DesignerGenerateRequest{
+		ProjectID:  "default",
+		Prompt:     "a cat",
+		ProviderID: "gpt_image_2",
+		Quality:    "medium",
+		Size:       "auto",
+		N:          1,
+	})
+	if err != nil {
+		t.Fatalf("CreateGenerationRecord(auto) error = %v", err)
+	}
+	if created.EstimatedCredits == 0 {
+		t.Fatalf("created = %+v, want non-zero GPT Image estimate", created)
 	}
 }
 

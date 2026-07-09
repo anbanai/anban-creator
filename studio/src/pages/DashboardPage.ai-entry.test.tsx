@@ -166,8 +166,10 @@ describe('DashboardPage AI entry', () => {
 
     render(<DashboardPage />)
 
-    expect(await screen.findByText('先创建一个项目，再开始创作。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /创建第一个项目/ })).toHaveAttribute(
+    expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '选择项目' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /创建第一个项目/ })).not.toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: '创建项目' })).toHaveAttribute(
       'href',
       '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
     )
@@ -187,14 +189,14 @@ describe('DashboardPage AI entry', () => {
   it('renders a Codex-style AI entry and creates a task with uploaded attachments', async () => {
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('heading', { name: '今天用「公众号项目」创作什么？' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '首页项目选择' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '选择项目 公众号项目' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '选择项目 公众号项目' })).toHaveAttribute('aria-expanded', 'false')
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
-    expect(await screen.findByText('使用项目：公众号项目')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /新建创作任务/ })).toHaveAttribute('href', '/tasks?create=true&type=article&project_id=project-1&intent=new')
-    expect(screen.getByRole('link', { name: /安排自动计划/ })).toHaveAttribute('href', '/plans?create=true&type=article&project_id=project-1&intent=schedule')
-    expect(screen.getByRole('link', { name: /管理项目配置/ })).toHaveAttribute('href', '/projects')
+    expect(screen.getByText('公众号文章')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /管理项目配置/ })).not.toBeInTheDocument()
     expect(screen.queryByText('今日创作态势')).not.toBeInTheDocument()
     expect(screen.queryByText('接入状态')).not.toBeInTheDocument()
     expect(screen.queryByText('下一步')).not.toBeInTheDocument()
@@ -227,7 +229,7 @@ describe('DashboardPage AI entry', () => {
     expect(navigateMock).toHaveBeenCalledWith('/tasks/task-ai-1')
   })
 
-  it('uses the first active project as the homepage context when multiple projects exist', async () => {
+  it('uses the selected project from the composer menu when multiple projects exist', async () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([
       { ...articleProject },
       { ...seednoteProject },
@@ -235,32 +237,39 @@ describe('DashboardPage AI entry', () => {
 
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('heading', { name: '今天用「公众号项目」创作什么？' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '首页项目选择' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /新建创作任务/ })).toHaveAttribute('href', '/tasks?create=true&type=article&project_id=project-1&intent=new')
-    expect(screen.getByRole('link', { name: /安排自动计划/ })).toHaveAttribute('href', '/plans?create=true&type=article&project_id=project-1&intent=schedule')
+    expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择项目 公众号项目' }))
+    expect(await screen.findByRole('textbox', { name: '搜索项目' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /种草项目/ }))
+    expect(screen.getByRole('button', { name: '选择项目 种草项目' })).toHaveAttribute('aria-expanded', 'false')
 
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
-      target: { value: '写一篇公众号文章' },
+      target: { value: '写一篇小红书种草笔记' },
     })
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith(expect.objectContaining({
-      project_id: 'project-1',
-      text: '写一篇公众号文章',
+      project_id: 'project-2',
+      text: '写一篇小红书种草笔记',
     })))
   })
 
-  it('hides schedule shortcuts for project types that cannot create plans', async () => {
+  it('does not render legacy shortcut cards for project types that cannot create plans', async () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([
       { ...ecommerceProject },
     ])
 
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('heading', { name: '今天用「电商项目」创作什么？' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /新建创作任务/ })).toHaveAttribute('href', '/tasks?create=true&type=ecommerce&project_id=project-3&intent=new')
+    expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '选择项目 电商项目' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /管理项目配置/ })).not.toBeInTheDocument()
   })
 
   it('shows needs-configuration errors without navigating', async () => {

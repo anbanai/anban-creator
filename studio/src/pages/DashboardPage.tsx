@@ -1,35 +1,35 @@
-import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   AlertTriangle,
-  ArrowRight,
-  Clock3,
+  Check,
+  ChevronDown,
   Cloud,
   FileText,
+  FolderPlus,
   ImageIcon,
   Monitor,
   Paperclip,
   Send,
-  Settings,
-  Plus,
+  Search,
   X,
-  type LucideIcon,
 } from 'lucide-react'
 
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import QueryErrorState from '@/components/QueryErrorState'
 import { Button } from '@/components/common/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { api } from '@/lib/api'
 import type { AIEntryAttachment, AIEntryAttachmentType } from '@/lib/api/ai-entry'
-import { createTaskHref, hasUsableModelConfig, projectsReturnHref } from '@/lib/command-center'
+import { hasUsableModelConfig, projectsReturnHref } from '@/lib/command-center'
 import { uploadToOSS } from '@/lib/direct-upload'
 import { contentTypeLabel } from '@/lib/labels'
 import { queryKeys } from '@/lib/query-keys'
 import { buildDashboardBlocker } from '@/lib/studio-ux'
 import { getLocalExecutorStatus, isDesktop } from '@/lib/tauri'
-import { isVideoCreator } from '@/lib/video-platforms'
+import { cn } from '@/lib/utils'
 import type { Project } from '@/types'
 
 const MEDIA_LIMIT = 50 * 1024 * 1024
@@ -57,6 +57,7 @@ export default function DashboardPage() {
   const [attachments, setAttachments] = useState<AIEntryAttachment[]>([])
   const [uploading, setUploading] = useState<UploadingFile[]>([])
   const [entryError, setEntryError] = useState<EntryError | null>(null)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const attachmentsRef = useRef<AIEntryAttachment[]>([])
   const uploadPromisesRef = useRef<Promise<void>[]>([])
 
@@ -86,14 +87,22 @@ export default function DashboardPage() {
   })
 
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
-  const selectedProject = activeProjects[0]
+  const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
   const localExecutionReady = desktopMode && Boolean(localExecutorStatus?.available)
-  const dashboardTitle = selectedProject ? `今天用「${selectedProject.name}」创作什么？` : '先创建一个项目，再开始创作。'
-  const newTaskHref = selectedProject ? createTaskHref({ type: selectedProject.platform, projectId: selectedProject.id, intent: 'new' }) : createTaskHref()
-  const scheduleHref = selectedProject ? planCreateHref(selectedProject) : '/plans?create=true'
-  const canCreateSchedule = canCreatePlanForProject(selectedProject)
   const ExecutionIcon = localExecutionReady ? Monitor : Cloud
   const executionLabel = localExecutionReady ? '本地模式' : '云端模式'
+
+  useEffect(() => {
+    if (projectsLoading) return
+    const nextProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
+    if (!nextProject) {
+      if (selectedProjectId !== null) setSelectedProjectId(null)
+      return
+    }
+    if (selectedProjectId !== nextProject.id) {
+      setSelectedProjectId(nextProject.id)
+    }
+  }, [activeProjects, projectsLoading, selectedProjectId])
 
   const submitMutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.aiEntry.submit>[0]) => api.aiEntry.submit(payload),
@@ -213,18 +222,31 @@ export default function DashboardPage() {
     <div className="mx-auto flex w-full max-w-5xl flex-col px-1 pb-8">
       <section className="mx-auto flex min-h-[calc(100dvh-9rem)] w-full max-w-4xl flex-col justify-center gap-5 py-8 md:py-12">
         <div className="mx-auto flex w-full flex-col items-center text-center">
-          <h1 className="text-balance text-[1.7rem] font-semibold leading-tight tracking-normal text-foreground md:text-3xl">
-            {dashboardTitle}
+          <h1 className="text-balance text-3xl font-medium leading-tight tracking-normal text-foreground md:text-[2rem]">
+            首页
           </h1>
         </div>
 
-        <div className="mx-auto w-full overflow-hidden rounded-xl border border-border/80 bg-white shadow-[0_10px_35px_rgba(15,23,42,0.10)] dark:bg-card">
-          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="描述你想创作的内容、目标和素材要求..."
-            className="min-h-[116px] w-full resize-none bg-transparent px-5 py-4 text-[15px] leading-7 text-foreground outline-none placeholder:text-muted-foreground md:min-h-[132px]"
-          />
+        <div className="mx-auto w-full max-w-3xl overflow-hidden rounded-[20px] border border-border/70 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.12)] dark:bg-card">
+          <div className="relative">
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="描述你想创作的内容、目标和素材要求..."
+              className="min-h-[92px] w-full resize-none bg-transparent px-5 py-4 pb-14 pr-16 text-[15px] leading-7 text-foreground outline-none placeholder:text-muted-foreground md:min-h-[102px]"
+            />
+            <Button
+              type="button"
+              aria-label="发送创建任务"
+              onClick={() => { void handleSubmit() }}
+              disabled={!canSubmit}
+              loading={submitMutation.isPending}
+              className="absolute bottom-3 right-3 size-9 rounded-full bg-foreground p-0 text-background shadow-sm hover:bg-foreground/90 disabled:bg-muted disabled:text-muted-foreground"
+            >
+              <Send className="size-4" />
+              <span className="sr-only">发送创建任务</span>
+            </Button>
+          </div>
 
           {(attachments.length > 0 || uploading.length > 0) && (
             <div className="border-t border-border px-4 py-3">
@@ -247,8 +269,8 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <div className="flex items-start justify-between gap-3 border-t border-border/80 bg-muted/20 px-3 py-3">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="flex min-h-12 items-center justify-between gap-3 border-t border-border/70 bg-muted/35 px-3 py-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <label className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" htmlFor="ai-entry-attachments">
                 <Paperclip className="size-4" />
                 <span className="sr-only">上传参考素材</span>
@@ -261,12 +283,13 @@ export default function DashboardPage() {
                 onChange={handleFileChange}
               />
 
+              <ProjectSelectControl
+                projects={activeProjects}
+                selectedProject={selectedProject}
+                onSelect={(projectId) => setSelectedProjectId(projectId)}
+              />
               {selectedProject && (
                 <>
-                  <ComposerMetaItem>
-                    <PlatformAvatar avatarUrl={selectedProject.avatar_url} name={selectedProject.name} platform={selectedProject.platform} size="sm" />
-                    <span className="truncate">项目：{selectedProject.name}</span>
-                  </ComposerMetaItem>
                   <ComposerMetaItem>
                     {contentTypeLabel[selectedProject.platform] || selectedProject.platform}
                   </ComposerMetaItem>
@@ -277,57 +300,11 @@ export default function DashboardPage() {
                 {executionLabel}
               </ComposerMetaItem>
             </div>
-
-            <Button
-              type="button"
-              aria-label="发送创建任务"
-              onClick={() => { void handleSubmit() }}
-              disabled={!canSubmit}
-              loading={submitMutation.isPending}
-              className="size-9 rounded-full bg-foreground p-0 text-background hover:bg-foreground/90 disabled:bg-muted disabled:text-muted-foreground"
-            >
-              <Send className="size-4" />
-              <span className="sr-only">发送创建任务</span>
-            </Button>
           </div>
         </div>
 
-        <div className="mx-auto grid w-full gap-3 md:grid-cols-3">
-          {selectedProject ? (
-            <>
-              <DashboardActionCard
-                to={newTaskHref}
-                icon={Plus}
-                title="新建创作任务"
-                description={`使用项目：${selectedProject.name}`}
-              />
-              {canCreateSchedule && (
-                <DashboardActionCard
-                  to={scheduleHref}
-                  icon={Clock3}
-                  title="安排自动计划"
-                  description="设置周期内容生产"
-                />
-              )}
-              <DashboardActionCard
-                to="/projects"
-                icon={Settings}
-                title="管理项目配置"
-                description="调整定位、风格和发布"
-              />
-            </>
-          ) : (
-            <DashboardActionCard
-              to={projectsReturnHref({ type: 'seednote', intent: 'new' })}
-              icon={Plus}
-              title="创建第一个项目"
-              description="先建立创作上下文"
-            />
-          )}
-        </div>
-
         {dashboardBlocker && !entryError && (
-          <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm">
+          <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm">
             <span className="min-w-0 text-muted-foreground">{dashboardBlocker.message}</span>
             <Link className="shrink-0 font-medium text-primary hover:text-primary/80" to={dashboardBlocker.actionHref}>
               {dashboardBlocker.actionLabel}
@@ -336,7 +313,7 @@ export default function DashboardPage() {
         )}
 
         {entryError && (
-          <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+          <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
             <span className="flex min-w-0 items-center gap-2 text-destructive">
               <AlertTriangle className="size-4 shrink-0" />
               <span>{entryError.message}</span>
@@ -365,46 +342,124 @@ function ComposerMetaItem({ children }: { children: ReactNode }) {
   )
 }
 
-function DashboardActionCard({
-  to,
-  icon: Icon,
-  title,
-  description,
+function ProjectSelectControl({
+  projects,
+  selectedProject,
+  onSelect,
 }: {
-  to: string
-  icon: LucideIcon
-  title: string
-  description: string
+  projects: Project[]
+  selectedProject?: Project
+  onSelect: (projectId: string) => void
 }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const createProjectHref = projectsReturnHref({ type: 'seednote', intent: 'new' })
+  const filteredProjects = useMemo(() => {
+    const keyword = search.trim().toLowerCase()
+    if (!keyword) return projects
+    return projects.filter((project) => {
+      const label = `${project.name} ${contentTypeLabel[project.platform] || project.platform}`.toLowerCase()
+      return label.includes(keyword)
+    })
+  }, [projects, search])
+
   return (
-    <Link
-      to={to}
-      aria-label={title}
-      className="group flex min-h-[86px] items-center gap-3 rounded-lg border border-border/80 bg-white px-4 py-3 text-left shadow-sm transition-colors hover:border-foreground/20 hover:bg-white dark:bg-card dark:hover:bg-card"
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen)
+        if (!nextOpen) setSearch('')
+      }}
     >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-md text-foreground">
-        <Icon className="size-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-foreground">{title}</span>
-        <span className="mt-1 block truncate text-sm text-muted-foreground">{description}</span>
-      </span>
-      <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
-    </Link>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            aria-label={selectedProject ? `选择项目 ${selectedProject.name}` : '选择项目'}
+            aria-expanded={open}
+            className="inline-flex h-8 max-w-[220px] items-center gap-1.5 rounded-md bg-background px-2 text-xs text-foreground shadow-sm ring-1 ring-border/70 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          />
+        }
+      >
+        {selectedProject ? (
+          <>
+            <MiniProjectAvatar project={selectedProject} />
+            <span className="truncate">{selectedProject.name}</span>
+          </>
+        ) : (
+          <span className="truncate text-muted-foreground">选择项目</span>
+        )}
+        <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
+      </PopoverTrigger>
+      <PopoverContent className="w-72 gap-0 rounded-xl border border-border/70 bg-white p-0 shadow-[0_16px_45px_rgba(15,23,42,0.18)] ring-0 dark:bg-card" align="start" side="top" sideOffset={8}>
+        <div className="flex h-9 items-center gap-2 border-b border-border/70 px-3">
+          <Search className="size-3.5 shrink-0 text-muted-foreground" />
+          <input
+            aria-label="搜索项目"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="搜索项目"
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+
+        <div className="max-h-64 overflow-y-auto p-1">
+          {filteredProjects.length > 0 ? (
+            filteredProjects.map((project) => {
+              const selected = selectedProject?.id === project.id
+              return (
+                <button
+                  key={project.id}
+                  type="button"
+                  onClick={() => {
+                    onSelect(project.id)
+                    setOpen(false)
+                    setSearch('')
+                  }}
+                  className={cn(
+                    'flex h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+                    selected && 'bg-accent/70',
+                  )}
+                >
+                  <MiniProjectAvatar project={project} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-foreground">{project.name}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {contentTypeLabel[project.platform] || project.platform}
+                    </span>
+                  </span>
+                  <Check className={cn('size-4 shrink-0 text-foreground', selected ? 'opacity-100' : 'opacity-0')} />
+                </button>
+              )
+            })
+          ) : (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">没有找到项目</div>
+          )}
+        </div>
+
+        <div className="border-t border-border/70 p-1">
+          <Link
+            to={createProjectHref}
+            onClick={() => setOpen(false)}
+            className="flex h-9 items-center gap-2 rounded-lg px-2 text-sm text-foreground transition-colors hover:bg-accent"
+          >
+            <FolderPlus className="size-4 text-muted-foreground" />
+            <span className="flex-1">创建项目</span>
+          </Link>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 
-function planCreateHref(project: Project) {
-  const params = new URLSearchParams()
-  params.set('create', 'true')
-  params.set('type', project.platform)
-  params.set('project_id', project.id)
-  params.set('intent', 'schedule')
-  return `/plans?${params.toString()}`
-}
-
-function canCreatePlanForProject(project?: Project) {
-  return Boolean(project && (project.platform === 'article' || project.platform === 'seednote' || isVideoCreator(project.platform)))
+function MiniProjectAvatar({ project }: { project: Project }) {
+  return (
+    <span className="grid size-4 shrink-0 place-items-center overflow-hidden rounded-full">
+      <span className="scale-50">
+        <PlatformAvatar avatarUrl={project.avatar_url} name={project.name} platform={project.platform} size="sm" />
+      </span>
+    </span>
+  )
 }
 
 function AttachmentChip({ attachment, onRemove }: { attachment: AIEntryAttachment; onRemove: () => void }) {

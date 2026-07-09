@@ -1,7 +1,7 @@
 import { http, unwrap } from '@/lib/http-client'
 import type { DesignerProvider, GenerateRequest, HistoryResponse, ImageGeneration, RawDesignerProvider } from '@/types/designer'
 
-function normalizeProvider(raw: RawDesignerProvider): DesignerProvider {
+export function normalizeProvider(raw: RawDesignerProvider): DesignerProvider {
   const caps = raw.capabilities ?? {}
   const pricing = raw.pricing ?? {}
   return {

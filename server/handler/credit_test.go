@@ -29,7 +29,23 @@ func TestCreditPricingKeepsGPTImage2OutOfFixedImageCosts(t *testing.T) {
 		ModelRoutes: srvconfig.ModelRoutesConfig{
 			ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
 				Designer: map[string]srvconfig.ImageGenerationRouteConfig{
-					"gpt_image_2": {Provider: "wangcai_openai", Model: "gpt-image-2", Enabled: true},
+					"gpt_image_2": {
+						Provider: "wangcai_openai",
+						Model:    "gpt-image-2",
+						Enabled:  true,
+						Capabilities: srvconfig.DesignerProviderCapabilities{
+							QualityLevels:      []string{"auto", "low", "medium", "high"},
+							SizePresets:        []string{"auto", "1024x1024", "1536x1024", "1024x1536"},
+							DefaultSize:        "auto",
+							MaxBatch:           10,
+							MaxReferenceImages: 16,
+							SupportsReference:  true,
+							SupportsMask:       true,
+							OutputFormats:      []string{"png", "jpeg", "webp"},
+							HasBackground:      true,
+							HasCompression:     true,
+						},
+					},
 				},
 			},
 		},

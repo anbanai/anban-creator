@@ -221,17 +221,32 @@ type VideoUnderstandingRouteConfig struct {
 }
 
 type ImageGenerationRouteConfig struct {
-	Provider       string `yaml:"provider"`
-	Model          string `yaml:"model"`
-	Alias          string `yaml:"alias"`
-	Enabled        bool   `yaml:"enabled"`
-	ResponseFormat string `yaml:"response_format"`
+	Provider       string                       `yaml:"provider"`
+	Model          string                       `yaml:"model"`
+	Alias          string                       `yaml:"alias"`
+	Enabled        bool                         `yaml:"enabled"`
+	ResponseFormat string                       `yaml:"response_format"`
+	Capabilities   DesignerProviderCapabilities `yaml:"capabilities" json:"capabilities"`
 }
 
 type ImageGenerationRoutesConfig struct {
 	Cover    ImageGenerationRouteConfig            `yaml:"cover"`
 	Content  ImageGenerationRouteConfig            `yaml:"content"`
 	Designer map[string]ImageGenerationRouteConfig `yaml:"designer"`
+}
+
+type DesignerProviderCapabilities struct {
+	QualityLevels      []string `yaml:"quality_levels" json:"quality_levels"`
+	SizePresets        []string `yaml:"size_presets" json:"size_presets"`
+	DefaultSize        string   `yaml:"default_size" json:"default_size"`
+	MaxBatch           int      `yaml:"max_batch" json:"max_batch"`
+	MaxReferenceImages int      `yaml:"max_reference_images" json:"max_reference_images"`
+	SupportsReference  bool     `yaml:"supports_reference" json:"supports_reference"`
+	SupportsMask       bool     `yaml:"supports_mask" json:"supports_mask"`
+	OutputFormats      []string `yaml:"output_formats" json:"output_formats"`
+	HasBackground      bool     `yaml:"has_background" json:"has_background"`
+	HasCompression     bool     `yaml:"has_compression" json:"has_compression"`
+	Watermark          bool     `yaml:"watermark" json:"watermark"`
 }
 
 type VideoGenerationRouteConfig struct {
@@ -901,11 +916,12 @@ func (c FunASRConfig) Complete() bool {
 // supporting auth tokens, base URLs, model overrides, etc.
 type ClaudeConfig struct {
 	Model          string            `yaml:"model"`    // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
-	Executor       string            `yaml:"executor"` // "local" (default) or "docker"
+	Executor       string            `yaml:"executor"` // "local" (default), "docker", or "kubernetes"
 	Env            map[string]string `yaml:"env"`
 	PluginDir      string            `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
 	Sandbox        bool              `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
+	Kubernetes     KubernetesConfig  `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
 	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 50}
 	TaskLogDir     string            `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
 	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
@@ -919,6 +935,26 @@ type DockerConfig struct {
 	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
 	ContainerName string `yaml:"container_name"` // Name of a persistent container to reuse via docker exec (empty = create+destroy per task)
 	WorkspaceDir  string `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
+}
+
+// KubernetesConfig holds ACK/Kubernetes executor settings for project Agent Pods.
+type KubernetesConfig struct {
+	Namespace          string                   `yaml:"namespace"`            // Namespace where project Agent Pods run.
+	AgentImage         string                   `yaml:"agent_image"`          // Agent image containing the anban binary and Claude runtime.
+	ServiceAccount     string                   `yaml:"service_account"`      // Service account used by Agent Pods.
+	ImagePullSecret    string                   `yaml:"image_pull_secret"`    // Optional image pull secret for private registries.
+	WorkspaceMountPath string                   `yaml:"workspace_mount_path"` // Container path where NAS is mounted.
+	WorkspacePVCName   string                   `yaml:"workspace_pvc_name"`   // NAS-backed PVC mounted by Agent Pods.
+	PodTTLSeconds      int                      `yaml:"pod_ttl_seconds"`      // Idle TTL for project Agent Pods.
+	ExecTimeoutSec     int                      `yaml:"exec_timeout_seconds"` // Per-task exec timeout.
+	Resources          KubernetesResourceConfig `yaml:"resources"`            // Agent Pod requests and limits.
+}
+
+// KubernetesResourceConfig mirrors Kubernetes resource maps without importing
+// client-go types into the config package.
+type KubernetesResourceConfig struct {
+	Requests map[string]string `yaml:"requests"`
+	Limits   map[string]string `yaml:"limits"`
 }
 
 // MemoryConfig holds Claude Code project memory projection settings.
@@ -1370,6 +1406,21 @@ func (c *Config) applyDefaults() {
 		// before the agent finishes (silent partial failure).
 		c.Claude.Docker.TimeoutSec = 3600
 	}
+	if c.Claude.Kubernetes.Namespace == "" {
+		c.Claude.Kubernetes.Namespace = "default"
+	}
+	if c.Claude.Kubernetes.AgentImage == "" {
+		c.Claude.Kubernetes.AgentImage = c.Claude.Docker.Image
+	}
+	if c.Claude.Kubernetes.WorkspaceMountPath == "" {
+		c.Claude.Kubernetes.WorkspaceMountPath = "/workspace"
+	}
+	if c.Claude.Kubernetes.PodTTLSeconds == 0 {
+		c.Claude.Kubernetes.PodTTLSeconds = 24 * 3600
+	}
+	if c.Claude.Kubernetes.ExecTimeoutSec == 0 {
+		c.Claude.Kubernetes.ExecTimeoutSec = c.Claude.Docker.TimeoutSec
+	}
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
 		c.Claude.PluginDir = detectPluginDir()
@@ -1444,7 +1495,11 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		c.ImageAPI.Designer = map[string]*appconfig.ImageAPI{}
 		c.ImageAPI.designerOrder = c.ImageAPI.designerOrder[:0]
 		for key, route := range c.ModelRoutes.ImageGeneration.Designer {
-			cfg, err := c.imageAPIFromRoute("model_routes.image_generation.designer."+key, route)
+			routeName := "model_routes.image_generation.designer." + key
+			if err := validateDesignerProviderCapabilities(routeName+".capabilities", route.Capabilities); err != nil {
+				return err
+			}
+			cfg, err := c.imageAPIFromRoute(routeName, route)
 			if err != nil {
 				return err
 			}
@@ -1497,6 +1552,55 @@ func (c *Config) resolveImagePresetRoutes() error {
 		preset.Model = route.Model
 		preset.Endpoint = provider.BaseURL
 		preset.APIKey = provider.APIKey
+	}
+	return nil
+}
+
+func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapabilities) error {
+	var errs []string
+	defaultSize := strings.TrimSpace(caps.DefaultSize)
+	if defaultSize == "" {
+		errs = append(errs, "default_size is required")
+	}
+	if len(caps.SizePresets) == 0 {
+		errs = append(errs, "size_presets is required")
+	}
+	if caps.MaxBatch <= 0 {
+		errs = append(errs, "max_batch must be positive")
+	}
+	if caps.MaxReferenceImages < 0 {
+		errs = append(errs, "max_reference_images must not be negative")
+	}
+	if len(caps.OutputFormats) == 0 {
+		errs = append(errs, "output_formats is required")
+	}
+
+	hasDefaultSize := false
+	for _, preset := range caps.SizePresets {
+		preset = strings.TrimSpace(preset)
+		if preset == "" {
+			errs = append(errs, "size_presets must not contain empty values")
+			continue
+		}
+		if strings.EqualFold(preset, defaultSize) {
+			hasDefaultSize = true
+		}
+	}
+	if defaultSize != "" && len(caps.SizePresets) > 0 && !hasDefaultSize {
+		errs = append(errs, "default_size must be included in size_presets")
+	}
+	for _, format := range caps.OutputFormats {
+		if strings.TrimSpace(format) == "" {
+			errs = append(errs, "output_formats must not contain empty values")
+		}
+	}
+	for _, quality := range caps.QualityLevels {
+		if strings.TrimSpace(quality) == "" {
+			errs = append(errs, "quality_levels must not contain empty values")
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s invalid: %s", path, strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -1752,8 +1856,16 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Claude.Executor != "local" && c.Claude.Executor != "docker" {
-		errs = append(errs, fmt.Sprintf("claude.executor must be 'local' or 'docker', got %q", c.Claude.Executor))
+	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+		if err := validateDesignerProviderCapabilities("model_routes.image_generation.designer."+key+".capabilities", route.Capabilities); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+
+	switch c.Claude.Executor {
+	case "local", "docker":
+	default:
+		errs = append(errs, fmt.Sprintf("claude.executor must be 'local' or 'docker' until a Kubernetes executor is wired, got %q", c.Claude.Executor))
 	}
 
 	// When using the Docker executor, the container timeout must be at least as
@@ -1764,6 +1876,38 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Sprintf(
 				"claude.docker.timeout_sec (%ds) must be >= asynq.content_generate_timeout (%s); otherwise the container is killed before the task deadline",
 				c.Claude.Docker.TimeoutSec, c.Asynq.ContentGenerateTimeout))
+		}
+	}
+
+	if c.Claude.Executor == "kubernetes" {
+		if c.Storage.Provider != "oss" {
+			errs = append(errs, "claude.kubernetes requires storage.provider to be \"oss\"")
+		}
+		if strings.TrimSpace(c.Storage.STSRoleArn) == "" {
+			errs = append(errs, "storage.sts_role_arn is required when claude.executor is \"kubernetes\"")
+		}
+		if strings.TrimSpace(c.Claude.AgentServerURL) == "" {
+			errs = append(errs, "claude.agent_server_url is required when claude.executor is \"kubernetes\"")
+		}
+		if strings.TrimSpace(c.Claude.Kubernetes.Namespace) == "" {
+			errs = append(errs, "claude.kubernetes.namespace is required")
+		}
+		if strings.TrimSpace(c.Claude.Kubernetes.AgentImage) == "" {
+			errs = append(errs, "claude.kubernetes.agent_image is required")
+		}
+		if strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath) == "" {
+			errs = append(errs, "claude.kubernetes.workspace_mount_path is required")
+		} else if !strings.HasPrefix(strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath), "/") {
+			errs = append(errs, "claude.kubernetes.workspace_mount_path must be absolute")
+		}
+		if strings.TrimSpace(c.Claude.Kubernetes.WorkspacePVCName) == "" {
+			errs = append(errs, "claude.kubernetes.workspace_pvc_name is required")
+		}
+		if c.Claude.Kubernetes.ExecTimeoutSec <= 0 {
+			errs = append(errs, "claude.kubernetes.exec_timeout_seconds must be positive")
+		}
+		if c.Claude.Kubernetes.PodTTLSeconds <= 0 {
+			errs = append(errs, "claude.kubernetes.pod_ttl_seconds must be positive")
 		}
 	}
 

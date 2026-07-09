@@ -31,6 +31,8 @@ vi.mock('@/lib/api/designer', () => ({
 describe('Designer provider contract', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
+    window.sessionStorage.clear()
     vi.mocked(designerApi.getProviders).mockResolvedValue([
       {
         id: 'gpt_image_2',
@@ -75,6 +77,25 @@ describe('Designer provider contract', () => {
     expect(page).toContain('provider_id: effectiveProvider.id')
   })
 
+  it('floats the prompt bar inside the designer canvas frame', () => {
+    const page = read('src/pages/DesignerPage.tsx')
+    const promptBar = read('src/components/designer/DesignerPromptBar.tsx')
+
+    expect(promptBar).not.toContain('max-w-5xl')
+    expect(promptBar).toContain('pointer-events-none absolute inset-x-4 bottom-4')
+    expect(promptBar).toContain('pointer-events-auto w-full rounded-2xl')
+    expect(page).toContain('pb-24')
+    expect(page).toContain('md:pb-28')
+  })
+
+  it('does not infer GPT Image sizes in the Studio API client', () => {
+    const apiClient = read('src/lib/api/designer.ts')
+
+    expect(apiClient).not.toContain('gpt-image')
+    expect(apiClient).not.toContain('chatgpt-image')
+    expect(apiClient).not.toContain('GPT_IMAGE_SIZE_PRESETS')
+  })
+
   it('uses the provider default size when generating with GPT Image', async () => {
     render(createElement(DesignerPage))
 
@@ -91,5 +112,42 @@ describe('Designer provider contract', () => {
     const request = vi.mocked(designerApi.generate).mock.calls[0][0] as GenerateRequest
     expect(request.provider_id).toBe('gpt_image_2')
     expect(request.size).toBe('auto')
+  })
+
+  it('renders ratio presets from configured Seedream capabilities without custom pixel controls', async () => {
+    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
+      {
+        id: 'seedream',
+        name: '豆包 Seedream',
+        provider: 'volcengine',
+        providerKey: 'volcengine_ark',
+        route: 'image_generation.designer.seedream',
+        model: 'doubao-seedream-5-0-260128',
+        credits: 50,
+        enabled: true,
+        idx: 0,
+        capabilities: {
+          qualityLevels: [],
+          sizePresets: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'],
+          defaultSize: '1:1',
+          maxBatch: 1,
+          maxReferenceImages: 10,
+          supportsReference: true,
+          supportsMask: false,
+          outputFormats: ['png', 'jpeg'],
+          hasBackground: false,
+          hasCompression: false,
+          watermark: true,
+        },
+        pricing: {},
+      },
+    ])
+
+    render(createElement(DesignerPage))
+
+    await screen.findAllByText('豆包 Seedream')
+    expect(screen.getAllByRole('button', { name: /21:9/ }).length).toBeGreaterThan(0)
+    expect(screen.getByText('分辨率')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /自定义\s*W×H/ })).not.toBeInTheDocument()
   })
 })

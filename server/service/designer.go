@@ -147,12 +147,14 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 			}
 			provider = cfg.Provider
 			modelName = cfg.Model
-			if err := validateDesignerGenerateRequest(req, designerCapabilities(provider, modelName)); err != nil {
-				return nil, err
-			}
 			if route, ok := s.designerRoute(req.ProviderID); ok {
+				if err := validateDesignerGenerateRequest(req, route.Capabilities); err != nil {
+					return nil, err
+				}
 				providerKey = route.Provider
 				routeName = "image_generation.designer." + req.ProviderID
+			} else {
+				return nil, fmt.Errorf("designer provider %s route is not configured", req.ProviderID)
 			}
 			if providerKey != "" && s.fullCfg != nil {
 				var err error
@@ -1024,19 +1026,7 @@ type DesignerProviderInfo struct {
 	Pricing      DesignerProviderPricing      `json:"pricing"`
 }
 
-type DesignerProviderCapabilities struct {
-	QualityLevels      []string `json:"quality_levels"`
-	SizePresets        []string `json:"size_presets"`
-	DefaultSize        string   `json:"default_size"`
-	MaxBatch           int      `json:"max_batch"`
-	MaxReferenceImages int      `json:"max_reference_images"`
-	SupportsReference  bool     `json:"supports_reference"`
-	SupportsMask       bool     `json:"supports_mask"`
-	OutputFormats      []string `json:"output_formats"`
-	HasBackground      bool     `json:"has_background"`
-	HasCompression     bool     `json:"has_compression"`
-	Watermark          bool     `json:"watermark"`
-}
+type DesignerProviderCapabilities = srvconfig.DesignerProviderCapabilities
 
 type DesignerProviderPricing struct {
 	PricingType   string                        `json:"pricing_type,omitempty"`
@@ -1080,6 +1070,7 @@ func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 		}
 		routeName := "image_generation.designer." + id
 		providerKey := s.designerProviderKey(id)
+		route, _ := s.designerRoute(id)
 		providers = append(providers, DesignerProviderInfo{
 			ID:           id,
 			Name:         name,
@@ -1091,7 +1082,7 @@ func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 			Credits:      cfg.Credits,
 			Enabled:      cfg.IsEnabled(),
 			Idx:          i,
-			Capabilities: designerCapabilities(cfg.Provider, cfg.Model),
+			Capabilities: route.Capabilities,
 			Pricing:      s.designerPricing(providerKey, cfg.Model),
 		})
 	}
@@ -1145,51 +1136,6 @@ func (s *DesignerService) designerPricing(providerKey, modelName string) Designe
 		out.BillingNote = "fixed per-image billing"
 	}
 	return out
-}
-
-func designerCapabilities(provider, modelName string) DesignerProviderCapabilities {
-	if isDesignerGPTImageModel(modelName) {
-		return DesignerProviderCapabilities{
-			QualityLevels:      []string{"auto", "low", "medium", "high"},
-			SizePresets:        []string{"auto", "1024x1024", "1536x1024", "1024x1536"},
-			DefaultSize:        "auto",
-			MaxBatch:           10,
-			MaxReferenceImages: 16,
-			SupportsReference:  true,
-			SupportsMask:       true,
-			OutputFormats:      []string{"png", "jpeg", "webp"},
-			HasBackground:      true,
-			HasCompression:     true,
-		}
-	}
-
-	switch provider {
-	case "volcengine":
-		return DesignerProviderCapabilities{
-			SizePresets:        []string{"1:1", "3:4", "4:3", "16:9", "9:16"},
-			DefaultSize:        "1:1",
-			MaxBatch:           1,
-			MaxReferenceImages: 1,
-			SupportsReference:  true,
-			OutputFormats:      []string{"png", "jpeg"},
-			Watermark:          true,
-		}
-	case "gemini":
-		return DesignerProviderCapabilities{
-			SizePresets:        []string{"1:1", "3:4", "4:3", "16:9"},
-			DefaultSize:        "1:1",
-			MaxBatch:           1,
-			MaxReferenceImages: 10,
-			SupportsReference:  true,
-			OutputFormats:      []string{"png"},
-		}
-	}
-	return DesignerProviderCapabilities{MaxBatch: 1}
-}
-
-func isDesignerGPTImageModel(modelName string) bool {
-	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	return strings.HasPrefix(modelName, "gpt-image-") || modelName == "chatgpt-image-latest"
 }
 
 // resolveCredits returns the per-image credit cost for the given provider+model combination.
