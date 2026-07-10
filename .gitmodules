@@ -1,12 +1,15 @@
 [submodule "claudecode"]
 	path = claudecode
 	url = https://github.com/anbanai/anban-creator-claudecode.git
+	syncPush = true
 [submodule "openclaw"]
 	path = openclaw
 	url = https://github.com/anbanai/anban-creator-openclaw.git
+	syncPush = true
 [submodule "codex"]
 	path = codex
 	url = https://github.com/anbanai/anban-creator-codex.git
+	syncPush = true
 [submodule "third_party/OpenMontage"]
 	path = third_party/OpenMontage
 	url = https://github.com/calesthio/OpenMontage.git
