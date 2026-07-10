@@ -12,9 +12,9 @@ The desired command surface is intentionally simple:
 
 ## Decision
 
-Disable Git's native recursive push and install a tracked `pre-push` hook. The hook invokes a tested script that explicitly pushes each owned submodule's current commit to the same branch being pushed by the superproject. Explicit `HEAD:refs/heads/<branch>` refspecs work for both attached and detached submodule HEADs.
+Disable Git's native recursive push and install a tracked `pre-push` hook. The hook reads Git's standard ref update list and invokes a tested script only when the checked-out branch (or its explicit `HEAD` alias) is actually being pushed. The destination branch comes from the remote ref, so refspecs such as `main:release` push the managed submodules to `release`. Explicit `HEAD:refs/heads/<branch>` refspecs work for both attached and detached submodule HEADs.
 
-Use `.gitmodules` metadata to opt owned submodules into coordinated pushes. This keeps `third_party/OpenMontage` and future third-party dependencies outside the push set without hard-coding repository names in shell logic.
+Use `.gitmodules` metadata to opt owned submodules into coordinated pushes and select each submodule's own push remote. This keeps `third_party/OpenMontage` and future third-party dependencies outside the push set without hard-coding repository names in shell logic, and it avoids assuming that the superproject and every submodule use the same remote name.
 
 ## Pull Behavior
 
@@ -30,19 +30,23 @@ This preserves the core submodule invariant: the superproject decides the exact 
 A tracked `.githooks/pre-push` hook will:
 
 1. Ignore recursive invocations from submodule pushes.
-2. Identify the checked-out superproject branch.
-3. Invoke `scripts/push-managed-submodules.sh` before Git sends the superproject refs.
+2. Parse the `<local-ref> <local-oid> <remote-ref> <remote-oid>` records supplied on standard input by Git.
+3. Ignore tag-only pushes and pushes of branches other than the checked-out branch.
+4. Map the checked-out local branch or explicit `HEAD` to the destination branch named by `remote-ref`.
+5. Invoke `scripts/push-managed-submodules.sh` with that destination branch and the exact superproject commit being pushed, before Git sends the superproject refs.
 
 The push script will:
 
-1. Read only submodules with `syncPush = true` in `.gitmodules`.
+1. Read only submodules with `syncPush = true` from the `.gitmodules` blob in the exact superproject commit being pushed.
 2. Skip an opted-in submodule when it is not initialized.
 3. Reject dirty submodule working trees because uncommitted work cannot be pushed.
-4. Reject a submodule whose current HEAD is not the gitlink recorded by the superproject index, preventing the parent push from publishing a stale pointer.
-5. Push the exact submodule commit using `git push <remote> HEAD:refs/heads/<superproject-branch>`.
-6. Stop immediately on the first real push failure.
+4. Reject a submodule whose current HEAD is not the gitlink recorded by the exact superproject commit being pushed, rather than trusting uncommitted index state.
+5. Resolve the push remote from `syncRemote` for that submodule, defaulting to `origin` when the metadata is absent.
+6. Validate every managed submodule before pushing any of them, preventing local validation failures from producing a partial multi-repository push.
+7. Push the exact submodule commit using `git push <submodule-remote> HEAD:refs/heads/<destination-branch>`.
+8. Stop immediately on the first real push failure.
 
-The hook intentionally does not infer a detached HEAD's former branch. Mapping all coordinated repositories to the branch selected by the superproject is deterministic and avoids pushing to an arbitrary nearby branch.
+The hook intentionally does not infer a detached superproject HEAD's former branch. An explicit detached `HEAD` push to a branch is rejected, while unrelated tag-only pushes remain unaffected. Mapping all coordinated repositories to the remote branch selected by the superproject refspec is deterministic and avoids pushing to an arbitrary nearby branch.
 
 ## Installation
 
@@ -62,8 +66,10 @@ Go integration tests will create temporary bare remotes and repositories to veri
 
 - the installer disables native recursive push and installs the tracked hook path;
 - detached submodule HEADs are pushed to the superproject branch;
+- refspec destinations are honored while tag-only and non-current-branch pushes do not trigger submodule pushes;
+- each submodule uses its configured push remote rather than the superproject remote name;
 - unmarked third-party submodules are not pushed;
-- dirty or stale-gitlink submodules stop the root push with actionable errors;
+- dirty or pushed-commit gitlink mismatches stop the root push with actionable errors before any managed remote is updated;
 - the tracked hook delegates to the push script and includes a recursion guard.
 
 Tests use local file remotes only and never touch the developer's configured remotes.

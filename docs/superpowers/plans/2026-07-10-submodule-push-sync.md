@@ -21,7 +21,7 @@ Create:
 
 Modify:
 
-- `.gitmodules` - mark the three owned plugin submodules with `syncPush = true`.
+- `.gitmodules` - mark the three owned plugin submodules with `syncPush = true` and `syncRemote = origin`.
 - `Makefile` - expose an idempotent `git-sync-setup` target.
 
 ### Task 1: Installer contract
@@ -93,7 +93,7 @@ Expected: PASS.
 Create a temporary bare submodule remote, seed `main`, add it to a temporary superproject, create and record a detached submodule commit, set `submodule.plugin.syncPush=true`, and run:
 
 ```go
-runGit(t, superproject, scriptPath, "main", "origin")
+runGit(t, superproject, scriptPath, "main")
 ```
 
 Assert `refs/heads/main` in the bare submodule remote equals the detached commit.
@@ -110,13 +110,13 @@ Expected: FAIL because `scripts/push-managed-submodules.sh` does not exist.
 
 - [ ] **Step 3: Implement the minimal push script**
 
-The executable script accepts `<branch> [remote]`, enumerates `.gitmodules` entries where `syncPush` is true, validates clean/index-aligned state, and pushes:
+The executable script accepts `<destination-branch> [superproject-commit]`, enumerates the pushed commit's `.gitmodules` entries where `syncPush` is true, validates clean/commit-aligned state, and pushes through each submodule's configured `syncRemote` (default `origin`):
 
 ```sh
-git -C "$submodule_path" push "$remote_name" "HEAD:refs/heads/$branch_name"
+git -C "$submodule_path" push "$submodule_remote" "HEAD:refs/heads/$destination_branch"
 ```
 
-Mark `claudecode`, `codex`, and `openclaw` with `syncPush = true`; do not mark `third_party/OpenMontage`.
+Mark `claudecode`, `codex`, and `openclaw` with `syncPush = true` and `syncRemote = origin`; do not mark `third_party/OpenMontage`.
 
 - [ ] **Step 4: Verify the push test passes**
 
@@ -156,7 +156,7 @@ Expected: at least the dirty and stale cases FAIL until validation is implemente
 
 - [ ] **Step 3: Implement minimal safety validation**
 
-Use `git status --porcelain`, `git ls-files --stage -- <path>`, and `git -C <path> rev-parse HEAD`. Emit actionable stderr messages and exit nonzero before any unsafe push.
+Use `git status --porcelain`, `git rev-parse <pushed-commit>:<path>`, and `git -C <path> rev-parse HEAD`. Validate the full managed set before starting any push, emit actionable stderr messages, and exit nonzero before any unsafe push.
 
 - [ ] **Step 4: Verify safety tests pass**
 
@@ -170,7 +170,7 @@ Run the same focused command and expect PASS.
 
 - [ ] **Step 1: Write the failing hook contract test**
 
-Assert the hook is executable, exits immediately when `ANBAN_SUBMODULE_PUSH_ACTIVE=1`, resolves the repository root, and delegates using the checked-out branch and Git-provided remote name.
+Assert the hook is executable, exits immediately when `ANBAN_SUBMODULE_PUSH_ACTIVE=1`, resolves the repository root, parses Git's standard-input ref list, ignores tags and non-current branches, and delegates using the remote destination branch plus the exact local commit.
 
 - [ ] **Step 2: Verify the hook test fails**
 
@@ -184,7 +184,7 @@ Expected: FAIL because `.githooks/pre-push` does not exist.
 
 - [ ] **Step 3: Implement the guarded hook**
 
-The hook must export `ANBAN_SUBMODULE_PUSH_ACTIVE=1` before invoking the submodule push script and fail with a clear message if the superproject is detached.
+The hook must export `ANBAN_SUBMODULE_PUSH_ACTIVE=1` before invoking the submodule push script. It rejects an explicit detached-`HEAD` branch push with a clear message, but leaves unrelated tag-only pushes alone.
 
 - [ ] **Step 4: Verify the hook test passes**
 

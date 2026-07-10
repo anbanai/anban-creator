@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,9 +53,15 @@ func mustMkdirAll(t *testing.T, path string) {
 
 func runCommand(t *testing.T, dir string, env []string, name string, args ...string) string {
 	t.Helper()
+	return runCommandInput(t, dir, env, "", name, args...)
+}
+
+func runCommandInput(t *testing.T, dir string, env []string, input, name string, args ...string) string {
+	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdin = strings.NewReader(input)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run %s %s in %s: %v\n%s", name, strings.Join(args, " "), dir, err, output)
@@ -64,9 +71,15 @@ func runCommand(t *testing.T, dir string, env []string, name string, args ...str
 
 func runCommandError(t *testing.T, dir string, env []string, name string, args ...string) string {
 	t.Helper()
+	return runCommandErrorInput(t, dir, env, "", name, args...)
+}
+
+func runCommandErrorInput(t *testing.T, dir string, env []string, input, name string, args ...string) string {
+	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdin = strings.NewReader(input)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("run %s %s in %s succeeded, want failure\n%s", name, strings.Join(args, " "), dir, output)
@@ -74,7 +87,7 @@ func runCommandError(t *testing.T, dir string, env []string, name string, args .
 	return string(output)
 }
 
-func TestPrePushHookDelegatesWithBranchRemoteAndRecursionGuard(t *testing.T) {
+func TestPrePushHookDelegatesWithDestinationCommitAndRecursionGuard(t *testing.T) {
 	hook := repositoryPath(t, ".githooks", "pre-push")
 	info, err := os.Stat(hook)
 	if err != nil {
@@ -93,29 +106,69 @@ func TestPrePushHookDelegatesWithBranchRemoteAndRecursionGuard(t *testing.T) {
 	fakeScript := filepath.Join(repo, "scripts", "push-managed-submodules.sh")
 	mustMkdirAll(t, filepath.Dir(fakeScript))
 	writeExecutable(t, fakeScript, `#!/bin/sh
-printf '%s|%s|%s\n' "$1" "$2" "$ANBAN_SUBMODULE_PUSH_ACTIVE" > "$ANBAN_PUSH_LOG"
+printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "$ANBAN_SUBMODULE_PUSH_ACTIVE" > "$ANBAN_PUSH_LOG"
 `)
 	logPath := filepath.Join(repo, "push.log")
-	runCommand(t, repo, []string{"ANBAN_PUSH_LOG=" + logPath}, hook, "upstream", "/tmp/remote.git")
+	head := strings.TrimSpace(runCommand(t, repo, nil, "git", "rev-parse", "HEAD"))
+	input := prePushLine("refs/heads/main", head, "refs/heads/release")
+	runCommandInput(t, repo, []string{"ANBAN_PUSH_LOG=" + logPath}, input, hook, "upstream", "/tmp/remote.git")
 
 	logData, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read hook delegation log: %v", err)
 	}
-	if actual, expected := strings.TrimSpace(string(logData)), "main|upstream|1"; actual != expected {
+	if actual, expected := strings.TrimSpace(string(logData)), "2|release|"+head+"|1"; actual != expected {
 		t.Fatalf("hook delegation = %q, want %q", actual, expected)
 	}
 
 	if err := os.Remove(logPath); err != nil {
 		t.Fatalf("remove hook delegation log: %v", err)
 	}
-	runCommand(t, repo, []string{
+	runCommandInput(t, repo, []string{
 		"ANBAN_PUSH_LOG=" + logPath,
 		"ANBAN_SUBMODULE_PUSH_ACTIVE=1",
-	}, hook, "upstream", "/tmp/remote.git")
+	}, input, hook, "upstream", "/tmp/remote.git")
 	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
 		t.Fatalf("recursive hook invocation created log; stat error = %v", err)
 	}
+}
+
+func TestPrePushHookSkipsRefsOutsideCurrentBranch(t *testing.T) {
+	hook := repositoryPath(t, ".githooks", "pre-push")
+	repo := filepath.Join(t.TempDir(), "repo")
+	initWorkingRepository(t, repo)
+	writeFile(t, filepath.Join(repo, "README.md"), "hook test\n")
+	runCommand(t, repo, nil, "git", "add", "README.md")
+	runCommand(t, repo, nil, "git", "commit", "-m", "initial")
+	head := strings.TrimSpace(runCommand(t, repo, nil, "git", "rev-parse", "HEAD"))
+
+	fakeScript := filepath.Join(repo, "scripts", "push-managed-submodules.sh")
+	mustMkdirAll(t, filepath.Dir(fakeScript))
+	writeExecutable(t, fakeScript, `#!/bin/sh
+printf 'unexpected delegation\n' > "$ANBAN_PUSH_LOG"
+`)
+	logPath := filepath.Join(repo, "push.log")
+	input := prePushLine("refs/tags/v1.0.0", head, "refs/tags/v1.0.0") +
+		prePushLine("refs/heads/other", head, "refs/heads/other")
+	runCommandInput(t, repo, []string{"ANBAN_PUSH_LOG=" + logPath}, input, hook, "origin", "/tmp/remote.git")
+
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("non-current ref push delegated to submodule script; stat error = %v", err)
+	}
+}
+
+func TestPrePushHookSkipsTagOnlyPushFromDetachedHead(t *testing.T) {
+	hook := repositoryPath(t, ".githooks", "pre-push")
+	repo := filepath.Join(t.TempDir(), "repo")
+	initWorkingRepository(t, repo)
+	writeFile(t, filepath.Join(repo, "README.md"), "hook test\n")
+	runCommand(t, repo, nil, "git", "add", "README.md")
+	runCommand(t, repo, nil, "git", "commit", "-m", "initial")
+	head := strings.TrimSpace(runCommand(t, repo, nil, "git", "rev-parse", "HEAD"))
+	runCommand(t, repo, nil, "git", "checkout", "--detach")
+
+	input := prePushLine("refs/tags/v1.0.0", head, "refs/tags/v1.0.0")
+	runCommandInput(t, repo, nil, input, hook, "origin", "/tmp/remote.git")
 }
 
 func TestPrePushHookRejectsDetachedSuperproject(t *testing.T) {
@@ -127,10 +180,16 @@ func TestPrePushHookRejectsDetachedSuperproject(t *testing.T) {
 	runCommand(t, repo, nil, "git", "commit", "-m", "initial")
 	runCommand(t, repo, nil, "git", "checkout", "--detach")
 
-	output := runCommandError(t, repo, nil, hook, "origin", "/tmp/remote.git")
+	head := strings.TrimSpace(runCommand(t, repo, nil, "git", "rev-parse", "HEAD"))
+	input := prePushLine("HEAD", head, "refs/heads/main")
+	output := runCommandErrorInput(t, repo, nil, input, hook, "origin", "/tmp/remote.git")
 	if !strings.Contains(output, "superproject HEAD is detached") {
 		t.Fatalf("error output = %q, want detached HEAD hint", output)
 	}
+}
+
+func prePushLine(localRef, localOID, remoteRef string) string {
+	return fmt.Sprintf("%s %s %s %s\n", localRef, localOID, remoteRef, strings.Repeat("0", 40))
 }
 
 type gitSyncFixture struct {
@@ -145,7 +204,7 @@ func TestPushManagedSubmodulesPushesDetachedHeadToSuperprojectBranch(t *testing.
 	fixture := newGitSyncFixture(t, true, true)
 
 	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
-	runCommand(t, fixture.superproject, nil, script, "main", "origin")
+	runCommand(t, fixture.superproject, nil, script, "main")
 
 	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
 	if remoteHead != fixture.detachedHead {
@@ -157,7 +216,7 @@ func TestPushManagedSubmodulesSkipsUnmarkedSubmodule(t *testing.T) {
 	fixture := newGitSyncFixture(t, false, true)
 
 	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
-	runCommand(t, fixture.superproject, nil, script, "main", "origin")
+	runCommand(t, fixture.superproject, nil, script, "main")
 
 	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
 	if remoteHead != fixture.initialRemoteHead {
@@ -170,7 +229,7 @@ func TestPushManagedSubmodulesRejectsDirtySubmodule(t *testing.T) {
 	writeFile(t, filepath.Join(fixture.plugin, "uncommitted.txt"), "not committed\n")
 
 	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
-	output := runCommandError(t, fixture.superproject, nil, script, "main", "origin")
+	output := runCommandError(t, fixture.superproject, nil, script, "main")
 	if !strings.Contains(output, "uncommitted changes") {
 		t.Fatalf("error output = %q, want uncommitted changes hint", output)
 	}
@@ -185,7 +244,7 @@ func TestPushManagedSubmodulesRejectsStaleGitlink(t *testing.T) {
 	fixture := newGitSyncFixture(t, true, false)
 
 	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
-	output := runCommandError(t, fixture.superproject, nil, script, "main", "origin")
+	output := runCommandError(t, fixture.superproject, nil, script, "main")
 	if !strings.Contains(output, "does not match the superproject gitlink") {
 		t.Fatalf("error output = %q, want stale gitlink hint", output)
 	}
@@ -193,6 +252,85 @@ func TestPushManagedSubmodulesRejectsStaleGitlink(t *testing.T) {
 	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
 	if remoteHead != fixture.initialRemoteHead {
 		t.Fatalf("stale-gitlink submodule remote main = %s, want unchanged %s", remoteHead, fixture.initialRemoteHead)
+	}
+}
+
+func TestPushManagedSubmodulesUsesConfiguredRemote(t *testing.T) {
+	fixture := newGitSyncFixture(t, true, true)
+	runCommand(t, fixture.plugin, nil, "git", "remote", "rename", "origin", "plugin-origin")
+	runCommand(t, fixture.superproject, nil, "git", "config", "-f", ".gitmodules", "submodule.plugin.syncRemote", "plugin-origin")
+	runCommand(t, fixture.superproject, nil, "git", "add", ".gitmodules")
+	runCommand(t, fixture.superproject, nil, "git", "commit", "-m", "configure plugin push remote")
+
+	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
+	runCommand(t, fixture.superproject, nil, script, "release")
+
+	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/release"))
+	if remoteHead != fixture.detachedHead {
+		t.Fatalf("remote release = %s, want detached submodule HEAD %s", remoteHead, fixture.detachedHead)
+	}
+}
+
+func TestPushManagedSubmodulesValidatesPushedCommitGitlink(t *testing.T) {
+	fixture := newGitSyncFixture(t, true, true)
+	writeFile(t, filepath.Join(fixture.plugin, "plugin.txt"), "newer detached commit\n")
+	runCommand(t, fixture.plugin, nil, "git", "add", "plugin.txt")
+	runCommand(t, fixture.plugin, nil, "git", "commit", "-m", "newer detached change")
+	runCommand(t, fixture.superproject, nil, "git", "add", "plugin")
+
+	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
+	output := runCommandError(t, fixture.superproject, nil, script, "main")
+	if !strings.Contains(output, "does not match the superproject gitlink in the pushed commit") {
+		t.Fatalf("error output = %q, want pushed-commit gitlink hint", output)
+	}
+
+	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
+	if remoteHead != fixture.initialRemoteHead {
+		t.Fatalf("mismatched submodule remote main = %s, want unchanged %s", remoteHead, fixture.initialRemoteHead)
+	}
+}
+
+func TestPushManagedSubmodulesValidatesAllBeforePushing(t *testing.T) {
+	fixture := newGitSyncFixture(t, true, true)
+	runCommand(t, fixture.superproject, nil, "git", "-c", "protocol.file.allow=always", "submodule", "add", fixture.remote, "broken")
+	runCommand(t, fixture.superproject, nil, "git", "config", "-f", ".gitmodules", "submodule.broken.syncPush", "true")
+	runCommand(t, fixture.superproject, nil, "git", "add", ".gitmodules", "broken")
+	runCommand(t, fixture.superproject, nil, "git", "commit", "-m", "add second managed plugin")
+
+	broken := filepath.Join(fixture.superproject, "broken")
+	configureGitIdentity(t, broken)
+	runCommand(t, broken, nil, "git", "checkout", "--detach")
+	writeFile(t, filepath.Join(broken, "broken.txt"), "unrecorded commit\n")
+	runCommand(t, broken, nil, "git", "add", "broken.txt")
+	runCommand(t, broken, nil, "git", "commit", "-m", "unrecorded broken change")
+
+	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
+	output := runCommandError(t, fixture.superproject, nil, script, "main")
+	if !strings.Contains(output, "does not match the superproject gitlink in the pushed commit") {
+		t.Fatalf("error output = %q, want pushed-commit gitlink hint", output)
+	}
+
+	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
+	if remoteHead != fixture.initialRemoteHead {
+		t.Fatalf("remote main changed before all submodules validated: got %s, want %s", remoteHead, fixture.initialRemoteHead)
+	}
+}
+
+func TestPushManagedSubmodulesRejectsMalformedManagedMetadata(t *testing.T) {
+	fixture := newGitSyncFixture(t, true, true)
+	runCommand(t, fixture.superproject, nil, "git", "config", "-f", ".gitmodules", "--unset", "submodule.plugin.path")
+	runCommand(t, fixture.superproject, nil, "git", "add", ".gitmodules")
+	runCommand(t, fixture.superproject, nil, "git", "commit", "-m", "remove managed plugin path")
+
+	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
+	output := runCommandError(t, fixture.superproject, nil, script, "main")
+	if !strings.Contains(output, "has no path in the pushed .gitmodules") {
+		t.Fatalf("error output = %q, want missing path hint", output)
+	}
+
+	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
+	if remoteHead != fixture.initialRemoteHead {
+		t.Fatalf("malformed metadata remote main = %s, want unchanged %s", remoteHead, fixture.initialRemoteHead)
 	}
 }
 

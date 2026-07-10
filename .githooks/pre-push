@@ -11,12 +11,30 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   exit 1
 }
 
-branch_name=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
-  echo "error: superproject HEAD is detached; check out the branch you intend to push" >&2
+current_branch_ref=$(git symbolic-ref --quiet HEAD 2>/dev/null || true)
+current_head=$(git rev-parse --verify HEAD 2>/dev/null) || {
+  echo "error: cannot resolve the superproject HEAD being pushed" >&2
   exit 1
 }
 
-remote_name=${1:-origin}
 export ANBAN_SUBMODULE_PUSH_ACTIVE=1
 
-exec "$repo_root/scripts/push-managed-submodules.sh" "$branch_name" "$remote_name"
+while read -r local_ref local_oid remote_ref remote_oid; do
+  case "$remote_ref" in
+    refs/heads/*) destination_branch=${remote_ref#refs/heads/} ;;
+    *) continue ;;
+  esac
+
+  if [ -n "$current_branch_ref" ] && [ "$local_ref" = "$current_branch_ref" ]; then
+    "$repo_root/scripts/push-managed-submodules.sh" "$destination_branch" "$local_oid"
+    continue
+  fi
+
+  if [ "$local_ref" = "HEAD" ] && [ "$local_oid" = "$current_head" ]; then
+    if [ -z "$current_branch_ref" ]; then
+      echo "error: superproject HEAD is detached; check out the branch you intend to push" >&2
+      exit 1
+    fi
+    "$repo_root/scripts/push-managed-submodules.sh" "$destination_branch" "$local_oid"
+  fi
+done
