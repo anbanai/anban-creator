@@ -1,7 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import DesignerToolbar from '@/components/designer/DesignerToolbar'
+import DesignerToolbar, {
+  type DesignerSettingsPatch,
+} from '@/components/designer/DesignerToolbar'
 import DesignerDropOverlay from '@/components/designer/DesignerDropOverlay'
 import {
   admitReferenceFiles,
@@ -39,6 +41,13 @@ const MAX_CONSECUTIVE_ERRORS = 5
 
 function hasExternalFiles(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.types).includes('Files')
+}
+
+function maxReferenceImagesForProvider(provider?: DesignerProvider): number {
+  const capabilities = provider?.capabilities
+  return capabilities?.supportsReference
+    ? Math.max(0, capabilities.maxReferenceImages)
+    : 0
 }
 
 function countIncomingReferenceImages(dataTransfer: DataTransfer): number | undefined {
@@ -119,8 +128,52 @@ export default function DesignerPage() {
   const abortedRef = useRef(false)
   const referenceFilesRef = useRef<File[]>([])
   const referenceDragDepthRef = useRef(0)
+  const normalizedProviderIdRef = useRef('')
+  const normalizedReferenceCapacityRef = useRef(0)
   const [referenceDropActive, setReferenceDropActive] = useState(false)
   const [incomingReferenceCount, setIncomingReferenceCount] = useState<number>()
+
+  const resetReferenceDrag = useCallback(() => {
+    referenceDragDepthRef.current = 0
+    setReferenceDropActive(false)
+    setIncomingReferenceCount(undefined)
+  }, [])
+
+  const updateSettings = useCallback((patch: DesignerSettingsPatch) => {
+    setSettings((current) => ({ ...current, ...patch }))
+  }, [])
+
+  const normalizeProviderState = useCallback((
+    provider: DesignerProvider | undefined,
+    resetSettings: boolean,
+  ) => {
+    const maxFiles = maxReferenceImagesForProvider(provider)
+    const retainedReferenceFiles = referenceFilesRef.current.slice(0, maxFiles)
+    const removedCount = referenceFilesRef.current.length - retainedReferenceFiles.length
+
+    resetReferenceDrag()
+    referenceFilesRef.current = retainedReferenceFiles
+
+    if (resetSettings) {
+      const capabilities = provider?.capabilities
+      setSettings({
+        ...DEFAULT_SETTINGS,
+        size: capabilities?.defaultSize || DEFAULT_SETTINGS.size,
+        quality: capabilities?.qualityLevels?.[0] ?? DEFAULT_SETTINGS.quality,
+        n: Math.min(DEFAULT_SETTINGS.n, Math.max(1, capabilities?.maxBatch ?? 1)),
+        referenceFiles: retainedReferenceFiles,
+      })
+    } else {
+      setSettings((current) => ({
+        ...current,
+        referenceFiles: retainedReferenceFiles,
+      }))
+    }
+
+    if (removedCount > 0) {
+      toast.warning(`当前模型最多支持 ${maxFiles} 张参考图，已移除 ${removedCount} 张`)
+    }
+  }, [resetReferenceDrag])
 
   // Stop polling on unmount
   useEffect(() => {
@@ -142,9 +195,7 @@ export default function DesignerPage() {
   const effectiveProvider = activeProvider ?? providerList.find((p) => p.enabled)
   const effectiveCaps = effectiveProvider?.capabilities
   const canInpaint = effectiveCaps?.supportsMask ?? false
-  const maxReferenceImages = effectiveCaps?.supportsReference
-    ? Math.max(0, effectiveCaps.maxReferenceImages)
-    : 0
+  const maxReferenceImages = maxReferenceImagesForProvider(effectiveProvider)
   const remainingReferenceCapacity = Math.max(
     0,
     maxReferenceImages - settings.referenceFiles.length,
@@ -152,15 +203,27 @@ export default function DesignerPage() {
   const canAcceptReferenceDrop = maxReferenceImages > 0 && remainingReferenceCapacity > 0
 
   useEffect(() => {
-    if (!effectiveProvider || selectedProviderId) return
-    setSelectedProviderId(effectiveProvider.id)
-    setSettings((current) => ({
-      ...current,
-      size: effectiveProvider.capabilities.defaultSize || current.size,
-      quality: effectiveProvider.capabilities.qualityLevels[0] ?? current.quality,
-      n: Math.min(current.n, Math.max(1, effectiveProvider.capabilities.maxBatch || 1)),
-    }))
-  }, [effectiveProvider, selectedProviderId])
+    if (providers === undefined) return
+
+    const effectiveProviderId = effectiveProvider?.id ?? ''
+    if (selectedProviderId !== effectiveProviderId) {
+      setSelectedProviderId(effectiveProviderId)
+    }
+
+    const providerChanged = normalizedProviderIdRef.current !== effectiveProviderId
+    const capacityChanged = normalizedReferenceCapacityRef.current !== maxReferenceImages
+    if (!providerChanged && !capacityChanged) return
+
+    normalizedProviderIdRef.current = effectiveProviderId
+    normalizedReferenceCapacityRef.current = maxReferenceImages
+    normalizeProviderState(effectiveProvider, providerChanged)
+  }, [
+    effectiveProvider,
+    maxReferenceImages,
+    normalizeProviderState,
+    providers,
+    selectedProviderId,
+  ])
 
   function stopPolling() {
     if (pollingRef.current) {
@@ -262,10 +325,13 @@ export default function DesignerPage() {
     setCurrentImages([])
 
     try {
-      // Upload reference files in parallel
-      const refFileIds = settings.referenceFiles.length > 0
+      // Upload only the ordered references currently supported by the effective provider.
+      const referenceFilesForGeneration = maxReferenceImages > 0
+        ? referenceFilesRef.current.slice(0, maxReferenceImages)
+        : []
+      const refFileIds = referenceFilesForGeneration.length > 0
         ? (await Promise.all(
-            settings.referenceFiles.map((file) => designerApi.uploadReference(file)),
+            referenceFilesForGeneration.map((file) => designerApi.uploadReference(file)),
           )).map((r) => r.file_id)
         : []
 
@@ -294,7 +360,7 @@ export default function DesignerPage() {
       toast.error(getApiErrorMessage(err, '图片生成失败，请重试'))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveProvider, settings, queryClient])
+  }, [effectiveProvider, maxReferenceImages, settings, queryClient])
 
   const handleHistorySelect = useCallback((gen: ImageGeneration) => {
     setSelectedGenerationId(gen.id)
@@ -305,12 +371,6 @@ export default function DesignerPage() {
   const handleRegenerate = useCallback((gen: ImageGeneration) => {
     setPrefillPrompt(gen.prompt)
     setPrefillKey(gen.id)
-  }, [])
-
-  const resetReferenceDrag = useCallback(() => {
-    referenceDragDepthRef.current = 0
-    setReferenceDropActive(false)
-    setIncomingReferenceCount(undefined)
   }, [])
 
   const addReferenceFiles = useCallback(
@@ -383,26 +443,13 @@ export default function DesignerPage() {
   }
 
   function handleModelChange(providerId: string) {
-    setSelectedProviderId(providerId)
-    resetReferenceDrag()
     const newProvider = providerList.find((provider) => provider.id === providerId)
-    const caps = newProvider?.capabilities
-    const maxFiles = caps?.supportsReference ? Math.max(0, caps.maxReferenceImages) : 0
-    const retainedReferenceFiles = referenceFilesRef.current.slice(0, maxFiles)
-    const removedCount = referenceFilesRef.current.length - retainedReferenceFiles.length
-    referenceFilesRef.current = retainedReferenceFiles
+    const maxFiles = maxReferenceImagesForProvider(newProvider)
 
-    setSettings({
-      ...DEFAULT_SETTINGS,
-      size: caps?.defaultSize || DEFAULT_SETTINGS.size,
-      quality: caps?.qualityLevels?.[0] ?? DEFAULT_SETTINGS.quality,
-      n: Math.min(DEFAULT_SETTINGS.n, Math.max(1, caps?.maxBatch ?? 1)),
-      referenceFiles: retainedReferenceFiles,
-    })
-
-    if (removedCount > 0) {
-      toast.warning(`当前模型最多支持 ${maxFiles} 张参考图，已移除 ${removedCount} 张`)
-    }
+    setSelectedProviderId(providerId)
+    normalizedProviderIdRef.current = providerId
+    normalizedReferenceCapacityRef.current = maxFiles
+    normalizeProviderState(newProvider, true)
   }
 
   function handleCancel() {
@@ -473,7 +520,7 @@ export default function DesignerPage() {
         onModelChange={handleModelChange}
         capabilities={effectiveProvider?.capabilities}
         settings={settings}
-        onSettingsChange={setSettings}
+        onSettingsChange={updateSettings}
         onHistoryToggle={() => setHistoryOpen(true)}
         onReferenceFilesAdded={addReferenceFiles}
         onReferenceFileRemove={removeReferenceFile}

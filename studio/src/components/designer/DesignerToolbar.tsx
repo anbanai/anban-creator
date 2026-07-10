@@ -162,13 +162,15 @@ function ResolutionSection({ value, onChange, sectionHeader }: {
   )
 }
 
+export type DesignerSettingsPatch = Partial<Omit<DesignerSettings, 'referenceFiles'>>
+
 interface DesignerToolbarProps {
   providers: DesignerProvider[]
   selectedProviderId: string
   onModelChange: (id: string) => void
   capabilities?: ModelCapabilities
   settings: DesignerSettings
-  onSettingsChange: (settings: DesignerSettings) => void
+  onSettingsChange: (patch: DesignerSettingsPatch) => void
   onHistoryToggle: () => void
   onReferenceFilesAdded: (files: File[]) => void
   onReferenceFileRemove: (index: number) => void
@@ -196,8 +198,8 @@ export default function DesignerToolbar({
   })
   const balance = balanceData?.balance ?? 0
 
-  function update(patch: Partial<DesignerSettings>) {
-    onSettingsChange({ ...settings, ...patch })
+  function update(patch: DesignerSettingsPatch) {
+    onSettingsChange(patch)
   }
   const showCount = (caps?.maxBatch ?? 1) > 1
   const showQuality = (caps?.qualityLevels.length ?? 0) > 0

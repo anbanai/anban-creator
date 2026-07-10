@@ -1,10 +1,23 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
+import {
+  act,
+  fireEvent,
+  render as testingRender,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
+import { QueryClientProvider, useQuery, type QueryClient } from '@tanstack/react-query'
+import { BrowserRouter } from 'react-router-dom'
+import { ThemeProvider } from 'next-themes'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DesignerPage from './DesignerPage'
 import { designerApi } from '@/lib/api/designer'
-import { render } from '@/test/test-utils'
+import { createTestQueryClient, render } from '@/test/test-utils'
 import type { DesignerProvider } from '@/types/designer'
+
+const PROVIDERS_QUERY_KEY = ['designer', 'providers'] as const
 
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
@@ -63,8 +76,51 @@ function dragData(files: File[] = [], types: string[] = ['Files']) {
   } as unknown as DataTransfer
 }
 
+function dispatchReferenceDrop(target: Element, dataTransfer: DataTransfer) {
+  const event = new Event('drop', { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+  target.dispatchEvent(event)
+}
+
 function image(name: string, lastModified = 100) {
   return new File(['image'], name, { type: 'image/png', lastModified })
+}
+
+function renderWithQueryClient(queryClient: QueryClient, extra?: ReactNode) {
+  return testingRender(
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <DesignerPage />
+          {extra}
+        </ThemeProvider>
+      </BrowserRouter>
+    </QueryClientProvider>,
+  )
+}
+
+function GenerateBeforeProviderReconciliation() {
+  const submittedRef = useRef(false)
+  const { data: providers } = useQuery({
+    queryKey: PROVIDERS_QUERY_KEY,
+    queryFn: () => designerApi.getProviders(),
+  })
+  const effectiveProvider = providers?.find((candidate) => candidate.enabled)
+
+  useLayoutEffect(() => {
+    if (
+      submittedRef.current
+      || !effectiveProvider
+      || effectiveProvider.capabilities.supportsReference
+    ) {
+      return
+    }
+
+    submittedRef.current = true
+    screen.getByRole('button', { name: '生成' }).click()
+  }, [effectiveProvider])
+
+  return null
 }
 
 function getResponsiveDocks() {
@@ -91,6 +147,15 @@ describe('Designer workspace reference drop', () => {
       static revokeObjectURL = vi.fn()
     })
     vi.mocked(designerApi.getProviders).mockResolvedValue([provider()])
+    vi.mocked(designerApi.uploadReference).mockImplementation(async (file) => ({
+      file_id: `uploaded:${file.name}`,
+      filename: file.name,
+      size: file.size,
+    }))
+    vi.mocked(designerApi.generate).mockResolvedValue({
+      generation_id: 'generation-1',
+      status: 'generating',
+    })
   })
 
   afterEach(() => {
@@ -233,6 +298,189 @@ describe('Designer workspace reference drop', () => {
     expect(toast.warning).toHaveBeenCalledWith(
       '当前模型最多支持 1 张参考图，已移除 1 张',
     )
+  })
+
+  it('normalizes references once when the effective provider capacity shrinks in query data', async () => {
+    const queryClient = createTestQueryClient()
+    const initialProvider = provider({ maxReferenceImages: 2, watermark: true })
+    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([initialProvider])
+    renderWithQueryClient(queryClient)
+    const workspace = await screen.findByTestId('designer-workspace')
+    const docks = await findResponsiveDocks()
+    const first = image('first.png')
+    const second = image('second.png', 200)
+
+    fireEvent.click(screen.getByRole('button', { name: /水印/ }))
+    expect(screen.getByRole('button', { name: /水印/ })).toHaveClass('border-primary')
+
+    fireEvent.drop(workspace, { dataTransfer: dragData([first, second]) })
+    await waitFor(() => {
+      expect(within(docks[0]).getByRole('img', { name: 'second.png' })).toBeInTheDocument()
+    })
+    toast.warning.mockClear()
+
+    await act(async () => {
+      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [
+        provider({ maxReferenceImages: 1, watermark: true }),
+      ])
+    })
+
+    await waitFor(() => {
+      for (const dock of docks) {
+        expect(within(dock).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
+        expect(within(dock).queryByRole('img', { name: 'second.png' })).not.toBeInTheDocument()
+      }
+    })
+    expect(screen.getByRole('button', { name: /水印/ })).toHaveClass('border-primary')
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(toast.warning).toHaveBeenCalledWith(
+      '当前模型最多支持 1 张参考图，已移除 1 张',
+    )
+  })
+
+  it('reconciles a disabled selection to an unsupported fallback and does not restore hidden refs', async () => {
+    const queryClient = createTestQueryClient()
+    const initialProvider = provider({ maxReferenceImages: 3 })
+    const fallbackProvider: DesignerProvider = {
+      ...provider({ supportsReference: false, maxReferenceImages: 0 }),
+      id: 'fallback_unsupported',
+      name: 'Fallback Unsupported',
+      provider: 'gemini',
+      model: 'fallback-model',
+      idx: 1,
+    }
+    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
+      initialProvider,
+      fallbackProvider,
+    ])
+    renderWithQueryClient(queryClient)
+    const workspace = await screen.findByTestId('designer-workspace')
+    const docks = await findResponsiveDocks()
+    const first = image('first.png')
+    const second = image('second.png', 200)
+
+    fireEvent.drop(workspace, { dataTransfer: dragData([first, second]) })
+    await waitFor(() => {
+      expect(within(docks[0]).getByRole('img', { name: 'second.png' })).toBeInTheDocument()
+    })
+    fireEvent.dragEnter(workspace, { dataTransfer: dragData() })
+    expect(screen.getByTestId('designer-drop-overlay')).toBeInTheDocument()
+    toast.warning.mockClear()
+
+    await act(async () => {
+      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [
+        { ...initialProvider, enabled: false },
+        fallbackProvider,
+      ])
+    })
+
+    await waitFor(() => {
+      expect(screen.queryAllByTestId('designer-reference-dock')).toHaveLength(0)
+      expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
+      for (const selector of screen.getAllByRole('combobox')) {
+        expect(selector).toHaveTextContent('Fallback Unsupported')
+      }
+    })
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(toast.warning).toHaveBeenCalledWith(
+      '当前模型最多支持 0 张参考图，已移除 2 张',
+    )
+
+    const unsupportedDrag = dragData([image('ignored.png')])
+    expect(fireEvent.dragOver(workspace, { dataTransfer: unsupportedDrag })).toBe(true)
+    expect(unsupportedDrag.dropEffect).toBe('none')
+
+    await act(async () => {
+      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [initialProvider, fallbackProvider])
+    })
+
+    await waitFor(() => {
+      expect(screen.queryAllByTestId('designer-reference-dock')).toHaveLength(0)
+      for (const selector of screen.getAllByRole('combobox')) {
+        expect(selector).toHaveTextContent('Fallback Unsupported')
+      }
+    })
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+  })
+
+  it('bounds submit-time reference uploads before passive provider reconciliation', async () => {
+    const queryClient = createTestQueryClient()
+    const initialProvider = provider({ maxReferenceImages: 2 })
+    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([initialProvider])
+    renderWithQueryClient(queryClient, <GenerateBeforeProviderReconciliation />)
+    const workspace = await screen.findByTestId('designer-workspace')
+    const docks = await findResponsiveDocks()
+    const first = image('first.png')
+    const second = image('second.png', 200)
+
+    fireEvent.drop(workspace, { dataTransfer: dragData([first, second]) })
+    await waitFor(() => {
+      expect(within(docks[0]).getByRole('img', { name: 'second.png' })).toBeInTheDocument()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
+      target: { value: '生成一张测试图片' },
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '生成' })).not.toBeDisabled()
+    })
+    vi.mocked(designerApi.uploadReference).mockClear()
+    vi.mocked(designerApi.generate).mockClear()
+
+    await act(async () => {
+      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [
+        provider({ supportsReference: false, maxReferenceImages: 0 }),
+      ])
+    })
+
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
+    expect(designerApi.uploadReference).not.toHaveBeenCalled()
+    expect(vi.mocked(designerApi.generate).mock.calls[0][0].reference_file_ids).toBeUndefined()
+  })
+
+  it('keeps reference state intact across batched toolbar setting writes', async () => {
+    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
+      provider({ maxReferenceImages: 3, watermark: true }),
+    ])
+    render(<DesignerPage />)
+    const workspace = await screen.findByTestId('designer-workspace')
+    const docks = await findResponsiveDocks()
+    const mobileDock = docks.find((dock) => dock.dataset.compact === 'true')!
+    const first = image('first.png')
+    const second = image('second.png', 200)
+
+    fireEvent.drop(workspace, { dataTransfer: dragData([first]) })
+    await waitFor(() => {
+      expect(within(docks[0]).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
+    })
+
+    const watermarkButton = screen.getByRole('button', { name: /水印/ })
+    act(() => {
+      dispatchReferenceDrop(workspace, dragData([second]))
+      watermarkButton.click()
+    })
+
+    await waitFor(() => {
+      for (const dock of docks) {
+        expect(within(dock).getAllByRole('img', { name: 'first.png' })).toHaveLength(1)
+        expect(within(dock).getAllByRole('img', { name: 'second.png' })).toHaveLength(1)
+      }
+    })
+
+    const removeFirst = within(mobileDock).getByRole('button', {
+      name: '移除参考图：first.png',
+    })
+    act(() => {
+      removeFirst.click()
+      watermarkButton.click()
+    })
+
+    await waitFor(() => {
+      for (const dock of docks) {
+        expect(within(dock).queryByRole('img', { name: 'first.png' })).not.toBeInTheDocument()
+        expect(within(dock).getAllByRole('img', { name: 'second.png' })).toHaveLength(1)
+      }
+    })
   })
 
   it('reports duplicate and non-image files instead of silently discarding them', async () => {
