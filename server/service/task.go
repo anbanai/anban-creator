@@ -967,6 +967,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ArticleWithCover:         plan.ArticleWithCover,
 		ArticleWithContentImages: plan.ArticleWithContentImages,
 	}
+	task.SetInputAttachments(cloneEntryAttachments(plan.InputAttachments.Data()))
 	if model.IsMontagePlatform(taskType) {
 		task.ExecutionTarget = montageExecutionTarget
 	}
