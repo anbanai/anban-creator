@@ -99,7 +99,7 @@ describe('DesignerReferenceDock', () => {
     expect(screen.getByText('已达上限')).toBeInTheDocument()
   })
 
-  it('uses a horizontal material rail in compact mode', () => {
+  it('renders the empty compact state as a horizontal add-tile rail', () => {
     render(
       <DesignerReferenceDock
         files={[]}
@@ -110,10 +110,62 @@ describe('DesignerReferenceDock', () => {
       />,
     )
 
-    expect(screen.getByTestId('designer-reference-dock')).toHaveAttribute('data-compact', 'true')
+    const dock = screen.getByTestId('designer-reference-dock')
+    const addButton = screen.getByRole('button', { name: '添加参考图' })
+
+    expect(dock).toHaveAttribute('data-compact', 'true')
+    expect(addButton.parentElement).toHaveClass('flex', 'gap-2', 'overflow-x-auto')
+    expect(addButton).toHaveClass('aspect-square', 'min-w-14')
+    expect(addButton).not.toHaveClass('w-full', 'py-5')
+    expect(screen.getByText('添加')).toBeInTheDocument()
+    expect(screen.queryByText('拖入参考图')).not.toBeInTheDocument()
   })
 
-  it('revokes preview URLs when files change and on unmount', async () => {
+  it('keeps compact removal visible with a 28px touch target', () => {
+    const first = image('first.png')
+
+    render(
+      <DesignerReferenceDock
+        files={[first]}
+        maxFiles={4}
+        onFilesAdded={vi.fn()}
+        onFileRemove={vi.fn()}
+        compact
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '移除参考图：first.png' })).toHaveClass(
+      'h-7',
+      'w-7',
+      'opacity-100',
+    )
+  })
+
+  it('preserves retained preview URLs when files are appended', async () => {
+    const first = image('first.png')
+    const second = image('second.png', 200)
+    const props = {
+      maxFiles: 3,
+      onFilesAdded: vi.fn(),
+      onFileRemove: vi.fn(),
+    }
+    const { rerender } = render(
+      <DesignerReferenceDock files={[first]} {...props} />,
+    )
+
+    await screen.findByRole('img', { name: 'first.png' })
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+
+    rerender(<DesignerReferenceDock files={[first, second]} {...props} />)
+
+    await screen.findByRole('img', { name: 'second.png' })
+    expect(createObjectURL).toHaveBeenCalledTimes(2)
+    expect(createObjectURL).toHaveBeenNthCalledWith(1, first)
+    expect(createObjectURL).toHaveBeenNthCalledWith(2, second)
+    expect(revokeObjectURL).not.toHaveBeenCalledWith('blob:first.png')
+  })
+
+  it('revokes preview URLs when files are replaced and on unmount', async () => {
     const first = image('first.png')
     const second = image('second.png', 200)
     const props = {
@@ -131,5 +183,31 @@ describe('DesignerReferenceDock', () => {
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:first.png'))
     unmount()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:second.png')
+  })
+
+  it('exposes drop activity and applies primary active styling', () => {
+    const props = {
+      files: [],
+      maxFiles: 4,
+      onFilesAdded: vi.fn(),
+      onFileRemove: vi.fn(),
+    }
+    const { rerender } = render(
+      <DesignerReferenceDock {...props} />,
+    )
+    const dock = screen.getByTestId('designer-reference-dock')
+
+    expect(dock).toHaveAttribute('data-drop-active', 'false')
+    expect(dock).not.toHaveClass('bg-primary/10', 'ring-primary/40')
+
+    rerender(<DesignerReferenceDock {...props} dropActive />)
+
+    expect(dock).toHaveAttribute('data-drop-active', 'true')
+    expect(dock).toHaveClass(
+      'bg-primary/10',
+      'ring-1',
+      'ring-primary/40',
+      'shadow-[0_0_24px_-10px_var(--color-primary)]',
+    )
   })
 })

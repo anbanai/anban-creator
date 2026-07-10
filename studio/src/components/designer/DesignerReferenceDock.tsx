@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { ImagePlus, Plus, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { referenceFileKey } from './reference-files'
 
 export interface DesignerReferenceDockProps {
   files: File[]
@@ -10,11 +11,6 @@ export interface DesignerReferenceDockProps {
   onFileRemove: (index: number) => void
   compact?: boolean
   dropActive?: boolean
-}
-
-interface FilePreview {
-  file: File
-  url: string
 }
 
 export default function DesignerReferenceDock({
@@ -26,21 +22,46 @@ export default function DesignerReferenceDock({
   dropActive = false,
 }: DesignerReferenceDockProps) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const [previews, setPreviews] = useState<FilePreview[]>([])
+  const previewUrlCacheRef = useRef(new Map<string, string>())
+  const [previewUrls, setPreviewUrls] = useState<Map<string, string>>(
+    () => new Map(),
+  )
   const hasCapacity = files.length < maxFiles
 
   useEffect(() => {
-    const nextPreviews = files.map((file) => ({
-      file,
-      url: URL.createObjectURL(file),
-    }))
+    const cache = previewUrlCacheRef.current
+    const nextKeys = new Set(files.map(referenceFileKey))
 
-    setPreviews(nextPreviews)
-
-    return () => {
-      nextPreviews.forEach(({ url }) => URL.revokeObjectURL(url))
+    for (const [key, url] of cache) {
+      if (!nextKeys.has(key)) {
+        URL.revokeObjectURL(url)
+        cache.delete(key)
+      }
     }
+
+    const nextPreviewUrls = new Map<string, string>()
+    for (const file of files) {
+      const key = referenceFileKey(file)
+      let url = cache.get(key)
+
+      if (url === undefined) {
+        url = URL.createObjectURL(file)
+        cache.set(key, url)
+      }
+
+      nextPreviewUrls.set(key, url)
+    }
+
+    setPreviewUrls(nextPreviewUrls)
   }, [files])
+
+  useEffect(() => {
+    return () => {
+      const cache = previewUrlCacheRef.current
+      cache.forEach((url) => URL.revokeObjectURL(url))
+      cache.clear()
+    }
+  }, [])
 
   function openPicker() {
     if (hasCapacity) {
@@ -78,7 +99,7 @@ export default function DesignerReferenceDock({
         onChange={handleFilesSelected}
       />
 
-      {files.length === 0 ? (
+      {files.length === 0 && !compact ? (
         <button
           type="button"
           aria-label="添加参考图"
@@ -100,12 +121,12 @@ export default function DesignerReferenceDock({
           )}
         >
           {files.map((file, index) => {
-            const preview = previews[index]
-            const previewUrl = preview?.file === file ? preview.url : undefined
+            const key = referenceFileKey(file)
+            const previewUrl = previewUrls.get(key)
 
             return (
               <div
-                key={`${file.name}-${file.size}-${file.lastModified}-${file.type}-${index}`}
+                key={key}
                 className="group relative aspect-square min-w-14 overflow-hidden rounded-lg bg-muted/30 ring-1 ring-border/70"
               >
                 {previewUrl ? (
@@ -119,7 +140,12 @@ export default function DesignerReferenceDock({
                   type="button"
                   aria-label={`移除参考图：${file.name}`}
                   onClick={() => onFileRemove(index)}
-                  className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/85 text-foreground opacity-0 shadow-sm ring-1 ring-border/70 backdrop-blur transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 motion-reduce:transition-none"
+                  className={cn(
+                    'absolute right-1 top-1 flex items-center justify-center rounded-full bg-background/85 text-foreground shadow-sm ring-1 ring-border/70 backdrop-blur transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 motion-reduce:transition-none',
+                    compact
+                      ? 'h-7 w-7 opacity-100'
+                      : 'h-5 w-5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
+                  )}
                 >
                   <X className="h-3 w-3" aria-hidden="true" />
                 </button>
@@ -130,11 +156,15 @@ export default function DesignerReferenceDock({
           {hasCapacity ? (
             <button
               type="button"
-              aria-label="添加更多参考图"
+              aria-label={files.length === 0 ? '添加参考图' : '添加更多参考图'}
               onClick={openPicker}
               className="flex aspect-square min-w-14 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border/70 bg-muted/20 text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
             >
-              <Plus className="h-4 w-4" aria-hidden="true" />
+              {files.length === 0 ? (
+                <ImagePlus className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Plus className="h-4 w-4" aria-hidden="true" />
+              )}
               <span className="text-[9px]">添加</span>
             </button>
           ) : (
