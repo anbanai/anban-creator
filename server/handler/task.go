@@ -73,16 +73,17 @@ func (h *TaskHandler) SetRepository(repo repository.Repository) {
 // Request types.
 
 type createTaskRequest struct {
-	ProjectID          string `json:"project_id"`
-	Prompt             string `json:"prompt"`
-	Quantity           int    `json:"quantity"`
-	ImageRatio         string `json:"image_ratio"`
-	ImageModelKey      string `json:"image_model_key"`
-	SkipReferenceImage *bool  `json:"skip_reference_image"`
-	ReferenceImageURL  string `json:"reference_image_url"`
-	Watermark          *bool  `json:"watermark"`
-	Goal               string `json:"goal"`
-	GoalMode           bool   `json:"goal_mode"`
+	ProjectID          string                  `json:"project_id"`
+	Prompt             string                  `json:"prompt"`
+	Quantity           int                     `json:"quantity"`
+	ImageRatio         string                  `json:"image_ratio"`
+	ImageModelKey      string                  `json:"image_model_key"`
+	SkipReferenceImage *bool                   `json:"skip_reference_image"`
+	ReferenceImageURL  string                  `json:"reference_image_url"`
+	InputAttachments   []model.EntryAttachment `json:"input_attachments,omitempty"`
+	Watermark          *bool                   `json:"watermark"`
+	Goal               string                  `json:"goal"`
+	GoalMode           bool                    `json:"goal_mode"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to CreateManualParams defaults (content on,
 	// tail off). Non-seednote task types ignore them.
@@ -198,6 +199,19 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
+	var pending service.PendingUploadRepository
+	if h.repo != nil {
+		pending = h.repo.PendingUploads()
+	}
+	validatedAttachments, err := validateInputAttachments(c.Context(), pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
+		MaxCount:     16,
+		AllowedTypes: map[string]bool{"image": true},
+	})
+	if err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	req.InputAttachments = validatedAttachments
+
 	quantity := req.Quantity
 	if quantity <= 0 {
 		quantity = 1
@@ -277,6 +291,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		ImageModelKey:            req.ImageModelKey,
 		SkipRefImage:             req.SkipReferenceImage,
 		ReferenceImageURL:        req.ReferenceImageURL,
+		InputAttachments:         req.InputAttachments,
 		Watermark:                req.Watermark,
 		Goal:                     req.Goal,
 		GoalMode:                 req.GoalMode,

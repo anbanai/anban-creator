@@ -340,6 +340,10 @@ func (s *TaskService) StorageProviderName() string {
 
 var ErrMontageInput = errors.New("montage input invalid")
 
+func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
+	return append([]model.EntryAttachment(nil), in...)
+}
+
 // CreateManualParams holds the inputs for CreateManual. Fields map 1:1 to the
 // model.Task attributes that callers can supply at creation time. Using a struct
 // instead of a long positional signature keeps call sites readable as fields are
@@ -635,7 +639,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			task.SetEcommerce(*p.Ecommerce)
 		}
 		if len(p.InputAttachments) > 0 {
-			task.SetInputAttachments(p.InputAttachments)
+			task.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
 		}
 		if model.IsVideoPlatform(taskType) {
 			if videoInput != nil {

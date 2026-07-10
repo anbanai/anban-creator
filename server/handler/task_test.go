@@ -1293,3 +1293,102 @@ func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
 		t.Fatalf("credit_transactions len = %d, want 3", len(body.Data.CreditTransactions))
 	}
 }
+
+func setupSeednoteTaskCreateHandler(t *testing.T) (*fiber.App, repository.Repository, context.Context, string, string) {
+	t.Helper()
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "seedrefs",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformSeednote,
+		Name:     "Seednote references",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	handler := NewTaskHandler(taskSvc, &logger)
+	handler.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return handler.Create(c)
+	})
+	return app, repo, ctx, userID, projectID
+}
+
+func TestCreateTaskAcceptsSeednoteInputAttachments(t *testing.T) {
+	app, repo, ctx, _, projectID := setupSeednoteTaskCreateHandler(t)
+	resp := postJSON(t, app, "/tasks", `{
+		"project_id":"`+projectID+`",
+		"prompt":"生成新品种草图文",
+		"input_attachments":[{
+			"type":"image",
+			"url":"/api/v1/files/uploads/references/product.png",
+			"file_name":" product.png ",
+			"content_type":"image/png",
+			"instruction":"  保持包装、Logo 和瓶盖颜色  "
+		}]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+	}
+	data := decodeEnvelopeRawData(t, resp)
+	var taskID string
+	if err := json.Unmarshal(data["id"], &taskID); err != nil {
+		t.Fatalf("decode task id: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	attachments := found.InputAttachments.Data()
+	if len(attachments) != 1 {
+		t.Fatalf("input attachments = %#v, want one", attachments)
+	}
+	if attachments[0].URL != "/api/v1/files/uploads/references/product.png" || attachments[0].FileName != "product.png" || attachments[0].Instruction != "保持包装、Logo 和瓶盖颜色" {
+		t.Fatalf("stored attachment = %#v", attachments[0])
+	}
+}
+
+func TestCreateTaskRejectsNonImageSeednoteAttachment(t *testing.T) {
+	app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
+	resp := postJSON(t, app, "/tasks", `{
+		"project_id":"`+projectID+`",
+		"prompt":"生成新品种草图文",
+		"input_attachments":[{
+			"type":"video",
+			"url":"/api/v1/files/uploads/references/demo.mp4",
+			"file_name":"demo.mp4",
+			"content_type":"video/mp4"
+		}]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil {
+		t.Fatalf("find tasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("tasks = %#v, want none", tasks)
+	}
+}

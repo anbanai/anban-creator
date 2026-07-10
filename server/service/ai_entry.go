@@ -139,8 +139,10 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	}
 
 	switch project.Platform {
-	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments:
+	case model.PlatformArticle, model.PlatformMoments:
 		params.ReferenceImageURL = firstImageAttachmentURL(req.Attachments)
+	case model.PlatformSeednote:
+		// Seednote uses InputAttachments as its only new per-run reference source.
 	case model.PlatformEcommerce:
 		photos := imageAttachmentURLs(req.Attachments)
 		if len(photos) == 0 {
@@ -257,6 +259,9 @@ func aiEntryPrompt(project *model.Project, req AIEntrySubmitRequest) string {
 		b.WriteString("attachments:\n")
 		for i, a := range req.Attachments {
 			fmt.Fprintf(&b, "- index=%d type=%s file_name=%s content_type=%s size=%d url=%s text=%s\n", i, a.Type, a.FileName, a.ContentType, a.Size, a.URL, a.Text)
+			if instruction := strings.TrimSpace(a.Instruction); instruction != "" {
+				fmt.Fprintf(&b, "- attachment %d instruction: %s\n", i+1, instruction)
+			}
 		}
 	}
 	return b.String()
@@ -295,6 +300,7 @@ func normalizeEntryAttachments(in []model.EntryAttachment) []model.EntryAttachme
 		a.Role = strings.TrimSpace(a.Role)
 		a.UploadID = strings.TrimSpace(a.UploadID)
 		a.Key = strings.TrimSpace(a.Key)
+		a.Instruction = strings.TrimSpace(a.Instruction)
 		out = append(out, a)
 	}
 	return out

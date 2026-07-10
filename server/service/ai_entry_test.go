@@ -406,3 +406,87 @@ func TestAIEntryServiceSubmitRequiresLLM(t *testing.T) {
 		t.Fatalf("result = %#v, want model configuration action", result)
 	}
 }
+
+func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceImageURL(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"生成新品种草图文"}`}}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID:    userID,
+		ProjectID: projectID,
+		Channel:   "studio",
+		Text:      "参考产品图生成种草内容",
+		Attachments: []model.EntryAttachment{{
+			Type:        "image",
+			URL:         "/api/v1/files/product.png",
+			FileName:    "product.png",
+			ContentType: "image/png",
+			Instruction: "  保持包装和 Logo  ",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || result.Task == nil {
+		t.Fatalf("result = %#v, want created task", result)
+	}
+	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.ReferenceImageURL != "" {
+		t.Fatalf("reference_image_url = %q, want empty", found.ReferenceImageURL)
+	}
+	attachments := found.InputAttachments.Data()
+	if len(attachments) != 1 || attachments[0].URL != "/api/v1/files/product.png" || attachments[0].Instruction != "保持包装和 Logo" {
+		t.Fatalf("input attachments = %#v", attachments)
+	}
+	if len(llm.calls) != 1 || !strings.Contains(llm.calls[0].user, "attachment 1 instruction: 保持包装和 Logo") {
+		t.Fatalf("LLM prompt did not include attachment instruction: %#v", llm.calls)
+	}
+}
+
+func TestAIEntryArticleAndMomentsKeepFirstImageCompatibility(t *testing.T) {
+	for _, platform := range []string{model.PlatformArticle, model.PlatformMoments} {
+		t.Run(platform, func(t *testing.T) {
+			taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, platform)
+			llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"生成内容"}`}}
+			logger := zerolog.New(io.Discard)
+			entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+				UserID:    userID,
+				ProjectID: projectID,
+				Channel:   "studio",
+				Text:      "参考产品图生成内容",
+				Attachments: []model.EntryAttachment{{
+					Type:        "image",
+					URL:         "/api/v1/files/product.png",
+					FileName:    "product.png",
+					ContentType: "image/png",
+				}},
+			})
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if result.Status != AIEntryStatusCreated || result.Task == nil {
+				t.Fatalf("result = %#v, want created task", result)
+			}
+			found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+			if err != nil {
+				t.Fatalf("find task: %v", err)
+			}
+			if found.ReferenceImageURL != "/api/v1/files/product.png" {
+				t.Fatalf("reference_image_url = %q", found.ReferenceImageURL)
+			}
+		})
+	}
+}

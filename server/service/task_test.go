@@ -3353,3 +3353,43 @@ func TestTaskService_RebuildWorkflowStatus(t *testing.T) {
 		t.Fatalf("review score = %d, want 91", status.Review.OverallScore)
 	}
 }
+
+func TestCreateManualClonesInputAttachments(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	input := []model.EntryAttachment{{
+		Type:        "image",
+		URL:         "/api/v1/files/product.png",
+		FileName:    "product.png",
+		ContentType: "image/png",
+		Instruction: "保持包装和 Logo",
+	}}
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:           userID,
+		ProjectID:        projectID,
+		Prompt:           "生成种草图文",
+		Quantity:         1,
+		InputAttachments: input,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	input[0].Instruction = "调用方后续修改"
+	input[0].FileName = "mutated.png"
+
+	returned := tasks[0].InputAttachments.Data()
+	if len(returned) != 1 || returned[0].Instruction != "保持包装和 Logo" || returned[0].FileName != "product.png" {
+		t.Fatalf("returned attachment snapshot = %#v", returned)
+	}
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	stored := found.InputAttachments.Data()
+	if len(stored) != 1 || stored[0].Instruction != "保持包装和 Logo" || stored[0].FileName != "product.png" {
+		t.Fatalf("persisted attachment snapshot = %#v", stored)
+	}
+}
