@@ -2,6 +2,12 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import DesignerToolbar from '@/components/designer/DesignerToolbar'
+import DesignerDropOverlay from '@/components/designer/DesignerDropOverlay'
+import {
+  admitReferenceFiles,
+  isReferenceImageFile,
+  type ReferenceAdmissionResult,
+} from '@/components/designer/reference-files'
 import DesignerCanvas from '@/components/designer/DesignerCanvas'
 import DesignerPromptBar from '@/components/designer/DesignerPromptBar'
 import InlineMaskEditor from '@/components/designer/InlineMaskEditor'
@@ -31,6 +37,44 @@ const POLL_INTERVAL = 2000
 const MAX_POLLS = 180 // 6 minutes at 2s interval (backend default is 5 min)
 const MAX_CONSECUTIVE_ERRORS = 5
 
+function hasExternalFiles(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes('Files')
+}
+
+function countIncomingReferenceImages(dataTransfer: DataTransfer): number | undefined {
+  const files = Array.from(dataTransfer.files)
+  if (files.length > 0) return files.filter(isReferenceImageFile).length
+
+  const imageItems = Array.from(dataTransfer.items).filter(
+    (item) => item.kind === 'file' && item.type.startsWith('image/'),
+  )
+  return imageItems.length > 0 ? imageItems.length : undefined
+}
+
+function describeReferenceAdmission(
+  result: ReferenceAdmissionResult,
+  maxFiles: number,
+): string | undefined {
+  const details: string[] = []
+  if (result.rejectedNonImages > 0) {
+    details.push(`忽略 ${result.rejectedNonImages} 个非图片文件`)
+  }
+  if (result.rejectedDuplicates > 0) {
+    details.push(`忽略 ${result.rejectedDuplicates} 张重复图片`)
+  }
+  if (result.rejectedOverflow > 0) {
+    details.push(
+      result.accepted > 0
+        ? `另外 ${result.rejectedOverflow} 张超过当前模型的 ${maxFiles} 张上限`
+        : `${result.rejectedOverflow} 张超过当前模型的 ${maxFiles} 张上限`,
+    )
+  }
+
+  if (details.length === 0) return undefined
+  if (result.accepted > 0) return `已添加 ${result.accepted} 张，${details.join('，')}`
+  return details.join('，')
+}
+
 function resultsToImages(results?: ImageGenerationResult[]): GenerateImage[] {
   if (!results || results.length === 0) return []
   return results
@@ -59,6 +103,10 @@ export default function DesignerPage() {
   const maskEditorRef = useRef<InlineMaskEditorHandle>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortedRef = useRef(false)
+  const referenceFilesRef = useRef<File[]>([])
+  const referenceDragDepthRef = useRef(0)
+  const [referenceDropActive, setReferenceDropActive] = useState(false)
+  const [incomingReferenceCount, setIncomingReferenceCount] = useState<number>()
 
   // Stop polling on unmount
   useEffect(() => {
@@ -80,6 +128,14 @@ export default function DesignerPage() {
   const effectiveProvider = activeProvider ?? providerList.find((p) => p.enabled)
   const effectiveCaps = effectiveProvider?.capabilities
   const canInpaint = effectiveCaps?.supportsMask ?? false
+  const maxReferenceImages = effectiveCaps?.supportsReference
+    ? Math.max(0, effectiveCaps.maxReferenceImages)
+    : 0
+  const remainingReferenceCapacity = Math.max(
+    0,
+    maxReferenceImages - settings.referenceFiles.length,
+  )
+  const canAcceptReferenceDrop = maxReferenceImages > 0 && remainingReferenceCapacity > 0
 
   useEffect(() => {
     if (!effectiveProvider || selectedProviderId) return
@@ -237,16 +293,102 @@ export default function DesignerPage() {
     setPrefillKey(gen.id)
   }, [])
 
+  const resetReferenceDrag = useCallback(() => {
+    referenceDragDepthRef.current = 0
+    setReferenceDropActive(false)
+    setIncomingReferenceCount(undefined)
+  }, [])
+
+  const addReferenceFiles = useCallback(
+    (incomingFiles: File[]) => {
+      const result = admitReferenceFiles(
+        referenceFilesRef.current,
+        incomingFiles,
+        maxReferenceImages,
+      )
+
+      referenceFilesRef.current = result.files
+      setSettings((current) => ({
+        ...current,
+        referenceFiles: result.files,
+      }))
+
+      const message = describeReferenceAdmission(result, maxReferenceImages)
+      if (message) toast.warning(message)
+    },
+    [maxReferenceImages],
+  )
+
+  const removeReferenceFile = useCallback((index: number) => {
+    const files = referenceFilesRef.current.filter(
+      (_, fileIndex) => fileIndex !== index,
+    )
+    referenceFilesRef.current = files
+    setSettings((current) => ({ ...current, referenceFiles: files }))
+  }, [])
+
+  useEffect(() => {
+    if (!referenceDropActive) return
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') resetReferenceDrag()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [referenceDropActive, resetReferenceDrag])
+
+  function handleReferenceDragEnter(event: React.DragEvent<HTMLDivElement>) {
+    if (!canAcceptReferenceDrop || !hasExternalFiles(event.dataTransfer)) return
+    event.preventDefault()
+    referenceDragDepthRef.current += 1
+    setReferenceDropActive(true)
+    setIncomingReferenceCount(countIncomingReferenceImages(event.dataTransfer))
+  }
+
+  function handleReferenceDragOver(event: React.DragEvent<HTMLDivElement>) {
+    if (!canAcceptReferenceDrop || !hasExternalFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  function handleReferenceDragLeave(event: React.DragEvent<HTMLDivElement>) {
+    if (!hasExternalFiles(event.dataTransfer)) return
+    event.preventDefault()
+    referenceDragDepthRef.current = Math.max(0, referenceDragDepthRef.current - 1)
+    if (referenceDragDepthRef.current === 0) resetReferenceDrag()
+  }
+
+  function handleReferenceDrop(event: React.DragEvent<HTMLDivElement>) {
+    if (!hasExternalFiles(event.dataTransfer)) return
+    event.preventDefault()
+    const files = Array.from(event.dataTransfer.files)
+    resetReferenceDrag()
+    if (maxReferenceImages === 0) return
+    if (files.length > 0) addReferenceFiles(files)
+  }
+
   function handleModelChange(providerId: string) {
     setSelectedProviderId(providerId)
-    const newProvider = providerList.find((p) => p.id === providerId)
+    resetReferenceDrag()
+    const newProvider = providerList.find((provider) => provider.id === providerId)
     const caps = newProvider?.capabilities
+    const maxFiles = caps?.supportsReference ? Math.max(0, caps.maxReferenceImages) : 0
+    const retainedReferenceFiles = referenceFilesRef.current.slice(0, maxFiles)
+    const removedCount = referenceFilesRef.current.length - retainedReferenceFiles.length
+    referenceFilesRef.current = retainedReferenceFiles
+
     setSettings({
       ...DEFAULT_SETTINGS,
       size: caps?.defaultSize || DEFAULT_SETTINGS.size,
       quality: caps?.qualityLevels?.[0] ?? DEFAULT_SETTINGS.quality,
       n: Math.min(DEFAULT_SETTINGS.n, Math.max(1, caps?.maxBatch ?? 1)),
+      referenceFiles: retainedReferenceFiles,
     })
+
+    if (removedCount > 0) {
+      toast.warning(`当前模型最多支持 ${maxFiles} 张参考图，已移除 ${removedCount} 张`)
+    }
   }
 
   function handleCancel() {
@@ -301,7 +443,15 @@ export default function DesignerPage() {
 
   return (
     // Full-bleed: negate AppLayout padding
-    <div className="-mx-4 -my-6 flex overflow-hidden bg-background md:-mx-8 md:-my-8" style={{ height: '100dvh' }}>
+    <div
+      data-testid="designer-workspace"
+      className="relative -mx-4 -my-6 flex overflow-hidden bg-background md:-mx-8 md:-my-8"
+      style={{ height: '100dvh' }}
+      onDragEnter={handleReferenceDragEnter}
+      onDragOver={handleReferenceDragOver}
+      onDragLeave={handleReferenceDragLeave}
+      onDrop={handleReferenceDrop}
+    >
       {/* Sidebar: full-height floating panel */}
       <DesignerToolbar
         providers={providerList}
@@ -311,11 +461,15 @@ export default function DesignerPage() {
         settings={settings}
         onSettingsChange={setSettings}
         onHistoryToggle={() => setHistoryOpen(true)}
+        onReferenceFilesAdded={addReferenceFiles}
+        onReferenceFileRemove={removeReferenceFile}
+        referenceDropActive={referenceDropActive}
       />
 
       {/* Main area: canvas workspace */}
       <div className="relative flex min-h-0 flex-1 flex-col p-3 pl-0">
         <div
+          data-testid="designer-canvas-frame"
           className="relative flex-1 overflow-hidden rounded-2xl border border-border/70 bg-card/35 shadow-inner"
           style={editingImage ? undefined : { backgroundImage: 'radial-gradient(circle, color-mix(in oklch, var(--color-border) 55%, transparent) 0.5px, transparent 0.5px)', backgroundSize: '20px 20px' }}
         >
@@ -347,6 +501,12 @@ export default function DesignerPage() {
           />
         </div>
       </div>
+
+      <DesignerDropOverlay
+        active={referenceDropActive}
+        incomingCount={incomingReferenceCount}
+        remainingCapacity={remainingReferenceCapacity}
+      />
 
       {/* History drawer */}
       <HistoryDrawer

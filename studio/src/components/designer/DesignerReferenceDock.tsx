@@ -144,7 +144,7 @@ export default function DesignerReferenceDock({
                     'absolute right-1 top-1 flex items-center justify-center rounded-full bg-background/85 text-foreground shadow-sm ring-1 ring-border/70 backdrop-blur transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 motion-reduce:transition-none',
                     compact
                       ? 'h-7 w-7 opacity-100'
-                      : 'h-5 w-5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
+                      : 'h-5 w-5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 md:[@media(hover:none)]:h-7 md:[@media(hover:none)]:w-7 md:[@media(hover:none)]:opacity-100 md:[@media(pointer:coarse)]:h-7 md:[@media(pointer:coarse)]:w-7 md:[@media(pointer:coarse)]:opacity-100',
                   )}
                 >
                   <X className="h-3 w-3" aria-hidden="true" />

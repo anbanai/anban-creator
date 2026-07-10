@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -80,6 +82,34 @@ describe('DesignerReferenceDock', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '移除参考图：second.png' }))
     expect(onFileRemove).toHaveBeenCalledWith(1)
+  })
+
+  it('keeps non-compact removal visible and touch-sized at wide coarse or no-hover viewports', () => {
+    const first = image('first.png')
+
+    render(
+      <DesignerReferenceDock
+        files={[first]}
+        maxFiles={4}
+        onFilesAdded={vi.fn()}
+        onFileRemove={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '移除参考图：first.png' })).toHaveClass(
+      'h-5',
+      'w-5',
+      'opacity-0',
+      'group-hover:opacity-100',
+      'group-focus-within:opacity-100',
+      'focus-visible:opacity-100',
+      'md:[@media(hover:none)]:h-7',
+      'md:[@media(hover:none)]:w-7',
+      'md:[@media(hover:none)]:opacity-100',
+      'md:[@media(pointer:coarse)]:h-7',
+      'md:[@media(pointer:coarse)]:w-7',
+      'md:[@media(pointer:coarse)]:opacity-100',
+    )
   })
 
   it('renders a clear full-capacity state without an add control', async () => {
@@ -209,5 +239,14 @@ describe('DesignerReferenceDock', () => {
       'ring-primary/40',
       'shadow-[0_0_24px_-10px_var(--color-primary)]',
     )
+  })
+
+  it('composes the controlled reference dock instead of the legacy toolbar uploader', () => {
+    const toolbarSource = readFileSync(resolve(import.meta.dirname, 'DesignerToolbar.tsx'), 'utf8')
+
+    expect(toolbarSource).toContain('<DesignerReferenceDock')
+    expect(toolbarSource).not.toContain('上传参考图')
+    expect(toolbarSource).not.toContain('handleRefFiles')
+    expect(toolbarSource).not.toContain('refInputRef')
   })
 })
