@@ -111,7 +111,7 @@ services:
   # agent:
   #   build:
   #     context: .
-  #     dockerfile: agent/Dockerfile
+  #     dockerfile: Dockerfile.agent
   #   image: anban-creator-agent:latest
   #   container_name: anban-creator-agent
   #   restart: unless-stopped
@@ -125,7 +125,7 @@ services:
   server:
     build:
       context: .
-      dockerfile: server/Dockerfile
+      dockerfile: Dockerfile.server
     image: anban-creator-server:latest
     container_name: anban-creator-server
     restart: unless-stopped

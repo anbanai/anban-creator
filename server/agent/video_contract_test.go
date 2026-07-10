@@ -217,7 +217,7 @@ func TestVideoDistributionDoesNotExposeUnifiedVideoAgent(t *testing.T) {
 }
 
 func TestDockerfilesInstallPluginWithSeedance20Skill(t *testing.T) {
-	for _, path := range []string{"../../agent/Dockerfile", "../../server/Dockerfile"} {
+	for _, path := range []string{"../../Dockerfile.agent", "../../Dockerfile.server"} {
 		text := readRepoFile(t, path)
 		for _, want := range []string{
 			"claude plugin marketplace add /anbanai",

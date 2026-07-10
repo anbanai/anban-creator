@@ -120,14 +120,14 @@ docker-logs:
 docker-agent-image:
 	@git submodule update --init --recursive
 	@echo "Building $(AGENT_IMAGE)..." && \
-	docker build -f agent/Dockerfile -t $(AGENT_IMAGE) . && \
+	docker build -f Dockerfile.agent -t $(AGENT_IMAGE) . && \
 	echo "Image build complete: $(AGENT_IMAGE)"
 
 # Build the anban-creator-server Docker image
 docker-server-image:
 	@git submodule update --init --recursive
 	@echo "Building $(SERVER_IMAGE)..." && \
-	docker build -f server/Dockerfile -t $(SERVER_IMAGE) . && \
+	docker build -f Dockerfile.server -t $(SERVER_IMAGE) . && \
 	echo "Image build complete: $(SERVER_IMAGE)"
 
 # Build both images

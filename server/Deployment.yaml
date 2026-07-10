@@ -17,7 +17,7 @@ spec:
         app: ${micro_service_name}
         version: ${version_switch}
     spec:
-      serviceAccountName: anban-server
+      serviceAccountName: creator-server
       containers:
         - env:
             - name: aliyun_logs_log-${micro_service_name}-${version_switch}_logstore
@@ -28,8 +28,6 @@ spec:
               value: applog=${micro_service_name}-${version_switch}
             - name: version_switch
               value: ${version_switch}
-            - name: version_switch
-              value: ${version_switch}
             - name: TZ
               value: Asia/Shanghai
             - name: ANBAN_SEEDNOTE_BASE_URL
@@ -38,6 +36,22 @@ spec:
               value: "true"
             - name: ANBAN_ILINK_BASE_URL
               value: http://wcflink:18070
+            - name: ANBAN_CLAUDE_EXECUTOR
+              value: kubernetes
+            - name: ANBAN_CLAUDE_AGENT_SERVER_URL
+              value: http://${micro_service_name}-svc.${namespace}.svc.cluster.local:8080
+            - name: ANBAN_AGENT_NAMESPACE
+              value: ${namespace}
+            - name: ANBAN_AGENT_IMAGE
+              value: ${agent_image_repo}
+            - name: ANBAN_AGENT_POD_REVISION
+              value: ${version_switch}
+            - name: ANBAN_AGENT_SERVICE_ACCOUNT
+              value: creator-agent-runner
+            - name: ANBAN_AGENT_WORKSPACE_PVC
+              value: anban-creator
+            - name: ANBAN_AGENT_IMAGE_PULL_SECRET
+              value: ${imagePullSecret}
           name: ${micro_service_name}-${version_switch}
           image: ${image_repo}
           ports:

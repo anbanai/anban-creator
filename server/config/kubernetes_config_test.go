@@ -14,14 +14,14 @@ func baseKubernetesConfigForTest() Config {
 		Claude: ClaudeConfig{
 			Executor: "kubernetes",
 			Kubernetes: KubernetesConfig{
-				Namespace:          "anban",
+				Namespace:          "anbanai-prod",
 				AgentImage:         "registry.example.com/anban-agent:latest",
-				ServiceAccount:     "anban-agent-runner",
+				ServiceAccount:     "creator-agent-runner",
 				WorkspaceMountPath: "/workspace",
-				WorkspacePVCName:   "anban-agent-nas",
+				WorkspacePVCName:   "anban-creator",
 				ExecTimeoutSec:     3600,
 			},
-			AgentServerURL: "http://anban-server.anban.svc.cluster.local:8080",
+			AgentServerURL: "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080",
 		},
 		Storage: StorageConfig{
 			Provider:        "oss",
@@ -43,11 +43,11 @@ func TestValidateAcceptsKubernetesExecutor(t *testing.T) {
 	}
 }
 
-func TestKubernetesAgentImageDefaultsToServerRuntimeImage(t *testing.T) {
+func TestKubernetesAgentImageMustBeExplicit(t *testing.T) {
 	cfg := Config{}
 	cfg.applyDefaults()
-	if cfg.Claude.Kubernetes.AgentImage != "anban-creator-server:latest" {
-		t.Fatalf("kubernetes agent image default = %q, want production server runtime image", cfg.Claude.Kubernetes.AgentImage)
+	if cfg.Claude.Kubernetes.AgentImage != "" {
+		t.Fatalf("kubernetes agent image default = %q, want explicit production image", cfg.Claude.Kubernetes.AgentImage)
 	}
 	if cfg.Claude.Docker.Image != "anban-creator-agent:latest" {
 		t.Fatalf("docker image default = %q, want Docker executor default unchanged", cfg.Claude.Docker.Image)
@@ -92,8 +92,8 @@ func TestValidateKubernetesRequiresAgentServerURL(t *testing.T) {
 
 func TestAgentServerURLUsesConfiguredKubernetesServiceURL(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
-	cfg.Claude.AgentServerURL = "http://anban-server.anban.svc.cluster.local:8080/"
-	if got := cfg.AgentServerURL(); got != "http://anban-server.anban.svc.cluster.local:8080" {
+	cfg.Claude.AgentServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080/"
+	if got := cfg.AgentServerURL(); got != "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080" {
 		t.Fatalf("AgentServerURL() = %q", got)
 	}
 }

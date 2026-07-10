@@ -67,13 +67,13 @@ func TestKubernetesAgentCommandUsesDirectArtifactUpload(t *testing.T) {
 		Prompt:    "写一篇文章",
 	}
 	e := &KubernetesExecutor{
-		serverURL:         "http://anban-server.anban.svc.cluster.local:8080/",
+		serverURL:         "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080/",
 		maxTurnsOverrides: map[string]int{model.PlatformArticle: 60},
 	}
 
 	cmd := e.buildAgentCommand(&ExecutionOptions{Task: task}, "claude-sonnet", 60, "/workspace/users/user-1/projects/project-1/tasks/task-1/workspace", "agent-key")
 
-	assertArgPair(t, cmd, "--server-url", "http://anban-server.anban.svc.cluster.local:8080")
+	assertArgPair(t, cmd, "--server-url", "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080")
 	assertArgPair(t, cmd, "--api-key", "agent-key")
 	assertArgPair(t, cmd, "--task-id", "task-1")
 	assertArgPair(t, cmd, "--task-type", model.PlatformArticle)
@@ -91,7 +91,7 @@ func TestKubernetesAgentEnvIncludesServerProjectAndClaudeEnv(t *testing.T) {
 			"ANTHROPIC_API_KEY":  "sk-ant",
 			"ANTHROPIC_BASE_URL": "https://anthropic.example.com",
 		},
-		serverURL: "http://anban-server:8080",
+		serverURL: "http://creator-api-svc:8080",
 	}
 	env := e.buildAgentEnv(&ExecutionOptions{
 		Task:               &model.Task{ID: "task-1", Type: model.PlatformMontage},
@@ -103,7 +103,7 @@ func TestKubernetesAgentEnvIncludesServerProjectAndClaudeEnv(t *testing.T) {
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 		"ANTHROPIC_API_KEY=sk-ant",
 		"ANTHROPIC_BASE_URL=https://anthropic.example.com",
-		"ANBAN_API_URL=http://anban-server:8080",
+		"ANBAN_API_URL=http://creator-api-svc:8080",
 		"ANBAN_DEFAULT_PROJECT=project-1",
 		"ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage",
 		"FAL_KEY=fal-secret",
@@ -115,7 +115,7 @@ func TestKubernetesAgentEnvIncludesServerProjectAndClaudeEnv(t *testing.T) {
 }
 
 func TestKubernetesAgentEnvSkipsMontageProviderEnvForOtherTasks(t *testing.T) {
-	e := &KubernetesExecutor{serverURL: "http://anban-server:8080"}
+	e := &KubernetesExecutor{serverURL: "http://creator-api-svc:8080"}
 
 	env := e.buildAgentEnv(&ExecutionOptions{
 		Task:               &model.Task{ID: "task-1", Type: model.PlatformArticle},
@@ -131,12 +131,12 @@ func TestKubernetesPodSpecUsesConfiguredImageAndPVC(t *testing.T) {
 	e := &KubernetesExecutor{
 		kubeCfg: srvconfig.KubernetesConfig{
 			AgentImage:         "registry.example.com/anban-agent:latest",
-			ServiceAccount:     "anban-agent-runner",
+			ServiceAccount:     "creator-agent-runner",
 			ImagePullSecret:    "acr-secret",
 			WorkspaceMountPath: "/workspace",
-			WorkspacePVCName:   "anban-agent-nas",
+			WorkspacePVCName:   "anban-creator",
 		},
-		serverURL: "http://anban-server:8080",
+		serverURL: "http://creator-api-svc:8080",
 	}
 	pod := e.buildAgentPod(&ExecutionOptions{
 		Task:    &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"},
@@ -155,7 +155,7 @@ func TestKubernetesPodSpecUsesConfiguredImageAndPVC(t *testing.T) {
 	if pod.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways {
 		t.Fatalf("imagePullPolicy = %q, want Always for production latest-tag rollouts", pod.Spec.Containers[0].ImagePullPolicy)
 	}
-	if pod.Spec.ServiceAccountName != "anban-agent-runner" {
+	if pod.Spec.ServiceAccountName != "creator-agent-runner" {
 		t.Fatalf("service account = %q, want configured", pod.Spec.ServiceAccountName)
 	}
 	if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
@@ -174,7 +174,7 @@ func TestKubernetesPodSpecUsesConfiguredImageAndPVC(t *testing.T) {
 	if strings.Join(init.Command, " ") == "" || !strings.Contains(strings.Join(init.Command, " "), "chown -R node:node") {
 		t.Fatalf("init container command = %#v, want node ownership setup", init.Command)
 	}
-	if len(pod.Spec.Volumes) != 1 || pod.Spec.Volumes[0].PersistentVolumeClaim == nil || pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName != "anban-agent-nas" {
+	if len(pod.Spec.Volumes) != 1 || pod.Spec.Volumes[0].PersistentVolumeClaim == nil || pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName != "anban-creator" {
 		t.Fatalf("volumes = %#v, want workspace PVC", pod.Spec.Volumes)
 	}
 	if len(pod.Spec.ImagePullSecrets) != 1 || pod.Spec.ImagePullSecrets[0].Name != "acr-secret" {
@@ -207,21 +207,21 @@ func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 		kubeCfg: srvconfig.KubernetesConfig{
 			AgentImage:         "registry.example.com/anban-agent:v1",
 			PodRevision:        "rev-1",
-			ServiceAccount:     "anban-agent-runner",
+			ServiceAccount:     "creator-agent-runner",
 			WorkspaceMountPath: "/workspace",
-			WorkspacePVCName:   "anban-agent-nas",
+			WorkspacePVCName:   "anban-creator",
 		},
-		serverURL: "http://anban-server:8080",
+		serverURL: "http://creator-api-svc:8080",
 	}
 	newExec := &KubernetesExecutor{
 		kubeCfg: srvconfig.KubernetesConfig{
 			AgentImage:         "registry.example.com/anban-agent:v1",
 			PodRevision:        "rev-2",
-			ServiceAccount:     "anban-agent-runner",
+			ServiceAccount:     "creator-agent-runner",
 			WorkspaceMountPath: "/workspace",
-			WorkspacePVCName:   "anban-agent-nas",
+			WorkspacePVCName:   "anban-creator",
 		},
-		serverURL: "http://anban-server:8080",
+		serverURL: "http://creator-api-svc:8080",
 	}
 
 	existing := oldExec.buildAgentPod(opts)

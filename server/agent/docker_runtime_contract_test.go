@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,12 +16,12 @@ func TestDockerfilesUseOpenHandsAgentRuntime(t *testing.T) {
 	}{
 		{
 			name:       "server",
-			path:       filepath.Join(root, "server", "Dockerfile"),
+			path:       filepath.Join(root, "Dockerfile.server"),
 			wantServer: true,
 		},
 		{
 			name: "agent",
-			path: filepath.Join(root, "agent", "Dockerfile"),
+			path: filepath.Join(root, "Dockerfile.agent"),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,8 +68,8 @@ func TestDockerfilesUseOpenHandsAgentRuntime(t *testing.T) {
 func TestOpenHandsRuntimeDockerfilesInstallPackagesAsRoot(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, path := range []string{
-		filepath.Join(root, "server", "Dockerfile"),
-		filepath.Join(root, "agent", "Dockerfile"),
+		filepath.Join(root, "Dockerfile.server"),
+		filepath.Join(root, "Dockerfile.agent"),
 	} {
 		t.Run(filepath.ToSlash(path), func(t *testing.T) {
 			body := readTextFile(t, path)
@@ -103,5 +104,29 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf(".dockerignore missing %q", want)
 		}
+	}
+}
+
+func TestAgentDockerfileIsRootEntrypoint(t *testing.T) {
+	root := repositoryRoot(t)
+	if _, err := os.Stat(filepath.Join(root, "Dockerfile.agent")); err != nil {
+		t.Fatalf("Dockerfile.agent must exist at repository root for CI builds with root context: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "agent", "Dockerfile")); err == nil {
+		t.Fatalf("agent/Dockerfile must not exist; use root Dockerfile.agent so CI context is unambiguous")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat agent/Dockerfile: %v", err)
+	}
+}
+
+func TestServerDockerfileIsRootEntrypoint(t *testing.T) {
+	root := repositoryRoot(t)
+	if _, err := os.Stat(filepath.Join(root, "Dockerfile.server")); err != nil {
+		t.Fatalf("Dockerfile.server must exist at repository root for CI builds with root context: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "server", "Dockerfile")); err == nil {
+		t.Fatalf("server/Dockerfile must not exist; use root Dockerfile.server so CI context is unambiguous")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat server/Dockerfile: %v", err)
 	}
 }

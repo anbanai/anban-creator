@@ -397,25 +397,25 @@ claude:
   # Agent Pod/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc:8080}"
   # Agent 执行器类型：local 用于开发；docker 用于单机容器；kubernetes 用于生产队列。
-  executor: local
+  executor: "${ANBAN_CLAUDE_EXECUTOR:-local}"
   # 是否启用 agent 沙箱隔离。生产建议 true。
   sandbox: true
   # Agent 插件目录，必须包含 agents/、skills/ 等分发资产。
   plugin_dir: "/anbanai"
   kubernetes:
     # Agent Pod 所在命名空间。
-    namespace: "${ANBAN_AGENT_NAMESPACE:-anban}"
+    namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"
     # Agent 镜像。生产镜像必须包含 anban agent 二进制、Claude/Codex 运行时、
     # Anban 插件资产、ffmpeg/浏览器/Node/Python 以及 third_party/OpenMontage。
-    agent_image: "${ANBAN_AGENT_IMAGE:-anban-creator-server:latest}"
+    agent_image: "${ANBAN_AGENT_IMAGE}"
     # Agent Pod 使用的 Kubernetes ServiceAccount。
-    service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-anban-agent-runner}"
+    service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
     # 私有镜像仓库拉取 secret；公开镜像可留空。
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
     # Agent Pod 内工作区挂载路径，必须是绝对路径。
     workspace_mount_path: "/workspace"
     # 持久化工作区 PVC，建议绑定 NAS/云盘，便于大素材和执行日志留存。
-    workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-agent-nas}"
+    workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-creator}"
     # Agent Pod 版本标识；ACK 发布时建议设为当前 version_switch 或镜像 digest，
     # 这样使用 latest tag 时，已有项目 Pod 也会被检测为漂移并重建。
     pod_revision: "${ANBAN_AGENT_POD_REVISION}"

@@ -185,7 +185,7 @@ func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(root, "server", "Dockerfile"))
+	raw, err := os.ReadFile(filepath.Join(root, "Dockerfile.server"))
 	if err != nil {
 		t.Fatalf("server Dockerfile missing: %v", err)
 	}
