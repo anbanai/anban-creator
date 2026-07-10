@@ -41,6 +41,22 @@ describe('DesignerReferenceDock', () => {
     expect(screen.getByText('或点按浏览 · 最多 16 张')).toBeInTheDocument()
   })
 
+  it('limits the native picker to the upload endpoint image contract', () => {
+    render(
+      <DesignerReferenceDock
+        files={[]}
+        maxFiles={16}
+        onFilesAdded={vi.fn()}
+        onFileRemove={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('designer-reference-input')).toHaveAttribute(
+      'accept',
+      'image/png,image/jpeg,image/jpg,image/gif,image/webp,image/bmp,.png,.jpeg,.jpg,.gif,.webp,.bmp',
+    )
+  })
+
   it('forwards every picker selection and resets the input', () => {
     const onFilesAdded = vi.fn()
     const first = image('first.png')

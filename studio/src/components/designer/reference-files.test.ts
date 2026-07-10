@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   admitReferenceFiles,
+  isReferenceImageFile,
+  REFERENCE_IMAGE_ACCEPT,
   referenceFileKey,
 } from './reference-files'
 
@@ -12,6 +14,49 @@ function createFile(
 ) {
   return new File([content], name, { lastModified, type })
 }
+
+describe('reference image upload contract', () => {
+  it('accepts only MIME types supported by the upload endpoint', () => {
+    const supported = [
+      ['image/png', 'image.png'],
+      ['image/jpeg', 'image.jpeg'],
+      ['image/jpg', 'image.jpg'],
+      ['image/gif', 'image.gif'],
+      ['image/webp', 'image.webp'],
+      ['image/bmp', 'image.bmp'],
+    ] as const
+    const unsupported = [
+      ['image/svg+xml', 'image.svg'],
+      ['image/avif', 'image.avif'],
+      ['image/heic', 'image.heic'],
+      ['image/tiff', 'image.tiff'],
+    ] as const
+
+    for (const [type, name] of supported) {
+      expect(isReferenceImageFile(createFile(name, type)), type).toBe(true)
+    }
+    for (const [type, name] of unsupported) {
+      expect(isReferenceImageFile(createFile(name, type)), type).toBe(false)
+    }
+    expect(isReferenceImageFile(createFile('misleading.png', 'application/octet-stream'))).toBe(false)
+  })
+
+  it('uses the supported extension set only when MIME is empty', () => {
+    for (const extension of ['png', 'jpeg', 'jpg', 'gif', 'webp', 'bmp']) {
+      expect(isReferenceImageFile(createFile(`image.${extension}`, '')), extension).toBe(true)
+    }
+    for (const extension of ['svg', 'avif', 'heic', 'heif', 'tif', 'tiff']) {
+      expect(isReferenceImageFile(createFile(`image.${extension}`, '')), extension).toBe(false)
+    }
+  })
+
+  it('exports an explicit picker accept contract without unsupported image wildcards', () => {
+    expect(REFERENCE_IMAGE_ACCEPT).toBe(
+      'image/png,image/jpeg,image/jpg,image/gif,image/webp,image/bmp,.png,.jpeg,.jpg,.gif,.webp,.bmp',
+    )
+    expect(REFERENCE_IMAGE_ACCEPT).not.toContain('image/*')
+  })
+})
 
 describe('admitReferenceFiles', () => {
   it('accepts image files in stable order', () => {

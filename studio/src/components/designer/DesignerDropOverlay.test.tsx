@@ -80,7 +80,7 @@ describe('DesignerDropOverlay', () => {
     expect(screen.getByText('未检测到可添加的图片')).toBeInTheDocument()
   })
 
-  it('communicates when only the first remaining-capacity images will be added', () => {
+  it('communicates the remaining capacity without promising source positions', () => {
     render(
       <DesignerDropOverlay
         active
@@ -89,7 +89,7 @@ describe('DesignerDropOverlay', () => {
       />,
     )
 
-    expect(screen.getByText('检测到 7 张参考图，将仅添加前 4 张')).toBeInTheDocument()
+    expect(screen.getByText('检测到 7 张参考图，最多可添加 4 张')).toBeInTheDocument()
     expect(screen.getByText('当前模型还可添加 4 张')).toBeInTheDocument()
   })
 

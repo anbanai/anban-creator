@@ -407,6 +407,42 @@ describe('Designer workspace reference drop', () => {
     expect(toast.warning).toHaveBeenCalledTimes(1)
   })
 
+  it('ignores unsupported known image MIME items before files become readable', async () => {
+    render(<DesignerPage />)
+    const workspace = await screen.findByTestId('designer-workspace')
+    await findResponsiveDocks()
+    const dataTransfer = {
+      types: ['Files'],
+      files: [],
+      items: [{ kind: 'file', type: 'image/avif' }],
+      dropEffect: 'none',
+    } as unknown as DataTransfer
+
+    fireEvent.dragEnter(workspace, { dataTransfer })
+
+    expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
+    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(true)
+    expect(dataTransfer.dropEffect).toBe('none')
+  })
+
+  it('conservatively accepts file items whose MIME is hidden', async () => {
+    render(<DesignerPage />)
+    const workspace = await screen.findByTestId('designer-workspace')
+    await findResponsiveDocks()
+    const dataTransfer = {
+      types: ['Files'],
+      files: [],
+      items: [{ kind: 'file', type: '' }],
+      dropEffect: 'none',
+    } as unknown as DataTransfer
+
+    fireEvent.dragEnter(workspace, { dataTransfer })
+
+    expect(screen.getByTestId('designer-drop-overlay')).toBeInTheDocument()
+    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(false)
+    expect(dataTransfer.dropEffect).toBe('copy')
+  })
+
   it('ignores explicit non-image desktop file drags before drop', async () => {
     render(<DesignerPage />)
     const workspace = await screen.findByTestId('designer-workspace')

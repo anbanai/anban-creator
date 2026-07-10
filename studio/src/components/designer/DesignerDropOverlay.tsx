@@ -24,7 +24,7 @@ function actionCopyFor(incomingCount: number | undefined, remainingCapacity: num
   }
 
   if (incomingCount !== undefined && incomingCount > remainingCapacity) {
-    return `检测到 ${incomingCount} 张参考图，将仅添加前 ${remainingCapacity} 张`
+    return `检测到 ${incomingCount} 张参考图，最多可添加 ${remainingCapacity} 张`
   }
 
   if (incomingCount !== undefined) {

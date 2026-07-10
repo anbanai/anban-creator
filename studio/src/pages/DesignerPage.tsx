@@ -8,6 +8,7 @@ import DesignerDropOverlay from '@/components/designer/DesignerDropOverlay'
 import {
   admitReferenceFiles,
   isReferenceImageFile,
+  isSupportedReferenceImageMimeType,
   type ReferenceAdmissionResult,
 } from '@/components/designer/reference-files'
 import DesignerCanvas from '@/components/designer/DesignerCanvas'
@@ -53,7 +54,7 @@ function hasPotentialReferenceImages(dataTransfer: DataTransfer): boolean {
   if (fileItems.length === 0) return true
 
   return fileItems.some(
-    (item) => item.type === '' || item.type.startsWith('image/'),
+    (item) => item.type === '' || isSupportedReferenceImageMimeType(item.type),
   )
 }
 
@@ -73,7 +74,7 @@ function countIncomingReferenceImages(dataTransfer: DataTransfer): number | unde
   if (files.length > 0) return files.filter(isReferenceImageFile).length
 
   const imageItems = Array.from(dataTransfer.items).filter(
-    (item) => item.kind === 'file' && item.type.startsWith('image/'),
+    (item) => item.kind === 'file' && isSupportedReferenceImageMimeType(item.type),
   )
   return imageItems.length > 0 ? imageItems.length : undefined
 }

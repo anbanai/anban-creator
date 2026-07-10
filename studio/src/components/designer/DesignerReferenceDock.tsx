@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { ImagePlus, Plus, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { referenceFileKey } from './reference-files'
+import { REFERENCE_IMAGE_ACCEPT, referenceFileKey } from './reference-files'
 
 export interface DesignerReferenceDockProps {
   files: File[]
@@ -93,7 +93,7 @@ export default function DesignerReferenceDock({
         ref={inputRef}
         data-testid="designer-reference-input"
         type="file"
-        accept="image/*"
+        accept={REFERENCE_IMAGE_ACCEPT}
         multiple
         className="hidden"
         onChange={handleFilesSelected}

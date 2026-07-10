@@ -1,16 +1,32 @@
-const EMPTY_MIME_IMAGE_EXTENSIONS = new Set([
-  'avif',
-  'bmp',
-  'gif',
-  'heic',
-  'heif',
+const SUPPORTED_REFERENCE_IMAGE_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+] as const
+
+const SUPPORTED_REFERENCE_IMAGE_EXTENSIONS = [
+  'png',
   'jpeg',
   'jpg',
-  'png',
-  'tif',
-  'tiff',
+  'gif',
   'webp',
-])
+  'bmp',
+] as const
+
+export const REFERENCE_IMAGE_ACCEPT = [
+  ...SUPPORTED_REFERENCE_IMAGE_MIME_TYPES,
+  ...SUPPORTED_REFERENCE_IMAGE_EXTENSIONS.map((extension) => `.${extension}`),
+].join(',')
+
+const SUPPORTED_REFERENCE_IMAGE_MIME_TYPE_SET = new Set<string>(
+  SUPPORTED_REFERENCE_IMAGE_MIME_TYPES,
+)
+const SUPPORTED_REFERENCE_IMAGE_EXTENSION_SET = new Set<string>(
+  SUPPORTED_REFERENCE_IMAGE_EXTENSIONS,
+)
 
 export interface ReferenceAdmissionResult {
   files: File[]
@@ -24,9 +40,13 @@ export function referenceFileKey(file: File) {
   return [file.name, file.size, file.lastModified, file.type].join('\u0000')
 }
 
+export function isSupportedReferenceImageMimeType(type: string) {
+  return SUPPORTED_REFERENCE_IMAGE_MIME_TYPE_SET.has(type.toLowerCase())
+}
+
 export function isReferenceImageFile(file: File) {
   if (file.type) {
-    return file.type.startsWith('image/')
+    return isSupportedReferenceImageMimeType(file.type)
   }
 
   const extensionStart = file.name.lastIndexOf('.')
@@ -35,7 +55,7 @@ export function isReferenceImageFile(file: File) {
   }
 
   const extension = file.name.slice(extensionStart + 1).toLowerCase()
-  return EMPTY_MIME_IMAGE_EXTENSIONS.has(extension)
+  return SUPPORTED_REFERENCE_IMAGE_EXTENSION_SET.has(extension)
 }
 
 export function admitReferenceFiles(
