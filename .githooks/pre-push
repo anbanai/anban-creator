@@ -1,0 +1,22 @@
+#!/bin/sh
+
+set -eu
+
+if [ "${ANBAN_SUBMODULE_PUSH_ACTIVE:-}" = "1" ]; then
+  exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "error: pre-push hook must run inside the superproject working tree" >&2
+  exit 1
+}
+
+branch_name=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+  echo "error: superproject HEAD is detached; check out the branch you intend to push" >&2
+  exit 1
+}
+
+remote_name=${1:-origin}
+export ANBAN_SUBMODULE_PUSH_ACTIVE=1
+
+exec "$repo_root/scripts/push-managed-submodules.sh" "$branch_name" "$remote_name"

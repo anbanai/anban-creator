@@ -74,6 +74,65 @@ func runCommandError(t *testing.T, dir string, env []string, name string, args .
 	return string(output)
 }
 
+func TestPrePushHookDelegatesWithBranchRemoteAndRecursionGuard(t *testing.T) {
+	hook := repositoryPath(t, ".githooks", "pre-push")
+	info, err := os.Stat(hook)
+	if err != nil {
+		t.Fatalf("stat pre-push hook: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("pre-push hook mode = %v, want executable", info.Mode().Perm())
+	}
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	initWorkingRepository(t, repo)
+	writeFile(t, filepath.Join(repo, "README.md"), "hook test\n")
+	runCommand(t, repo, nil, "git", "add", "README.md")
+	runCommand(t, repo, nil, "git", "commit", "-m", "initial")
+
+	fakeScript := filepath.Join(repo, "scripts", "push-managed-submodules.sh")
+	mustMkdirAll(t, filepath.Dir(fakeScript))
+	writeExecutable(t, fakeScript, `#!/bin/sh
+printf '%s|%s|%s\n' "$1" "$2" "$ANBAN_SUBMODULE_PUSH_ACTIVE" > "$ANBAN_PUSH_LOG"
+`)
+	logPath := filepath.Join(repo, "push.log")
+	runCommand(t, repo, []string{"ANBAN_PUSH_LOG=" + logPath}, hook, "upstream", "/tmp/remote.git")
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read hook delegation log: %v", err)
+	}
+	if actual, expected := strings.TrimSpace(string(logData)), "main|upstream|1"; actual != expected {
+		t.Fatalf("hook delegation = %q, want %q", actual, expected)
+	}
+
+	if err := os.Remove(logPath); err != nil {
+		t.Fatalf("remove hook delegation log: %v", err)
+	}
+	runCommand(t, repo, []string{
+		"ANBAN_PUSH_LOG=" + logPath,
+		"ANBAN_SUBMODULE_PUSH_ACTIVE=1",
+	}, hook, "upstream", "/tmp/remote.git")
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("recursive hook invocation created log; stat error = %v", err)
+	}
+}
+
+func TestPrePushHookRejectsDetachedSuperproject(t *testing.T) {
+	hook := repositoryPath(t, ".githooks", "pre-push")
+	repo := filepath.Join(t.TempDir(), "repo")
+	initWorkingRepository(t, repo)
+	writeFile(t, filepath.Join(repo, "README.md"), "hook test\n")
+	runCommand(t, repo, nil, "git", "add", "README.md")
+	runCommand(t, repo, nil, "git", "commit", "-m", "initial")
+	runCommand(t, repo, nil, "git", "checkout", "--detach")
+
+	output := runCommandError(t, repo, nil, hook, "origin", "/tmp/remote.git")
+	if !strings.Contains(output, "superproject HEAD is detached") {
+		t.Fatalf("error output = %q, want detached HEAD hint", output)
+	}
+}
+
 type gitSyncFixture struct {
 	remote            string
 	superproject      string
@@ -200,6 +259,13 @@ func configureGitIdentity(t *testing.T, path string) {
 	t.Helper()
 	runCommand(t, path, nil, "git", "config", "user.name", "Anban Test")
 	runCommand(t, path, nil, "git", "config", "user.email", "anban-test@example.com")
+}
+
+func writeExecutable(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("write executable %s: %v", path, err)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {
