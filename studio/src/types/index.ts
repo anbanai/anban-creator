@@ -33,6 +33,7 @@ export type {
   Task,
   TaskResult,
   TaskFile,
+  ReferenceUsageSummaryData,
   CreateTaskRequest,
   BulkTaskResult,
   BulkTasksResponse,

@@ -120,6 +120,37 @@ export interface Task {
 // Publish-approval gate state (mirrors server model.PublishApprovalState*).
 export type PublishApprovalState = '' | 'pending' | 'approved' | 'rejected'
 
+export interface ReferenceUsageSummaryData {
+  version: '1.0'
+  inputs: Array<{
+    attachment_index: number
+    file_name?: string
+    url?: string
+    instruction?: string
+    status: 'used' | 'excluded' | 'analysis_failed'
+    decision_summary: string
+    analysis_attempts: number
+    warnings?: string[]
+  }>
+  outputs: Array<{
+    file_name: string
+    references: Array<{
+      attachment_index: number
+      purpose: string
+    }>
+    generation_attempts: number
+    verification: {
+      status: 'passed' | 'warning' | 'failed'
+      summary: string
+    }
+    provider?: string
+    model?: string
+    selection_reason?: string
+  }>
+  warnings?: string[]
+  model_fallback_reason?: string
+}
+
 export interface TaskResult {
   files: TaskFile[] | null
   output: string
