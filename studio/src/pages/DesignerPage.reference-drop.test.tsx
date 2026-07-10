@@ -99,7 +99,11 @@ function renderWithQueryClient(queryClient: QueryClient, extra?: ReactNode) {
   )
 }
 
-function GenerateBeforeProviderReconciliation() {
+function GenerateBeforeProviderReconciliation({
+  shouldSubmit = (provider) => !provider.capabilities.supportsReference,
+}: {
+  shouldSubmit?: (provider: DesignerProvider) => boolean
+} = {}) {
   const submittedRef = useRef(false)
   const { data: providers } = useQuery({
     queryKey: PROVIDERS_QUERY_KEY,
@@ -111,14 +115,14 @@ function GenerateBeforeProviderReconciliation() {
     if (
       submittedRef.current
       || !effectiveProvider
-      || effectiveProvider.capabilities.supportsReference
+      || !shouldSubmit(effectiveProvider)
     ) {
       return
     }
 
     submittedRef.current = true
     screen.getByRole('button', { name: '生成' }).click()
-  }, [effectiveProvider])
+  }, [effectiveProvider, shouldSubmit])
 
   return null
 }
@@ -403,6 +407,20 @@ describe('Designer workspace reference drop', () => {
     expect(toast.warning).toHaveBeenCalledTimes(1)
   })
 
+  it('ignores explicit non-image desktop file drags before drop', async () => {
+    render(<DesignerPage />)
+    const workspace = await screen.findByTestId('designer-workspace')
+    await findResponsiveDocks()
+    const textFile = new File(['notes'], 'notes.txt', { type: 'text/plain' })
+    const dataTransfer = dragData([textFile])
+
+    fireEvent.dragEnter(workspace, { dataTransfer })
+
+    expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
+    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(true)
+    expect(dataTransfer.dropEffect).toBe('none')
+  })
+
   it('bounds submit-time reference uploads before passive provider reconciliation', async () => {
     const queryClient = createTestQueryClient()
     const initialProvider = provider({ maxReferenceImages: 2 })
@@ -436,6 +454,51 @@ describe('Designer workspace reference drop', () => {
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
     expect(designerApi.uploadReference).not.toHaveBeenCalled()
     expect(vi.mocked(designerApi.generate).mock.calls[0][0].reference_file_ids).toBeUndefined()
+  })
+
+  it('uploads only the ordered non-zero prefix at submit-time before reconciliation', async () => {
+    const queryClient = createTestQueryClient()
+    const initialProvider = provider({ maxReferenceImages: 3 })
+    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([initialProvider])
+    renderWithQueryClient(
+      queryClient,
+      <GenerateBeforeProviderReconciliation
+        shouldSubmit={(candidate) => candidate.capabilities.maxReferenceImages === 1}
+      />,
+    )
+    const workspace = await screen.findByTestId('designer-workspace')
+    const docks = await findResponsiveDocks()
+    const first = image('first.png')
+    const second = image('second.png', 200)
+    const third = image('third.png', 300)
+
+    fireEvent.drop(workspace, { dataTransfer: dragData([first, second, third]) })
+    await waitFor(() => {
+      expect(within(docks[0]).getByRole('img', { name: 'third.png' })).toBeInTheDocument()
+    })
+    expect(designerApi.uploadReference).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
+      target: { value: '生成一张测试图片' },
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '生成' })).not.toBeDisabled()
+    })
+    vi.mocked(designerApi.uploadReference).mockClear()
+    vi.mocked(designerApi.generate).mockClear()
+
+    await act(async () => {
+      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [
+        provider({ maxReferenceImages: 1 }),
+      ])
+    })
+
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
+    expect(designerApi.uploadReference).toHaveBeenCalledTimes(1)
+    expect(designerApi.uploadReference).toHaveBeenCalledWith(first)
+    expect(vi.mocked(designerApi.generate).mock.calls[0][0].reference_file_ids).toEqual([
+      'uploaded:first.png',
+    ])
   })
 
   it('keeps reference state intact across batched toolbar setting writes', async () => {

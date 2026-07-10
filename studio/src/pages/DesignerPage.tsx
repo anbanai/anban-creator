@@ -43,6 +43,24 @@ function hasExternalFiles(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.types).includes('Files')
 }
 
+function hasPotentialReferenceImages(dataTransfer: DataTransfer): boolean {
+  const files = Array.from(dataTransfer.files)
+  if (files.length > 0) return files.some(isReferenceImageFile)
+
+  const fileItems = Array.from(dataTransfer.items).filter(
+    (item) => item.kind === 'file',
+  )
+  if (fileItems.length === 0) return true
+
+  return fileItems.some(
+    (item) => item.type === '' || item.type.startsWith('image/'),
+  )
+}
+
+function hasReferenceFileDrag(dataTransfer: DataTransfer): boolean {
+  return hasExternalFiles(dataTransfer) && hasPotentialReferenceImages(dataTransfer)
+}
+
 function maxReferenceImagesForProvider(provider?: DesignerProvider): number {
   const capabilities = provider?.capabilities
   return capabilities?.supportsReference
@@ -413,7 +431,7 @@ export default function DesignerPage() {
   }, [referenceDropActive, resetReferenceDrag])
 
   function handleReferenceDragEnter(event: React.DragEvent<HTMLDivElement>) {
-    if (!canAcceptReferenceDrop || !hasExternalFiles(event.dataTransfer)) return
+    if (!canAcceptReferenceDrop || !hasReferenceFileDrag(event.dataTransfer)) return
     event.preventDefault()
     referenceDragDepthRef.current += 1
     setReferenceDropActive(true)
@@ -421,7 +439,7 @@ export default function DesignerPage() {
   }
 
   function handleReferenceDragOver(event: React.DragEvent<HTMLDivElement>) {
-    if (maxReferenceImages === 0 || !hasExternalFiles(event.dataTransfer)) return
+    if (maxReferenceImages === 0 || !hasReferenceFileDrag(event.dataTransfer)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
   }
