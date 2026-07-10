@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Streamdown } from 'streamdown'
-import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban, Upload, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban, Upload, X } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -1203,40 +1203,34 @@ export default function TaskDetailPage() {
           <CardContent>
             {task.status === 'failed' ? (
               <div className="space-y-3">
-                <p className="text-sm text-red-400">任务失败</p>
-                {task.error && (
-                  <p className="mt-2 bg-red-900/20 border border-red-900/30 rounded-lg px-3 py-2 text-sm text-red-300">
-                    {task.error}
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
-                    <Send className="h-4 w-4" />
-                    继续执行
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => void handleClone()}>
-                    <RefreshCw className="h-4 w-4" />
-                    克隆任务
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')}>
-                    返回任务列表
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => navigate('/projects')}>
-                    检查项目配置
-                  </Button>
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">执行中断</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      当前工作目录已保留，可以从失败点补充信息后继续推进。
+                    </p>
+                  </div>
                 </div>
+                {task.error && (
+                  <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
+                    <p className="text-xs font-medium text-destructive">失败原因</p>
+                    <p className="mt-1 text-sm text-foreground">{task.error}</p>
+                  </div>
+                )}
+                <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                  右上角可继续执行当前工作目录，或克隆为一个全新任务。
+                </p>
               </div>
             ) : task.status === 'cancelled' ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-sm text-muted-foreground">任务已取消</p>
-                <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
-                  <Send className="h-4 w-4" />
-                  继续执行
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => void handleClone()}>
-                  <RefreshCw className="h-4 w-4" />
-                  克隆任务
-                </Button>
+              <div className="flex items-start gap-3">
+                <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">执行已停止</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    当前任务没有继续运行。右上角可继续执行当前工作目录，或克隆为一个全新任务。
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="space-y-2">

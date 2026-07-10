@@ -4,7 +4,6 @@ import {
   Menu,
   X,
   Workflow,
-  PlugZap,
   BarChart3,
   PanelLeftClose,
   PanelLeftOpen,
@@ -12,6 +11,7 @@ import {
   CalendarRange,
   Boxes,
   LayoutDashboard,
+  MoreHorizontal,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
 import LocalExecutorStatusPill from "@/components/desktop/LocalExecutorStatusPill";
@@ -23,6 +23,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   assetItems,
   automationItems,
@@ -168,7 +173,7 @@ export default function Sidebar() {
         {/* Bottom: Platform + Settings */}
         <div className="flex flex-col gap-0.5 px-3 py-2">
           {isDesktop() && <LocalExecutorStatusPill collapsed={collapsed} />}
-          <SidebarBottomSection collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarUtilityMenu collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
         </div>
 
         {/* Bottom: User account */}
@@ -283,36 +288,90 @@ function SidebarSection({
   );
 }
 
-function SidebarBottomSection({
+function SidebarUtilityMenu({
   collapsed,
   onSelect,
 }: {
   collapsed: boolean
   onSelect: () => void
 }) {
+  const [open, setOpen] = useState(false)
+  const handleSelect = () => {
+    setOpen(false)
+    onSelect()
+  }
+
   if (collapsed) {
     return (
-      <div className="flex flex-col gap-0.5">
-        {connectSettingItems.map((item) => (
-          <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
-        ))}
-      </div>
+      <Popover open={open} onOpenChange={setOpen}>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="更多"
+                    className="flex w-full items-center justify-center rounded-md py-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                  />
+                }
+              />
+            }
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">更多</TooltipContent>
+        </Tooltip>
+        <PopoverContent side="right" align="end" sideOffset={8} className="w-56 p-1">
+          <UtilityMenuLinks onSelect={handleSelect} />
+        </PopoverContent>
+      </Popover>
     );
   }
 
   return (
-    <>
-      <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/62">
-        <span className="inline-flex items-center gap-2">
-          <PlugZap className="h-3.5 w-3.5" />
-          接入配置
-        </span>
-      </div>
-      {connectSettingItems.map((item) => (
-        <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
-      ))}
-    </>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            aria-label="更多"
+            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          />
+        }
+      >
+        <MoreHorizontal className="h-4 w-4 shrink-0" />
+        <span>更多</span>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" sideOffset={8} className="w-56 p-1">
+        <UtilityMenuLinks onSelect={handleSelect} />
+      </PopoverContent>
+    </Popover>
   );
+}
+
+function UtilityMenuLinks({ onSelect }: { onSelect: () => void }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      {connectSettingItems.map((item) => (
+        <NavLink
+          key={item.to}
+          to={item.to}
+          onClick={onSelect}
+          className={({ isActive }) =>
+            `flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+              isActive
+                ? "bg-accent text-accent-foreground"
+                : "text-popover-foreground/75 hover:bg-accent hover:text-accent-foreground"
+            }`
+          }
+        >
+          <item.icon className="h-4 w-4 shrink-0" />
+          <span>{item.label}</span>
+        </NavLink>
+      ))}
+    </div>
+  )
 }
 
 function SidebarNavLink({

@@ -226,8 +226,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const continueButtons = await screen.findAllByRole('button', { name: /继续执行/ })
-    fireEvent.click(continueButtons[0])
+    const continueButton = await screen.findByRole('button', { name: /继续执行/ })
+    fireEvent.click(continueButton)
 
     const dialogTitle = await screen.findByText('继续执行此任务')
     const dialog = dialogTitle.closest('[data-slot="dialog-content"]') as HTMLElement
@@ -263,8 +263,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const continueButtons = await screen.findAllByRole('button', { name: /继续执行/ })
-    fireEvent.click(continueButtons[0])
+    const continueButton = await screen.findByRole('button', { name: /继续执行/ })
+    fireEvent.click(continueButton)
 
     const dialogTitle = await screen.findByText('继续执行此任务')
     const dialog = dialogTitle.closest('[data-slot="dialog-content"]') as HTMLElement
@@ -320,7 +320,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByRole('button', { name: /克隆任务/ })).not.toBeInTheDocument()
   })
 
-  it('uses distinct continue and clone wording for cancelled tasks', async () => {
+  it('keeps recovery actions in the header for cancelled tasks', async () => {
     mockTask(taskWith({
       status: 'cancelled',
       result: { files: null, output: '' },
@@ -328,10 +328,29 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findAllByRole('button', { name: /继续执行/ })).toHaveLength(2)
-    expect(screen.getAllByRole('button', { name: /克隆任务/ })).toHaveLength(2)
+    expect(await screen.findAllByRole('button', { name: /继续执行/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /克隆任务/ })).toHaveLength(1)
+    expect(screen.getByText('执行已停止')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /再试一次/ })).not.toBeInTheDocument()
+  })
+
+  it('shows failed-task diagnosis without duplicating header actions', async () => {
+    mockTask(taskWith({
+      status: 'failed',
+      error: '模型超时',
+      result: { files: null, output: '' },
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findAllByRole('button', { name: /继续执行/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /克隆任务/ })).toHaveLength(1)
+    expect(screen.getByText('执行中断')).toBeInTheDocument()
+    expect(screen.getByText('模型超时')).toBeInTheDocument()
+    expect(screen.getByText('右上角可继续执行当前工作目录，或克隆为一个全新任务。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /返回任务列表/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /检查项目配置/ })).not.toBeInTheDocument()
   })
 
   it('shows project parameters without the low-value reference image preview', async () => {
