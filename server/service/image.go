@@ -513,14 +513,10 @@ func (s *ImageService) generateWithRetry(
 // GenerateImage generates a single image using the project's image provider.
 // Returns the download URL (remote CDN URL or data URL) for the agent to download.
 // If outputPath is provided, also saves the image to that path and returns file_path.
-//
-// modelSelection is normally a *ResolvedImageModel selected once before billing.
-// A string is accepted temporarily for the legacy MCP caller and is removed when
-// Task 10 migrates that caller to resolve-once generation.
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
 	userID, projectID, prompt, imageType, outputPath, refPath string, refPaths []string, taskID, size string,
-	modelSelection any,
+	resolved *ResolvedImageModel,
 	watermark *bool,
 ) (*ImageResult, error) {
 	ch, err := s.repo.Projects().FindByID(ctx, projectID)
@@ -528,19 +524,7 @@ func (s *ImageService) GenerateImage(
 		return nil, fmt.Errorf("find project: %w", err)
 	}
 
-	var resolved *ResolvedImageModel
-	var processor *image.Processor
-	switch selection := modelSelection.(type) {
-	case *ResolvedImageModel:
-		resolved = selection
-		processor, err = s.buildProcessorForResolved(ch, imageType, resolved)
-	case string:
-		// Transitional compatibility for MCP call sites migrated in Task 10.
-		// Resolved descriptors already take the strict no-re-resolution path.
-		processor, err = s.buildProcessor(ctx, ch, imageType, selection)
-	default:
-		err = fmt.Errorf("resolved image model is required")
-	}
+	processor, err := s.buildProcessorForResolved(ch, imageType, resolved)
 	if err != nil {
 		return nil, err
 	}

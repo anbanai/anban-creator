@@ -16,28 +16,78 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
+// ImageModelResolver selects one immutable provider/model descriptor before an
+// image request reaches billing or generation.
+type ImageModelResolver interface {
+	ResolveImageModelForGeneration(
+		ctx context.Context,
+		userID string,
+		imageModelKey string,
+		imageType string,
+		referenceCount int,
+	) (*service.ResolvedImageModel, error)
+}
+
+// ImageGenerator is the narrow generation surface used by generate_image.
+// ImageSvc remains concrete because the other image tools need upload,
+// compression, and download methods that are intentionally not part of this
+// request-scoped interface.
+type ImageGenerator interface {
+	GenerateImage(
+		ctx context.Context,
+		userID, projectID, prompt, imageType, outputPath, refPath string,
+		refPaths []string,
+		taskID, size string,
+		resolved *service.ResolvedImageModel,
+		watermark *bool,
+	) (*service.ImageResult, error)
+}
+
+type ImageGenerationBillingDecision struct {
+	Provider        string
+	Model           string
+	Source          string
+	Dynamic         bool
+	DynamicProvider string
+	DynamicModel    string
+	DynamicRoute    string
+}
+
+// ImageGenerationBiller performs static pre-generation charging or records the
+// dynamic route that must be charged from the provider's returned usage.
+type ImageGenerationBiller interface {
+	PrepareImageGeneration(
+		ctx context.Context,
+		userID, taskID, imageType string,
+		resolved *service.ResolvedImageModel,
+	) (ImageGenerationBillingDecision, error)
+}
+
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ProjectSvc        *service.ProjectService
-	Store             storage.Provider
-	TaskSvc           *service.TaskService
-	CreditSvc         *service.CreditService
-	PlanSvc           *service.PlanService
-	ImageSvc          *service.ImageService
-	VideoSvc          *service.VideoService
-	AudioASRSvc       *service.AudioASRService
-	VideoASRSvc       *service.VideoASRService
-	WritingSvc        *service.WritingService
-	PublishingSvc     *service.PublishingService
-	WorkspaceSvc      *service.WorkspaceService
-	TemplateSvc       *service.TemplateService
-	LiveSliceSvc      *service.LiveSliceService
-	SeednoteClient    *seednote.Client
-	SeednoteReadiness service.Readiness
-	TopicPoolSvc      *service.TopicPoolService
-	AgentFeedbackSvc  *service.AgentFeedbackService
-	TingWuConfigured  bool
-	FunASRConfigured  bool
+	ProjectSvc            *service.ProjectService
+	Store                 storage.Provider
+	TaskSvc               *service.TaskService
+	CreditSvc             *service.CreditService
+	PlanSvc               *service.PlanService
+	ImageSvc              *service.ImageService
+	ImageModelResolver    ImageModelResolver
+	ImageGenerator        ImageGenerator
+	ImageGenerationBiller ImageGenerationBiller
+	VideoSvc              *service.VideoService
+	AudioASRSvc           *service.AudioASRService
+	VideoASRSvc           *service.VideoASRService
+	WritingSvc            *service.WritingService
+	PublishingSvc         *service.PublishingService
+	WorkspaceSvc          *service.WorkspaceService
+	TemplateSvc           *service.TemplateService
+	LiveSliceSvc          *service.LiveSliceService
+	SeednoteClient        *seednote.Client
+	SeednoteReadiness     service.Readiness
+	TopicPoolSvc          *service.TopicPoolService
+	AgentFeedbackSvc      *service.AgentFeedbackService
+	TingWuConfigured      bool
+	FunASRConfigured      bool
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -415,6 +465,26 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
 		}
+		if svcs.ImageModelResolver != nil {
+			imageModelKey := ""
+			if task != nil {
+				imageModelKey = task.ImageModelKey
+			}
+			resolved, resolveErr := svcs.ImageModelResolver.ResolveImageModelForGeneration(ctx, userID, imageModelKey, "content", 0)
+			if resolveErr != nil {
+				return nil, fmt.Sprintf("resolve image generation capability: %v", resolveErr)
+			}
+			if resolved == nil {
+				return nil, "resolve image generation capability: resolver returned no descriptor"
+			}
+			info["image_generation"] = map[string]any{
+				"provider":             resolved.Provider,
+				"model":                resolved.Model,
+				"supports_reference":   resolved.SupportsReference,
+				"max_reference_images": resolved.MaxReferenceImages,
+				"selection_reason":     resolved.SelectionReason,
+			}
+		}
 	case "moments":
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
@@ -438,14 +508,11 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		// E-commerce: surface the package config (selected modules, target
 		// platform, brand brief, language) plus the resolved image model and the
 		// workspace path where the executor materialized the product photos.
-		// The server resolves Task.ImageModelKey to a concrete provider/model here
-		// so the agent can adapt its reference-image strategy without selecting or
-		// passing model keys: OpenAI/Gemini accept multiple refs (≤16 via
-		// generate_image's ref_image_paths) for max product fidelity; Volcengine/
-		// Seedream take a single ref (strong i2i), so the agent uses one anchor ref
-		// + product-bible text block. Product photos are downloaded by the executor
-		// into .anban-creator/products/ (see agent.DownloadProductImages); the agent
-		// reads index.json there for the exact filenames.
+		// The agent uses the concrete provider/model only to plan its independent
+		// product-photo workflow; task model keys remain server-owned. Product
+		// photos are downloaded by the executor into .anban-creator/products/ (see
+		// agent.DownloadProductImages); the agent reads index.json there for the
+		// exact filenames.
 		ec := map[string]any{
 			"product_photo_dir": ".anban-creator/products",
 			"consistency_audit": true, // verify_with_vision self-check loop
@@ -455,7 +522,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			ec["image_model"] = map[string]any{
 				"provider": provider,
 				"model":    mdl,
-				"key":      task.ImageModelKey,
 			}
 			cfg := task.Ecommerce.Data()
 			ec["selected_modules"] = cfg.SelectedModules
