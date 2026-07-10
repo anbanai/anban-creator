@@ -42,6 +42,19 @@ while IFS=' ' read -r key enabled; do
     continue
   fi
 
+  if [ -n "$(git -C "$submodule_path" status --porcelain)" ]; then
+    printf "error: managed submodule '%s' (%s) has uncommitted changes; commit or discard them before pushing\n" "$name" "$submodule_path" >&2
+    exit 1
+  fi
+
+  submodule_head=$(git -C "$submodule_path" rev-parse HEAD)
+  recorded_head=$(git rev-parse --verify ":$submodule_path" 2>/dev/null || true)
+  if [ -z "$recorded_head" ] || [ "$submodule_head" != "$recorded_head" ]; then
+    printf "error: managed submodule '%s' HEAD %s does not match the superproject gitlink %s; commit the updated gitlink before pushing\n" \
+      "$name" "$submodule_head" "${recorded_head:-<missing>}" >&2
+    exit 1
+  fi
+
   printf "Pushing managed submodule '%s' (%s) to %s/%s\n" "$name" "$submodule_path" "$remote_name" "$branch_name"
   git -C "$submodule_path" push "$remote_name" "HEAD:refs/heads/$branch_name"
 done

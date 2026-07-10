@@ -62,7 +62,83 @@ func runCommand(t *testing.T, dir string, env []string, name string, args ...str
 	return string(output)
 }
 
+func runCommandError(t *testing.T, dir string, env []string, name string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("run %s %s in %s succeeded, want failure\n%s", name, strings.Join(args, " "), dir, output)
+	}
+	return string(output)
+}
+
+type gitSyncFixture struct {
+	remote            string
+	superproject      string
+	plugin            string
+	initialRemoteHead string
+	detachedHead      string
+}
+
 func TestPushManagedSubmodulesPushesDetachedHeadToSuperprojectBranch(t *testing.T) {
+	fixture := newGitSyncFixture(t, true, true)
+
+	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
+	runCommand(t, fixture.superproject, nil, script, "main", "origin")
+
+	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
+	if remoteHead != fixture.detachedHead {
+		t.Fatalf("remote main = %s, want detached submodule HEAD %s", remoteHead, fixture.detachedHead)
+	}
+}
+
+func TestPushManagedSubmodulesSkipsUnmarkedSubmodule(t *testing.T) {
+	fixture := newGitSyncFixture(t, false, true)
+
+	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
+	runCommand(t, fixture.superproject, nil, script, "main", "origin")
+
+	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
+	if remoteHead != fixture.initialRemoteHead {
+		t.Fatalf("unmarked submodule remote main = %s, want unchanged %s", remoteHead, fixture.initialRemoteHead)
+	}
+}
+
+func TestPushManagedSubmodulesRejectsDirtySubmodule(t *testing.T) {
+	fixture := newGitSyncFixture(t, true, true)
+	writeFile(t, filepath.Join(fixture.plugin, "uncommitted.txt"), "not committed\n")
+
+	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
+	output := runCommandError(t, fixture.superproject, nil, script, "main", "origin")
+	if !strings.Contains(output, "uncommitted changes") {
+		t.Fatalf("error output = %q, want uncommitted changes hint", output)
+	}
+
+	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
+	if remoteHead != fixture.initialRemoteHead {
+		t.Fatalf("dirty submodule remote main = %s, want unchanged %s", remoteHead, fixture.initialRemoteHead)
+	}
+}
+
+func TestPushManagedSubmodulesRejectsStaleGitlink(t *testing.T) {
+	fixture := newGitSyncFixture(t, true, false)
+
+	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
+	output := runCommandError(t, fixture.superproject, nil, script, "main", "origin")
+	if !strings.Contains(output, "does not match the superproject gitlink") {
+		t.Fatalf("error output = %q, want stale gitlink hint", output)
+	}
+
+	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
+	if remoteHead != fixture.initialRemoteHead {
+		t.Fatalf("stale-gitlink submodule remote main = %s, want unchanged %s", remoteHead, fixture.initialRemoteHead)
+	}
+}
+
+func newGitSyncFixture(t *testing.T, marked, recordDetachedHead bool) gitSyncFixture {
+	t.Helper()
 	root := t.TempDir()
 	remote := filepath.Join(root, "plugin.git")
 	seed := filepath.Join(root, "seed")
@@ -83,7 +159,9 @@ func TestPushManagedSubmodulesPushesDetachedHeadToSuperprojectBranch(t *testing.
 	runCommand(t, superproject, nil, "git", "add", "README.md")
 	runCommand(t, superproject, nil, "git", "commit", "-m", "initial superproject")
 	runCommand(t, superproject, nil, "git", "-c", "protocol.file.allow=always", "submodule", "add", remote, "plugin")
-	runCommand(t, superproject, nil, "git", "config", "-f", ".gitmodules", "submodule.plugin.syncPush", "true")
+	if marked {
+		runCommand(t, superproject, nil, "git", "config", "-f", ".gitmodules", "submodule.plugin.syncPush", "true")
+	}
 	runCommand(t, superproject, nil, "git", "add", ".gitmodules", "plugin")
 	runCommand(t, superproject, nil, "git", "commit", "-m", "add plugin")
 
@@ -97,15 +175,17 @@ func TestPushManagedSubmodulesPushesDetachedHeadToSuperprojectBranch(t *testing.
 	if detachedHead == initialRemoteHead {
 		t.Fatal("detached commit unexpectedly matches initial remote head")
 	}
-	runCommand(t, superproject, nil, "git", "add", "plugin")
-	runCommand(t, superproject, nil, "git", "commit", "-m", "record detached plugin commit")
+	if recordDetachedHead {
+		runCommand(t, superproject, nil, "git", "add", "plugin")
+		runCommand(t, superproject, nil, "git", "commit", "-m", "record detached plugin commit")
+	}
 
-	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
-	runCommand(t, superproject, nil, script, "main", "origin")
-
-	remoteHead := strings.TrimSpace(runCommand(t, remote, nil, "git", "rev-parse", "refs/heads/main"))
-	if remoteHead != detachedHead {
-		t.Fatalf("remote main = %s, want detached submodule HEAD %s", remoteHead, detachedHead)
+	return gitSyncFixture{
+		remote:            remote,
+		superproject:      superproject,
+		plugin:            plugin,
+		initialRemoteHead: initialRemoteHead,
+		detachedHead:      detachedHead,
 	}
 }
 
