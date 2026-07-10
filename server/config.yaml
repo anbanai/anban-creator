@@ -94,6 +94,7 @@ model_routes:
         provider: "volcengine_ark"
         model: "doubao-seedream-5-0-pro-260628"
         enabled: true
+        quality_rank: 100
         capabilities:
           size_presets: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
           default_size: "1:1"
@@ -110,6 +111,7 @@ model_routes:
         provider: "wangcai_openai"
         model: "gpt-image-2"
         enabled: true
+        quality_rank: 200
         response_format: "url"
         capabilities:
           quality_levels: ["auto", "low", "medium", "high"]

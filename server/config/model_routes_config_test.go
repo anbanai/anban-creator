@@ -123,6 +123,7 @@ model_routes:
         provider: volcengine_ark
         model: doubao-seedream-5-0-pro-260628
         enabled: true
+        quality_rank: 100
         capabilities:
           size_presets: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
           default_size: "1:1"
@@ -139,6 +140,7 @@ model_routes:
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
+        quality_rank: 200
         response_format: url
         capabilities:
           quality_levels: [auto, low, medium, high]
@@ -231,6 +233,10 @@ claude:
 	if len(cfg.ImagePresets) != 1 || cfg.ImagePresets[0].Provider != "openai" || cfg.ImagePresets[0].Endpoint != "http://18.141.196.64:18888/v1" || cfg.ImagePresets[0].APIKey != "wangcai-test" {
 		t.Fatalf("derived image preset route = %#v", cfg.ImagePresets)
 	}
+	preset := cfg.ImagePresets[0]
+	if preset.QualityRank != 200 || !preset.Capabilities.SupportsReference || preset.Capabilities.MaxReferenceImages != 16 {
+		t.Fatalf("derived image preset capabilities = %#v", preset)
+	}
 	designerRoute := cfg.ModelRoutes.ImageGeneration.Designer["gpt_image_2"]
 	if designerRoute.Capabilities.DefaultSize != "auto" {
 		t.Fatalf("designer default size = %q, want auto", designerRoute.Capabilities.DefaultSize)
@@ -298,6 +304,7 @@ model_routes:
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
+        quality_rank: 100
 ` + routeExtra + `
 model_prices:
   image_generation:
@@ -325,6 +332,62 @@ claude:
 				t.Fatalf("error = %v, want designer capabilities validation error", err)
 			}
 		})
+	}
+}
+
+func TestSemanticModelConfigRejectsEnabledDesignerRouteWithoutPositiveQualityRank(t *testing.T) {
+	t.Setenv("WANGCAI_OPENAI_API_KEY", "wangcai-test")
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+	cfgPath := filepath.Join(dir, "missing-quality-rank.yaml")
+	body := []byte(`
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_providers:
+  wangcai_openai:
+    protocol: openai_compatible
+    base_url: http://18.141.196.64:18888/v1
+    api_key: "${WANGCAI_OPENAI_API_KEY}"
+model_routes:
+  image_generation:
+    designer:
+      gpt_image_2:
+        alias: GPT Image 2
+        provider: wangcai_openai
+        model: gpt-image-2
+        enabled: true
+        capabilities:
+          size_presets: [auto, 1024x1024]
+          default_size: auto
+          max_batch: 1
+          output_formats: [png]
+model_prices:
+  image_generation:
+    wangcai_openai/gpt-image-2:
+      pricing_type: openai_image_usage
+      currency: USD
+      unit: 1000000
+      require_usage: true
+      text_input: 5.00
+      text_cached_input: 1.25
+      image_input: 8.00
+      image_cached_input: 2.00
+      image_output: 30.00
+      estimate_table:
+        "1024x1024": {medium: 0.053}
+claude:
+  plugin_dir: "` + pluginDir + `"
+`)
+	if err := os.WriteFile(cfgPath, body, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := NewConfig(cfgPath)
+	if err == nil || !strings.Contains(err.Error(), "model_routes.image_generation.designer.gpt_image_2.quality_rank must be positive") {
+		t.Fatalf("error = %v, want positive quality rank validation error", err)
 	}
 }
 
@@ -729,6 +792,7 @@ model_routes:
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
+        quality_rank: 200
         capabilities:
           quality_levels: [auto, low, medium, high]
           size_presets: [auto, 1024x1024, 1536x1024, 1024x1536]

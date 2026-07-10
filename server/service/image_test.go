@@ -20,6 +20,7 @@ import (
 	appimage "github.com/anbanai/anban-creator/app/image"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/rs/zerolog"
 )
 
@@ -313,6 +314,98 @@ func TestBuildProcessor_VideoResolvesGenericImageAPI(t *testing.T) {
 				t.Fatal("buildProcessor(video) returned nil processor, want non-nil")
 			}
 		})
+	}
+}
+
+func TestBuildProcessorForResolvedUsesImageTypeDescriptor(t *testing.T) {
+	logger := zerolog.Nop()
+	svc := &ImageService{logger: &logger}
+	ch := &model.Project{
+		Platform: model.ScopeSeednote,
+		UserID:   "resolved-user",
+		Name:     "Resolved project",
+	}
+	resolved := &ResolvedImageModel{
+		Config: &srvconfig.ImageAPIConfig{
+			Cover: &appconfig.ImageAPI{
+				Provider: "openai",
+				Key:      "openai-key",
+				BaseURL:  "https://openai.example/v1",
+				Model:    "gpt-image-2",
+			},
+			Content: &appconfig.ImageAPI{
+				Provider: "volcengine",
+				Key:      "volc-key",
+				BaseURL:  "https://ark.example/v3",
+				Model:    "doubao-seedream",
+			},
+		},
+		Provider: "volcengine",
+		Model:    "doubao-seedream",
+	}
+
+	processor, err := svc.buildProcessorForResolved(ch, "content", resolved)
+	if err != nil {
+		t.Fatalf("buildProcessorForResolved(content) error = %v", err)
+	}
+	if processor == nil {
+		t.Fatal("buildProcessorForResolved(content) returned nil processor")
+	}
+
+	_, err = svc.buildProcessorForResolved(ch, "cover", resolved)
+	if err == nil || !strings.Contains(err.Error(), "resolved image model does not match image type configuration") {
+		t.Fatalf("buildProcessorForResolved(cover) error = %v, want descriptor mismatch", err)
+	}
+}
+
+func TestGenerateImageUsesResolvedDescriptor(t *testing.T) {
+	db := setupTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	project := &model.Project{
+		ID:       "resolved-generation-project",
+		UserID:   "resolved-generation-user",
+		Platform: model.ScopeSeednote,
+		Name:     "Resolved generation project",
+	}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.Nop()
+	svc := &ImageService{repo: repo, logger: &logger}
+	resolved := &ResolvedImageModel{
+		Config: &srvconfig.ImageAPIConfig{
+			Cover: &appconfig.ImageAPI{
+				Provider: "openai",
+				Key:      "openai-key",
+				BaseURL:  "https://openai.example/v1",
+				Model:    "gpt-image-2",
+			},
+			Content: &appconfig.ImageAPI{
+				Provider: "volcengine",
+				Key:      "volc-key",
+				BaseURL:  "https://ark.example/v3",
+				Model:    "doubao-seedream",
+			},
+		},
+		Provider:           "openai",
+		Model:              "gpt-image-2",
+		SelectionReason:    "preferred",
+		SupportsReference:  true,
+		MaxReferenceImages: 16,
+	}
+
+	_, err := svc.GenerateImage(
+		context.Background(), project.UserID, project.ID, "test prompt", "content", "", "", nil, "", "", resolved, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "resolved image model does not match image type configuration") {
+		t.Fatalf("GenerateImage() error = %v, want descriptor mismatch before provider request", err)
 	}
 }
 
