@@ -163,6 +163,42 @@ describe('Designer workspace reference drop', () => {
     )
   })
 
+  it('accepts full-capacity dragover so drop can report overflow without activating the overlay', async () => {
+    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
+      provider({ maxReferenceImages: 1 }),
+    ])
+    render(<DesignerPage />)
+    const workspace = await screen.findByTestId('designer-workspace')
+    const docks = await findResponsiveDocks()
+    const first = image('first.png')
+    const second = image('second.png', 200)
+
+    fireEvent.drop(workspace, { dataTransfer: dragData([first]) })
+    await waitFor(() => {
+      expect(within(docks[0]).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
+    })
+    toast.warning.mockClear()
+
+    const dataTransfer = dragData([second])
+    fireEvent.dragEnter(workspace, { dataTransfer })
+    expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
+
+    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(false)
+    expect(dataTransfer.dropEffect).toBe('copy')
+
+    fireEvent.drop(workspace, { dataTransfer })
+
+    await waitFor(() => {
+      for (const dock of docks) {
+        expect(within(dock).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
+        expect(within(dock).queryByRole('img', { name: 'second.png' })).not.toBeInTheDocument()
+      }
+    })
+    expect(toast.warning).toHaveBeenCalledWith(
+      '参考图已达到当前模型的 1 张上限',
+    )
+  })
+
   it('retains only the supported prefix when switching to a lower-capacity provider', async () => {
     const singleReferenceProvider = {
       ...provider({ maxReferenceImages: 1 }),
@@ -220,6 +256,24 @@ describe('Designer workspace reference drop', () => {
     )
   })
 
+  it('reports duplicate-only admission with the focused aggregate message', async () => {
+    render(<DesignerPage />)
+    const workspace = await screen.findByTestId('designer-workspace')
+    const docks = await findResponsiveDocks()
+    const existing = image('existing.png')
+    const duplicate = image('existing.png')
+
+    fireEvent.drop(workspace, { dataTransfer: dragData([existing]) })
+    await waitFor(() => {
+      expect(within(docks[0]).getByRole('img', { name: 'existing.png' })).toBeInTheDocument()
+    })
+    toast.warning.mockClear()
+
+    fireEvent.drop(workspace, { dataTransfer: dragData([duplicate]) })
+
+    expect(toast.warning).toHaveBeenCalledWith('这些图片已经在参考素材中')
+  })
+
   it('does not activate for text drags', async () => {
     render(<DesignerPage />)
     const workspace = await screen.findByTestId('designer-workspace')
@@ -238,9 +292,12 @@ describe('Designer workspace reference drop', () => {
     const workspace = await screen.findByTestId('designer-workspace')
     await screen.findAllByText('GPT Image 2')
 
-    fireEvent.dragEnter(workspace, { dataTransfer: dragData([image('ignored.png')]) })
+    const dataTransfer = dragData([image('ignored.png')])
+    fireEvent.dragEnter(workspace, { dataTransfer })
 
     expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
+    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(true)
+    expect(dataTransfer.dropEffect).toBe('none')
   })
 
   it('clears the overlay when Escape is pressed', async () => {

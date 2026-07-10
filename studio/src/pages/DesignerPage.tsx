@@ -55,6 +55,24 @@ function describeReferenceAdmission(
   result: ReferenceAdmissionResult,
   maxFiles: number,
 ): string | undefined {
+  if (
+    result.accepted === 0
+    && result.rejectedOverflow > 0
+    && result.rejectedNonImages === 0
+    && result.rejectedDuplicates === 0
+  ) {
+    return `参考图已达到当前模型的 ${maxFiles} 张上限`
+  }
+
+  if (
+    result.accepted === 0
+    && result.rejectedDuplicates > 0
+    && result.rejectedNonImages === 0
+    && result.rejectedOverflow === 0
+  ) {
+    return '这些图片已经在参考素材中'
+  }
+
   const details: string[] = []
   if (result.rejectedNonImages > 0) {
     details.push(`忽略 ${result.rejectedNonImages} 个非图片文件`)
@@ -63,11 +81,7 @@ function describeReferenceAdmission(
     details.push(`忽略 ${result.rejectedDuplicates} 张重复图片`)
   }
   if (result.rejectedOverflow > 0) {
-    details.push(
-      result.accepted > 0
-        ? `另外 ${result.rejectedOverflow} 张超过当前模型的 ${maxFiles} 张上限`
-        : `${result.rejectedOverflow} 张超过当前模型的 ${maxFiles} 张上限`,
-    )
+    details.push(`另外 ${result.rejectedOverflow} 张超过当前模型的 ${maxFiles} 张上限`)
   }
 
   if (details.length === 0) return undefined
@@ -347,7 +361,7 @@ export default function DesignerPage() {
   }
 
   function handleReferenceDragOver(event: React.DragEvent<HTMLDivElement>) {
-    if (!canAcceptReferenceDrop || !hasExternalFiles(event.dataTransfer)) return
+    if (maxReferenceImages === 0 || !hasExternalFiles(event.dataTransfer)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
   }
