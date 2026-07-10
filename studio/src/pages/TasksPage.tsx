@@ -39,6 +39,7 @@ import {
 } from '@/lib/local-executor-ux'
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
+import { ReferenceMaterialInput } from '@/components/ReferenceMaterialInput'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { buildVideoInputForSubmit, initialVideoInput } from '@/lib/video-form'
@@ -81,6 +82,7 @@ export default function TasksPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [quantity, setQuantity] = useState(1)
   const [watermark, setWatermark] = useState(false)
+  const [referenceUploading, setReferenceUploading] = useState(false)
   const [goalMode, setGoalMode] = useState(false)
   const [hasContentImage, setHasContentImage] = useState(true)
   const [hasTailImage, setHasTailImage] = useState(false)
@@ -145,7 +147,7 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
+    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
@@ -154,6 +156,7 @@ export default function TasksPage() {
   const isMontageTask = watchedType === 'montage'
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
+  const watchedInputAttachments = useWatch({ control: form.control, name: 'input_attachments' })
   const watchedVideoEditorReferences = useWatch({ control: form.control, name: 'video_editor_input.references' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
@@ -330,6 +333,7 @@ export default function TasksPage() {
       project_id: selectedIntentProject?.id ?? '',
       image_ratio: defaults.imageRatio as CreateTaskFormValues['image_ratio'],
       image_model_key: defaults.imageModelKey,
+      input_attachments: [],
       product_photos: [],
       selected_modules: defaults.selectedModules,
       target_platform: defaults.targetPlatform,
@@ -341,6 +345,7 @@ export default function TasksPage() {
     })
     setQuantity(1)
     setWatermark(false)
+    setReferenceUploading(false)
     setProjectImageRatio(defaults.imageRatio)
     setHasContentImage(true)
     setHasTailImage(false)
@@ -364,9 +369,10 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_creator_input: undefined, video_editor_input: undefined, montage_input: undefined })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_creator_input: undefined, video_editor_input: undefined, montage_input: undefined })
     setQuantity(1)
     setWatermark(false)
+    setReferenceUploading(false)
     setGoalMode(false)
     setGoalText('')
     setProjectImageRatio('')
@@ -406,6 +412,7 @@ export default function TasksPage() {
       goal: values.type !== 'ecommerce' && goalMode ? (goalText.trim() || undefined) : undefined,
       has_content_image: values.type === 'seednote' ? hasContentImage : undefined,
       has_tail_image: values.type === 'seednote' ? hasTailImage : undefined,
+      input_attachments: values.type === 'seednote' ? values.input_attachments : undefined,
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? articleWithCover : undefined,
       article_with_content_images: values.type === 'article' ? articleWithContentImages : undefined,
@@ -1035,6 +1042,31 @@ export default function TasksPage() {
                 </div>
               </button>}
 
+              {watchedType === 'seednote' && (
+                <section aria-label="Seednote 参考素材" className="space-y-3 rounded-lg border border-border p-3">
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground">参考素材</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      上传产品图、场景图或风格参考，AI 会自动判断如何使用。
+                    </p>
+                  </div>
+                  <ReferenceMaterialInput
+                    value={watchedInputAttachments ?? []}
+                    onChange={(value) => form.setValue(
+                      'input_attachments',
+                      value,
+                      { shouldDirty: true, shouldValidate: true },
+                    )}
+                    allowedTypes={['image']}
+                    maxCount={16}
+                    instructionEnabled
+                    instructionMaxLength={1000}
+                    hint="AI 会先理解创作需求，再逐张分析图片并自动决定每页是否使用。"
+                    onUploadingChange={setReferenceUploading}
+                  />
+                </section>
+              )}
+
               {/* Image composition (seednote only) */}
               {watchedType === 'seednote' && (
                 <div className="rounded-lg border border-border p-3">
@@ -1338,7 +1370,7 @@ export default function TasksPage() {
               type="submit"
               form="task-create-form"
               loading={createMutation.isPending}
-              disabled={Boolean(creationBlocker)}
+              disabled={Boolean(creationBlocker) || (watchedType === 'seednote' && referenceUploading)}
             >
               {runLocally && !isMontageTask && localExecutorStatus?.state === 'ready_stopped'
                 ? '启动并创建'

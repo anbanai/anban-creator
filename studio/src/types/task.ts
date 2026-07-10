@@ -1,6 +1,7 @@
 import type { VideoInput, VideoTaskConfig } from './video'
 import type { CreditTransaction } from './credits'
 import type { MontageInput } from './montage'
+import type { InputAttachment } from './input-attachment'
 
 export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'montage'
 
@@ -62,6 +63,7 @@ export interface Task {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  input_attachments?: InputAttachment[]
   error: string | null
   plan_id?: string | null
   project_id: string
@@ -165,6 +167,7 @@ export interface CreateTaskRequest {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  input_attachments?: InputAttachment[]
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
