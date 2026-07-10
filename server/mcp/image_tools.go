@@ -166,8 +166,20 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	}
 	logicalOutputPath := outputPath
 	outputPathForService, outputPathResolved := resolveTaskWorkspacePath(taskID, outputPath)
-	refPathForService, _ := resolveTaskWorkspacePath(taskID, refPath)
-	refPathsForService := resolveTaskWorkspacePaths(taskID, refPaths)
+	refPathForService, refCleanup, err := resolveTaskWorkspaceReadablePath(ctx, taskID, refPath)
+	if err != nil {
+		return errorResult(fmt.Sprintf("resolve ref_image_path: %v", err)), nil
+	}
+	if refCleanup != nil {
+		defer refCleanup()
+	}
+	refPathsForService, refPathsCleanup, err := resolveTaskWorkspaceReadablePaths(ctx, taskID, refPaths)
+	if err != nil {
+		return errorResult(fmt.Sprintf("resolve ref_image_paths: %v", err)), nil
+	}
+	if refPathsCleanup != nil {
+		defer refPathsCleanup()
+	}
 
 	// upload_to_cdn requires a saved local file to upload; validate before
 	// billing/generation so a contract violation never wastes a generation.
@@ -481,6 +493,86 @@ func resolveTaskWorkspacePaths(taskID string, filePaths []string) []string {
 		out = append(out, resolved)
 	}
 	return out
+}
+
+func resolveTaskWorkspaceReadablePath(ctx context.Context, taskID, filePath string) (string, func(), error) {
+	filePath = strings.TrimSpace(filePath)
+	if taskID == "" || filePath == "" || filepath.IsAbs(filePath) {
+		return filePath, nil, nil
+	}
+	if resolved, ok := resolveTaskWorkspacePath(taskID, filePath); ok {
+		return resolved, nil, nil
+	}
+	if svcs == nil || svcs.TaskSvc == nil || svcs.Store == nil || svcs.TaskSvc.Repository() == nil {
+		return filePath, nil, nil
+	}
+	cleanPath, err := service.CleanTaskFileRelativePath(filePath)
+	if err != nil {
+		return filePath, nil, nil
+	}
+	taskFile, err := svcs.TaskSvc.Repository().TaskFiles().FindExisting(ctx, taskID, cleanPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("find task file %s: %w", cleanPath, err)
+	}
+	if taskFile == nil || strings.TrimSpace(taskFile.OSSKey) == "" {
+		return filePath, nil, nil
+	}
+	data, err := svcs.Store.Read(ctx, taskFile.OSSKey)
+	if err != nil {
+		return "", nil, fmt.Errorf("read task file %s: %w", cleanPath, err)
+	}
+	return writeTaskFileTemp(data, cleanPath)
+}
+
+func resolveTaskWorkspaceReadablePaths(ctx context.Context, taskID string, filePaths []string) ([]string, func(), error) {
+	if len(filePaths) == 0 {
+		return nil, nil, nil
+	}
+	out := make([]string, 0, len(filePaths))
+	cleanups := make([]func(), 0)
+	for _, filePath := range filePaths {
+		resolved, cleanup, err := resolveTaskWorkspaceReadablePath(ctx, taskID, filePath)
+		if err != nil {
+			for _, fn := range cleanups {
+				fn()
+			}
+			return nil, nil, err
+		}
+		out = append(out, resolved)
+		if cleanup != nil {
+			cleanups = append(cleanups, cleanup)
+		}
+	}
+	if len(cleanups) == 0 {
+		return out, nil, nil
+	}
+	return out, func() {
+		for _, fn := range cleanups {
+			fn()
+		}
+	}, nil
+}
+
+func writeTaskFileTemp(data []byte, logicalPath string) (string, func(), error) {
+	ext := strings.ToLower(filepath.Ext(logicalPath))
+	if ext == "" {
+		ext = ".bin"
+	}
+	f, err := os.CreateTemp("", "anban-task-file-*"+ext)
+	if err != nil {
+		return "", nil, fmt.Errorf("create task file temp: %w", err)
+	}
+	path := f.Name()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return "", nil, fmt.Errorf("write task file temp: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", nil, fmt.Errorf("close task file temp: %w", err)
+	}
+	return path, func() { _ = os.Remove(path) }, nil
 }
 
 func validateImageToolTaskAccess(ctx context.Context, userID, taskID, projectID string) *mcp.CallToolResult {

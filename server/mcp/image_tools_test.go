@@ -554,6 +554,60 @@ func TestValidateImageToolTaskAccessRejectsProjectMismatch(t *testing.T) {
 	}
 }
 
+func TestResolveTaskWorkspaceReadablePathRestoresTaskFileWhenWorkspaceMissing(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	ctx := context.Background()
+	userID := "user-image-readable"
+	projectID := "project-image-readable"
+	taskID := "task-image-readable"
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "image-readable@example.com", Password: "hashed", InviteCode: "invite-image-readable", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Project", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, Prompt: "task"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	store := &fakeVideoReferenceStorage{files: map[string][]byte{"user/task/output/cover.png": tinyPNGBytes()}}
+	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, t.TempDir(), nil, nil)
+	svcs = &Services{TaskSvc: taskSvc, Store: store}
+	if _, err := repo.TaskFiles().Upsert(ctx, &model.TaskFile{
+		TaskID:          taskID,
+		Role:            model.FileRoleCover,
+		FileName:        "cover.png",
+		MimeType:        "image/png",
+		OSSKey:          "user/task/output/cover.png",
+		StorageProvider: store.Name(),
+		FilePath:        "output/cover.png",
+	}); err != nil {
+		t.Fatalf("upsert task file: %v", err)
+	}
+
+	resolved, cleanup, err := resolveTaskWorkspaceReadablePath(ctx, taskID, "output/cover.png")
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		t.Fatalf("resolveTaskWorkspaceReadablePath() error = %v", err)
+	}
+	if resolved == "output/cover.png" || !filepath.IsAbs(resolved) {
+		t.Fatalf("resolved = %q, want server-local temp path", resolved)
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		t.Fatalf("read resolved file: %v", err)
+	}
+	if len(data) == 0 || data[0] != 0x89 {
+		t.Fatalf("resolved data does not look like PNG: %q", data[:min(len(data), 8)])
+	}
+}
+
 func TestRegisterGeneratedImageTaskFile_FallsBackToOSSURL(t *testing.T) {
 	// When Enrich leaves URL empty (OSSKey == "" branch), the helper must fall
 	// back to OSSURL so the caller still gets a fetchable download_url.
