@@ -1,47 +1,31 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
 import {
   AlertTriangle,
   Check,
   ChevronDown,
   Cloud,
-  FileText,
   FolderPlus,
-  ImageIcon,
   Monitor,
-  Paperclip,
   Send,
   Search,
-  X,
 } from 'lucide-react'
 
 import { PlatformAvatar } from '@/components/PlatformAvatar'
+import { ReferenceMaterialInput } from '@/components/ReferenceMaterialInput'
 import QueryErrorState from '@/components/QueryErrorState'
 import { Button } from '@/components/common/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { api } from '@/lib/api'
-import type { AIEntryAttachment, AIEntryAttachmentType } from '@/lib/api/ai-entry'
 import { hasUsableModelConfig, projectsReturnHref } from '@/lib/command-center'
-import { uploadToOSS } from '@/lib/direct-upload'
 import { contentTypeLabel } from '@/lib/labels'
 import { queryKeys } from '@/lib/query-keys'
 import { buildDashboardBlocker } from '@/lib/studio-ux'
 import { getLocalExecutorStatus, isDesktop } from '@/lib/tauri'
 import { cn } from '@/lib/utils'
 import type { Project } from '@/types'
-
-const MEDIA_LIMIT = 50 * 1024 * 1024
-const DOCUMENT_LIMIT = 25 * 1024 * 1024
-
-const DOCUMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'csv', 'txt', 'md', 'markdown', 'json'])
-
-interface UploadingFile {
-  id: string
-  name: string
-  progress: number
-}
+import type { InputAttachment } from '@/types/input-attachment'
 
 interface EntryError {
   message: string
@@ -54,12 +38,10 @@ export default function DashboardPage() {
   const desktopMode = isDesktop()
 
   const [prompt, setPrompt] = useState('')
-  const [attachments, setAttachments] = useState<AIEntryAttachment[]>([])
-  const [uploading, setUploading] = useState<UploadingFile[]>([])
+  const [attachments, setAttachments] = useState<InputAttachment[]>([])
+  const [attachmentsUploading, setAttachmentsUploading] = useState(false)
   const [entryError, setEntryError] = useState<EntryError | null>(null)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
-  const attachmentsRef = useRef<AIEntryAttachment[]>([])
-  const uploadPromisesRef = useRef<Promise<void>[]>([])
 
   const { data: projects = [], isLoading: projectsLoading, isError: projectsError, refetch: refetchProjects } = useQuery({
     queryKey: ['projects', 'dashboard', 'active'],
@@ -111,7 +93,6 @@ export default function DashboardPage() {
         setEntryError(null)
         setPrompt('')
         setAttachments([])
-        attachmentsRef.current = []
         await queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
         navigate(`/tasks/${result.task.id}`)
         return
@@ -136,7 +117,11 @@ export default function DashboardPage() {
     apiKeysReady: apiKeysResponse ? (apiKeysResponse.items || []).length > 0 : null,
     modelConfigReady: modelConfig ? hasUsableModelConfig(modelConfig) : null,
   })
-  const canSubmit = Boolean(selectedProject) && !dashboardBlocker?.blocking && !submitMutation.isPending && uploading.length === 0
+  const canSubmit = Boolean(selectedProjectId && selectedProject)
+    && !dashboardBlocker?.blocking
+    && !submitMutation.isPending
+    && !attachmentsUploading
+    && Boolean(prompt.trim())
 
   async function handleSubmit() {
     const text = prompt.trim()
@@ -144,78 +129,18 @@ export default function DashboardPage() {
       setEntryError({ message: '请先创建或选择一个活跃项目。', actionUrl: '/projects' })
       return
     }
-    if (!text && attachmentsRef.current.length === 0) {
-      setEntryError({ message: '请输入创作需求，或上传参考素材后补一句说明。' })
+    if (!text) {
+      setEntryError({ message: '请输入创作需求。' })
       return
     }
     setEntryError(null)
-    if (uploadPromisesRef.current.length > 0) {
-      await Promise.allSettled(uploadPromisesRef.current)
-    }
     await submitMutation.mutateAsync({
       channel: 'studio',
       project_id: selectedProject.id,
       text,
       execution_target: localExecutionReady ? 'local' : '',
-      attachments: attachmentsRef.current,
+      attachments,
     })
-  }
-
-  function addAttachment(attachment: AIEntryAttachment) {
-    attachmentsRef.current = [...attachmentsRef.current, attachment]
-    setAttachments(attachmentsRef.current)
-  }
-
-  function removeAttachment(index: number) {
-    attachmentsRef.current = attachmentsRef.current.filter((_, i) => i !== index)
-    setAttachments(attachmentsRef.current)
-  }
-
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? [])
-    event.target.value = ''
-    if (files.length === 0) return
-    setEntryError(null)
-    const uploads = files.map((file) => uploadAttachment(file))
-    uploadPromisesRef.current = [...uploadPromisesRef.current, ...uploads]
-    void Promise.allSettled(uploads).then(() => {
-      uploadPromisesRef.current = uploadPromisesRef.current.filter((promise) => !uploads.includes(promise))
-    })
-  }
-
-  async function uploadAttachment(file: File) {
-    const validation = validateAIEntryFile(file)
-    if (!validation.ok) {
-      setEntryError({ message: validation.message })
-      toast.error(validation.message)
-      return
-    }
-    const id = `${file.name}-${file.size}-${Date.now()}`
-    setUploading((items) => [...items, { id, name: file.name, progress: 0 }])
-    try {
-      const result = await uploadToOSS({
-        purpose: 'ai_entry_attachment',
-        file,
-        onProgress: (progress) => {
-          setUploading((items) => items.map((item) => item.id === id ? { ...item, progress } : item))
-        },
-      })
-      addAttachment({
-        type: validation.type,
-        url: result.publicUrl,
-        file_name: file.name,
-        content_type: result.contentType,
-        size: result.size,
-        upload_id: result.uploadId,
-        key: result.key,
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '素材上传失败，请重试。'
-      setEntryError({ message })
-      toast.error(message)
-    } finally {
-      setUploading((items) => items.filter((item) => item.id !== id))
-    }
   }
 
   return (
@@ -248,41 +173,20 @@ export default function DashboardPage() {
             </Button>
           </div>
 
-          {(attachments.length > 0 || uploading.length > 0) && (
-            <div className="border-t border-border px-4 py-3">
-              <div className="flex flex-wrap gap-2">
-                {attachments.map((attachment, index) => (
-                  <AttachmentChip
-                    key={`${attachment.url}-${index}`}
-                    attachment={attachment}
-                    onRemove={() => removeAttachment(index)}
-                  />
-                ))}
-                {uploading.map((item) => (
-                  <span key={item.id} className="inline-flex h-8 max-w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 text-xs text-muted-foreground">
-                    <Paperclip className="size-3.5" />
-                    <span className="max-w-[180px] truncate">{item.name}</span>
-                    <span>{item.progress}%</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          <div className="border-t border-border px-4 py-3">
+            <ReferenceMaterialInput
+              value={attachments}
+              onChange={setAttachments}
+              allowedTypes={['image', 'audio', 'video', 'document', 'text']}
+              instructionEnabled
+              compact
+              hint="可添加图片、音频、视频、文档或文本素材；图片可填写说明。"
+              onUploadingChange={setAttachmentsUploading}
+            />
+          </div>
 
           <div className="flex min-h-12 items-center justify-between gap-3 border-t border-border/70 bg-muted/35 px-3 py-2">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <label className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" htmlFor="ai-entry-attachments">
-                <Paperclip className="size-4" />
-                <span className="sr-only">上传参考素材</span>
-              </label>
-              <input
-                id="ai-entry-attachments"
-                className="sr-only"
-                type="file"
-                multiple
-                onChange={handleFileChange}
-              />
-
               <ProjectSelectControl
                 projects={activeProjects}
                 selectedProject={selectedProject}
@@ -460,42 +364,4 @@ function MiniProjectAvatar({ project }: { project: Project }) {
       </span>
     </span>
   )
-}
-
-function AttachmentChip({ attachment, onRemove }: { attachment: AIEntryAttachment; onRemove: () => void }) {
-  const Icon = attachment.type === 'image' ? ImageIcon : FileText
-  return (
-    <span className="inline-flex h-8 max-w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 text-xs text-foreground">
-      <Icon className="size-3.5 text-muted-foreground" />
-      <span className="max-w-[220px] truncate">{attachment.file_name || attachment.url || '素材'}</span>
-      <button type="button" className="text-muted-foreground hover:text-foreground" onClick={onRemove} aria-label="移除素材">
-        <X className="size-3.5" />
-      </button>
-    </span>
-  )
-}
-
-function validateAIEntryFile(file: File): { ok: true; type: AIEntryAttachmentType } | { ok: false; message: string } {
-  const type = classifyFile(file)
-  if (!type) {
-    return { ok: false, message: '暂不支持该素材格式。' }
-  }
-  const limit = type === 'document' || type === 'text' ? DOCUMENT_LIMIT : MEDIA_LIMIT
-  if (file.size > limit) {
-    return { ok: false, message: `文件大小不能超过 ${Math.round(limit / 1024 / 1024)}MB` }
-  }
-  return { ok: true, type }
-}
-
-function classifyFile(file: File): AIEntryAttachmentType | null {
-  const mime = file.type.toLowerCase()
-  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
-  if (mime.startsWith('image/')) return 'image'
-  if (mime.startsWith('audio/')) return 'audio'
-  if (mime.startsWith('video/')) return 'video'
-  if (mime.startsWith('text/') || ext === 'txt' || ext === 'md' || ext === 'markdown' || ext === 'csv') return 'text'
-  if (DOCUMENT_EXTENSIONS.has(ext) || mime === 'application/pdf' || mime.includes('word') || mime.includes('presentation') || mime.includes('spreadsheet') || mime === 'application/json') {
-    return 'document'
-  }
-  return null
 }
