@@ -10,7 +10,7 @@ SERVER_IMAGE := anban-creator-server:latest
 SERVER_CONFIG := server/config.yaml
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
-        server-build server-run server-dev server-test \
+        server-build server-run server-dev server-test git-sync-setup \
         agent-build-native plugin-binaries \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
@@ -51,6 +51,10 @@ vet:
 deps:
 	@go mod download
 	@go mod tidy
+
+# Configure repository-local pull/push behavior for managed submodules.
+git-sync-setup:
+	@scripts/setup-git-sync.sh
 
 # Run all CI checks (format, vet, test, lint)
 ci: fmt vet test lint
