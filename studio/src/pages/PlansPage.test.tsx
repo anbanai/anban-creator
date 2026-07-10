@@ -1,12 +1,25 @@
-import { screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { act, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import PlansPage from './PlansPage'
 import { render } from '@/test/test-utils'
 import { api } from '@/lib/api'
+import type { ReferenceMaterialInputProps } from '@/components/ReferenceMaterialInput'
+import type { InputAttachment, Plan, Project } from '@/types'
 
 const { errorMock } = vi.hoisted(() => ({ errorMock: vi.fn() }))
 
 vi.mock('sonner', () => ({ toast: { error: errorMock, success: vi.fn() } }))
+
+const referenceMaterialInputHarness = vi.hoisted(() => ({
+  props: undefined as ReferenceMaterialInputProps | undefined,
+}))
+
+vi.mock('@/components/ReferenceMaterialInput', () => ({
+  ReferenceMaterialInput: (props: ReferenceMaterialInputProps) => {
+    referenceMaterialInputHarness.props = props
+    return <div />
+  },
+}))
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -248,5 +261,149 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(within(dialog).getByText('1,000')).toBeInTheDocument()
     expect(within(dialog).queryByText(/运行预留/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/积分不足/)).not.toBeInTheDocument()
+  })
+})
+
+
+describe('PlansPage Seednote reference snapshots', () => {
+  const savedAttachment: InputAttachment = {
+    type: 'image',
+    url: '/saved-product.png',
+    file_name: 'saved-product.png',
+    content_type: 'image/png',
+    upload_id: 'upload-saved',
+    key: 'uploads/saved-product.png',
+    instruction: '保留包装、Logo 和瓶身比例',
+  }
+  const replacementAttachment: InputAttachment = {
+    type: 'image',
+    url: '/replacement.png',
+    file_name: 'replacement.png',
+    content_type: 'image/png',
+    upload_id: 'upload-replacement',
+    key: 'uploads/replacement.png',
+    instruction: '使用新版包装',
+  }
+  const seednoteProject = {
+    id: 'seednote-project-1',
+    user_id: '1',
+    platform: 'seednote',
+    name: '种草项目',
+    avatar_url: '',
+    profile_url: '',
+    instructions: '面向敏感肌用户',
+    keywords: '护肤',
+    visual_style: '',
+    writer: '',
+    theme: '',
+    author: '',
+    template_id: '',
+    reference_image_url: '',
+    image_ratio: '3:4',
+    max_concurrent_tasks: 2,
+    config: {},
+    status: 'active',
+    created_at: '2025-01-01T00:00:00Z',
+    updated_at: '2025-01-01T00:00:00Z',
+  } as Project
+  const seednotePlan = {
+    id: 'seednote-plan-1',
+    type: 'seednote',
+    title: '每日种草计划',
+    description: '',
+    cron_expr: '0 9 * * 1,3,5',
+    prompt: '围绕敏感肌保湿创作',
+    status: 'active',
+    next_run_at: '2025-01-20T09:00:00Z',
+    project_id: seednoteProject.id,
+    input_attachments: [savedAttachment],
+    created_at: '2025-01-10T00:00:00Z',
+    updated_at: '2025-01-10T00:00:00Z',
+  } as Plan
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.history.pushState({}, '', '/')
+    referenceMaterialInputHarness.props = undefined
+    vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [seednotePlan], total: 1 })
+    vi.mocked(api.plans.create).mockResolvedValue(seednotePlan)
+    vi.mocked(api.plans.update).mockResolvedValue(seednotePlan)
+    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+  })
+
+  it('creates a Seednote plan with the current reference snapshot', async () => {
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
+    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props).toBeDefined())
+    expect(screen.getByRole('region', { name: 'Seednote 参考素材' })).toBeInTheDocument()
+    expect(referenceMaterialInputHarness.props).toEqual(expect.objectContaining({
+      allowedTypes: ['image'],
+      maxCount: 16,
+      instructionEnabled: true,
+      instructionMaxLength: 1000,
+    }))
+
+    act(() => {
+      referenceMaterialInputHarness.props?.onChange([savedAttachment])
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => {
+      expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'seednote',
+        input_attachments: [savedAttachment],
+      }))
+    })
+  })
+
+  it('hydrates edit snapshots and preserves omit, clear, and replace update semantics', async () => {
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    expect(await screen.findByRole('dialog', { name: '编辑计划' })).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props?.value).toEqual([savedAttachment]))
+
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.plans.update).mock.calls[0][1]).not.toHaveProperty('input_attachments')
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    await waitFor(() => expect(referenceMaterialInputHarness.props?.value).toEqual([savedAttachment]))
+    act(() => {
+      referenceMaterialInputHarness.props?.onChange([])
+    })
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.plans.update).mock.calls[1][1]).toEqual(expect.objectContaining({
+      input_attachments: [],
+    }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    await waitFor(() => expect(referenceMaterialInputHarness.props?.value).toEqual([savedAttachment]))
+    act(() => {
+      referenceMaterialInputHarness.props?.onChange([replacementAttachment])
+    })
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(3))
+    expect(vi.mocked(api.plans.update).mock.calls[2][1]).toEqual(expect.objectContaining({
+      input_attachments: [replacementAttachment],
+    }))
+  })
+
+  it('disables plan save while reference images are uploading', async () => {
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
+    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props).toBeDefined())
+
+    act(() => {
+      referenceMaterialInputHarness.props?.onUploadingChange?.(true)
+    })
+
+    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
   })
 })

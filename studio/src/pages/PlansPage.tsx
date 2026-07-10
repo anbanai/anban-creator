@@ -9,10 +9,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { Project, Plan, PlanType, CreatePlanRequest } from '@/types'
+import type { Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
+import { ReferenceMaterialInput } from '@/components/ReferenceMaterialInput'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
@@ -58,6 +59,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     prompt: plan.prompt || '',
     image_model_key: plan.image_model_key || '',
     skip_reference_image: plan.skip_reference_image || false,
+    input_attachments: plan.input_attachments ?? [],
     watermark: plan.watermark || false,
     goal: plan.goal || '',
     goal_mode: plan.goal_mode || false,
@@ -81,6 +83,7 @@ export default function PlansPage() {
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const [referenceUploading, setReferenceUploading] = useState(false)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
   const highlightedPlanId = searchParams.get('highlight') || ''
@@ -94,6 +97,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
+      input_attachments: [],
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
@@ -113,6 +117,7 @@ export default function PlansPage() {
   const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedGoalMode = useWatch({ control: form.control, name: 'goal_mode' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
+  const watchedInputAttachments = useWatch({ control: form.control, name: 'input_attachments' })
   const isMontagePlan = watchedType === 'montage'
 
   // Warn before closing with unsaved changes
@@ -187,7 +192,7 @@ export default function PlansPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: CreatePlanRequest }) => api.plans.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: UpdatePlanRequest }) => api.plans.update(id, data),
     onSuccess: () => {
       toast.success('计划更新成功')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
@@ -237,12 +242,14 @@ export default function PlansPage() {
       ? createIntent.type
       : 'seednote'
     setEditingPlan(null)
+    setReferenceUploading(false)
     form.reset({
       project_id: createIntent.projectId ?? '',
       type: requestedType,
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
+      input_attachments: [],
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
@@ -262,6 +269,7 @@ export default function PlansPage() {
 
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
+    setReferenceUploading(false)
     form.reset(planToFormValues(plan))
     setModalOpen(true)
   }
@@ -278,12 +286,14 @@ export default function PlansPage() {
     setModalOpen(false)
     setShowDirtyDialog(false)
     setEditingPlan(null)
+    setReferenceUploading(false)
     form.reset({
       project_id: '',
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
+      input_attachments: [],
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
@@ -298,12 +308,21 @@ export default function PlansPage() {
     // unchanged, "" = clear to system default. Always send it so explicit
     // "system default" selection actually clears the previously saved value.
     // For create (POST), "" is also valid (means system default).
-    const payload: CreatePlanRequest = {
+    const inputAttachments = values.type === 'seednote'
+      ? (
+          editingPlan && !form.formState.dirtyFields.input_attachments
+            ? undefined
+            : values.input_attachments
+        )
+      : undefined
+
+    const payload: CreatePlanRequest | UpdatePlanRequest = {
       type: values.type,
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
       project_id: values.project_id || undefined,
       image_model_key: values.image_model_key,
+      ...(inputAttachments === undefined ? {} : { input_attachments: inputAttachments }),
       watermark: values.watermark || undefined,
       goal_mode: values.type !== 'montage' && values.goal_mode ? true : undefined,
       goal: values.type !== 'montage' && values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
@@ -621,6 +640,33 @@ export default function PlansPage() {
                 </FormItem>
               )} />}
 
+              {watchedType === 'seednote' && (
+                <section
+                  aria-label="Seednote 参考素材"
+                  className="space-y-3 rounded-lg border border-border p-3"
+                >
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground">参考素材</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      上传产品图、场景图或风格参考，AI 会自动判断如何使用。
+                    </p>
+                  </div>
+                  <ReferenceMaterialInput
+                    value={watchedInputAttachments ?? []}
+                    onChange={(value) => form.setValue('input_attachments', value, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })}
+                    allowedTypes={['image']}
+                    maxCount={16}
+                    instructionEnabled
+                    instructionMaxLength={1000}
+                    hint="AI 会先理解创作需求，再逐张分析图片并自动决定每页是否使用。"
+                    onUploadingChange={setReferenceUploading}
+                  />
+                </section>
+              )}
+
               {/* Image composition (seednote only) */}
               {watchedType === 'seednote' && (
                 <FormField control={form.control} name="has_content_image" render={({ field }) => {
@@ -796,7 +842,12 @@ export default function PlansPage() {
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="plan-form" loading={isSubmitting}>
+            <Button
+              type="submit"
+              form="plan-form"
+              loading={isSubmitting}
+              disabled={watchedType === 'seednote' && referenceUploading}
+            >
               {editingPlan ? '更新' : '创建'}
             </Button>
           </DialogFooter>

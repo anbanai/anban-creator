@@ -393,6 +393,45 @@ describe('createTaskSchema', () => {
 })
 
 describe('planSchema', () => {
+  it('defaults plan input attachments to an empty snapshot', () => {
+    const result = planSchema.parse({
+      type: 'seednote',
+      cron_expr: '0 9 * * 1',
+    })
+
+    expect(result.input_attachments).toEqual([])
+  })
+
+  it('accepts up to 16 image references for Seednote plans', () => {
+    const result = planSchema.safeParse({
+      type: 'seednote',
+      cron_expr: '0 9 * * 1',
+      input_attachments: Array.from({ length: 16 }, (_, index) => ({
+        type: 'image',
+        url: `/plan-reference-${index + 1}.png`,
+      })),
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects more than 16 references and non-image Seednote plan materials', () => {
+    expect(planSchema.safeParse({
+      type: 'seednote',
+      cron_expr: '0 9 * * 1',
+      input_attachments: Array.from({ length: 17 }, (_, index) => ({
+        type: 'image',
+        url: `/plan-reference-${index + 1}.png`,
+      })),
+    }).success).toBe(false)
+
+    expect(planSchema.safeParse({
+      type: 'seednote',
+      cron_expr: '0 9 * * 1',
+      input_attachments: [{ type: 'document', url: '/brief.pdf' }],
+    }).success).toBe(false)
+  })
+
   it('accepts valid plan data', () => {
     expect(planSchema.safeParse({
       type: 'article',
