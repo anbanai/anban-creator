@@ -208,7 +208,7 @@ New controlled component with responsibilities:
 
 - render empty, populated, add-more, and full states;
 - own the hidden input element and reset its value after each selection;
-- forward selected/dropped files through `onFilesAdded`;
+- forward files selected through its picker via `onFilesAdded`;
 - render thumbnails from provided files;
 - create and revoke preview object URLs safely;
 - remove files through `onFileRemove`;
@@ -227,7 +227,7 @@ interface DesignerReferenceDockProps {
 }
 ```
 
-The dock does not apply deduplication or limits itself. It delegates all file admission to the page-owned callback so every path has identical semantics.
+The dock does not apply deduplication or limits itself. The stable Designer page root owns all drag/drop events, including drops visually made over the dock, while the dock delegates picker selections to the same page-owned callback. This avoids duplicate processing from bubbled drop events and guarantees every ingestion path has identical semantics.
 
 ### 5.3 `DesignerDropOverlay.tsx`
 
@@ -349,7 +349,7 @@ Create `DesignerReferenceDock.test.tsx` covering:
 
 - renders the empty drop surface and maximum count;
 - file input selection calls `onFilesAdded`;
-- drop calls `onFilesAdded` with all dropped files;
+- picker selection calls `onFilesAdded` with all selected files and resets the input;
 - populated state renders thumbnails and add-more tile;
 - remove action reports the correct index;
 - full state removes/disables add-more behavior;
@@ -362,7 +362,7 @@ Extend the Designer provider contract test or add a focused page test covering:
 
 - eligible dragenter shows the workspace overlay;
 - nested enter/leave does not flicker;
-- drop anywhere admits images and updates the dock;
+- drop anywhere, including over the dock, is handled once and updates the dock;
 - Escape clears drag state;
 - text/internal drag does not activate;
 - provider maximum is enforced;
