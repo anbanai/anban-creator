@@ -503,7 +503,10 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		}
 	}
 	if attachments := opts.Task.InputAttachments.Data(); len(attachments) > 0 {
-		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, attachments); n == 0 {
+		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, workDir, attachments); err != nil {
+			return nil, fmt.Errorf("materialize resume inputs: %w", err)
+		}
+		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, attachments); n == 0 && hasNonResumeInputAttachments(attachments) {
 			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
 		}
 	}

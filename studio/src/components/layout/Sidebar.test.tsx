@@ -120,6 +120,22 @@ describe('Sidebar', () => {
     })
   })
 
+  it('closes the mobile drawer after navigating from the utility menu', async () => {
+    renderAuthenticatedShell()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
+    expect(screen.getByRole('button', { name: '关闭菜单' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '更多' }))
+    fireEvent.click(await screen.findByRole('link', { name: 'Claude Code' }))
+
+    expect(await screen.findByRole('heading', { name: 'Claude Code 页' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: '关闭菜单' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'OpenClaw' })).not.toBeInTheDocument()
+    })
+  })
+
   it('navigates from the authenticated shell without breaking external stores or tooltips', async () => {
     renderAuthenticatedShell()
 

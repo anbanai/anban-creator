@@ -288,6 +288,64 @@ func TestKubernetesPrepareWorkspaceBundleMatchesDockerWorkspaceInputs(t *testing
 	}
 }
 
+func TestKubernetesPrepareWorkspaceBundleRestoresResumeInputs(t *testing.T) {
+	store := &fakeStore{
+		readData: map[string][]byte{"uploads/resume/material.txt": []byte("resume material")},
+	}
+	e := &KubernetesExecutor{
+		logger:      noopLogger(),
+		imageAPICfg: &srvconfig.ImageAPIConfig{},
+		store:       store,
+	}
+	task := &model.Task{
+		ID:        "task-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+		Type:      model.PlatformArticle,
+	}
+	task.SetInputAttachments([]model.EntryAttachment{
+		{
+			Role:     model.EntryAttachmentRoleResumeLatest,
+			Text:     "# 继续执行补充\n\n## 补充指令\n\n继续优化\n\n## 补充文件\n\n- 相对路径：attachments/material.txt\n",
+			FileName: "latest.md",
+		},
+		{
+			Role:     model.EntryAttachmentRoleResumeFile,
+			Key:      "uploads/resume/material.txt",
+			FileName: "material.txt",
+		},
+	})
+	project := &model.Project{ID: "project-1", UserID: "user-1", Platform: model.PlatformArticle}
+
+	bundleDir, cleanup, err := e.prepareWorkspaceBundle(context.Background(), &ExecutionOptions{Task: task, Project: project}, "/workspace/users/user-1/projects/project-1/tasks/task-1/workspace")
+	if err != nil {
+		t.Fatalf("prepareWorkspaceBundle: %v", err)
+	}
+	defer cleanup()
+
+	latest, err := os.ReadFile(filepath.Join(bundleDir, ".anban-creator", "resume", "latest.md"))
+	if err != nil {
+		t.Fatalf("read resume latest: %v", err)
+	}
+	if !strings.Contains(string(latest), "继续优化") || !strings.Contains(string(latest), "attachments/material.txt") {
+		t.Fatalf("resume latest not restored:\n%s", latest)
+	}
+	matches, err := filepath.Glob(filepath.Join(bundleDir, ".anban-creator", "resume", "*", "attachments", "material.txt"))
+	if err != nil {
+		t.Fatalf("glob resume attachment: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("resume attachment matches = %v, want one", matches)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read resume attachment: %v", err)
+	}
+	if string(data) != "resume material" {
+		t.Fatalf("resume attachment = %q", data)
+	}
+}
+
 func assertArgPair(t *testing.T, args []string, key, value string) {
 	t.Helper()
 	for i := 0; i < len(args)-1; i++ {

@@ -1219,7 +1219,7 @@ export default function TaskDetailPage() {
                   </div>
                 )}
                 <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                  右上角可继续执行当前工作目录，或克隆为一个全新任务。
+                  页面顶部可继续执行当前工作目录，或克隆为一个全新任务。
                 </p>
               </div>
             ) : task.status === 'cancelled' ? (
@@ -1228,7 +1228,7 @@ export default function TaskDetailPage() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-foreground">执行已停止</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    当前任务没有继续运行。右上角可继续执行当前工作目录，或克隆为一个全新任务。
+                    当前任务没有继续运行。页面顶部可继续执行当前工作目录，或克隆为一个全新任务。
                   </p>
                 </div>
               </div>

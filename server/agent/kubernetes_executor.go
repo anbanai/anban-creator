@@ -226,7 +226,10 @@ func (e *KubernetesExecutor) prepareWorkspaceBundle(ctx context.Context, opts *E
 		}
 	}
 	if attachments := opts.Task.InputAttachments.Data(); len(attachments) > 0 {
-		if n := DownloadInputAttachments(ctx, e.store, e.logger, bundleDir, attachments); n == 0 && e.logger != nil {
+		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, bundleDir, attachments); err != nil {
+			return fail(fmt.Errorf("materialize resume inputs: %w", err))
+		}
+		if n := DownloadInputAttachments(ctx, e.store, e.logger, bundleDir, attachments); n == 0 && hasNonResumeInputAttachments(attachments) && e.logger != nil {
 			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
 		}
 	}
@@ -495,7 +498,12 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 			return "", fmt.Errorf("create agent pod: %w", err)
 		}
 	} else if existing != nil && existing.DeletionTimestamp != nil {
-		return "", fmt.Errorf("agent pod %s is being deleted", pod.Name)
+		if err := e.waitForAgentPodDeleted(ctx, pod.Name); err != nil {
+			return "", err
+		}
+		if _, err := pods.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+			return "", fmt.Errorf("recreate deleted agent pod: %w", err)
+		}
 	} else if !kubernetesPodConfigMatches(existing, pod) {
 		if err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			return "", fmt.Errorf("delete drifted agent pod: %w", err)

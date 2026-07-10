@@ -2451,6 +2451,83 @@ func TestTaskService_ResumeReusesTaskAndWritesPromptAndFiles(t *testing.T) {
 	}
 }
 
+func TestTaskService_ResumeRemoteArtifactsPersistsInputsWithoutLocalWorkspace(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	enqueuer := &mockEnqueuer{}
+	store := &fakeAudioASRStorage{files: map[string][]byte{}}
+	svc := NewTaskService(repo, nil, enqueuer, store, nil, &logger, "", nil, t.TempDir(), nil, nil)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	resultJSON := `{"success":true,"remote_artifacts":true}`
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusCompleted,
+		Prompt:    "finished remotely",
+		Result:    &resultJSON,
+	}
+	task.SetInputAttachments([]model.EntryAttachment{
+		{Role: "brief", Text: "keep me", FileName: "brief.txt"},
+		{Role: model.EntryAttachmentRoleResumeLatest, Text: "old resume", FileName: "latest.md"},
+	})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	resumed, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{
+		Prompt: "继续补充 ACK 方案",
+		Files: []ResumeTaskFile{{
+			OriginalName: "补充 材料.txt",
+			Label:        "补充材料",
+			Reader:       strings.NewReader("remote resume file"),
+			Size:         int64(len("remote resume file")),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Resume remote: %v", err)
+	}
+	if resumed.Status != model.TaskStatusPending {
+		t.Fatalf("status = %q, want pending", resumed.Status)
+	}
+	if len(enqueuer.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(enqueuer.enqueued))
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find resumed: %v", err)
+	}
+	attachments := found.InputAttachments.Data()
+	var latest, resumeFile, preserved bool
+	for _, attachment := range attachments {
+		switch attachment.Role {
+		case model.EntryAttachmentRoleResumeLatest:
+			latest = strings.Contains(attachment.Text, "继续补充 ACK 方案") &&
+				strings.Contains(attachment.Text, "attachments/补充_材料.txt")
+		case model.EntryAttachmentRoleResumeFile:
+			resumeFile = attachment.Key != "" && string(store.files[attachment.Key]) == "remote resume file"
+		case "brief":
+			preserved = attachment.Text == "keep me"
+		}
+		if attachment.Role == model.EntryAttachmentRoleResumeLatest && attachment.Text == "old resume" {
+			t.Fatal("old resume attachment was not replaced")
+		}
+	}
+	if !latest || !resumeFile || !preserved {
+		t.Fatalf("attachments latest=%v resumeFile=%v preserved=%v: %#v", latest, resumeFile, preserved, attachments)
+	}
+}
+
 func TestWriteResumeInputsPublishesLatestOnlyWhenRequested(t *testing.T) {
 	workDir := t.TempDir()
 	runDir, body, err := writeResumeInputs(context.Background(), workDir, "第一次补充", nil)
@@ -2474,6 +2551,125 @@ func TestWriteResumeInputsPublishesLatestOnlyWhenRequested(t *testing.T) {
 	}
 	if string(latest) != body {
 		t.Fatalf("latest.md = %q, want body %q", string(latest), body)
+	}
+}
+
+func TestTaskServiceCleanupSkipsAbsentWorkspaceWithoutMarkingCleaned(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	workspaceRoot := t.TempDir()
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	completedAt := time.Now().Add(-2 * time.Hour)
+	resultJSON := `{"success":true,"remote_artifacts":true}`
+	task := &model.Task{
+		ID:          uuid.New().String(),
+		UserID:      userID,
+		ProjectID:   projectID,
+		Type:        model.PlatformArticle,
+		Status:      model.TaskStatusCompleted,
+		Result:      &resultJSON,
+		CompletedAt: &completedAt,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := svc.CleanupExpiredWorkspaces(ctx); err != nil {
+		t.Fatalf("CleanupExpiredWorkspaces: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.CleanedUpAt != nil {
+		t.Fatalf("cleaned_up_at = %v, want nil when local workspace is absent", found.CleanedUpAt)
+	}
+}
+
+func TestTaskServiceProjectConcurrencyCapOverridesProjectLimit(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetProjectConcurrencyCap(1)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.MaxConcurrentTasks = 10
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	running := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "already running",
+	}
+	if err := repo.Tasks().Create(ctx, running); err != nil {
+		t.Fatalf("create running task: %v", err)
+	}
+	pending := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusPending,
+		Prompt:    "next task",
+	}
+	if err := repo.Tasks().Create(ctx, pending); err != nil {
+		t.Fatalf("create pending task: %v", err)
+	}
+
+	if err := svc.EnqueueExecution(ctx, pending, project); err != nil {
+		t.Fatalf("EnqueueExecution: %v", err)
+	}
+	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 0 {
+		t.Fatalf("enqueued = %d, want 0 because cap=1 and project already has a running task", got)
+	}
+}
+
+func TestTaskServiceResolveWorkspacePath(t *testing.T) {
+	svc, _ := setupTaskServiceWithEnqueuer(t)
+	root := t.TempDir()
+	svc.workspaceDir = root
+	taskID := "task-1"
+
+	got, ok := svc.ResolveWorkspacePath(taskID, "output/cover.png")
+	if ok {
+		t.Fatalf("resolved missing workspace to %q", got)
+	}
+	if got != "output/cover.png" {
+		t.Fatalf("path = %q, want original relative path", got)
+	}
+
+	if err := os.MkdirAll(filepath.Join(root, taskID), 0o755); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	got, ok = svc.ResolveWorkspacePath(taskID, "output/cover.png")
+	if !ok {
+		t.Fatal("expected task-relative path to resolve when workspace exists")
+	}
+	if want := filepath.Join(root, taskID, "output", "cover.png"); got != want {
+		t.Fatalf("resolved path = %q, want %q", got, want)
+	}
+
+	absolute := filepath.Join(root, taskID, "already.png")
+	got, ok = svc.ResolveWorkspacePath(taskID, absolute)
+	if ok || got != absolute {
+		t.Fatalf("absolute path resolved to %q ok=%v, want unchanged", got, ok)
 	}
 }
 

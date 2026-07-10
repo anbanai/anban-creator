@@ -208,6 +208,13 @@ func (r *taskRepository) Update(ctx context.Context, task *model.Task) error {
 	return r.db.WithContext(ctx).Save(task).Error
 }
 
+func (r *taskRepository) UpdateInputAttachments(ctx context.Context, id string, attachments []model.EntryAttachment) error {
+	return r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ?", id).
+		Update("input_attachments", datatypes.NewJSONType(attachments)).Error
+}
+
 func (r *taskRepository) UpdateTitle(ctx context.Context, id string, title string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("title", title).Error
 }

@@ -314,6 +314,10 @@ func main() {
 		// Wire executor defaults so local-executor claim responses carry the same
 		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
 		taskSvc.SetExecutorDefaults(cfg.Claude.Model, cfg.Claude.MaxTurns)
+		if cfg.Claude.Executor == "kubernetes" {
+			taskSvc.SetProjectConcurrencyCap(1)
+			log.Info().Msg("kubernetes executor enabled: project task concurrency capped at 1 per project pod")
+		}
 		if count, err := taskSvc.ClearArtifactTitles(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clear artifact task titles")
 		} else if count > 0 {

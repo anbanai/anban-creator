@@ -296,6 +296,88 @@ func TestDownloadInputAttachmentsMaterializesFilesAndIndex(t *testing.T) {
 	}
 }
 
+func TestDownloadInputAttachmentsSkipsResumeRoles(t *testing.T) {
+	workDir := t.TempDir()
+	attachments := []model.EntryAttachment{
+		{Type: "document", Text: "brief", FileName: "brief.txt"},
+		{Type: "document", Text: "resume", FileName: "latest.md", Role: model.EntryAttachmentRoleResumeLatest},
+		{Type: "document", Text: "resume file", FileName: "resume.txt", Role: model.EntryAttachmentRoleResumeFile},
+	}
+
+	if n := DownloadInputAttachments(context.Background(), nil, noopLogger(), workDir, attachments); n != 1 {
+		t.Fatalf("DownloadInputAttachments count = %d, want 1", n)
+	}
+	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
+	if _, err := os.Stat(filepath.Join(base, "attachment_01_brief.txt")); err != nil {
+		t.Fatalf("expected regular attachment: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "attachment_02_latest.md")); !os.IsNotExist(err) {
+		t.Fatalf("resume latest should not be materialized as regular input attachment, statErr=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "attachment_03_resume.txt")); !os.IsNotExist(err) {
+		t.Fatalf("resume file should not be materialized as regular input attachment, statErr=%v", err)
+	}
+}
+
+func TestMaterializeResumeInputsWritesLatestAndAttachments(t *testing.T) {
+	workDir := t.TempDir()
+	store := &fakeStore{
+		readData: map[string][]byte{
+			"resume/task-1/attachments/feedback.txt": []byte("feedback bytes"),
+		},
+	}
+	body := "# 继续执行补充\n\n## 补充文件\n\n- 相对路径：attachments/feedback.txt\n"
+	attachments := []model.EntryAttachment{
+		{Type: "document", Text: body, FileName: "latest.md", Role: model.EntryAttachmentRoleResumeLatest},
+		{Type: "document", Key: "resume/task-1/attachments/feedback.txt", FileName: "feedback.txt", Role: model.EntryAttachmentRoleResumeFile},
+	}
+
+	n, err := MaterializeResumeInputs(context.Background(), store, noopLogger(), workDir, attachments)
+	if err != nil {
+		t.Fatalf("MaterializeResumeInputs error = %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("MaterializeResumeInputs count = %d, want 2", n)
+	}
+	latest, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "resume", "latest.md"))
+	if err != nil {
+		t.Fatalf("read latest.md: %v", err)
+	}
+	if string(latest) != body {
+		t.Fatalf("latest.md = %q, want %q", latest, body)
+	}
+	matches, err := filepath.Glob(filepath.Join(workDir, appconfig.ConfigDir, "resume", "*", "attachments", "feedback.txt"))
+	if err != nil {
+		t.Fatalf("glob resume attachment: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("resume attachment matches = %v, want one", matches)
+	}
+	got, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read resume attachment: %v", err)
+	}
+	if string(got) != "feedback bytes" {
+		t.Fatalf("resume attachment = %q, want feedback bytes", got)
+	}
+}
+
+func TestMaterializeResumeInputsFailsWhenResumeAttachmentMissing(t *testing.T) {
+	workDir := t.TempDir()
+	body := "# 继续执行补充\n\n## 补充文件\n\n- 相对路径：attachments/missing.txt\n"
+	attachments := []model.EntryAttachment{
+		{Type: "document", Text: body, FileName: "latest.md", Role: model.EntryAttachmentRoleResumeLatest},
+		{Type: "document", Key: "resume/task-1/attachments/missing.txt", FileName: "missing.txt", Role: model.EntryAttachmentRoleResumeFile},
+	}
+
+	if _, err := MaterializeResumeInputs(context.Background(), &fakeStore{}, noopLogger(), workDir, attachments); err == nil {
+		t.Fatal("MaterializeResumeInputs succeeded with missing resume attachment")
+	}
+	if _, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "resume", "latest.md")); !os.IsNotExist(err) {
+		t.Fatalf("latest.md should not be published when resume attachment is missing, statErr=%v", err)
+	}
+}
+
 func TestWriteProjectCLAUDEMD(t *testing.T) {
 	t.Run("writes fixed positioning template", func(t *testing.T) {
 		dir := t.TempDir()

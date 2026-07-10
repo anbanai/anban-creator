@@ -426,6 +426,134 @@ func TestRegisterGeneratedImageTaskFile_RegistersAndReturnsFetchableURL(t *testi
 	}
 }
 
+func TestRegisterGeneratedImageTaskFile_UsesLocalFileButRegistersLogicalPath(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "generated-cover.png")
+	body := []byte("fake-png-bytes")
+	if err := os.WriteFile(tmp, body, 0o644); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+
+	fake := &fakeTaskFileRegistrar{
+		uploadResult: &model.TaskFile{URL: "https://cdn.example.com/u/t/output/cover.png"},
+	}
+	res := &service.ImageResult{
+		FilePath:      "output/seednote/cover.png",
+		LocalFilePath: tmp,
+		OutputMIME:    "image/png",
+	}
+
+	_, err := registerGeneratedImageTaskFile(context.Background(), fake, "task-1", "user-1", res)
+	if err != nil {
+		t.Fatalf("[FAIL] unexpected error: %v", err)
+	}
+	if len(fake.uploadCalls) != 1 {
+		t.Fatalf("[FAIL] expected exactly 1 Upload call, got %d", len(fake.uploadCalls))
+	}
+	c := fake.uploadCalls[0]
+	if c.relPath != "output/seednote/cover.png" {
+		t.Fatalf("[FAIL] relPath = %q, want logical output path", c.relPath)
+	}
+	if c.size != int64(len(body)) {
+		t.Fatalf("[FAIL] size = %d, want %d from local temp file", c.size, len(body))
+	}
+}
+
+func TestCategorizeImageGenFailureDetectsFilesystemErrors(t *testing.T) {
+	err := fmt.Errorf("create output directory: %w", os.ErrPermission)
+
+	if got := categorizeImageGenFailure(err, ""); got != "filesystem" {
+		t.Fatalf("categorizeImageGenFailure() = %q, want filesystem", got)
+	}
+}
+
+func TestValidateImageToolTaskAccessRejectsForeignTask(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	ctx := context.Background()
+	userID := "user-image-access"
+	otherUserID := "user-image-access-other"
+	projectID := "project-image-access-other"
+	taskID := "task-image-access-other"
+	for _, user := range []*model.User{
+		{ID: userID, Email: "image-access@example.com", Password: "hashed", InviteCode: "invite-image-access", Tier: model.TierFree},
+		{ID: otherUserID, Email: "image-access-other@example.com", Password: "hashed", InviteCode: "invite-image-access-other", Tier: model.TierFree},
+	} {
+		if err := repo.Users().Create(ctx, user); err != nil {
+			t.Fatalf("create user %s: %v", user.ID, err)
+		}
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: otherUserID, Platform: model.PlatformArticle, Name: "Foreign Project", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    otherUserID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "foreign task",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)}
+
+	res := validateImageToolTaskAccess(ctx, userID, taskID, "")
+	if res == nil || !res.IsError {
+		t.Fatalf("expected task ownership error, got %#v", res)
+	}
+	if !strings.Contains(callToolText(res), "task does not belong to user") {
+		t.Fatalf("response = %q, want task ownership error", callToolText(res))
+	}
+}
+
+func TestValidateImageToolTaskAccessRejectsProjectMismatch(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	ctx := context.Background()
+	userID := "user-image-project-access"
+	projectID := "project-image-project-access"
+	otherProjectID := "project-image-project-access-other"
+	taskID := "task-image-project-access"
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "image-project-access@example.com", Password: "hashed", InviteCode: "invite-image-project-access", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	for _, project := range []*model.Project{
+		{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Project", Status: model.ProjectStatusActive},
+		{ID: otherProjectID, UserID: userID, Platform: model.PlatformArticle, Name: "Other Project", Status: model.ProjectStatusActive},
+	} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatalf("create project %s: %v", project.ID, err)
+		}
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "task",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)}
+
+	res := validateImageToolTaskAccess(ctx, userID, taskID, otherProjectID)
+	if res == nil || !res.IsError {
+		t.Fatalf("expected project mismatch error, got %#v", res)
+	}
+	if !strings.Contains(callToolText(res), "task does not belong to the requested project") {
+		t.Fatalf("response = %q, want project mismatch error", callToolText(res))
+	}
+}
+
 func TestRegisterGeneratedImageTaskFile_FallsBackToOSSURL(t *testing.T) {
 	// When Enrich leaves URL empty (OSSKey == "" branch), the helper must fall
 	// back to OSSURL so the caller still gets a fetchable download_url.
@@ -460,8 +588,8 @@ func TestRegisterGeneratedImageTaskFile_StatErrorSkipsUpload(t *testing.T) {
 }
 
 func TestRegisterGeneratedImageTaskFile_UploadErrorPropagates(t *testing.T) {
-	// The handler treats this as a soft failure (logs + keeps generation); the
-	// helper itself must surface the error so the handler can decide.
+	// The helper must surface the error so the handler can decide whether the
+	// generated bytes are already durable or the task-local temp file must fail.
 	tmp := filepath.Join(t.TempDir(), "cover.png")
 	if err := os.WriteFile(tmp, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write temp: %v", err)

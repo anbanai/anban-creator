@@ -389,6 +389,9 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 
 	index := make([]MaterializedInputAttachment, 0, len(attachments))
 	for i, attachment := range attachments {
+		if model.IsResumeEntryAttachment(attachment) {
+			continue
+		}
 		var data []byte
 		var err error
 		if strings.TrimSpace(attachment.URL) != "" {
@@ -431,6 +434,102 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 		}
 	}
 	return len(index)
+}
+
+func hasNonResumeInputAttachments(attachments []model.EntryAttachment) bool {
+	for _, attachment := range attachments {
+		if !model.IsResumeEntryAttachment(attachment) {
+			return true
+		}
+	}
+	return false
+}
+
+// MaterializeResumeInputs restores persisted task resume inputs into the
+// workspace location consumed by AppendResumeContextToPrompt.
+func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, attachments []model.EntryAttachment) (int, error) {
+	var latest *model.EntryAttachment
+	files := make([]model.EntryAttachment, 0)
+	for i := range attachments {
+		switch attachments[i].Role {
+		case model.EntryAttachmentRoleResumeLatest:
+			latest = &attachments[i]
+		case model.EntryAttachmentRoleResumeFile:
+			files = append(files, attachments[i])
+		}
+	}
+	if latest == nil || strings.TrimSpace(latest.Text) == "" {
+		return 0, nil
+	}
+	resumeRoot := filepath.Join(workDir, appconfig.ConfigDir, "resume")
+	stamp := time.Now().Format("20060102-150405.000000000")
+	runDir := filepath.Join(resumeRoot, stamp)
+	attachmentsDir := filepath.Join(runDir, "attachments")
+	if err := os.MkdirAll(attachmentsDir, 0o755); err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("create resume input dir failed")
+		}
+		return 0, fmt.Errorf("create resume input dir: %w", err)
+	}
+	written := 0
+	for _, attachment := range files {
+		data, err := fetchResumeAttachmentBytes(ctx, store, attachment)
+		if err != nil {
+			if logger != nil {
+				logger.Warn().Err(err).Str("url", attachment.URL).Msg("failed to fetch resume attachment")
+			}
+			return written, fmt.Errorf("fetch resume attachment %q: %w", attachment.FileName, err)
+		}
+		name := filepath.Base(strings.TrimSpace(attachment.FileName))
+		if name == "." || name == "" {
+			name = "attachment"
+		}
+		if err := os.WriteFile(filepath.Join(attachmentsDir, name), data, 0o644); err != nil {
+			if logger != nil {
+				logger.Warn().Err(err).Str("name", name).Msg("write resume attachment failed")
+			}
+			return written, fmt.Errorf("write resume attachment %q: %w", name, err)
+		}
+		written++
+	}
+	body := []byte(latest.Text)
+	if err := os.WriteFile(filepath.Join(runDir, "input.md"), body, 0o644); err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("write resume input.md failed")
+		}
+		return written, fmt.Errorf("write resume input.md: %w", err)
+	}
+	tmpPath := filepath.Join(resumeRoot, fmt.Sprintf(".latest-%d.tmp", time.Now().UnixNano()))
+	if err := os.WriteFile(tmpPath, body, 0o644); err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("write resume latest temp failed")
+		}
+		return written, fmt.Errorf("write resume latest temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, filepath.Join(resumeRoot, "latest.md")); err != nil {
+		_ = os.Remove(tmpPath)
+		if logger != nil {
+			logger.Warn().Err(err).Msg("publish resume latest failed")
+		}
+		return written, fmt.Errorf("publish resume latest: %w", err)
+	}
+	return written + 1, nil
+}
+
+func fetchResumeAttachmentBytes(ctx context.Context, store storage.Provider, attachment model.EntryAttachment) ([]byte, error) {
+	if store != nil && strings.TrimSpace(attachment.Key) != "" {
+		data, err := store.Read(ctx, strings.TrimSpace(attachment.Key))
+		if err == nil {
+			return data, nil
+		}
+	}
+	if strings.TrimSpace(attachment.URL) != "" {
+		return fetchAttachmentBytes(ctx, store, attachment.URL)
+	}
+	if strings.TrimSpace(attachment.Text) != "" {
+		return []byte(strings.TrimSpace(attachment.Text)), nil
+	}
+	return nil, fmt.Errorf("resume attachment has no readable source")
 }
 
 func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL string) ([]byte, error) {

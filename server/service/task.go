@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +73,10 @@ type TaskService struct {
 	defaultModel      string
 	maxTurnsOverrides map[string]int
 	memoryMgr         *projectmemory.ProjectMemoryManager
+	// projectConcurrencyCap optionally lowers per-project concurrency for
+	// executors that reuse a mutable project workspace, such as Kubernetes
+	// project Pods. Zero means no service-level cap.
+	projectConcurrencyCap int
 }
 
 // NewTaskService creates a new TaskService.
@@ -247,6 +253,43 @@ func (s *TaskService) SetExecutionTimeouts(execution, persist time.Duration) {
 func (s *TaskService) SetExecutorDefaults(defaultModel string, maxTurnsOverrides map[string]int) {
 	s.defaultModel = defaultModel
 	s.maxTurnsOverrides = maxTurnsOverrides
+}
+
+func (s *TaskService) SetProjectConcurrencyCap(cap int) {
+	if cap < 0 {
+		cap = 0
+	}
+	s.projectConcurrencyCap = cap
+}
+
+// ResolveWorkspacePath converts a task-relative path into a server-local path
+// when the API server can see that task's workspace. It returns false when the
+// original path should be used as-is, including Kubernetes/remote workspaces.
+func (s *TaskService) ResolveWorkspacePath(taskID, filePath string) (string, bool) {
+	filePath = strings.TrimSpace(filePath)
+	if taskID == "" || filePath == "" || filepath.IsAbs(filePath) {
+		return filePath, false
+	}
+	cleanRelPath, err := CleanTaskFileRelativePath(filePath)
+	if err != nil {
+		return filePath, false
+	}
+	workDir := s.taskWorkspaceDir(taskID)
+	if info, err := os.Stat(workDir); err == nil && info.IsDir() {
+		return filepath.Join(workDir, cleanRelPath), true
+	}
+	return filePath, false
+}
+
+func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int {
+	maxConcurrent := DefaultMaxConcurrentTasks
+	if project != nil && project.MaxConcurrentTasks > 0 {
+		maxConcurrent = project.MaxConcurrentTasks
+	}
+	if s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
+		return s.projectConcurrencyCap
+	}
+	return maxConcurrent
 }
 
 // GoalMultiplier returns the configured goal-mode credit multiplier (default 3).
@@ -1259,10 +1302,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 
 	// Check per-project concurrency limit.
 	if project != nil {
-		maxConcurrent := project.MaxConcurrentTasks
-		if maxConcurrent <= 0 {
-			maxConcurrent = DefaultMaxConcurrentTasks
-		}
+		maxConcurrent := s.effectiveProjectMaxConcurrent(project)
 
 		slotReserved := false
 		if s.pubsub != nil && s.pubsub.Available() {
@@ -1372,10 +1412,7 @@ func (s *TaskService) DispatchPendingTasks(ctx context.Context, projectID string
 		return fmt.Errorf("find project: %w", err)
 	}
 
-	maxConcurrent := project.MaxConcurrentTasks
-	if maxConcurrent <= 0 {
-		maxConcurrent = DefaultMaxConcurrentTasks
-	}
+	maxConcurrent := s.effectiveProjectMaxConcurrent(project)
 
 	var running int64
 	if s.pubsub != nil && s.pubsub.Available() {

@@ -348,7 +348,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getAllByRole('button', { name: /克隆任务/ })).toHaveLength(1)
     expect(screen.getByText('执行中断')).toBeInTheDocument()
     expect(screen.getByText('模型超时')).toBeInTheDocument()
-    expect(screen.getByText('右上角可继续执行当前工作目录，或克隆为一个全新任务。')).toBeInTheDocument()
+    expect(screen.getByText('页面顶部可继续执行当前工作目录，或克隆为一个全新任务。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /返回任务列表/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /检查项目配置/ })).not.toBeInTheDocument()
   })

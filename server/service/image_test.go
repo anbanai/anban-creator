@@ -91,6 +91,82 @@ func TestSaveGeneratedImageBytesReencodesJPEGWhenOutputIsPNG(t *testing.T) {
 	}
 }
 
+func TestGeneratedImageTaskOutputPathUsesServerTempFile(t *testing.T) {
+	localPath, cleanup, err := generatedImageTaskOutputPath("output/seednote/cover.png")
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		t.Fatalf("generatedImageTaskOutputPath() error = %v", err)
+	}
+	if localPath == "output/seednote/cover.png" {
+		t.Fatal("generatedImageTaskOutputPath() returned the logical output_path; want server-local temp path")
+	}
+	if !filepath.IsAbs(localPath) {
+		t.Fatalf("generatedImageTaskOutputPath() = %q, want absolute temp path", localPath)
+	}
+	if filepath.Ext(localPath) != ".png" {
+		t.Fatalf("generatedImageTaskOutputPath() ext = %q, want .png", filepath.Ext(localPath))
+	}
+}
+
+func TestSaveGeneratedImageForOutputKeepsWritableAbsoluteTaskPath(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), "output", "cover.png")
+	savePath, _, cleanup, err := saveGeneratedImageForOutput(outputPath, tinyImagePNG(t), "task-1")
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		t.Fatalf("saveGeneratedImageForOutput() error = %v", err)
+	}
+	if savePath != outputPath {
+		t.Fatalf("savePath = %q, want original writable output path %q", savePath, outputPath)
+	}
+	if cleanup != nil {
+		t.Fatal("cleanup should be nil for a durable workspace file")
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("expected image at workspace output path: %v", err)
+	}
+}
+
+func TestSaveGeneratedImageForOutputUsesTempForTaskRelativePath(t *testing.T) {
+	savePath, _, cleanup, err := saveGeneratedImageForOutput("output/cover.png", tinyImagePNG(t), "task-1")
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		t.Fatalf("saveGeneratedImageForOutput() error = %v", err)
+	}
+	if savePath == "output/cover.png" || !filepath.IsAbs(savePath) {
+		t.Fatalf("savePath = %q, want server-local temp path", savePath)
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup should be present for task temp files")
+	}
+}
+
+func TestSaveGeneratedImageForOutputFallsBackToTempWhenTaskPathUnavailable(t *testing.T) {
+	parentFile := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(parentFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write parent file: %v", err)
+	}
+	outputPath := filepath.Join(parentFile, "cover.png")
+	savePath, _, cleanup, err := saveGeneratedImageForOutput(outputPath, tinyImagePNG(t), "task-1")
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		t.Fatalf("saveGeneratedImageForOutput() error = %v", err)
+	}
+	if savePath == outputPath || !filepath.IsAbs(savePath) {
+		t.Fatalf("savePath = %q, want fallback temp path", savePath)
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup should be present for fallback temp files")
+	}
+}
+
 func TestDetectTaskFileMIMEUsesImageContentBeforeExtension(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	img.Set(0, 0, color.RGBA{R: 10, G: 20, B: 30, A: 255})
@@ -108,6 +184,17 @@ func TestDetectTaskFileMIMEUsesImageContentBeforeExtension(t *testing.T) {
 	if got := DetectTaskFileMIME(path); got != "image/jpeg" {
 		t.Fatalf("DetectTaskFileMIME() = %q, want image/jpeg", got)
 	}
+}
+
+func tinyImagePNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 10, G: 20, B: 30, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return buf.Bytes()
 }
 
 // TestBuildProcessor_EcommerceResolvesImageAPI is a regression test for the

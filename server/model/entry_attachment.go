@@ -14,3 +14,12 @@ type EntryAttachment struct {
 	UploadID    string `json:"upload_id,omitempty"`
 	Key         string `json:"key,omitempty"`
 }
+
+const (
+	EntryAttachmentRoleResumeLatest = "resume_latest"
+	EntryAttachmentRoleResumeFile   = "resume_file"
+)
+
+func IsResumeEntryAttachment(a EntryAttachment) bool {
+	return a.Role == EntryAttachmentRoleResumeLatest || a.Role == EntryAttachmentRoleResumeFile
+}

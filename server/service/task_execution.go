@@ -701,6 +701,13 @@ func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
 		} else {
 			workDir = agent.DefaultWorkspaceDir(task.ID)
 		}
+		if _, err := os.Stat(workDir); os.IsNotExist(err) {
+			s.logger.Debug().Str("task_id", task.ID).Str("path", workDir).Msg("workspace directory absent, skipping cleanup marker")
+			continue
+		} else if err != nil {
+			s.logger.Warn().Err(err).Str("task_id", task.ID).Str("path", workDir).Msg("failed to stat workspace directory")
+			continue
+		}
 		if err := os.RemoveAll(workDir); err != nil {
 			s.logger.Warn().Err(err).Str("task_id", task.ID).Str("path", workDir).Msg("failed to remove workspace directory")
 			continue
