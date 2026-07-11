@@ -302,6 +302,7 @@ func TestKubernetesPrepareWorkspaceBundleRestoresResumeInputs(t *testing.T) {
 		UserID:    "user-1",
 		ProjectID: "project-1",
 		Type:      model.PlatformArticle,
+		Result:    nil,
 	}
 	task.SetInputAttachments([]model.EntryAttachment{
 		{
@@ -343,6 +344,19 @@ func TestKubernetesPrepareWorkspaceBundleRestoresResumeInputs(t *testing.T) {
 	}
 	if string(data) != "resume material" {
 		t.Fatalf("resume attachment = %q", data)
+	}
+}
+
+func TestKubernetesCopyWorkspaceScriptPreservesExistingNASWorkspace(t *testing.T) {
+	workDir := "/workspace/users/user-1/projects/project-1/tasks/task-1/workspace"
+	script := kubernetesCopyWorkspaceScript(workDir)
+	if strings.Contains(script, "rm ") || strings.Contains(script, "rm-") {
+		t.Fatalf("copy script must not delete existing NAS content: %q", script)
+	}
+	for _, want := range []string{"mkdir -p '" + workDir + "'", "tar -C '" + workDir + "' -xf -"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("copy script missing %q: %q", want, script)
+		}
 	}
 }
 

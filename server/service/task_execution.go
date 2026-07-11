@@ -308,8 +308,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	// Auto-publish if project has publishing enabled (non-blocking).
-	// Extract article data BEFORE launching goroutine to avoid race with
-	// workspace cleanup defer.
+	// Extract article data before launching the goroutine so publication does
+	// not depend on the executor's post-run filesystem lifecycle.
 	if s.publishingSvc != nil && project != nil && project.GetEnablePublishing() {
 		published := wasPublishedByAgent(result.LogText)
 		var articles []DraftArticleInput
@@ -686,50 +686,8 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 	return execErr
 }
 
-// CleanupExpiredWorkspaces cleans up workspace directories for completed/failed
-// tasks that are older than the specified threshold.
-func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
-	threshold := time.Now().Add(-1 * time.Hour)
-	tasks, err := s.repo.Tasks().FindCompletedOlderThan(ctx, threshold)
-	if err != nil {
-		return fmt.Errorf("find completed tasks for cleanup: %w", err)
-	}
-
-	s.logger.Info().Int("count", len(tasks)).Msg("found tasks eligible for cleanup")
-
-	for _, task := range tasks {
-		var workDir string
-		if s.workspaceDir != "" {
-			workDir = filepath.Join(s.workspaceDir, task.ID)
-		} else {
-			workDir = agent.DefaultWorkspaceDir(task.ID)
-		}
-		if _, err := os.Stat(workDir); os.IsNotExist(err) {
-			s.logger.Debug().Str("task_id", task.ID).Str("path", workDir).Msg("workspace directory absent, skipping cleanup marker")
-			continue
-		} else if err != nil {
-			s.logger.Warn().Err(err).Str("task_id", task.ID).Str("path", workDir).Msg("failed to stat workspace directory")
-			continue
-		}
-		if err := os.RemoveAll(workDir); err != nil {
-			s.logger.Warn().Err(err).Str("task_id", task.ID).Str("path", workDir).Msg("failed to remove workspace directory")
-			continue
-		}
-
-		now := time.Now()
-		if err := s.repo.Tasks().UpdateCleanedUpAt(ctx, task.ID, now); err != nil {
-			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("failed to update cleaned_up_at")
-			continue
-		}
-
-		s.logger.Info().Str("task_id", task.ID).Str("path", workDir).Msg("cleaned up workspace directory")
-	}
-
-	return nil
-}
-
-// autoPublishWithData publishes pre-extracted article data, avoiding filesystem
-// access that could race with workspace cleanup.
+// autoPublishWithData publishes pre-extracted article data without depending on
+// executor-local filesystem access.
 func (s *TaskService) autoPublishWithData(ctx context.Context, task *model.Task, project *model.Project, articles []DraftArticleInput, logText string) {
 	taskID := task.ID
 

@@ -16,7 +16,6 @@ func TestTaskProcessor_SeednoteHandlers(t *testing.T) {
 	processor := NewTaskProcessor(
 		func(ctx context.Context, taskID, userID string) error { return nil },
 		func(ctx context.Context, planID string) error { return nil },
-		func(ctx context.Context) error { return nil },
 		func(ctx context.Context, trackingID string) error {
 			discovered = append(discovered, trackingID)
 			return nil
@@ -57,7 +56,6 @@ func TestTaskProcessor_PlanTriggerHandler(t *testing.T) {
 			triggered = append(triggered, planID)
 			return nil
 		},
-		func(ctx context.Context) error { return nil },
 		nil,
 		nil,
 		nil,
@@ -83,7 +81,6 @@ func TestTaskProcessor_PlanTriggerHandlerErrorsPropagate(t *testing.T) {
 	processor := NewTaskProcessor(
 		func(ctx context.Context, taskID, userID string) error { return nil },
 		func(ctx context.Context, planID string) error { return wantErr },
-		func(ctx context.Context) error { return nil },
 		nil,
 		nil,
 		nil,
@@ -106,7 +103,6 @@ func TestTaskProcessor_SeednoteHandlerErrorsPropagate(t *testing.T) {
 	processor := NewTaskProcessor(
 		func(ctx context.Context, taskID, userID string) error { return nil },
 		func(ctx context.Context, planID string) error { return nil },
-		func(ctx context.Context) error { return nil },
 		func(ctx context.Context, trackingID string) error { return nil },
 		func(ctx context.Context, trackingID string) error { return wantErr },
 		nil,

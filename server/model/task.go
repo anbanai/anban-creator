@@ -137,7 +137,6 @@ type Task struct {
 	ErrorMessage            string                                `gorm:"type:text" json:"error_message,omitempty"`
 	StartedAt               *time.Time                            `gorm:"index" json:"started_at"`
 	CompletedAt             *time.Time                            `gorm:"index" json:"completed_at"`
-	CleanedUpAt             *time.Time                            `gorm:"index" json:"cleaned_up_at"`
 	LastHeartbeatAt         *time.Time                            `gorm:"index" json:"last_heartbeat_at,omitempty"`
 	RetryCount              int                                   `gorm:"default:0" json:"retry_count"`
 	MaxRetries              int                                   `gorm:"default:3" json:"max_retries"`
@@ -160,8 +159,8 @@ type Task struct {
 	PublishApprovalState string `gorm:"type:varchar(20);default:''" json:"publish_approval_state,omitempty"`
 	// PendingDraftArticles is the frozen []service.DraftArticleInput (marshaled)
 	// captured at task completion when the approval gate holds. Stored here so the
-	// resume path (ApprovePublish) can publish without re-extracting from the
-	// (possibly cleaned-up) workspace. Opaque datatypes.JSON rather than
+	// resume path (ApprovePublish) can publish without re-extracting from an
+	// executor filesystem. Opaque datatypes.JSON rather than
 	// JSONType[T] because the element type lives in package service — model may
 	// not import service (cycle). The service boundary (un)marshals it.
 	PendingDraftArticles datatypes.JSON `gorm:"type:json" json:"pending_draft_articles,omitempty"`

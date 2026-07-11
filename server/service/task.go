@@ -77,6 +77,7 @@ type TaskService struct {
 	// executors that reuse a mutable project workspace, such as Kubernetes
 	// project Pods. Zero means no service-level cap.
 	projectConcurrencyCap int
+	nasResumeEnabled      bool
 }
 
 // NewTaskService creates a new TaskService.
@@ -260,6 +261,19 @@ func (s *TaskService) SetProjectConcurrencyCap(cap int) {
 		cap = 0
 	}
 	s.projectConcurrencyCap = cap
+}
+
+// SetNASResumeEnabled enables task continuation against durable Kubernetes NAS
+// workspaces. It must remain disabled for local and Docker executors.
+func (s *TaskService) SetNASResumeEnabled(enabled bool) {
+	s.nasResumeEnabled = enabled
+}
+
+func (s *TaskService) taskWorkspaceDir(taskID string) string {
+	if s.workspaceDir != "" {
+		return filepath.Join(s.workspaceDir, taskID)
+	}
+	return agent.DefaultWorkspaceDir(taskID)
 }
 
 // ResolveWorkspacePath converts a task-relative path into a server-local path

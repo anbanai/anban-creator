@@ -887,13 +887,14 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	workspaceRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(workspaceRoot, taskID), 0o755); err != nil {
-		t.Fatalf("create workdir: %v", err)
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 
@@ -940,12 +941,78 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	if env.Data.ID != taskID || env.Data.Status != model.TaskStatusPending {
 		t.Fatalf("resume response = id %q status %q, want same pending task", env.Data.ID, env.Data.Status)
 	}
-	latest, err := os.ReadFile(filepath.Join(workspaceRoot, taskID, ".anban-creator", "resume", "latest.md"))
+	resumed, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
-		t.Fatalf("read latest.md: %v", err)
+		t.Fatalf("find resumed task: %v", err)
 	}
-	if text := string(latest); !strings.Contains(text, "继续写结论") || !strings.Contains(text, "修改意见") || !strings.Contains(text, "notes.md") {
-		t.Fatalf("latest.md missing resume input:\n%s", text)
+	var latest, file bool
+	for _, attachment := range resumed.InputAttachments.Data() {
+		switch attachment.Role {
+		case model.EntryAttachmentRoleResumeLatest:
+			latest = strings.Contains(attachment.Text, "继续写结论") && strings.Contains(attachment.Text, "修改意见") && strings.Contains(attachment.Text, "notes.md")
+		case model.EntryAttachmentRoleResumeFile:
+			file = attachment.Key != "" && attachment.FileName == "notes.md"
+		}
+	}
+	if !latest || !file {
+		t.Fatalf("resume attachments latest=%v file=%v: %#v", latest, file, resumed.InputAttachments.Data())
+	}
+}
+
+func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "resume-storage@example.com", Password: "hashed", InviteCode: "resume-storage"}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.NewString()
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc.SetNASResumeEnabled(true)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks/:id/resume", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Resume(c)
+	})
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("files", "notes.md")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("notes")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/resume", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	var env Response
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if env.Msg != "补充文件存储暂不可用，请稍后重试" {
+		t.Fatalf("message = %q", env.Msg)
 	}
 }
 
@@ -990,6 +1057,7 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 

@@ -127,21 +127,6 @@ func (r *taskRepository) FindPaymentRequiredByUser(ctx context.Context, userID s
 	return tasks, nil
 }
 
-// FindCompletedOlderThan finds tasks in a terminal state whose completed_at
-// is before the given time and which have not yet been cleaned up.
-func (r *taskRepository) FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.Task, error) {
-	var tasks []*model.Task
-	err := r.db.WithContext(ctx).
-		Where("status IN ?", model.TerminalTaskStatuses).
-		Where("completed_at IS NOT NULL AND completed_at < ?", before).
-		Where("cleaned_up_at IS NULL").
-		Find(&tasks).Error
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
 func (r *taskRepository) UpdateStatus(ctx context.Context, id, status string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("status", status).Error
 }
@@ -217,11 +202,6 @@ func (r *taskRepository) UpdateInputAttachments(ctx context.Context, id string, 
 
 func (r *taskRepository) UpdateTitle(ctx context.Context, id string, title string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("title", title).Error
-}
-
-// UpdateCleanedUpAt sets the cleaned_up_at timestamp for a task.
-func (r *taskRepository) UpdateCleanedUpAt(ctx context.Context, id string, t time.Time) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("cleaned_up_at", t).Error
 }
 
 func (r *taskRepository) SetStartedAt(ctx context.Context, id string) error {
@@ -470,9 +450,26 @@ func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskI
 	return result.RowsAffected > 0, nil
 }
 
-// ResetTerminalTaskForResume atomically moves a terminal task back to pending
-// and clears execution-only state so the same task ID can be executed again.
-func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID string) (bool, error) {
+// FailPendingTask atomically records a terminal enqueue failure only while the
+// task is still pending, so it cannot stamp a newer execution attempt.
+func (r *taskRepository) FailPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status = ?", taskID, model.TaskStatusPending).
+		Updates(map[string]interface{}{
+			"status":        model.TaskStatusFailed,
+			"error_message": errorMsg,
+			"completed_at":  time.Now(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// ResetTerminalTaskForResume atomically persists supplemental inputs, moves a
+// terminal task back to pending, and routes it to the cloud executor.
+func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error) {
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).
 		Where("id = ? AND status IN ?", taskID, model.TerminalTaskStatuses).
@@ -490,6 +487,10 @@ func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID 
 			"pending_draft_articles": nil,
 			"published":              false,
 			"published_at":           nil,
+			"input_attachments":      datatypes.NewJSONType(attachments),
+			"execution_target":       model.ExecutionTargetCloud,
+			"local_claim_deadline":   nil,
+			"executor_info":          datatypes.NewJSONType(model.ExecutorMeta{}),
 		})
 	if result.Error != nil {
 		return false, result.Error

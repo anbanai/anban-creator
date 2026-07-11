@@ -3,26 +3,25 @@ package service
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
 
-	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
+	"gorm.io/datatypes"
 )
 
 var (
-	ErrTaskResumeNoInput          = errors.New("task resume requires prompt or files")
-	ErrTaskResumeNotTerminal      = errors.New("only completed, failed, or cancelled tasks can be resumed")
-	ErrTaskResumeWorkspaceMissing = errors.New("task workspace is missing")
-	ErrTaskResumeConflict         = errors.New("task resume conflict")
+	ErrTaskResumeNoInput            = errors.New("task resume requires prompt or files")
+	ErrTaskResumeNotTerminal        = errors.New("only completed, failed, or cancelled tasks can be resumed")
+	ErrTaskResumeUnavailable        = errors.New("task resume requires kubernetes NAS execution")
+	ErrTaskResumeStorageUnavailable = errors.New("task resume storage is unavailable")
+	ErrTaskResumeConflict           = errors.New("task resume conflict")
 )
 
 // ResumeTaskParams carries the operator's continuation prompt and optional
@@ -51,6 +50,9 @@ type resumeWrittenFile struct {
 // Resume requeues an existing terminal task in the same workspace. Unlike Clone,
 // it does not create a new task and does not bill a fresh task charge.
 func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params ResumeTaskParams) (*model.Task, error) {
+	if !s.nasResumeEnabled {
+		return nil, ErrTaskResumeUnavailable
+	}
 	prompt := strings.TrimSpace(params.Prompt)
 	if prompt == "" && len(params.Files) == 0 {
 		return nil, ErrTaskResumeNoInput
@@ -65,106 +67,78 @@ func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params 
 	if !model.IsTerminalTaskStatus(task.Status) {
 		return nil, ErrTaskResumeNotTerminal
 	}
-	remoteArtifacts := taskHasRemoteArtifacts(task)
-	if task.CleanedUpAt != nil && !remoteArtifacts {
-		return nil, ErrTaskResumeWorkspaceMissing
+	resumeAttachments, latestBody, err := s.persistResumeInputs(ctx, task, prompt, params.Files)
+	if err != nil {
+		return nil, err
 	}
-	workDir := s.taskWorkspaceDir(task.ID)
-	if !remoteArtifacts {
-		if info, statErr := os.Stat(workDir); statErr != nil || !info.IsDir() {
-			return nil, ErrTaskResumeWorkspaceMissing
-		}
-	}
-
-	var runDir, latestBody string
-	var resumeAttachments []model.EntryAttachment
-	if remoteArtifacts {
-		resumeAttachments, latestBody, err = s.persistRemoteResumeInputs(ctx, task, prompt, params.Files)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		runDir, latestBody, err = writeResumeInputs(ctx, workDir, prompt, params.Files)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if remoteArtifacts && latestBody == "" {
+	if latestBody == "" {
 		return nil, ErrTaskResumeNoInput
 	}
-	if !remoteArtifacts && runDir == "" {
-		return nil, ErrTaskResumeWorkspaceMissing
-	}
+	merged := replaceResumeInputAttachments(task.InputAttachments.Data(), resumeAttachments)
 
-	swapped, err := s.repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID)
+	swapped, err := s.repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID, merged)
 	if err != nil {
-		_ = os.RemoveAll(runDir)
 		s.deleteRemoteResumeAttachments(ctx, resumeAttachments)
 		return nil, fmt.Errorf("reset task for resume: %w", err)
 	}
 	if !swapped {
-		_ = os.RemoveAll(runDir)
 		s.deleteRemoteResumeAttachments(ctx, resumeAttachments)
 		return nil, ErrTaskResumeConflict
 	}
-	if remoteArtifacts {
-		merged := replaceResumeInputAttachments(task.InputAttachments.Data(), resumeAttachments)
-		if err := s.repo.Tasks().UpdateInputAttachments(ctx, task.ID, merged); err != nil {
-			s.deleteRemoteResumeAttachments(ctx, resumeAttachments)
-			errMsg := "继续执行输入保存失败: " + err.Error()
-			_ = s.repo.Tasks().UpdateStatusAndError(ctx, task.ID, model.TaskStatusFailed, errMsg)
-			_ = s.repo.Tasks().SetCompletedAt(ctx, task.ID)
-			return nil, fmt.Errorf("persist remote resume attachments: %w", err)
-		}
-	} else if err := writeResumeLatest(workDir, latestBody); err != nil {
-		_ = os.RemoveAll(runDir)
-		errMsg := "继续执行输入写入失败: " + err.Error()
-		_ = s.repo.Tasks().UpdateStatusAndError(ctx, task.ID, model.TaskStatusFailed, errMsg)
-		_ = s.repo.Tasks().SetCompletedAt(ctx, task.ID)
-		return nil, fmt.Errorf("write resume latest: %w", err)
-	}
+	s.deleteRemoteResumeAttachments(ctx, task.InputAttachments.Data())
 	if err := s.repo.Tasks().AppendProgressLog(ctx, task.ID, "--- 继续执行：用户提交了补充指令/文件 ---"); err != nil {
 		s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("append resume progress log failed")
 	}
 	s.logger.Info().
 		Str("task_id", task.ID).
-		Str("resume_dir", runDir).
 		Int("resume_bytes", len(latestBody)).
-		Msg("task resume inputs written")
+		Msg("task resume inputs persisted")
 
-	resumed, err := s.repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		return nil, fmt.Errorf("reload resumed task: %w", err)
-	}
-	if resumed.ExecutionTarget == model.ExecutionTargetLocal {
-		deadline := time.Now().Add(LocalClaimWindow)
-		resumed.LocalClaimDeadline = &deadline
-		if err := s.repo.Tasks().Update(ctx, resumed); err != nil {
-			return nil, fmt.Errorf("reset local claim deadline: %w", err)
+	applyResumedTaskState(task, merged)
+	if err := s.EnqueueExecution(ctx, task, nil); err != nil {
+		errMsg := "failed to enqueue resumed task: " + err.Error()
+		recoveryTimeout := s.persistTimeout
+		if recoveryTimeout <= 0 {
+			recoveryTimeout = 15 * time.Second
 		}
-		s.logger.Info().Str("task_id", task.ID).Msg("resumed task routed to local executor, awaiting desktop claim")
-		return resumed, nil
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), recoveryTimeout)
+		defer cancel()
+		if swapped, updateErr := s.repo.Tasks().FailPendingTask(recoveryCtx, task.ID, errMsg); updateErr != nil {
+			s.logger.Error().Err(updateErr).Str("task_id", task.ID).Msg("failed to recover unqueued resumed task")
+		} else if !swapped {
+			s.logger.Warn().Str("task_id", task.ID).Msg("unqueued resumed task was no longer pending during recovery")
+		}
+		if task.ProjectID != "" && s.pubsub != nil {
+			s.pubsub.ReleaseSlot(recoveryCtx, task.ProjectID)
+		}
+		return nil, fmt.Errorf("enqueue resumed task: %w", err)
 	}
-	if err := s.EnqueueExecution(ctx, resumed, nil); err != nil {
-		return nil, err
-	}
-	return resumed, nil
+	return task, nil
 }
 
-func taskHasRemoteArtifacts(task *model.Task) bool {
-	if task == nil || task.Result == nil || strings.TrimSpace(*task.Result) == "" {
-		return false
-	}
-	var result struct {
-		RemoteArtifacts bool `json:"remote_artifacts"`
-	}
-	return json.Unmarshal([]byte(*task.Result), &result) == nil && result.RemoteArtifacts
+func applyResumedTaskState(task *model.Task, attachments []model.EntryAttachment) {
+	task.Status = model.TaskStatusPending
+	task.StartedAt = nil
+	task.CompletedAt = nil
+	task.LastHeartbeatAt = nil
+	task.ErrorMessage = ""
+	task.Result = nil
+	task.Progress = 0
+	task.LatestProgress = datatypes.NewJSONType(model.ProgressPayload{})
+	task.WorkflowStatus = nil
+	task.PublishApprovalState = ""
+	task.PendingDraftArticles = nil
+	task.Published = false
+	task.PublishedAt = nil
+	task.SetInputAttachments(attachments)
+	task.ExecutionTarget = model.ExecutionTargetCloud
+	task.LocalClaimDeadline = nil
+	task.ExecutorInfo = datatypes.NewJSONType(model.ExecutorMeta{})
 }
 
-func (s *TaskService) persistRemoteResumeInputs(ctx context.Context, task *model.Task, prompt string, files []ResumeTaskFile) ([]model.EntryAttachment, string, error) {
+func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task, prompt string, files []ResumeTaskFile) ([]model.EntryAttachment, string, error) {
 	if s.store == nil && len(files) > 0 {
-		return nil, "", ErrTaskResumeWorkspaceMissing
+		return nil, "", ErrTaskResumeStorageUnavailable
 	}
 	stamp := time.Now().Format("20060102-150405.000000000")
 	written := make([]resumeWrittenFile, 0, len(files))
@@ -176,12 +150,18 @@ func (s *TaskService) persistRemoteResumeInputs(ctx context.Context, task *model
 		safeName := uniqueResumeFilename(sanitizeResumeFilename(file.OriginalName), usedNames)
 		var buf bytes.Buffer
 		if _, err := io.Copy(&buf, file.Reader); err != nil {
+			s.deleteWrittenResumeFiles(ctx, written)
 			return nil, "", fmt.Errorf("read resume file: %w", err)
 		}
 		key := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID, "resume", stamp, "attachments", safeName)
 		upload, err := s.store.Upload(ctx, key, bytes.NewReader(buf.Bytes()), "application/octet-stream")
 		if err != nil {
-			return nil, "", fmt.Errorf("upload resume file %s: %w", safeName, err)
+			s.deleteWrittenResumeFiles(ctx, written, key)
+			return nil, "", fmt.Errorf("%w: upload resume file %s: %v", ErrTaskResumeStorageUnavailable, safeName, err)
+		}
+		if upload == nil || strings.TrimSpace(upload.Key) == "" {
+			s.deleteWrittenResumeFiles(ctx, written, key)
+			return nil, "", fmt.Errorf("%w: upload resume file %s returned no object key", ErrTaskResumeStorageUnavailable, safeName)
 		}
 		written = append(written, resumeWrittenFile{
 			OriginalName: file.OriginalName,
@@ -213,15 +193,28 @@ func (s *TaskService) persistRemoteResumeInputs(ctx context.Context, task *model
 	return attachments, body, nil
 }
 
-func (s *TaskService) deleteRemoteResumeAttachments(ctx context.Context, attachments []model.EntryAttachment) {
+func (s *TaskService) deleteWrittenResumeFiles(ctx context.Context, written []resumeWrittenFile, extraKeys ...string) {
+	attachments := make([]model.EntryAttachment, 0, len(written)+len(extraKeys))
+	for _, file := range written {
+		attachments = append(attachments, file.Attachment)
+	}
+	for _, key := range extraKeys {
+		attachments = append(attachments, model.EntryAttachment{Role: model.EntryAttachmentRoleResumeFile, Key: key})
+	}
+	s.deleteRemoteResumeAttachments(ctx, attachments)
+}
+
+func (s *TaskService) deleteRemoteResumeAttachments(_ context.Context, attachments []model.EntryAttachment) {
 	if s.store == nil {
 		return
 	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 	for _, attachment := range attachments {
 		if attachment.Role != model.EntryAttachmentRoleResumeFile || strings.TrimSpace(attachment.Key) == "" {
 			continue
 		}
-		if err := s.store.Delete(ctx, strings.TrimSpace(attachment.Key)); err != nil && s.logger != nil {
+		if err := s.store.Delete(cleanupCtx, strings.TrimSpace(attachment.Key)); err != nil && s.logger != nil {
 			s.logger.Warn().Err(err).Str("key", attachment.Key).Msg("delete orphaned resume attachment failed")
 		}
 	}
@@ -237,51 +230,6 @@ func replaceResumeInputAttachments(existing, resume []model.EntryAttachment) []m
 	}
 	out = append(out, resume...)
 	return out
-}
-
-func (s *TaskService) taskWorkspaceDir(taskID string) string {
-	if s.workspaceDir != "" {
-		return filepath.Join(s.workspaceDir, taskID)
-	}
-	return agent.DefaultWorkspaceDir(taskID)
-}
-
-func writeResumeInputs(ctx context.Context, workDir, prompt string, files []ResumeTaskFile) (string, string, error) {
-	resumeRoot := filepath.Join(workDir, ".anban-creator", "resume")
-	stamp := time.Now().Format("20060102-150405.000000000")
-	runDir := filepath.Join(resumeRoot, stamp)
-	attachmentsDir := filepath.Join(runDir, "attachments")
-	if err := os.MkdirAll(attachmentsDir, 0o755); err != nil {
-		return "", "", fmt.Errorf("create resume attachments dir: %w", err)
-	}
-
-	written := make([]resumeWrittenFile, 0, len(files))
-	usedNames := map[string]int{}
-	for _, file := range files {
-		if file.Reader == nil {
-			continue
-		}
-		safeName := uniqueResumeFilename(sanitizeResumeFilename(file.OriginalName), usedNames)
-		dstPath := filepath.Join(attachmentsDir, safeName)
-		if err := copyResumeFile(ctx, dstPath, file.Reader); err != nil {
-			_ = os.RemoveAll(runDir)
-			return "", "", err
-		}
-		rel, _ := filepath.Rel(runDir, dstPath)
-		written = append(written, resumeWrittenFile{
-			OriginalName: file.OriginalName,
-			SafeName:     safeName,
-			Label:        strings.TrimSpace(file.Label),
-			RelPath:      filepath.ToSlash(rel),
-		})
-	}
-
-	body := buildResumeInputBody(prompt, written)
-	if err := os.WriteFile(filepath.Join(runDir, "input.md"), []byte(body), 0o644); err != nil {
-		_ = os.RemoveAll(runDir)
-		return "", "", fmt.Errorf("write resume input: %w", err)
-	}
-	return runDir, body, nil
 }
 
 func buildResumeInputBody(prompt string, written []resumeWrittenFile) string {
@@ -313,37 +261,6 @@ func buildResumeInputBody(prompt string, written []resumeWrittenFile) string {
 		}
 	}
 	return b.String()
-}
-
-func writeResumeLatest(workDir, body string) error {
-	resumeRoot := filepath.Join(workDir, ".anban-creator", "resume")
-	tmpPath := filepath.Join(resumeRoot, fmt.Sprintf(".latest-%d.tmp", time.Now().UnixNano()))
-	if err := os.WriteFile(tmpPath, []byte(body), 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, filepath.Join(resumeRoot, "latest.md")); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return nil
-}
-
-func copyResumeFile(ctx context.Context, dstPath string, src io.Reader) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return fmt.Errorf("create resume file: %w", err)
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, src); err != nil {
-		_ = os.Remove(dstPath)
-		return fmt.Errorf("write resume file: %w", err)
-	}
-	return nil
 }
 
 func sanitizeResumeFilename(name string) string {
