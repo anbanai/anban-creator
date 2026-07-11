@@ -41,7 +41,7 @@ func validateInputAttachments(ctx context.Context, pending service.PendingUpload
 		}
 		if a.URL != "" {
 			if !validAIEntryAttachmentURL(a.URL, pending != nil) {
-				return nil, fmt.Errorf("attachment URLs must be internal file paths or http(s) URLs")
+				return nil, fmt.Errorf("attachment URLs must be internal file URLs or registered pending-upload URLs")
 			}
 			urls = append(urls, a.URL)
 		}

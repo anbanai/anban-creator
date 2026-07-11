@@ -110,6 +110,34 @@ describe('ReferenceMaterialInput', () => {
     ])
   })
 
+
+  it('preserves the user-selected order when concurrent uploads finish out of order', async () => {
+    const uploads = new Map<string, ReturnType<typeof deferred<UploadToOSSResult>>>()
+    vi.mocked(uploadToOSS).mockImplementation(({ file }) => {
+      const pending = deferred<UploadToOSSResult>()
+      uploads.set(file.name, pending)
+      return pending.promise
+    })
+    const onValueChange = vi.fn()
+
+    render(<ControlledReferenceInput onValueChange={onValueChange} />)
+
+    fireEvent.change(screen.getByLabelText('添加参考素材'), {
+      target: { files: [imageFile('first.png'), imageFile('second.png')] },
+    })
+
+    uploads.get('second.png')?.resolve(uploadResult('second.png'))
+    expect(await screen.findByAltText('second.png')).toBeInTheDocument()
+
+    uploads.get('first.png')?.resolve(uploadResult('first.png'))
+    expect(await screen.findByAltText('first.png')).toBeInTheDocument()
+
+    await waitFor(() => expect(onValueChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ file_name: 'first.png' }),
+      expect.objectContaining({ file_name: 'second.png' }),
+    ]))
+  })
+
   it('accepts drag and drop on the upload zone', async () => {
     vi.mocked(uploadToOSS).mockResolvedValue(uploadResult('drop.png'))
 
@@ -160,6 +188,30 @@ describe('ReferenceMaterialInput', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '删除 a.png' }))
     expect(onValueChange).toHaveBeenLastCalledWith([])
+  })
+
+  it('keeps instruction validation aligned after deleting an earlier attachment', () => {
+    const first: InputAttachment = {
+      type: 'image', url: '/first.png', file_name: 'first.png', instruction: '',
+    }
+    const second: InputAttachment = {
+      type: 'image', url: '/second.png', file_name: 'second.png', instruction: '',
+    }
+
+    render(
+      <ControlledReferenceInput
+        initialValue={[first, second]}
+        instructionMaxLength={1}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('second.png 的说明'), { target: { value: '太长' } })
+    expect(screen.getByText('最多 1 个字符')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 first.png' }))
+
+    expect(screen.getByLabelText('second.png 的说明')).toBeInTheDocument()
+    expect(screen.getByText('最多 1 个字符')).toBeInTheDocument()
   })
 
   it('shows a failed upload and retries it without losing successful attachments', async () => {

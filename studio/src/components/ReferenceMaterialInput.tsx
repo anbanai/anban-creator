@@ -34,6 +34,7 @@ export interface ReferenceMaterialInputProps {
 
 type UploadRow = {
   id: string
+  order: number
   file: File
   progress: number
   status: 'uploading' | 'failed'
@@ -114,6 +115,7 @@ export function ReferenceMaterialInput({
   const inputRef = useRef<HTMLInputElement>(null)
   const valueRef = useRef(value)
   const rowsRef = useRef<UploadRow[]>([])
+  const uploadOrderRef = useRef(new Map<string, number>())
   const [rows, setRows] = useState<UploadRow[]>([])
   const [validationError, setValidationError] = useState('')
   const [instructionErrors, setInstructionErrors] = useState<Record<number, boolean>>({})
@@ -161,20 +163,33 @@ export function ReferenceMaterialInput({
       const type = typeFromFile(row.file)
       if (!type) throw new Error(`不支持 ${row.file.name} 的文件类型`)
 
-      const nextValue = [
-        ...valueRef.current,
-        {
-          type,
-          url: result.publicUrl,
-          file_name: row.file.name,
-          content_type: result.contentType,
-          size: result.size,
-          upload_id: result.uploadId,
-          key: result.key,
-          instruction: instructionEnabled ? '' : undefined,
-        } satisfies InputAttachment,
-      ]
-      emitValue(nextValue)
+      const attachment = {
+        type,
+        url: result.publicUrl,
+        file_name: row.file.name,
+        content_type: result.contentType,
+        size: result.size,
+        upload_id: result.uploadId,
+        key: result.key,
+        instruction: instructionEnabled ? '' : undefined,
+      } satisfies InputAttachment
+      uploadOrderRef.current.set(result.uploadId, row.order)
+
+      // Uploads run concurrently, but the controlled value must preserve the
+      // order in which the user selected files. Keep pre-existing attachments
+      // first and sort only attachments uploaded by this mounted component.
+      const existing = valueRef.current.filter((item) => (
+        !item.upload_id || !uploadOrderRef.current.has(item.upload_id)
+      ))
+      const uploaded = [
+        ...valueRef.current.filter((item) => (
+          Boolean(item.upload_id) && uploadOrderRef.current.has(item.upload_id as string)
+        )),
+        attachment,
+      ].sort((left, right) => (
+        uploadOrderRef.current.get(left.upload_id as string)! - uploadOrderRef.current.get(right.upload_id as string)!
+      ))
+      emitValue([...existing, ...uploaded])
       updateRows((current) => current.filter((item) => item.id !== row.id))
     } catch (error) {
       updateRows((current) => current.map((item) => (
@@ -219,6 +234,7 @@ export function ReferenceMaterialInput({
       nextUploadRowID += 1
       acceptedRows.push({
         id: `reference-upload-${nextUploadRowID}`,
+        order: nextUploadRowID,
         file,
         progress: 0,
         status: 'uploading',
@@ -261,9 +277,12 @@ export function ReferenceMaterialInput({
   const removeAttachment = (index: number) => {
     emitValue(valueRef.current.filter((_, itemIndex) => itemIndex !== index))
     setInstructionErrors((current) => {
-      if (!current[index]) return current
-      const next = { ...current }
-      delete next[index]
+      const next: Record<number, boolean> = {}
+      for (const [rawIndex, hasError] of Object.entries(current)) {
+        const itemIndex = Number(rawIndex)
+        if (!hasError || itemIndex === index) continue
+        next[itemIndex > index ? itemIndex - 1 : itemIndex] = true
+      }
       return next
     })
   }

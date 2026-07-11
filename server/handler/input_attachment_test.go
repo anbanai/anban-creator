@@ -140,7 +140,7 @@ func TestValidateInputAttachmentsRejectsInvalidMetadataAndURL(t *testing.T) {
 			attachment: model.EntryAttachment{
 				Type: "image", URL: "file:///etc/passwd", FileName: "product.png", ContentType: "image/png",
 			},
-			wantErr: "attachment URLs must be internal file paths or http(s) URLs",
+			wantErr: "attachment URLs must be internal file URLs or registered pending-upload URLs",
 		},
 	}
 
