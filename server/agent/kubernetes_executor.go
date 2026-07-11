@@ -335,6 +335,7 @@ func (e *KubernetesExecutor) buildAgentPod(opts *ExecutionOptions) *corev1.Pod {
 	delete(labels, kubernetesTaskIDLabel)
 	labels[kubernetesProjectIDLabel] = kubernetesLabelValue(task.ProjectID)
 	fsGroup := int64(1000)
+	nodeUser := int64(1000)
 	rootUser := int64(0)
 	automountServiceAccountToken := false
 	projectDir := kubernetesProjectWorkspaceRoot(e.kubeCfg.WorkspaceMountPath, task)
@@ -371,6 +372,7 @@ func (e *KubernetesExecutor) buildAgentPod(opts *ExecutionOptions) *corev1.Pod {
 				Image:           e.kubeCfg.AgentImage,
 				ImagePullPolicy: corev1.PullAlways,
 				Command:         []string{"/bin/sh", "-c", "trap : TERM INT; sleep infinity & wait"},
+				SecurityContext: &corev1.SecurityContext{RunAsUser: &nodeUser},
 				Env:             kubernetesEnvVars(e.buildAgentEnv(opts)),
 				VolumeMounts: []corev1.VolumeMount{{
 					Name:      kubernetesWorkspaceMountName,
@@ -455,7 +457,18 @@ func kubernetesPodConfigMatches(existing, desired *corev1.Pod) bool {
 	if existing == nil || desired == nil {
 		return false
 	}
-	return existing.Annotations[kubernetesPodConfigHashAnnotation] == desired.Annotations[kubernetesPodConfigHashAnnotation]
+	if existing.Annotations[kubernetesPodConfigHashAnnotation] != desired.Annotations[kubernetesPodConfigHashAnnotation] {
+		return false
+	}
+	if len(existing.Spec.Containers) == 0 || len(desired.Spec.Containers) == 0 {
+		return false
+	}
+	existingSecurity := existing.Spec.Containers[0].SecurityContext
+	desiredSecurity := desired.Spec.Containers[0].SecurityContext
+	if existingSecurity == nil || desiredSecurity == nil || existingSecurity.RunAsUser == nil || desiredSecurity.RunAsUser == nil {
+		return false
+	}
+	return *existingSecurity.RunAsUser == *desiredSecurity.RunAsUser
 }
 
 func kubernetesEnvVars(env []string) []corev1.EnvVar {

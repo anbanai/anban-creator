@@ -155,6 +155,10 @@ func TestKubernetesPodSpecUsesConfiguredImageAndPVC(t *testing.T) {
 	if pod.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways {
 		t.Fatalf("imagePullPolicy = %q, want Always for production latest-tag rollouts", pod.Spec.Containers[0].ImagePullPolicy)
 	}
+	agentContainer := pod.Spec.Containers[0]
+	if agentContainer.SecurityContext == nil || agentContainer.SecurityContext.RunAsUser == nil || *agentContainer.SecurityContext.RunAsUser != 1000 {
+		t.Fatalf("agent container security context = %#v, want node user 1000", agentContainer.SecurityContext)
+	}
 	if pod.Spec.ServiceAccountName != "creator-agent-runner" {
 		t.Fatalf("service account = %q, want configured", pod.Spec.ServiceAccountName)
 	}
@@ -232,6 +236,12 @@ func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 	}
 	if !kubernetesPodConfigMatches(existing, oldExec.buildAgentPod(opts)) {
 		t.Fatalf("config match = false, want identical config to reuse pod")
+	}
+
+	legacyRootPod := newExec.buildAgentPod(opts)
+	legacyRootPod.Spec.Containers[0].SecurityContext = nil
+	if kubernetesPodConfigMatches(legacyRootPod, newExec.buildAgentPod(opts)) {
+		t.Fatal("config match = true, want legacy root pod to be recreated")
 	}
 }
 
