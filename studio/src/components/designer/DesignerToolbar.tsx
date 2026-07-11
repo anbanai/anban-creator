@@ -1,21 +1,17 @@
-import { useRef, useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Proportions,
   Layers,
-  ImagePlus,
   History,
-  X,
-  Upload,
   Sparkles,
   Maximize,
   Coins,
   Stamp,
   SlidersHorizontal,
 } from 'lucide-react'
+import DesignerReferenceDock from '@/components/designer/DesignerReferenceDock'
 import ModelSelector from '@/components/designer/ModelSelector'
 import { Slider } from '@/components/ui/slider'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -166,14 +162,19 @@ function ResolutionSection({ value, onChange, sectionHeader }: {
   )
 }
 
+export type DesignerSettingsPatch = Partial<Omit<DesignerSettings, 'referenceFiles'>>
+
 interface DesignerToolbarProps {
   providers: DesignerProvider[]
   selectedProviderId: string
   onModelChange: (id: string) => void
   capabilities?: ModelCapabilities
   settings: DesignerSettings
-  onSettingsChange: (settings: DesignerSettings) => void
+  onSettingsChange: (patch: DesignerSettingsPatch) => void
   onHistoryToggle: () => void
+  onReferenceFilesAdded: (files: File[]) => void
+  onReferenceFileRemove: (index: number) => void
+  referenceDropActive: boolean
 }
 
 export default function DesignerToolbar({
@@ -184,9 +185,11 @@ export default function DesignerToolbar({
   settings,
   onSettingsChange,
   onHistoryToggle,
+  onReferenceFilesAdded,
+  onReferenceFileRemove,
+  referenceDropActive,
 }: DesignerToolbarProps) {
   const caps = capabilities
-  const refInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch user credit balance
   const { data: balanceData, isLoading: balanceLoading } = useQuery({
@@ -195,22 +198,9 @@ export default function DesignerToolbar({
   })
   const balance = balanceData?.balance ?? 0
 
-  function update(patch: Partial<DesignerSettings>) {
-    onSettingsChange({ ...settings, ...patch })
+  function update(patch: DesignerSettingsPatch) {
+    onSettingsChange(patch)
   }
-
-  function handleRefFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? [])
-    const max = caps?.maxReferenceImages ?? 0
-    const combined = [...settings.referenceFiles, ...files].slice(0, max)
-    update({ referenceFiles: combined })
-    e.target.value = ''
-  }
-
-  function removeRefFile(index: number) {
-    update({ referenceFiles: settings.referenceFiles.filter((_, i) => i !== index) })
-  }
-
   const showCount = (caps?.maxBatch ?? 1) > 1
   const showQuality = (caps?.qualityLevels.length ?? 0) > 0
   const showFormat = (caps?.outputFormats.length ?? 0) > 1
@@ -219,15 +209,6 @@ export default function DesignerToolbar({
   const pixelSizePresets = configuredSizePresets.filter((preset) => preset.trim().toLowerCase() === 'auto' || isPixelSizePreset(preset))
   const ratioSizePresets = configuredSizePresets.filter(isRatioSizePreset)
   const showPixelSizePresets = pixelSizePresets.length > 0
-
-  // Generate object URLs for reference image previews
-  const [refPreviewUrls, setRefPreviewUrls] = useState<string[]>([])
-  useEffect(() => {
-    const urls = settings.referenceFiles.map((f) => URL.createObjectURL(f))
-    setRefPreviewUrls(urls)
-    return () => urls.forEach((u) => URL.revokeObjectURL(u))
-  }, [settings.referenceFiles])
-
   const sectionHeader = 'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
 
   return (
@@ -426,47 +407,19 @@ export default function DesignerToolbar({
             {/* References */}
             {showRefs && (
               <div className="space-y-2">
-                <h4 className={sectionHeader}>
-                  <ImagePlus className="h-3 w-3" />
-                  参考图 ({settings.referenceFiles.length}/{caps!.maxReferenceImages})
-                </h4>
-                <div className="space-y-1.5">
-                  {refPreviewUrls.length > 0 && (
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {refPreviewUrls.map((url, i) => (
-                        <div key={url} className="group relative aspect-square overflow-hidden rounded-lg bg-muted/20 ring-1 ring-border/30">
-                          <img src={url} alt={settings.referenceFiles[i]?.name} className="h-full w-full object-cover" />
-                          <button
-                            type="button"
-                            onClick={() => removeRefFile(i)}
-                            className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100"
-                          >
-                            <X className="h-2.5 w-2.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {settings.referenceFiles.length < (caps?.maxReferenceImages ?? 0) && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full border border-dashed border-border/50 text-[11px] text-muted-foreground hover:border-primary/30 hover:text-primary"
-                      onClick={() => refInputRef.current?.click()}
-                    >
-                      <Upload className="h-3 w-3" />
-                      上传参考图
-                    </Button>
-                  )}
-                  <input
-                    ref={refInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={handleRefFiles}
-                  />
+                <div className="flex items-center justify-between">
+                  <h4 className={sectionHeader}>参考素材</h4>
+                  <span className="text-[10px] tabular-nums text-muted-foreground">
+                    {settings.referenceFiles.length}/{caps!.maxReferenceImages}
+                  </span>
                 </div>
+                <DesignerReferenceDock
+                  files={settings.referenceFiles}
+                  maxFiles={caps!.maxReferenceImages}
+                  onFilesAdded={onReferenceFilesAdded}
+                  onFileRemove={onReferenceFileRemove}
+                  dropActive={referenceDropActive}
+                />
               </div>
             )}
           </div>
@@ -495,6 +448,17 @@ export default function DesignerToolbar({
             selectedProviderId={selectedProviderId}
             onChange={onModelChange}
           />
+
+          {showRefs && (
+            <DesignerReferenceDock
+              files={settings.referenceFiles}
+              maxFiles={caps!.maxReferenceImages}
+              onFilesAdded={onReferenceFilesAdded}
+              onFileRemove={onReferenceFileRemove}
+              dropActive={referenceDropActive}
+              compact
+            />
+          )}
 
           {/* Mobile settings row */}
           <div className="flex gap-1 overflow-x-auto">
