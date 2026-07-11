@@ -157,7 +157,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	// the existing upload safety net. Remote Agent Pods report OSS-backed
 	// task_files through their manifest; the server must not try to read the pod
 	// filesystem path.
-	if result.WorkDir != "" && !remoteArtifacts {
+	if result != nil && result.WorkDir != "" && !remoteArtifacts {
 		if err := s.uploadMissingTaskFiles(persistCtx, taskID, userID, result.WorkDir); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("workspace file upload failed")
 		}
@@ -204,6 +204,9 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		return nil
 	}
 
+	if result == nil && execErr == nil {
+		execErr = errors.New("executor returned nil result without error")
+	}
 	if execErr != nil {
 		s.logger.Error().Err(execErr).Str("task_id", taskID).Msg("task execution failed")
 		_ = s.HandleExecutionFailure(persistCtx, task, execErr)

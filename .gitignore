@@ -73,5 +73,6 @@ eval-article-viral-strategy/
 md2wechat-skill-main/
 seednote-workspace/
 video-use-main/
+/wcflink/
 __pycache__/
 *.pyc

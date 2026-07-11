@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/config"
@@ -34,11 +36,196 @@ import (
 type cancelingExecutor struct {
 	parentCancel context.CancelFunc
 	result       *agent.ExecutionResult
+	err          error
 }
 
 func (e *cancelingExecutor) Execute(ctx context.Context, opts *agent.ExecutionOptions) (*agent.ExecutionResult, error) {
 	e.parentCancel()
-	return e.result, nil
+	return e.result, e.err
+}
+
+func TestHandleExecutionNilResultFailsTaskWithoutPanic(t *testing.T) {
+	tests := []struct {
+		name         string
+		execErr      error
+		wantErrorMsg string
+	}{
+		{
+			name:         "executor error",
+			execErr:      errors.New("executor setup failed"),
+			wantErrorMsg: "executor setup failed",
+		},
+		{
+			name:         "missing result without error",
+			wantErrorMsg: "executor returned nil result without error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskTestDB(t)
+			t.Cleanup(func() {
+				sqlDB, _ := db.DB()
+				if sqlDB != nil {
+					sqlDB.Close()
+				}
+			})
+			repo := repository.New(db)
+			logger := zerolog.New(io.Discard)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			project := &model.Project{
+				ID:       uuid.NewString(),
+				UserID:   userID,
+				Platform: model.PlatformArticle,
+			}
+			task := &model.Task{
+				ID:     uuid.NewString(),
+				UserID: userID,
+				Type:   model.PlatformArticle,
+				Status: model.TaskStatusRunning,
+			}
+			if err := repo.Tasks().Create(ctx, task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+
+			svc := NewTaskService(repo, &fakeTaskExecutor{err: tt.execErr}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+			if err := svc.HandleExecution(ctx, task, project); err != nil {
+				t.Fatalf("HandleExecution: %v", err)
+			}
+
+			found, err := repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("find task: %v", err)
+			}
+			if found.Status != model.TaskStatusFailed {
+				t.Fatalf("status = %q, want %q", found.Status, model.TaskStatusFailed)
+			}
+			if found.CompletedAt == nil {
+				t.Fatal("completed_at is nil")
+			}
+			if !strings.Contains(found.ErrorMessage, tt.wantErrorMsg) {
+				t.Fatalf("error_message = %q, want it to contain %q", found.ErrorMessage, tt.wantErrorMsg)
+			}
+		})
+	}
+}
+
+func TestHandleExecutionCancellationTakesPrecedenceOverNilResult(t *testing.T) {
+	tests := []struct {
+		name    string
+		execErr error
+	}{
+		{name: "without executor error"},
+		{name: "with executor error", execErr: errors.New("executor interrupted")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskTestDB(t)
+			t.Cleanup(func() {
+				sqlDB, _ := db.DB()
+				if sqlDB != nil {
+					sqlDB.Close()
+				}
+			})
+			repo := repository.New(db)
+			logger := zerolog.New(io.Discard)
+			ctx, cancel := context.WithCancel(context.Background())
+			userID := uuid.NewString()
+			task := &model.Task{
+				ID:     uuid.NewString(),
+				UserID: userID,
+				Type:   model.PlatformArticle,
+				Status: model.TaskStatusRunning,
+			}
+			if err := repo.Tasks().Create(context.Background(), task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle}
+			exec := &cancelingExecutor{parentCancel: cancel, err: tt.execErr}
+			svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+			if err := svc.HandleExecution(ctx, task, project); err != nil {
+				t.Fatalf("HandleExecution: %v", err)
+			}
+
+			found, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatalf("find task: %v", err)
+			}
+			if found.Status != model.TaskStatusCancelled {
+				t.Fatalf("status = %q, want %q", found.Status, model.TaskStatusCancelled)
+			}
+			if found.CompletedAt == nil {
+				t.Fatal("completed_at is nil")
+			}
+			if !strings.Contains(found.ErrorMessage, context.Canceled.Error()) {
+				t.Fatalf("error_message = %q, want cancellation reason", found.ErrorMessage)
+			}
+			if strings.Contains(found.ErrorMessage, "executor interrupted") {
+				t.Fatalf("error_message = %q, executor error overrode cancellation", found.ErrorMessage)
+			}
+		})
+	}
+}
+
+func TestHandleExecutionPersistsPartialResultBeforeExecutorFailure(t *testing.T) {
+	db := setupTaskTestDB(t)
+	db.Logger = gormlogger.Default.LogMode(gormlogger.Silent)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	task := &model.Task{
+		ID:     uuid.NewString(),
+		UserID: userID,
+		Type:   model.PlatformArticle,
+		Status: model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle}
+	workDir := t.TempDir()
+	writeWorkspaceFile(t, workDir, "output/partial.md", "# partial result")
+	result := &agent.ExecutionResult{WorkDir: workDir, Model: "partial-model"}
+	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	svc := NewTaskService(repo, &fakeTaskExecutor{
+		result: result,
+		err:    errors.New("executor failed after producing output"),
+	}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, project); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want %q", found.Status, model.TaskStatusFailed)
+	}
+	if found.Result == nil || !strings.Contains(*found.Result, `"model":"partial-model"`) {
+		t.Fatalf("result = %v, want persisted partial execution result", found.Result)
+	}
+	if !strings.Contains(found.ErrorMessage, "executor failed after producing output") {
+		t.Fatalf("error_message = %q, want executor error", found.ErrorMessage)
+	}
+	files, err := repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task files: %v", err)
+	}
+	if len(files) != 1 || files[0].FilePath != "output/partial.md" {
+		t.Fatalf("task files = %+v, want persisted partial output", files)
+	}
 }
 
 // TestHandleExecution_PersistsOutcomeOnExpiredContext is the regression test for
