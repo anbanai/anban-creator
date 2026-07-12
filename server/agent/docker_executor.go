@@ -103,9 +103,13 @@ func (e *DockerExecutor) Close() error {
 // CleanupOrphanedContainers removes stopped ephemeral task containers
 // left behind by previous runs. Safe to call at startup.
 func (e *DockerExecutor) CleanupOrphanedContainers() {
+	nameFilters := filters.NewArgs()
+	for _, name := range OrphanedContainerNameFilters() {
+		nameFilters.Add("name", name)
+	}
 	containers, err := e.dockerCLI.ContainerList(context.Background(), container.ListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.KeyValuePair{Key: "name", Value: OrphanedContainerNameFilter}),
+		Filters: nameFilters,
 	})
 	if err != nil {
 		e.logger.Warn().Err(err).Msg("failed to list containers for orphan cleanup")

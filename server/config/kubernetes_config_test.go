@@ -15,7 +15,7 @@ func baseKubernetesConfigForTest() Config {
 			Executor: "kubernetes",
 			Kubernetes: KubernetesConfig{
 				Namespace:          "anbanai-prod",
-				AgentImage:         "registry.example.com/anban-agent:latest",
+				AgentImage:         "registry.example.com/creator-agent:latest",
 				ServiceAccount:     "creator-agent-runner",
 				WorkspaceMountPath: "/workspace",
 				WorkspacePVCName:   "anban-creator",
@@ -49,8 +49,8 @@ func TestKubernetesAgentImageMustBeExplicit(t *testing.T) {
 	if cfg.Claude.Kubernetes.AgentImage != "" {
 		t.Fatalf("kubernetes agent image default = %q, want explicit production image", cfg.Claude.Kubernetes.AgentImage)
 	}
-	if cfg.Claude.Docker.Image != "anban-creator-agent:latest" {
-		t.Fatalf("docker image default = %q, want Docker executor default unchanged", cfg.Claude.Docker.Image)
+	if cfg.Claude.Docker.Image != "creator-agent:latest" {
+		t.Fatalf("docker image default = %q, want creator-agent Docker runtime identity", cfg.Claude.Docker.Image)
 	}
 }
 

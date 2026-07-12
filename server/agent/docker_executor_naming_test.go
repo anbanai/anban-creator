@@ -1,14 +1,19 @@
 package agent
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/docker/docker/client"
+
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-func TestDockerExecutorUsesAnbanRuntimeNames(t *testing.T) {
+func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
 	task := model.Task{ID: "task-1", Type: model.PlatformVideoEditor, Prompt: "topic"}
 
@@ -26,8 +31,41 @@ func TestDockerExecutorUsesAnbanRuntimeNames(t *testing.T) {
 	if got, want := filepath.Base(filepath.Dir(DefaultWorkspaceDir(task.ID))), "anban-creator"; got != want {
 		t.Fatalf("default workspace base = %q, want %q", got, want)
 	}
-	if got, want := EphemeralContainerName(task.ID), "anban-creator-task-task-1"; got != want {
+	if got, want := EphemeralContainerName(task.ID), "creator-agent-task-task-1"; got != want {
 		t.Fatalf("container name = %q, want %q", got, want)
+	}
+	if got, want := DockerAgentImageDefault, "creator-agent:latest"; got != want {
+		t.Fatalf("Docker Agent image default = %q, want %q", got, want)
+	}
+}
+
+func TestCleanupOrphanedContainersIncludesCurrentAndLegacyNameFilters(t *testing.T) {
+	var gotFilters map[string]map[string]bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.Unmarshal([]byte(r.URL.Query().Get("filters")), &gotFilters); err != nil {
+			t.Errorf("decode Docker filters: %v", err)
+		}
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer server.Close()
+
+	cli, err := client.NewClientWithOpts(
+		client.WithHost(server.URL),
+		client.WithHTTPClient(server.Client()),
+		client.WithVersion("1.44"),
+	)
+	if err != nil {
+		t.Fatalf("create Docker client: %v", err)
+	}
+	defer cli.Close()
+
+	e := &DockerExecutor{dockerCLI: cli}
+	e.CleanupOrphanedContainers()
+
+	for _, want := range []string{"^/creator-agent-task-", "^/anban-creator-task-"} {
+		if !gotFilters["name"][want] {
+			t.Errorf("Docker name filters = %#v, want %q", gotFilters["name"], want)
+		}
 	}
 }
 

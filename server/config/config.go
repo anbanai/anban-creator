@@ -1095,7 +1095,7 @@ type ClaudeConfig struct {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Image         string `yaml:"image"`          // Docker image name (default: "anban-creator-agent:latest")
+	Image         string `yaml:"image"`          // Docker image name (default: "creator-agent:latest")
 	CPUCores      int64  `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
 	MemoryMB      int64  `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
 	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
@@ -1571,7 +1571,7 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	if c.Claude.Docker.Image == "" {
-		c.Claude.Docker.Image = "anban-creator-agent:latest"
+		c.Claude.Docker.Image = "creator-agent:latest"
 	}
 	if c.Claude.Docker.CPUCores == 0 {
 		c.Claude.Docker.CPUCores = 2
