@@ -350,6 +350,57 @@ func TestKubernetesEnsureAgentPodDeletesDriftedCurrentPodWithIdentityPreconditio
 	}
 }
 
+func TestKubernetesEnsureAgentPodReconcilesTerminalCurrentPod(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodFailed, corev1.PodSucceeded} {
+		t.Run(string(phase), func(t *testing.T) {
+			opts := &ExecutionOptions{Task: &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}}
+			e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: "agents"}}
+			desired := e.buildAgentPod(opts)
+			desired.Namespace = e.kubeCfg.Namespace
+			terminal := desired.DeepCopy()
+			terminal.UID = types.UID("terminal-current-uid")
+			terminal.ResourceVersion = "42"
+			terminal.Status.Phase = phase
+			client := kubernetesfake.NewSimpleClientset(terminal)
+			var deleteOptions metav1.DeleteOptions
+			client.PrependReactor("delete", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+				deleteOptions = action.(kubernetestesting.DeleteAction).GetDeleteOptions()
+				return false, nil, nil
+			})
+			client.PrependReactor("create", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+				created := action.(kubernetestesting.CreateAction).GetObject().(*corev1.Pod).DeepCopy()
+				created.UID = types.UID("replacement-current-uid")
+				created.ResourceVersion = "43"
+				created.Status.Phase = corev1.PodRunning
+				created.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+				if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), created, e.kubeCfg.Namespace); err != nil {
+					return true, nil, err
+				}
+				return true, created, nil
+			})
+			e.kube = client
+
+			got, err := e.ensureAgentPod(context.Background(), opts)
+			if err != nil {
+				t.Fatalf("ensureAgentPod: %v", err)
+			}
+			if got != desired.Name {
+				t.Fatalf("pod name = %q, want recreated pod %q", got, desired.Name)
+			}
+			if deleteOptions.Preconditions == nil || deleteOptions.Preconditions.UID == nil || *deleteOptions.Preconditions.UID != terminal.UID {
+				t.Fatalf("delete UID precondition = %#v, want %q", deleteOptions.Preconditions, terminal.UID)
+			}
+			if deleteOptions.Preconditions.ResourceVersion == nil || *deleteOptions.Preconditions.ResourceVersion != terminal.ResourceVersion {
+				t.Fatalf("delete resourceVersion precondition = %#v, want %q", deleteOptions.Preconditions, terminal.ResourceVersion)
+			}
+			current, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), desired.Name, metav1.GetOptions{})
+			if err != nil || current.UID == terminal.UID || current.Status.Phase != corev1.PodRunning {
+				t.Fatalf("terminal pod was not replaced: pod=%#v err=%v", current, err)
+			}
+		})
+	}
+}
+
 func TestKubernetesEnsureAgentPodPreservesReplacementCreatedDuringDeleteWait(t *testing.T) {
 	opts := &ExecutionOptions{Task: &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}}
 	e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: "agents"}}

@@ -516,6 +516,29 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 		}
 		return true, nil
 	}
+	deleteObservedAgentPod := func(observed *corev1.Pod, reason string) error {
+		if observed.UID == "" {
+			return fmt.Errorf("%s agent pod %s UID is empty; refusing deletion", reason, observed.Name)
+		}
+		if observed.ResourceVersion == "" {
+			return fmt.Errorf("%s agent pod %s resourceVersion is empty; refusing deletion", reason, observed.Name)
+		}
+		uid := observed.UID
+		resourceVersion := observed.ResourceVersion
+		deleteErr := pods.Delete(ctx, observed.Name, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{
+				UID:             &uid,
+				ResourceVersion: &resourceVersion,
+			},
+		})
+		if apierrors.IsConflict(deleteErr) || apierrors.IsInvalid(deleteErr) || apierrors.IsNotFound(deleteErr) {
+			return nil
+		}
+		if deleteErr != nil {
+			return fmt.Errorf("delete %s agent pod: %w", reason, deleteErr)
+		}
+		return e.waitForAgentPodDeleted(ctx, observed.Name, uid)
+	}
 	createAction := "create agent pod"
 	for attempt := 1; attempt <= kubernetesAgentPodReconcileMaxAttempts; attempt++ {
 		existing, err := pods.Get(ctx, pod.Name, metav1.GetOptions{})
@@ -541,32 +564,14 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 				createAction = "recreate deleted agent pod"
 				continue
 			}
-			if !kubernetesPodConfigMatches(existing, pod) {
-				if existing.UID == "" {
-					return "", fmt.Errorf("drifted agent pod %s UID is empty; refusing deletion", pod.Name)
-				}
-				if existing.ResourceVersion == "" {
-					return "", fmt.Errorf("drifted agent pod %s resourceVersion is empty; refusing deletion", pod.Name)
-				}
-				uid := existing.UID
-				resourceVersion := existing.ResourceVersion
-				deleteErr := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{
-					Preconditions: &metav1.Preconditions{
-						UID:             &uid,
-						ResourceVersion: &resourceVersion,
-					},
-				})
-				if apierrors.IsConflict(deleteErr) || apierrors.IsInvalid(deleteErr) {
-					continue
-				}
-				if apierrors.IsNotFound(deleteErr) {
-					createAction = "recreate agent pod"
-					continue
-				}
-				if deleteErr != nil {
-					return "", fmt.Errorf("delete drifted agent pod: %w", deleteErr)
-				}
-				if err := e.waitForAgentPodDeleted(ctx, pod.Name, uid); err != nil {
+			replaceReason := ""
+			if existing.Status.Phase == corev1.PodFailed || existing.Status.Phase == corev1.PodSucceeded {
+				replaceReason = "terminal"
+			} else if !kubernetesPodConfigMatches(existing, pod) {
+				replaceReason = "drifted"
+			}
+			if replaceReason != "" {
+				if err := deleteObservedAgentPod(existing, replaceReason); err != nil {
 					return "", err
 				}
 				createAction = "recreate agent pod"
