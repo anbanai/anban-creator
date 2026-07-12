@@ -32,8 +32,8 @@ func TestKubernetesPodNameIsDeterministicAndDNSSafe(t *testing.T) {
 	if !regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`).MatchString(first) {
 		t.Fatalf("pod name %q is not DNS-1123 safe", first)
 	}
-	if !strings.HasPrefix(first, "anban-agent-") {
-		t.Fatalf("pod name = %q, want anban-agent prefix", first)
+	if !strings.HasPrefix(first, "creator-agent-") {
+		t.Fatalf("pod name = %q, want creator-agent prefix", first)
 	}
 }
 
@@ -41,8 +41,8 @@ func TestKubernetesLabelsIncludeUserAndProject(t *testing.T) {
 	task := &model.Task{UserID: "user-1", ProjectID: "project-1"}
 	labels := kubernetesAgentLabels(task)
 
-	if labels["app.kubernetes.io/name"] != "anban-agent" {
-		t.Fatalf("app label = %q, want anban-agent", labels["app.kubernetes.io/name"])
+	if labels["app.kubernetes.io/name"] != "creator-agent" {
+		t.Fatalf("app label = %q, want creator-agent", labels["app.kubernetes.io/name"])
 	}
 	if labels["anban.ai/user-id"] != "user-1" || labels["anban.ai/project-id"] != "project-1" {
 		t.Fatalf("labels = %#v, want user/project IDs", labels)
@@ -130,7 +130,7 @@ func TestKubernetesAgentEnvSkipsMontageProviderEnvForOtherTasks(t *testing.T) {
 func TestKubernetesPodSpecUsesConfiguredImageAndPVC(t *testing.T) {
 	e := &KubernetesExecutor{
 		kubeCfg: srvconfig.KubernetesConfig{
-			AgentImage:         "registry.example.com/anban-agent:latest",
+			AgentImage:         "registry.example.com/creator-agent:latest",
 			ServiceAccount:     "creator-agent-runner",
 			ImagePullSecret:    "acr-secret",
 			WorkspaceMountPath: "/workspace",
@@ -151,6 +151,9 @@ func TestKubernetesPodSpecUsesConfiguredImageAndPVC(t *testing.T) {
 	}
 	if len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Image != e.kubeCfg.AgentImage {
 		t.Fatalf("container spec = %#v, want configured image", pod.Spec.Containers)
+	}
+	if pod.Spec.Containers[0].Name != "creator-agent" {
+		t.Fatalf("container name = %q, want creator-agent", pod.Spec.Containers[0].Name)
 	}
 	if pod.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways {
 		t.Fatalf("imagePullPolicy = %q, want Always for production latest-tag rollouts", pod.Spec.Containers[0].ImagePullPolicy)
@@ -209,7 +212,7 @@ func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 	}
 	oldExec := &KubernetesExecutor{
 		kubeCfg: srvconfig.KubernetesConfig{
-			AgentImage:         "registry.example.com/anban-agent:v1",
+			AgentImage:         "registry.example.com/creator-agent:v1",
 			PodRevision:        "rev-1",
 			ServiceAccount:     "creator-agent-runner",
 			WorkspaceMountPath: "/workspace",
@@ -219,7 +222,7 @@ func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 	}
 	newExec := &KubernetesExecutor{
 		kubeCfg: srvconfig.KubernetesConfig{
-			AgentImage:         "registry.example.com/anban-agent:v1",
+			AgentImage:         "registry.example.com/creator-agent:v1",
 			PodRevision:        "rev-2",
 			ServiceAccount:     "creator-agent-runner",
 			WorkspaceMountPath: "/workspace",

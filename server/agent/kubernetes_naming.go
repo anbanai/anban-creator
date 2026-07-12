@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	kubernetesAgentAppName       = "anban-agent"
-	kubernetesAgentNamePrefix    = "anban-agent"
+	kubernetesAgentAppName       = "creator-agent"
+	kubernetesAgentNamePrefix    = kubernetesAgentAppName
 	kubernetesUserIDLabel        = "anban.ai/user-id"
 	kubernetesProjectIDLabel     = "anban.ai/project-id"
 	kubernetesTaskIDLabel        = "anban.ai/task-id"

@@ -37,7 +37,7 @@ import (
 var _ TaskExecutor = (*KubernetesExecutor)(nil)
 
 const (
-	kubernetesAgentContainerName      = "agent"
+	kubernetesAgentContainerName      = kubernetesAgentAppName
 	kubernetesPodTTLAnnotation        = "anban.ai/pod-ttl-seconds"
 	kubernetesPodRevisionAnnotation   = "anban.ai/pod-revision"
 	kubernetesPodConfigHashAnnotation = "anban.ai/pod-config-hash"
