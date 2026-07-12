@@ -21,8 +21,12 @@ RUN set -eux; \
     if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then \
       apt-get install -y --no-install-recommends ffmpeg; \
     fi; \
-    if ! id -u node >/dev/null 2>&1; then \
-      useradd -m -s /bin/bash node; \
+    if id -u node >/dev/null 2>&1; then \
+      [ "$(id -u node)" = "1000" ] && [ "$(id -g node)" = "1000" ] || { echo >&2 "node user must be 1000:1000"; exit 1; }; \
+    else \
+      ! getent passwd 1000 >/dev/null && ! getent group 1000 >/dev/null || { echo >&2 "UID/GID 1000 already belongs to another identity"; exit 1; }; \
+      groupadd --gid 1000 node; \
+      useradd --uid 1000 --gid 1000 -m -s /bin/bash node; \
     fi; \
     rm -rf /var/lib/apt/lists/*
 

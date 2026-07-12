@@ -15,15 +15,17 @@ import (
 )
 
 const (
-	kubernetesMemoryMountName       = "memory"
-	kubernetesTokenVolumeName       = "workload-token"
-	kubernetesTmpVolumeName         = "tmp"
-	kubernetesHomeVolumeName        = "home"
-	kubernetesMemoryMountPath       = "/workspace/.claude/memory"
-	kubernetesTokenMountPath        = "/var/run/secrets/anban"
-	kubernetesTokenFile             = kubernetesTokenMountPath + "/token"
-	kubernetesTokenAudience         = "anban-server"
-	kubernetesObjectConfigHashLabel = "anban.ai/config-hash"
+	kubernetesAgentUID              int64 = 1000
+	kubernetesAgentGID              int64 = 1000
+	kubernetesMemoryMountName             = "memory"
+	kubernetesTokenVolumeName             = "workload-token"
+	kubernetesTmpVolumeName               = "tmp"
+	kubernetesHomeVolumeName              = "home"
+	kubernetesMemoryMountPath             = "/workspace/.claude/memory"
+	kubernetesTokenMountPath              = "/var/run/secrets/anban"
+	kubernetesTokenFile                   = kubernetesTokenMountPath + "/token"
+	kubernetesTokenAudience               = "anban-server"
+	kubernetesObjectConfigHashLabel       = "anban.ai/config-hash"
 )
 
 type kubernetesJobConfig struct {
@@ -37,8 +39,8 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	ttl := cfg.TTLSecondsAfterFinished
 	automountToken := false
 	runAsNonRoot := true
-	runAsUser := int64(1000)
-	runAsGroup := int64(1000)
+	runAsUser := kubernetesAgentUID
+	runAsGroup := kubernetesAgentGID
 	readOnlyRoot := true
 	allowPrivilegeEscalation := false
 	tokenExpiration := projectedTokenExpiration(activeDeadline)

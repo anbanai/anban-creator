@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
+
+	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
 func TestRunnerUsesManagedAgentRuntimePolicy(t *testing.T) {
@@ -13,5 +16,33 @@ func TestRunnerUsesManagedAgentRuntimePolicy(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "serveragent.WithManagedAgentRuntimePolicy()") {
 		t.Fatal("runner must apply serveragent.WithManagedAgentRuntimePolicy()")
+	}
+}
+
+func TestRunnerOptionsLoadImmutablePluginRootAndKeepAgentFlag(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "/anbanai")
+	runner := NewRunner(&Config{Workspace: t.TempDir(), AgentFlag: "anban:seednote", MaxTurns: 10}, nil, nil)
+	opts, err := runner.buildSDKOptions(context.Background())
+	if err != nil {
+		t.Fatalf("buildSDKOptions: %v", err)
+	}
+	got := claudecode.NewOptions(opts...)
+	if len(got.Plugins) != 1 || got.Plugins[0].Type != claudecode.SdkPluginTypeLocal || got.Plugins[0].Path != "/anbanai" {
+		t.Fatalf("plugins = %#v, want local /anbanai", got.Plugins)
+	}
+	if got.ExtraArgs["agent"] == nil || *got.ExtraArgs["agent"] != "anban:seednote" {
+		t.Fatalf("agent extra arg = %#v, want existing AgentFlag", got.ExtraArgs["agent"])
+	}
+}
+
+func TestRunnerOptionsLeaveLocalPluginUnsetWithoutEnvironment(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "")
+	runner := NewRunner(&Config{Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10}, nil, nil)
+	opts, err := runner.buildSDKOptions(context.Background())
+	if err != nil {
+		t.Fatalf("buildSDKOptions: %v", err)
+	}
+	if got := claudecode.NewOptions(opts...).Plugins; len(got) != 0 {
+		t.Fatalf("plugins = %#v, want none without CLAUDE_PLUGIN_ROOT", got)
 	}
 }

@@ -602,6 +602,13 @@ The Job command accepts only `server-url`, `execution-id`, `workspace`, and
 `execution_id` in progress, prepare, manifest, and completion requests. Keep
 `anban run` unchanged for desktop/local callers.
 
+The shared Runner must load `CLAUDE_PLUGIN_ROOT` with the SDK's local-plugin
+option when that environment variable is set. Kubernetes mounts a writable
+`emptyDir` over `/home/node`, so Job execution must discover the immutable
+Anban plugin from `/anbanai` rather than relying on image-baked user-home state.
+When `CLAUDE_PLUGIN_ROOT` is unset, preserve the existing local/desktop plugin
+discovery behavior and continue passing the configured Agent flag.
+
 - [ ] **Step 5: Run tests and commit**
 
 Run: `go test ./agent -run 'Bootstrap|JobCommand|Reporter|Artifact' -count=1`
@@ -856,6 +863,9 @@ Grant Server namespace Job/PVC/Pod-read permissions and cluster TokenReview
 permission, remove Pod create/exec permissions, keep Agent ServiceAccount without
 API permissions, and add optional NetworkPolicy. Ensure the image contains the
 `anban job` command and writable directories are supplied only by Job volumes.
+Keep `/anbanai` immutable and outside the writable `/home/node` volume, retain
+Runner loading through `CLAUDE_PLUGIN_ROOT=/anbanai`, and make the image's node
+identity explicitly match the Job security context UID/GID `1000:1000`.
 
 - [ ] **Step 6: Run targeted tests and commit**
 

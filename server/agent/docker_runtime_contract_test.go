@@ -89,6 +89,22 @@ func TestOpenHandsRuntimeDockerfilesInstallPackagesAsRoot(t *testing.T) {
 	}
 }
 
+func TestAgentDockerfileAndKubernetesJobAgreeOnNodeIdentity(t *testing.T) {
+	if kubernetesAgentUID != 1000 || kubernetesAgentGID != 1000 {
+		t.Fatalf("Job identity = %d:%d, want explicit node 1000:1000", kubernetesAgentUID, kubernetesAgentGID)
+	}
+	body := readTextFile(t, filepath.Join(repositoryRoot(t), "Dockerfile.agent"))
+	for _, want := range []string{
+		`[ "$(id -u node)" = "1000" ]`,
+		`[ "$(id -g node)" = "1000" ]`,
+		"useradd --uid 1000 --gid 1000",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Dockerfile.agent missing explicit node identity contract %q", want)
+		}
+	}
+}
+
 func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 	root := repositoryRoot(t)
 	body := readTextFile(t, filepath.Join(root, ".dockerignore"))

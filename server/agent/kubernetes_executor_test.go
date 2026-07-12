@@ -6,10 +6,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -51,12 +53,18 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if c.SecurityContext.RunAsNonRoot == nil || !*c.SecurityContext.RunAsNonRoot || c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation {
 		t.Fatalf("security context = %#v, want non-root and no privilege escalation", c.SecurityContext)
 	}
+	if c.SecurityContext.RunAsUser == nil || *c.SecurityContext.RunAsUser != kubernetesAgentUID || c.SecurityContext.RunAsGroup == nil || *c.SecurityContext.RunAsGroup != kubernetesAgentGID {
+		t.Fatalf("container identity = %#v, want %d:%d", c.SecurityContext, kubernetesAgentUID, kubernetesAgentGID)
+	}
 	if c.SecurityContext.Capabilities == nil || !slices.Contains(c.SecurityContext.Capabilities.Drop, corev1.Capability("ALL")) {
 		t.Fatalf("capabilities = %#v, want ALL dropped", c.SecurityContext.Capabilities)
 	}
 	assertMount(t, c, kubernetesWorkspaceMountName, "/workspace", false)
 	assertMount(t, c, kubernetesMemoryMountName, "/workspace/.claude/memory", false)
 	assertMount(t, c, kubernetesHomeVolumeName, "/home/node", false)
+	if home := requireTestVolume(t, job, kubernetesHomeVolumeName); home.EmptyDir == nil {
+		t.Fatalf("home volume = %#v, want writable emptyDir", home)
+	}
 	assertMount(t, c, kubernetesTokenVolumeName, kubernetesTokenMountPath, true)
 	assertProjectedAudience(t, spec.Volumes, kubernetesTokenAudience)
 	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
@@ -64,6 +72,9 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	}
 	if spec.SecurityContext == nil || spec.SecurityContext.SeccompProfile == nil || spec.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
 		t.Fatalf("pod security context = %#v, want RuntimeDefault seccomp", spec.SecurityContext)
+	}
+	if spec.SecurityContext.RunAsUser == nil || *spec.SecurityContext.RunAsUser != kubernetesAgentUID || spec.SecurityContext.RunAsGroup == nil || *spec.SecurityContext.RunAsGroup != kubernetesAgentGID {
+		t.Fatalf("pod identity = %#v, want %d:%d", spec.SecurityContext, kubernetesAgentUID, kubernetesAgentGID)
 	}
 	if len(spec.ImagePullSecrets) != 1 || spec.ImagePullSecrets[0].Name != "acr-secret" {
 		t.Fatalf("image pull secrets = %#v, want acr-secret", spec.ImagePullSecrets)
@@ -155,6 +166,112 @@ func TestKubernetesDispatcherDispatchCreatesAndReusesObjects(t *testing.T) {
 	}
 }
 
+func TestVerifyKubernetesJobRejectsSecurityAndRuntimeSpecMutation(t *testing.T) {
+	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	for _, tc := range []struct {
+		name   string
+		mutate func(*batchv1.Job)
+	}{
+		{name: "backoff", mutate: func(job *batchv1.Job) { *job.Spec.BackoffLimit = 1 }},
+		{name: "deadline", mutate: func(job *batchv1.Job) { *job.Spec.ActiveDeadlineSeconds = 901 }},
+		{name: "TTL", mutate: func(job *batchv1.Job) { *job.Spec.TTLSecondsAfterFinished = 121 }},
+		{name: "restart", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure }},
+		{name: "service account", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.ServiceAccountName = "foreign" }},
+		{name: "automount", mutate: func(job *batchv1.Job) { *job.Spec.Template.Spec.AutomountServiceAccountToken = true }},
+		{name: "grace", mutate: func(job *batchv1.Job) { *job.Spec.Template.Spec.TerminationGracePeriodSeconds++ }},
+		{name: "host network", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.HostNetwork = true }},
+		{name: "host PID", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.HostPID = true }},
+		{name: "host IPC", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.HostIPC = true }},
+		{name: "shared process namespace", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.ShareProcessNamespace = boolPtr(true) }},
+		{name: "host users", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.HostUsers = boolPtr(false) }},
+		{name: "runtime class", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.RuntimeClassName = stringPtr("foreign") }},
+		{name: "pod security", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.SecurityContext = nil }},
+		{name: "init container", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.InitContainers = []corev1.Container{{Name: "init"}} }},
+		{name: "extra container", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers = append(job.Spec.Template.Spec.Containers, corev1.Container{Name: "sidecar"})
+		}},
+		{name: "container name", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].Name = "foreign" }},
+		{name: "image", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].Image = "foreign/image" }},
+		{name: "pull policy", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullIfNotPresent }},
+		{name: "command", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].Command = []string{"sleep"} }},
+		{name: "args", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].Args[0] = "run" }},
+		{name: "container security", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].SecurityContext = nil }},
+		{name: "resources", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU] = resource.MustParse("3")
+		}},
+		{name: "mounts", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].VolumeMounts[0].MountPath = "/foreign" }},
+		{name: "memory claim", mutate: func(job *batchv1.Job) {
+			requireTestVolume(t, job, kubernetesMemoryMountName).PersistentVolumeClaim.ClaimName = "foreign"
+		}},
+		{name: "token audience", mutate: func(job *batchv1.Job) { requireTestTokenProjection(t, job).Audience = "foreign" }},
+		{name: "token path", mutate: func(job *batchv1.Job) { requireTestTokenProjection(t, job).Path = "foreign" }},
+		{name: "token expiration", mutate: func(job *batchv1.Job) { *requireTestTokenProjection(t, job).ExpirationSeconds++ }},
+		{name: "token mode", mutate: func(job *batchv1.Job) {
+			*requireTestVolume(t, job, kubernetesTokenVolumeName).Projected.DefaultMode = 0777
+		}},
+		{name: "volumes", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Volumes = job.Spec.Template.Spec.Volumes[1:] }},
+		{name: "home volume", mutate: func(job *batchv1.Job) {
+			requireTestVolume(t, job, kubernetesHomeVolumeName).EmptyDir = nil
+		}},
+		{name: "pull secret", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.ImagePullSecrets[0].Name = "foreign" }},
+		{name: "template label", mutate: func(job *batchv1.Job) { delete(job.Spec.Template.Labels, kubernetesExecutionIDLabel) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			existing := desired.DeepCopy()
+			tc.mutate(existing)
+			if err := verifyJob(existing, desired, testExecution(), testTask()); err == nil || !strings.Contains(err.Error(), "configuration mismatch") {
+				t.Fatalf("verifyJob error = %v, want configuration mismatch", err)
+			}
+		})
+	}
+}
+
+func TestVerifyKubernetesJobIgnoresSafeAPIServerDefaults(t *testing.T) {
+	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	existing := desired.DeepCopy()
+	enableServiceLinks := true
+	existing.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirst
+	existing.Spec.Template.Spec.SchedulerName = corev1.DefaultSchedulerName
+	existing.Spec.Template.Spec.EnableServiceLinks = &enableServiceLinks
+	existing.Spec.Template.Spec.HostUsers = boolPtr(true)
+	existing.Spec.Template.Spec.ShareProcessNamespace = boolPtr(false)
+	existing.Spec.Template.Spec.Containers[0].TerminationMessagePath = corev1.TerminationMessagePathDefault
+	existing.Spec.Template.Spec.Containers[0].TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	if err := verifyJob(existing, desired, testExecution(), testTask()); err != nil {
+		t.Fatalf("verifyJob with API defaults: %v", err)
+	}
+}
+
+func TestVerifyProjectMemoryPVCAcceptsEqualOrLargerAndRejectsSmaller(t *testing.T) {
+	desired := buildProjectMemoryPVC(testJobConfig(), "project-1")
+	for _, tc := range []struct {
+		name    string
+		size    string
+		wantErr bool
+	}{
+		{name: "equal", size: "1Gi"},
+		{name: "larger", size: "2Gi"},
+		{name: "smaller", size: "512Mi", wantErr: true},
+		{name: "missing", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			existing := desired.DeepCopy()
+			if tc.size == "" {
+				delete(existing.Spec.Resources.Requests, corev1.ResourceStorage)
+			} else {
+				existing.Spec.Resources.Requests[corev1.ResourceStorage] = resource.MustParse(tc.size)
+			}
+			err := verifyPVC(existing, desired, "project-1")
+			if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "expand")) {
+				t.Fatalf("verifyPVC error = %v, want actionable expansion error", err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("verifyPVC: %v", err)
+			}
+		})
+	}
+}
+
 func TestKubernetesDispatcherRejectsMissingOrMismatchedRequiredLabels(t *testing.T) {
 	ctx := context.Background()
 	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
@@ -197,7 +314,9 @@ func TestKubernetesDispatcherRejectsMissingOrMismatchedRequiredLabels(t *testing
 
 func TestKubernetesDispatcherDeleteUsesForegroundPropagation(t *testing.T) {
 	ctx := context.Background()
-	client := fake.NewSimpleClientset(buildKubernetesJob(testJobConfig(), testExecution(), testTask()))
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
+	client := fake.NewSimpleClientset(job)
 	d := testDispatcher(client)
 	if err := d.Delete(ctx, testExecution()); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -210,18 +329,52 @@ func TestKubernetesDispatcherDeleteUsesForegroundPropagation(t *testing.T) {
 	if got := deleteAction.GetDeleteOptions().PropagationPolicy; got == nil || *got != metav1.DeletePropagationForeground {
 		t.Fatalf("propagation = %#v, want foreground", got)
 	}
+	if got := deleteAction.GetDeleteOptions().Preconditions; got == nil || got.UID == nil || *got.UID != job.UID {
+		t.Fatalf("preconditions = %#v, want UID %q", got, job.UID)
+	}
 	if err := d.Delete(ctx, testExecution()); err != nil {
 		t.Fatalf("idempotent Delete: %v", err)
+	}
+}
+
+func TestKubernetesDispatcherDeleteRejectsForeignJob(t *testing.T) {
+	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	for _, label := range []string{
+		"app.kubernetes.io/name",
+		"app.kubernetes.io/component",
+		kubernetesExecutionIDLabel,
+		kubernetesTaskIDLabel,
+	} {
+		t.Run(label, func(t *testing.T) {
+			job := desired.DeepCopy()
+			delete(job.Labels, label)
+			client := fake.NewSimpleClientset(job)
+			err := testDispatcher(client).Delete(context.Background(), testExecution())
+			if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
+				t.Fatalf("Delete error = %v, want identity mismatch", err)
+			}
+			if _, getErr := client.BatchV1().Jobs("anban").Get(context.Background(), job.Name, metav1.GetOptions{}); getErr != nil {
+				t.Fatalf("foreign Job was deleted: %v", getErr)
+			}
+		})
 	}
 }
 
 func TestKubernetesDispatcherDeleteProjectMemoryIsGuardedAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	pvc := buildProjectMemoryPVC(testJobConfig(), "project-1")
+	pvc.UID = types.UID("pvc-uid-1")
 	client := fake.NewSimpleClientset(pvc)
 	d := testDispatcher(client)
 	if err := d.DeleteProjectMemory(ctx, "project-1"); err != nil {
 		t.Fatalf("DeleteProjectMemory: %v", err)
+	}
+	deleteAction, ok := client.Actions()[len(client.Actions())-1].(ktesting.DeleteAction)
+	if !ok {
+		t.Fatalf("last action = %T, want DeleteAction", client.Actions()[len(client.Actions())-1])
+	}
+	if got := deleteAction.GetDeleteOptions().Preconditions; got == nil || got.UID == nil || *got.UID != pvc.UID {
+		t.Fatalf("preconditions = %#v, want UID %q", got, pvc.UID)
 	}
 	if err := d.DeleteProjectMemory(ctx, "project-1"); err != nil {
 		t.Fatalf("idempotent DeleteProjectMemory: %v", err)
@@ -253,6 +406,7 @@ func TestKubernetesDispatcherDeleteProjectMemoryIsGuardedAndIdempotent(t *testin
 func TestKubernetesDispatcherInspectMapsJobAndPodTermination(t *testing.T) {
 	execution := testExecution()
 	job := buildKubernetesJob(testJobConfig(), execution, testTask())
+	job.UID = types.UID("job-uid-1")
 	job.Status.Conditions = []batchv1.JobCondition{{
 		Type:    batchv1.JobFailed,
 		Status:  corev1.ConditionTrue,
@@ -280,6 +434,7 @@ func TestKubernetesDispatcherInspectMapsJobAndPodTermination(t *testing.T) {
 			}},
 		},
 	}
+	ownTestPod(job, pod)
 	d := testDispatcher(fake.NewSimpleClientset(job, pod))
 	state, err := d.Inspect(context.Background(), execution)
 	if err != nil {
@@ -303,7 +458,8 @@ func TestKubernetesDispatcherInspectMapsPendingAndCompleteJobs(t *testing.T) {
 	}{
 		{name: "pending", want: kubernetesPhasePending},
 		{name: "running", active: 1, want: kubernetesPhaseRunning},
-		{name: "complete", condition: &batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, Reason: "Completed"}, want: kubernetesPhaseSucceeded},
+		{name: "complete active", condition: &batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, Reason: "Completed"}, active: 1, want: kubernetesPhaseSucceeded},
+		{name: "failed active", condition: &batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "Failed"}, active: 1, want: kubernetesPhaseFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
@@ -321,6 +477,7 @@ func TestKubernetesDispatcherInspectMapsPendingAndCompleteJobs(t *testing.T) {
 
 func TestKubernetesDispatcherInspectMapsPodTerminationBeforeJobCondition(t *testing.T) {
 	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "job-pod",
@@ -335,6 +492,7 @@ func TestKubernetesDispatcherInspectMapsPodTerminationBeforeJobCondition(t *test
 			}},
 		}}},
 	}
+	ownTestPod(job, pod)
 	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), testExecution())
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
@@ -346,6 +504,7 @@ func TestKubernetesDispatcherInspectMapsPodTerminationBeforeJobCondition(t *test
 
 func TestKubernetesDispatcherInspectPreservesSchedulingFailureDiagnostics(t *testing.T) {
 	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
 	job.Status.Active = 1
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -360,6 +519,7 @@ func TestKubernetesDispatcherInspectPreservesSchedulingFailureDiagnostics(t *tes
 			Message: "0/3 nodes are available: insufficient memory",
 		}}},
 	}
+	ownTestPod(job, pod)
 	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), testExecution())
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
@@ -374,6 +534,7 @@ func TestKubernetesDispatcherInspectPreservesSchedulingFailureDiagnostics(t *tes
 
 func TestKubernetesDispatcherInspectKeepsRunningPodRunning(t *testing.T) {
 	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
 	job.Status.Active = 1
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -383,12 +544,107 @@ func TestKubernetesDispatcherInspectKeepsRunningPodRunning(t *testing.T) {
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning},
 	}
+	ownTestPod(job, pod)
 	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), testExecution())
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
 	if state.Phase != kubernetesPhaseRunning {
 		t.Fatalf("phase = %q, want running for a running Pod", state.Phase)
+	}
+}
+
+func TestKubernetesDispatcherInspectMapsContainerWaitingDiagnostics(t *testing.T) {
+	for _, reason := range []string{"ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError"} {
+		t.Run(reason, func(t *testing.T) {
+			job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+			job.UID = types.UID("job-uid-1")
+			job.Status.Active = 1
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "waiting", Namespace: "anban", Labels: map[string]string{kubernetesExecutionIDLabel: testExecution().ID}},
+				Status: corev1.PodStatus{Phase: corev1.PodPending, ContainerStatuses: []corev1.ContainerStatus{{
+					Name:  kubernetesAgentContainerName,
+					State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: reason, Message: "waiting message"}},
+				}}},
+			}
+			ownTestPod(job, pod)
+			state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), testExecution())
+			if err != nil {
+				t.Fatalf("Inspect: %v", err)
+			}
+			if state.Phase != kubernetesPhasePending || state.Reason != reason || state.Message != "waiting message" {
+				t.Fatalf("state = %#v, want pending waiting diagnostics", state)
+			}
+		})
+	}
+}
+
+func TestKubernetesDispatcherInspectPreservesTerminalJobDiagnosticsFromWaitingPod(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
+	job.Status.Active = 1
+	job.Status.Conditions = []batchv1.JobCondition{{
+		Type:    batchv1.JobComplete,
+		Status:  corev1.ConditionTrue,
+		Reason:  "Completed",
+		Message: "job completed",
+	}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "waiting", Namespace: "anban", Labels: map[string]string{kubernetesExecutionIDLabel: testExecution().ID}},
+		Status: corev1.PodStatus{Phase: corev1.PodPending, ContainerStatuses: []corev1.ContainerStatus{{
+			Name: kubernetesAgentContainerName,
+			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+				Reason:  "ImagePullBackOff",
+				Message: "stale waiting diagnostic",
+			}},
+		}}},
+	}
+	ownTestPod(job, pod)
+	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), testExecution())
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.Phase != kubernetesPhaseSucceeded || state.Reason != "Completed" || state.Message != "job completed" {
+		t.Fatalf("state = %#v, want authoritative terminal Job diagnostics", state)
+	}
+}
+
+func TestKubernetesDispatcherInspectIgnoresSpoofedOrStalePods(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-current")
+	owned := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "owned", Namespace: "anban", UID: types.UID("owned-uid"),
+		CreationTimestamp: metav1.NewTime(time.Unix(100, 0)),
+		Labels:            map[string]string{kubernetesExecutionIDLabel: testExecution().ID},
+	}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+	ownTestPod(job, owned)
+	spoof := owned.DeepCopy()
+	spoof.Name = "spoof"
+	spoof.UID = types.UID("spoof-uid")
+	spoof.CreationTimestamp = metav1.NewTime(time.Unix(200, 0))
+	spoof.OwnerReferences = nil
+	spoof.Status.Phase = corev1.PodFailed
+	stale := spoof.DeepCopy()
+	stale.Name = "stale"
+	stale.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: types.UID("old-job-uid"), Controller: boolPtr(true)}}
+	state, err := testDispatcher(fake.NewSimpleClientset(job, owned, spoof, stale)).Inspect(context.Background(), testExecution())
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.PodUID != "owned-uid" || state.Phase != kubernetesPhaseRunning {
+		t.Fatalf("state = %#v, want only current Job-owned Pod", state)
+	}
+}
+
+func TestNewestPodUsesStableNameAndUIDTieBreak(t *testing.T) {
+	timestamp := metav1.NewTime(time.Unix(100, 0))
+	pods := []corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", UID: types.UID("uid-z"), CreationTimestamp: timestamp}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", UID: types.UID("uid-a"), CreationTimestamp: timestamp}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", UID: types.UID("uid-z"), CreationTimestamp: timestamp}},
+	}
+	if got := newestPod(pods); got == nil || got.Name != "pod-b" || got.UID != types.UID("uid-z") {
+		t.Fatalf("newestPod = %#v, want stable pod-b/uid-z tie break", got)
 	}
 }
 
@@ -411,6 +667,52 @@ func TestKubernetesDispatcherStopsWhenPVCProvisioningFails(t *testing.T) {
 	jobs, listErr := client.BatchV1().Jobs("anban").List(context.Background(), metav1.ListOptions{})
 	if listErr != nil || len(jobs.Items) != 0 {
 		t.Fatalf("jobs = %#v, err = %v, want none after PVC failure", jobs.Items, listErr)
+	}
+}
+
+func TestKubernetesDispatcherRecoversFromPVCCreateAlreadyExistsRace(t *testing.T) {
+	desiredPVC := buildProjectMemoryPVC(testJobConfig(), "project-1")
+	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	client := fake.NewSimpleClientset(desiredJob)
+	gets := 0
+	client.PrependReactor("get", "persistentvolumeclaims", func(ktesting.Action) (bool, runtime.Object, error) {
+		gets++
+		if gets == 1 {
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "persistentvolumeclaims"}, desiredPVC.Name)
+		}
+		return true, desiredPVC.DeepCopy(), nil
+	})
+	client.PrependReactor("create", "persistentvolumeclaims", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "persistentvolumeclaims"}, desiredPVC.Name)
+	})
+	if err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask()); err != nil {
+		t.Fatalf("Dispatch after PVC create race: %v", err)
+	}
+	if gets != 2 {
+		t.Fatalf("PVC GET calls = %d, want initial lookup plus race recovery lookup", gets)
+	}
+}
+
+func TestKubernetesDispatcherRecoversFromJobCreateAlreadyExistsRace(t *testing.T) {
+	desiredPVC := buildProjectMemoryPVC(testJobConfig(), "project-1")
+	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	client := fake.NewSimpleClientset(desiredPVC)
+	gets := 0
+	client.PrependReactor("get", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+		gets++
+		if gets == 1 {
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "jobs"}, desiredJob.Name)
+		}
+		return true, desiredJob.DeepCopy(), nil
+	})
+	client.PrependReactor("create", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "jobs"}, desiredJob.Name)
+	})
+	if err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask()); err != nil {
+		t.Fatalf("Dispatch after Job create race: %v", err)
+	}
+	if gets != 2 {
+		t.Fatalf("Job GET calls = %d, want initial lookup plus race recovery lookup", gets)
 	}
 }
 
@@ -470,3 +772,43 @@ func assertProjectedAudience(t *testing.T, volumes []corev1.Volume, audience str
 	}
 	t.Fatalf("projected service-account token audience %q not found in %#v", audience, volumes)
 }
+
+func requireTestVolume(t *testing.T, job *batchv1.Job, name string) *corev1.VolumeSource {
+	t.Helper()
+	for i := range job.Spec.Template.Spec.Volumes {
+		if job.Spec.Template.Spec.Volumes[i].Name == name {
+			return &job.Spec.Template.Spec.Volumes[i].VolumeSource
+		}
+	}
+	t.Fatalf("volume %q not found", name)
+	return nil
+}
+
+func requireTestTokenProjection(t *testing.T, job *batchv1.Job) *corev1.ServiceAccountTokenProjection {
+	t.Helper()
+	projected := requireTestVolume(t, job, kubernetesTokenVolumeName).Projected
+	if projected == nil {
+		t.Fatal("token projected volume missing")
+	}
+	for i := range projected.Sources {
+		if projected.Sources[i].ServiceAccountToken != nil {
+			return projected.Sources[i].ServiceAccountToken
+		}
+	}
+	t.Fatal("service account token projection missing")
+	return nil
+}
+
+func ownTestPod(job *batchv1.Job, pod *corev1.Pod) {
+	pod.Labels[batchv1.JobNameLabel] = job.Name
+	pod.OwnerReferences = []metav1.OwnerReference{{
+		APIVersion: "batch/v1",
+		Kind:       "Job",
+		Name:       job.Name,
+		UID:        job.UID,
+		Controller: boolPtr(true),
+	}}
+}
+
+func boolPtr(value bool) *bool       { return &value }
+func stringPtr(value string) *string { return &value }

@@ -7,6 +7,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -120,8 +121,23 @@ func (d *kubernetesJobDispatcher) Delete(ctx context.Context, execution *model.T
 		return err
 	}
 	name := kubernetesJobName(execution.ID)
+	jobs := d.kube.BatchV1().Jobs(d.config.Namespace)
+	job, err := jobs.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get Kubernetes Job %q before delete: %w", name, err)
+	}
+	desiredLabels := kubernetesExecutionLabels(execution, nil)
+	if err := verifyRequiredLabels(job.Labels, desiredLabels); err != nil {
+		return fmt.Errorf("Kubernetes Job %q identity mismatch: %w", name, err)
+	}
 	foreground := metav1.DeletePropagationForeground
-	err := d.kube.BatchV1().Jobs(d.config.Namespace).Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: &foreground})
+	err = jobs.Delete(ctx, name, metav1.DeleteOptions{
+		PropagationPolicy: &foreground,
+		Preconditions:     &metav1.Preconditions{UID: &job.UID},
+	})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
@@ -151,7 +167,7 @@ func (d *kubernetesJobDispatcher) DeleteProjectMemory(ctx context.Context, proje
 	if err := verifyRequiredLabels(pvc.Labels, desired.Labels); err != nil {
 		return fmt.Errorf("project memory PVC %q identity mismatch: %w", name, err)
 	}
-	if err := pvcs.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+	if err := pvcs.Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pvc.UID}}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete project memory PVC %q: %w", name, err)
 	}
 	return nil
@@ -173,7 +189,13 @@ func (d *kubernetesJobDispatcher) Inspect(ctx context.Context, execution *model.
 	if err != nil {
 		return nil, fmt.Errorf("list pods for Kubernetes Job %q: %w", name, err)
 	}
-	if pod := newestPod(pods.Items); pod != nil {
+	ownedPods := make([]corev1.Pod, 0, len(pods.Items))
+	for i := range pods.Items {
+		if podControlledByJob(&pods.Items[i], job) {
+			ownedPods = append(ownedPods, pods.Items[i])
+		}
+	}
+	if pod := newestPod(ownedPods); pod != nil {
 		state.PodUID = string(pod.UID)
 		applyPodDiagnostics(state, pod)
 	}
@@ -202,9 +224,11 @@ func verifyPVC(existing, desired *corev1.PersistentVolumeClaim, projectID string
 		return fmt.Errorf("project memory PVC %q identity mismatch for project %q: %w", existing.Name, projectID, err)
 	}
 	if existing.Spec.StorageClassName == nil || desired.Spec.StorageClassName == nil || *existing.Spec.StorageClassName != *desired.Spec.StorageClassName ||
-		!containsAccessMode(existing.Spec.AccessModes, corev1.ReadWriteMany) ||
-		existing.Spec.Resources.Requests.Storage().Cmp(*desired.Spec.Resources.Requests.Storage()) != 0 {
+		!containsAccessMode(existing.Spec.AccessModes, corev1.ReadWriteMany) {
 		return fmt.Errorf("project memory PVC %q configuration mismatch", existing.Name)
+	}
+	if existing.Spec.Resources.Requests.Storage().Cmp(*desired.Spec.Resources.Requests.Storage()) < 0 {
+		return fmt.Errorf("project memory PVC %q is smaller than required; expand it to at least %s", existing.Name, desired.Spec.Resources.Requests.Storage().String())
 	}
 	return nil
 }
@@ -213,10 +237,81 @@ func verifyJob(existing, desired *batchv1.Job, execution *model.TaskExecution, t
 	if err := verifyRequiredLabels(existing.Labels, desired.Labels); err != nil {
 		return fmt.Errorf("Kubernetes Job %q identity mismatch: %w", existing.Name, err)
 	}
-	if existing.Annotations[kubernetesObjectConfigHashLabel] != desired.Annotations[kubernetesObjectConfigHashLabel] {
+	if err := verifyRequiredLabels(existing.Spec.Template.Labels, desired.Spec.Template.Labels); err != nil {
+		return fmt.Errorf("Kubernetes Job %q configuration mismatch: template %w", existing.Name, err)
+	}
+	if !apiequality.Semantic.DeepEqual(controlledJobSpec(existing), controlledJobSpec(desired)) {
 		return fmt.Errorf("Kubernetes Job %q configuration mismatch for execution %q task %q", existing.Name, execution.ID, task.ID)
 	}
 	return nil
+}
+
+type kubernetesControlledJobSpec struct {
+	BackoffLimit            *int32
+	ActiveDeadlineSeconds   *int64
+	TTLSecondsAfterFinished *int32
+	RestartPolicy           corev1.RestartPolicy
+	ServiceAccountName      string
+	AutomountToken          *bool
+	TerminationGraceSeconds *int64
+	HostNetwork             bool
+	HostPID                 bool
+	HostIPC                 bool
+	ShareProcessNamespace   bool
+	HostUsers               bool
+	RuntimeClassName        string
+	PodSecurityContext      *corev1.PodSecurityContext
+	InitContainers          []corev1.Container
+	Containers              []kubernetesControlledContainer
+	Volumes                 []corev1.Volume
+	ImagePullSecrets        []corev1.LocalObjectReference
+}
+
+type kubernetesControlledContainer struct {
+	Name            string
+	Image           string
+	ImagePullPolicy corev1.PullPolicy
+	Command         []string
+	Args            []string
+	SecurityContext *corev1.SecurityContext
+	Resources       corev1.ResourceRequirements
+	VolumeMounts    []corev1.VolumeMount
+	Env             []corev1.EnvVar
+	EnvFrom         []corev1.EnvFromSource
+}
+
+func controlledJobSpec(job *batchv1.Job) kubernetesControlledJobSpec {
+	pod := job.Spec.Template.Spec
+	containers := make([]kubernetesControlledContainer, 0, len(pod.Containers))
+	for _, container := range pod.Containers {
+		containers = append(containers, kubernetesControlledContainer{
+			Name: container.Name, Image: container.Image, ImagePullPolicy: container.ImagePullPolicy,
+			Command: container.Command, Args: container.Args, SecurityContext: container.SecurityContext,
+			Resources: container.Resources, VolumeMounts: container.VolumeMounts,
+			Env: container.Env, EnvFrom: container.EnvFrom,
+		})
+	}
+	return kubernetesControlledJobSpec{
+		BackoffLimit: job.Spec.BackoffLimit, ActiveDeadlineSeconds: job.Spec.ActiveDeadlineSeconds,
+		TTLSecondsAfterFinished: job.Spec.TTLSecondsAfterFinished,
+		RestartPolicy:           pod.RestartPolicy,
+		ServiceAccountName:      pod.ServiceAccountName, AutomountToken: pod.AutomountServiceAccountToken,
+		TerminationGraceSeconds: pod.TerminationGracePeriodSeconds,
+		HostNetwork:             pod.HostNetwork, HostPID: pod.HostPID, HostIPC: pod.HostIPC,
+		ShareProcessNamespace: valueOr(pod.ShareProcessNamespace, false),
+		HostUsers:             valueOr(pod.HostUsers, true),
+		RuntimeClassName:      valueOr(pod.RuntimeClassName, ""),
+		PodSecurityContext:    pod.SecurityContext,
+		InitContainers:        pod.InitContainers, Containers: containers, Volumes: pod.Volumes,
+		ImagePullSecrets: pod.ImagePullSecrets,
+	}
+}
+
+func valueOr[T any](value *T, fallback T) T {
+	if value == nil {
+		return fallback
+	}
+	return *value
 }
 
 func verifyRequiredLabels(existing, desired map[string]string) error {
@@ -244,6 +339,7 @@ func inspectJob(job *batchv1.Job) *KubernetesExecutionState {
 			state.Phase = kubernetesPhaseSucceeded
 			state.Reason = condition.Reason
 			state.Message = condition.Message
+			return state
 		}
 	}
 	if job.Status.Active > 0 {
@@ -253,7 +349,8 @@ func inspectJob(job *batchv1.Job) *KubernetesExecutionState {
 }
 
 func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
-	if !isTerminalKubernetesPhase(state.Phase) {
+	jobTerminal := isTerminalKubernetesPhase(state.Phase)
+	if !jobTerminal {
 		switch pod.Status.Phase {
 		case corev1.PodPending:
 			state.Phase = kubernetesPhasePending
@@ -266,7 +363,15 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 		}
 	}
 	for _, status := range pod.Status.ContainerStatuses {
-		if status.Name != kubernetesAgentContainerName || status.State.Terminated == nil {
+		if status.Name != kubernetesAgentContainerName {
+			continue
+		}
+		if status.State.Waiting != nil && !jobTerminal {
+			state.Reason = status.State.Waiting.Reason
+			state.Message = status.State.Waiting.Message
+			return
+		}
+		if status.State.Terminated == nil {
 			continue
 		}
 		terminated := status.State.Terminated
@@ -287,20 +392,25 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 		}
 		return
 	}
+	for _, status := range pod.Status.InitContainerStatuses {
+		if status.State.Waiting != nil && !jobTerminal {
+			state.Reason = status.State.Waiting.Reason
+			state.Message = status.State.Waiting.Message
+			return
+		}
+	}
 	for _, condition := range pod.Status.Conditions {
-		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
-			if !isTerminalKubernetesPhase(state.Phase) {
-				state.Phase = kubernetesPhasePending
-			}
+		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse && !jobTerminal {
+			state.Phase = kubernetesPhasePending
 			state.Reason = condition.Reason
 			state.Message = condition.Message
 			return
 		}
 	}
-	if pod.Status.Reason != "" {
+	if pod.Status.Reason != "" && !jobTerminal {
 		state.Reason = pod.Status.Reason
 	}
-	if pod.Status.Message != "" {
+	if pod.Status.Message != "" && !jobTerminal {
 		state.Message = pod.Status.Message
 	}
 }
@@ -315,11 +425,25 @@ func newestPod(pods []corev1.Pod) *corev1.Pod {
 	}
 	newest := &pods[0]
 	for i := 1; i < len(pods); i++ {
-		if pods[i].CreationTimestamp.After(newest.CreationTimestamp.Time) {
+		if pods[i].CreationTimestamp.After(newest.CreationTimestamp.Time) ||
+			(pods[i].CreationTimestamp.Equal(&newest.CreationTimestamp) &&
+				(pods[i].Name > newest.Name || (pods[i].Name == newest.Name && string(pods[i].UID) > string(newest.UID)))) {
 			newest = &pods[i]
 		}
 	}
 	return newest
+}
+
+func podControlledByJob(pod *corev1.Pod, job *batchv1.Job) bool {
+	if pod == nil || job == nil || job.UID == "" || pod.Labels[batchv1.JobNameLabel] != job.Name {
+		return false
+	}
+	for _, owner := range pod.OwnerReferences {
+		if owner.Controller != nil && *owner.Controller && owner.APIVersion == "batch/v1" && owner.Kind == "Job" && owner.Name == job.Name && owner.UID == job.UID {
+			return true
+		}
+	}
+	return false
 }
 
 func containsAccessMode(modes []corev1.PersistentVolumeAccessMode, want corev1.PersistentVolumeAccessMode) bool {

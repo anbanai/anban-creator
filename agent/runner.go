@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
@@ -31,37 +32,9 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		WorkDir: r.cfg.Workspace,
 	}
 
-	sdkOpts := []claudecode.Option{
-		claudecode.WithMaxTurns(r.cfg.MaxTurns),
-		claudecode.WithCwd(r.cfg.Workspace),
-		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
-		// Load both user and project setting sources so a CLAUDE.md in the
-		// workspace (e.g., written by the desktop shell in the future) is picked up
-		// by Claude Code as project memory.
-		claudecode.WithSettingSources(claudecode.SettingSourceUser, claudecode.SettingSourceProject),
-		serveragent.WithManagedAgentRuntimePolicy(),
-		claudecode.WithExtraArgs(map[string]*string{
-			"agent": &r.cfg.AgentFlag,
-		}),
-		claudecode.WithEnvVar("ANBAN_API_KEY", r.cfg.APIKey),
-		claudecode.WithEnvVar("ANBAN_API_URL", r.cfg.ServerURL),
-		claudecode.WithStderrCallback(func(line string) {
-			_ = r.reporter.ReportProgress(ctx, strings.TrimSpace(line))
-		}),
-	}
-	for key, value := range montageProviderEnvFromProcess(r.cfg.TaskType) {
-		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
-	}
-	if r.cfg.Model != "" {
-		sdkOpts = append(sdkOpts, claudecode.WithModel(r.cfg.Model))
-		_ = r.reporter.ReportProgress(ctx, fmt.Sprintf("agent model: %s", r.cfg.Model))
-	}
-	if r.cfg.AutoMemoryDirectory != "" {
-		settings, err := serveragent.BuildAutoMemorySettingsJSON(r.cfg.AutoMemoryDirectory)
-		if err != nil {
-			return result, err
-		}
-		sdkOpts = append(sdkOpts, claudecode.WithSettings(settings))
+	sdkOpts, err := r.buildSDKOptions(ctx)
+	if err != nil {
+		return result, err
 	}
 
 	var resultText string
@@ -73,7 +46,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 	toolCalls := make(map[string]trackedToolCall)
 	toolUseSummary := make(map[string]int)
 
-	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
+	err = claudecode.WithClient(ctx, func(client claudecode.Client) error {
 		if err := client.Query(ctx, r.cfg.UserPrompt()); err != nil {
 			return fmt.Errorf("send query: %w", err)
 		}
@@ -171,4 +144,45 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		result.AgentLikelyFailed = true
 	}
 	return result, nil
+}
+
+func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, error) {
+	sdkOpts := []claudecode.Option{
+		claudecode.WithMaxTurns(r.cfg.MaxTurns),
+		claudecode.WithCwd(r.cfg.Workspace),
+		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
+		// Load both user and project setting sources so a CLAUDE.md in the
+		// workspace (e.g., written by the desktop shell in the future) is picked up
+		// by Claude Code as project memory.
+		claudecode.WithSettingSources(claudecode.SettingSourceUser, claudecode.SettingSourceProject),
+		serveragent.WithManagedAgentRuntimePolicy(),
+		claudecode.WithExtraArgs(map[string]*string{
+			"agent": &r.cfg.AgentFlag,
+		}),
+		claudecode.WithEnvVar("ANBAN_API_KEY", r.cfg.APIKey),
+		claudecode.WithEnvVar("ANBAN_API_URL", r.cfg.ServerURL),
+		claudecode.WithStderrCallback(func(line string) {
+			_ = r.reporter.ReportProgress(ctx, strings.TrimSpace(line))
+		}),
+	}
+	if pluginRoot := strings.TrimSpace(os.Getenv("CLAUDE_PLUGIN_ROOT")); pluginRoot != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithLocalPlugin(pluginRoot))
+	}
+	for key, value := range montageProviderEnvFromProcess(r.cfg.TaskType) {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
+	}
+	if r.cfg.Model != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithModel(r.cfg.Model))
+		if r.reporter != nil {
+			_ = r.reporter.ReportProgress(ctx, fmt.Sprintf("agent model: %s", r.cfg.Model))
+		}
+	}
+	if r.cfg.AutoMemoryDirectory != "" {
+		settings, err := serveragent.BuildAutoMemorySettingsJSON(r.cfg.AutoMemoryDirectory)
+		if err != nil {
+			return nil, err
+		}
+		sdkOpts = append(sdkOpts, claudecode.WithSettings(settings))
+	}
+	return sdkOpts, nil
 }
