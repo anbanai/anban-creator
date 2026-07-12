@@ -13,6 +13,7 @@ Remove the redundant `首页` section heading and `首页` navigation item pairi
 - Keep the Dashboard page title and route behavior unchanged; this change only affects navigation presentation and naming.
 - Preserve collapsed-sidebar tooltips, active-state styling, mobile menu closing, command-palette discovery, and derived navigation collections through the existing `NavItem` contract.
 - On mobile, render the open-menu trigger only while the drawer is closed and the close-menu trigger only while it is open, preventing either control from covering the sidebar brand.
+- Render `Claude Code`, `OpenClaw`, `Codex`, and `设置` directly in a `平台与设置` section at the end of the scrollable main navigation; do not hide them behind a `更多` popover.
 
 ## Alternatives Considered
 
@@ -25,4 +26,5 @@ Remove the redundant `首页` section heading and `首页` navigation item pairi
 - Update navigation unit tests to expect `AI助手` at `/`.
 - Update sidebar tests to assert a single `AI助手` navigation link and no `首页` navigation label.
 - Assert that opening the mobile drawer removes the open-menu trigger while keeping the close-menu trigger available.
+- Assert that platform and settings links are present without opening another control in expanded, collapsed, and mobile sidebar states.
 - Run the targeted Studio tests, then the full Studio test suite and production build.

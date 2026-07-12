@@ -10,7 +10,7 @@ import {
   Search,
   CalendarRange,
   Boxes,
-  MoreHorizontal,
+  Settings,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
 import LocalExecutorStatusPill from "@/components/desktop/LocalExecutorStatusPill";
@@ -22,11 +22,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   assetItems,
   automationItems,
@@ -175,16 +170,14 @@ export default function Sidebar() {
           <SidebarSection label="自动化" icon={CalendarRange} items={automationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           <SidebarSection label="资产" icon={Boxes} items={assetItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           <SidebarSection label="经营" icon={BarChart3} items={businessItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="平台与设置" icon={Settings} items={connectSettingItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
         </nav>
 
-        {/* Divider */}
-        <div className="mx-3 border-t border-sidebar-border" />
-
-        {/* Bottom: Platform + Settings */}
-        <div className="flex flex-col gap-0.5 px-3 py-2">
-          {isDesktop() && <LocalExecutorStatusPill collapsed={collapsed} />}
-          <SidebarUtilityMenu collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
-        </div>
+        {isDesktop() && (
+          <div className="border-t border-sidebar-border px-3 py-2">
+            <LocalExecutorStatusPill collapsed={collapsed} />
+          </div>
+        )}
 
         {/* Bottom: User account */}
         <div className={`border-t border-sidebar-border py-3 ${collapsed ? "flex justify-center px-0" : "px-3"}`}>
@@ -296,92 +289,6 @@ function SidebarSection({
       </div>
     </div>
   );
-}
-
-function SidebarUtilityMenu({
-  collapsed,
-  onSelect,
-}: {
-  collapsed: boolean
-  onSelect: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const handleSelect = () => {
-    setOpen(false)
-    onSelect()
-  }
-
-  if (collapsed) {
-    return (
-      <Popover open={open} onOpenChange={setOpen}>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PopoverTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-label="更多"
-                    className="flex w-full items-center justify-center rounded-md py-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                  />
-                }
-              />
-            }
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </TooltipTrigger>
-          <TooltipContent side="right">更多</TooltipContent>
-        </Tooltip>
-        <PopoverContent side="right" align="end" sideOffset={8} className="w-56 p-1">
-          <UtilityMenuLinks onSelect={handleSelect} />
-        </PopoverContent>
-      </Popover>
-    );
-  }
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            aria-label="更多"
-            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-          />
-        }
-      >
-        <MoreHorizontal className="h-4 w-4 shrink-0" />
-        <span>更多</span>
-      </PopoverTrigger>
-      <PopoverContent side="top" align="start" sideOffset={8} className="w-56 p-1">
-        <UtilityMenuLinks onSelect={handleSelect} />
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function UtilityMenuLinks({ onSelect }: { onSelect: () => void }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      {connectSettingItems.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          onClick={onSelect}
-          className={({ isActive }) =>
-            `flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
-              isActive
-                ? "bg-accent text-accent-foreground"
-                : "text-popover-foreground/75 hover:bg-accent hover:text-accent-foreground"
-            }`
-          }
-        >
-          <item.icon className="h-4 w-4 shrink-0" />
-          <span>{item.label}</span>
-        </NavLink>
-      ))}
-    </div>
-  )
 }
 
 function SidebarNavLink({

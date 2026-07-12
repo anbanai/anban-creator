@@ -83,58 +83,48 @@ describe('Sidebar', () => {
     expect(screen.queryByText('创意工坊')).not.toBeInTheDocument()
   })
 
-  it('keeps low-frequency connection setup behind the more menu', async () => {
+  it('renders connection and settings links directly in the sidebar', () => {
     renderSidebar()
 
-    expect(screen.queryByText('接入配置')).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Claude Code' })).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '更多' }))
-
-    expect(await screen.findByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'OpenClaw' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Codex' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
   })
 
-  it('keeps the utility menu reachable when collapsed', async () => {
+  it('keeps expanded utility links reachable when collapsed', () => {
     renderSidebar()
 
     fireEvent.click(screen.getByRole('button', { name: '收起侧边栏' }))
-    fireEvent.click(screen.getByRole('button', { name: '更多' }))
 
-    expect(await screen.findByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'OpenClaw' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Codex' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
   })
 
-  it('navigates from the utility menu and closes the popover', async () => {
+  it('navigates directly to settings from the sidebar', async () => {
     renderAuthenticatedShell()
 
-    fireEvent.click(screen.getByRole('button', { name: '更多' }))
-    fireEvent.click(await screen.findByRole('link', { name: '设置' }))
+    fireEvent.click(screen.getByRole('link', { name: '设置' }))
 
     expect(await screen.findByRole('heading', { name: '设置页' })).toBeInTheDocument()
-    await waitFor(() => {
-      expect(screen.queryByRole('link', { name: 'Claude Code' })).not.toBeInTheDocument()
-    })
   })
 
-  it('closes the mobile drawer after navigating from the utility menu', async () => {
+  it('closes the mobile drawer after navigating from an expanded utility link', async () => {
     renderAuthenticatedShell()
 
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     expect(screen.getByRole('button', { name: '关闭菜单' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '打开菜单' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '更多' }))
-    fireEvent.click(await screen.findByRole('link', { name: 'Claude Code' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Claude Code' }))
 
     expect(await screen.findByRole('heading', { name: 'Claude Code 页' })).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: '关闭菜单' })).not.toBeInTheDocument()
-      expect(screen.queryByRole('link', { name: 'OpenClaw' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '打开菜单' })).toBeInTheDocument()
     })
   })
 
