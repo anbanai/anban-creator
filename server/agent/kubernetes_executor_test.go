@@ -268,7 +268,7 @@ func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 	}
 }
 
-func TestKubernetesEnsureAgentPodDeletesLegacyPod(t *testing.T) {
+func TestKubernetesEnsureAgentPodPreservesActiveLegacyPod(t *testing.T) {
 	opts := &ExecutionOptions{
 		Task:    &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"},
 		Project: &model.Project{ID: "project-1"},
@@ -294,11 +294,6 @@ func TestKubernetesEnsureAgentPodDeletesLegacyPod(t *testing.T) {
 	legacy.UID = types.UID("legacy-pod-uid")
 	legacy.Labels["app.kubernetes.io/name"] = "anban-agent"
 	client := kubernetesfake.NewSimpleClientset(current, legacy)
-	var deleteOptions metav1.DeleteOptions
-	client.PrependReactor("delete", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
-		deleteOptions = action.(kubernetestesting.DeleteAction).GetDeleteOptions()
-		return false, nil, nil
-	})
 	e.kube = client
 
 	got, err := e.ensureAgentPod(context.Background(), opts)
@@ -308,28 +303,66 @@ func TestKubernetesEnsureAgentPodDeletesLegacyPod(t *testing.T) {
 	if got != current.Name {
 		t.Fatalf("pod name = %q, want current pod %q", got, current.Name)
 	}
-	if _, err := e.kube.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), legacy.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Fatalf("legacy pod get error = %v, want NotFound after cleanup", err)
+	if gotLegacy, err := e.kube.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), legacy.Name, metav1.GetOptions{}); err != nil || gotLegacy.UID != legacy.UID {
+		t.Fatalf("active legacy pod was not preserved: pod=%#v err=%v", gotLegacy, err)
 	}
 	if _, err := e.kube.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), current.Name, metav1.GetOptions{}); err != nil {
 		t.Fatalf("current pod was not preserved: %v", err)
 	}
-	if deleteOptions.Preconditions == nil || deleteOptions.Preconditions.UID == nil || *deleteOptions.Preconditions.UID != legacy.UID {
-		t.Fatalf("delete preconditions = %#v, want legacy UID %q", deleteOptions.Preconditions, legacy.UID)
+}
+
+func TestKubernetesEnsureAgentPodDeletesDriftedCurrentPodWithIdentityPreconditions(t *testing.T) {
+	opts := &ExecutionOptions{Task: &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}}
+	e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: "agents"}}
+	desired := e.buildAgentPod(opts)
+	desired.Namespace = e.kubeCfg.Namespace
+	stale := desired.DeepCopy()
+	stale.UID = types.UID("stale-current-uid")
+	stale.ResourceVersion = "42"
+	stale.Annotations[kubernetesPodConfigHashAnnotation] = "stale-config"
+	client := kubernetesfake.NewSimpleClientset(stale)
+	var deleteOptions metav1.DeleteOptions
+	client.PrependReactor("delete", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+		deleteOptions = action.(kubernetestesting.DeleteAction).GetDeleteOptions()
+		return false, nil, nil
+	})
+	client.PrependReactor("create", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+		created := action.(kubernetestesting.CreateAction).GetObject().(*corev1.Pod).DeepCopy()
+		created.UID = types.UID("desired-current-uid")
+		created.ResourceVersion = "43"
+		created.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+		if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), created, e.kubeCfg.Namespace); err != nil {
+			return true, nil, err
+		}
+		return true, created, nil
+	})
+	e.kube = client
+
+	if _, err := e.ensureAgentPod(context.Background(), opts); err != nil {
+		t.Fatalf("ensureAgentPod: %v", err)
+	}
+	if deleteOptions.Preconditions == nil || deleteOptions.Preconditions.UID == nil || *deleteOptions.Preconditions.UID != stale.UID {
+		t.Fatalf("delete UID precondition = %#v, want %q", deleteOptions.Preconditions, stale.UID)
+	}
+	if deleteOptions.Preconditions.ResourceVersion == nil || *deleteOptions.Preconditions.ResourceVersion != stale.ResourceVersion {
+		t.Fatalf("delete resourceVersion precondition = %#v, want %q", deleteOptions.Preconditions, stale.ResourceVersion)
 	}
 }
 
-func TestKubernetesEnsureAgentPodRejectsChangedLegacyPodIdentity(t *testing.T) {
+func TestKubernetesEnsureAgentPodPreservesChangedCurrentPodIdentity(t *testing.T) {
 	opts := &ExecutionOptions{Task: &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}}
 	e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: "agents"}}
-	legacy := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		Name:      kubernetesLegacyAgentPodName(opts.Task),
-		Namespace: e.kubeCfg.Namespace,
-		UID:       types.UID("legacy-old-uid"),
-	}}
-	replacement := legacy.DeepCopy()
-	replacement.UID = types.UID("legacy-replacement-uid")
-	client := kubernetesfake.NewSimpleClientset(legacy)
+	desired := e.buildAgentPod(opts)
+	desired.Namespace = e.kubeCfg.Namespace
+	stale := desired.DeepCopy()
+	stale.UID = types.UID("stale-current-uid")
+	stale.ResourceVersion = "42"
+	stale.Annotations[kubernetesPodConfigHashAnnotation] = "stale-config"
+	replacement := desired.DeepCopy()
+	replacement.UID = types.UID("replacement-current-uid")
+	replacement.ResourceVersion = "43"
+	replacement.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	client := kubernetesfake.NewSimpleClientset(stale)
 	client.PrependReactor("delete", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
 		name := action.(kubernetestesting.DeleteAction).GetName()
 		if err := client.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), e.kubeCfg.Namespace, name); err != nil {
@@ -338,39 +371,7 @@ func TestKubernetesEnsureAgentPodRejectsChangedLegacyPodIdentity(t *testing.T) {
 		if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), replacement.DeepCopy(), e.kubeCfg.Namespace); err != nil {
 			return true, nil, err
 		}
-		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, name, fmt.Errorf("UID precondition failed"))
-	})
-	e.kube = client
-
-	_, err := e.ensureAgentPod(context.Background(), opts)
-	if err == nil || !strings.Contains(err.Error(), "identity changed") {
-		t.Fatalf("ensureAgentPod error = %v, want legacy identity changed error", err)
-	}
-	got, getErr := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), replacement.Name, metav1.GetOptions{})
-	if getErr != nil {
-		t.Fatalf("replacement pod was not preserved: %v", getErr)
-	}
-	if got.UID != replacement.UID {
-		t.Fatalf("replacement UID = %q, want %q", got.UID, replacement.UID)
-	}
-}
-
-func TestKubernetesEnsureAgentPodToleratesLegacyDeleteNotFound(t *testing.T) {
-	opts := &ExecutionOptions{Task: &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}}
-	e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: "agents"}}
-	current := e.buildAgentPod(opts)
-	current.Namespace = e.kubeCfg.Namespace
-	current.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
-	legacy := current.DeepCopy()
-	legacy.Name = kubernetesLegacyAgentPodName(opts.Task)
-	legacy.UID = types.UID("legacy-pod-uid")
-	client := kubernetesfake.NewSimpleClientset(current, legacy)
-	client.PrependReactor("delete", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
-		name := action.(kubernetestesting.DeleteAction).GetName()
-		if err := client.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), e.kubeCfg.Namespace, name); err != nil {
-			return true, nil, err
-		}
-		return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, name)
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, name, fmt.Errorf("identity precondition failed"))
 	})
 	e.kube = client
 
@@ -378,26 +379,59 @@ func TestKubernetesEnsureAgentPodToleratesLegacyDeleteNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureAgentPod: %v", err)
 	}
-	if got != current.Name {
-		t.Fatalf("pod name = %q, want current pod %q", got, current.Name)
+	if got != desired.Name {
+		t.Fatalf("pod name = %q, want replacement %q", got, desired.Name)
+	}
+	current, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), desired.Name, metav1.GetOptions{})
+	if err != nil || current.UID != replacement.UID {
+		t.Fatalf("replacement current pod was not preserved: pod=%#v err=%v", current, err)
 	}
 }
 
-func TestKubernetesEnsureAgentPodRejectsLegacyPodWithoutUID(t *testing.T) {
-	opts := &ExecutionOptions{Task: &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}}
-	e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: "agents"}}
-	current := e.buildAgentPod(opts)
-	current.Namespace = e.kubeCfg.Namespace
-	current.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
-	legacy := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		Name:      kubernetesLegacyAgentPodName(opts.Task),
-		Namespace: e.kubeCfg.Namespace,
-	}}
-	e.kube = kubernetesfake.NewSimpleClientset(current, legacy)
+func TestKubernetesEnsureAgentPodRejectsDriftedCurrentPodWithoutIdentity(t *testing.T) {
+	tests := []struct {
+		name            string
+		uid             types.UID
+		resourceVersion string
+		wantError       string
+	}{
+		{name: "empty UID", resourceVersion: "42", wantError: "UID is empty"},
+		{name: "empty resource version", uid: types.UID("stale-current-uid"), wantError: "resourceVersion is empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &ExecutionOptions{Task: &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}}
+			e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: "agents"}}
+			desired := e.buildAgentPod(opts)
+			desired.Namespace = e.kubeCfg.Namespace
+			stale := desired.DeepCopy()
+			stale.UID = tt.uid
+			stale.ResourceVersion = tt.resourceVersion
+			stale.Annotations[kubernetesPodConfigHashAnnotation] = "stale-config"
+			client := kubernetesfake.NewSimpleClientset(stale)
+			deleteCalls := 0
+			client.PrependReactor("delete", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+				deleteCalls++
+				return false, nil, nil
+			})
+			client.PrependReactor("create", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+				created := action.(kubernetestesting.CreateAction).GetObject().(*corev1.Pod).DeepCopy()
+				created.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+				if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), created, e.kubeCfg.Namespace); err != nil {
+					return true, nil, err
+				}
+				return true, created, nil
+			})
+			e.kube = client
 
-	_, err := e.ensureAgentPod(context.Background(), opts)
-	if err == nil || !strings.Contains(err.Error(), "UID is empty") {
-		t.Fatalf("ensureAgentPod error = %v, want empty legacy UID error", err)
+			_, err := e.ensureAgentPod(context.Background(), opts)
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("ensureAgentPod error = %v, want %q", err, tt.wantError)
+			}
+			if deleteCalls != 0 {
+				t.Fatalf("delete calls = %d, want fail closed before delete", deleteCalls)
+			}
+		})
 	}
 }
 
@@ -442,8 +476,8 @@ func TestKubernetesEnsureAgentPodAcceptsConcurrentCurrentPodCreation(t *testing.
 	if got != current.Name {
 		t.Fatalf("pod name = %q, want concurrently created pod %q", got, current.Name)
 	}
-	if _, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), legacy.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Fatalf("legacy pod get error = %v, want NotFound after cleanup", err)
+	if _, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), legacy.Name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("active legacy pod was not preserved: %v", err)
 	}
 	if _, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), current.Name, metav1.GetOptions{}); err != nil {
 		t.Fatalf("concurrently created current pod was not preserved: %v", err)
@@ -473,6 +507,8 @@ func TestKubernetesEnsureAgentPodReconcilesStaleConcurrentWinner(t *testing.T) {
 	legacy.UID = types.UID("legacy-pod-uid")
 	legacy.Labels["app.kubernetes.io/name"] = "anban-agent"
 	stale := desired.DeepCopy()
+	stale.UID = types.UID("stale-current-uid")
+	stale.ResourceVersion = "41"
 	stale.Spec.Containers[0].Image = "registry.example.com/creator-agent:v1"
 	stale.Spec.Containers[0].SecurityContext = nil
 	stale.Annotations[kubernetesPodRevisionAnnotation] = "rev-1"
@@ -523,8 +559,8 @@ func TestKubernetesEnsureAgentPodReconcilesStaleConcurrentWinner(t *testing.T) {
 	if !kubernetesPodConfigMatches(current, desired) {
 		t.Fatalf("current pod config = %#v, want desired config", current)
 	}
-	if _, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), legacy.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Fatalf("legacy pod get error = %v, want NotFound after cleanup", err)
+	if _, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), legacy.Name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("active legacy pod was not preserved: %v", err)
 	}
 }
 
@@ -552,6 +588,8 @@ func TestKubernetesEnsureAgentPodReconcilesReplacementBeforeReadiness(t *testing
 	legacy.Labels["app.kubernetes.io/name"] = "anban-agent"
 	matching := desired.DeepCopy()
 	stale := desired.DeepCopy()
+	stale.UID = types.UID("stale-current-uid")
+	stale.ResourceVersion = "42"
 	stale.Spec.Containers[0].Image = "registry.example.com/creator-agent:v1"
 	stale.Annotations[kubernetesPodRevisionAnnotation] = "rev-1"
 	stale.Annotations[kubernetesPodConfigHashAnnotation] = "stale-config"

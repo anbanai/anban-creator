@@ -506,48 +506,6 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 	pod := e.buildAgentPod(opts)
 	pod.Namespace = e.kubeCfg.Namespace
 	pods := e.kube.CoreV1().Pods(e.kubeCfg.Namespace)
-	legacyPodName := kubernetesLegacyAgentPodName(opts.Task)
-	legacyPod, err := pods.Get(ctx, legacyPodName, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return "", fmt.Errorf("get legacy agent pod %s for cleanup: %w", legacyPodName, err)
-	}
-	if err == nil {
-		if legacyPod.UID == "" {
-			return "", fmt.Errorf("legacy agent pod %s UID is empty; refusing cleanup", legacyPodName)
-		}
-		legacyGone := false
-		if legacyPod.DeletionTimestamp == nil {
-			legacyUID := legacyPod.UID
-			deleteErr := pods.Delete(ctx, legacyPodName, metav1.DeleteOptions{
-				Preconditions: &metav1.Preconditions{UID: &legacyUID},
-			})
-			switch {
-			case deleteErr == nil:
-			case apierrors.IsNotFound(deleteErr):
-				legacyGone = true
-			case apierrors.IsConflict(deleteErr) || apierrors.IsInvalid(deleteErr):
-				observed, getErr := pods.Get(ctx, legacyPodName, metav1.GetOptions{})
-				if apierrors.IsNotFound(getErr) {
-					legacyGone = true
-					break
-				}
-				if getErr != nil {
-					return "", fmt.Errorf("re-get legacy agent pod %s after delete precondition failure: %w", legacyPodName, getErr)
-				}
-				if observed.UID != legacyUID {
-					return "", fmt.Errorf("legacy agent pod %s identity changed from UID %q to %q during cleanup", legacyPodName, legacyUID, observed.UID)
-				}
-				return "", fmt.Errorf("delete legacy agent pod %s: %w", legacyPodName, deleteErr)
-			default:
-				return "", fmt.Errorf("delete legacy agent pod %s: %w", legacyPodName, deleteErr)
-			}
-		}
-		if !legacyGone {
-			if err := e.waitForAgentPodDeleted(ctx, legacyPodName); err != nil {
-				return "", fmt.Errorf("wait for legacy agent pod %s deletion: %w", legacyPodName, err)
-			}
-		}
-	}
 	createAgentPod := func(action string) (bool, error) {
 		if _, err := pods.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 			if apierrors.IsAlreadyExists(err) {
@@ -580,8 +538,29 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 				continue
 			}
 			if !kubernetesPodConfigMatches(existing, pod) {
-				if err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-					return "", fmt.Errorf("delete drifted agent pod: %w", err)
+				if existing.UID == "" {
+					return "", fmt.Errorf("drifted agent pod %s UID is empty; refusing deletion", pod.Name)
+				}
+				if existing.ResourceVersion == "" {
+					return "", fmt.Errorf("drifted agent pod %s resourceVersion is empty; refusing deletion", pod.Name)
+				}
+				uid := existing.UID
+				resourceVersion := existing.ResourceVersion
+				deleteErr := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{
+					Preconditions: &metav1.Preconditions{
+						UID:             &uid,
+						ResourceVersion: &resourceVersion,
+					},
+				})
+				if apierrors.IsConflict(deleteErr) || apierrors.IsInvalid(deleteErr) {
+					continue
+				}
+				if apierrors.IsNotFound(deleteErr) {
+					createAction = "recreate agent pod"
+					continue
+				}
+				if deleteErr != nil {
+					return "", fmt.Errorf("delete drifted agent pod: %w", deleteErr)
 				}
 				if err := e.waitForAgentPodDeleted(ctx, pod.Name); err != nil {
 					return "", err
