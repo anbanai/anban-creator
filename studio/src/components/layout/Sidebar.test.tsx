@@ -126,6 +126,7 @@ describe('Sidebar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     expect(screen.getByRole('button', { name: '关闭菜单' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '打开菜单' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '更多' }))
     fireEvent.click(await screen.findByRole('link', { name: 'Claude Code' }))

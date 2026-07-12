@@ -78,13 +78,15 @@ export default function Sidebar() {
   return (
     <>
       {/* Mobile hamburger */}
-      <button
-        onClick={() => setMobileOpen(true)}
-        className="fixed left-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg bg-sidebar text-sidebar-foreground shadow-lg md:hidden"
-        aria-label="打开菜单"
-      >
-        <Menu className="h-5 w-5" />
-      </button>
+      {!mobileOpen && (
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="fixed left-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg bg-sidebar text-sidebar-foreground shadow-lg md:hidden"
+          aria-label="打开菜单"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+      )}
 
       {/* Mobile overlay */}
       {mobileOpen && (
