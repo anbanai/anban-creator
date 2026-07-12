@@ -14,6 +14,7 @@ import (
 const (
 	kubernetesAgentAppName       = "creator-agent"
 	kubernetesAgentNamePrefix    = kubernetesAgentAppName
+	kubernetesLegacyAgentPrefix  = "anban-agent"
 	kubernetesUserIDLabel        = "anban.ai/user-id"
 	kubernetesProjectIDLabel     = "anban.ai/project-id"
 	kubernetesTaskIDLabel        = "anban.ai/task-id"
@@ -23,6 +24,14 @@ const (
 var kubernetesNameUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
 
 func kubernetesAgentPodName(task *model.Task) string {
+	return kubernetesAgentPodNameWithPrefix(task, kubernetesAgentNamePrefix)
+}
+
+func kubernetesLegacyAgentPodName(task *model.Task) string {
+	return kubernetesAgentPodNameWithPrefix(task, kubernetesLegacyAgentPrefix)
+}
+
+func kubernetesAgentPodNameWithPrefix(task *model.Task, prefix string) string {
 	userID, projectID := "", ""
 	if task != nil {
 		userID = task.UserID
@@ -31,13 +40,13 @@ func kubernetesAgentPodName(task *model.Task) string {
 	user := kubernetesSafeNamePart(userID)
 	project := kubernetesSafeNamePart(projectID)
 	hash := kubernetesHashSuffix(userID + "\x00" + projectID)
-	base := fmt.Sprintf("%s-%s-%s", kubernetesAgentNamePrefix, user, project)
+	base := fmt.Sprintf("%s-%s-%s", prefix, user, project)
 	maxBaseLen := 63 - len(hash) - 1
 	if len(base) > maxBaseLen {
 		base = strings.Trim(base[:maxBaseLen], "-")
 	}
 	if base == "" {
-		base = kubernetesAgentNamePrefix
+		base = prefix
 	}
 	return strings.Trim(base+"-"+hash, "-")
 }

@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +12,12 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	kubernetesfake "k8s.io/client-go/kubernetes/fake"
+	kubernetestesting "k8s.io/client-go/testing"
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -34,6 +42,17 @@ func TestKubernetesPodNameIsDeterministicAndDNSSafe(t *testing.T) {
 	}
 	if !strings.HasPrefix(first, "creator-agent-") {
 		t.Fatalf("pod name = %q, want creator-agent prefix", first)
+	}
+}
+
+func TestKubernetesPodNamesDistinguishCurrentAndLegacyIdentity(t *testing.T) {
+	task := &model.Task{UserID: "user-1", ProjectID: "project-1"}
+
+	if got, want := kubernetesAgentPodName(task), "creator-agent-user-1-project-1-94df591a66"; got != want {
+		t.Fatalf("current pod name = %q, want %q", got, want)
+	}
+	if got, want := kubernetesLegacyAgentPodName(task), "anban-agent-user-1-project-1-94df591a66"; got != want {
+		t.Fatalf("legacy pod name = %q, want %q", got, want)
 	}
 }
 
@@ -245,6 +264,282 @@ func TestKubernetesPodConfigHashDetectsDrift(t *testing.T) {
 	legacyRootPod.Spec.Containers[0].SecurityContext = nil
 	if kubernetesPodConfigMatches(legacyRootPod, newExec.buildAgentPod(opts)) {
 		t.Fatal("config match = true, want legacy root pod to be recreated")
+	}
+}
+
+func TestKubernetesEnsureAgentPodDeletesLegacyPod(t *testing.T) {
+	opts := &ExecutionOptions{
+		Task:    &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"},
+		Project: &model.Project{ID: "project-1"},
+	}
+	e := &KubernetesExecutor{
+		kubeCfg: srvconfig.KubernetesConfig{
+			Namespace:          "agents",
+			AgentImage:         "registry.example.com/creator-agent:v1",
+			ServiceAccount:     "creator-agent-runner",
+			WorkspaceMountPath: "/workspace",
+			WorkspacePVCName:   "anban-creator",
+		},
+		serverURL: "http://creator-api-svc:8080",
+	}
+	current := e.buildAgentPod(opts)
+	current.Namespace = e.kubeCfg.Namespace
+	current.Status.Conditions = []corev1.PodCondition{{
+		Type:   corev1.PodReady,
+		Status: corev1.ConditionTrue,
+	}}
+	legacy := current.DeepCopy()
+	legacy.Name = kubernetesLegacyAgentPodName(opts.Task)
+	legacy.Labels["app.kubernetes.io/name"] = "anban-agent"
+	e.kube = kubernetesfake.NewSimpleClientset(current, legacy)
+
+	got, err := e.ensureAgentPod(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("ensureAgentPod: %v", err)
+	}
+	if got != current.Name {
+		t.Fatalf("pod name = %q, want current pod %q", got, current.Name)
+	}
+	if _, err := e.kube.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), legacy.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("legacy pod get error = %v, want NotFound after cleanup", err)
+	}
+	if _, err := e.kube.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), current.Name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("current pod was not preserved: %v", err)
+	}
+}
+
+func TestKubernetesEnsureAgentPodAcceptsConcurrentCurrentPodCreation(t *testing.T) {
+	opts := &ExecutionOptions{
+		Task:    &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"},
+		Project: &model.Project{ID: "project-1"},
+	}
+	e := &KubernetesExecutor{
+		kubeCfg: srvconfig.KubernetesConfig{
+			Namespace:          "agents",
+			AgentImage:         "registry.example.com/creator-agent:v1",
+			ServiceAccount:     "creator-agent-runner",
+			WorkspaceMountPath: "/workspace",
+			WorkspacePVCName:   "anban-creator",
+		},
+		serverURL: "http://creator-api-svc:8080",
+	}
+	current := e.buildAgentPod(opts)
+	current.Namespace = e.kubeCfg.Namespace
+	current.Status.Conditions = []corev1.PodCondition{{
+		Type:   corev1.PodReady,
+		Status: corev1.ConditionTrue,
+	}}
+	legacy := current.DeepCopy()
+	legacy.Name = kubernetesLegacyAgentPodName(opts.Task)
+	legacy.Labels["app.kubernetes.io/name"] = "anban-agent"
+	client := kubernetesfake.NewSimpleClientset(legacy)
+	client.PrependReactor("create", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+		if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), current.DeepCopy(), e.kubeCfg.Namespace); err != nil {
+			return true, nil, err
+		}
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "pods"}, current.Name)
+	})
+	e.kube = client
+
+	got, err := e.ensureAgentPod(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("ensureAgentPod: %v", err)
+	}
+	if got != current.Name {
+		t.Fatalf("pod name = %q, want concurrently created pod %q", got, current.Name)
+	}
+	if _, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), legacy.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("legacy pod get error = %v, want NotFound after cleanup", err)
+	}
+	if _, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), current.Name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("concurrently created current pod was not preserved: %v", err)
+	}
+}
+
+func TestKubernetesEnsureAgentPodReconcilesStaleConcurrentWinner(t *testing.T) {
+	opts := &ExecutionOptions{
+		Task:    &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"},
+		Project: &model.Project{ID: "project-1"},
+	}
+	e := &KubernetesExecutor{
+		kubeCfg: srvconfig.KubernetesConfig{
+			Namespace:          "agents",
+			AgentImage:         "registry.example.com/creator-agent:v2",
+			PodRevision:        "rev-2",
+			ServiceAccount:     "creator-agent-runner",
+			WorkspaceMountPath: "/workspace",
+			WorkspacePVCName:   "anban-creator",
+		},
+		serverURL: "http://creator-api-svc:8080",
+	}
+	desired := e.buildAgentPod(opts)
+	desired.Namespace = e.kubeCfg.Namespace
+	legacy := desired.DeepCopy()
+	legacy.Name = kubernetesLegacyAgentPodName(opts.Task)
+	legacy.Labels["app.kubernetes.io/name"] = "anban-agent"
+	stale := desired.DeepCopy()
+	stale.Spec.Containers[0].Image = "registry.example.com/creator-agent:v1"
+	stale.Spec.Containers[0].SecurityContext = nil
+	stale.Annotations[kubernetesPodRevisionAnnotation] = "rev-1"
+	stale.Annotations[kubernetesPodConfigHashAnnotation] = "stale-config"
+	stale.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+
+	client := kubernetesfake.NewSimpleClientset(legacy)
+	createAttempts := 0
+	client.PrependReactor("create", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+		createAttempts++
+		switch createAttempts {
+		case 1:
+			if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), stale.DeepCopy(), e.kubeCfg.Namespace); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "pods"}, stale.Name)
+		case 2:
+			createAction, ok := action.(kubernetestesting.CreateAction)
+			if !ok {
+				return true, nil, fmt.Errorf("create action type = %T, want CreateAction", action)
+			}
+			created := createAction.GetObject().(*corev1.Pod).DeepCopy()
+			created.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+			if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), created, e.kubeCfg.Namespace); err != nil {
+				return true, nil, err
+			}
+			return true, created, nil
+		default:
+			return true, nil, fmt.Errorf("unexpected create attempt %d", createAttempts)
+		}
+	})
+	e.kube = client
+
+	got, err := e.ensureAgentPod(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("ensureAgentPod: %v", err)
+	}
+	if got != desired.Name {
+		t.Fatalf("pod name = %q, want reconciled pod %q", got, desired.Name)
+	}
+	if createAttempts != 2 {
+		t.Fatalf("create attempts = %d, want stale winner replaced by desired pod", createAttempts)
+	}
+	current, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), desired.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get reconciled current pod: %v", err)
+	}
+	if !kubernetesPodConfigMatches(current, desired) {
+		t.Fatalf("current pod config = %#v, want desired config", current)
+	}
+	if _, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), legacy.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("legacy pod get error = %v, want NotFound after cleanup", err)
+	}
+}
+
+func TestKubernetesEnsureAgentPodReconcilesReplacementBeforeReadiness(t *testing.T) {
+	opts := &ExecutionOptions{
+		Task:    &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"},
+		Project: &model.Project{ID: "project-1"},
+	}
+	e := &KubernetesExecutor{
+		kubeCfg: srvconfig.KubernetesConfig{
+			Namespace:          "agents",
+			AgentImage:         "registry.example.com/creator-agent:v2",
+			PodRevision:        "rev-2",
+			ServiceAccount:     "creator-agent-runner",
+			WorkspaceMountPath: "/workspace",
+			WorkspacePVCName:   "anban-creator",
+		},
+		serverURL: "http://creator-api-svc:8080",
+	}
+	desired := e.buildAgentPod(opts)
+	desired.Namespace = e.kubeCfg.Namespace
+	legacy := desired.DeepCopy()
+	legacy.Name = kubernetesLegacyAgentPodName(opts.Task)
+	legacy.Labels["app.kubernetes.io/name"] = "anban-agent"
+	matching := desired.DeepCopy()
+	stale := desired.DeepCopy()
+	stale.Spec.Containers[0].Image = "registry.example.com/creator-agent:v1"
+	stale.Annotations[kubernetesPodRevisionAnnotation] = "rev-1"
+	stale.Annotations[kubernetesPodConfigHashAnnotation] = "stale-config"
+	stale.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+
+	client := kubernetesfake.NewSimpleClientset(legacy)
+	createAttempts := 0
+	client.PrependReactor("create", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+		createAttempts++
+		switch createAttempts {
+		case 1:
+			if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), matching.DeepCopy(), e.kubeCfg.Namespace); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "pods"}, matching.Name)
+		case 2:
+			createAction := action.(kubernetestesting.CreateAction)
+			created := createAction.GetObject().(*corev1.Pod).DeepCopy()
+			created.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+			if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), created, e.kubeCfg.Namespace); err != nil {
+				return true, nil, err
+			}
+			return true, created, nil
+		default:
+			return true, nil, fmt.Errorf("unexpected create attempt %d", createAttempts)
+		}
+	})
+	currentGets := 0
+	client.PrependReactor("get", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+		getAction := action.(kubernetestesting.GetAction)
+		if getAction.GetName() != desired.Name {
+			return false, nil, nil
+		}
+		currentGets++
+		if currentGets == 3 {
+			if err := client.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), e.kubeCfg.Namespace, desired.Name); err != nil {
+				return true, nil, err
+			}
+			if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), stale.DeepCopy(), e.kubeCfg.Namespace); err != nil {
+				return true, nil, err
+			}
+		}
+		return false, nil, nil
+	})
+	e.kube = client
+
+	got, err := e.ensureAgentPod(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("ensureAgentPod: %v", err)
+	}
+	if got != desired.Name {
+		t.Fatalf("pod name = %q, want reconciled pod %q", got, desired.Name)
+	}
+	if createAttempts != 2 {
+		t.Fatalf("create attempts = %d, want readiness replacement reconciled", createAttempts)
+	}
+	current, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), desired.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get reconciled current pod: %v", err)
+	}
+	if !kubernetesPodConfigMatches(current, desired) {
+		t.Fatalf("current pod config = %#v, want desired config", current)
+	}
+}
+
+func TestKubernetesWaitForAgentPodReadyRejectsTerminatingPod(t *testing.T) {
+	now := metav1.Now()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "creator-agent-project", Namespace: "agents", DeletionTimestamp: &now},
+		Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
+			Type:   corev1.PodReady,
+			Status: corev1.ConditionTrue,
+		}}},
+	}
+	e := &KubernetesExecutor{
+		kubeCfg: srvconfig.KubernetesConfig{Namespace: pod.Namespace},
+		kube:    kubernetesfake.NewSimpleClientset(pod),
+	}
+	desired := pod.DeepCopy()
+	desired.DeletionTimestamp = nil
+
+	err := e.waitForAgentPodReady(context.Background(), desired)
+	if !errors.Is(err, errKubernetesAgentPodNeedsReconciliation) || !strings.Contains(err.Error(), "terminating") {
+		t.Fatalf("waitForAgentPodReady error = %v, want terminating needs-reconciliation error", err)
 	}
 }
 

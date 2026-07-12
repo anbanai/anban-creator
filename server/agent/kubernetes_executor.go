@@ -3,6 +3,7 @@ package agent
 import (
 	"archive/tar"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -37,11 +38,14 @@ import (
 var _ TaskExecutor = (*KubernetesExecutor)(nil)
 
 const (
-	kubernetesAgentContainerName      = kubernetesAgentAppName
-	kubernetesPodTTLAnnotation        = "anban.ai/pod-ttl-seconds"
-	kubernetesPodRevisionAnnotation   = "anban.ai/pod-revision"
-	kubernetesPodConfigHashAnnotation = "anban.ai/pod-config-hash"
+	kubernetesAgentContainerName           = kubernetesAgentAppName
+	kubernetesAgentPodReconcileMaxAttempts = 5
+	kubernetesPodTTLAnnotation             = "anban.ai/pod-ttl-seconds"
+	kubernetesPodRevisionAnnotation        = "anban.ai/pod-revision"
+	kubernetesPodConfigHashAnnotation      = "anban.ai/pod-config-hash"
 )
+
+var errKubernetesAgentPodNeedsReconciliation = errors.New("agent pod needs reconciliation")
 
 type KubernetesExecutor struct {
 	logger            *zerolog.Logger
@@ -502,36 +506,72 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 	pod := e.buildAgentPod(opts)
 	pod.Namespace = e.kubeCfg.Namespace
 	pods := e.kube.CoreV1().Pods(e.kubeCfg.Namespace)
-	existing, err := pods.Get(ctx, pod.Name, metav1.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return "", fmt.Errorf("get agent pod: %w", err)
+	legacyPodName := kubernetesLegacyAgentPodName(opts.Task)
+	legacyPod, err := pods.Get(ctx, legacyPodName, metav1.GetOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return "", fmt.Errorf("get legacy agent pod %s for cleanup: %w", legacyPodName, err)
+	}
+	if err == nil {
+		if legacyPod.DeletionTimestamp == nil {
+			if err := pods.Delete(ctx, legacyPodName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+				return "", fmt.Errorf("delete legacy agent pod %s: %w", legacyPodName, err)
+			}
 		}
-		if _, err := pods.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-			return "", fmt.Errorf("create agent pod: %w", err)
-		}
-	} else if existing != nil && existing.DeletionTimestamp != nil {
-		if err := e.waitForAgentPodDeleted(ctx, pod.Name); err != nil {
-			return "", err
-		}
-		if _, err := pods.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-			return "", fmt.Errorf("recreate deleted agent pod: %w", err)
-		}
-	} else if !kubernetesPodConfigMatches(existing, pod) {
-		if err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-			return "", fmt.Errorf("delete drifted agent pod: %w", err)
-		}
-		if err := e.waitForAgentPodDeleted(ctx, pod.Name); err != nil {
-			return "", err
-		}
-		if _, err := pods.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-			return "", fmt.Errorf("recreate agent pod: %w", err)
+		if err := e.waitForAgentPodDeleted(ctx, legacyPodName); err != nil {
+			return "", fmt.Errorf("wait for legacy agent pod %s deletion: %w", legacyPodName, err)
 		}
 	}
-	if err := e.waitForAgentPodReady(ctx, pod.Name); err != nil {
-		return "", err
+	createAgentPod := func(action string) (bool, error) {
+		if _, err := pods.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("%s: %w", action, err)
+		}
+		return true, nil
 	}
-	return pod.Name, nil
+	createAction := "create agent pod"
+	for attempt := 1; attempt <= kubernetesAgentPodReconcileMaxAttempts; attempt++ {
+		existing, err := pods.Get(ctx, pod.Name, metav1.GetOptions{})
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return "", fmt.Errorf("get agent pod: %w", err)
+			}
+			created, err := createAgentPod(createAction)
+			if err != nil {
+				return "", err
+			}
+			if !created {
+				continue
+			}
+		} else {
+			if existing.DeletionTimestamp != nil {
+				if err := e.waitForAgentPodDeleted(ctx, pod.Name); err != nil {
+					return "", err
+				}
+				createAction = "recreate deleted agent pod"
+				continue
+			}
+			if !kubernetesPodConfigMatches(existing, pod) {
+				if err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+					return "", fmt.Errorf("delete drifted agent pod: %w", err)
+				}
+				if err := e.waitForAgentPodDeleted(ctx, pod.Name); err != nil {
+					return "", err
+				}
+				createAction = "recreate agent pod"
+				continue
+			}
+		}
+		if err := e.waitForAgentPodReady(ctx, pod); err != nil {
+			if errors.Is(err, errKubernetesAgentPodNeedsReconciliation) {
+				continue
+			}
+			return "", err
+		}
+		return pod.Name, nil
+	}
+	return "", fmt.Errorf("reconcile agent pod %s exhausted after %d attempts", pod.Name, kubernetesAgentPodReconcileMaxAttempts)
 }
 
 func (e *KubernetesExecutor) waitForAgentPodDeleted(ctx context.Context, podName string) error {
@@ -547,11 +587,21 @@ func (e *KubernetesExecutor) waitForAgentPodDeleted(ctx context.Context, podName
 	})
 }
 
-func (e *KubernetesExecutor) waitForAgentPodReady(ctx context.Context, podName string) error {
+func (e *KubernetesExecutor) waitForAgentPodReady(ctx context.Context, desired *corev1.Pod) error {
+	podName := desired.Name
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 		pod, err := e.kube.CoreV1().Pods(e.kubeCfg.Namespace).Get(ctx, podName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("%w: agent pod %s was deleted", errKubernetesAgentPodNeedsReconciliation, podName)
+		}
 		if err != nil {
 			return false, err
+		}
+		if pod.DeletionTimestamp != nil {
+			return false, fmt.Errorf("%w: agent pod %s is terminating", errKubernetesAgentPodNeedsReconciliation, podName)
+		}
+		if !kubernetesPodConfigMatches(pod, desired) {
+			return false, fmt.Errorf("%w: agent pod %s config changed before readiness", errKubernetesAgentPodNeedsReconciliation, podName)
 		}
 		if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
 			return false, fmt.Errorf("agent pod %s is terminal: %s", podName, pod.Status.Phase)
