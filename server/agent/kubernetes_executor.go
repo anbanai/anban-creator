@@ -512,13 +512,40 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 		return "", fmt.Errorf("get legacy agent pod %s for cleanup: %w", legacyPodName, err)
 	}
 	if err == nil {
+		if legacyPod.UID == "" {
+			return "", fmt.Errorf("legacy agent pod %s UID is empty; refusing cleanup", legacyPodName)
+		}
+		legacyGone := false
 		if legacyPod.DeletionTimestamp == nil {
-			if err := pods.Delete(ctx, legacyPodName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-				return "", fmt.Errorf("delete legacy agent pod %s: %w", legacyPodName, err)
+			legacyUID := legacyPod.UID
+			deleteErr := pods.Delete(ctx, legacyPodName, metav1.DeleteOptions{
+				Preconditions: &metav1.Preconditions{UID: &legacyUID},
+			})
+			switch {
+			case deleteErr == nil:
+			case apierrors.IsNotFound(deleteErr):
+				legacyGone = true
+			case apierrors.IsConflict(deleteErr) || apierrors.IsInvalid(deleteErr):
+				observed, getErr := pods.Get(ctx, legacyPodName, metav1.GetOptions{})
+				if apierrors.IsNotFound(getErr) {
+					legacyGone = true
+					break
+				}
+				if getErr != nil {
+					return "", fmt.Errorf("re-get legacy agent pod %s after delete precondition failure: %w", legacyPodName, getErr)
+				}
+				if observed.UID != legacyUID {
+					return "", fmt.Errorf("legacy agent pod %s identity changed from UID %q to %q during cleanup", legacyPodName, legacyUID, observed.UID)
+				}
+				return "", fmt.Errorf("delete legacy agent pod %s: %w", legacyPodName, deleteErr)
+			default:
+				return "", fmt.Errorf("delete legacy agent pod %s: %w", legacyPodName, deleteErr)
 			}
 		}
-		if err := e.waitForAgentPodDeleted(ctx, legacyPodName); err != nil {
-			return "", fmt.Errorf("wait for legacy agent pod %s deletion: %w", legacyPodName, err)
+		if !legacyGone {
+			if err := e.waitForAgentPodDeleted(ctx, legacyPodName); err != nil {
+				return "", fmt.Errorf("wait for legacy agent pod %s deletion: %w", legacyPodName, err)
+			}
 		}
 	}
 	createAgentPod := func(action string) (bool, error) {
