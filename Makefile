@@ -5,7 +5,7 @@
 
 BINARY      := anban-creator-server
 BINDIR      := bin
-AGENT_IMAGE := anban-creator-agent:latest
+AGENT_IMAGE := creator-agent:latest
 SERVER_IMAGE := anban-creator-server:latest
 SERVER_CONFIG := server/config.yaml
 

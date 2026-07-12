@@ -310,7 +310,7 @@ claude:
   executor: kubernetes
   kubernetes:
     namespace: anban
-    agent_image: registry.example.com/anban-agent:latest
+    agent_image: registry.example.com/creator-agent:latest
     service_account: creator-agent-runner
     image_pull_secret: ""
     memory_storage_class: alicloud-nas

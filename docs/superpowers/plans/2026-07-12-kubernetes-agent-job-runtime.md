@@ -415,7 +415,7 @@ type ExecutionClaims struct {
 ```
 
 Issue HS256 tokens with issuer `anban-server`, audience
-`anban-agent-execution`, subject equal to execution ID, and expiry no later than
+`creator-agent-execution`, subject equal to execution ID, and expiry no later than
 the Job deadline. The workload verifier submits `authentication/v1.TokenReview`
 for audience `anban-server`, requires the configured Agent ServiceAccount, reads
 bound Pod name/UID extras, and verifies the owning Job labels.

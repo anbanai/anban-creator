@@ -27,7 +27,7 @@
 - `server/agent/kubernetes_naming.go`: deterministic user/project scoped Pod names and labels.
 - `server/agent/kubernetes_executor_test.go`: unit tests for naming, command/env construction, and remote workdir behavior.
 - `server/main.go`: wire `claude.executor=kubernetes`.
-- `deploy/k8s/ack-agent-runtime.yaml`: RBAC and Agent NAS PVC/runtime template.
+- `deploy/k8s/ack-agent-runtime.yaml`: RBAC and runtime wiring for the existing `anban-creator` NAS PVC.
 - `server/k8s_agent_runtime_test.go`: assert ACK manifest safety properties.
 
 ## Task 1: Config Foundation
@@ -59,10 +59,10 @@ func baseKubernetesConfigForTest() Config {
 			Executor: "kubernetes",
 			Kubernetes: KubernetesConfig{
 				Namespace:          "anban",
-				AgentImage:         "registry.example.com/anban-agent:latest",
-				ServiceAccount:     "anban-agent-runner",
+				AgentImage:         "registry.example.com/creator-agent:latest",
+				ServiceAccount:     "creator-agent-runner",
 				WorkspaceMountPath: "/workspace",
-				WorkspacePVCName:   "anban-agent-nas",
+				WorkspacePVCName:   "anban-creator",
 				ExecTimeoutSec:     3600,
 			},
 		},
@@ -495,7 +495,7 @@ Assert the manifest includes:
 - Role verbs for `get`, `list`, `watch`, `create`, `delete` pods.
 - Role verbs for `create`, `get` pods/exec.
 - No NAS PVC mount on server deployment.
-- Agent PVC placeholder is named consistently with config example.
+- Manifest references the existing `anban-creator` PVC consistently with the config example and does not create a PVC.
 
 - [ ] **Step 2: Run tests**
 
@@ -510,9 +510,9 @@ Expected: FAIL because manifest does not exist.
 Create ACK runtime YAML with:
 
 - `ServiceAccount/anban-server`
-- `Role/anban-agent-runner`
-- `RoleBinding/anban-agent-runner`
-- `PersistentVolumeClaim/anban-agent-nas` placeholder for ACK NAS storage class
+- `Role/creator-agent-runner`
+- `RoleBinding/creator-agent-runner`
+- reference the existing `PersistentVolumeClaim/anban-creator` for ACK NAS storage; the runtime manifest does not create the PVC
 - comments explaining that server does not mount the PVC
 
 - [ ] **Step 4: Verify**
