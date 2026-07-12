@@ -55,8 +55,7 @@ func TestKubernetesAgentImageMustBeExplicit(t *testing.T) {
 }
 
 func TestKubernetesJobRuntimeDefaults(t *testing.T) {
-	cfg := Config{}
-	cfg.applyDefaults()
+	cfg := baseKubernetesConfigForTest()
 	if cfg.Claude.Kubernetes.MemoryStorageClass != "alicloud-nas" {
 		t.Fatal("memory storage class")
 	}
@@ -65,6 +64,17 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	}
 	if cfg.Claude.Kubernetes.TTLSecondsAfterFinished != 600 {
 		t.Fatal("job ttl")
+	}
+}
+
+func TestValidateKubernetesRequiresExplicitMemoryStorageClass(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Claude.Kubernetes.MemoryStorageClass = ""
+	cfg.applyDefaults()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.kubernetes.memory_storage_class is required") {
+		t.Fatalf("Validate() error = %v, want explicit memory storage class requirement", err)
 	}
 }
 

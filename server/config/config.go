@@ -1590,9 +1590,6 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.Namespace == "" {
 		c.Claude.Kubernetes.Namespace = "default"
 	}
-	if c.Claude.Kubernetes.MemoryStorageClass == "" {
-		c.Claude.Kubernetes.MemoryStorageClass = "alicloud-nas"
-	}
 	if c.Claude.Kubernetes.MemorySize == "" {
 		c.Claude.Kubernetes.MemorySize = "1Gi"
 	}
