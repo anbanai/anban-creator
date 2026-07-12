@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
 )
@@ -1103,18 +1104,19 @@ type DockerConfig struct {
 	WorkspaceDir  string `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
 }
 
-// KubernetesConfig holds ACK/Kubernetes executor settings for project Agent Pods.
+// KubernetesConfig holds ACK/Kubernetes executor settings for one-shot Agent Jobs.
 type KubernetesConfig struct {
-	Namespace          string                   `yaml:"namespace"`            // Namespace where project Agent Pods run.
-	AgentImage         string                   `yaml:"agent_image"`          // Agent image containing the anban binary and Claude runtime.
-	ServiceAccount     string                   `yaml:"service_account"`      // Service account used by Agent Pods.
-	ImagePullSecret    string                   `yaml:"image_pull_secret"`    // Optional image pull secret for private registries.
-	WorkspaceMountPath string                   `yaml:"workspace_mount_path"` // Container path where NAS is mounted.
-	WorkspacePVCName   string                   `yaml:"workspace_pvc_name"`   // NAS-backed PVC mounted by Agent Pods.
-	PodRevision        string                   `yaml:"pod_revision"`         // Deployment/image revision that forces project Pod recreation when changed.
-	PodTTLSeconds      int                      `yaml:"pod_ttl_seconds"`      // Idle TTL for project Agent Pods.
-	ExecTimeoutSec     int                      `yaml:"exec_timeout_seconds"` // Per-task exec timeout.
-	Resources          KubernetesResourceConfig `yaml:"resources"`            // Agent Pod requests and limits.
+	Namespace               string                   `yaml:"namespace"`
+	AgentImage              string                   `yaml:"agent_image"`
+	ServiceAccount          string                   `yaml:"service_account"`
+	ImagePullSecret         string                   `yaml:"image_pull_secret"`
+	MemoryStorageClass      string                   `yaml:"memory_storage_class"`
+	MemorySize              string                   `yaml:"memory_size"`
+	ActiveDeadlineSeconds   int64                    `yaml:"active_deadline_seconds"`
+	CompletionGraceSeconds  int                      `yaml:"completion_grace_seconds"`
+	TTLSecondsAfterFinished int32                    `yaml:"ttl_seconds_after_finished"`
+	PreStartRetryLimit      int                      `yaml:"pre_start_retry_limit"`
+	Resources               KubernetesResourceConfig `yaml:"resources"`
 }
 
 // KubernetesResourceConfig mirrors Kubernetes resource maps without importing
@@ -1588,20 +1590,23 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.Namespace == "" {
 		c.Claude.Kubernetes.Namespace = "default"
 	}
-	if c.Claude.Kubernetes.WorkspaceMountPath == "" {
-		c.Claude.Kubernetes.WorkspaceMountPath = "/workspace"
+	if c.Claude.Kubernetes.MemoryStorageClass == "" {
+		c.Claude.Kubernetes.MemoryStorageClass = "alicloud-nas"
 	}
-	if c.Claude.Kubernetes.PodRevision == "" {
-		c.Claude.Kubernetes.PodRevision = strings.TrimSpace(os.Getenv("ANBAN_AGENT_POD_REVISION"))
-		if c.Claude.Kubernetes.PodRevision == "" {
-			c.Claude.Kubernetes.PodRevision = strings.TrimSpace(os.Getenv("version_switch"))
-		}
+	if c.Claude.Kubernetes.MemorySize == "" {
+		c.Claude.Kubernetes.MemorySize = "1Gi"
 	}
-	if c.Claude.Kubernetes.PodTTLSeconds == 0 {
-		c.Claude.Kubernetes.PodTTLSeconds = 24 * 3600
+	if c.Claude.Kubernetes.ActiveDeadlineSeconds == 0 {
+		c.Claude.Kubernetes.ActiveDeadlineSeconds = 3600
 	}
-	if c.Claude.Kubernetes.ExecTimeoutSec == 0 {
-		c.Claude.Kubernetes.ExecTimeoutSec = c.Claude.Docker.TimeoutSec
+	if c.Claude.Kubernetes.CompletionGraceSeconds == 0 {
+		c.Claude.Kubernetes.CompletionGraceSeconds = 30
+	}
+	if c.Claude.Kubernetes.TTLSecondsAfterFinished == 0 {
+		c.Claude.Kubernetes.TTLSecondsAfterFinished = 600
+	}
+	if c.Claude.Kubernetes.PreStartRetryLimit == 0 {
+		c.Claude.Kubernetes.PreStartRetryLimit = 1
 	}
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
@@ -2081,19 +2086,20 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Claude.Kubernetes.AgentImage) == "" {
 			errs = append(errs, "claude.kubernetes.agent_image is required")
 		}
-		if strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath) == "" {
-			errs = append(errs, "claude.kubernetes.workspace_mount_path is required")
-		} else if !strings.HasPrefix(strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath), "/") {
-			errs = append(errs, "claude.kubernetes.workspace_mount_path must be absolute")
+		if strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
+			errs = append(errs, "claude.kubernetes.service_account is required")
 		}
-		if strings.TrimSpace(c.Claude.Kubernetes.WorkspacePVCName) == "" {
-			errs = append(errs, "claude.kubernetes.workspace_pvc_name is required")
+		if strings.TrimSpace(c.Claude.Kubernetes.MemoryStorageClass) == "" {
+			errs = append(errs, "claude.kubernetes.memory_storage_class is required")
 		}
-		if c.Claude.Kubernetes.ExecTimeoutSec <= 0 {
-			errs = append(errs, "claude.kubernetes.exec_timeout_seconds must be positive")
+		if _, err := resource.ParseQuantity(strings.TrimSpace(c.Claude.Kubernetes.MemorySize)); err != nil {
+			errs = append(errs, "claude.kubernetes.memory_size must be a valid Kubernetes quantity")
 		}
-		if c.Claude.Kubernetes.PodTTLSeconds <= 0 {
-			errs = append(errs, "claude.kubernetes.pod_ttl_seconds must be positive")
+		if c.Claude.Kubernetes.ActiveDeadlineSeconds <= 0 {
+			errs = append(errs, "claude.kubernetes.active_deadline_seconds must be positive")
+		}
+		if c.Claude.Kubernetes.TTLSecondsAfterFinished <= 0 {
+			errs = append(errs, "claude.kubernetes.ttl_seconds_after_finished must be positive")
 		}
 	}
 
