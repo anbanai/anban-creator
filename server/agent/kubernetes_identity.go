@@ -9,6 +9,8 @@ import (
 	"time"
 
 	authv1 "k8s.io/api/authentication/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -80,6 +82,9 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 	if string(pod.UID) != podUID {
 		return nil, errors.New("bound Pod UID mismatch")
 	}
+	if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		return nil, errors.New("bound Pod is terminating or terminal")
+	}
 	var ownerName, ownerUID string
 	for _, owner := range pod.OwnerReferences {
 		if owner.Controller != nil && *owner.Controller && owner.Kind == "Job" && owner.APIVersion == "batch/v1" {
@@ -102,6 +107,9 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 	if string(job.UID) != ownerUID {
 		return nil, errors.New("owning Job UID mismatch")
 	}
+	if job.DeletionTimestamp != nil || (job.Spec.Suspend != nil && *job.Spec.Suspend) || terminalJobCondition(job.Status.Conditions) {
+		return nil, errors.New("owning Job is terminating, suspended, or terminal")
+	}
 	if job.Status.StartTime == nil || job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds <= 0 {
 		return nil, errors.New("owning Job has no active deadline identity")
 	}
@@ -120,6 +128,15 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 		}
 	}
 	return &KubernetesWorkloadIdentity{Namespace: v.namespace, ServiceAccount: v.serviceAccount, PodName: podName, PodUID: podUID, JobName: job.Name, JobUID: string(job.UID), ExecutionID: requestedExecutionID, TaskID: labels[kubernetesTaskIDLabel], ProjectID: labels[kubernetesProjectIDLabel], UserID: labels[kubernetesUserIDLabel], JobDeadline: jobDeadline}, nil
+}
+
+func terminalJobCondition(conditions []batchv1.JobCondition) bool {
+	for _, condition := range conditions {
+		if condition.Status == corev1.ConditionTrue && (condition.Type == batchv1.JobComplete || condition.Type == batchv1.JobFailed || condition.Type == batchv1.JobFailureTarget || condition.Type == batchv1.JobSuccessCriteriaMet) {
+			return true
+		}
+	}
+	return false
 }
 
 func singleExtra(extra map[string]authv1.ExtraValue, key string) (string, error) {

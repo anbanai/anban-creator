@@ -146,9 +146,14 @@ func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task,
 		if file.Reader == nil {
 			continue
 		}
-		safeName := serveragent.UniqueResumeFilename(serveragent.SanitizeResumeFilename(file.OriginalName), usedNames)
+		safeName, err := serveragent.PrepareResumeAttachmentFilename(file.OriginalName, usedNames)
+		if err != nil {
+			s.deleteWrittenResumeFiles(ctx, written)
+			return nil, "", err
+		}
 		relPath, err := serveragent.ResumeAttachmentReferencePath(safeName)
 		if err != nil {
+			s.deleteWrittenResumeFiles(ctx, written)
 			return nil, "", err
 		}
 		var buf bytes.Buffer

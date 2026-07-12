@@ -75,6 +75,12 @@ func TestWorkloadVerifierRejectsSpoofedIdentity(t *testing.T) {
 			r.Status.User.Extra[KubernetesPodUIDExtra] = []string{"a", "b"}
 		}},
 		{"stale pod uid", func(_ *authv1.TokenReview, p *corev1.Pod, _ *batchv1.Job) { p.UID = "new-uid" }},
+		{"deleting pod", func(_ *authv1.TokenReview, p *corev1.Pod, _ *batchv1.Job) {
+			now := metav1.Now()
+			p.DeletionTimestamp = &now
+		}},
+		{"succeeded pod", func(_ *authv1.TokenReview, p *corev1.Pod, _ *batchv1.Job) { p.Status.Phase = corev1.PodSucceeded }},
+		{"failed pod", func(_ *authv1.TokenReview, p *corev1.Pod, _ *batchv1.Job) { p.Status.Phase = corev1.PodFailed }},
 		{"pod wrong namespace", func(_ *authv1.TokenReview, p *corev1.Pod, _ *batchv1.Job) { p.Namespace = "other" }},
 		{"pod wrong service account", func(_ *authv1.TokenReview, p *corev1.Pod, _ *batchv1.Job) {
 			p.Spec.ServiceAccountName = "other"
@@ -90,6 +96,26 @@ func TestWorkloadVerifierRejectsSpoofedIdentity(t *testing.T) {
 		}},
 		{"wrong owner uid", func(_ *authv1.TokenReview, p *corev1.Pod, _ *batchv1.Job) { p.OwnerReferences[0].UID = "foreign" }},
 		{"job uid mismatch", func(_ *authv1.TokenReview, _ *corev1.Pod, j *batchv1.Job) { j.UID = "replacement" }},
+		{"deleting job", func(_ *authv1.TokenReview, _ *corev1.Pod, j *batchv1.Job) {
+			now := metav1.Now()
+			j.DeletionTimestamp = &now
+		}},
+		{"suspended job", func(_ *authv1.TokenReview, _ *corev1.Pod, j *batchv1.Job) {
+			suspended := true
+			j.Spec.Suspend = &suspended
+		}},
+		{"completed job", func(_ *authv1.TokenReview, _ *corev1.Pod, j *batchv1.Job) {
+			j.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+		}},
+		{"failed job", func(_ *authv1.TokenReview, _ *corev1.Pod, j *batchv1.Job) {
+			j.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue}}
+		}},
+		{"job failure target", func(_ *authv1.TokenReview, _ *corev1.Pod, j *batchv1.Job) {
+			j.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobFailureTarget, Status: corev1.ConditionTrue}}
+		}},
+		{"job success criteria met", func(_ *authv1.TokenReview, _ *corev1.Pod, j *batchv1.Job) {
+			j.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue}}
+		}},
 		{"job wrong namespace", func(_ *authv1.TokenReview, _ *corev1.Pod, j *batchv1.Job) { j.Namespace = "other" }},
 		{"job wrong service account", func(_ *authv1.TokenReview, _ *corev1.Pod, j *batchv1.Job) {
 			j.Spec.Template.Spec.ServiceAccountName = "other"

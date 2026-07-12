@@ -74,32 +74,46 @@ func (h *AgentHandler) SetDirectUploadConfig(cfg service.DirectUploadConfig) {
 
 // AuthMiddleware validates bearer-style API keys for agent endpoints.
 func (h *AgentHandler) AuthMiddleware(c fiber.Ctx) error {
-	token := extractAgentToken(c)
-	if token == "" {
-		return Error(c, fiber.StatusUnauthorized, "missing agent api key")
-	}
-	if h.executionTokens != nil {
-		if claims, err := h.executionTokens.Validate(token); err == nil {
+	authorization := strings.TrimSpace(c.Get("Authorization"))
+	secondary, secondaryCount := extractAgentHeaderCredential(c)
+	if authorization != "" {
+		if secondaryCount > 0 {
+			return Error(c, fiber.StatusUnauthorized, "conflicting agent credentials")
+		}
+		parts := strings.SplitN(authorization, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || strings.TrimSpace(parts[1]) == "" {
+			return Error(c, fiber.StatusUnauthorized, "invalid agent authorization")
+		}
+		token := strings.TrimSpace(parts[1])
+		if h.executionTokens != nil && strings.Count(token, ".") == 2 {
+			claims, err := h.executionTokens.Validate(token)
+			if err != nil {
+				return Error(c, fiber.StatusUnauthorized, "invalid agent execution token")
+			}
 			c.Locals(agentUserIDContextKey, claims.UserID)
 			c.Locals(agentProjectIDContextKey, claims.ProjectID)
 			c.Locals(agentTaskIDContextKey, claims.TaskID)
 			c.Locals(agentExecutionIDContextKey, claims.ExecutionID)
 			return c.Next()
-		} else if strings.Count(token, ".") == 2 {
-			if h.authenticateLegacyToken(c, extractAgentHeaderToken(c)) {
-				return c.Next()
-			}
-			return Error(c, fiber.StatusUnauthorized, "invalid agent execution token")
 		}
+		if h.authenticateLegacyToken(c, token) {
+			return c.Next()
+		}
+		return Error(c, fiber.StatusUnauthorized, "invalid agent api key")
 	}
-
-	if h.authenticateLegacyToken(c, token) {
+	if secondaryCount == 0 {
+		return Error(c, fiber.StatusUnauthorized, "missing agent api key")
+	}
+	if secondaryCount > 1 {
+		return Error(c, fiber.StatusUnauthorized, "conflicting agent credentials")
+	}
+	if h.authenticateLegacyToken(c, secondary) {
 		return c.Next()
 	}
 
 	if h.logger != nil {
 		h.logger.Warn().
-			Int("token_len", len(token)).
+			Int("token_len", len(secondary)).
 			Msg("agent auth failed: invalid token")
 	}
 	return Error(c, fiber.StatusUnauthorized, "invalid agent api key")
@@ -122,13 +136,16 @@ func (h *AgentHandler) authenticateLegacyToken(c fiber.Ctx, token string) bool {
 	return false
 }
 
-func extractAgentHeaderToken(c fiber.Ctx) string {
+func extractAgentHeaderCredential(c fiber.Ctx) (string, int) {
+	var token string
+	count := 0
 	for _, name := range []string{"X-Agent-API-Key", "X-API-Key", "X-Admin-API-Key"} {
-		if token := strings.TrimSpace(c.Get(name)); token != "" {
-			return token
+		if candidate := strings.TrimSpace(c.Get(name)); candidate != "" {
+			token = candidate
+			count++
 		}
 	}
-	return ""
+	return token, count
 }
 
 // WorkloadAuthMiddleware accepts only the projected Kubernetes bearer token.
@@ -140,26 +157,6 @@ func (h *AgentHandler) WorkloadAuthMiddleware(c fiber.Ctx) error {
 	}
 	c.Locals(agentWorkloadTokenContextKey, strings.TrimSpace(parts[1]))
 	return c.Next()
-}
-
-func extractAgentToken(c fiber.Ctx) string {
-	candidates := []string{
-		c.Get("Authorization"),
-		c.Get("X-Agent-API-Key"),
-		c.Get("X-API-Key"),
-		c.Get("X-Admin-API-Key"),
-	}
-	for _, raw := range candidates {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-		if strings.HasPrefix(raw, "Bearer ") {
-			return strings.TrimSpace(strings.TrimPrefix(raw, "Bearer "))
-		}
-		return raw
-	}
-	return ""
 }
 
 func (h *AgentHandler) authenticatedUserID(c fiber.Ctx) string {
@@ -199,11 +196,24 @@ func (h *AgentHandler) Bootstrap(c fiber.Ctx) error {
 	token, _ := c.Locals(agentWorkloadTokenContextKey).(string)
 	identity, err := h.workloadVerifier.Verify(c.Context(), token, strings.TrimSpace(req.ExecutionID))
 	if err != nil {
+		if h.logger != nil {
+			h.logger.Warn().Err(err).Str("execution_id", strings.TrimSpace(req.ExecutionID)).Msg("agent workload identity verification failed")
+		}
 		return Error(c, fiber.StatusUnauthorized, "workload identity verification failed")
 	}
 	response, err := h.bootstrapper.Bootstrap(c.Context(), identity)
 	if err != nil {
-		return Error(c, fiber.StatusConflict, err.Error())
+		if h.logger != nil {
+			h.logger.Error().Err(err).Str("execution_id", strings.TrimSpace(req.ExecutionID)).Msg("agent bootstrap failed")
+		}
+		switch {
+		case errors.Is(err, service.ErrAgentBootstrapConflict):
+			return Error(c, fiber.StatusConflict, "agent bootstrap state conflict")
+		case errors.Is(err, service.ErrAgentBootstrapUnavailable):
+			return Error(c, fiber.StatusServiceUnavailable, "agent bootstrap dependency unavailable")
+		default:
+			return Error(c, fiber.StatusInternalServerError, "agent bootstrap failed")
+		}
 	}
 	return Success(c, response)
 }

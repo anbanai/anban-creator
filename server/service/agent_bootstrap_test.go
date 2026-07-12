@@ -21,12 +21,125 @@ import (
 
 type bootstrapSecurityStore struct {
 	*signFakeStore
-	signedKeys []string
+	signedKeys     []string
+	signedTTLs     []int
+	signAt         time.Time
+	signedExpiries []time.Time
 }
 
-func (s *bootstrapSecurityStore) DownloadURL(_ context.Context, key string, _ int) (string, error) {
+func (s *bootstrapSecurityStore) DownloadURL(_ context.Context, key string, ttl int) (string, error) {
 	s.signedKeys = append(s.signedKeys, key)
+	s.signedTTLs = append(s.signedTTLs, ttl)
+	if !s.signAt.IsZero() {
+		s.signedExpiries = append(s.signedExpiries, time.Unix(s.signAt.Unix()+int64(ttl), 0))
+	}
 	return "https://signed.example.com/" + key, nil
+}
+
+func TestBootstrapSignedDownloadDoesNotCrossAbsoluteDeadlineAtSignerBoundary(t *testing.T) {
+	start := time.Unix(1_800_000_000, 0)
+	deadline := start.Add(3 * time.Second)
+	for _, tc := range []struct {
+		name    string
+		signAt  time.Time
+		wantErr bool
+	}{
+		{name: "crosses one second boundary", signAt: start.Add(1100 * time.Millisecond)},
+		{name: "signer stalls beyond safety margin", signAt: start.Add(2100 * time.Millisecond), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.example.com/"}, signAt: tc.signAt}
+			samples := []time.Time{start, tc.signAt}
+			svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}, now: func() time.Time {
+				sampled := samples[0]
+				samples = samples[1:]
+				return sampled
+			}}
+			task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+			key := "uploads/users/user-1/projects/project-1/tasks/task-1/inputs/reference.png"
+			_, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: "https://bucket.example.com/" + key}, deadline)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("stalled signer returned a URL beyond the absolute deadline")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(store.signedExpiries) != 1 || store.signedExpiries[0].After(deadline) {
+				t.Fatalf("signed expiry = %v, deadline = %v, ttl = %v", store.signedExpiries, deadline, store.signedTTLs)
+			}
+		})
+	}
+}
+
+func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second).Add(200 * time.Millisecond)
+	jobDeadline := now.Add(3700 * time.Millisecond)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
+	svc := NewAgentBootstrapService(nil, tokens, AgentBootstrapConfig{TokenTTL: 10 * time.Minute, SignedURLTTL: 600, Store: store}, zerolog.Nop())
+	svc.now = func() time.Time { return now }
+	prefix := "uploads/users/user-1/projects/project-1/tasks/task-1"
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformEcommerce, Prompt: "topic", ReferenceImageURL: "https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/inputs/reference.png"}
+	task.SetInputAttachments([]model.EntryAttachment{
+		{Type: "image", URL: "https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/inputs/attachment.png", FileName: "attachment.png"},
+		{Role: model.EntryAttachmentRoleResumeLatest, Text: "read attachments/resume.pdf"},
+		{Role: model.EntryAttachmentRoleResumeFile, URL: "https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/resume/run/attachments/resume.pdf", FileName: "resume.pdf"},
+	})
+	task.SetEcommerce(model.EcommerceConfig{ProductPhotos: []string{"https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/inputs/product.png"}})
+	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := tokens.Validate(response.ExecutionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.ExpiresAt == nil || claims.ExpiresAt.Time.After(jobDeadline) {
+		t.Fatalf("token expiry %v exceeds Job deadline %v", claims.ExpiresAt, jobDeadline)
+	}
+	if len(store.signedTTLs) != 4 {
+		t.Fatalf("signed TTLs = %v, want reference, attachment, resume, product", store.signedTTLs)
+	}
+	for i, ttl := range store.signedTTLs {
+		if ttl <= 0 || now.Add(time.Duration(ttl)*time.Second).After(claims.ExpiresAt.Time) {
+			t.Fatalf("signed TTL[%d]=%d exceeds credential deadline %v from %v", i, ttl, claims.ExpiresAt.Time, now)
+		}
+	}
+
+	before := len(store.signedKeys)
+	svc.now = func() time.Time { return jobDeadline.Add(-500 * time.Millisecond) }
+	if _, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline); err == nil {
+		t.Fatal("bootstrap accepted a deadline with no positive whole-second signing lifetime")
+	}
+	if len(store.signedKeys) != before {
+		t.Fatalf("expired bootstrap reached signer: %v", store.signedKeys[before:])
+	}
+}
+
+func TestBootstrapRejectsTextOnlyResponseWhenSafeLifetimeExpiresDuringBuild(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second).Add(200 * time.Millisecond)
+	jobDeadline := now.Add(3700 * time.Millisecond)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewAgentBootstrapService(nil, tokens, AgentBootstrapConfig{TokenTTL: 10 * time.Minute}, zerolog.Nop())
+	clockSamples := []time.Time{now, jobDeadline.Add(-500 * time.Millisecond)}
+	svc.now = func() time.Time {
+		sampled := clockSamples[0]
+		clockSamples = clockSamples[1:]
+		return sampled
+	}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "topic", SkipReferenceImage: true}
+	if _, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline); err == nil {
+		t.Fatal("text-only bootstrap issued a token without a positive whole-second lifetime")
+	}
 }
 
 func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testing.T) {
@@ -144,6 +257,10 @@ func TestValidateBootstrapFilesRejectsUnsafeContracts(t *testing.T) {
 		{{Path: "/absolute", Text: "x", Mode: 0644}},
 		{{Path: "../escape", Text: "x", Mode: 0644}},
 		{{Path: "same", Text: "x", Mode: 0644}, {Path: "same", Text: "y", Mode: 0644}},
+		{{Path: "Foo.txt", Text: "x", Mode: 0644}, {Path: "foo.txt", Text: "y", Mode: 0644}},
+		{{Path: "Straße.txt", Text: "x", Mode: 0644}, {Path: "STRASSE.txt", Text: "y", Mode: 0644}},
+		{{Path: "Résumé.txt", Text: "x", Mode: 0644}, {Path: "Re\u0301sume\u0301.txt", Text: "y", Mode: 0644}},
+		{{Path: strings.Repeat("a", 256), Text: "x", Mode: 0644}},
 		{{Path: "both", Text: "x", DownloadURL: "https://example.com/x", Mode: 0644}},
 		{{Path: "world", Text: "x", Mode: 0666}},
 		{{Path: "setuid", Text: "x", Mode: 04644}},
@@ -176,7 +293,7 @@ func TestBuildEcommerceProductBootstrapFiles(t *testing.T) {
 	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{Store: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}, SignedURLTTL: 60}}
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformEcommerce}
 	task.SetEcommerce(model.EcommerceConfig{ProductPhotos: []string{"https://bucket.oss-cn-x.aliyuncs.com/uploads/users/user-1/projects/project-1/tasks/task-1/inputs/product.png"}})
-	files, err := svc.buildProductFiles(context.Background(), task)
+	files, err := svc.buildProductFiles(context.Background(), task, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,8 +309,9 @@ func TestBootstrapDownloadSigningRequiresCanonicalTaskOwnership(t *testing.T) {
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
 	goodKey := "uploads/users/user-1/projects/project-1/tasks/task-1/inputs/good.png"
 	goodURL := "https://bucket.oss-cn-x.aliyuncs.com/" + goodKey
+	deadline := time.Now().Add(time.Hour)
 
-	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: goodURL, AssertedKey: goodKey}); err != nil {
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: goodURL, AssertedKey: goodKey}, deadline); err != nil {
 		t.Fatalf("owned input rejected: %v", err)
 	}
 	if len(store.signedKeys) != 1 || store.signedKeys[0] != goodKey {
@@ -207,7 +325,7 @@ func TestBootstrapDownloadSigningRequiresCanonicalTaskOwnership(t *testing.T) {
 		{URL: "https://external.example.com/uploads/users/user-1/projects/project-1/tasks/task-1/secret.png"},
 	}
 	for _, attack := range attacks {
-		if _, err := svc.signedDownloadURL(context.Background(), task, attack); err == nil {
+		if _, err := svc.signedDownloadURL(context.Background(), task, attack, deadline); err == nil {
 			t.Fatalf("unsafe source accepted: %#v", attack)
 		}
 	}
@@ -223,13 +341,14 @@ func TestBootstrapDownloadSigningValidatesFinalizedPendingUpload(t *testing.T) {
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
 	key := "uploads/pending/user-1/upload-1/input.png"
 	url := "https://bucket.oss-cn-x.aliyuncs.com/" + key
+	deadline := time.Now().Add(time.Hour)
 	if err := repo.PendingUploads().CreatePendingUpload(context.Background(), &model.PendingUpload{ID: "upload-1", UserID: task.UserID, Purpose: DirectUploadPurposeAIEntryAttachment, Key: key, PublicURL: url, Status: model.PendingUploadStatusFinalized, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: url, AssertedKey: key, UploadID: "upload-1", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}); err != nil {
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: url, AssertedKey: key, UploadID: "upload-1", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}, deadline); err != nil {
 		t.Fatalf("finalized pending input rejected: %v", err)
 	}
-	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: url, AssertedKey: key, UploadID: "other", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}); err == nil {
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: url, AssertedKey: key, UploadID: "other", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}, deadline); err == nil {
 		t.Fatal("mismatched upload id accepted")
 	}
 	if len(store.signedKeys) != 1 {
@@ -255,7 +374,7 @@ func TestBootstrapDownloadSigningValidatesFinalizedPendingUpload(t *testing.T) {
 				}
 			}
 			before := len(store.signedKeys)
-			if _, err := svc.signedDownloadURL(context.Background(), task, attack.source); err == nil {
+			if _, err := svc.signedDownloadURL(context.Background(), task, attack.source, deadline); err == nil {
 				t.Fatalf("unsafe pending source accepted: %#v", attack.source)
 			}
 			if len(store.signedKeys) != before {
@@ -270,6 +389,7 @@ func TestBootstrapPendingPurposeMatrix(t *testing.T) {
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
 	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}}
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+	deadline := time.Now().Add(time.Hour)
 	for _, purpose := range []string{DirectUploadPurposeTaskReference, DirectUploadPurposeProjectReference, DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeEcommercePhoto} {
 		t.Run(purpose, func(t *testing.T) {
 			id := strings.ReplaceAll(purpose, "_", "-")
@@ -278,7 +398,7 @@ func TestBootstrapPendingPurposeMatrix(t *testing.T) {
 			if err := repo.PendingUploads().CreatePendingUpload(context.Background(), &model.PendingUpload{ID: id, UserID: task.UserID, Purpose: purpose, Key: key, PublicURL: url, Status: model.PendingUploadStatusFinalized, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: url, AllowedPurposes: []string{purpose}}); err != nil {
+			if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: url, AllowedPurposes: []string{purpose}}, deadline); err != nil {
 				t.Fatalf("legitimate %s upload rejected: %v", purpose, err)
 			}
 		})

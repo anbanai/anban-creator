@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -41,19 +43,21 @@ func (s *executionScopeTestStore) Upload(_ context.Context, key string, reader i
 type testWorkloadVerifier struct {
 	gotToken, gotExecutionID string
 	identity                 *serveragent.KubernetesWorkloadIdentity
+	err                      error
 }
 
 func (v *testWorkloadVerifier) Verify(_ context.Context, token, executionID string) (*serveragent.KubernetesWorkloadIdentity, error) {
 	v.gotToken, v.gotExecutionID = token, executionID
-	return v.identity, nil
+	return v.identity, v.err
 }
 
 type testBootstrapper struct {
 	response *service.AgentBootstrapResponse
+	err      error
 }
 
 func (b testBootstrapper) Bootstrap(context.Context, *serveragent.KubernetesWorkloadIdentity) (*service.AgentBootstrapResponse, error) {
-	return b.response, nil
+	return b.response, b.err
 }
 
 func TestAgentExecutionTokenAndWorkloadBootstrap(t *testing.T) {
@@ -135,8 +139,113 @@ func TestAgentInvalidJWTDoesNotDowngradeToStaticKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != fiber.StatusNoContent {
-		t.Fatalf("independent API key status = %d, want 204", resp.StatusCode)
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("conflicting invalid JWT/API key status = %d, want 401", resp.StatusCode)
+	}
+
+	raw, err := tokens.Issue(auth.ExecutionClaims{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1"}, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest("POST", "/agent", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	req.Header.Set("X-Agent-API-Key", "independent-key")
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("conflicting valid JWT/API key status = %d, want 401", resp.StatusCode)
+	}
+
+	for _, setCredential := range []func(*http.Request){
+		func(req *http.Request) { req.Header.Set("Authorization", "Bearer independent-key") },
+		func(req *http.Request) { req.Header.Set("X-Agent-API-Key", "independent-key") },
+	} {
+		req = httptest.NewRequest("POST", "/agent", nil)
+		setCredential(req)
+		resp, err = app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != fiber.StatusNoContent {
+			t.Fatalf("single legacy API key status = %d, want 204", resp.StatusCode)
+		}
+	}
+	req = httptest.NewRequest("POST", "/agent", nil)
+	req.Header.Set("X-Agent-API-Key", "independent-key")
+	req.Header.Set("X-API-Key", "independent-key")
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("simultaneous valid legacy credentials status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestAgentBootstrapRedactsInternalErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "state conflict", err: fmt.Errorf("%w: secret-task-id", service.ErrAgentBootstrapConflict), wantStatus: fiber.StatusConflict, wantBody: "agent bootstrap state conflict"},
+		{name: "dependency unavailable", err: fmt.Errorf("%w: sign key uploads/private/secret", service.ErrAgentBootstrapUnavailable), wantStatus: fiber.StatusServiceUnavailable, wantBody: "agent bootstrap dependency unavailable"},
+		{name: "internal", err: errors.New("database password and object key"), wantStatus: fiber.StatusInternalServerError, wantBody: "agent bootstrap failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := zerolog.New(io.Discard)
+			verifier := &testWorkloadVerifier{identity: &serveragent.KubernetesWorkloadIdentity{ExecutionID: "execution-1"}}
+			h := NewAgentHandler(nil, nil, nil, "", &logger)
+			h.SetBootstrap(verifier, testBootstrapper{err: tc.err})
+			app := fiber.New()
+			app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
+			req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+			req.Header.Set("Authorization", "Bearer workload-token")
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != tc.wantStatus || !strings.Contains(string(body), tc.wantBody) {
+				t.Fatalf("status/body = %d/%s, want %d/%q", resp.StatusCode, body, tc.wantStatus, tc.wantBody)
+			}
+			for _, leaked := range []string{"secret-task-id", "uploads/private/secret", "database password", "object key"} {
+				if strings.Contains(string(body), leaked) {
+					t.Fatalf("internal detail %q leaked in %s", leaked, body)
+				}
+			}
+		})
+	}
+}
+
+func TestAgentBootstrapLogsWorkloadVerificationErrorWithoutLeakingIt(t *testing.T) {
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	verifier := &testWorkloadVerifier{err: errors.New("token review failed for private pod uid")}
+	h := NewAgentHandler(nil, nil, nil, "", &logger)
+	h.SetBootstrap(verifier, testBootstrapper{})
+	app := fiber.New()
+	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
+	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+	req.Header.Set("Authorization", "Bearer workload-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusUnauthorized || !strings.Contains(string(body), "workload identity verification failed") {
+		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "private pod uid") {
+		t.Fatalf("verification detail leaked in response: %s", body)
+	}
+	if !strings.Contains(logs.String(), "private pod uid") || !strings.Contains(logs.String(), "execution-1") {
+		t.Fatalf("verification failure missing from server logs: %s", logs.String())
 	}
 }
 

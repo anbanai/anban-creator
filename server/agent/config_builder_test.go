@@ -381,6 +381,41 @@ func TestMaterializeResumeInputsFailsWhenResumeAttachmentMissing(t *testing.T) {
 	}
 }
 
+func TestMaterializeResumeInputsRejectsPortableFilenameCollision(t *testing.T) {
+	for _, names := range [][2]string{
+		{"Foo.txt", "foo.txt"},
+		{"Straße.txt", "STRASSE.txt"},
+		{"Résumé.txt", "Re\u0301sume\u0301.txt"},
+	} {
+		workDir := t.TempDir()
+		attachments := []model.EntryAttachment{
+			{Text: "read attachments/" + names[0], Role: model.EntryAttachmentRoleResumeLatest},
+			{Text: "one", FileName: names[0], Role: model.EntryAttachmentRoleResumeFile},
+			{Text: "two", FileName: names[1], Role: model.EntryAttachmentRoleResumeFile},
+		}
+		if _, err := MaterializeResumeInputs(context.Background(), nil, noopLogger(), workDir, attachments); err == nil {
+			t.Fatalf("case-folded duplicate resume filenames %q accepted", names)
+		}
+		if _, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "resume", "latest.md")); !os.IsNotExist(err) {
+			t.Fatalf("latest.md published for invalid resume set: %v", err)
+		}
+	}
+}
+
+func TestMaterializeResumeInputsRejectsOverlongFilenameBeforeFilesystemWrites(t *testing.T) {
+	workDir := t.TempDir()
+	attachments := []model.EntryAttachment{
+		{Text: "read attachment", Role: model.EntryAttachmentRoleResumeLatest},
+		{Text: "content", FileName: strings.Repeat("a", 256), Role: model.EntryAttachmentRoleResumeFile},
+	}
+	if _, err := MaterializeResumeInputs(context.Background(), nil, noopLogger(), workDir, attachments); err == nil {
+		t.Fatal("overlong resume filename accepted")
+	}
+	if _, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "resume")); !os.IsNotExist(err) {
+		t.Fatalf("resume directory created before portable validation: %v", err)
+	}
+}
+
 func TestWriteProjectCLAUDEMD(t *testing.T) {
 	t.Run("writes fixed positioning template", func(t *testing.T) {
 		dir := t.TempDir()

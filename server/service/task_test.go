@@ -2728,6 +2728,46 @@ func TestTaskService_ResumeStorageFailureCleansPartialUploads(t *testing.T) {
 	}
 }
 
+func TestTaskService_ResumeRejectsNonPortableFilenameAndCleansPartialUploads(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := &resumeTestStorage{files: map[string][]byte{}}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续", Files: []ResumeTaskFile{
+		{OriginalName: "first.md", Reader: strings.NewReader("first")},
+		{OriginalName: "CON.txt", Reader: strings.NewReader("reserved")},
+	}})
+	if err == nil {
+		t.Fatal("Windows reserved resume filename accepted")
+	}
+	if len(store.files) != 0 || len(store.deleted) != 1 || !strings.HasSuffix(store.deleted[0], "/first.md") {
+		t.Fatalf("partial portable-name failure cleanup files=%v deleted=%v", store.files, store.deleted)
+	}
+	found, findErr := repo.Tasks().FindByID(ctx, task.ID)
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
+	if found.Status != model.TaskStatusFailed || len(found.InputAttachments.Data()) != 0 {
+		t.Fatalf("task changed after portable-name failure: status=%q attachments=%#v", found.Status, found.InputAttachments.Data())
+	}
+}
+
 func TestTaskService_ResumeDeletesSupersededResumeFilesAfterCAS(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {

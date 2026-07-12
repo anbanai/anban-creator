@@ -60,7 +60,13 @@ type AgentBootstrapService struct {
 	tokens *auth.ExecutionTokenService
 	cfg    AgentBootstrapConfig
 	logger zerolog.Logger
+	now    func() time.Time
 }
+
+var (
+	ErrAgentBootstrapConflict    = errors.New("agent bootstrap state conflict")
+	ErrAgentBootstrapUnavailable = errors.New("agent bootstrap dependency unavailable")
+)
 
 var unsafeBootstrapFilename = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
@@ -74,7 +80,14 @@ func NewAgentBootstrapService(repo repository.Repository, tokens *auth.Execution
 	if cfg.SignedURLTTL <= 0 || time.Duration(cfg.SignedURLTTL)*time.Second > cfg.TokenTTL {
 		cfg.SignedURLTTL = int(cfg.TokenTTL.Seconds())
 	}
-	return &AgentBootstrapService{repo: repo, tokens: tokens, cfg: cfg, logger: logger}
+	return &AgentBootstrapService{repo: repo, tokens: tokens, cfg: cfg, logger: logger, now: time.Now}
+}
+
+func (s *AgentBootstrapService) currentTime() time.Time {
+	if s != nil && s.now != nil {
+		return s.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *serveragent.KubernetesWorkloadIdentity) (*AgentBootstrapResponse, error) {
@@ -100,7 +113,7 @@ func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *servera
 				return err
 			}
 			if !won {
-				return errors.New("execution bootstrap state changed concurrently")
+				return fmt.Errorf("%w: execution bootstrap state changed concurrently", ErrAgentBootstrapConflict)
 			}
 		}
 		now := time.Now()
@@ -132,32 +145,40 @@ func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo reposi
 		return nil, nil, nil, fmt.Errorf("find execution owner: %w", err)
 	}
 	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID || execution.TaskID != identity.TaskID || task.ID != identity.TaskID || task.ProjectID != identity.ProjectID || task.UserID != identity.UserID || project.ID != identity.ProjectID || project.UserID != identity.UserID || user.ID != identity.UserID {
-		return nil, nil, nil, errors.New("workload identity does not match current task execution ownership")
+		return nil, nil, nil, fmt.Errorf("%w: workload identity does not match current task execution ownership", ErrAgentBootstrapConflict)
 	}
 	if execution.Target != "kubernetes" || execution.Namespace != identity.Namespace || execution.JobName != identity.JobName {
-		return nil, nil, nil, errors.New("workload Kubernetes runtime identity mismatch")
+		return nil, nil, nil, fmt.Errorf("%w: workload Kubernetes runtime identity mismatch", ErrAgentBootstrapConflict)
 	}
 	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
-		return nil, nil, nil, errors.New("task is terminal")
+		return nil, nil, nil, fmt.Errorf("%w: task is terminal", ErrAgentBootstrapConflict)
 	}
 	switch execution.Status {
 	case model.TaskExecutionStarting:
 		if execution.PodUID != "" && execution.PodUID != identity.PodUID {
-			return nil, nil, nil, errors.New("execution is bound to another Pod")
+			return nil, nil, nil, fmt.Errorf("%w: execution is bound to another Pod", ErrAgentBootstrapConflict)
 		}
 	case model.TaskExecutionRunning:
 		if !execution.Started || execution.PodUID == "" || execution.PodUID != identity.PodUID {
-			return nil, nil, nil, errors.New("running execution is bound to another Pod")
+			return nil, nil, nil, fmt.Errorf("%w: running execution is bound to another Pod", ErrAgentBootstrapConflict)
 		}
 	default:
-		return nil, nil, nil, fmt.Errorf("execution status %q cannot bootstrap", execution.Status)
+		return nil, nil, nil, fmt.Errorf("%w: execution status %q cannot bootstrap", ErrAgentBootstrapConflict, execution.Status)
 	}
 	return execution, task, project, nil
 }
 
 func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *model.TaskExecution, task *model.Task, project *model.Project, jobDeadline time.Time) (*AgentBootstrapResponse, error) {
-	if !jobDeadline.After(time.Now()) {
-		return nil, errors.New("Kubernetes Job active deadline is missing or expired")
+	issuedAt := s.currentTime()
+	credentialDeadline := issuedAt.Add(s.cfg.TokenTTL)
+	if jobDeadline.Before(credentialDeadline) {
+		credentialDeadline = jobDeadline
+	}
+	// JWT NumericDate serializes at whole-second precision. Use that exact
+	// boundary for download signing as well, never a rounded-up duration.
+	credentialDeadline = credentialDeadline.UTC().Truncate(time.Second)
+	if !credentialDeadline.After(issuedAt) || credentialDeadline.Sub(issuedAt) < time.Second {
+		return nil, fmt.Errorf("%w: Kubernetes Job has no positive bootstrap credential lifetime", ErrAgentBootstrapConflict)
 	}
 	effective := serveragent.EffectiveProject(project, task)
 	files := []BootstrapFile{{Path: ".task-context", Text: "TASK_ID=" + task.ID + "\n", Mode: 0644}}
@@ -189,13 +210,13 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		referencePurposes = []string{DirectUploadPurposeProjectReference}
 	}
 	if reference != "" {
-		signed, err := s.signedDownloadURL(ctx, task, bootstrapDownloadSource{URL: reference, AllowedPurposes: referencePurposes})
+		signed, err := s.signedDownloadURL(ctx, task, bootstrapDownloadSource{URL: reference, AllowedPurposes: referencePurposes}, credentialDeadline)
 		if err != nil {
 			return nil, fmt.Errorf("sign reference image: %w", err)
 		}
 		files = append(files, BootstrapFile{Path: ".anban-creator/reference.png", DownloadURL: signed, Mode: 0644})
 	}
-	attachmentFiles, err := s.buildAttachmentFiles(ctx, task, task.InputAttachments.Data())
+	attachmentFiles, err := s.buildAttachmentFiles(ctx, task, task.InputAttachments.Data(), credentialDeadline)
 	if err != nil {
 		return nil, err
 	}
@@ -205,19 +226,19 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, montageFiles...)
-	productFiles, err := s.buildProductFiles(ctx, task)
+	productFiles, err := s.buildProductFiles(ctx, task, credentialDeadline)
 	if err != nil {
 		return nil, err
 	}
 	files = append(files, productFiles...)
 	if err := ValidateBootstrapFiles(files); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 	}
-	expires := time.Now().Add(s.cfg.TokenTTL)
-	if jobDeadline.Before(expires) {
-		expires = jobDeadline
+	tokenIssuedAt := s.currentTime()
+	if !credentialDeadline.After(tokenIssuedAt) || credentialDeadline.Sub(tokenIssuedAt) < time.Second {
+		return nil, fmt.Errorf("%w: Kubernetes Job has no positive bootstrap credential lifetime", ErrAgentBootstrapConflict)
 	}
-	token, err := s.tokens.Issue(auth.ExecutionClaims{UserID: task.UserID, ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: execution.ID}, expires)
+	token, err := s.tokens.IssueAt(auth.ExecutionClaims{UserID: task.UserID, ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: execution.ID}, tokenIssuedAt, credentialDeadline)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +246,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", Files: files}, nil
 }
 
-func (s *AgentBootstrapService) buildProductFiles(ctx context.Context, task *model.Task) ([]BootstrapFile, error) {
+func (s *AgentBootstrapService) buildProductFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
 	if task == nil || task.Type != model.PlatformEcommerce {
 		return nil, nil
 	}
@@ -236,7 +257,7 @@ func (s *AgentBootstrapService) buildProductFiles(ctx context.Context, task *mod
 	files := make([]BootstrapFile, 0, len(photos)+1)
 	names := make([]string, 0, len(photos))
 	for i, photo := range photos {
-		signed, err := s.signedDownloadURL(ctx, task, bootstrapDownloadSource{URL: photo, AllowedPurposes: []string{DirectUploadPurposeEcommercePhoto, DirectUploadPurposeAIEntryAttachment}})
+		signed, err := s.signedDownloadURL(ctx, task, bootstrapDownloadSource{URL: photo, AllowedPurposes: []string{DirectUploadPurposeEcommercePhoto, DirectUploadPurposeAIEntryAttachment}}, credentialDeadline)
 		if err != nil {
 			return nil, fmt.Errorf("sign product photo %d: %w", i+1, err)
 		}
@@ -290,37 +311,51 @@ type bootstrapDownloadSource struct {
 	AllowedPurposes []string
 }
 
-func (s *AgentBootstrapService) signedDownloadURL(ctx context.Context, task *model.Task, source bootstrapDownloadSource) (string, error) {
+func (s *AgentBootstrapService) signedDownloadURL(ctx context.Context, task *model.Task, source bootstrapDownloadSource, credentialDeadline time.Time) (string, error) {
 	if s.cfg.Store == nil {
-		return "", errors.New("storage provider is required for bootstrap downloads")
+		return "", fmt.Errorf("%w: storage provider is required for bootstrap downloads", ErrAgentBootstrapUnavailable)
 	}
 	if task == nil || strings.TrimSpace(task.UserID) == "" || strings.TrimSpace(task.ProjectID) == "" || strings.TrimSpace(task.ID) == "" {
-		return "", errors.New("task identity is required for bootstrap download")
+		return "", fmt.Errorf("%w: task identity is required for bootstrap download", ErrAgentBootstrapConflict)
 	}
 	rawURL := strings.TrimSpace(source.URL)
 	if rawURL == "" || !s.cfg.Store.IsOwnedURL(rawURL) {
-		return "", errors.New("bootstrap download is not owned by configured storage")
+		return "", fmt.Errorf("%w: bootstrap download is not owned by configured storage", ErrAgentBootstrapConflict)
 	}
 	key, ok := storage.StorageKeyFromURL(rawURL)
 	if !ok || key == "" {
-		return "", errors.New("cannot resolve bootstrap storage object key")
+		return "", fmt.Errorf("%w: cannot resolve bootstrap storage object key", ErrAgentBootstrapConflict)
 	}
 	key = strings.TrimPrefix(key, "/")
 	if clean := path.Clean(key); clean != key || clean == "." || strings.HasPrefix(clean, "../") {
-		return "", errors.New("bootstrap storage object key is invalid")
+		return "", fmt.Errorf("%w: bootstrap storage object key is invalid", ErrAgentBootstrapConflict)
 	}
 	if asserted := strings.TrimSpace(source.AssertedKey); asserted != "" && asserted != key {
-		return "", errors.New("bootstrap storage object key assertion mismatch")
+		return "", fmt.Errorf("%w: bootstrap storage object key assertion mismatch", ErrAgentBootstrapConflict)
 	}
 	if err := s.authorizeBootstrapObject(ctx, task, rawURL, key, source); err != nil {
-		return "", err
+		if errors.Is(err, ErrAgentBootstrapUnavailable) {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 	}
-	signed, err := s.cfg.Store.DownloadURL(ctx, key, s.cfg.SignedURLTTL)
+	signingNow := s.currentTime()
+	ttl := int(credentialDeadline.Unix()-signingNow.Unix()) - 1
+	if s.cfg.SignedURLTTL > 0 && ttl > s.cfg.SignedURLTTL {
+		ttl = s.cfg.SignedURLTTL
+	}
+	if ttl <= 0 {
+		return "", fmt.Errorf("%w: no positive signed download lifetime remains", ErrAgentBootstrapConflict)
+	}
+	signed, err := s.cfg.Store.DownloadURL(ctx, key, ttl)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: sign bootstrap download: %v", ErrAgentBootstrapUnavailable, err)
 	}
 	if strings.TrimSpace(signed) == "" {
-		return "", errors.New("storage returned an empty signed download URL")
+		return "", fmt.Errorf("%w: storage returned an empty signed download URL", ErrAgentBootstrapUnavailable)
+	}
+	if s.currentTime().Unix()+int64(ttl) > credentialDeadline.Unix() {
+		return "", fmt.Errorf("%w: signed download crossed the credential deadline", ErrAgentBootstrapConflict)
 	}
 	return signed, nil
 }
@@ -341,7 +376,7 @@ func (s *AgentBootstrapService) authorizeBootstrapObject(ctx context.Context, ta
 	}
 	upload, err := s.repo.PendingUploads().FindPendingUploadByID(ctx, id)
 	if err != nil {
-		return errors.New("bootstrap pending upload ownership is unavailable")
+		return fmt.Errorf("%w: pending upload ownership lookup: %v", ErrAgentBootstrapUnavailable, err)
 	}
 	if upload.UserID != task.UserID || upload.Status != model.PendingUploadStatusFinalized || !directUploadPurposeAllowed(upload.Purpose, source.AllowedPurposes) || upload.Key != key || !pendingUploadURLMatches(rawURL, upload) {
 		return errors.New("bootstrap pending upload ownership mismatch")
@@ -349,7 +384,7 @@ func (s *AgentBootstrapService) authorizeBootstrapObject(ctx context.Context, ta
 	return nil
 }
 
-func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, task *model.Task, attachments []model.EntryAttachment) ([]BootstrapFile, error) {
+func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, task *model.Task, attachments []model.EntryAttachment, credentialDeadline time.Time) ([]BootstrapFile, error) {
 	files := make([]BootstrapFile, 0, len(attachments)+2)
 	type indexEntry struct {
 		Index       int    `json:"index"`
@@ -363,7 +398,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, task *
 	for i, attachment := range attachments {
 		if attachment.Role == model.EntryAttachmentRoleResumeLatest {
 			if strings.TrimSpace(attachment.Text) == "" {
-				return nil, errors.New("resume latest attachment requires text")
+				return nil, fmt.Errorf("%w: resume latest attachment requires text", ErrAgentBootstrapConflict)
 			}
 			files = append(files, BootstrapFile{Path: ".anban-creator/resume/latest.md", Text: attachment.Text, Mode: 0644})
 			continue
@@ -374,12 +409,12 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, task *
 		if attachment.Role == model.EntryAttachmentRoleResumeFile {
 			canonicalName, err := serveragent.CanonicalResumeAttachmentFilename(attachment.FileName)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 			}
 			name = canonicalName
 			rel, err = serveragent.ResumeAttachmentWorkspacePath(name)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 			}
 		}
 		if rel == "" {
@@ -391,7 +426,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, task *
 			if attachment.Role == model.EntryAttachmentRoleResumeFile {
 				purposes = nil
 			}
-			signed, err := s.signedDownloadURL(ctx, task, bootstrapDownloadSource{URL: attachment.URL, AssertedKey: attachment.Key, UploadID: attachment.UploadID, AllowedPurposes: purposes})
+			signed, err := s.signedDownloadURL(ctx, task, bootstrapDownloadSource{URL: attachment.URL, AssertedKey: attachment.Key, UploadID: attachment.UploadID, AllowedPurposes: purposes}, credentialDeadline)
 			if err != nil {
 				return nil, fmt.Errorf("sign attachment %q: %w", attachment.FileName, err)
 			}
@@ -399,7 +434,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, task *
 		} else if strings.TrimSpace(attachment.Text) != "" {
 			file.Text = attachment.Text
 		} else {
-			return nil, fmt.Errorf("attachment %q has no content source", attachment.FileName)
+			return nil, fmt.Errorf("%w: attachment %q has no content source", ErrAgentBootstrapConflict, attachment.FileName)
 		}
 		files = append(files, file)
 		if attachment.Role != model.EntryAttachmentRoleResumeFile {
@@ -437,10 +472,16 @@ func ValidateBootstrapFiles(files []BootstrapFile) error {
 		if err != nil || filepath.ToSlash(clean) != raw {
 			return fmt.Errorf("invalid bootstrap file path %q", file.Path)
 		}
-		if _, exists := seen[clean]; exists {
+		for _, component := range strings.Split(filepath.ToSlash(clean), "/") {
+			if err := serveragent.ValidatePortableFilenameComponent(component); err != nil {
+				return fmt.Errorf("invalid bootstrap file path %q: %w", file.Path, err)
+			}
+		}
+		portableKey := serveragent.PortableFilenameKey(filepath.ToSlash(clean))
+		if _, exists := seen[portableKey]; exists {
 			return fmt.Errorf("duplicate bootstrap file path %q", clean)
 		}
-		seen[clean] = struct{}{}
+		seen[portableKey] = struct{}{}
 		if (file.Text == "") == (file.DownloadURL == "") {
 			return fmt.Errorf("bootstrap file %q must have exactly one content source", clean)
 		}

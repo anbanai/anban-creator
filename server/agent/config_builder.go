@@ -461,6 +461,18 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 	if latest == nil || strings.TrimSpace(latest.Text) == "" {
 		return 0, nil
 	}
+	seenNames := make(map[string]struct{}, len(files))
+	for _, attachment := range files {
+		name, err := CanonicalResumeAttachmentFilename(attachment.FileName)
+		if err != nil {
+			return 0, err
+		}
+		portableKey := PortableFilenameKey(name)
+		if _, exists := seenNames[portableKey]; exists {
+			return 0, fmt.Errorf("duplicate resume attachment filename %q", name)
+		}
+		seenNames[portableKey] = struct{}{}
+	}
 	resumeRoot := filepath.Join(workDir, appconfig.ConfigDir, "resume")
 	attachmentsDir := filepath.Join(resumeRoot, "attachments")
 	if err := os.MkdirAll(resumeRoot, 0o755); err != nil {

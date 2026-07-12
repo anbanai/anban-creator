@@ -41,17 +41,27 @@ func NewExecutionTokenService(secret string) (*ExecutionTokenService, error) {
 
 // Issue creates a token whose expiry must be chosen no later than the Job deadline.
 func (s *ExecutionTokenService) Issue(identity ExecutionClaims, expiresAt time.Time) (string, error) {
+	if s == nil || s.now == nil {
+		return "", errors.New("execution token service is not configured")
+	}
+	return s.IssueAt(identity, s.now().UTC(), expiresAt)
+}
+
+// IssueAt issues a token from one caller-sampled clock value so related
+// credential deadlines can be calculated from the same instant.
+func (s *ExecutionTokenService) IssueAt(identity ExecutionClaims, issuedAt, expiresAt time.Time) (string, error) {
 	if s == nil || len(s.secret) == 0 {
 		return "", errors.New("execution token service is not configured")
 	}
 	if err := validateExecutionIdentity(identity); err != nil {
 		return "", err
 	}
-	now := s.now().UTC()
-	if !expiresAt.After(now) {
+	issuedAt = issuedAt.UTC()
+	expiresAt = expiresAt.UTC()
+	if !expiresAt.After(issuedAt) {
 		return "", errors.New("execution token expiry must be in the future")
 	}
-	if expiresAt.Sub(now) > maximumExecutionLifetime {
+	if expiresAt.Sub(issuedAt) > maximumExecutionLifetime {
 		return "", errors.New("execution token lifetime exceeds maximum")
 	}
 	identity.RegisteredClaims = jwt.RegisteredClaims{
@@ -59,8 +69,8 @@ func (s *ExecutionTokenService) Issue(identity ExecutionClaims, expiresAt time.T
 		Subject:   identity.ExecutionID,
 		Audience:  jwt.ClaimStrings{executionTokenAudience},
 		ExpiresAt: jwt.NewNumericDate(expiresAt.UTC()),
-		NotBefore: jwt.NewNumericDate(now),
-		IssuedAt:  jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(issuedAt),
+		IssuedAt:  jwt.NewNumericDate(issuedAt),
 		ID:        uuid.NewString(),
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, identity).SignedString(s.secret)
