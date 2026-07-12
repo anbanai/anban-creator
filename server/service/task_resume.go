@@ -7,11 +7,10 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
-	"unicode"
 
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
 	"gorm.io/datatypes"
 )
@@ -147,7 +146,11 @@ func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task,
 		if file.Reader == nil {
 			continue
 		}
-		safeName := uniqueResumeFilename(sanitizeResumeFilename(file.OriginalName), usedNames)
+		safeName := serveragent.UniqueResumeFilename(serveragent.SanitizeResumeFilename(file.OriginalName), usedNames)
+		relPath, err := serveragent.ResumeAttachmentReferencePath(safeName)
+		if err != nil {
+			return nil, "", err
+		}
 		var buf bytes.Buffer
 		if _, err := io.Copy(&buf, file.Reader); err != nil {
 			s.deleteWrittenResumeFiles(ctx, written)
@@ -167,7 +170,7 @@ func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task,
 			OriginalName: file.OriginalName,
 			SafeName:     safeName,
 			Label:        strings.TrimSpace(file.Label),
-			RelPath:      filepath.ToSlash(filepath.Join("attachments", safeName)),
+			RelPath:      relPath,
 			Attachment: model.EntryAttachment{
 				Type:        "document",
 				URL:         upload.URL,
@@ -261,39 +264,4 @@ func buildResumeInputBody(prompt string, written []resumeWrittenFile) string {
 		}
 	}
 	return b.String()
-}
-
-func sanitizeResumeFilename(name string) string {
-	name = filepath.Base(strings.TrimSpace(name))
-	if name == "." || name == string(filepath.Separator) || name == "" {
-		name = "attachment"
-	}
-	var b strings.Builder
-	for _, r := range name {
-		switch {
-		case unicode.IsControl(r):
-			b.WriteRune('_')
-		case unicode.IsSpace(r):
-			b.WriteRune('_')
-		case strings.ContainsRune(`/\:*?"<>|`, r):
-			b.WriteRune('_')
-		default:
-			b.WriteRune(r)
-		}
-	}
-	cleaned := strings.Trim(b.String(), "._ ")
-	if cleaned == "" {
-		return "attachment"
-	}
-	return cleaned
-}
-
-func uniqueResumeFilename(name string, used map[string]int) string {
-	used[name]++
-	if used[name] == 1 {
-		return name
-	}
-	ext := filepath.Ext(name)
-	base := strings.TrimSuffix(name, ext)
-	return fmt.Sprintf("%s_%d%s", base, used[name], ext)
 }

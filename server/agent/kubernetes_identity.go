@@ -56,10 +56,10 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 		return nil, fmt.Errorf("review workload token: %w", err)
 	}
 	expectedUser := "system:serviceaccount:" + v.namespace + ":" + v.serviceAccount
-	if !review.Status.Authenticated || review.Status.User.Username != expectedUser {
+	if strings.TrimSpace(review.Status.Error) != "" || !review.Status.Authenticated || review.Status.User.Username != expectedUser {
 		return nil, errors.New("workload token is not authenticated as the configured service account")
 	}
-	if !slices.Contains(review.Status.Audiences, KubernetesWorkloadAudience) {
+	if len(review.Status.Audiences) != 1 || !slices.Contains(review.Status.Audiences, KubernetesWorkloadAudience) {
 		return nil, errors.New("workload token audience mismatch")
 	}
 	podName, err := singleExtra(review.Status.User.Extra, KubernetesPodNameExtra)
@@ -73,6 +73,9 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 	pod, err := v.kube.CoreV1().Pods(v.namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("get bound Pod: %w", err)
+	}
+	if pod.Namespace != v.namespace || pod.Spec.ServiceAccountName != v.serviceAccount {
+		return nil, errors.New("bound Pod service account identity mismatch")
 	}
 	if string(pod.UID) != podUID {
 		return nil, errors.New("bound Pod UID mismatch")
@@ -93,6 +96,9 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 	if err != nil {
 		return nil, fmt.Errorf("get owning Job: %w", err)
 	}
+	if job.Namespace != v.namespace || job.Spec.Template.Spec.ServiceAccountName != v.serviceAccount {
+		return nil, errors.New("owning Job service account identity mismatch")
+	}
 	if string(job.UID) != ownerUID {
 		return nil, errors.New("owning Job UID mismatch")
 	}
@@ -107,6 +113,11 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 	if labels["app.kubernetes.io/name"] != kubernetesAgentAppName || labels["app.kubernetes.io/component"] != "execution" ||
 		labels[kubernetesExecutionIDLabel] != kubernetesLabelValue(requestedExecutionID) || labels[kubernetesTaskIDLabel] == "" || labels[kubernetesProjectIDLabel] == "" || labels[kubernetesUserIDLabel] == "" {
 		return nil, errors.New("owning Job runtime identity labels mismatch")
+	}
+	for _, key := range []string{"app.kubernetes.io/name", "app.kubernetes.io/component", kubernetesExecutionIDLabel, kubernetesTaskIDLabel, kubernetesProjectIDLabel, kubernetesUserIDLabel} {
+		if pod.Labels[key] == "" || pod.Labels[key] != labels[key] {
+			return nil, errors.New("bound Pod and owning Job runtime identity labels conflict")
+		}
 	}
 	return &KubernetesWorkloadIdentity{Namespace: v.namespace, ServiceAccount: v.serviceAccount, PodName: podName, PodUID: podUID, JobName: job.Name, JobUID: string(job.UID), ExecutionID: requestedExecutionID, TaskID: labels[kubernetesTaskIDLabel], ProjectID: labels[kubernetesProjectIDLabel], UserID: labels[kubernetesUserIDLabel], JobDeadline: jobDeadline}, nil
 }

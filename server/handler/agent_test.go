@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -24,6 +27,16 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
+
+type executionScopeTestStore struct{ *fakeAgentArtifactStorage }
+
+func (s *executionScopeTestStore) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	return &storage.UploadResult{Key: key, URL: s.GetURL(key), Size: int64(len(data)), MimeType: contentType}, nil
+}
 
 type testWorkloadVerifier struct {
 	gotToken, gotExecutionID string
@@ -125,6 +138,154 @@ func TestAgentInvalidJWTDoesNotDowngradeToStaticKey(t *testing.T) {
 	if resp.StatusCode != fiber.StatusNoContent {
 		t.Fatalf("independent API key status = %d, want 204", resp.StatusCode)
 	}
+}
+
+func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
+	endpoints := []struct {
+		name    string
+		path    string
+		request func(string) *http.Request
+	}{
+		{"progress", "/agent/progress", func(taskID string) *http.Request {
+			return agentJSONRequest("/agent/progress", `{"task_id":"`+taskID+`","message":"working"}`)
+		}},
+		{"upload", "/agent/upload", agentMultipartUploadRequest},
+		{"prepare", "/agent/artifacts/prepare", func(taskID string) *http.Request {
+			return agentJSONRequest("/agent/artifacts/prepare", `{"task_id":"`+taskID+`","relative_path":"output/content.md","filename":"content.md","content_type":"text/markdown","size":7}`)
+		}},
+		{"manifest", "/agent/artifacts/manifest", func(taskID string) *http.Request {
+			return agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+taskID+`","files":[]}`)
+		}},
+		{"complete", "/agent/complete", func(taskID string) *http.Request {
+			return agentJSONRequest("/agent/complete", `{"task_id":"`+taskID+`"}`)
+		}},
+	}
+	for _, endpoint := range endpoints {
+		for _, mode := range []string{"current", "cross_task", "stale"} {
+			t.Run(endpoint.name+"/"+mode, func(t *testing.T) {
+				app, repo, task, executionID, token, _, store := setupExecutionScopedAgentApp(t)
+				requestTaskID := task.ID
+				switch mode {
+				case "cross_task":
+					requestTaskID = uuid.NewString()
+				case "stale":
+					other := uuid.NewString()
+					persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					persisted.CurrentExecutionID = &other
+					if err := repo.Tasks().Update(context.Background(), persisted); err != nil {
+						t.Fatal(err)
+					}
+				}
+				req := endpoint.request(requestTaskID)
+				req.Header.Set("Authorization", "Bearer "+token)
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mode == "current" && resp.StatusCode != fiber.StatusOK {
+					t.Fatalf("current execution %s status = %d, want 200", executionID, resp.StatusCode)
+				}
+				if mode != "current" && resp.StatusCode != fiber.StatusForbidden {
+					t.Fatalf("%s status = %d, want 403", mode, resp.StatusCode)
+				}
+				if mode != "current" {
+					persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					files, err := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if persisted.ProgressLog != "" || persisted.Status != model.TaskStatusRunning || len(files) != 0 || store.uploadKey != "" {
+						t.Fatalf("rejected request caused side effect: task=%#v files=%d upload=%q", persisted, len(files), store.uploadKey)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestAgentAPIKeyProgressBehaviorIsPreserved(t *testing.T) {
+	app, _, task, _, _, rawAPIKey, _ := setupExecutionScopedAgentApp(t)
+	req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`","message":"local progress"}`)
+	req.Header.Set("Authorization", "Bearer "+rawAPIKey)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("API-key progress status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
+	t.Helper()
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, projectID, taskID, executionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: uuid.NewString() + "@example.com", Password: "x", InviteCode: uuid.NewString()[:12]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "P", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, PodUID: "pod-1"}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	store := &executionScopeTestStore{fakeAgentArtifactStorage: &fakeAgentArtifactStorage{}}
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	apiKeys := service.NewAPIKeyService(repo, &logger)
+	_, rawAPIKey, err := apiKeys.Create(ctx, userID, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	token, err := tokens.Issue(auth.ExecutionClaims{UserID: userID, ProjectID: projectID, TaskID: taskID, ExecutionID: executionID}, time.Now().Add(10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewAgentHandler(taskSvc, apiKeys, store, "", &logger)
+	h.SetExecutionTokenService(tokens)
+	h.SetDirectUploadConfig(service.DirectUploadConfig{Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", STSRoleArn: "role"}, CredentialIssuer: service.StaticUploadCredentialIssuer(func(context.Context, service.UploadCredentialRequest) (*service.UploadCredential, error) {
+		return &service.UploadCredential{AccessKeyID: "ak", AccessKeySecret: "secret", SecurityToken: "token", ExpiresAt: time.Now().Add(time.Minute)}, nil
+	})})
+	app := fiber.New()
+	app.Post("/agent/progress", h.AuthMiddleware, h.Progress)
+	app.Post("/agent/upload", h.AuthMiddleware, h.Upload)
+	app.Post("/agent/artifacts/prepare", h.AuthMiddleware, h.PrepareArtifactUpload)
+	app.Post("/agent/artifacts/manifest", h.AuthMiddleware, h.ReportArtifactManifest)
+	app.Post("/agent/complete", h.AuthMiddleware, h.Complete)
+	return app, repo, task, executionID, token, rawAPIKey, store.fakeAgentArtifactStorage
+}
+
+func agentJSONRequest(path, body string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func agentMultipartUploadRequest(taskID string) *http.Request {
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	_ = w.WriteField("task_id", taskID)
+	_ = w.WriteField("relative_path", "output/content.md")
+	file, _ := w.CreateFormFile("file", "content.md")
+	_, _ = file.Write([]byte("content"))
+	_ = w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/agent/upload", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	return req
 }
 
 // setupAgentClaimApp wires an AgentHandler (real API-key auth via APIKeyService)

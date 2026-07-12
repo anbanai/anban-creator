@@ -2552,6 +2552,12 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 				Reader:       strings.NewReader("feedback"),
 				Size:         int64(len("feedback")),
 			},
+			{
+				OriginalName: "客户 反馈.txt",
+				Label:        "第二份反馈",
+				Reader:       strings.NewReader("feedback-2"),
+				Size:         int64(len("feedback-2")),
+			},
 		},
 	})
 	if err != nil {
@@ -2575,22 +2581,22 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 		t.Fatalf("find resumed task: %v", err)
 	}
 	var latestText string
-	var resumeFile model.EntryAttachment
+	var resumeFiles []model.EntryAttachment
 	for _, attachment := range found.InputAttachments.Data() {
 		switch attachment.Role {
 		case model.EntryAttachmentRoleResumeLatest:
 			latestText = attachment.Text
 		case model.EntryAttachmentRoleResumeFile:
-			resumeFile = attachment
+			resumeFiles = append(resumeFiles, attachment)
 		}
 	}
-	for _, want := range []string{"请基于现有草稿补充案例", "客户反馈", "客户 反馈.txt", "attachments/客户_反馈.txt"} {
+	for _, want := range []string{"请基于现有草稿补充案例", "客户反馈", "客户 反馈.txt", "attachments/客户_反馈.txt", "attachments/客户_反馈_2.txt"} {
 		if !strings.Contains(latestText, want) {
 			t.Fatalf("resume latest missing %q:\n%s", want, latestText)
 		}
 	}
-	if resumeFile.FileName != "客户_反馈.txt" || string(store.files[resumeFile.Key]) != "feedback" {
-		t.Fatalf("resume file = %#v data=%q", resumeFile, store.files[resumeFile.Key])
+	if len(resumeFiles) != 2 || resumeFiles[0].FileName != "客户_反馈.txt" || resumeFiles[1].FileName != "客户_反馈_2.txt" || string(store.files[resumeFiles[0].Key]) != "feedback" || string(store.files[resumeFiles[1].Key]) != "feedback-2" {
+		t.Fatalf("resume files = %#v", resumeFiles)
 	}
 }
 

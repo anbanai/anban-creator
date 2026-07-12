@@ -462,15 +462,21 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 		return 0, nil
 	}
 	resumeRoot := filepath.Join(workDir, appconfig.ConfigDir, "resume")
-	stamp := time.Now().Format("20060102-150405.000000000")
-	runDir := filepath.Join(resumeRoot, stamp)
-	attachmentsDir := filepath.Join(runDir, "attachments")
-	if err := os.MkdirAll(attachmentsDir, 0o755); err != nil {
+	attachmentsDir := filepath.Join(resumeRoot, "attachments")
+	if err := os.MkdirAll(resumeRoot, 0o755); err != nil {
 		if logger != nil {
-			logger.Warn().Err(err).Msg("create resume input dir failed")
+			logger.Warn().Err(err).Msg("create resume input root failed")
 		}
-		return 0, fmt.Errorf("create resume input dir: %w", err)
+		return 0, fmt.Errorf("create resume input root: %w", err)
 	}
+	stagedAttachmentsDir, err := os.MkdirTemp(resumeRoot, ".attachments-")
+	if err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("stage resume input dir failed")
+		}
+		return 0, fmt.Errorf("stage resume input dir: %w", err)
+	}
+	defer os.RemoveAll(stagedAttachmentsDir)
 	written := 0
 	for _, attachment := range files {
 		data, err := fetchResumeAttachmentBytes(ctx, store, attachment)
@@ -480,11 +486,11 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 			}
 			return written, fmt.Errorf("fetch resume attachment %q: %w", attachment.FileName, err)
 		}
-		name := filepath.Base(strings.TrimSpace(attachment.FileName))
-		if name == "." || name == "" {
-			name = "attachment"
+		name, err := CanonicalResumeAttachmentFilename(attachment.FileName)
+		if err != nil {
+			return written, err
 		}
-		if err := os.WriteFile(filepath.Join(attachmentsDir, name), data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(stagedAttachmentsDir, name), data, 0o644); err != nil {
 			if logger != nil {
 				logger.Warn().Err(err).Str("name", name).Msg("write resume attachment failed")
 			}
@@ -492,13 +498,13 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 		}
 		written++
 	}
-	body := []byte(latest.Text)
-	if err := os.WriteFile(filepath.Join(runDir, "input.md"), body, 0o644); err != nil {
-		if logger != nil {
-			logger.Warn().Err(err).Msg("write resume input.md failed")
-		}
-		return written, fmt.Errorf("write resume input.md: %w", err)
+	if err := os.RemoveAll(attachmentsDir); err != nil {
+		return written, fmt.Errorf("replace resume attachment directory: %w", err)
 	}
+	if err := os.Rename(stagedAttachmentsDir, attachmentsDir); err != nil {
+		return written, fmt.Errorf("publish resume attachment directory: %w", err)
+	}
+	body := []byte(latest.Text)
 	tmpPath := filepath.Join(resumeRoot, fmt.Sprintf(".latest-%d.tmp", time.Now().UnixNano()))
 	if err := os.WriteFile(tmpPath, body, 0o644); err != nil {
 		if logger != nil {
