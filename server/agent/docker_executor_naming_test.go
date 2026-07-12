@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/docker/docker/client"
+	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -65,6 +67,62 @@ func TestCleanupOrphanedContainersIncludesCurrentAndLegacyNameFilters(t *testing
 	for _, want := range []string{"^/creator-agent-task-", "^/anban-creator-task-"} {
 		if !gotFilters["name"][want] {
 			t.Errorf("Docker name filters = %#v, want %q", gotFilters["name"], want)
+		}
+	}
+}
+
+func TestCleanupOrphanedContainersRemovesOnlySafeStates(t *testing.T) {
+	containers := []map[string]string{
+		{"Id": "created-id", "State": "created", "Status": "Up 2 hours"},
+		{"Id": "exited-id", "State": "exited", "Status": "Up 2 hours"},
+		{"Id": "dead-id", "State": "dead", "Status": "Up 2 hours"},
+		{"Id": "running-id", "State": "running", "Status": "Exited (1)"},
+		{"Id": "restarting-id", "State": "restarting", "Status": "Exited (1)"},
+		{"Id": "paused-id", "State": "paused", "Status": "Exited (1)"},
+		{"Id": "removing-id", "State": "removing", "Status": "Exited (1)"},
+		{"Id": "empty-id", "State": "", "Status": "Exited (1)"},
+		{"Id": "unknown-id", "State": "unknown", "Status": "Exited (1)"},
+	}
+	var deletedIDs []string
+	forceByID := make(map[string]string)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if err := json.NewEncoder(w).Encode(containers); err != nil {
+				t.Errorf("encode Docker containers: %v", err)
+			}
+		case http.MethodDelete:
+			id := path.Base(r.URL.Path)
+			deletedIDs = append(deletedIDs, id)
+			forceByID[id] = r.URL.Query().Get("force")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected Docker request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cli, err := client.NewClientWithOpts(
+		client.WithHost(server.URL),
+		client.WithHTTPClient(server.Client()),
+		client.WithVersion("1.44"),
+	)
+	if err != nil {
+		t.Fatalf("create Docker client: %v", err)
+	}
+	defer cli.Close()
+
+	logger := zerolog.Nop()
+	e := &DockerExecutor{dockerCLI: cli, logger: &logger}
+	e.CleanupOrphanedContainers()
+
+	wantDeleted := []string{"created-id", "exited-id", "dead-id"}
+	if !slices.Equal(deletedIDs, wantDeleted) {
+		t.Fatalf("deleted container IDs = %#v, want %#v", deletedIDs, wantDeleted)
+	}
+	for _, id := range wantDeleted {
+		if forceByID[id] != "1" {
+			t.Errorf("DELETE force for %q = %q, want 1", id, forceByID[id])
 		}
 	}
 }

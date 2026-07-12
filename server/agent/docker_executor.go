@@ -100,7 +100,7 @@ func (e *DockerExecutor) Close() error {
 	return nil
 }
 
-// CleanupOrphanedContainers removes stopped ephemeral task containers
+// CleanupOrphanedContainers removes stopped or unused Agent task containers
 // left behind by previous runs. Safe to call at startup.
 func (e *DockerExecutor) CleanupOrphanedContainers() {
 	nameFilters := filters.NewArgs()
@@ -112,20 +112,32 @@ func (e *DockerExecutor) CleanupOrphanedContainers() {
 		Filters: nameFilters,
 	})
 	if err != nil {
-		e.logger.Warn().Err(err).Msg("failed to list containers for orphan cleanup")
+		e.logger.Warn().Err(err).Msg("failed to list Agent task containers for orphan cleanup")
 		return
 	}
 
 	removed := 0
 	for _, c := range containers {
+		if !isRemovableOrphanContainerState(c.State) {
+			continue
+		}
 		if err := e.dockerCLI.ContainerRemove(context.Background(), c.ID, container.RemoveOptions{Force: true}); err != nil {
-			e.logger.Warn().Err(err).Str("container", c.ID).Msg("failed to remove orphan container")
+			e.logger.Warn().Err(err).Str("container", c.ID).Msg("failed to remove orphaned Agent task container")
 			continue
 		}
 		removed++
 	}
 	if removed > 0 {
-		e.logger.Info().Int("removed", removed).Msg("cleaned up orphaned Anban Creator containers")
+		e.logger.Info().Int("removed", removed).Msg("cleaned up stopped or unused Agent task containers")
+	}
+}
+
+func isRemovableOrphanContainerState(state container.ContainerState) bool {
+	switch state {
+	case container.StateCreated, container.StateExited, container.StateDead:
+		return true
+	default:
+		return false
 	}
 }
 
