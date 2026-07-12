@@ -346,6 +346,7 @@ func TestKubernetesDispatcherInspectMapsPodTerminationBeforeJobCondition(t *test
 
 func TestKubernetesDispatcherInspectPreservesSchedulingFailureDiagnostics(t *testing.T) {
 	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.Status.Active = 1
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "unscheduled-job-pod",
@@ -368,6 +369,26 @@ func TestKubernetesDispatcherInspectPreservesSchedulingFailureDiagnostics(t *tes
 	}
 	if state.Reason != "Unschedulable" || state.Message != "0/3 nodes are available: insufficient memory" {
 		t.Fatalf("diagnostics = %q/%q, want scheduler reason and message", state.Reason, state.Message)
+	}
+}
+
+func TestKubernetesDispatcherInspectKeepsRunningPodRunning(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.Status.Active = 1
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "running-job-pod",
+			Namespace: "anban",
+			Labels:    map[string]string{kubernetesExecutionIDLabel: testExecution().ID},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), testExecution())
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.Phase != kubernetesPhaseRunning {
+		t.Fatalf("phase = %q, want running for a running Pod", state.Phase)
 	}
 }
 

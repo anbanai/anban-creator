@@ -253,8 +253,10 @@ func inspectJob(job *batchv1.Job) *KubernetesExecutionState {
 }
 
 func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
-	if state.Phase == kubernetesPhasePending {
+	if !isTerminalKubernetesPhase(state.Phase) {
 		switch pod.Status.Phase {
+		case corev1.PodPending:
+			state.Phase = kubernetesPhasePending
 		case corev1.PodRunning:
 			state.Phase = kubernetesPhaseRunning
 		case corev1.PodSucceeded:
@@ -287,6 +289,9 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 	}
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
+			if !isTerminalKubernetesPhase(state.Phase) {
+				state.Phase = kubernetesPhasePending
+			}
 			state.Reason = condition.Reason
 			state.Message = condition.Message
 			return
@@ -298,6 +303,10 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 	if pod.Status.Message != "" {
 		state.Message = pod.Status.Message
 	}
+}
+
+func isTerminalKubernetesPhase(phase string) bool {
+	return phase == kubernetesPhaseSucceeded || phase == kubernetesPhaseFailed
 }
 
 func newestPod(pods []corev1.Pod) *corev1.Pod {
