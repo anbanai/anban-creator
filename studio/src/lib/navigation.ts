@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import {
-  LayoutDashboard,
+  Sparkles,
   Rss,
   CalendarRange,
   ListChecks,
@@ -23,7 +23,7 @@ export interface NavItem {
 }
 
 export const todayItems: NavItem[] = [
-  { to: '/', label: '首页', icon: LayoutDashboard, end: true },
+  { to: '/', label: 'AI助手', icon: Sparkles, end: true },
 ]
 
 export const creationItems: NavItem[] = [

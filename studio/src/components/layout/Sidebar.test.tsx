@@ -64,7 +64,8 @@ describe('Sidebar', () => {
   it('renders navigation items', () => {
     renderSidebar()
 
-    expect(screen.getAllByText('首页').length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: 'AI助手' })).toBeInTheDocument()
+    expect(screen.queryByText('首页')).not.toBeInTheDocument()
     expect(screen.getByText('项目')).toBeInTheDocument()
     expect(screen.getByText('计划')).toBeInTheDocument()
     expect(screen.getByText('任务')).toBeInTheDocument()
