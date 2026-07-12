@@ -412,6 +412,12 @@ claude:
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
     # 私有镜像仓库拉取 secret；公开镜像可留空。
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
+    # 以下可复用 Pod 配置仅供旧执行器使用，并将与旧执行器及 main wiring 原子删除。
+    workspace_mount_path: "/workspace"
+    workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-creator}"
+    pod_revision: "${ANBAN_AGENT_POD_REVISION}"
+    pod_ttl_seconds: 86400
+    exec_timeout_seconds: 3600
     # 项目记忆 PVC 使用的 RWX 存储类与容量。
     memory_storage_class: "${ANBAN_AGENT_MEMORY_STORAGE_CLASS:-alicloud-nas}"
     memory_size: "${ANBAN_AGENT_MEMORY_SIZE:-1Gi}"

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +17,7 @@ func baseKubernetesConfigForTest() Config {
 				Namespace:          "anbanai-prod",
 				AgentImage:         "registry.example.com/anban-agent:latest",
 				ServiceAccount:     "creator-agent-runner",
+				WorkspacePVCName:   "anban-creator",
 				MemoryStorageClass: "alicloud-nas",
 				MemorySize:         "1Gi",
 			},
@@ -55,15 +55,25 @@ func TestKubernetesAgentImageMustBeExplicit(t *testing.T) {
 }
 
 func TestKubernetesJobRuntimeDefaults(t *testing.T) {
-	cfg := baseKubernetesConfigForTest()
-	if cfg.Claude.Kubernetes.MemoryStorageClass != "alicloud-nas" {
-		t.Fatal("memory storage class")
+	cfg := Config{}
+	cfg.applyDefaults()
+	if cfg.Claude.Kubernetes.Namespace != "default" {
+		t.Fatalf("namespace = %q, want default", cfg.Claude.Kubernetes.Namespace)
+	}
+	if cfg.Claude.Kubernetes.MemorySize != "1Gi" {
+		t.Fatalf("memory size = %q, want 1Gi", cfg.Claude.Kubernetes.MemorySize)
 	}
 	if cfg.Claude.Kubernetes.ActiveDeadlineSeconds != 3600 {
 		t.Fatal("active deadline")
 	}
+	if cfg.Claude.Kubernetes.CompletionGraceSeconds != 30 {
+		t.Fatal("completion grace")
+	}
 	if cfg.Claude.Kubernetes.TTLSecondsAfterFinished != 600 {
 		t.Fatal("job ttl")
+	}
+	if cfg.Claude.Kubernetes.PreStartRetryLimit != 1 {
+		t.Fatal("pre-start retry limit")
 	}
 }
 
@@ -75,15 +85,6 @@ func TestValidateKubernetesRequiresExplicitMemoryStorageClass(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "claude.kubernetes.memory_storage_class is required") {
 		t.Fatalf("Validate() error = %v, want explicit memory storage class requirement", err)
-	}
-}
-
-func TestKubernetesConfigHasNoReusablePodFields(t *testing.T) {
-	typ := reflect.TypeOf(KubernetesConfig{})
-	for _, name := range []string{"WorkspaceMountPath", "WorkspacePVCName", "PodRevision", "PodTTLSeconds", "ExecTimeoutSec"} {
-		if _, ok := typ.FieldByName(name); ok {
-			t.Fatalf("obsolete field %s remains", name)
-		}
 	}
 }
 
@@ -133,11 +134,25 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 			wantErr: "claude.kubernetes.memory_storage_class is required",
 		},
 		{
-			name: "memory size",
+			name: "invalid memory size",
 			mutate: func(cfg *Config) {
 				cfg.Claude.Kubernetes.MemorySize = "not-a-quantity"
 			},
 			wantErr: "claude.kubernetes.memory_size must be a valid Kubernetes quantity",
+		},
+		{
+			name: "zero memory size",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.MemorySize = "0"
+			},
+			wantErr: "claude.kubernetes.memory_size must be positive",
+		},
+		{
+			name: "negative memory size",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.MemorySize = "-1Gi"
+			},
+			wantErr: "claude.kubernetes.memory_size must be positive",
 		},
 		{
 			name: "active deadline",
@@ -153,6 +168,20 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 			},
 			wantErr: "claude.kubernetes.ttl_seconds_after_finished must be positive",
 		},
+		{
+			name: "negative completion grace",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.CompletionGraceSeconds = -1
+			},
+			wantErr: "claude.kubernetes.completion_grace_seconds must not be negative",
+		},
+		{
+			name: "negative pre-start retry limit",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.PreStartRetryLimit = -1
+			},
+			wantErr: "claude.kubernetes.pre_start_retry_limit must not be negative",
+		},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +193,16 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateKubernetesAllowsZeroJobControls(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Claude.Kubernetes.CompletionGraceSeconds = 0
+	cfg.Claude.Kubernetes.PreStartRetryLimit = 0
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want zero completion grace and retries accepted", err)
 	}
 }
 
