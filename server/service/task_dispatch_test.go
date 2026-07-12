@@ -13,6 +13,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
@@ -189,7 +191,15 @@ func TestDispatchCloudTaskConcurrentHandlersCreateAndDispatchOneAttempt(t *testi
 
 func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.err = agent.NewPermanentDispatchError(errors.New("job identity mismatch"))
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	logger := zerolog.New(io.Discard)
+	svc.pubsub = NewRedisPubSub(rdb, &logger)
+	if _, ok, err := svc.pubsub.TryReserveSlot(context.Background(), task.ProjectID, 10); err != nil || !ok {
+		t.Fatalf("reserve slot = %v, %v", ok, err)
+	}
+	dispatcher.err = agent.NewPermanentDispatchError(apierrors.NewForbidden(schema.GroupResource{Resource: "jobs"}, "job-1", errors.New("denied")))
 	err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
 	if err == nil || !errors.Is(err, dispatcher.err) {
 		t.Fatalf("dispatch error = %v, want %v", err, dispatcher.err)
@@ -211,11 +221,22 @@ func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("replayed dispatch calls = %d, want 1", dispatcher.callCount())
 	}
+	if count, err := rdb.Get(context.Background(), projectRunningCountPrefix+task.ProjectID).Int64(); err != nil || count != 0 {
+		t.Fatalf("terminal slot count = %d, %v; want 0", count, err)
+	}
 }
 
 func TestDispatchCloudTaskAmbiguousErrorAbandonsClaimAndRetriesWithoutTerminalizing(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.err = errors.New("connection reset after job create")
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	logger := zerolog.New(io.Discard)
+	svc.pubsub = NewRedisPubSub(rdb, &logger)
+	if _, ok, err := svc.pubsub.TryReserveSlot(context.Background(), task.ProjectID, 10); err != nil || !ok {
+		t.Fatalf("reserve slot = %v, %v", ok, err)
+	}
+	dispatcher.err = apierrors.NewTooManyRequests("retry", 1)
 	dispatcher.sideEffectOnError = true
 
 	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
@@ -231,6 +252,9 @@ func TestDispatchCloudTaskAmbiguousErrorAbandonsClaimAndRetriesWithoutTerminaliz
 	}
 	if currentTask.Status != model.TaskStatusRunning || currentTask.CompletedAt != nil || currentTask.ErrorMessage != "" {
 		t.Fatalf("ambiguous task was terminalized: %+v", currentTask)
+	}
+	if count, err := rdb.Get(context.Background(), projectRunningCountPrefix+task.ProjectID).Int64(); err != nil || count != 1 {
+		t.Fatalf("ambiguous slot count = %d, %v; want 1", count, err)
 	}
 
 	dispatcher.err = nil

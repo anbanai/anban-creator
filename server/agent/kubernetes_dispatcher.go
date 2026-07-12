@@ -78,14 +78,16 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 	if apierrors.IsNotFound(err) {
 		existingPVC, err = pvcs.Create(ctx, desiredPVC, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("create project memory PVC %q: %w", desiredPVC.Name, err)
+			return fmt.Errorf("create project memory PVC %q: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, true))
 		}
 		if apierrors.IsAlreadyExists(err) {
 			existingPVC, err = pvcs.Get(ctx, desiredPVC.Name, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("get project memory PVC %q after create conflict: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, false))
+			}
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("get project memory PVC %q: %w", desiredPVC.Name, err)
+	} else if err != nil {
+		return fmt.Errorf("get project memory PVC %q: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, false))
 	}
 	if existingPVC != nil {
 		if err := verifyPVC(existingPVC, desiredPVC, task.ProjectID); err != nil {
@@ -99,14 +101,16 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 	if apierrors.IsNotFound(err) {
 		existingJob, err = jobs.Create(ctx, desiredJob, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("create Kubernetes Job %q: %w", desiredJob.Name, err)
+			return fmt.Errorf("create Kubernetes Job %q: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, true))
 		}
 		if apierrors.IsAlreadyExists(err) {
 			existingJob, err = jobs.Get(ctx, desiredJob.Name, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("get Kubernetes Job %q after create conflict: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, false))
+			}
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("get Kubernetes Job %q: %w", desiredJob.Name, err)
+	} else if err != nil {
+		return fmt.Errorf("get Kubernetes Job %q: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, false))
 	}
 	if existingJob != nil {
 		if err := verifyJob(existingJob, desiredJob, execution, task); err != nil {
@@ -114,6 +118,20 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 		}
 	}
 	return nil
+}
+
+func classifyKubernetesDispatchAPIError(err error, create bool) error {
+	if err == nil {
+		return nil
+	}
+	if apierrors.IsForbidden(err) ||
+		apierrors.IsUnauthorized(err) ||
+		apierrors.IsInvalid(err) ||
+		apierrors.IsBadRequest(err) ||
+		(create && apierrors.IsNotFound(err)) {
+		return NewPermanentDispatchError(err)
+	}
+	return err
 }
 
 func (d *kubernetesJobDispatcher) Delete(ctx context.Context, execution *model.TaskExecution) error {

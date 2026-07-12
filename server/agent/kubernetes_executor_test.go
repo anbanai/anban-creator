@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"slices"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	kubeclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
@@ -391,6 +393,102 @@ func TestKubernetesDispatcherLeavesCreateTimeoutAmbiguous(t *testing.T) {
 	}
 	if IsPermanentDispatchError(err) {
 		t.Fatalf("create timeout was classified permanent: %v", err)
+	}
+}
+
+func TestKubernetesDispatcherClassifiesAPIErrors(t *testing.T) {
+	resource := schema.GroupResource{Group: "batch", Resource: "jobs"}
+	statusCases := []struct {
+		name      string
+		err       error
+		permanent bool
+	}{
+		{name: "forbidden", err: apierrors.NewForbidden(resource, "object-1", errors.New("denied")), permanent: true},
+		{name: "unauthorized", err: apierrors.NewUnauthorized("identity rejected"), permanent: true},
+		{name: "invalid", err: apierrors.NewInvalid(schema.GroupKind{Group: "batch", Kind: "Job"}, "object-1", field.ErrorList{field.Invalid(field.NewPath("spec"), "bad", "invalid")}), permanent: true},
+		{name: "bad request", err: apierrors.NewBadRequest("malformed"), permanent: true},
+		{name: "timeout", err: apierrors.NewTimeoutError("timeout", 1)},
+		{name: "server timeout", err: apierrors.NewServerTimeout(resource, "create", 1)},
+		{name: "service unavailable", err: apierrors.NewServiceUnavailable("down")},
+		{name: "internal error", err: apierrors.NewInternalError(errors.New("broken"))},
+		{name: "too many requests", err: apierrors.NewTooManyRequests("slow down", 1)},
+		{name: "conflict", err: apierrors.NewConflict(resource, "object-1", errors.New("changed"))},
+		{name: "transport reset", err: errors.New("connection reset by peer")},
+	}
+	operations := []struct {
+		name     string
+		resource string
+		verb     string
+	}{
+		{name: "PVC GET", resource: "persistentvolumeclaims", verb: "get"},
+		{name: "PVC Create", resource: "persistentvolumeclaims", verb: "create"},
+		{name: "Job GET", resource: "jobs", verb: "get"},
+		{name: "Job Create", resource: "jobs", verb: "create"},
+	}
+	for _, operation := range operations {
+		for _, testCase := range statusCases {
+			t.Run(operation.name+"/"+testCase.name, func(t *testing.T) {
+				client := fake.NewSimpleClientset()
+				if operation.resource == "jobs" {
+					if _, err := client.CoreV1().PersistentVolumeClaims("anban").Create(context.Background(),
+						buildProjectMemoryPVC(testJobConfig(), "project-1"), metav1.CreateOptions{}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				client.PrependReactor(operation.verb, operation.resource, func(ktesting.Action) (bool, runtime.Object, error) {
+					return true, nil, testCase.err
+				})
+				err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
+				if err == nil {
+					t.Fatal("expected API error")
+				}
+				if got := IsPermanentDispatchError(err); got != testCase.permanent {
+					t.Fatalf("permanent = %v, want %v: %v", got, testCase.permanent, err)
+				}
+			})
+		}
+	}
+
+	for _, resourceName := range []string{"persistentvolumeclaims", "jobs"} {
+		t.Run(resourceName+" create parent not found", func(t *testing.T) {
+			client := fake.NewSimpleClientset()
+			if resourceName == "jobs" {
+				_, _ = client.CoreV1().PersistentVolumeClaims("anban").Create(context.Background(),
+					buildProjectMemoryPVC(testJobConfig(), "project-1"), metav1.CreateOptions{})
+			}
+			client.PrependReactor("create", resourceName, func(ktesting.Action) (bool, runtime.Object, error) {
+				return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: resourceName}, "anban")
+			})
+			err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
+			if err == nil || !IsPermanentDispatchError(err) {
+				t.Fatalf("create NotFound error = %v, want permanent", err)
+			}
+		})
+	}
+}
+
+func TestKubernetesDispatcherLeavesPostAlreadyExistsNotFoundRetryable(t *testing.T) {
+	for _, resourceName := range []string{"persistentvolumeclaims", "jobs"} {
+		t.Run(resourceName, func(t *testing.T) {
+			client := fake.NewSimpleClientset()
+			if resourceName == "jobs" {
+				_, _ = client.CoreV1().PersistentVolumeClaims("anban").Create(context.Background(),
+					buildProjectMemoryPVC(testJobConfig(), "project-1"), metav1.CreateOptions{})
+			}
+			client.PrependReactor("get", resourceName, func(ktesting.Action) (bool, runtime.Object, error) {
+				return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: resourceName}, "object-1")
+			})
+			client.PrependReactor("create", resourceName, func(ktesting.Action) (bool, runtime.Object, error) {
+				return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: resourceName}, "object-1")
+			})
+			err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
+			if err == nil {
+				t.Fatal("expected post-AlreadyExists disappearance error")
+			}
+			if IsPermanentDispatchError(err) {
+				t.Fatalf("disappearance race was classified permanent: %v", err)
+			}
+		})
 	}
 }
 
