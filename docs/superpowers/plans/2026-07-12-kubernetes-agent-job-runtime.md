@@ -785,6 +785,8 @@ git commit -m "feat(server): finalize and reconcile kubernetes jobs"
 
 **Files:**
 - Modify: `server/main.go`
+- Modify: `server/mcp/mcp.go`
+- Modify: `server/mcp/mcp_test.go`
 - Delete: `server/agent/kubernetes_executor.go`
 - Modify: `server/agent/kubernetes_executor_test.go`
 - Modify: `server/service/project.go`
@@ -835,6 +837,14 @@ dispatcher, workload verifier, execution token service, and reconciler; set the
 dispatcher on `TaskService`; set verifier/token service on `AgentHandler`; start
 the reconciler with the Server lifecycle context. Do not construct a synchronous
 Kubernetes `TaskExecutor` or OSS `ProjectMemoryManager` for Kubernetes mode.
+
+Extend MCP bearer authentication to accept execution JWTs and centrally enforce
+the claimed user/project/task/current-execution scope on every tool call before
+dispatch. A token for task T1 must be unable to read, mutate, cancel, publish, or
+generate assets for T2 even when both tasks share the same user. Preserve API-key
+and static-key authentication for desktop/local callers, and add an HTTP tool-call
+test proving the cross-task request is rejected. Wire this execution-aware MCP
+verifier from `main.go` with the same token service and `TaskService` authorizer.
 
 Add a project-memory lifecycle dependency to `ProjectService`. After the
 existing guarded project deletion succeeds, call `DeleteProjectMemory` with the

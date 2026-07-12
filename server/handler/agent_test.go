@@ -16,12 +16,116 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
+
+type testWorkloadVerifier struct {
+	gotToken, gotExecutionID string
+	identity                 *serveragent.KubernetesWorkloadIdentity
+}
+
+func (v *testWorkloadVerifier) Verify(_ context.Context, token, executionID string) (*serveragent.KubernetesWorkloadIdentity, error) {
+	v.gotToken, v.gotExecutionID = token, executionID
+	return v.identity, nil
+}
+
+type testBootstrapper struct {
+	response *service.AgentBootstrapResponse
+}
+
+func (b testBootstrapper) Bootstrap(context.Context, *serveragent.KubernetesWorkloadIdentity) (*service.AgentBootstrapResponse, error) {
+	return b.response, nil
+}
+
+func TestAgentExecutionTokenAndWorkloadBootstrap(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := tokens.Issue(auth.ExecutionClaims{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1"}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewAgentHandler(nil, nil, nil, "", &logger)
+	h.SetExecutionTokenService(tokens)
+	verifier := &testWorkloadVerifier{identity: &serveragent.KubernetesWorkloadIdentity{ExecutionID: "execution-1"}}
+	h.SetBootstrap(verifier, testBootstrapper{response: &service.AgentBootstrapResponse{TaskID: "task-1", ExecutionToken: "execution-token"}})
+	app := fiber.New()
+	app.Post("/agent/scoped", h.AuthMiddleware, func(c fiber.Ctx) error {
+		return c.JSON(fiber.Map{"user": c.Locals(agentUserIDContextKey), "project": c.Locals(agentProjectIDContextKey), "task": c.Locals(agentTaskIDContextKey), "execution": c.Locals(agentExecutionIDContextKey)})
+	})
+	app.Post("/agent/claim", h.AuthMiddleware, h.Claim)
+	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
+
+	req := httptest.NewRequest("POST", "/agent/scoped", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("execution auth status = %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"execution":"execution-1"`) || !strings.Contains(string(body), `"task":"task-1"`) {
+		t.Fatalf("locals body = %s", body)
+	}
+	req = httptest.NewRequest("POST", "/agent/claim", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("execution JWT claim status = %d, want 403", resp.StatusCode)
+	}
+
+	req = httptest.NewRequest("POST", "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+	req.Header.Set("Authorization", "Bearer workload-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 || verifier.gotToken != "workload-token" || verifier.gotExecutionID != "execution-1" {
+		t.Fatalf("bootstrap status/token/id = %d/%q/%q", resp.StatusCode, verifier.gotToken, verifier.gotExecutionID)
+	}
+}
+
+func TestAgentInvalidJWTDoesNotDowngradeToStaticKey(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	h := NewAgentHandler(nil, nil, nil, "independent-key", &logger)
+	h.SetExecutionTokenService(tokens)
+	app := fiber.New()
+	app.Post("/agent", h.AuthMiddleware, func(c fiber.Ctx) error { return c.SendStatus(204) })
+	req := httptest.NewRequest("POST", "/agent", nil)
+	req.Header.Set("Authorization", "Bearer bad.jwt.token")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	req = httptest.NewRequest("POST", "/agent", nil)
+	req.Header.Set("Authorization", "Bearer bad.jwt.token")
+	req.Header.Set("X-Agent-API-Key", "independent-key")
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusNoContent {
+		t.Fatalf("independent API key status = %d, want 204", resp.StatusCode)
+	}
+}
 
 // setupAgentClaimApp wires an AgentHandler (real API-key auth via APIKeyService)
 // over a fresh sqlite DB seeded with a user + project, and returns the app, the

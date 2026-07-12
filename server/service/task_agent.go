@@ -24,6 +24,26 @@ func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authe
 	return task, nil
 }
 
+// ValidateAgentExecutionAccess rejects stale execution JWTs even when they
+// belong to the same user and task as the current attempt.
+func (s *TaskService) ValidateAgentExecutionAccess(ctx context.Context, userID, projectID, taskID, executionID string) error {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("find task: %w", err)
+	}
+	if task.UserID != userID || task.ProjectID != projectID || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+		return fmt.Errorf("execution token does not match current task execution")
+	}
+	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("find execution: %w", err)
+	}
+	if execution.TaskID != taskID || execution.Status != model.TaskExecutionRunning || !execution.Started || execution.CompletedAt != nil {
+		return fmt.Errorf("execution token is not authorized for an active execution")
+	}
+	return nil
+}
+
 // UpdateHeartbeat refreshes a task's last_heartbeat_at, marking it as actively
 // working. Called by the agent /progress endpoint on every report so long-running
 // local-execution tasks are not force-failed by the stuck-task reaper
