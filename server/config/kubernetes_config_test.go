@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +76,49 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	}
 	if cfg.Claude.Kubernetes.PreStartRetryLimit != 1 {
 		t.Fatal("pre-start retry limit")
+	}
+}
+
+func TestNewConfigPreservesExplicitZeroKubernetesJobControls(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := []byte(`
+database:
+  dsn: "dsn"
+jwt:
+  secret_key: "secret"
+storage:
+  provider: "oss"
+  endpoint: "oss-cn-hangzhou.aliyuncs.com"
+  access_key_id: "ak"
+  access_key_secret: "sk"
+  bucket_name: "bucket"
+  sts_role_arn: "acs:ram::123:role/upload"
+claude:
+  executor: "kubernetes"
+  agent_server_url: "http://creator-api-svc:8080"
+  kubernetes:
+    agent_image: "registry.example.com/anban-agent:latest"
+    service_account: "creator-agent-runner"
+    workspace_pvc_name: "anban-creator"
+    memory_storage_class: "alicloud-nas"
+    memory_size: "1Gi"
+    completion_grace_seconds: 0
+    pre_start_retry_limit: 0
+`)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := NewConfig(path)
+	if err != nil {
+		t.Fatalf("NewConfig() error = %v", err)
+	}
+	if cfg.Claude.Kubernetes.CompletionGraceSeconds != 0 || cfg.Claude.Kubernetes.PreStartRetryLimit != 0 {
+		t.Fatalf(
+			"job controls = %d/%d, want explicit zero values preserved",
+			cfg.Claude.Kubernetes.CompletionGraceSeconds,
+			cfg.Claude.Kubernetes.PreStartRetryLimit,
+		)
 	}
 }
 

@@ -1121,9 +1121,30 @@ type KubernetesConfig struct {
 	MemorySize              string                   `yaml:"memory_size"`
 	ActiveDeadlineSeconds   int64                    `yaml:"active_deadline_seconds"`
 	CompletionGraceSeconds  int                      `yaml:"completion_grace_seconds"`
+	completionGraceSet      bool                     `yaml:"-"`
 	TTLSecondsAfterFinished int32                    `yaml:"ttl_seconds_after_finished"`
 	PreStartRetryLimit      int                      `yaml:"pre_start_retry_limit"`
+	preStartRetryLimitSet   bool                     `yaml:"-"`
 	Resources               KubernetesResourceConfig `yaml:"resources"`
+}
+
+func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawKubernetesConfig KubernetesConfig
+	var raw rawKubernetesConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	*c = KubernetesConfig(raw)
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		switch value.Content[i].Value {
+		case "completion_grace_seconds":
+			c.completionGraceSet = true
+		case "pre_start_retry_limit":
+			c.preStartRetryLimitSet = true
+		}
+	}
+	return nil
 }
 
 // KubernetesResourceConfig mirrors Kubernetes resource maps without importing
@@ -1618,13 +1639,13 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.ActiveDeadlineSeconds == 0 {
 		c.Claude.Kubernetes.ActiveDeadlineSeconds = 3600
 	}
-	if c.Claude.Kubernetes.CompletionGraceSeconds == 0 {
+	if c.Claude.Kubernetes.CompletionGraceSeconds == 0 && !c.Claude.Kubernetes.completionGraceSet {
 		c.Claude.Kubernetes.CompletionGraceSeconds = 30
 	}
 	if c.Claude.Kubernetes.TTLSecondsAfterFinished == 0 {
 		c.Claude.Kubernetes.TTLSecondsAfterFinished = 600
 	}
-	if c.Claude.Kubernetes.PreStartRetryLimit == 0 {
+	if c.Claude.Kubernetes.PreStartRetryLimit == 0 && !c.Claude.Kubernetes.preStartRetryLimitSet {
 		c.Claude.Kubernetes.PreStartRetryLimit = 1
 	}
 	// Auto-detect plugin_dir by searching for agents/.

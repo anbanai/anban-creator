@@ -196,7 +196,9 @@ Add these cases to `TestValidateKubernetesJobRuntimeRequirements`:
 ```
 
 Keep the existing invalid-quantity case and add an explicit valid case with
-both completion grace and pre-start retries set to zero. Keep
+both completion grace and pre-start retries set to zero. Add a real `NewConfig`
+test with both YAML keys explicitly set to `0` and assert they remain zero after
+loading and defaults. Keep
 `memory_storage_class` explicit in YAML and valid fixtures, and prove omission
 survives defaults:
 
@@ -235,18 +237,28 @@ type KubernetesConfig struct {
 	MemorySize                string                   `yaml:"memory_size"`
 	ActiveDeadlineSeconds     int64                    `yaml:"active_deadline_seconds"`
 	CompletionGraceSeconds    int                      `yaml:"completion_grace_seconds"`
+	completionGraceSet        bool                     `yaml:"-"`
 	TTLSecondsAfterFinished   int32                    `yaml:"ttl_seconds_after_finished"`
 	PreStartRetryLimit        int                      `yaml:"pre_start_retry_limit"`
+	preStartRetryLimitSet     bool                     `yaml:"-"`
 	Resources                 KubernetesResourceConfig `yaml:"resources"`
 }
 ```
 
+Implement `KubernetesConfig.UnmarshalYAML` using a non-recursive alias and scan
+the mapping node for `completion_grace_seconds` and `pre_start_retry_limit`.
+Decode into a fresh alias before assigning it back so repeated unmarshalling
+resets presence state. In `applyDefaults`, default zero values only when the
+corresponding presence flag is false. Keep the exported values as integers.
+
 Defaults: namespace `default`, memory size `1Gi`, active deadline `3600`,
-completion grace `30`, Job TTL `600`, pre-start retries `1`. Validation requires
-OSS, STS role, Agent Server URL, image, service account, storage class, a valid
-positive quantity for memory size, positive deadline/TTL values, non-negative
-completion grace, and a non-negative pre-start retry limit. Storage class has no
-Go default and must be explicit.
+completion grace `30`, Job TTL `600`, pre-start retries `1`. Completion grace
+and pre-start retry defaults apply only when their YAML keys are omitted;
+explicit YAML zero remains zero. Validation requires OSS, STS role, Agent
+Server URL, image, service account, storage class, a valid positive quantity for
+memory size, positive deadline/TTL values, non-negative completion grace, and a
+non-negative pre-start retry limit. Storage class has no Go default and must be
+explicit.
 
 Retain the legacy reusable-Pod fields, defaults, validation, and YAML keys in
 this task solely because `server/agent/kubernetes_executor.go` and the current
