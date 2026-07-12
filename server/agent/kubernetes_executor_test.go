@@ -155,35 +155,43 @@ func TestKubernetesDispatcherDispatchCreatesAndReusesObjects(t *testing.T) {
 	}
 }
 
-func TestKubernetesDispatcherRejectsMismatchedExistingIdentities(t *testing.T) {
+func TestKubernetesDispatcherRejectsMissingOrMismatchedRequiredLabels(t *testing.T) {
 	ctx := context.Background()
-	for _, tc := range []struct {
+	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	desiredPVC := buildProjectMemoryPVC(testJobConfig(), "project-1")
+	for _, object := range []struct {
 		name   string
-		mutate func(*batchv1.Job, *corev1.PersistentVolumeClaim)
+		labels map[string]string
+		client func(*batchv1.Job, *corev1.PersistentVolumeClaim) kubeclient.Interface
 	}{
-		{name: "job execution", mutate: func(job *batchv1.Job, _ *corev1.PersistentVolumeClaim) {
-			job.Labels[kubernetesExecutionIDLabel] = "other-execution"
+		{name: "job", labels: desiredJob.Labels, client: func(job *batchv1.Job, pvc *corev1.PersistentVolumeClaim) kubeclient.Interface {
+			return fake.NewSimpleClientset(job, pvc)
 		}},
-		{name: "job task", mutate: func(job *batchv1.Job, _ *corev1.PersistentVolumeClaim) {
-			job.Labels[kubernetesTaskIDLabel] = "other-task"
-		}},
-		{name: "job project", mutate: func(job *batchv1.Job, _ *corev1.PersistentVolumeClaim) {
-			job.Labels[kubernetesProjectIDLabel] = "other-project"
-		}},
-		{name: "PVC project", mutate: func(_ *batchv1.Job, pvc *corev1.PersistentVolumeClaim) {
-			pvc.Labels[kubernetesProjectIDLabel] = "other-project"
+		{name: "PVC", labels: desiredPVC.Labels, client: func(job *batchv1.Job, pvc *corev1.PersistentVolumeClaim) kubeclient.Interface {
+			return fake.NewSimpleClientset(pvc, job)
 		}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
-			pvc := buildProjectMemoryPVC(testJobConfig(), "project-1")
-			tc.mutate(job, pvc)
-			client := fake.NewSimpleClientset(job, pvc)
-			err := testDispatcher(client).Dispatch(ctx, testExecution(), testTask())
-			if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
-				t.Fatalf("Dispatch error = %v, want identity mismatch", err)
+		for label := range object.labels {
+			for _, mutation := range []string{"missing", "conflicting"} {
+				t.Run(object.name+"/"+label+"/"+mutation, func(t *testing.T) {
+					job := desiredJob.DeepCopy()
+					pvc := desiredPVC.DeepCopy()
+					labels := job.Labels
+					if object.name == "PVC" {
+						labels = pvc.Labels
+					}
+					if mutation == "missing" {
+						delete(labels, label)
+					} else {
+						labels[label] = "conflicting-value"
+					}
+					err := testDispatcher(object.client(job, pvc)).Dispatch(ctx, testExecution(), testTask())
+					if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
+						t.Fatalf("Dispatch error = %v, want identity mismatch", err)
+					}
+				})
 			}
-		})
+		}
 	}
 }
 
@@ -228,6 +236,17 @@ func TestKubernetesDispatcherDeleteProjectMemoryIsGuardedAndIdempotent(t *testin
 	}
 	if _, getErr := client.CoreV1().PersistentVolumeClaims("anban").Get(ctx, mismatch.Name, metav1.GetOptions{}); getErr != nil {
 		t.Fatalf("mismatched PVC was deleted: %v", getErr)
+	}
+
+	missingOwnership := buildProjectMemoryPVC(testJobConfig(), "project-1")
+	delete(missingOwnership.Labels, "app.kubernetes.io/component")
+	client = fake.NewSimpleClientset(missingOwnership)
+	err = testDispatcher(client).DeleteProjectMemory(ctx, "project-1")
+	if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
+		t.Fatalf("unowned DeleteProjectMemory error = %v, want identity mismatch", err)
+	}
+	if _, getErr := client.CoreV1().PersistentVolumeClaims("anban").Get(ctx, missingOwnership.Name, metav1.GetOptions{}); getErr != nil {
+		t.Fatalf("unowned PVC was deleted: %v", getErr)
 	}
 }
 
@@ -322,6 +341,33 @@ func TestKubernetesDispatcherInspectMapsPodTerminationBeforeJobCondition(t *test
 	}
 	if state.Phase != kubernetesPhaseFailed {
 		t.Fatalf("phase = %q, want failed from terminated container before Job condition", state.Phase)
+	}
+}
+
+func TestKubernetesDispatcherInspectPreservesSchedulingFailureDiagnostics(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unscheduled-job-pod",
+			Namespace: "anban",
+			Labels:    map[string]string{kubernetesExecutionIDLabel: testExecution().ID},
+		},
+		Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
+			Type:    corev1.PodScheduled,
+			Status:  corev1.ConditionFalse,
+			Reason:  "Unschedulable",
+			Message: "0/3 nodes are available: insufficient memory",
+		}}},
+	}
+	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), testExecution())
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.Phase != kubernetesPhasePending {
+		t.Fatalf("phase = %q, want pending for pre-start scheduling failure", state.Phase)
+	}
+	if state.Reason != "Unschedulable" || state.Message != "0/3 nodes are available: insufficient memory" {
+		t.Fatalf("diagnostics = %q/%q, want scheduler reason and message", state.Reason, state.Message)
 	}
 }
 

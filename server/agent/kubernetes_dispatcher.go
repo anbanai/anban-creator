@@ -147,8 +147,9 @@ func (d *kubernetesJobDispatcher) DeleteProjectMemory(ctx context.Context, proje
 	if err != nil {
 		return fmt.Errorf("get project memory PVC %q: %w", name, err)
 	}
-	if pvc.Labels[kubernetesProjectIDLabel] != kubernetesLabelValue(projectID) {
-		return fmt.Errorf("project memory PVC %q identity mismatch: project label is %q", name, pvc.Labels[kubernetesProjectIDLabel])
+	desired := buildProjectMemoryPVC(d.config, projectID)
+	if err := verifyRequiredLabels(pvc.Labels, desired.Labels); err != nil {
+		return fmt.Errorf("project memory PVC %q identity mismatch: %w", name, err)
 	}
 	if err := pvcs.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete project memory PVC %q: %w", name, err)
@@ -197,8 +198,8 @@ func (d *kubernetesJobDispatcher) validate(execution *model.TaskExecution) error
 }
 
 func verifyPVC(existing, desired *corev1.PersistentVolumeClaim, projectID string) error {
-	if existing.Labels[kubernetesProjectIDLabel] != desired.Labels[kubernetesProjectIDLabel] {
-		return fmt.Errorf("project memory PVC %q identity mismatch: project %q does not match %q", existing.Name, existing.Labels[kubernetesProjectIDLabel], projectID)
+	if err := verifyRequiredLabels(existing.Labels, desired.Labels); err != nil {
+		return fmt.Errorf("project memory PVC %q identity mismatch for project %q: %w", existing.Name, projectID, err)
 	}
 	if existing.Spec.StorageClassName == nil || desired.Spec.StorageClassName == nil || *existing.Spec.StorageClassName != *desired.Spec.StorageClassName ||
 		!containsAccessMode(existing.Spec.AccessModes, corev1.ReadWriteMany) ||
@@ -209,13 +210,20 @@ func verifyPVC(existing, desired *corev1.PersistentVolumeClaim, projectID string
 }
 
 func verifyJob(existing, desired *batchv1.Job, execution *model.TaskExecution, task *model.Task) error {
-	for _, key := range []string{kubernetesExecutionIDLabel, kubernetesTaskIDLabel, kubernetesProjectIDLabel} {
-		if existing.Labels[key] != desired.Labels[key] {
-			return fmt.Errorf("Kubernetes Job %q identity mismatch: label %q is %q, want %q", existing.Name, key, existing.Labels[key], desired.Labels[key])
-		}
+	if err := verifyRequiredLabels(existing.Labels, desired.Labels); err != nil {
+		return fmt.Errorf("Kubernetes Job %q identity mismatch: %w", existing.Name, err)
 	}
 	if existing.Annotations[kubernetesObjectConfigHashLabel] != desired.Annotations[kubernetesObjectConfigHashLabel] {
 		return fmt.Errorf("Kubernetes Job %q configuration mismatch for execution %q task %q", existing.Name, execution.ID, task.ID)
+	}
+	return nil
+}
+
+func verifyRequiredLabels(existing, desired map[string]string) error {
+	for key, want := range desired {
+		if got := existing[key]; got != want {
+			return fmt.Errorf("label %q is %q, want %q", key, got, want)
+		}
 	}
 	return nil
 }
@@ -276,6 +284,13 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 			state.Message = terminated.Message
 		}
 		return
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
+			state.Reason = condition.Reason
+			state.Message = condition.Message
+			return
+		}
 	}
 	if pod.Status.Reason != "" {
 		state.Reason = pod.Status.Reason
