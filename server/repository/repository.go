@@ -15,6 +15,7 @@ type Repository interface {
 	Sessions() SessionRepository
 	Plans() PlanRepository
 	Tasks() TaskRepository
+	TaskExecutions() TaskExecutionRepository
 	TaskFiles() TaskFileRepository
 	PendingUploads() PendingUploadRepository
 	Projects() ProjectRepository
@@ -174,6 +175,17 @@ type TaskFileRepository interface {
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
 }
 
+// TaskExecutionRepository provides durable execution-attempt persistence.
+type TaskExecutionRepository interface {
+	Create(ctx context.Context, execution *model.TaskExecution) error
+	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)
+	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
+	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)
+	SetRuntimeIdentity(ctx context.Context, id, namespace, jobName, podUID string) error
+	UpdateHeartbeat(ctx context.Context, id string, now time.Time) error
+	Transition(ctx context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error)
+}
+
 // PendingUploadRepository tracks browser-direct uploads until submit finalizes them.
 type PendingUploadRepository interface {
 	CreatePendingUpload(ctx context.Context, upload *model.PendingUpload) error
@@ -250,6 +262,7 @@ type repository struct {
 	sessions                SessionRepository
 	plans                   PlanRepository
 	tasks                   TaskRepository
+	taskExecutions          TaskExecutionRepository
 	files                   TaskFileRepository
 	pendingUploads          PendingUploadRepository
 	projects                ProjectRepository
@@ -275,6 +288,7 @@ func New(db *gorm.DB) Repository {
 	sessions := newSessionRepository(db)
 	plans := newPlanRepository(db)
 	tasks := newTaskRepository(db)
+	taskExecutions := newTaskExecutionRepository(db)
 	files := newTaskFileRepository(db)
 	pendingUploads := newPendingUploadRepository(db)
 	projects := newProjectRepository(db)
@@ -299,6 +313,7 @@ func New(db *gorm.DB) Repository {
 		sessions:                sessions,
 		plans:                   plans,
 		tasks:                   tasks,
+		taskExecutions:          taskExecutions,
 		files:                   files,
 		pendingUploads:          pendingUploads,
 		projects:                projects,
@@ -323,6 +338,7 @@ func (r *repository) Users() UserRepository                         { return r.u
 func (r *repository) Sessions() SessionRepository                   { return r.sessions }
 func (r *repository) Plans() PlanRepository                         { return r.plans }
 func (r *repository) Tasks() TaskRepository                         { return r.tasks }
+func (r *repository) TaskExecutions() TaskExecutionRepository       { return r.taskExecutions }
 func (r *repository) TaskFiles() TaskFileRepository                 { return r.files }
 func (r *repository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
 func (r *repository) Projects() ProjectRepository                   { return r.projects }
@@ -380,6 +396,7 @@ type txRepository struct {
 	sessions                SessionRepository
 	plans                   PlanRepository
 	tasks                   TaskRepository
+	taskExecutions          TaskExecutionRepository
 	files                   TaskFileRepository
 	pendingUploads          PendingUploadRepository
 	projects                ProjectRepository
@@ -406,6 +423,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		sessions:                newSessionRepository(tx),
 		plans:                   newPlanRepository(tx),
 		tasks:                   newTaskRepository(tx),
+		taskExecutions:          newTaskExecutionRepository(tx),
 		files:                   newTaskFileRepository(tx),
 		pendingUploads:          newPendingUploadRepository(tx),
 		projects:                newProjectRepository(tx),
@@ -430,6 +448,7 @@ func (r *txRepository) Users() UserRepository                         { return r
 func (r *txRepository) Sessions() SessionRepository                   { return r.sessions }
 func (r *txRepository) Plans() PlanRepository                         { return r.plans }
 func (r *txRepository) Tasks() TaskRepository                         { return r.tasks }
+func (r *txRepository) TaskExecutions() TaskExecutionRepository       { return r.taskExecutions }
 func (r *txRepository) TaskFiles() TaskFileRepository                 { return r.files }
 func (r *txRepository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
 func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
