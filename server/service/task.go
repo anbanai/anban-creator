@@ -38,6 +38,7 @@ const TypeContentGenerate = "content:generate"
 type TaskService struct {
 	repo                  repository.Repository
 	executor              agent.TaskExecutor
+	kubernetesDispatcher  agent.KubernetesDispatcher
 	logger                *zerolog.Logger
 	enqueuer              TaskEnqueuer
 	store                 storage.Provider
@@ -73,11 +74,7 @@ type TaskService struct {
 	defaultModel      string
 	maxTurnsOverrides map[string]int
 	memoryMgr         *projectmemory.ProjectMemoryManager
-	// projectConcurrencyCap optionally lowers per-project concurrency for
-	// executors that reuse a mutable project workspace, such as Kubernetes
-	// project Pods. Zero means no service-level cap.
-	projectConcurrencyCap int
-	nasResumeEnabled      bool
+	nasResumeEnabled  bool
 }
 
 // NewTaskService creates a new TaskService.
@@ -257,10 +254,8 @@ func (s *TaskService) SetExecutorDefaults(defaultModel string, maxTurnsOverrides
 }
 
 func (s *TaskService) SetProjectConcurrencyCap(cap int) {
-	if cap < 0 {
-		cap = 0
-	}
-	s.projectConcurrencyCap = cap
+	// Retained until the Kubernetes executor wiring is replaced by the Job
+	// dispatcher. Per-project concurrency is governed by Project.MaxConcurrentTasks.
 }
 
 // SetNASResumeEnabled enables task continuation against durable Kubernetes NAS
@@ -299,9 +294,6 @@ func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int 
 	maxConcurrent := DefaultMaxConcurrentTasks
 	if project != nil && project.MaxConcurrentTasks > 0 {
 		maxConcurrent = project.MaxConcurrentTasks
-	}
-	if s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
-		return s.projectConcurrencyCap
 	}
 	return maxConcurrent
 }

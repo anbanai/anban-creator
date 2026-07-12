@@ -21,6 +21,16 @@ func (r *taskExecutionRepository) Create(ctx context.Context, execution *model.T
 	return r.db.WithContext(ctx).Create(execution).Error
 }
 
+func (r *taskExecutionRepository) NextAttempt(ctx context.Context, taskID string) (int, error) {
+	var next int
+	err := r.db.WithContext(ctx).
+		Model(&model.TaskExecution{}).
+		Select("COALESCE(MAX(attempt), 0) + 1").
+		Where("task_id = ?", taskID).
+		Scan(&next).Error
+	return next, err
+}
+
 func (r *taskExecutionRepository) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
 	var execution model.TaskExecution
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&execution).Error; err != nil {

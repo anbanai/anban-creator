@@ -450,6 +450,36 @@ func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskI
 	return result.RowsAffected > 0, nil
 }
 
+// SetCurrentExecution records the active durable attempt only while the task is
+// running. Callers create the execution and update this pointer in one transaction.
+func (r *taskRepository) SetCurrentExecution(ctx context.Context, taskID, executionID string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status = ?", taskID, model.TaskStatusRunning).
+		Update("current_execution_id", executionID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// FailRunningTask guardedly records a pre-start terminal failure. The status,
+// diagnostic message, and completion timestamp change atomically.
+func (r *taskRepository) FailRunningTask(ctx context.Context, taskID, errorMsg string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status = ?", taskID, model.TaskStatusRunning).
+		Updates(map[string]interface{}{
+			"status":        model.TaskStatusFailed,
+			"error_message": errorMsg,
+			"completed_at":  time.Now(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // FailPendingTask atomically records a terminal enqueue failure only while the
 // task is still pending, so it cannot stamp a newer execution attempt.
 func (r *taskRepository) FailPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error) {

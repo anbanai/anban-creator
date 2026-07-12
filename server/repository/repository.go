@@ -135,6 +135,8 @@ type TaskRepository interface {
 	CompareAndSwapStatusForUser(ctx context.Context, taskID, userID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
+	SetCurrentExecution(ctx context.Context, taskID, executionID string) (bool, error)
+	FailRunningTask(ctx context.Context, taskID, errorMsg string) (bool, error)
 	FailPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error)
 	ResetTerminalTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error)
 	FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error)
@@ -178,6 +180,7 @@ type TaskFileRepository interface {
 // TaskExecutionRepository provides durable execution-attempt persistence.
 type TaskExecutionRepository interface {
 	Create(ctx context.Context, execution *model.TaskExecution) error
+	NextAttempt(ctx context.Context, taskID string) (int, error)
 	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)
 	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
 	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)

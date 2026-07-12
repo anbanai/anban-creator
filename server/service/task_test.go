@@ -2853,7 +2853,7 @@ func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
 	}
 }
 
-func TestTaskServiceProjectConcurrencyCapOverridesProjectLimit(t *testing.T) {
+func TestTaskServiceProjectConcurrencyCapDoesNotOverrideProjectLimit(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetProjectConcurrencyCap(1)
 	ctx := context.Background()
@@ -2893,8 +2893,8 @@ func TestTaskServiceProjectConcurrencyCapOverridesProjectLimit(t *testing.T) {
 	if err := svc.EnqueueExecution(ctx, pending, project); err != nil {
 		t.Fatalf("EnqueueExecution: %v", err)
 	}
-	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 0 {
-		t.Fatalf("enqueued = %d, want 0 because cap=1 and project already has a running task", got)
+	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 1 {
+		t.Fatalf("enqueued = %d, want 1 because the configured project limit is 10", got)
 	}
 }
 

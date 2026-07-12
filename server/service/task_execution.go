@@ -605,6 +605,9 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 	if err != nil {
 		return fmt.Errorf("find task %s: %w", taskID, err)
 	}
+	if s.kubernetesDispatcher != nil {
+		return s.dispatchKubernetes(ctx, task)
+	}
 
 	// Atomic CAS: pending → running (with started_at). Eliminates TOCTOU race.
 	swapped, err := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(ctx, taskID, model.TaskStatusPending, model.TaskStatusRunning)
