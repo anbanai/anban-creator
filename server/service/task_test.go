@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,8 +57,28 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
 	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1000)
 	return svc, repo
+}
+
+func TestTaskService_ResumeRequiresNASCapability(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	_, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续"})
+	if !errors.Is(err, ErrTaskResumeUnavailable) {
+		t.Fatalf("Resume error = %v, want ErrTaskResumeUnavailable", err)
+	}
 }
 
 func setupTaskServiceWithCredits(t *testing.T, creditSvc *CreditService) (*TaskService, repository.Repository) {
@@ -81,6 +102,21 @@ type mockEnqueuer struct {
 	enqueued []string
 }
 
+type cancelingFailTaskEnqueuer struct {
+	cancel context.CancelFunc
+	err    error
+}
+
+func (e cancelingFailTaskEnqueuer) Enqueue(string, []byte) error {
+	e.cancel()
+	return e.err
+}
+
+func (e cancelingFailTaskEnqueuer) EnqueueIn(string, []byte, time.Duration) error {
+	e.cancel()
+	return e.err
+}
+
 func (m *mockEnqueuer) Enqueue(taskType string, payload []byte) error {
 	m.enqueued = append(m.enqueued, taskType)
 	return nil
@@ -90,6 +126,120 @@ func (m *mockEnqueuer) EnqueueIn(taskType string, payload []byte, delay time.Dur
 	m.enqueued = append(m.enqueued, taskType)
 	return nil
 }
+
+type resumeTestStorage struct {
+	files        map[string][]byte
+	deleted      []string
+	uploadCount  int
+	failUploadAt int
+}
+
+func (s *resumeTestStorage) Name() string { return "resume-test" }
+
+func (s *resumeTestStorage) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
+	s.uploadCount++
+	if s.failUploadAt > 0 && s.uploadCount == s.failUploadAt {
+		return nil, errors.New("object storage unavailable")
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	if s.files == nil {
+		s.files = map[string][]byte{}
+	}
+	s.files[key] = data
+	return &storage.UploadResult{Key: key, URL: "https://storage.test/" + key, Size: int64(len(data)), MimeType: contentType}, nil
+}
+
+func (s *resumeTestStorage) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *resumeTestStorage) UploadURL(context.Context, string, string, int) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (s *resumeTestStorage) GetURL(key string) string { return "https://storage.test/" + key }
+
+func (s *resumeTestStorage) Read(_ context.Context, key string) ([]byte, error) {
+	data, ok := s.files[key]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return data, nil
+}
+
+func (s *resumeTestStorage) Delete(_ context.Context, key string) error {
+	s.deleted = append(s.deleted, key)
+	delete(s.files, key)
+	return nil
+}
+
+func (s *resumeTestStorage) DownloadURL(context.Context, string, int) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (s *resumeTestStorage) HasCustomDomain() bool  { return true }
+func (s *resumeTestStorage) IsOwnedURL(string) bool { return true }
+
+type concurrentResumeStorage struct {
+	mu      sync.Mutex
+	files   map[string][]byte
+	deleted []string
+	uploads int
+	release chan struct{}
+}
+
+func newConcurrentResumeStorage() *concurrentResumeStorage {
+	return &concurrentResumeStorage{files: map[string][]byte{}, release: make(chan struct{})}
+}
+
+func (s *concurrentResumeStorage) Name() string { return "concurrent-resume-test" }
+
+func (s *concurrentResumeStorage) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.files[key] = data
+	s.uploads++
+	if s.uploads == 2 {
+		close(s.release)
+	}
+	s.mu.Unlock()
+	<-s.release
+	return &storage.UploadResult{Key: key, URL: "https://storage.test/" + key, Size: int64(len(data)), MimeType: contentType}, nil
+}
+
+func (s *concurrentResumeStorage) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *concurrentResumeStorage) UploadURL(context.Context, string, string, int) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (s *concurrentResumeStorage) GetURL(key string) string { return "https://storage.test/" + key }
+func (s *concurrentResumeStorage) Read(context.Context, string) ([]byte, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *concurrentResumeStorage) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleted = append(s.deleted, key)
+	delete(s.files, key)
+	return nil
+}
+
+func (s *concurrentResumeStorage) DownloadURL(context.Context, string, int) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (s *concurrentResumeStorage) HasCustomDomain() bool  { return true }
+func (s *concurrentResumeStorage) IsOwnedURL(string) bool { return true }
 
 type fakePublishedTrackingService struct {
 	calls []struct {
@@ -2357,7 +2507,7 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 	}
 }
 
-func TestTaskService_ResumeReusesTaskAndWritesPromptAndFiles(t *testing.T) {
+func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
@@ -2368,8 +2518,9 @@ func TestTaskService_ResumeReusesTaskAndWritesPromptAndFiles(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
-	workspaceRoot := t.TempDir()
-	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	store := &resumeTestStorage{files: map[string][]byte{}}
+	svc := NewTaskService(repo, nil, enqueuer, store, nil, &logger, "", nil, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -2392,11 +2543,6 @@ func TestTaskService_ResumeReusesTaskAndWritesPromptAndFiles(t *testing.T) {
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	workDir := filepath.Join(workspaceRoot, task.ID)
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatalf("create workdir: %v", err)
-	}
-
 	resumed, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{
 		Prompt: "请基于现有草稿补充案例",
 		Files: []ResumeTaskFile{
@@ -2424,34 +2570,31 @@ func TestTaskService_ResumeReusesTaskAndWritesPromptAndFiles(t *testing.T) {
 		t.Fatalf("enqueued = %d, want 1", len(enqueuer.enqueued))
 	}
 
-	resumeRoot := filepath.Join(workDir, ".anban-creator", "resume")
-	latest, err := os.ReadFile(filepath.Join(resumeRoot, "latest.md"))
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
-		t.Fatalf("read latest.md: %v", err)
+		t.Fatalf("find resumed task: %v", err)
 	}
-	latestText := string(latest)
-	for _, want := range []string{"请基于现有草稿补充案例", "客户反馈", "客户 反馈.txt", "attachments/客户_反馈.txt"} {
-		if !strings.Contains(latestText, want) {
-			t.Fatalf("latest.md missing %q:\n%s", want, latestText)
+	var latestText string
+	var resumeFile model.EntryAttachment
+	for _, attachment := range found.InputAttachments.Data() {
+		switch attachment.Role {
+		case model.EntryAttachmentRoleResumeLatest:
+			latestText = attachment.Text
+		case model.EntryAttachmentRoleResumeFile:
+			resumeFile = attachment
 		}
 	}
-	matches, err := filepath.Glob(filepath.Join(resumeRoot, "*", "attachments", "客户_反馈.txt"))
-	if err != nil {
-		t.Fatalf("glob attachment: %v", err)
+	for _, want := range []string{"请基于现有草稿补充案例", "客户反馈", "客户 反馈.txt", "attachments/客户_反馈.txt"} {
+		if !strings.Contains(latestText, want) {
+			t.Fatalf("resume latest missing %q:\n%s", want, latestText)
+		}
 	}
-	if len(matches) != 1 {
-		t.Fatalf("attachment matches = %v, want one sanitized file", matches)
-	}
-	data, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatalf("read attachment: %v", err)
-	}
-	if string(data) != "feedback" {
-		t.Fatalf("attachment = %q, want feedback", string(data))
+	if resumeFile.FileName != "客户_反馈.txt" || string(store.files[resumeFile.Key]) != "feedback" {
+		t.Fatalf("resume file = %#v data=%q", resumeFile, store.files[resumeFile.Key])
 	}
 }
 
-func TestTaskService_ResumeRemoteArtifactsPersistsInputsWithoutLocalWorkspace(t *testing.T) {
+func TestTaskService_ResumePersistsFilesWithoutResultOrLocalWorkspace(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
@@ -2463,11 +2606,11 @@ func TestTaskService_ResumeRemoteArtifactsPersistsInputsWithoutLocalWorkspace(t 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
 	store := &fakeAudioASRStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, nil, enqueuer, store, nil, &logger, "", nil, t.TempDir(), nil, nil)
+	svc := NewTaskService(repo, nil, enqueuer, store, nil, &logger, "", nil, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	resultJSON := `{"success":true,"remote_artifacts":true}`
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
@@ -2475,7 +2618,6 @@ func TestTaskService_ResumeRemoteArtifactsPersistsInputsWithoutLocalWorkspace(t 
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "finished remotely",
-		Result:    &resultJSON,
 	}
 	task.SetInputAttachments([]model.EntryAttachment{
 		{Role: "brief", Text: "keep me", FileName: "brief.txt"},
@@ -2528,33 +2670,7 @@ func TestTaskService_ResumeRemoteArtifactsPersistsInputsWithoutLocalWorkspace(t 
 	}
 }
 
-func TestWriteResumeInputsPublishesLatestOnlyWhenRequested(t *testing.T) {
-	workDir := t.TempDir()
-	runDir, body, err := writeResumeInputs(context.Background(), workDir, "第一次补充", nil)
-	if err != nil {
-		t.Fatalf("writeResumeInputs: %v", err)
-	}
-	if runDir == "" || body == "" {
-		t.Fatalf("writeResumeInputs returned runDir=%q body=%q", runDir, body)
-	}
-	latestPath := filepath.Join(workDir, ".anban-creator", "resume", "latest.md")
-	if _, err := os.Stat(latestPath); !os.IsNotExist(err) {
-		t.Fatalf("latest.md should not be published before CAS success, stat error: %v", err)
-	}
-
-	if err := writeResumeLatest(workDir, body); err != nil {
-		t.Fatalf("writeResumeLatest: %v", err)
-	}
-	latest, err := os.ReadFile(latestPath)
-	if err != nil {
-		t.Fatalf("read latest.md: %v", err)
-	}
-	if string(latest) != body {
-		t.Fatalf("latest.md = %q, want body %q", string(latest), body)
-	}
-}
-
-func TestTaskServiceCleanupSkipsAbsentWorkspaceWithoutMarkingCleaned(t *testing.T) {
+func TestTaskService_ResumeStorageFailureCleansPartialUploads(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
@@ -2563,36 +2679,177 @@ func TestTaskServiceCleanupSkipsAbsentWorkspaceWithoutMarkingCleaned(t *testing.
 		}
 	})
 	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	workspaceRoot := t.TempDir()
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	logger := zerolog.New(io.Discard)
+	store := &resumeTestStorage{files: map[string][]byte{}, failUploadAt: 2}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
-	userID := uuid.New().String()
+	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	completedAt := time.Now().Add(-2 * time.Hour)
-	resultJSON := `{"success":true,"remote_artifacts":true}`
 	task := &model.Task{
-		ID:          uuid.New().String(),
-		UserID:      userID,
-		ProjectID:   projectID,
-		Type:        model.PlatformArticle,
-		Status:      model.TaskStatusCompleted,
-		Result:      &resultJSON,
-		CompletedAt: &completedAt,
+		ID:        uuid.NewString(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusFailed,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
-	if err := svc.CleanupExpiredWorkspaces(ctx); err != nil {
-		t.Fatalf("CleanupExpiredWorkspaces: %v", err)
+	_, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{
+		Prompt: "继续",
+		Files: []ResumeTaskFile{
+			{OriginalName: "first.md", Reader: strings.NewReader("first")},
+			{OriginalName: "second.md", Reader: strings.NewReader("second")},
+		},
+	})
+	if !errors.Is(err, ErrTaskResumeStorageUnavailable) {
+		t.Fatalf("Resume error = %v, want ErrTaskResumeStorageUnavailable", err)
+	}
+	if len(store.deleted) != 2 || len(store.files) != 0 {
+		t.Fatalf("deleted = %v files = %v, want completed and failing upload keys cleaned", store.deleted, store.files)
+	}
+	if !strings.HasSuffix(store.deleted[0], "/first.md") || !strings.HasSuffix(store.deleted[1], "/second.md") {
+		t.Fatalf("deleted keys = %v, want first.md and second.md", store.deleted)
+	}
+	found, findErr := repo.Tasks().FindByID(context.Background(), task.ID)
+	if findErr != nil {
+		t.Fatalf("find task: %v", findErr)
+	}
+	if found.Status != model.TaskStatusFailed || len(found.InputAttachments.Data()) != 0 {
+		t.Fatalf("task changed after upload failure: status=%q attachments=%#v", found.Status, found.InputAttachments.Data())
+	}
+}
+
+func TestTaskService_ResumeDeletesSupersededResumeFilesAfterCAS(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := &resumeTestStorage{files: map[string][]byte{"resume/old.txt": []byte("old")}}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	task.SetInputAttachments([]model.EntryAttachment{
+		{Role: "brief", Text: "keep"},
+		{Role: model.EntryAttachmentRoleResumeLatest, Text: "old latest"},
+		{Role: model.EntryAttachmentRoleResumeFile, Key: "resume/old.txt", FileName: "old.txt"},
+	})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if _, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "new prompt"}); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != "resume/old.txt" {
+		t.Fatalf("deleted = %v, want superseded resume file", store.deleted)
 	}
 	found, err := repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.CleanedUpAt != nil {
-		t.Fatalf("cleaned_up_at = %v, want nil when local workspace is absent", found.CleanedUpAt)
+	attachments := found.InputAttachments.Data()
+	if len(attachments) != 2 || attachments[0].Role != "brief" || attachments[1].Role != model.EntryAttachmentRoleResumeLatest {
+		t.Fatalf("attachments = %#v, want brief plus new latest", attachments)
+	}
+}
+
+func TestTaskService_ResumeEnqueueFailureReturnsTaskToFailed(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	ctx, cancel := context.WithCancel(context.Background())
+	svc := NewTaskService(repo, nil, cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	_, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续"})
+	if err == nil || !strings.Contains(err.Error(), "enqueue resumed task") {
+		t.Fatalf("Resume error = %v, want enqueue failure", err)
+	}
+	found, findErr := repo.Tasks().FindByID(context.Background(), task.ID)
+	if findErr != nil {
+		t.Fatalf("find task: %v", findErr)
+	}
+	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil {
+		t.Fatalf("status=%q completed_at=%v, want retryable failed terminal task", found.Status, found.CompletedAt)
+	}
+	if !strings.Contains(found.ErrorMessage, "redis unavailable") {
+		t.Fatalf("error_message = %q", found.ErrorMessage)
+	}
+}
+
+func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := newConcurrentResumeStorage()
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	errs := make(chan error, 2)
+	for _, prompt := range []string{"first", "second"} {
+		prompt := prompt
+		go func() {
+			_, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{
+				Prompt: prompt,
+				Files:  []ResumeTaskFile{{OriginalName: prompt + ".md", Reader: strings.NewReader(prompt)}},
+			})
+			errs <- err
+		}()
+	}
+	var succeeded, conflicted int
+	for range 2 {
+		err := <-errs
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, ErrTaskResumeConflict):
+			conflicted++
+		default:
+			t.Fatalf("unexpected Resume error: %v", err)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("succeeded=%d conflicted=%d, want one each", succeeded, conflicted)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.files) != 1 || len(store.deleted) != 1 {
+		t.Fatalf("files=%v deleted=%v, want only winning upload", store.files, store.deleted)
 	}
 }
 
@@ -2720,14 +2977,14 @@ func TestTaskRepository_ResetTerminalTaskForResumeOnlyOneStatusSwap(t *testing.T
 		t.Fatalf("create task: %v", err)
 	}
 
-	first, err := repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID)
+	first, err := repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID, nil)
 	if err != nil {
 		t.Fatalf("first ResetTerminalTaskForResume: %v", err)
 	}
 	if !first {
 		t.Fatal("first ResetTerminalTaskForResume = false, want true")
 	}
-	second, err := repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID)
+	second, err := repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID, nil)
 	if err != nil {
 		t.Fatalf("second ResetTerminalTaskForResume: %v", err)
 	}
@@ -2743,7 +3000,7 @@ func TestTaskRepository_ResetTerminalTaskForResumeOnlyOneStatusSwap(t *testing.T
 	}
 }
 
-func TestTaskService_ResumeRejectsMissingWorkspace(t *testing.T) {
+func TestTaskService_ResumePersistsPromptWithoutResultOrLocalWorkspace(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -2759,9 +3016,23 @@ func TestTaskService_ResumeRejectsMissingWorkspace(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	_, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续"})
-	if !errors.Is(err, ErrTaskResumeWorkspaceMissing) {
-		t.Fatalf("Resume error = %v, want ErrTaskResumeWorkspaceMissing", err)
+	resumed, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续完成原任务"})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if resumed.Status != model.TaskStatusPending {
+		t.Fatalf("status = %q, want pending", resumed.Status)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find resumed task: %v", err)
+	}
+	attachments := found.InputAttachments.Data()
+	if len(attachments) != 1 || attachments[0].Role != model.EntryAttachmentRoleResumeLatest {
+		t.Fatalf("input attachments = %#v, want one resume latest attachment", attachments)
+	}
+	if !strings.Contains(attachments[0].Text, "继续完成原任务") {
+		t.Fatalf("resume latest = %q, want prompt", attachments[0].Text)
 	}
 }
 

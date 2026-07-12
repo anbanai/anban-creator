@@ -571,8 +571,10 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, "请填写补充指令或上传补充文件")
 		case errors.Is(err, service.ErrTaskResumeNotTerminal):
 			return Error(c, fiber.StatusConflict, "只有已完成、失败或已取消的任务可以继续执行")
-		case errors.Is(err, service.ErrTaskResumeWorkspaceMissing):
-			return Error(c, fiber.StatusConflict, "原任务工作目录已清理，无法继续执行。可以使用“克隆任务”创建新任务。")
+		case errors.Is(err, service.ErrTaskResumeUnavailable):
+			return Error(c, fiber.StatusServiceUnavailable, "继续执行仅支持 Kubernetes NAS 模式")
+		case errors.Is(err, service.ErrTaskResumeStorageUnavailable):
+			return Error(c, fiber.StatusServiceUnavailable, "补充文件存储暂不可用，请稍后重试")
 		case errors.Is(err, service.ErrTaskResumeConflict):
 			return Error(c, fiber.StatusConflict, "任务状态已变化，请刷新后重试")
 		default:

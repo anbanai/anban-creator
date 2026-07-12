@@ -16,7 +16,6 @@ import (
 const (
 	TypeContentGenerate        = "content:generate"
 	TypePlanTrigger            = "plan:trigger"
-	TypeTaskCleanup            = "task:cleanup"
 	TypeSeednoteDiscover       = "seednote:discover"
 	TypeSeednoteCaptureMetrics = "seednote:capture_metrics"
 	TypeViralAnalysis          = "viral:analyze"
@@ -92,9 +91,6 @@ type ContentGenerateHandler func(ctx context.Context, taskID, userID string) err
 // PlanTriggerHandler is the function signature for handling plan trigger tasks.
 type PlanTriggerHandler func(ctx context.Context, planID string) error
 
-// TaskCleanupHandler is the function signature for handling task cleanup tasks.
-type TaskCleanupHandler func(ctx context.Context) error
-
 // SeednoteTrackingHandler is the function signature for SeedNote tracking jobs.
 type SeednoteTrackingHandler func(ctx context.Context, trackingID string) error
 
@@ -105,7 +101,6 @@ type ViralAnalysisHandler func(ctx context.Context, analysisID string) error
 func NewTaskProcessor(
 	contentHandler ContentGenerateHandler,
 	planHandler PlanTriggerHandler,
-	cleanupHandler TaskCleanupHandler,
 	seednoteDiscoverHandler SeednoteTrackingHandler,
 	seednoteCaptureHandler SeednoteTrackingHandler,
 	viralAnalysisHandler ViralAnalysisHandler,
@@ -142,11 +137,6 @@ func NewTaskProcessor(
 		}
 		logger.Info().Str("plan_id", payload.PlanID).Msg("processing plan trigger")
 		return planHandler(ctx, payload.PlanID)
-	})
-
-	mux.HandleFunc(TypeTaskCleanup, func(ctx context.Context, t *asynq.Task) error {
-		logger.Info().Msg("processing task cleanup")
-		return cleanupHandler(ctx)
 	})
 
 	mux.HandleFunc(TypeSeednoteDiscover, func(ctx context.Context, t *asynq.Task) error {

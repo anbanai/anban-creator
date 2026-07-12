@@ -315,6 +315,7 @@ func main() {
 		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
 		taskSvc.SetExecutorDefaults(cfg.Claude.Model, cfg.Claude.MaxTurns)
 		if cfg.Claude.Executor == "kubernetes" {
+			taskSvc.SetNASResumeEnabled(true)
 			taskSvc.SetProjectConcurrencyCap(1)
 			log.Info().Msg("kubernetes executor enabled: project task concurrency capped at 1 per project pod")
 		}
@@ -668,15 +669,17 @@ func main() {
 		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log, rdb)
 	}
 
-	// 15.2 Start periodic workspace cleanup (every hour).
-	if repo != nil && taskSvc != nil {
+	// 15.2 Clean up expirable derived records without touching NAS task workspaces.
+	if repo != nil {
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		defer cleanupCancel()
-		go startPeriodicCleanup(cleanupCtx, taskSvc, viralAnalysisSvc, posterSvc, log)
+		go startPeriodicArtifactCleanup(cleanupCtx, viralAnalysisSvc, posterSvc, log)
+	}
 
-		// 15.3 Start the local-claim fallback worker (every 10s). Flips
-		// pending local-target tasks past their claim deadline back to cloud
-		// execution so they're never stuck when no desktop is online.
+	// 15.3 Start the local-claim fallback worker (every 10s). Flips
+	// pending local-target tasks past their claim deadline back to cloud
+	// execution so they're never stuck when no desktop is online.
+	if repo != nil && taskSvc != nil {
 		reclaimCtx, reclaimCancel := context.WithCancel(context.Background())
 		defer reclaimCancel()
 		go startLocalClaimFallback(reclaimCtx, taskSvc, log)
@@ -945,9 +948,6 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		func(ctx context.Context, planID string) error {
 			return scheduler.TriggerPlanNow(ctx, repo, taskSvc, planID, log)
 		},
-		func(ctx context.Context) error {
-			return taskSvc.CleanupExpiredWorkspaces(ctx)
-		},
 		seednoteDiscoverHandler,
 		seednoteCaptureHandler,
 		viralAnalysisHandler,
@@ -984,15 +984,12 @@ func parseLogLevel(level string) zerolog.Level {
 	}
 }
 
-// startPeriodicCleanup runs CleanupExpiredWorkspaces on a ticker until ctx is cancelled.
-func startPeriodicCleanup(ctx context.Context, taskSvc *service.TaskService, viralSvc *service.ViralAnalysisService, posterSvc *service.PosterService, log *zerolog.Logger) {
+// startPeriodicArtifactCleanup removes expirable derived records without touching NAS task workspaces.
+func startPeriodicArtifactCleanup(ctx context.Context, viralSvc *service.ViralAnalysisService, posterSvc *service.PosterService, log *zerolog.Logger) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
 	cleanup := func() {
-		if err := taskSvc.CleanupExpiredWorkspaces(ctx); err != nil {
-			log.Error().Err(err).Msg("periodic cleanup failed")
-		}
 		if viralSvc != nil {
 			if err := viralSvc.CleanupOldCompleted(ctx); err != nil {
 				log.Error().Err(err).Msg("viral analysis cleanup failed")

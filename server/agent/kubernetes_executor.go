@@ -590,12 +590,16 @@ func (e *KubernetesExecutor) copyWorkspaceBundle(ctx context.Context, podName, w
 		err := writeTarDirectory(pw, bundleDir)
 		_ = pw.CloseWithError(err)
 	}()
-	script := "mkdir -p " + shellQuote(workDir) + " && tar -C " + shellQuote(workDir) + " -xf -"
+	script := kubernetesCopyWorkspaceScript(workDir)
 	res := e.execShellWithStdin(ctx, podName, script, pr)
 	if res.err != nil {
 		return fmt.Errorf("copy workspace bundle to pod: %w", res.err)
 	}
 	return nil
+}
+
+func kubernetesCopyWorkspaceScript(workDir string) string {
+	return "mkdir -p " + shellQuote(workDir) + " && tar -C " + shellQuote(workDir) + " -xf -"
 }
 
 func (e *KubernetesExecutor) captureProjectMemoryArchive(ctx context.Context, podName, memoryDir string) ([]byte, error) {

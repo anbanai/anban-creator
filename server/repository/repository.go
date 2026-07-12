@@ -84,7 +84,6 @@ type TaskRepository interface {
 	FindRunning(ctx context.Context) ([]*model.Task, error)
 	FindRunningByUser(ctx context.Context, userID string, projectID string) ([]*model.Task, error)
 	FindPaymentRequiredByUser(ctx context.Context, userID string) ([]*model.Task, error)
-	FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.Task, error)
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
 	UpdateProgressLog(ctx context.Context, id, log string) error
@@ -102,7 +101,6 @@ type TaskRepository interface {
 	Update(ctx context.Context, task *model.Task) error
 	UpdateInputAttachments(ctx context.Context, id string, attachments []model.EntryAttachment) error
 	UpdateTitle(ctx context.Context, id string, title string) error
-	UpdateCleanedUpAt(ctx context.Context, id string, t time.Time) error
 	SetStartedAt(ctx context.Context, id string) error
 	SetCompletedAt(ctx context.Context, id string) error
 	UpdateHeartbeat(ctx context.Context, id string) error
@@ -136,7 +134,8 @@ type TaskRepository interface {
 	CompareAndSwapStatusForUser(ctx context.Context, taskID, userID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
-	ResetTerminalTaskForResume(ctx context.Context, taskID string) (bool, error)
+	FailPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error)
+	ResetTerminalTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error)
 	FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error)
 	FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error)
 	ClearTitles(ctx context.Context, titles []string) (int64, error)
