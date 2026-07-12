@@ -60,6 +60,16 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 	if !slices.Contains(env, "FAL_KEY=fal-secret") {
 		t.Fatalf("env = %#v, want Montage provider env", env)
 	}
+	if !slices.Contains(env, "HOME=/home/node") {
+		t.Fatalf("env = %#v, want explicit numeric-runtime HOME", env)
+	}
+
+	kubernetesEnv := (&KubernetesExecutor{serverURL: "http://localhost:8080/"}).buildAgentEnv(&ExecutionOptions{
+		Task: &model.Task{ID: "task-1", Type: model.PlatformArticle},
+	})
+	if !slices.Contains(kubernetesEnv, "HOME=/home/node") {
+		t.Fatalf("legacy Kubernetes env = %#v, want explicit numeric-runtime HOME", kubernetesEnv)
+	}
 }
 
 func TestDockerExecutorDoesNotExposeMontageProviderEnvToOtherTasks(t *testing.T) {

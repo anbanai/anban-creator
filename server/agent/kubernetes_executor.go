@@ -314,7 +314,7 @@ func (e *KubernetesExecutor) buildAgentCommand(opts *ExecutionOptions, agentMode
 }
 
 func (e *KubernetesExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
-	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin"}
+	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + ContainerHomePath}
 	for k, v := range e.claudeEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
@@ -335,7 +335,7 @@ func (e *KubernetesExecutor) buildAgentPod(opts *ExecutionOptions) *corev1.Pod {
 	delete(labels, kubernetesTaskIDLabel)
 	labels[kubernetesProjectIDLabel] = kubernetesLabelValue(task.ProjectID)
 	fsGroup := int64(1000)
-	nodeUser := int64(1000)
+	runtimeUser := int64(1000)
 	rootUser := int64(0)
 	automountServiceAccountToken := false
 	projectDir := kubernetesProjectWorkspaceRoot(e.kubeCfg.WorkspaceMountPath, task)
@@ -372,7 +372,7 @@ func (e *KubernetesExecutor) buildAgentPod(opts *ExecutionOptions) *corev1.Pod {
 				Image:           e.kubeCfg.AgentImage,
 				ImagePullPolicy: corev1.PullAlways,
 				Command:         []string{"/bin/sh", "-c", "trap : TERM INT; sleep infinity & wait"},
-				SecurityContext: &corev1.SecurityContext{RunAsUser: &nodeUser},
+				SecurityContext: &corev1.SecurityContext{RunAsUser: &runtimeUser},
 				Env:             kubernetesEnvVars(e.buildAgentEnv(opts)),
 				VolumeMounts: []corev1.VolumeMount{{
 					Name:      kubernetesWorkspaceMountName,
@@ -414,7 +414,7 @@ func kubernetesProjectWorkspaceRoot(mountPath string, task *model.Task) string {
 }
 
 func kubernetesWorkspaceInitScript(projectDir string) string {
-	return "mkdir -p " + shellQuote(projectDir) + " && chown -R node:node " + shellQuote(projectDir)
+	return "mkdir -p " + shellQuote(projectDir) + " && chown -R " + ContainerRuntimeUser + " " + shellQuote(projectDir)
 }
 
 func (e *KubernetesExecutor) kubernetesPodConfigHash(opts *ExecutionOptions) string {

@@ -75,6 +75,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						Name:            kubernetesAgentContainerName,
 						Image:           cfg.AgentImage,
 						ImagePullPolicy: corev1.PullAlways,
+						Env:             []corev1.EnvVar{{Name: "HOME", Value: ContainerHomePath}},
 						Command:         []string{"anban"},
 						Args: []string{
 							"job",

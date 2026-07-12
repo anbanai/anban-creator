@@ -610,6 +610,8 @@ The shared Runner must load `CLAUDE_PLUGIN_ROOT` with the SDK's local-plugin
 option when that environment variable is set. Kubernetes mounts a writable
 `emptyDir` over `/home/node`, so Job execution must discover the immutable
 Anban plugin from `/anbanai` rather than relying on image-baked user-home state.
+The image and Job must explicitly set `HOME=/home/node` and run Agent work as
+numeric UID/GID `1000:1000`; do not depend on a `node` passwd or group name.
 When `ANBAN_HOME_TEMPLATE` is set, seed missing files from that immutable image
 directory into `$HOME` before constructing the Claude SDK client. Preserve any
 newer runtime files, make seeded content writable by the runtime user, and fail
@@ -874,9 +876,12 @@ permission, remove Pod create/exec permissions, keep Agent ServiceAccount withou
 API permissions, and add optional NetworkPolicy. Ensure the image contains the
 `anban job` command and writable directories are supplied only by Job volumes.
 Keep `/anbanai` immutable and outside the writable `/home/node` volume, retain
-Runner loading through `CLAUDE_PLUGIN_ROOT=/anbanai`, and make the image's node
-identity explicitly match the Job security context UID/GID `1000:1000`. After
-all node-user skill and plugin installation, allowlist only the three installed
+Runner loading through `CLAUDE_PLUGIN_ROOT=/anbanai`, and make the image's numeric runtime
+identity explicitly match the Job security context UID/GID `1000:1000`. Verify
+the pinned base provides numeric UID and GID 1000, create `/home/node` with
+numeric ownership, set `HOME=/home/node`, and use `USER 1000:1000` without
+creating or requiring a `node` account. After
+all numeric-runtime-user skill and plugin installation, allowlist only the three installed
 skill directories, the known/installed plugin registry files, and the Anban
 plugin cache into `/opt/anban-home-template`; never copy `.claude` or the user
 home wholesale. Set `ANBAN_HOME_TEMPLATE` to that path and reject missing

@@ -10,6 +10,8 @@ const (
 	DefaultWorkspaceBaseName      = "anban-creator"
 	EphemeralContainerNamePrefix  = "anban-creator-task-"
 	DockerAgentImageDefault       = "anban-creator-agent:latest"
+	ContainerRuntimeUser          = "1000:1000"
+	ContainerHomePath             = "/home/node"
 	MontageSubmoduleEnvName       = "ANBAN_MONTAGE_SUBMODULE_PATH"
 	ContainerMontageSubmodulePath = "/app/third_party/OpenMontage"
 	OrphanedContainerNameFilter   = "^/" + EphemeralContainerNamePrefix

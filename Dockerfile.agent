@@ -21,13 +21,9 @@ RUN set -eux; \
     if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then \
       apt-get install -y --no-install-recommends ffmpeg; \
     fi; \
-    if id -u node >/dev/null 2>&1; then \
-      [ "$(id -u node)" = "1000" ] && [ "$(id -g node)" = "1000" ] || { echo >&2 "node user must be 1000:1000"; exit 1; }; \
-    else \
-      ! getent passwd 1000 >/dev/null && ! getent group 1000 >/dev/null || { echo >&2 "UID/GID 1000 already belongs to another identity"; exit 1; }; \
-      groupadd --gid 1000 node; \
-      useradd --uid 1000 --gid 1000 -m -s /bin/bash node; \
-    fi; \
+    getent passwd 1000 >/dev/null || { echo >&2 "pinned OpenHands base must provide UID 1000"; exit 1; }; \
+    getent group 1000 >/dev/null || { echo >&2 "pinned OpenHands base must provide GID 1000"; exit 1; }; \
+    install -d -m 0755 -o 1000 -g 1000 /home/node; \
     rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code
@@ -39,8 +35,9 @@ COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
 ENV CLAUDE_PLUGIN_ROOT=/anbanai
 ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template
 ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage
+ENV HOME=/home/node
 
-USER node
+USER 1000:1000
 RUN git config --global http.version HTTP/1.1
 
 RUN npx -y skills@latest add heygen-com/hyperframes \
@@ -64,16 +61,16 @@ USER root
 RUN set -eux; \
     install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache"; \
     for skill in music-to-video slideshow remotion-best-practices; do \
-      test -f "/home/node/.claude/skills/$skill/SKILL.md"; \
+      test -f "$HOME/.claude/skills/$skill/SKILL.md"; \
       install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill"; \
-      cp -a "/home/node/.claude/skills/$skill/." "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill/"; \
+      cp -a "$HOME/.claude/skills/$skill/." "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill/"; \
     done; \
     for file in known_marketplaces.json installed_plugins.json; do \
-      test -f "/home/node/.claude/plugins/$file"; \
-      cp -a "/home/node/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"; \
+      test -f "$HOME/.claude/plugins/$file"; \
+      cp -a "$HOME/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"; \
     done; \
-    test -d "/home/node/.claude/plugins/cache/anbanai"; \
-    cp -a "/home/node/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"; \
+    test -d "$HOME/.claude/plugins/cache/anbanai"; \
+    cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"; \
     if [ -n "$(find "$ANBAN_HOME_TEMPLATE" -type l -print -quit)" ]; then \
       echo >&2 "home template must not contain symlinks"; \
       exit 1; \
@@ -81,6 +78,7 @@ RUN set -eux; \
     chown -R root:root "$ANBAN_HOME_TEMPLATE"; \
     chmod -R a=rX "$ANBAN_HOME_TEMPLATE"
 
+USER 1000:1000
 WORKDIR /workspace
 
 ENTRYPOINT ["tini", "--"]

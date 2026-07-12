@@ -85,8 +85,8 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if got := strings.Join(append(c.Command, c.Args...), " "); strings.Contains(got, testTask().Prompt) {
 		t.Fatalf("command embeds task prompt: %q", got)
 	}
-	if len(c.Env) != 0 {
-		t.Fatalf("environment = %#v, want no task secrets", c.Env)
+	if len(c.Env) != 1 || c.Env[0].Name != "HOME" || c.Env[0].Value != "/home/node" {
+		t.Fatalf("environment = %#v, want only explicit HOME", c.Env)
 	}
 	if c.Resources.Requests.Cpu().String() != "500m" || c.Resources.Limits.Memory().String() != "2Gi" {
 		t.Fatalf("resources = %#v, want configured requests and limits", c.Resources)
@@ -223,6 +223,9 @@ func TestVerifyKubernetesJobRejectsSecurityAndRuntimeSpecMutation(t *testing.T) 
 		{name: "working directory", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].WorkingDir = "/foreign" }},
 		{name: "environment", mutate: func(job *batchv1.Job) {
 			job.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "FOREIGN", Value: "1"}}
+		}},
+		{name: "home environment", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "HOME", Value: "/foreign"}}
 		}},
 		{name: "environment source", mutate: func(job *batchv1.Job) {
 			job.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{Prefix: "FOREIGN_"}}
@@ -775,6 +778,13 @@ func TestKubernetesDispatcherRecoversFromJobCreateAlreadyExistsRace(t *testing.T
 	}
 	if gets != 2 {
 		t.Fatalf("Job GET calls = %d, want initial lookup plus race recovery lookup", gets)
+	}
+}
+
+func TestLegacyKubernetesWorkspaceInitUsesNumericOwnership(t *testing.T) {
+	got := kubernetesWorkspaceInitScript("/workspace/project")
+	if !strings.Contains(got, "chown -R 1000:1000") || strings.Contains(got, "node:node") {
+		t.Fatalf("workspace init script = %q, want numeric runtime ownership", got)
 	}
 }
 
