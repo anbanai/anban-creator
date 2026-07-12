@@ -25,16 +25,16 @@ func ExtractTitleFromWorkspace(workDir string) string {
 
 	var htmlTitle, mdHeading string
 	_ = filepath.WalkDir(scanDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
 			return nil
 		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		if ShouldSkipTaskFileDir(d.Name()) || ShouldSkipTaskFile(d.Name()) {
-			if d.IsDir() {
+		if d.IsDir() {
+			if path != scanDir && ShouldSkipTaskFileDir(d.Name()) {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 || ShouldSkipTaskFile(d.Name()) {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(d.Name()))

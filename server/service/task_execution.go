@@ -849,7 +849,13 @@ func extractArticleDraftFromWorkspace(workDir string) ([]DraftArticleInput, erro
 	// Fallback: find the first HTML file in the workspace.
 	var htmlPath string
 	_ = filepath.WalkDir(scanDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || htmlPath != "" {
+		if err != nil || htmlPath != "" {
+			return nil
+		}
+		if d.IsDir() {
+			if path != scanDir && ShouldSkipTaskFileDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if d.Type()&os.ModeSymlink != 0 {

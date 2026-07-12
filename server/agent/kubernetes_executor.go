@@ -316,6 +316,9 @@ func (e *KubernetesExecutor) buildAgentCommand(opts *ExecutionOptions, agentMode
 func (e *KubernetesExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + ContainerHomePath}
 	for k, v := range e.claudeEnv {
+		if isManagedContainerEnv(k) {
+			continue
+		}
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	if opts != nil && opts.Project != nil {

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -134,6 +133,10 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	if maxTurns <= 0 {
 		maxTurns = DefaultMaxTurns(opts.Task.Type, e.maxTurnsOverrides)
 	}
+	runtimeUser, err := currentDockerRuntimeUser()
+	if err != nil {
+		return nil, err
+	}
 
 	var workDir string
 	if e.dockerCfg.ContainerName != "" && e.dockerCfg.WorkspaceDir != "" {
@@ -215,8 +218,8 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	if err := writeMontageRuntimeFiles(workDir, opts); err != nil {
 		return nil, err
 	}
-	if err := prepareDockerWorkspaceForNumericRuntime(workDir); err != nil {
-		return nil, fmt.Errorf("prepare Docker workspace for numeric runtime: %w", err)
+	if err := validateDockerHostWorkspace(workDir); err != nil {
+		return nil, fmt.Errorf("validate Docker host workspace: %w", err)
 	}
 
 	apiKey, err := e.resolveAgentAPIKey(ctx, opts)
@@ -242,13 +245,13 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		opts.AutoMemoryDirectory = containerMemoryDir(workDir, workDirInContainer, opts.AutoMemoryDirectory)
 	}
 	cmd = e.buildAgentCommand(opts, agentModel, maxTurns, workDirInContainer, apiKey)
-	env := e.buildAgentEnv(opts)
+	env := e.buildAgentEnv(opts, dockerRuntimeHome(workDirInContainer))
 
 	var execRes execResult
 	if e.dockerCfg.ContainerName != "" {
-		execRes = e.executeViaExec(ctx, opts.Task.ID, workDirInContainer, cmd, env, opts.HeartbeatFunc)
+		execRes = e.executeViaExec(ctx, opts.Task.ID, workDirInContainer, runtimeUser, cmd, env, opts.HeartbeatFunc)
 	} else {
-		execRes = e.executeInNewContainer(ctx, opts.Task.ID, workDir, cmd, env)
+		execRes = e.executeInNewContainer(ctx, opts.Task.ID, workDir, runtimeUser, cmd, env)
 	}
 
 	if opts.LogWriter != nil {
@@ -355,9 +358,12 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 	return cmd
 }
 
-func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
-	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + ContainerHomePath}
+func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions, runtimeHome string) []string {
+	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + runtimeHome}
 	for k, v := range e.claudeEnv {
+		if isManagedContainerEnv(k) {
+			continue
+		}
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	if opts.Project != nil {
@@ -377,17 +383,13 @@ type execResult struct {
 	err    error
 }
 
-func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInContainer string, cmd []string, env []string, heartbeatFunc func(string)) execResult {
+func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInContainer, runtimeUser string, cmd []string, env []string, heartbeatFunc func(string)) execResult {
 	containerName := e.dockerCfg.ContainerName
 	if containerName == "" {
 		return execResult{err: fmt.Errorf("persistent container name is empty")}
 	}
 
-	mkdirExec, err := e.dockerCLI.ContainerExecCreate(ctx, containerName, container.ExecOptions{
-		Cmd: []string{"sh", "-c", "mkdir -p " + shellQuote(workDirInContainer) +
-			" && chown -R " + ContainerRuntimeUser + " " + shellQuote(workDirInContainer)},
-		User: "root",
-	})
+	mkdirExec, err := e.dockerCLI.ContainerExecCreate(ctx, containerName, dockerWorkspacePreparationExecOptions(workDirInContainer, runtimeUser))
 	if err != nil {
 		return execResult{err: fmt.Errorf("prepare persistent container workspace exec: %w", err)}
 	}
@@ -402,14 +404,7 @@ func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInCo
 		return execResult{err: fmt.Errorf("persistent container workspace preparation exited with code %d", workspaceInspect.ExitCode)}
 	}
 
-	execCreate, err := e.dockerCLI.ContainerExecCreate(ctx, containerName, container.ExecOptions{
-		Cmd:          cmd,
-		Env:          env,
-		WorkingDir:   workDirInContainer,
-		User:         ContainerRuntimeUser,
-		AttachStdout: true,
-		AttachStderr: true,
-	})
+	execCreate, err := e.dockerCLI.ContainerExecCreate(ctx, containerName, dockerAgentExecOptions(cmd, env, workDirInContainer, runtimeUser))
 	if err != nil {
 		return execResult{err: fmt.Errorf("exec create: %w", err)}
 	}
@@ -470,27 +465,43 @@ func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInCo
 	}
 }
 
-func prepareDockerWorkspaceForNumericRuntime(root string) error {
-	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		switch {
-		case info.IsDir():
-			return os.Chmod(path, 0o777)
-		case info.Mode().IsRegular():
-			return os.Chmod(path, info.Mode().Perm()|0o666)
-		default:
-			return fmt.Errorf("unsupported workspace file type at %q", path)
-		}
-	})
+func validateDockerHostWorkspace(root string) error {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("Docker workspace root %q must be a real directory: %w", root, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("Docker workspace root %q must be a real directory", root)
+	}
+	return nil
+}
+
+func dockerWorkspacePreparationExecOptions(workDirInContainer, runtimeUser string) container.ExecOptions {
+	return container.ExecOptions{
+		Cmd:  []string{"mkdir", "-p", workDirInContainer},
+		User: runtimeUser,
+	}
+}
+
+func dockerAgentExecOptions(cmd, env []string, workDirInContainer, runtimeUser string) container.ExecOptions {
+	return container.ExecOptions{
+		Cmd:          cmd,
+		Env:          env,
+		WorkingDir:   workDirInContainer,
+		User:         runtimeUser,
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+}
+
+func dockerAgentContainerConfig(image string, cmd, env []string, runtimeUser string) *container.Config {
+	return &container.Config{
+		Image:      image,
+		Cmd:        cmd,
+		Env:        env,
+		WorkingDir: "/workspace",
+		User:       runtimeUser,
+	}
 }
 
 func (e *DockerExecutor) killExecProcess(execID, containerName string) {
@@ -545,14 +556,8 @@ func (e *DockerExecutor) waitForDone(done chan error, execID, containerName stri
 	}
 }
 
-func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, workDir string, cmd []string, env []string) execResult {
-	containerConfig := &container.Config{
-		Image:      e.dockerCfg.Image,
-		Cmd:        cmd,
-		Env:        env,
-		WorkingDir: "/workspace",
-		User:       ContainerRuntimeUser,
-	}
+func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, workDir, runtimeUser string, cmd []string, env []string) execResult {
+	containerConfig := dockerAgentContainerConfig(e.dockerCfg.Image, cmd, env, runtimeUser)
 	hostConfig := &container.HostConfig{
 		Mounts: []mount.Mount{{
 			Type:   mount.TypeBind,

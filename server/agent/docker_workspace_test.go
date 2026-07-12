@@ -3,10 +3,11 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestPrepareDockerWorkspaceForNumericRuntimeMakesTreeWritableWithoutFollowingSymlinks(t *testing.T) {
+func TestValidateDockerHostWorkspacePreservesModesAndDoesNotFollowSymlinks(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "nested")
 	if err := os.Mkdir(nested, 0o700); err != nil {
@@ -28,39 +29,50 @@ func TestPrepareDockerWorkspaceForNumericRuntimeMakesTreeWritableWithoutFollowin
 		t.Fatal(err)
 	}
 
-	if err := prepareDockerWorkspaceForNumericRuntime(root); err != nil {
-		t.Fatalf("prepareDockerWorkspaceForNumericRuntime: %v", err)
+	if err := validateDockerHostWorkspace(root); err != nil {
+		t.Fatalf("validateDockerHostWorkspace: %v", err)
 	}
-	for _, path := range []string{root, nested} {
-		info, err := os.Stat(path)
+	for _, tc := range []struct {
+		path string
+		want os.FileMode
+	}{
+		{path: nested, want: 0o700},
+		{path: file, want: 0o600},
+		{path: executable, want: 0o700},
+		{path: outside, want: 0o600},
+	} {
+		info, err := os.Stat(tc.path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != 0o777 {
-			t.Fatalf("directory %s mode = %o, want 777", path, info.Mode().Perm())
+		if info.Mode().Perm() != tc.want {
+			t.Fatalf("%s mode = %o, want %o", tc.path, info.Mode().Perm(), tc.want)
 		}
 	}
-	for _, path := range []string{file, executable} {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm()&0o222 != 0o222 {
-			t.Fatalf("file %s mode = %o, want writable by numeric container user", path, info.Mode().Perm())
-		}
-	}
-	executableInfo, err := os.Stat(executable)
-	if err != nil {
+}
+
+func TestValidateDockerHostWorkspaceRejectsNonDirectoryRoots(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "workspace.txt")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if executableInfo.Mode().Perm()&0o100 == 0 {
-		t.Fatalf("executable mode = %o, want owner execute preserved", executableInfo.Mode().Perm())
-	}
-	outsideInfo, err := os.Stat(outside)
-	if err != nil {
+	symlink := filepath.Join(t.TempDir(), "workspace-link")
+	if err := os.Symlink(t.TempDir(), symlink); err != nil {
 		t.Fatal(err)
 	}
-	if outsideInfo.Mode().Perm() != 0o600 {
-		t.Fatalf("symlink target mode = %o, want untouched 600", outsideInfo.Mode().Perm())
+
+	for _, tc := range []struct {
+		name string
+		root string
+	}{
+		{name: "missing", root: filepath.Join(t.TempDir(), "missing")},
+		{name: "file", root: file},
+		{name: "symlink", root: symlink},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateDockerHostWorkspace(tc.root); err == nil || !strings.Contains(err.Error(), "real directory") {
+				t.Fatalf("validateDockerHostWorkspace(%q) error = %v, want real directory error", tc.root, err)
+			}
+		})
 	}
 }

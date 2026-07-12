@@ -488,8 +488,10 @@ func TestCountMeaningfulFiles(t *testing.T) {
 			setup: func(t *testing.T, dir string) {
 				os.MkdirAll(filepath.Join(dir, ".anban-creator"), 0755)
 				os.MkdirAll(filepath.Join(dir, ".claude"), 0755)
+				os.MkdirAll(filepath.Join(dir, DockerRuntimeHomeDirName), 0755)
 				os.WriteFile(filepath.Join(dir, ".anban-creator", "settings.json"), []byte("{}"), 0644)
 				os.WriteFile(filepath.Join(dir, ".claude", ".mcp.json"), []byte("{}"), 0644)
+				os.WriteFile(filepath.Join(dir, DockerRuntimeHomeDirName, "state.json"), []byte("{}"), 0644)
 			},
 			want: 0,
 		},

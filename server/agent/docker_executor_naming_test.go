@@ -46,13 +46,19 @@ func TestDockerExecutorPassesContainerAutoMemoryDirectory(t *testing.T) {
 }
 
 func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
-	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
+	e := &DockerExecutor{
+		serverURL: "http://localhost:8080/",
+		claudeEnv: map[string]string{
+			"HOME": "/configured-home",
+			"PATH": "/configured-bin",
+		},
+	}
 
 	env := e.buildAgentEnv(&ExecutionOptions{
 		Task:               &model.Task{ID: "task-1", Type: model.PlatformMontage},
 		Project:            &model.Project{ID: "project-1"},
 		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
-	})
+	}, dockerRuntimeHome("/workspace/task-1"))
 
 	if !slices.Contains(env, "ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage") {
 		t.Fatalf("env = %#v, want Montage runtime path", env)
@@ -60,15 +66,24 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 	if !slices.Contains(env, "FAL_KEY=fal-secret") {
 		t.Fatalf("env = %#v, want Montage provider env", env)
 	}
-	if !slices.Contains(env, "HOME=/home/node") {
-		t.Fatalf("env = %#v, want explicit numeric-runtime HOME", env)
+	if !slices.Contains(env, "HOME=/workspace/task-1/.anban-runtime-home") || slices.Contains(env, "HOME=/home/node") {
+		t.Fatalf("env = %#v, want task-scoped Docker HOME", env)
+	}
+	if countEnvKey(env, "HOME") != 1 || countEnvKey(env, "PATH") != 1 {
+		t.Fatalf("env = %#v, want exactly one managed HOME and PATH", env)
 	}
 
-	kubernetesEnv := (&KubernetesExecutor{serverURL: "http://localhost:8080/"}).buildAgentEnv(&ExecutionOptions{
+	kubernetesEnv := (&KubernetesExecutor{
+		serverURL: "http://localhost:8080/",
+		claudeEnv: map[string]string{
+			"HOME": "/configured-home",
+			"PATH": "/configured-bin",
+		},
+	}).buildAgentEnv(&ExecutionOptions{
 		Task: &model.Task{ID: "task-1", Type: model.PlatformArticle},
 	})
-	if !slices.Contains(kubernetesEnv, "HOME=/home/node") {
-		t.Fatalf("legacy Kubernetes env = %#v, want explicit numeric-runtime HOME", kubernetesEnv)
+	if !slices.Contains(kubernetesEnv, "HOME=/home/node") || countEnvKey(kubernetesEnv, "HOME") != 1 || countEnvKey(kubernetesEnv, "PATH") != 1 {
+		t.Fatalf("legacy Kubernetes env = %#v, want exactly one managed HOME and PATH", kubernetesEnv)
 	}
 }
 
@@ -78,7 +93,7 @@ func TestDockerExecutorDoesNotExposeMontageProviderEnvToOtherTasks(t *testing.T)
 	env := e.buildAgentEnv(&ExecutionOptions{
 		Task:               &model.Task{ID: "task-1", Type: model.PlatformArticle},
 		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
-	})
+	}, dockerRuntimeHome("/workspace"))
 
 	if slices.Contains(env, "FAL_KEY=fal-secret") {
 		t.Fatalf("env = %#v, non-Montage task must not receive Montage provider env", env)
@@ -92,4 +107,15 @@ func flagValue(args []string, flag string) string {
 		}
 	}
 	return ""
+}
+
+func countEnvKey(env []string, key string) int {
+	prefix := key + "="
+	count := 0
+	for _, value := range env {
+		if len(value) >= len(prefix) && value[:len(prefix)] == prefix {
+			count++
+		}
+	}
+	return count
 }

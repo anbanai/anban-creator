@@ -12,6 +12,7 @@ const (
 	DockerAgentImageDefault       = "anban-creator-agent:latest"
 	ContainerRuntimeUser          = "1000:1000"
 	ContainerHomePath             = "/home/node"
+	DockerRuntimeHomeDirName      = ".anban-runtime-home"
 	MontageSubmoduleEnvName       = "ANBAN_MONTAGE_SUBMODULE_PATH"
 	ContainerMontageSubmodulePath = "/app/third_party/OpenMontage"
 	OrphanedContainerNameFilter   = "^/" + EphemeralContainerNamePrefix

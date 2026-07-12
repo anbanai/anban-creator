@@ -118,14 +118,24 @@ func TestDockerRuntimeAgentImageAndKubernetesJobAgreeOnNumericIdentity(t *testin
 	}
 }
 
-func TestDockerRuntimeAgentSourceDoesNotDependOnNodeAccount(t *testing.T) {
+func TestDockerRuntimeAgentSourceUsesResolvedLocalIdentity(t *testing.T) {
 	root := repositoryRoot(t)
 	dockerExecutor := readTextFile(t, filepath.Join(root, "server", "agent", "docker_executor.go"))
 	if strings.Contains(dockerExecutor, `User:         "node"`) || strings.Contains(dockerExecutor, `User:       "node"`) {
 		t.Fatal("Docker executor must use numeric runtime identity")
 	}
-	if strings.Count(dockerExecutor, `User:         ContainerRuntimeUser`) != 1 || strings.Count(dockerExecutor, `User:       ContainerRuntimeUser`) != 1 {
-		t.Fatal("Docker executor must apply ContainerRuntimeUser to exec and new-container paths")
+	for _, want := range []string{
+		"currentDockerRuntimeUser()",
+		"dockerWorkspacePreparationExecOptions(workDirInContainer, runtimeUser)",
+		"dockerAgentExecOptions(cmd, env, workDirInContainer, runtimeUser)",
+		"dockerAgentContainerConfig(e.dockerCfg.Image, cmd, env, runtimeUser)",
+	} {
+		if !strings.Contains(dockerExecutor, want) {
+			t.Fatalf("Docker executor missing resolved local identity flow %q", want)
+		}
+	}
+	if strings.Contains(dockerExecutor, "chown -R") || strings.Contains(dockerExecutor, "os.Chmod") {
+		t.Fatal("Docker executor must not recursively change bind-mounted host permissions")
 	}
 	for _, want := range []string{
 		"prepare persistent container workspace exec",

@@ -118,6 +118,20 @@ func TestScanWorkspaceArtifactsPrefersOutputAndSkipsRuntimeFiles(t *testing.T) {
 	}
 }
 
+func TestScanWorkspaceArtifactsSkipsDockerRuntimeHome(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "article.md", "# article")
+	writeAgentArtifactTestFile(t, root, ".anban-runtime-home/secret.md", "runtime state")
+
+	files, err := ScanWorkspaceArtifacts(root)
+	if err != nil {
+		t.Fatalf("ScanWorkspaceArtifacts: %v", err)
+	}
+	if len(files) != 1 || files[0].RelativePath != "article.md" {
+		t.Fatalf("files = %#v, want only article.md", files)
+	}
+}
+
 func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")

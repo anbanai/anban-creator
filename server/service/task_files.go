@@ -95,7 +95,7 @@ func DetermineTaskFileRole(filename, mimeType string) string {
 // ShouldSkipTaskFileDir reports whether a directory should be excluded from task uploads.
 func ShouldSkipTaskFileDir(name string) bool {
 	switch name {
-	case ".anban-creator", ".claude", ".git", "node_modules", "dist", "build", ".cache", ".vite":
+	case ".anban-creator", ".anban-runtime-home", ".claude", ".git", "node_modules", "dist", "build", ".cache", ".vite":
 		return true
 	default:
 		return false

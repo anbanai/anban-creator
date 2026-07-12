@@ -165,7 +165,7 @@ func collectWorkDirArtifacts(workDir string) (map[string]bool, int) {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".anban-creator", ".claude":
+			case ".anban-creator", ".claude", DockerRuntimeHomeDirName:
 				return filepath.SkipDir
 			}
 			return nil
