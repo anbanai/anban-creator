@@ -105,6 +105,42 @@ func TestAgentDockerfileAndKubernetesJobAgreeOnNodeIdentity(t *testing.T) {
 	}
 }
 
+func TestAgentDockerfileSnapshotsInstalledHomeStateForJobRuntime(t *testing.T) {
+	body := readTextFile(t, filepath.Join(repositoryRoot(t), "Dockerfile.agent"))
+	for _, want := range []string{
+		"ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template",
+		`for skill in music-to-video slideshow remotion-best-practices; do`,
+		`test -f "/home/node/.claude/skills/$skill/SKILL.md"`,
+		`cp -a "/home/node/.claude/skills/$skill/." "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill/"`,
+		`for file in known_marketplaces.json installed_plugins.json; do`,
+		`cp -a "/home/node/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"`,
+		`test -d "/home/node/.claude/plugins/cache/anbanai"`,
+		`cp -a "/home/node/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"`,
+		`find "$ANBAN_HOME_TEMPLATE" -type l -print -quit`,
+		`chown -R root:root "$ANBAN_HOME_TEMPLATE"`,
+		`chmod -R a=rX "$ANBAN_HOME_TEMPLATE"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Dockerfile.agent missing immutable home-template contract %q", want)
+		}
+	}
+	installAt := strings.Index(body, "claude plugin install --scope user anban@anbanai")
+	snapshotAt := strings.Index(body, `for skill in music-to-video slideshow remotion-best-practices; do`)
+	if installAt < 0 || snapshotAt < installAt {
+		t.Fatalf("home snapshot must occur after all node-user plugin installation: install=%d snapshot=%d", installAt, snapshotAt)
+	}
+	for _, forbidden := range []string{
+		`for entry in .claude .agents .claude.json; do`,
+		`cp -a "/home/node/.claude"`,
+		`cp -a "/home/node/.agents"`,
+		`cp -a "/home/node/.claude.json"`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("Dockerfile.agent must not broadly snapshot user home via %q", forbidden)
+		}
+	}
+}
+
 func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 	root := repositoryRoot(t)
 	body := readTextFile(t, filepath.Join(root, ".dockerignore"))

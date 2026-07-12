@@ -37,6 +37,7 @@ COPY claudecode/   /anbanai/
 COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
 
 ENV CLAUDE_PLUGIN_ROOT=/anbanai
+ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template
 ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage
 
 USER node
@@ -58,7 +59,27 @@ RUN npx -y skills@latest add heygen-com/hyperframes \
 
 RUN claude plugin marketplace add /anbanai && \
     claude plugin install --scope user anban@anbanai
+
 USER root
+RUN set -eux; \
+    install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache"; \
+    for skill in music-to-video slideshow remotion-best-practices; do \
+      test -f "/home/node/.claude/skills/$skill/SKILL.md"; \
+      install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill"; \
+      cp -a "/home/node/.claude/skills/$skill/." "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill/"; \
+    done; \
+    for file in known_marketplaces.json installed_plugins.json; do \
+      test -f "/home/node/.claude/plugins/$file"; \
+      cp -a "/home/node/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"; \
+    done; \
+    test -d "/home/node/.claude/plugins/cache/anbanai"; \
+    cp -a "/home/node/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"; \
+    if [ -n "$(find "$ANBAN_HOME_TEMPLATE" -type l -print -quit)" ]; then \
+      echo >&2 "home template must not contain symlinks"; \
+      exit 1; \
+    fi; \
+    chown -R root:root "$ANBAN_HOME_TEMPLATE"; \
+    chmod -R a=rX "$ANBAN_HOME_TEMPLATE"
 
 WORKDIR /workspace
 

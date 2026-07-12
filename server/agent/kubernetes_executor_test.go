@@ -173,8 +173,28 @@ func TestVerifyKubernetesJobRejectsSecurityAndRuntimeSpecMutation(t *testing.T) 
 		mutate func(*batchv1.Job)
 	}{
 		{name: "backoff", mutate: func(job *batchv1.Job) { *job.Spec.BackoffLimit = 1 }},
+		{name: "parallelism", mutate: func(job *batchv1.Job) { job.Spec.Parallelism = int32Ptr(2) }},
+		{name: "completions", mutate: func(job *batchv1.Job) { job.Spec.Completions = int32Ptr(2) }},
 		{name: "deadline", mutate: func(job *batchv1.Job) { *job.Spec.ActiveDeadlineSeconds = 901 }},
 		{name: "TTL", mutate: func(job *batchv1.Job) { *job.Spec.TTLSecondsAfterFinished = 121 }},
+		{name: "suspend", mutate: func(job *batchv1.Job) { job.Spec.Suspend = boolPtr(true) }},
+		{name: "completion mode", mutate: func(job *batchv1.Job) {
+			mode := batchv1.IndexedCompletion
+			job.Spec.CompletionMode = &mode
+		}},
+		{name: "managed by", mutate: func(job *batchv1.Job) { job.Spec.ManagedBy = stringPtr("foreign.example/controller") }},
+		{name: "pod failure policy", mutate: func(job *batchv1.Job) { job.Spec.PodFailurePolicy = &batchv1.PodFailurePolicy{} }},
+		{name: "pod replacement policy", mutate: func(job *batchv1.Job) {
+			policy := batchv1.Failed
+			job.Spec.PodReplacementPolicy = &policy
+		}},
+		{name: "success policy", mutate: func(job *batchv1.Job) { job.Spec.SuccessPolicy = &batchv1.SuccessPolicy{} }},
+		{name: "backoff per index", mutate: func(job *batchv1.Job) { job.Spec.BackoffLimitPerIndex = int32Ptr(1) }},
+		{name: "max failed indexes", mutate: func(job *batchv1.Job) { job.Spec.MaxFailedIndexes = int32Ptr(1) }},
+		{name: "manual selector", mutate: func(job *batchv1.Job) { job.Spec.ManualSelector = boolPtr(true) }},
+		{name: "foreign selector", mutate: func(job *batchv1.Job) {
+			job.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"foreign": "selector"}}
+		}},
 		{name: "restart", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure }},
 		{name: "service account", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.ServiceAccountName = "foreign" }},
 		{name: "automount", mutate: func(job *batchv1.Job) { *job.Spec.Template.Spec.AutomountServiceAccountToken = true }},
@@ -185,6 +205,11 @@ func TestVerifyKubernetesJobRejectsSecurityAndRuntimeSpecMutation(t *testing.T) 
 		{name: "shared process namespace", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.ShareProcessNamespace = boolPtr(true) }},
 		{name: "host users", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.HostUsers = boolPtr(false) }},
 		{name: "runtime class", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.RuntimeClassName = stringPtr("foreign") }},
+		{name: "node selector", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.NodeSelector = map[string]string{"dedicated": "foreign"}
+		}},
+		{name: "affinity", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Affinity = &corev1.Affinity{} }},
+		{name: "tolerations", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Tolerations = []corev1.Toleration{{Key: "foreign"}} }},
 		{name: "pod security", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.SecurityContext = nil }},
 		{name: "init container", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.InitContainers = []corev1.Container{{Name: "init"}} }},
 		{name: "extra container", mutate: func(job *batchv1.Job) {
@@ -195,6 +220,22 @@ func TestVerifyKubernetesJobRejectsSecurityAndRuntimeSpecMutation(t *testing.T) 
 		{name: "pull policy", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullIfNotPresent }},
 		{name: "command", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].Command = []string{"sleep"} }},
 		{name: "args", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].Args[0] = "run" }},
+		{name: "working directory", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].WorkingDir = "/foreign" }},
+		{name: "environment", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "FOREIGN", Value: "1"}}
+		}},
+		{name: "environment source", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{Prefix: "FOREIGN_"}}
+		}},
+		{name: "ports", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers[0].Ports = []corev1.ContainerPort{{ContainerPort: 8080}}
+		}},
+		{name: "liveness probe", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].LivenessProbe = &corev1.Probe{} }},
+		{name: "lifecycle", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{
+				Exec: &corev1.ExecAction{Command: []string{"sh", "-c", "echo foreign"}},
+			}}
+		}},
 		{name: "container security", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.Containers[0].SecurityContext = nil }},
 		{name: "resources", mutate: func(job *batchv1.Job) {
 			job.Spec.Template.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU] = resource.MustParse("3")
@@ -229,6 +270,27 @@ func TestVerifyKubernetesJobRejectsSecurityAndRuntimeSpecMutation(t *testing.T) 
 func TestVerifyKubernetesJobIgnoresSafeAPIServerDefaults(t *testing.T) {
 	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	existing := desired.DeepCopy()
+	existing.Annotations[kubernetesObjectConfigHashLabel] = "stale-diagnostic-hash"
+	existing.UID = types.UID("job-uid-1")
+	existing.Spec.Parallelism = int32Ptr(1)
+	existing.Spec.Completions = int32Ptr(1)
+	existing.Spec.ManualSelector = boolPtr(false)
+	mode := batchv1.NonIndexedCompletion
+	existing.Spec.CompletionMode = &mode
+	existing.Spec.Suspend = boolPtr(false)
+	replacement := batchv1.TerminatingOrFailed
+	existing.Spec.PodReplacementPolicy = &replacement
+	existing.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{
+		batchv1.ControllerUidLabel: string(existing.UID),
+	}}
+	for key, value := range map[string]string{
+		"controller-uid":           string(existing.UID),
+		batchv1.ControllerUidLabel: string(existing.UID),
+		"job-name":                 existing.Name,
+		batchv1.JobNameLabel:       existing.Name,
+	} {
+		existing.Spec.Template.Labels[key] = value
+	}
 	enableServiceLinks := true
 	existing.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirst
 	existing.Spec.Template.Spec.SchedulerName = corev1.DefaultSchedulerName

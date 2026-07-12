@@ -147,6 +147,9 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 }
 
 func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, error) {
+	if err := materializeHomeTemplateFromEnvironment(); err != nil {
+		return nil, fmt.Errorf("materialize runtime home template: %w", err)
+	}
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(r.cfg.MaxTurns),
 		claudecode.WithCwd(r.cfg.Workspace),

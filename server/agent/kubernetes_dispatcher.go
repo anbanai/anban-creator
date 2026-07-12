@@ -240,79 +240,115 @@ func verifyJob(existing, desired *batchv1.Job, execution *model.TaskExecution, t
 	if err := verifyRequiredLabels(existing.Spec.Template.Labels, desired.Spec.Template.Labels); err != nil {
 		return fmt.Errorf("Kubernetes Job %q configuration mismatch: template %w", existing.Name, err)
 	}
-	if !apiequality.Semantic.DeepEqual(controlledJobSpec(existing), controlledJobSpec(desired)) {
+	if !apiequality.Semantic.DeepEqual(normalizedJobSpec(existing), normalizedJobSpec(desired)) {
 		return fmt.Errorf("Kubernetes Job %q configuration mismatch for execution %q task %q", existing.Name, execution.ID, task.ID)
 	}
 	return nil
 }
 
-type kubernetesControlledJobSpec struct {
-	BackoffLimit            *int32
-	ActiveDeadlineSeconds   *int64
-	TTLSecondsAfterFinished *int32
-	RestartPolicy           corev1.RestartPolicy
-	ServiceAccountName      string
-	AutomountToken          *bool
-	TerminationGraceSeconds *int64
-	HostNetwork             bool
-	HostPID                 bool
-	HostIPC                 bool
-	ShareProcessNamespace   bool
-	HostUsers               bool
-	RuntimeClassName        string
-	PodSecurityContext      *corev1.PodSecurityContext
-	InitContainers          []corev1.Container
-	Containers              []kubernetesControlledContainer
-	Volumes                 []corev1.Volume
-	ImagePullSecrets        []corev1.LocalObjectReference
+func normalizedJobSpec(job *batchv1.Job) batchv1.JobSpec {
+	spec := job.Spec.DeepCopy()
+	one := int32(1)
+	if spec.Completions == nil && spec.Parallelism == nil {
+		spec.Completions = &one
+	}
+	if spec.Parallelism == nil {
+		spec.Parallelism = &one
+	}
+	if spec.BackoffLimit == nil {
+		backoff := int32(6)
+		if spec.BackoffLimitPerIndex != nil {
+			backoff = int32(^uint32(0) >> 1)
+		}
+		spec.BackoffLimit = &backoff
+	}
+	if spec.CompletionMode == nil {
+		mode := batchv1.NonIndexedCompletion
+		spec.CompletionMode = &mode
+	}
+	if spec.Suspend == nil {
+		spec.Suspend = pointerTo(false)
+	}
+	if spec.PodReplacementPolicy == nil {
+		policy := batchv1.TerminatingOrFailed
+		if spec.PodFailurePolicy != nil {
+			policy = batchv1.Failed
+		}
+		spec.PodReplacementPolicy = &policy
+	}
+	if spec.ManualSelector == nil {
+		spec.ManualSelector = pointerTo(false)
+	}
+	normalizeGeneratedJobSelector(job, spec)
+	normalizeJobPodDefaults(&spec.Template.Spec)
+	return *spec
 }
 
-type kubernetesControlledContainer struct {
-	Name            string
-	Image           string
-	ImagePullPolicy corev1.PullPolicy
-	Command         []string
-	Args            []string
-	SecurityContext *corev1.SecurityContext
-	Resources       corev1.ResourceRequirements
-	VolumeMounts    []corev1.VolumeMount
-	Env             []corev1.EnvVar
-	EnvFrom         []corev1.EnvFromSource
-}
-
-func controlledJobSpec(job *batchv1.Job) kubernetesControlledJobSpec {
-	pod := job.Spec.Template.Spec
-	containers := make([]kubernetesControlledContainer, 0, len(pod.Containers))
-	for _, container := range pod.Containers {
-		containers = append(containers, kubernetesControlledContainer{
-			Name: container.Name, Image: container.Image, ImagePullPolicy: container.ImagePullPolicy,
-			Command: container.Command, Args: container.Args, SecurityContext: container.SecurityContext,
-			Resources: container.Resources, VolumeMounts: container.VolumeMounts,
-			Env: container.Env, EnvFrom: container.EnvFrom,
-		})
+func normalizeGeneratedJobSelector(job *batchv1.Job, spec *batchv1.JobSpec) {
+	if spec.ManualSelector == nil || *spec.ManualSelector || job.UID == "" {
+		return
 	}
-	return kubernetesControlledJobSpec{
-		BackoffLimit: job.Spec.BackoffLimit, ActiveDeadlineSeconds: job.Spec.ActiveDeadlineSeconds,
-		TTLSecondsAfterFinished: job.Spec.TTLSecondsAfterFinished,
-		RestartPolicy:           pod.RestartPolicy,
-		ServiceAccountName:      pod.ServiceAccountName, AutomountToken: pod.AutomountServiceAccountToken,
-		TerminationGraceSeconds: pod.TerminationGracePeriodSeconds,
-		HostNetwork:             pod.HostNetwork, HostPID: pod.HostPID, HostIPC: pod.HostIPC,
-		ShareProcessNamespace: valueOr(pod.ShareProcessNamespace, false),
-		HostUsers:             valueOr(pod.HostUsers, true),
-		RuntimeClassName:      valueOr(pod.RuntimeClassName, ""),
-		PodSecurityContext:    pod.SecurityContext,
-		InitContainers:        pod.InitContainers, Containers: containers, Volumes: pod.Volumes,
-		ImagePullSecrets: pod.ImagePullSecrets,
+	wantSelector := &metav1.LabelSelector{MatchLabels: map[string]string{
+		batchv1.ControllerUidLabel: string(job.UID),
+	}}
+	if apiequality.Semantic.DeepEqual(spec.Selector, wantSelector) {
+		spec.Selector = nil
+	}
+	for key, want := range map[string]string{
+		"controller-uid":           string(job.UID),
+		batchv1.ControllerUidLabel: string(job.UID),
+		"job-name":                 job.Name,
+		batchv1.JobNameLabel:       job.Name,
+	} {
+		if spec.Template.Labels[key] == want {
+			delete(spec.Template.Labels, key)
+		}
 	}
 }
 
-func valueOr[T any](value *T, fallback T) T {
-	if value == nil {
-		return fallback
+func normalizeJobPodDefaults(spec *corev1.PodSpec) {
+	if spec.DNSPolicy == "" {
+		spec.DNSPolicy = corev1.DNSClusterFirst
 	}
-	return *value
+	if spec.RestartPolicy == "" {
+		spec.RestartPolicy = corev1.RestartPolicyAlways
+	}
+	if spec.SecurityContext == nil {
+		spec.SecurityContext = &corev1.PodSecurityContext{}
+	}
+	if spec.TerminationGracePeriodSeconds == nil {
+		spec.TerminationGracePeriodSeconds = int64Ptr(corev1.DefaultTerminationGracePeriodSeconds)
+	}
+	if spec.SchedulerName == "" {
+		spec.SchedulerName = corev1.DefaultSchedulerName
+	}
+	if spec.EnableServiceLinks == nil {
+		spec.EnableServiceLinks = pointerTo(corev1.DefaultEnableServiceLinks)
+	}
+	if spec.ShareProcessNamespace == nil {
+		spec.ShareProcessNamespace = pointerTo(false)
+	}
+	if spec.HostUsers == nil {
+		spec.HostUsers = pointerTo(true)
+	}
+	for i := range spec.InitContainers {
+		normalizeContainerDefaults(&spec.InitContainers[i])
+	}
+	for i := range spec.Containers {
+		normalizeContainerDefaults(&spec.Containers[i])
+	}
 }
+
+func normalizeContainerDefaults(container *corev1.Container) {
+	if container.TerminationMessagePath == "" {
+		container.TerminationMessagePath = corev1.TerminationMessagePathDefault
+	}
+	if container.TerminationMessagePolicy == "" {
+		container.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	}
+}
+
+func pointerTo[T any](value T) *T { return &value }
 
 func verifyRequiredLabels(existing, desired map[string]string) error {
 	for key, want := range desired {

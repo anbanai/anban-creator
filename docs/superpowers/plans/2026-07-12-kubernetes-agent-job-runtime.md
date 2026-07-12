@@ -549,10 +549,14 @@ git commit -m "feat(server): bootstrap jobs with workload identity"
 - Create: `agent/bootstrap_test.go`
 - Create: `agent/job.go`
 - Create: `agent/job_test.go`
+- Create: `agent/home_template.go`
+- Create: `agent/home_template_test.go`
 - Modify: `agent/main.go`
 - Modify: `agent/config.go`
 - Modify: `agent/reporter.go`
 - Modify: `agent/artifact_upload.go`
+- Modify: `agent/runner.go`
+- Modify: `agent/runner_contract_test.go`
 
 - [ ] **Step 1: Write failing bootstrap materialization tests**
 
@@ -574,7 +578,7 @@ func TestJobCommandBootstrapsBeforeRunningClaude(t *testing.T) {
 
 - [ ] **Step 2: Run tests and verify RED**
 
-Run: `go test ./agent -run 'Bootstrap|JobCommand' -count=1`
+Run: `go test ./agent -run 'Bootstrap|JobCommand|HomeTemplate' -count=1`
 
 Expected: FAIL because the Job command and bootstrap client do not exist.
 
@@ -606,17 +610,22 @@ The shared Runner must load `CLAUDE_PLUGIN_ROOT` with the SDK's local-plugin
 option when that environment variable is set. Kubernetes mounts a writable
 `emptyDir` over `/home/node`, so Job execution must discover the immutable
 Anban plugin from `/anbanai` rather than relying on image-baked user-home state.
+When `ANBAN_HOME_TEMPLATE` is set, seed missing files from that immutable image
+directory into `$HOME` before constructing the Claude SDK client. Preserve any
+newer runtime files, make seeded content writable by the runtime user, and fail
+on symlinks, path escapes, special files, type conflicts, or credential files.
 When `CLAUDE_PLUGIN_ROOT` is unset, preserve the existing local/desktop plugin
-discovery behavior and continue passing the configured Agent flag.
+discovery behavior and continue passing the configured Agent flag. When
+`ANBAN_HOME_TEMPLATE` is unset, local/desktop home behavior remains unchanged.
 
 - [ ] **Step 5: Run tests and commit**
 
-Run: `go test ./agent -run 'Bootstrap|JobCommand|Reporter|Artifact' -count=1`
+Run: `go test ./agent -run 'Bootstrap|JobCommand|Reporter|Artifact|Runner|HomeTemplate|Plugin' -count=1`
 
 Expected: PASS.
 
 ```bash
-git add agent/bootstrap.go agent/bootstrap_test.go agent/job.go agent/job_test.go agent/main.go agent/config.go agent/reporter.go agent/artifact_upload.go
+git add agent/bootstrap.go agent/bootstrap_test.go agent/job.go agent/job_test.go agent/home_template.go agent/home_template_test.go agent/main.go agent/config.go agent/reporter.go agent/artifact_upload.go agent/runner.go agent/runner_contract_test.go
 git commit -m "feat(agent): run one-shot kubernetes jobs"
 ```
 
@@ -782,6 +791,7 @@ git commit -m "feat(server): finalize and reconcile kubernetes jobs"
 - Modify: `server/Deployment.yaml`
 - Modify: `server/k8s_agent_runtime_test.go`
 - Modify: `Dockerfile.agent`
+- Modify: `server/agent/docker_runtime_contract_test.go`
 - Modify: `server/config/config.go`
 - Modify: `server/config.yaml`
 - Modify: `server/config.example.yaml`
@@ -865,16 +875,23 @@ API permissions, and add optional NetworkPolicy. Ensure the image contains the
 `anban job` command and writable directories are supplied only by Job volumes.
 Keep `/anbanai` immutable and outside the writable `/home/node` volume, retain
 Runner loading through `CLAUDE_PLUGIN_ROOT=/anbanai`, and make the image's node
-identity explicitly match the Job security context UID/GID `1000:1000`.
+identity explicitly match the Job security context UID/GID `1000:1000`. After
+all node-user skill and plugin installation, allowlist only the three installed
+skill directories, the known/installed plugin registry files, and the Anban
+plugin cache into `/opt/anban-home-template`; never copy `.claude` or the user
+home wholesale. Set `ANBAN_HOME_TEMPLATE` to that path and reject missing
+required inputs, credentials, special files, and image-template symlinks. The
+Runner must seed that immutable template into the writable Job home without
+overwriting runtime-created files.
 
 - [ ] **Step 6: Run targeted tests and commit**
 
-Run: `go test ./server ./server/agent ./server/config -run 'Kubernetes|ACKAgentRuntime' -count=1`
+Run: `go test ./server ./server/agent ./server/config ./agent -run 'Kubernetes|ACKAgentRuntime|DockerRuntime|Runner|HomeTemplate|Plugin' -count=1`
 
 Expected: PASS.
 
 ```bash
-git add server/main.go server/agent/kubernetes_executor.go server/agent/kubernetes_executor_test.go server/service/project.go server/service/project_test.go deploy/k8s/ack-agent-runtime.yaml server/Deployment.yaml server/k8s_agent_runtime_test.go Dockerfile.agent server/config/config.go server/config.yaml server/config.example.yaml server/config/kubernetes_config_test.go
+git add server/main.go server/agent/kubernetes_executor.go server/agent/kubernetes_executor_test.go server/agent/docker_runtime_contract_test.go server/service/project.go server/service/project_test.go deploy/k8s/ack-agent-runtime.yaml server/Deployment.yaml server/k8s_agent_runtime_test.go Dockerfile.agent server/config/config.go server/config.yaml server/config.example.yaml server/config/kubernetes_config_test.go
 git commit -m "refactor(server): replace kubernetes pod executor with jobs"
 ```
 
