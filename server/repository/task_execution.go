@@ -31,6 +31,64 @@ func (r *taskExecutionRepository) NextAttempt(ctx context.Context, taskID string
 	return next, err
 }
 
+func (r *taskExecutionRepository) ClaimDispatch(
+	ctx context.Context,
+	id, token string,
+	claimedAt, staleBefore time.Time,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.TaskExecution{}).
+		Where("id = ?", id).
+		Where("status = ? OR (status = ? AND (dispatch_claimed_at IS NULL OR dispatch_claimed_at <= ?))",
+			model.TaskExecutionCreated, model.TaskExecutionDispatching, staleBefore).
+		Updates(map[string]any{
+			"status":               model.TaskExecutionDispatching,
+			"dispatch_claim_token": token,
+			"dispatch_claimed_at":  claimedAt,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.TaskExecution{}).
+		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token).
+		Updates(map[string]any{
+			"status":               model.TaskExecutionStarting,
+			"dispatch_claim_token": "",
+			"dispatch_claimed_at":  nil,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (r *taskExecutionRepository) FailDispatch(
+	ctx context.Context,
+	id, token, reason string,
+	diagnostics []byte,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.TaskExecution{}).
+		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token).
+		Updates(map[string]any{
+			"status":               model.TaskExecutionFailed,
+			"dispatch_claim_token": "",
+			"dispatch_claimed_at":  nil,
+			"terminal_reason":      reason,
+			"diagnostics":          diagnostics,
+			"completed_at":         time.Now(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 func (r *taskExecutionRepository) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
 	var execution model.TaskExecution
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&execution).Error; err != nil {

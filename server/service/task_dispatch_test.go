@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
@@ -21,14 +23,23 @@ import (
 type dispatchTestDispatcher struct {
 	mu      sync.Mutex
 	calls   int
+	creates int
+	seen    map[string]struct{}
 	err     error
 	started chan struct{}
 	release chan struct{}
 }
 
-func (d *dispatchTestDispatcher) Dispatch(_ context.Context, _ *model.TaskExecution, _ *model.Task) error {
+func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) error {
 	d.mu.Lock()
 	d.calls++
+	if d.seen == nil {
+		d.seen = make(map[string]struct{})
+	}
+	if _, ok := d.seen[execution.ID]; !ok && d.err == nil {
+		d.seen[execution.ID] = struct{}{}
+		d.creates++
+	}
 	started := d.started
 	release := d.release
 	err := d.err
@@ -61,6 +72,12 @@ func (d *dispatchTestDispatcher) callCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.calls
+}
+
+func (d *dispatchTestDispatcher) createCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.creates
 }
 
 func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm.DB, *dispatchTestDispatcher, *model.Task) {
@@ -134,8 +151,8 @@ func TestDispatchCloudTaskConcurrentHandlersCreateAndDispatchOneAttempt(t *testi
 	}()
 	<-dispatcher.started
 
-	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
-		t.Fatalf("overlapping handler: %v", err)
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); !errors.Is(err, ErrDispatchInProgress) {
+		t.Fatalf("overlapping handler error = %v, want ErrDispatchInProgress", err)
 	}
 	close(dispatcher.release)
 	if err := <-firstDone; err != nil {
@@ -172,11 +189,163 @@ func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 	if failedTask.Status != model.TaskStatusFailed || failedTask.CompletedAt == nil || failedTask.ErrorMessage == "" {
 		t.Fatalf("failed task = %+v", failedTask)
 	}
-	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
-		t.Fatalf("replay failed dispatch: %v", err)
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
+		t.Fatal("terminal current attempt was silently acknowledged")
 	}
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("replayed dispatch calls = %d, want 1", dispatcher.callCount())
+	}
+}
+
+func TestDispatchCloudTaskDoesNotAcknowledgeStartingAttemptOnTerminalTask(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().UpdateStatus(context.Background(), task.ID, model.TaskStatusFailed); err != nil {
+		t.Fatalf("make task inconsistent: %v", err)
+	}
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
+		t.Fatal("terminal task with starting execution was silently acknowledged")
+	}
+	if dispatcher.callCount() != 1 {
+		t.Fatalf("dispatch calls = %d, want 1", dispatcher.callCount())
+	}
+}
+
+func TestDispatchCloudTaskAcceptedTransitionFailureIsReclaimed(t *testing.T) {
+	svc, repo, db, dispatcher, task := setupDispatchTest(t)
+	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	svc.SetKubernetesDispatchLease(func() time.Time { return now }, time.Minute)
+	trigger := `CREATE TRIGGER reject_starting BEFORE UPDATE OF status ON task_executions
+		WHEN NEW.status = 'starting' BEGIN SELECT RAISE(ABORT, 'starting rejected'); END`
+	if err := db.Exec(trigger).Error; err != nil {
+		t.Fatalf("create transition trigger: %v", err)
+	}
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
+		t.Fatal("expected transition-to-starting error")
+	}
+	if got := mustCurrentExecution(t, repo, task.ID).Status; got != model.TaskExecutionDispatching {
+		t.Fatalf("status after transition error = %s, want dispatching", got)
+	}
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); !errors.Is(err, ErrDispatchInProgress) {
+		t.Fatalf("active claim replay error = %v, want ErrDispatchInProgress", err)
+	}
+	now = now.Add(2 * time.Minute)
+	if err := db.Exec("DROP TRIGGER reject_starting").Error; err != nil {
+		t.Fatalf("drop transition trigger: %v", err)
+	}
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatalf("reclaim accepted dispatch: %v", err)
+	}
+	if got := mustCurrentExecution(t, repo, task.ID).Status; got != model.TaskExecutionStarting {
+		t.Fatalf("reclaimed status = %s, want starting", got)
+	}
+	if dispatcher.callCount() != 2 || dispatcher.createCount() != 1 {
+		t.Fatalf("dispatcher calls=%d creates=%d, want 2 calls and 1 idempotent create", dispatcher.callCount(), dispatcher.createCount())
+	}
+}
+
+func TestDispatchCloudTaskFailureRollbackIsReclaimedAndTerminalized(t *testing.T) {
+	svc, repo, db, dispatcher, task := setupDispatchTest(t)
+	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	svc.SetKubernetesDispatchLease(func() time.Time { return now }, time.Minute)
+	dispatcher.err = errors.New("job admission denied")
+	trigger := `CREATE TRIGGER reject_task_failure BEFORE UPDATE OF status ON tasks
+		WHEN NEW.status = 'failed' BEGIN SELECT RAISE(ABORT, 'task failure rejected'); END`
+	if err := db.Exec(trigger).Error; err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
+		t.Fatal("expected dispatch/finalization error")
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	currentTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
+	if execution.Status != model.TaskExecutionDispatching || currentTask.Status != model.TaskStatusRunning {
+		t.Fatalf("rolled back state: execution=%s task=%s", execution.Status, currentTask.Status)
+	}
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); !errors.Is(err, ErrDispatchInProgress) {
+		t.Fatalf("active failed claim replay = %v, want ErrDispatchInProgress", err)
+	}
+	now = now.Add(2 * time.Minute)
+	if err := db.Exec("DROP TRIGGER reject_task_failure").Error; err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
+	}
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
+		t.Fatal("reclaimed failed dispatch should report the dispatcher error")
+	}
+	execution = mustCurrentExecution(t, repo, task.ID)
+	currentTask, _ = repo.Tasks().FindByID(context.Background(), task.ID)
+	if execution.Status != model.TaskExecutionFailed || currentTask.Status != model.TaskStatusFailed {
+		t.Fatalf("repaired terminal state: execution=%s task=%s", execution.Status, currentTask.Status)
+	}
+	if dispatcher.callCount() != 2 {
+		t.Fatalf("dispatch calls = %d, want 2", dispatcher.callCount())
+	}
+}
+
+func TestDispatchCloudTaskInitialTransactionContentionCreatesOneAttempt(t *testing.T) {
+	svc, _, db, dispatcher, task := setupDispatchTest(t)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var blocked atomic.Bool
+	if err := db.Callback().Update().Before("gorm:update").Register("test:block_first_task_claim", func(tx *gorm.DB) {
+		if tx.Statement.Table == "tasks" && blocked.CompareAndSwap(false, true) {
+			close(entered)
+			<-release
+		}
+	}); err != nil {
+		t.Fatalf("register transaction barrier: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Update().Remove("test:block_first_task_claim") })
+
+	results := make(chan error, 2)
+	go func() { results <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID) }()
+	<-entered
+	go func() { results <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID) }()
+	close(release)
+	err1, err2 := <-results, <-results
+	if err1 != nil && err2 != nil && !errors.Is(err1, ErrDispatchInProgress) && !errors.Is(err2, ErrDispatchInProgress) {
+		t.Fatalf("both contenders failed unexpectedly: %v, %v", err1, err2)
+	}
+	var count int64
+	if err := db.Model(&model.TaskExecution{}).Where("task_id = ?", task.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count attempts: %v", err)
+	}
+	if count != 1 || dispatcher.callCount() != 1 {
+		t.Fatalf("attempts=%d dispatches=%d, want 1 and 1", count, dispatcher.callCount())
+	}
+}
+
+func TestDispatchCloudTaskStaleClaimRaceHasOneOwner(t *testing.T) {
+	svc, _, _, dispatcher, task := setupDispatchTest(t)
+	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	svc.SetKubernetesDispatchLease(func() time.Time { return now }, time.Minute)
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	// Replace the completed first call's dispatcher barrier with a stale durable claim.
+	execution := mustCurrentExecution(t, svc.repo, task.ID)
+	if won, err := svc.repo.TaskExecutions().Transition(context.Background(), execution.ID,
+		[]string{model.TaskExecutionStarting}, model.TaskExecutionDispatching, model.ExecutionTransition{}); err != nil || !won {
+		t.Fatalf("make claim stale: %v", err)
+	}
+	now = now.Add(2 * time.Minute)
+	dispatcher.started = make(chan struct{}, 1)
+	dispatcher.release = make(chan struct{})
+	results := make(chan error, 2)
+	go func() { results <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID) }()
+	<-dispatcher.started
+	go func() { results <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID) }()
+	second := <-results
+	if !errors.Is(second, ErrDispatchInProgress) {
+		t.Fatalf("stale claim loser = %v, want ErrDispatchInProgress", second)
+	}
+	close(dispatcher.release)
+	if err := <-results; err != nil {
+		t.Fatalf("stale claim winner: %v", err)
 	}
 }
 

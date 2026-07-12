@@ -29,4 +29,8 @@ func TestTaskExecutionMigrationAndCurrentAttempt(t *testing.T) {
 	if !db.Migrator().HasColumn(&Task{}, "CurrentExecutionID") {
 		t.Fatal("current_execution_id missing")
 	}
+	if !db.Migrator().HasColumn(&TaskExecution{}, "DispatchClaimToken") ||
+		!db.Migrator().HasColumn(&TaskExecution{}, "DispatchClaimedAt") {
+		t.Fatal("dispatch lease columns missing")
+	}
 }

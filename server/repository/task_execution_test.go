@@ -218,6 +218,41 @@ func TestTaskExecutionRepositoryRejectsDuplicateAttempt(t *testing.T) {
 	}
 }
 
+func TestTaskExecutionDispatchClaimLeaseIsTokenGuarded(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionCreated)
+	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+
+	won, err := repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-1", now, now.Add(-time.Minute))
+	if err != nil || !won {
+		t.Fatalf("initial claim = %v, %v", won, err)
+	}
+	won, err = repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-2", now.Add(30*time.Second), now.Add(-30*time.Second))
+	if err != nil || won {
+		t.Fatalf("active lease claim = %v, %v", won, err)
+	}
+	won, err = repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-2", now.Add(2*time.Minute), now.Add(time.Minute))
+	if err != nil || !won {
+		t.Fatalf("stale lease reclaim = %v, %v", won, err)
+	}
+	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-1")
+	if err != nil || won {
+		t.Fatalf("stale owner completion = %v, %v", won, err)
+	}
+	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-2")
+	if err != nil || !won {
+		t.Fatalf("current owner completion = %v, %v", won, err)
+	}
+	found, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatalf("find completed dispatch: %v", err)
+	}
+	if found.Status != model.TaskExecutionStarting || found.DispatchClaimToken != "" || found.DispatchClaimedAt != nil {
+		t.Fatalf("completed dispatch = %+v", found)
+	}
+}
+
 func TestTaskExecutionRepositoryIsAvailableInTransactions(t *testing.T) {
 	repo := setupTaskExecutionRepository(t)
 	ctx := context.Background()

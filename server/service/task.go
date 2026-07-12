@@ -39,6 +39,8 @@ type TaskService struct {
 	repo                  repository.Repository
 	executor              agent.TaskExecutor
 	kubernetesDispatcher  agent.KubernetesDispatcher
+	dispatchNow           func() time.Time
+	dispatchLeaseDuration time.Duration
 	logger                *zerolog.Logger
 	enqueuer              TaskEnqueuer
 	store                 storage.Provider
