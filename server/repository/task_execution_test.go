@@ -222,17 +222,24 @@ func TestTaskExecutionDispatchClaimLeaseIsTokenGuarded(t *testing.T) {
 	repo := setupTaskExecutionRepository(t)
 	ctx := context.Background()
 	execution := seedTaskExecution(t, repo, model.TaskExecutionCreated)
-	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 
-	won, err := repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-1", now, now.Add(-time.Minute))
+	won, err := repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-1", time.Minute)
 	if err != nil || !won {
 		t.Fatalf("initial claim = %v, %v", won, err)
 	}
-	won, err = repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-2", now.Add(30*time.Second), now.Add(-30*time.Second))
+	won, err = repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-2", time.Minute)
 	if err != nil || won {
 		t.Fatalf("active lease claim = %v, %v", won, err)
 	}
-	won, err = repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-2", now.Add(2*time.Minute), now.Add(time.Minute))
+	databaseNow, err := sampleDatabaseTime(ctx, repo.db)
+	if err != nil {
+		t.Fatalf("sample database time: %v", err)
+	}
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).
+		Update("dispatch_claimed_at", databaseNow.Add(-2*time.Minute)).Error; err != nil {
+		t.Fatalf("age dispatch claim: %v", err)
+	}
+	won, err = repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-2", time.Minute)
 	if err != nil || !won {
 		t.Fatalf("stale lease reclaim = %v, %v", won, err)
 	}
@@ -250,6 +257,25 @@ func TestTaskExecutionDispatchClaimLeaseIsTokenGuarded(t *testing.T) {
 	}
 	if found.Status != model.TaskExecutionStarting || found.DispatchClaimToken != "" || found.DispatchClaimedAt != nil {
 		t.Fatalf("completed dispatch = %+v", found)
+	}
+}
+
+func TestTaskExecutionDispatchClaimUsesDatabaseTime(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionCreated)
+	won, err := repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-1", time.Minute)
+	if err != nil || !won {
+		t.Fatalf("initial claim = %v, %v", won, err)
+	}
+	// There is deliberately no caller timestamp: claim freshness is evaluated
+	// against the database clock sampled inside ClaimDispatch.
+	won, err = repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "second-owner", time.Minute)
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if won {
+		t.Fatal("active database lease was stolen")
 	}
 }
 

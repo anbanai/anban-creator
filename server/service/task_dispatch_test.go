@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -120,6 +119,22 @@ func mustCurrentExecution(t *testing.T, repo repository.Repository, taskID strin
 	return execution
 }
 
+func ageDispatchClaim(t *testing.T, db *gorm.DB, executionID string, age time.Duration) {
+	t.Helper()
+	var raw string
+	if err := db.Raw("SELECT CURRENT_TIMESTAMP").Row().Scan(&raw); err != nil {
+		t.Fatalf("sample database time: %v", err)
+	}
+	databaseNow, err := time.ParseInLocation("2006-01-02 15:04:05", raw, time.UTC)
+	if err != nil {
+		t.Fatalf("parse database time %q: %v", raw, err)
+	}
+	if err := db.Model(&model.TaskExecution{}).Where("id = ?", executionID).
+		Update("dispatch_claimed_at", databaseNow.Add(-age)).Error; err != nil {
+		t.Fatalf("age dispatch claim: %v", err)
+	}
+}
+
 func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterJobAccepted(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	ctx := context.Background()
@@ -215,8 +230,7 @@ func TestDispatchCloudTaskDoesNotAcknowledgeStartingAttemptOnTerminalTask(t *tes
 
 func TestDispatchCloudTaskAcceptedTransitionFailureIsReclaimed(t *testing.T) {
 	svc, repo, db, dispatcher, task := setupDispatchTest(t)
-	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
-	svc.SetKubernetesDispatchLease(func() time.Time { return now }, time.Minute)
+	svc.SetKubernetesDispatchLease(time.Minute)
 	trigger := `CREATE TRIGGER reject_starting BEFORE UPDATE OF status ON task_executions
 		WHEN NEW.status = 'starting' BEGIN SELECT RAISE(ABORT, 'starting rejected'); END`
 	if err := db.Exec(trigger).Error; err != nil {
@@ -232,7 +246,7 @@ func TestDispatchCloudTaskAcceptedTransitionFailureIsReclaimed(t *testing.T) {
 	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); !errors.Is(err, ErrDispatchInProgress) {
 		t.Fatalf("active claim replay error = %v, want ErrDispatchInProgress", err)
 	}
-	now = now.Add(2 * time.Minute)
+	ageDispatchClaim(t, db, mustCurrentExecution(t, repo, task.ID).ID, 2*time.Minute)
 	if err := db.Exec("DROP TRIGGER reject_starting").Error; err != nil {
 		t.Fatalf("drop transition trigger: %v", err)
 	}
@@ -247,10 +261,32 @@ func TestDispatchCloudTaskAcceptedTransitionFailureIsReclaimed(t *testing.T) {
 	}
 }
 
+func TestDispatchCloudTaskUsesDatabaseTimeForActiveClaim(t *testing.T) {
+	svc, repo, db, dispatcher, task := setupDispatchTest(t)
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	if err := db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).Updates(map[string]any{
+		"status":               model.TaskExecutionDispatching,
+		"dispatch_claim_token": "active-owner",
+	}).Error; err != nil {
+		t.Fatalf("seed active claim: %v", err)
+	}
+	ageDispatchClaim(t, db, execution.ID, 0)
+	svc.SetKubernetesDispatchLease(time.Minute)
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); !errors.Is(err, ErrDispatchInProgress) {
+		t.Fatalf("active replay error = %v, want ErrDispatchInProgress", err)
+	}
+	if dispatcher.callCount() != 1 {
+		t.Fatalf("dispatch calls = %d, want 1", dispatcher.callCount())
+	}
+}
+
 func TestDispatchCloudTaskFailureRollbackIsReclaimedAndTerminalized(t *testing.T) {
 	svc, repo, db, dispatcher, task := setupDispatchTest(t)
-	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
-	svc.SetKubernetesDispatchLease(func() time.Time { return now }, time.Minute)
+	svc.SetKubernetesDispatchLease(time.Minute)
 	dispatcher.err = errors.New("job admission denied")
 	trigger := `CREATE TRIGGER reject_task_failure BEFORE UPDATE OF status ON tasks
 		WHEN NEW.status = 'failed' BEGIN SELECT RAISE(ABORT, 'task failure rejected'); END`
@@ -269,7 +305,7 @@ func TestDispatchCloudTaskFailureRollbackIsReclaimedAndTerminalized(t *testing.T
 	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); !errors.Is(err, ErrDispatchInProgress) {
 		t.Fatalf("active failed claim replay = %v, want ErrDispatchInProgress", err)
 	}
-	now = now.Add(2 * time.Minute)
+	ageDispatchClaim(t, db, execution.ID, 2*time.Minute)
 	if err := db.Exec("DROP TRIGGER reject_task_failure").Error; err != nil {
 		t.Fatalf("drop failure trigger: %v", err)
 	}
@@ -288,27 +324,29 @@ func TestDispatchCloudTaskFailureRollbackIsReclaimedAndTerminalized(t *testing.T
 
 func TestDispatchCloudTaskInitialTransactionContentionCreatesOneAttempt(t *testing.T) {
 	svc, _, db, dispatcher, task := setupDispatchTest(t)
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	var blocked atomic.Bool
-	if err := db.Callback().Update().Before("gorm:update").Register("test:block_first_task_claim", func(tx *gorm.DB) {
-		if tx.Statement.Table == "tasks" && blocked.CompareAndSwap(false, true) {
-			close(entered)
-			<-release
-		}
-	}); err != nil {
-		t.Fatalf("register transaction barrier: %v", err)
+	entered := make(chan struct{}, 2)
+	releaseCreate := make(chan struct{})
+	svc.dispatchBeforeCreate = func() {
+		entered <- struct{}{}
+		<-releaseCreate
 	}
-	t.Cleanup(func() { _ = db.Callback().Update().Remove("test:block_first_task_claim") })
+	dispatcher.started = make(chan struct{}, 1)
+	dispatcher.release = make(chan struct{})
 
 	results := make(chan error, 2)
 	go func() { results <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID) }()
 	<-entered
 	go func() { results <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID) }()
-	close(release)
-	err1, err2 := <-results, <-results
-	if err1 != nil && err2 != nil && !errors.Is(err1, ErrDispatchInProgress) && !errors.Is(err2, ErrDispatchInProgress) {
-		t.Fatalf("both contenders failed unexpectedly: %v, %v", err1, err2)
+	<-entered
+	releaseCreate <- struct{}{}
+	<-dispatcher.started
+	releaseCreate <- struct{}{}
+	if err := <-results; !errors.Is(err, ErrDispatchInProgress) {
+		t.Fatalf("creation CAS loser = %v, want ErrDispatchInProgress", err)
+	}
+	close(dispatcher.release)
+	if err := <-results; err != nil {
+		t.Fatalf("creation CAS winner: %v", err)
 	}
 	var count int64
 	if err := db.Model(&model.TaskExecution{}).Where("task_id = ?", task.ID).Count(&count).Error; err != nil {
@@ -321,8 +359,7 @@ func TestDispatchCloudTaskInitialTransactionContentionCreatesOneAttempt(t *testi
 
 func TestDispatchCloudTaskStaleClaimRaceHasOneOwner(t *testing.T) {
 	svc, _, _, dispatcher, task := setupDispatchTest(t)
-	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
-	svc.SetKubernetesDispatchLease(func() time.Time { return now }, time.Minute)
+	svc.SetKubernetesDispatchLease(time.Minute)
 	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +369,6 @@ func TestDispatchCloudTaskStaleClaimRaceHasOneOwner(t *testing.T) {
 		[]string{model.TaskExecutionStarting}, model.TaskExecutionDispatching, model.ExecutionTransition{}); err != nil || !won {
 		t.Fatalf("make claim stale: %v", err)
 	}
-	now = now.Add(2 * time.Minute)
 	dispatcher.started = make(chan struct{}, 1)
 	dispatcher.release = make(chan struct{})
 	results := make(chan error, 2)

@@ -181,7 +181,7 @@ type TaskFileRepository interface {
 type TaskExecutionRepository interface {
 	Create(ctx context.Context, execution *model.TaskExecution) error
 	NextAttempt(ctx context.Context, taskID string) (int, error)
-	ClaimDispatch(ctx context.Context, id, token string, claimedAt, staleBefore time.Time) (bool, error)
+	ClaimDispatch(ctx context.Context, id, token string, leaseDuration time.Duration) (bool, error)
 	CompleteDispatch(ctx context.Context, id, token string) (bool, error)
 	FailDispatch(ctx context.Context, id, token, reason string, diagnostics []byte) (bool, error)
 	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)

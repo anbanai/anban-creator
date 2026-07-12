@@ -21,18 +21,10 @@ func (s *TaskService) SetKubernetesDispatcher(dispatcher agent.KubernetesDispatc
 	s.kubernetesDispatcher = dispatcher
 }
 
-func (s *TaskService) SetKubernetesDispatchLease(now func() time.Time, duration time.Duration) {
-	s.dispatchNow = now
+func (s *TaskService) SetKubernetesDispatchLease(duration time.Duration) {
 	if duration > 0 {
 		s.dispatchLeaseDuration = duration
 	}
-}
-
-func (s *TaskService) kubernetesDispatchNow() time.Time {
-	if s.dispatchNow != nil {
-		return s.dispatchNow()
-	}
-	return time.Now()
 }
 
 func (s *TaskService) kubernetesDispatchLease() time.Duration {
@@ -43,19 +35,40 @@ func (s *TaskService) kubernetesDispatchLease() time.Duration {
 }
 
 func (s *TaskService) dispatchKubernetes(ctx context.Context, task *model.Task) error {
+	if s.dispatchBeforeCreate != nil {
+		s.dispatchBeforeCreate()
+	}
 	execution, created, err := s.createCurrentExecution(ctx, task)
 	if err != nil {
 		return err
 	}
 	if !created {
-		execution, err = s.repo.TaskExecutions().FindCurrentByTaskID(ctx, task.ID)
+		task, execution, err = s.reloadCurrentDispatchState(ctx, task.ID)
 		if err != nil {
-			return fmt.Errorf("task %s is not pending and has no readable current execution: %w", task.ID, err)
+			return err
 		}
 	} else {
 		task.Status = model.TaskStatusRunning
 	}
 	return s.dispatchCurrentExecution(ctx, task, execution)
+}
+
+func (s *TaskService) reloadCurrentDispatchState(ctx context.Context, taskID string) (*model.Task, *model.TaskExecution, error) {
+	var task *model.Task
+	var execution *model.TaskExecution
+	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		var err error
+		task, err = txRepo.Tasks().FindByID(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("reload contended task %s: %w", taskID, err)
+		}
+		execution, err = txRepo.TaskExecutions().FindCurrentByTaskID(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("task %s has no readable current execution: %w", taskID, err)
+		}
+		return nil
+	})
+	return task, execution, err
 }
 
 func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) error {
@@ -71,9 +84,8 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 		return fmt.Errorf("task %s is running with current execution %s in status %s", task.ID, execution.ID, execution.Status)
 	}
 
-	now := s.kubernetesDispatchNow()
 	token := uuid.NewString()
-	won, err := s.repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, token, now, now.Add(-s.kubernetesDispatchLease()))
+	won, err := s.repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, token, s.kubernetesDispatchLease())
 	if err != nil {
 		return fmt.Errorf("claim Kubernetes dispatch: %w", err)
 	}
@@ -92,7 +104,6 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 	}
 	execution.Status = model.TaskExecutionDispatching
 	execution.DispatchClaimToken = token
-	execution.DispatchClaimedAt = &now
 
 	if err := s.kubernetesDispatcher.Dispatch(ctx, execution, task); err != nil {
 		return s.failDispatch(ctx, task, execution, token, err)

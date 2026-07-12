@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -34,8 +35,13 @@ func (r *taskExecutionRepository) NextAttempt(ctx context.Context, taskID string
 func (r *taskExecutionRepository) ClaimDispatch(
 	ctx context.Context,
 	id, token string,
-	claimedAt, staleBefore time.Time,
+	leaseDuration time.Duration,
 ) (bool, error) {
+	databaseNow, err := sampleDatabaseTime(ctx, r.db)
+	if err != nil {
+		return false, err
+	}
+	staleBefore := databaseNow.Add(-leaseDuration)
 	result := r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
 		Where("id = ?", id).
@@ -44,12 +50,47 @@ func (r *taskExecutionRepository) ClaimDispatch(
 		Updates(map[string]any{
 			"status":               model.TaskExecutionDispatching,
 			"dispatch_claim_token": token,
-			"dispatch_claimed_at":  claimedAt,
+			"dispatch_claimed_at":  databaseNow,
 		})
 	if result.Error != nil {
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+func sampleDatabaseTime(ctx context.Context, db *gorm.DB) (time.Time, error) {
+	var raw any
+	if err := db.WithContext(ctx).Raw("SELECT CURRENT_TIMESTAMP").Row().Scan(&raw); err != nil {
+		return time.Time{}, fmt.Errorf("sample database time: %w", err)
+	}
+	switch value := raw.(type) {
+	case time.Time:
+		return value, nil
+	case string:
+		return parseDatabaseTime(db, value)
+	case []byte:
+		return parseDatabaseTime(db, string(value))
+	default:
+		return time.Time{}, fmt.Errorf("sample database time: unsupported value %T", raw)
+	}
+}
+
+func parseDatabaseTime(db *gorm.DB, value string) (time.Time, error) {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	} {
+		location := time.Local
+		if db.Dialector.Name() == "sqlite" {
+			location = time.UTC
+		}
+		if parsed, err := time.ParseInLocation(layout, value, location); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("sample database time: unsupported timestamp %q", value)
 }
 
 func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token string) (bool, error) {
