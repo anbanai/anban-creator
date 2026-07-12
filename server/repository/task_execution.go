@@ -8,6 +8,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type taskExecutionRepository struct {
@@ -37,60 +38,63 @@ func (r *taskExecutionRepository) ClaimDispatch(
 	id, token string,
 	leaseDuration time.Duration,
 ) (bool, error) {
-	databaseNow, err := sampleDatabaseTime(ctx, r.db)
+	result, err := buildDispatchClaimUpdate(r.db.WithContext(ctx), id, token, leaseDuration)
 	if err != nil {
 		return false, err
 	}
-	staleBefore := databaseNow.Add(-leaseDuration)
-	result := r.db.WithContext(ctx).
-		Model(&model.TaskExecution{}).
-		Where("id = ?", id).
-		Where("status = ? OR (status = ? AND (dispatch_claimed_at IS NULL OR dispatch_claimed_at <= ?))",
-			model.TaskExecutionCreated, model.TaskExecutionDispatching, staleBefore).
-		Updates(map[string]any{
-			"status":               model.TaskExecutionDispatching,
-			"dispatch_claim_token": token,
-			"dispatch_claimed_at":  databaseNow,
-		})
 	if result.Error != nil {
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
 }
 
-func sampleDatabaseTime(ctx context.Context, db *gorm.DB) (time.Time, error) {
-	var raw any
-	if err := db.WithContext(ctx).Raw("SELECT CURRENT_TIMESTAMP").Row().Scan(&raw); err != nil {
-		return time.Time{}, fmt.Errorf("sample database time: %w", err)
+func buildDispatchClaimUpdate(db *gorm.DB, id, token string, leaseDuration time.Duration) (*gorm.DB, error) {
+	if leaseDuration <= 0 {
+		return nil, fmt.Errorf("dispatch lease duration must be positive")
 	}
-	switch value := raw.(type) {
-	case time.Time:
-		return value, nil
-	case string:
-		return parseDatabaseTime(db, value)
-	case []byte:
-		return parseDatabaseTime(db, string(value))
+	var now clause.Expr
+	var stalePredicate string
+	var staleArg int64
+	switch db.Dialector.Name() {
+	case "mysql":
+		now = gorm.Expr("CURRENT_TIMESTAMP(6)")
+		stalePredicate = "dispatch_claimed_at <= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND)"
+		staleArg = leaseDuration.Microseconds()
+	case "sqlite":
+		now = gorm.Expr("STRFTIME('%Y-%m-%d %H:%M:%f', 'now')")
+		stalePredicate = "JULIANDAY(dispatch_claimed_at) <= JULIANDAY('now') - (? / 86400000.0)"
+		staleArg = leaseDuration.Milliseconds()
+		if staleArg == 0 {
+			staleArg = 1
+		}
 	default:
-		return time.Time{}, fmt.Errorf("sample database time: unsupported value %T", raw)
+		return nil, fmt.Errorf("dispatch leases are unsupported for database dialect %q", db.Dialector.Name())
 	}
+	return db.Model(&model.TaskExecution{}).
+		Where("id = ?", id).
+		Where("status = ? OR (status = ? AND (dispatch_claimed_at IS NULL OR "+stalePredicate+"))",
+			model.TaskExecutionCreated, model.TaskExecutionDispatching, staleArg).
+		Updates(map[string]any{
+			"status":               model.TaskExecutionDispatching,
+			"dispatch_claim_token": token,
+			"dispatch_claimed_at":  now,
+			"updated_at":           now,
+		}), nil
 }
 
-func parseDatabaseTime(db *gorm.DB, value string) (time.Time, error) {
-	for _, layout := range []string{
-		time.RFC3339Nano,
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-	} {
-		location := time.Local
-		if db.Dialector.Name() == "sqlite" {
-			location = time.UTC
-		}
-		if parsed, err := time.ParseInLocation(layout, value, location); err == nil {
-			return parsed, nil
-		}
+func (r *taskExecutionRepository) AbandonDispatch(ctx context.Context, id, token string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.TaskExecution{}).
+		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token).
+		Updates(map[string]any{
+			"status":               model.TaskExecutionCreated,
+			"dispatch_claim_token": "",
+			"dispatch_claimed_at":  nil,
+		})
+	if result.Error != nil {
+		return false, result.Error
 	}
-	return time.Time{}, fmt.Errorf("sample database time: unsupported timestamp %q", value)
+	return result.RowsAffected > 0, nil
 }
 
 func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token string) (bool, error) {

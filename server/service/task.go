@@ -41,6 +41,7 @@ type TaskService struct {
 	kubernetesDispatcher  agent.KubernetesDispatcher
 	dispatchLeaseDuration time.Duration
 	dispatchBeforeCreate  func()
+	projectConcurrencyCap int
 	logger                *zerolog.Logger
 	enqueuer              TaskEnqueuer
 	store                 storage.Provider
@@ -256,8 +257,10 @@ func (s *TaskService) SetExecutorDefaults(defaultModel string, maxTurnsOverrides
 }
 
 func (s *TaskService) SetProjectConcurrencyCap(cap int) {
-	// Retained until the Kubernetes executor wiring is replaced by the Job
-	// dispatcher. Per-project concurrency is governed by Project.MaxConcurrentTasks.
+	if cap < 0 {
+		cap = 0
+	}
+	s.projectConcurrencyCap = cap
 }
 
 // SetNASResumeEnabled enables task continuation against durable Kubernetes NAS
@@ -296,6 +299,9 @@ func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int 
 	maxConcurrent := DefaultMaxConcurrentTasks
 	if project != nil && project.MaxConcurrentTasks > 0 {
 		maxConcurrent = project.MaxConcurrentTasks
+	}
+	if s.kubernetesDispatcher == nil && s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
+		return s.projectConcurrencyCap
 	}
 	return maxConcurrent
 }

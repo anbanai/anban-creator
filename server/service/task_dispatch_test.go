@@ -20,13 +20,14 @@ import (
 )
 
 type dispatchTestDispatcher struct {
-	mu      sync.Mutex
-	calls   int
-	creates int
-	seen    map[string]struct{}
-	err     error
-	started chan struct{}
-	release chan struct{}
+	mu                sync.Mutex
+	calls             int
+	creates           int
+	seen              map[string]struct{}
+	err               error
+	sideEffectOnError bool
+	started           chan struct{}
+	release           chan struct{}
 }
 
 func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) error {
@@ -35,7 +36,7 @@ func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.Ta
 	if d.seen == nil {
 		d.seen = make(map[string]struct{})
 	}
-	if _, ok := d.seen[execution.ID]; !ok && d.err == nil {
+	if _, ok := d.seen[execution.ID]; !ok && (d.err == nil || d.sideEffectOnError) {
 		d.seen[execution.ID] = struct{}{}
 		d.creates++
 	}
@@ -188,7 +189,7 @@ func TestDispatchCloudTaskConcurrentHandlersCreateAndDispatchOneAttempt(t *testi
 
 func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.err = errors.New("job admission denied")
+	dispatcher.err = agent.NewPermanentDispatchError(errors.New("job identity mismatch"))
 	err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
 	if err == nil || !errors.Is(err, dispatcher.err) {
 		t.Fatalf("dispatch error = %v, want %v", err, dispatcher.err)
@@ -209,6 +210,38 @@ func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 	}
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("replayed dispatch calls = %d, want 1", dispatcher.callCount())
+	}
+}
+
+func TestDispatchCloudTaskAmbiguousErrorAbandonsClaimAndRetriesWithoutTerminalizing(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.err = errors.New("connection reset after job create")
+	dispatcher.sideEffectOnError = true
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
+		t.Fatal("expected ambiguous dispatch error")
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	currentTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.Status != model.TaskExecutionCreated || execution.DispatchClaimToken != "" || execution.DispatchClaimedAt != nil {
+		t.Fatalf("abandoned execution = %+v", execution)
+	}
+	if currentTask.Status != model.TaskStatusRunning || currentTask.CompletedAt != nil || currentTask.ErrorMessage != "" {
+		t.Fatalf("ambiguous task was terminalized: %+v", currentTask)
+	}
+
+	dispatcher.err = nil
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatalf("retry ambiguous dispatch: %v", err)
+	}
+	if got := mustCurrentExecution(t, repo, task.ID).Status; got != model.TaskExecutionStarting {
+		t.Fatalf("retry status = %s, want starting", got)
+	}
+	if dispatcher.callCount() != 2 || dispatcher.createCount() != 1 {
+		t.Fatalf("dispatcher calls=%d logical jobs=%d, want 2 and 1", dispatcher.callCount(), dispatcher.createCount())
 	}
 }
 
@@ -287,7 +320,7 @@ func TestDispatchCloudTaskUsesDatabaseTimeForActiveClaim(t *testing.T) {
 func TestDispatchCloudTaskFailureRollbackIsReclaimedAndTerminalized(t *testing.T) {
 	svc, repo, db, dispatcher, task := setupDispatchTest(t)
 	svc.SetKubernetesDispatchLease(time.Minute)
-	dispatcher.err = errors.New("job admission denied")
+	dispatcher.err = agent.NewPermanentDispatchError(errors.New("job identity mismatch"))
 	trigger := `CREATE TRIGGER reject_task_failure BEFORE UPDATE OF status ON tasks
 		WHEN NEW.status = 'failed' BEGIN SELECT RAISE(ABORT, 'task failure rejected'); END`
 	if err := db.Exec(trigger).Error; err != nil {

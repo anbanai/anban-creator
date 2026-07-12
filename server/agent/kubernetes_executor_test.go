@@ -371,9 +371,26 @@ func TestKubernetesDispatcherRejectsMissingOrMismatchedRequiredLabels(t *testing
 					if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
 						t.Fatalf("Dispatch error = %v, want identity mismatch", err)
 					}
+					if !IsPermanentDispatchError(err) {
+						t.Fatalf("identity mismatch error = %T, want permanent dispatch error", err)
+					}
 				})
 			}
 		}
+	}
+}
+
+func TestKubernetesDispatcherLeavesCreateTimeoutAmbiguous(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("create", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, context.DeadlineExceeded
+	})
+	err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
+	if err == nil {
+		t.Fatal("expected create timeout")
+	}
+	if IsPermanentDispatchError(err) {
+		t.Fatalf("create timeout was classified permanent: %v", err)
 	}
 }
 

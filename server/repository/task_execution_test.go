@@ -3,12 +3,14 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -231,17 +233,17 @@ func TestTaskExecutionDispatchClaimLeaseIsTokenGuarded(t *testing.T) {
 	if err != nil || won {
 		t.Fatalf("active lease claim = %v, %v", won, err)
 	}
-	databaseNow, err := sampleDatabaseTime(ctx, repo.db)
-	if err != nil {
-		t.Fatalf("sample database time: %v", err)
-	}
 	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).
-		Update("dispatch_claimed_at", databaseNow.Add(-2*time.Minute)).Error; err != nil {
+		Update("dispatch_claimed_at", gorm.Expr("DATETIME('now', '-2 minutes')")).Error; err != nil {
 		t.Fatalf("age dispatch claim: %v", err)
 	}
 	won, err = repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-2", time.Minute)
 	if err != nil || !won {
 		t.Fatalf("stale lease reclaim = %v, %v", won, err)
+	}
+	won, err = repo.TaskExecutions().AbandonDispatch(ctx, execution.ID, "owner-1")
+	if err != nil || won {
+		t.Fatalf("stale owner abandonment = %v, %v", won, err)
 	}
 	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-1")
 	if err != nil || won {
@@ -276,6 +278,56 @@ func TestTaskExecutionDispatchClaimUsesDatabaseTime(t *testing.T) {
 	}
 	if won {
 		t.Fatal("active database lease was stolen")
+	}
+}
+
+func TestDispatchClaimSQLUsesOneDatabaseTimedUpdate(t *testing.T) {
+	tests := []struct {
+		name       string
+		db         *gorm.DB
+		assignment string
+		cutoff     string
+	}{
+		{
+			name:       "sqlite",
+			db:         setupTestDB(t).Session(&gorm.Session{DryRun: true}),
+			assignment: "STRFTIME",
+			cutoff:     "JULIANDAY",
+		},
+	}
+	mysqlDB, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "root@tcp(localhost:3306)/test?parseTime=true",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true, SkipDefaultTransaction: true})
+	if err != nil {
+		t.Fatalf("open dry-run mysql: %v", err)
+	}
+	tests = append(tests, struct {
+		name       string
+		db         *gorm.DB
+		assignment string
+		cutoff     string
+	}{name: "mysql", db: mysqlDB, assignment: "CURRENT_TIMESTAMP(6)", cutoff: "DATE_SUB"})
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			statement, err := buildDispatchClaimUpdate(tt.db, "execution-1", "token-1", time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if statement.Error != nil {
+				t.Fatalf("build claim statement: %v", statement.Error)
+			}
+			sql := strings.ToUpper(statement.Statement.SQL.String())
+			if !strings.HasPrefix(sql, "UPDATE") || !strings.Contains(sql, tt.assignment) || !strings.Contains(sql, tt.cutoff) {
+				t.Fatalf("claim SQL = %s", sql)
+			}
+			for _, value := range statement.Statement.Vars {
+				if _, ok := value.(time.Time); ok {
+					t.Fatalf("claim SQL includes application timestamp arg: %#v", statement.Statement.Vars)
+				}
+			}
+		})
 	}
 }
 

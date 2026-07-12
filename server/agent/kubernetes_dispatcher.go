@@ -60,16 +60,16 @@ func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, serverURL string) (
 
 func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) error {
 	if err := d.validate(execution); err != nil {
-		return err
+		return NewPermanentDispatchError(err)
 	}
 	if task == nil {
-		return fmt.Errorf("task is required")
+		return NewPermanentDispatchError(fmt.Errorf("task is required"))
 	}
 	if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.ProjectID) == "" {
-		return fmt.Errorf("task ID and project ID are required")
+		return NewPermanentDispatchError(fmt.Errorf("task ID and project ID are required"))
 	}
 	if execution.TaskID != task.ID {
-		return fmt.Errorf("execution task identity mismatch: execution has %q, task has %q", execution.TaskID, task.ID)
+		return NewPermanentDispatchError(fmt.Errorf("execution task identity mismatch: execution has %q, task has %q", execution.TaskID, task.ID))
 	}
 
 	desiredPVC := buildProjectMemoryPVC(d.config, task.ProjectID)
@@ -89,7 +89,7 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 	}
 	if existingPVC != nil {
 		if err := verifyPVC(existingPVC, desiredPVC, task.ProjectID); err != nil {
-			return err
+			return NewPermanentDispatchError(err)
 		}
 	}
 
@@ -110,7 +110,7 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 	}
 	if existingJob != nil {
 		if err := verifyJob(existingJob, desiredJob, execution, task); err != nil {
-			return err
+			return NewPermanentDispatchError(err)
 		}
 	}
 	return nil

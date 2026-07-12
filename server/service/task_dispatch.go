@@ -106,7 +106,17 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 	execution.DispatchClaimToken = token
 
 	if err := s.kubernetesDispatcher.Dispatch(ctx, execution, task); err != nil {
-		return s.failDispatch(ctx, task, execution, token, err)
+		if agent.IsPermanentDispatchError(err) {
+			return s.failDispatch(ctx, task, execution, token, err)
+		}
+		abandoned, abandonErr := s.repo.TaskExecutions().AbandonDispatch(ctx, execution.ID, token)
+		if abandonErr != nil {
+			return errors.Join(fmt.Errorf("ambiguous Kubernetes dispatch: %w", err), fmt.Errorf("abandon dispatch claim: %w", abandonErr))
+		}
+		if !abandoned {
+			return errors.Join(fmt.Errorf("ambiguous Kubernetes dispatch: %w", err), fmt.Errorf("abandon dispatch claim: stale execution %s", execution.ID))
+		}
+		return fmt.Errorf("ambiguous Kubernetes dispatch: %w", err)
 	}
 	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token)
 	if err != nil {

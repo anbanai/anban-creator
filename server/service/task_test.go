@@ -2853,7 +2853,7 @@ func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
 	}
 }
 
-func TestTaskServiceProjectConcurrencyCapDoesNotOverrideProjectLimit(t *testing.T) {
+func TestTaskServiceLegacyProjectConcurrencyCapOverridesProjectLimit(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetProjectConcurrencyCap(1)
 	ctx := context.Background()
@@ -2893,8 +2893,60 @@ func TestTaskServiceProjectConcurrencyCapDoesNotOverrideProjectLimit(t *testing.
 	if err := svc.EnqueueExecution(ctx, pending, project); err != nil {
 		t.Fatalf("EnqueueExecution: %v", err)
 	}
+	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 0 {
+		t.Fatalf("enqueued = %d, want 0 while legacy Kubernetes cap is 1", got)
+	}
+}
+
+func TestTaskServiceJobDispatcherIgnoresLegacyProjectConcurrencyCap(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetProjectConcurrencyCap(1)
+	svc.SetKubernetesDispatcher(&dispatchTestDispatcher{})
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.MaxConcurrentTasks = 10
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	var pending *model.Task
+	for _, status := range []string{model.TaskStatusRunning, model.TaskStatusPending} {
+		created := &model.Task{
+			ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+			Type: model.PlatformArticle, Status: status,
+		}
+		if err := repo.Tasks().Create(ctx, created); err != nil {
+			t.Fatal(err)
+		}
+		if status == model.TaskStatusPending {
+			pending = created
+		}
+	}
+	if err := svc.EnqueueExecution(ctx, pending, project); err != nil {
+		t.Fatal(err)
+	}
 	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 1 {
-		t.Fatalf("enqueued = %d, want 1 because the configured project limit is 10", got)
+		t.Fatalf("enqueued = %d, want 1 under configured project limit", got)
+	}
+}
+
+func TestTaskServiceProjectConcurrencyModes(t *testing.T) {
+	svc, _ := setupTaskServiceWithEnqueuer(t)
+	project := &model.Project{MaxConcurrentTasks: 8}
+	if got := svc.effectiveProjectMaxConcurrent(project); got != 8 {
+		t.Fatalf("local/Docker configured limit = %d, want 8", got)
+	}
+	svc.SetProjectConcurrencyCap(1)
+	if got := svc.effectiveProjectMaxConcurrent(project); got != 1 {
+		t.Fatalf("legacy Kubernetes limit = %d, want 1", got)
+	}
+	svc.SetKubernetesDispatcher(&dispatchTestDispatcher{})
+	if got := svc.effectiveProjectMaxConcurrent(project); got != 8 {
+		t.Fatalf("Job dispatcher configured limit = %d, want 8", got)
 	}
 }
 
