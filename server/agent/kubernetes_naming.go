@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/anbanai/anban-creator/server/model"
 )
 
@@ -17,7 +19,10 @@ const (
 	kubernetesUserIDLabel        = "anban.ai/user-id"
 	kubernetesProjectIDLabel     = "anban.ai/project-id"
 	kubernetesTaskIDLabel        = "anban.ai/task-id"
+	kubernetesExecutionIDLabel   = "anban.ai/execution-id"
 	kubernetesWorkspaceMountName = "workspace"
+	kubernetesJobNamePrefix      = "anban-job"
+	kubernetesMemoryNamePrefix   = "anban-memory"
 )
 
 var kubernetesNameUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -40,6 +45,27 @@ func kubernetesAgentPodName(task *model.Task) string {
 		base = kubernetesAgentNamePrefix
 	}
 	return strings.Trim(base+"-"+hash, "-")
+}
+
+func kubernetesJobName(executionID string) string {
+	return kubernetesIdentityName(kubernetesJobNamePrefix, executionID)
+}
+
+func kubernetesProjectMemoryPVCName(projectID string) string {
+	return kubernetesIdentityName(kubernetesMemoryNamePrefix, projectID)
+}
+
+func kubernetesIdentityName(prefix, identity string) string {
+	part := kubernetesSafeNamePart(identity)
+	hash := kubernetesHashSuffix(identity)
+	maxPartLen := 63 - len(prefix) - len(hash) - 2
+	if len(part) > maxPartLen {
+		part = strings.Trim(part[:maxPartLen], "-")
+	}
+	if part == "" {
+		part = "unknown"
+	}
+	return prefix + "-" + part + "-" + hash
 }
 
 func kubernetesAgentLabels(task *model.Task) map[string]string {
@@ -103,18 +129,25 @@ func kubernetesSafePathPart(value string) string {
 }
 
 func kubernetesLabelValue(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, "_", "-")
-	value = kubernetesNameUnsafe.ReplaceAllString(value, "-")
-	value = strings.Trim(value, "-")
+	value = strings.TrimSpace(value)
 	if value == "" {
 		return "unknown"
 	}
-	if len(value) <= 63 {
+	if len(validation.IsValidLabelValue(value)) == 0 {
 		return value
 	}
+	safe := strings.ToLower(value)
+	safe = strings.ReplaceAll(safe, "_", "-")
+	safe = kubernetesNameUnsafe.ReplaceAllString(safe, "-")
+	safe = strings.Trim(safe, "-")
 	hash := kubernetesHashSuffix(value)
-	return strings.Trim(value[:52], "-") + "-" + hash
+	if len(safe) > 52 {
+		safe = strings.Trim(safe[:52], "-")
+	}
+	if safe == "" {
+		return hash
+	}
+	return safe + "-" + hash
 }
 
 func kubernetesHashSuffix(value string) string {

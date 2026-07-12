@@ -1,0 +1,308 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+)
+
+const (
+	kubernetesPhasePending   = "pending"
+	kubernetesPhaseRunning   = "running"
+	kubernetesPhaseSucceeded = "succeeded"
+	kubernetesPhaseFailed    = "failed"
+)
+
+type KubernetesDispatcher interface {
+	Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) error
+	Delete(ctx context.Context, execution *model.TaskExecution) error
+	DeleteProjectMemory(ctx context.Context, projectID string) error
+	Inspect(ctx context.Context, execution *model.TaskExecution) (*KubernetesExecutionState, error)
+}
+
+type KubernetesExecutionState struct {
+	Phase    string
+	PodUID   string
+	Reason   string
+	Message  string
+	ExitCode *int32
+}
+
+type kubernetesJobDispatcher struct {
+	config kubernetesJobConfig
+	kube   kubernetes.Interface
+}
+
+var _ KubernetesDispatcher = (*kubernetesJobDispatcher)(nil)
+
+func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, serverURL string) (KubernetesDispatcher, error) {
+	restConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("kubernetes in-cluster config: %w", err)
+	}
+	client, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("kubernetes client: %w", err)
+	}
+	return &kubernetesJobDispatcher{config: kubernetesJobConfig{KubernetesConfig: cfg, ServerURL: serverURL}, kube: client}, nil
+}
+
+func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) error {
+	if err := d.validate(execution); err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("task is required")
+	}
+	if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.ProjectID) == "" {
+		return fmt.Errorf("task ID and project ID are required")
+	}
+	if execution.TaskID != task.ID {
+		return fmt.Errorf("execution task identity mismatch: execution has %q, task has %q", execution.TaskID, task.ID)
+	}
+
+	desiredPVC := buildProjectMemoryPVC(d.config, task.ProjectID)
+	pvcs := d.kube.CoreV1().PersistentVolumeClaims(d.config.Namespace)
+	existingPVC, err := pvcs.Get(ctx, desiredPVC.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		existingPVC, err = pvcs.Create(ctx, desiredPVC, metav1.CreateOptions{})
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create project memory PVC %q: %w", desiredPVC.Name, err)
+		}
+		if apierrors.IsAlreadyExists(err) {
+			existingPVC, err = pvcs.Get(ctx, desiredPVC.Name, metav1.GetOptions{})
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("get project memory PVC %q: %w", desiredPVC.Name, err)
+	}
+	if existingPVC != nil {
+		if err := verifyPVC(existingPVC, desiredPVC, task.ProjectID); err != nil {
+			return err
+		}
+	}
+
+	desiredJob := buildKubernetesJob(d.config, execution, task)
+	jobs := d.kube.BatchV1().Jobs(d.config.Namespace)
+	existingJob, err := jobs.Get(ctx, desiredJob.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		existingJob, err = jobs.Create(ctx, desiredJob, metav1.CreateOptions{})
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create Kubernetes Job %q: %w", desiredJob.Name, err)
+		}
+		if apierrors.IsAlreadyExists(err) {
+			existingJob, err = jobs.Get(ctx, desiredJob.Name, metav1.GetOptions{})
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("get Kubernetes Job %q: %w", desiredJob.Name, err)
+	}
+	if existingJob != nil {
+		if err := verifyJob(existingJob, desiredJob, execution, task); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *kubernetesJobDispatcher) Delete(ctx context.Context, execution *model.TaskExecution) error {
+	if err := d.validate(execution); err != nil {
+		return err
+	}
+	name := kubernetesJobName(execution.ID)
+	foreground := metav1.DeletePropagationForeground
+	err := d.kube.BatchV1().Jobs(d.config.Namespace).Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: &foreground})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("delete Kubernetes Job %q: %w", name, err)
+	}
+	return nil
+}
+
+func (d *kubernetesJobDispatcher) DeleteProjectMemory(ctx context.Context, projectID string) error {
+	if d == nil || d.kube == nil {
+		return fmt.Errorf("kubernetes dispatcher is not configured")
+	}
+	if strings.TrimSpace(projectID) == "" {
+		return fmt.Errorf("project ID is required")
+	}
+	name := kubernetesProjectMemoryPVCName(projectID)
+	pvcs := d.kube.CoreV1().PersistentVolumeClaims(d.config.Namespace)
+	pvc, err := pvcs.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get project memory PVC %q: %w", name, err)
+	}
+	if pvc.Labels[kubernetesProjectIDLabel] != kubernetesLabelValue(projectID) {
+		return fmt.Errorf("project memory PVC %q identity mismatch: project label is %q", name, pvc.Labels[kubernetesProjectIDLabel])
+	}
+	if err := pvcs.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete project memory PVC %q: %w", name, err)
+	}
+	return nil
+}
+
+func (d *kubernetesJobDispatcher) Inspect(ctx context.Context, execution *model.TaskExecution) (*KubernetesExecutionState, error) {
+	if err := d.validate(execution); err != nil {
+		return nil, err
+	}
+	name := kubernetesJobName(execution.ID)
+	job, err := d.kube.BatchV1().Jobs(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get Kubernetes Job %q: %w", name, err)
+	}
+	state := inspectJob(job)
+	pods, err := d.kube.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: kubernetesExecutionIDLabel + "=" + kubernetesLabelValue(execution.ID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list pods for Kubernetes Job %q: %w", name, err)
+	}
+	if pod := newestPod(pods.Items); pod != nil {
+		state.PodUID = string(pod.UID)
+		applyPodDiagnostics(state, pod)
+	}
+	return state, nil
+}
+
+func (d *kubernetesJobDispatcher) validate(execution *model.TaskExecution) error {
+	if d == nil || d.kube == nil {
+		return fmt.Errorf("kubernetes dispatcher is not configured")
+	}
+	if execution == nil || strings.TrimSpace(execution.ID) == "" {
+		return fmt.Errorf("execution is required")
+	}
+	deterministicName := kubernetesJobName(execution.ID)
+	if execution.JobName != "" && execution.JobName != deterministicName {
+		return fmt.Errorf("execution Job identity mismatch: name is %q, want %q", execution.JobName, deterministicName)
+	}
+	if execution.Namespace != "" && execution.Namespace != d.config.Namespace {
+		return fmt.Errorf("execution namespace identity mismatch: namespace is %q, want %q", execution.Namespace, d.config.Namespace)
+	}
+	return nil
+}
+
+func verifyPVC(existing, desired *corev1.PersistentVolumeClaim, projectID string) error {
+	if existing.Labels[kubernetesProjectIDLabel] != desired.Labels[kubernetesProjectIDLabel] {
+		return fmt.Errorf("project memory PVC %q identity mismatch: project %q does not match %q", existing.Name, existing.Labels[kubernetesProjectIDLabel], projectID)
+	}
+	if existing.Spec.StorageClassName == nil || desired.Spec.StorageClassName == nil || *existing.Spec.StorageClassName != *desired.Spec.StorageClassName ||
+		!containsAccessMode(existing.Spec.AccessModes, corev1.ReadWriteMany) ||
+		existing.Spec.Resources.Requests.Storage().Cmp(*desired.Spec.Resources.Requests.Storage()) != 0 {
+		return fmt.Errorf("project memory PVC %q configuration mismatch", existing.Name)
+	}
+	return nil
+}
+
+func verifyJob(existing, desired *batchv1.Job, execution *model.TaskExecution, task *model.Task) error {
+	for _, key := range []string{kubernetesExecutionIDLabel, kubernetesTaskIDLabel, kubernetesProjectIDLabel} {
+		if existing.Labels[key] != desired.Labels[key] {
+			return fmt.Errorf("Kubernetes Job %q identity mismatch: label %q is %q, want %q", existing.Name, key, existing.Labels[key], desired.Labels[key])
+		}
+	}
+	if existing.Annotations[kubernetesObjectConfigHashLabel] != desired.Annotations[kubernetesObjectConfigHashLabel] {
+		return fmt.Errorf("Kubernetes Job %q configuration mismatch for execution %q task %q", existing.Name, execution.ID, task.ID)
+	}
+	return nil
+}
+
+func inspectJob(job *batchv1.Job) *KubernetesExecutionState {
+	state := &KubernetesExecutionState{Phase: kubernetesPhasePending}
+	for _, condition := range job.Status.Conditions {
+		if condition.Status != corev1.ConditionTrue {
+			continue
+		}
+		switch condition.Type {
+		case batchv1.JobFailed:
+			state.Phase = kubernetesPhaseFailed
+			state.Reason = condition.Reason
+			state.Message = condition.Message
+			return state
+		case batchv1.JobComplete:
+			state.Phase = kubernetesPhaseSucceeded
+			state.Reason = condition.Reason
+			state.Message = condition.Message
+		}
+	}
+	if job.Status.Active > 0 {
+		state.Phase = kubernetesPhaseRunning
+	}
+	return state
+}
+
+func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
+	if state.Phase == kubernetesPhasePending {
+		switch pod.Status.Phase {
+		case corev1.PodRunning:
+			state.Phase = kubernetesPhaseRunning
+		case corev1.PodSucceeded:
+			state.Phase = kubernetesPhaseSucceeded
+		case corev1.PodFailed:
+			state.Phase = kubernetesPhaseFailed
+		}
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Name != kubernetesAgentContainerName || status.State.Terminated == nil {
+			continue
+		}
+		terminated := status.State.Terminated
+		exitCode := terminated.ExitCode
+		state.ExitCode = &exitCode
+		if state.Phase == kubernetesPhasePending || state.Phase == kubernetesPhaseRunning {
+			if exitCode == 0 {
+				state.Phase = kubernetesPhaseSucceeded
+			} else {
+				state.Phase = kubernetesPhaseFailed
+			}
+		}
+		if terminated.Reason != "" {
+			state.Reason = terminated.Reason
+		}
+		if terminated.Message != "" {
+			state.Message = terminated.Message
+		}
+		return
+	}
+	if pod.Status.Reason != "" {
+		state.Reason = pod.Status.Reason
+	}
+	if pod.Status.Message != "" {
+		state.Message = pod.Status.Message
+	}
+}
+
+func newestPod(pods []corev1.Pod) *corev1.Pod {
+	if len(pods) == 0 {
+		return nil
+	}
+	newest := &pods[0]
+	for i := 1; i < len(pods); i++ {
+		if pods[i].CreationTimestamp.After(newest.CreationTimestamp.Time) {
+			newest = &pods[i]
+		}
+	}
+	return newest
+}
+
+func containsAccessMode(modes []corev1.PersistentVolumeAccessMode, want corev1.PersistentVolumeAccessMode) bool {
+	for _, mode := range modes {
+		if mode == want {
+			return true
+		}
+	}
+	return false
+}
