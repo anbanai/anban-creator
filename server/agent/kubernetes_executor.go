@@ -628,7 +628,7 @@ func (e *KubernetesExecutor) waitForAgentPodReady(ctx context.Context, desired *
 			return false, fmt.Errorf("%w: agent pod %s config changed before readiness", errKubernetesAgentPodNeedsReconciliation, podName)
 		}
 		if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
-			return false, fmt.Errorf("agent pod %s is terminal: %s", podName, pod.Status.Phase)
+			return false, fmt.Errorf("%w: agent pod %s is terminal: %s", errKubernetesAgentPodNeedsReconciliation, podName, pod.Status.Phase)
 		}
 		for _, condition := range pod.Status.Conditions {
 			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
