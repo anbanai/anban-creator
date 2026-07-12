@@ -20,6 +20,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kubeclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -531,7 +532,10 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 			}
 		} else {
 			if existing.DeletionTimestamp != nil {
-				if err := e.waitForAgentPodDeleted(ctx, pod.Name); err != nil {
+				if existing.UID == "" {
+					return "", fmt.Errorf("terminating agent pod %s UID is empty; refusing deletion wait", pod.Name)
+				}
+				if err := e.waitForAgentPodDeleted(ctx, pod.Name, existing.UID); err != nil {
 					return "", err
 				}
 				createAction = "recreate deleted agent pod"
@@ -562,7 +566,7 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 				if deleteErr != nil {
 					return "", fmt.Errorf("delete drifted agent pod: %w", deleteErr)
 				}
-				if err := e.waitForAgentPodDeleted(ctx, pod.Name); err != nil {
+				if err := e.waitForAgentPodDeleted(ctx, pod.Name, uid); err != nil {
 					return "", err
 				}
 				createAction = "recreate agent pod"
@@ -580,14 +584,23 @@ func (e *KubernetesExecutor) ensureAgentPod(ctx context.Context, opts *Execution
 	return "", fmt.Errorf("reconcile agent pod %s exhausted after %d attempts", pod.Name, kubernetesAgentPodReconcileMaxAttempts)
 }
 
-func (e *KubernetesExecutor) waitForAgentPodDeleted(ctx context.Context, podName string) error {
+func (e *KubernetesExecutor) waitForAgentPodDeleted(ctx context.Context, podName string, expectedUID types.UID) error {
+	if expectedUID == "" {
+		return fmt.Errorf("wait for agent pod %s deletion: expected UID is empty", podName)
+	}
 	return wait.PollUntilContextTimeout(ctx, time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-		_, err := e.kube.CoreV1().Pods(e.kubeCfg.Namespace).Get(ctx, podName, metav1.GetOptions{})
+		pod, err := e.kube.CoreV1().Pods(e.kubeCfg.Namespace).Get(ctx, podName, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
 		}
 		if err != nil {
 			return false, err
+		}
+		if pod.UID == "" {
+			return false, fmt.Errorf("wait for agent pod %s deletion: observed UID is empty", podName)
+		}
+		if pod.UID != expectedUID {
+			return true, nil
 		}
 		return false, nil
 	})

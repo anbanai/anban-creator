@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -347,6 +348,86 @@ func TestKubernetesEnsureAgentPodDeletesDriftedCurrentPodWithIdentityPreconditio
 	if deleteOptions.Preconditions.ResourceVersion == nil || *deleteOptions.Preconditions.ResourceVersion != stale.ResourceVersion {
 		t.Fatalf("delete resourceVersion precondition = %#v, want %q", deleteOptions.Preconditions, stale.ResourceVersion)
 	}
+}
+
+func TestKubernetesEnsureAgentPodPreservesReplacementCreatedDuringDeleteWait(t *testing.T) {
+	opts := &ExecutionOptions{Task: &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}}
+	e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: "agents"}}
+	desired := e.buildAgentPod(opts)
+	desired.Namespace = e.kubeCfg.Namespace
+	stale := desired.DeepCopy()
+	stale.UID = types.UID("stale-current-uid")
+	stale.ResourceVersion = "42"
+	stale.Annotations[kubernetesPodConfigHashAnnotation] = "stale-config"
+	replacement := desired.DeepCopy()
+	replacement.UID = types.UID("replacement-current-uid")
+	replacement.ResourceVersion = "43"
+	replacement.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	client := kubernetesfake.NewSimpleClientset(stale)
+	client.PrependReactor("delete", "pods", func(action kubernetestesting.Action) (bool, runtime.Object, error) {
+		name := action.(kubernetestesting.DeleteAction).GetName()
+		if err := client.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), e.kubeCfg.Namespace, name); err != nil {
+			return true, nil, err
+		}
+		if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), replacement.DeepCopy(), e.kubeCfg.Namespace); err != nil {
+			return true, nil, err
+		}
+		return true, nil, nil
+	})
+	e.kube = client
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	got, err := e.ensureAgentPod(ctx, opts)
+	if err != nil {
+		t.Fatalf("ensureAgentPod: %v", err)
+	}
+	if got != desired.Name {
+		t.Fatalf("pod name = %q, want replacement %q", got, desired.Name)
+	}
+	current, err := client.CoreV1().Pods(e.kubeCfg.Namespace).Get(context.Background(), desired.Name, metav1.GetOptions{})
+	if err != nil || current.UID != replacement.UID {
+		t.Fatalf("replacement current pod was not preserved: pod=%#v err=%v", current, err)
+	}
+}
+
+func TestKubernetesWaitForAgentPodUIDDeleted(t *testing.T) {
+	const namespace = "agents"
+	const podName = "creator-agent-project"
+	oldUID := types.UID("old-current-uid")
+
+	t.Run("same UID waits", func(t *testing.T) {
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: namespace, UID: oldUID}}
+		e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: namespace}, kube: kubernetesfake.NewSimpleClientset(pod)}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		if err := e.waitForAgentPodDeleted(ctx, podName, oldUID); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("waitForAgentPodDeleted error = %v, want context deadline while same UID remains", err)
+		}
+	})
+
+	t.Run("different UID completes", func(t *testing.T) {
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: namespace, UID: types.UID("replacement-uid")}}
+		e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: namespace}, kube: kubernetesfake.NewSimpleClientset(pod)}
+		if err := e.waitForAgentPodDeleted(context.Background(), podName, oldUID); err != nil {
+			t.Fatalf("waitForAgentPodDeleted: %v", err)
+		}
+	})
+
+	t.Run("NotFound completes", func(t *testing.T) {
+		e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: namespace}, kube: kubernetesfake.NewSimpleClientset()}
+		if err := e.waitForAgentPodDeleted(context.Background(), podName, oldUID); err != nil {
+			t.Fatalf("waitForAgentPodDeleted: %v", err)
+		}
+	})
+
+	t.Run("empty expected UID fails closed", func(t *testing.T) {
+		e := &KubernetesExecutor{kubeCfg: srvconfig.KubernetesConfig{Namespace: namespace}, kube: kubernetesfake.NewSimpleClientset()}
+		err := e.waitForAgentPodDeleted(context.Background(), podName, "")
+		if err == nil || !strings.Contains(err.Error(), "expected UID is empty") {
+			t.Fatalf("waitForAgentPodDeleted error = %v, want empty expected UID error", err)
+		}
+	})
 }
 
 func TestKubernetesEnsureAgentPodPreservesChangedCurrentPodIdentity(t *testing.T) {
