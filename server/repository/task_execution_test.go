@@ -175,6 +175,49 @@ func TestTaskExecutionRepositoryRuntimeAndReconciliation(t *testing.T) {
 	}
 }
 
+func TestTaskExecutionRepositoryRuntimeIdentityPreservesExistingValues(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionStarting)
+
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, "agent-system", "agent-job-1", "pod-1"); err != nil {
+		t.Fatalf("set full runtime identity: %v", err)
+	}
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, "", "agent-job-2", ""); err != nil {
+		t.Fatalf("set partial runtime identity: %v", err)
+	}
+
+	found, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatalf("find execution: %v", err)
+	}
+	if found.Namespace != "agent-system" || found.JobName != "agent-job-2" || found.PodUID != "pod-1" {
+		t.Fatalf("runtime identity = (%q, %q, %q), want (%q, %q, %q)",
+			found.Namespace, found.JobName, found.PodUID,
+			"agent-system", "agent-job-2", "pod-1")
+	}
+}
+
+func TestTaskExecutionRepositoryRejectsDuplicateAttempt(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	taskID := uuid.NewString()
+	first := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: taskID, Attempt: 1,
+		Target: "kubernetes", Status: model.TaskExecutionCreated,
+	}
+	if err := repo.TaskExecutions().Create(ctx, first); err != nil {
+		t.Fatalf("create first attempt: %v", err)
+	}
+	duplicate := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: taskID, Attempt: 1,
+		Target: "kubernetes", Status: model.TaskExecutionCreated,
+	}
+	if err := repo.TaskExecutions().Create(ctx, duplicate); err == nil {
+		t.Fatal("duplicate (task_id, attempt) was accepted")
+	}
+}
+
 func TestTaskExecutionRepositoryIsAvailableInTransactions(t *testing.T) {
 	repo := setupTaskExecutionRepository(t)
 	ctx := context.Background()

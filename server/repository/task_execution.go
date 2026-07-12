@@ -58,14 +58,24 @@ func (r *taskExecutionRepository) FindReconcilable(ctx context.Context, before t
 }
 
 func (r *taskExecutionRepository) SetRuntimeIdentity(ctx context.Context, id, namespace, jobName, podUID string) error {
+	updates := make(map[string]any, 3)
+	if namespace != "" {
+		updates["namespace"] = namespace
+	}
+	if jobName != "" {
+		updates["job_name"] = jobName
+	}
+	if podUID != "" {
+		updates["pod_uid"] = podUID
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+
 	return r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
 		Where("id = ?", id).
-		Updates(map[string]any{
-			"namespace": namespace,
-			"job_name":  jobName,
-			"pod_uid":   podUID,
-		}).Error
+		Updates(updates).Error
 }
 
 func (r *taskExecutionRepository) UpdateHeartbeat(ctx context.Context, id string, now time.Time) error {
