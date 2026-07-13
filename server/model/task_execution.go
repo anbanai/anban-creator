@@ -23,6 +23,13 @@ type TaskExecution struct {
 	FinalizationStatus string         `gorm:"type:varchar(20);default:'';index" json:"finalization_status,omitempty"`
 	FinalizationToken  string         `gorm:"type:char(36);default:'';index" json:"-"`
 	FinalizationAt     *time.Time     `json:"-"`
+	CleanupStatus      string         `gorm:"type:varchar(20);default:'';index" json:"cleanup_status,omitempty"`
+	CleanupToken       string         `gorm:"type:char(36);default:'';index" json:"-"`
+	CleanupAt          *time.Time     `json:"-"`
+	CleanupAttempts    int            `gorm:"default:0" json:"-"`
+	CleanupNextAt      *time.Time     `gorm:"index" json:"-"`
+	PublishingStatus   string         `gorm:"type:varchar(20);default:'';index" json:"publishing_status,omitempty"`
+	PublishingResult   datatypes.JSON `gorm:"type:json" json:"-"`
 	Result             datatypes.JSON `gorm:"type:json" json:"-"`
 	TerminalReason     string         `gorm:"type:varchar(80);default:''" json:"terminal_reason,omitempty"`
 	Diagnostics        datatypes.JSON `gorm:"type:json" json:"diagnostics,omitempty"`
@@ -45,10 +52,29 @@ const (
 )
 
 const (
-	TaskExecutionFinalizationTerminal  = "terminal"
-	TaskExecutionFinalizationArtifacts = "artifacts"
-	TaskExecutionFinalizationTask      = "task"
-	TaskExecutionFinalizationDone      = "done"
+	TaskExecutionFinalizationTerminal     = "terminal"
+	TaskExecutionFinalizationArtifacts    = "artifacts"
+	TaskExecutionFinalizationResult       = "result"
+	TaskExecutionFinalizationWorkflow     = "workflow"
+	TaskExecutionFinalizationPublishing   = "publishing"
+	TaskExecutionFinalizationTask         = "task"
+	TaskExecutionFinalizationSettlement   = "settlement"
+	TaskExecutionFinalizationSlot         = "slot"
+	TaskExecutionFinalizationDispatch     = "dispatch"
+	TaskExecutionFinalizationNotification = "notification"
+	TaskExecutionFinalizationDone         = "done"
+)
+
+const (
+	TaskExecutionCleanupPending = "pending"
+	TaskExecutionCleanupDone    = "done"
+)
+
+const (
+	TaskExecutionPublishingInFlight  = "in_flight"
+	TaskExecutionPublishingSucceeded = "succeeded"
+	TaskExecutionPublishingSkipped   = "skipped"
+	TaskExecutionPublishingAmbiguous = "ambiguous"
 )
 
 const (
@@ -67,4 +93,5 @@ type ExecutionTransition struct {
 	Diagnostics        datatypes.JSON
 	Result             datatypes.JSON
 	FinalizationStatus string
+	CleanupStatus      string
 }

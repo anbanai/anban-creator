@@ -19,29 +19,65 @@ func (s *TaskService) FindReconcilableExecutions(ctx context.Context, before tim
 	return s.repo.TaskExecutions().FindReconcilable(ctx, before, limit)
 }
 
-func (s *TaskService) RecordExecutionPod(ctx context.Context, executionID, podUID string) error {
+func (s *TaskService) RecordExecutionRuntime(ctx context.Context, executionID, podUID string, started bool) error {
 	execution, _, err := s.currentExecution(ctx, executionID)
 	if err != nil {
 		return err
 	}
-	if isTerminalExecution(execution.Status) || podUID == "" || execution.PodUID == podUID {
+	if isTerminalExecution(execution.Status) {
 		return nil
 	}
-	if execution.PodUID != "" && execution.PodUID != podUID {
+	if podUID != "" && execution.PodUID != "" && execution.PodUID != podUID {
 		return fmt.Errorf("execution pod identity changed from %s to %s", execution.PodUID, podUID)
+	}
+	if started {
+		won, err := s.repo.TaskExecutions().RecordRuntimeStarted(ctx, executionID, podUID)
+		if err != nil {
+			return err
+		}
+		if !won {
+			return fmt.Errorf("record execution start lost guarded transition")
+		}
+		return nil
+	}
+	if podUID == "" || execution.PodUID == podUID {
+		return nil
 	}
 	return s.repo.TaskExecutions().SetRuntimeIdentity(ctx, executionID, "", "", podUID)
 }
 
 func (s *TaskService) ResumeExecutionFinalization(ctx context.Context, executionID string) error {
-	execution, task, err := s.currentExecution(ctx, executionID)
+	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
 	if err != nil {
 		return err
 	}
 	if !isTerminalExecution(execution.Status) {
 		return nil
 	}
+	task, err := s.repo.Tasks().FindByID(ctx, execution.TaskID)
+	if err != nil {
+		return err
+	}
+	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID {
+		return nil
+	}
 	return s.finalizeTaskFromExecution(ctx, task, execution)
+}
+
+func (s *TaskService) ClaimExecutionCleanup(ctx context.Context, executionID, token string, lease time.Duration) (bool, error) {
+	return s.repo.TaskExecutions().ClaimCleanup(ctx, executionID, token, lease)
+}
+
+func (s *TaskService) CompleteExecutionCleanup(ctx context.Context, executionID, token string) (bool, error) {
+	return s.repo.TaskExecutions().CompleteCleanup(ctx, executionID, token)
+}
+
+func (s *TaskService) FailExecutionCleanup(ctx context.Context, executionID, token string, next time.Time) (bool, error) {
+	return s.repo.TaskExecutions().FailCleanup(ctx, executionID, token, next)
+}
+
+func (s *TaskService) ReleaseExecutionCleanup(ctx context.Context, executionID, token string) error {
+	return s.repo.TaskExecutions().ReleaseCleanup(ctx, executionID, token)
 }
 
 // ReconcileExecutionFailure either atomically replaces a pre-start attempt or

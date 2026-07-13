@@ -174,21 +174,19 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 
 func (s *TaskService) failDispatch(ctx context.Context, task *model.Task, execution *model.TaskExecution, token string, dispatchErr error) error {
 	diagnostics, _ := json.Marshal(map[string]string{"error": dispatchErr.Error()})
+	executionResult, _ := json.Marshal(&agent.ExecutionResult{
+		Success:         false,
+		Error:           dispatchErr.Error(),
+		RemoteArtifacts: true,
+	})
 	terminalized := false
 	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-		won, err := txRepo.TaskExecutions().FailDispatch(ctx, execution.ID, token, "dispatch_failed", diagnostics)
+		won, err := txRepo.TaskExecutions().FailDispatch(ctx, execution.ID, token, "dispatch_failed", diagnostics, executionResult)
 		if err != nil {
 			return fmt.Errorf("fail task execution: %w", err)
 		}
 		if !won {
 			return nil
-		}
-		won, err = txRepo.Tasks().FailRunningTask(ctx, task.ID, dispatchErr.Error())
-		if err != nil {
-			return fmt.Errorf("fail dispatched task: %w", err)
-		}
-		if !won {
-			return fmt.Errorf("fail dispatched task: task %s is no longer running", task.ID)
 		}
 		terminalized = true
 		return nil
@@ -200,16 +198,17 @@ func (s *TaskService) failDispatch(ctx context.Context, task *model.Task, execut
 		return fmt.Errorf("dispatch Kubernetes execution: %w", dispatchErr)
 	}
 
-	if task.ProjectID != "" && s.pubsub != nil {
-		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
-	}
-	s.refundTaskByMode(ctx, task, "dispatch_failed")
-	s.notifyTerminal(ctx, task, model.TaskStatusFailed, dispatchErr.Error())
-	if task.ProjectID != "" {
-		if err := s.DispatchPendingTasks(ctx, task.ProjectID); err != nil && s.logger != nil {
-			s.logger.Warn().Err(err).Str("project_id", task.ProjectID).
-				Msg("failed to dispatch pending tasks after Kubernetes dispatch failure")
-		}
+	execution.Status = model.TaskExecutionFailed
+	execution.TerminalReason = "dispatch_failed"
+	execution.Diagnostics = diagnostics
+	execution.Result = executionResult
+	execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
+	execution.CleanupStatus = model.TaskExecutionCleanupPending
+	if finalizeErr := s.finalizeTaskFromExecution(ctx, task, execution); finalizeErr != nil {
+		return errors.Join(
+			fmt.Errorf("dispatch Kubernetes execution: %w", dispatchErr),
+			fmt.Errorf("finalize failed Kubernetes dispatch: %w", finalizeErr),
+		)
 	}
 	return fmt.Errorf("dispatch Kubernetes execution: %w", dispatchErr)
 }

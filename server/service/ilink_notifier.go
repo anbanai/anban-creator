@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -27,17 +29,29 @@ func (n *IlinkNotifier) Available() bool {
 }
 
 func (n *IlinkNotifier) NotifyTerminal(ctx context.Context, task *model.Task, status, errMsg string) {
+	if err := n.NotifyTerminalDurable(ctx, task, status, errMsg); err != nil && n.logger != nil {
+		n.logger.Warn().Err(err).Str("task_id", task.ID).Msg("ilink terminal notification enqueue failed")
+	}
+}
+
+func (n *IlinkNotifier) NotifyTerminalDurable(ctx context.Context, task *model.Task, status, errMsg string) error {
 	if !n.Available() || task == nil {
-		return
+		return nil
 	}
 	binding, err := n.repo.IlinkBindings().FindByUserID(ctx, task.UserID)
-	if err != nil || binding == nil || binding.Status != model.IlinkBindingStatusActive {
-		return
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if binding == nil || binding.Status != model.IlinkBindingStatusActive {
+		return nil
 	}
 	platformAccountID := stringValue(binding.PlatformAccountID)
 	externalUserID := stringValue(binding.ExternalUserID)
 	if platformAccountID == "" || externalUserID == "" {
-		return
+		return nil
 	}
 	now := n.now()
 	item := &model.IlinkNotification{
@@ -53,9 +67,7 @@ func (n *IlinkNotifier) NotifyTerminal(ctx context.Context, task *model.Task, st
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	if err := n.repo.IlinkNotifications().Enqueue(ctx, item); err != nil && n.logger != nil {
-		n.logger.Warn().Err(err).Str("task_id", task.ID).Msg("ilink terminal notification enqueue failed")
-	}
+	return n.repo.IlinkNotifications().Enqueue(ctx, item)
 }
 
 func (n *IlinkNotifier) now() time.Time {

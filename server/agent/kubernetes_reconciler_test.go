@@ -14,15 +14,28 @@ import (
 )
 
 type reconcileTestDispatcher struct {
-	states map[string]*KubernetesExecutionState
-	errs   map[string]error
+	mu         sync.Mutex
+	states     map[string]*KubernetesExecutionState
+	errs       map[string]error
+	deleteErrs []error
+	deletes    int
 }
 
 func (*reconcileTestDispatcher) Dispatch(context.Context, *model.TaskExecution, *model.Task) error {
 	return nil
 }
-func (*reconcileTestDispatcher) Delete(context.Context, *model.TaskExecution) error { return nil }
-func (*reconcileTestDispatcher) DeleteProjectMemory(context.Context, string) error  { return nil }
+func (d *reconcileTestDispatcher) Delete(context.Context, *model.TaskExecution) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deletes++
+	if len(d.deleteErrs) == 0 {
+		return nil
+	}
+	err := d.deleteErrs[0]
+	d.deleteErrs = d.deleteErrs[1:]
+	return err
+}
+func (*reconcileTestDispatcher) DeleteProjectMemory(context.Context, string) error { return nil }
 func (d *reconcileTestDispatcher) Inspect(_ context.Context, execution *model.TaskExecution) (*KubernetesExecutionState, error) {
 	return d.states[execution.ID], d.errs[execution.ID]
 }
@@ -34,19 +47,63 @@ type reconcileTestService struct {
 	failures   []reconcileFailure
 	resumed    []string
 	pods       map[string]string
+	started    map[string]bool
+	cleanup    map[string]string
 	failID     string
 }
 
 func (s *reconcileTestService) FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error) {
 	return s.executions, nil
 }
-func (s *reconcileTestService) RecordExecutionPod(_ context.Context, id, uid string) error {
+func (s *reconcileTestService) RecordExecutionRuntime(_ context.Context, id, uid string, started bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.pods == nil {
 		s.pods = map[string]string{}
 	}
 	s.pods[id] = uid
+	if s.started == nil {
+		s.started = map[string]bool{}
+	}
+	s.started[id] = started
+	return nil
+}
+func (s *reconcileTestService) ClaimExecutionCleanup(_ context.Context, id, token string, _ time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cleanup == nil {
+		s.cleanup = map[string]string{}
+	}
+	if s.cleanup[id] != "" {
+		return false, nil
+	}
+	s.cleanup[id] = token
+	return true, nil
+}
+func (s *reconcileTestService) CompleteExecutionCleanup(_ context.Context, id, token string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cleanup[id] != token {
+		return false, nil
+	}
+	s.cleanup[id] = "done"
+	return true, nil
+}
+func (s *reconcileTestService) FailExecutionCleanup(_ context.Context, id, token string, _ time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cleanup[id] != token {
+		return false, nil
+	}
+	s.cleanup[id] = ""
+	return true, nil
+}
+func (s *reconcileTestService) ReleaseExecutionCleanup(_ context.Context, id, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cleanup[id] == token {
+		s.cleanup[id] = ""
+	}
 	return nil
 }
 func (s *reconcileTestService) ResumeExecutionFinalization(_ context.Context, id string) error {
@@ -147,5 +204,46 @@ func TestKubernetesReconcilerRunStopsWithContext(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("reconciler did not stop")
+	}
+}
+
+func TestKubernetesReconcilerRepairsStartedBeforeFailure(t *testing.T) {
+	now := time.Now()
+	execution := &model.TaskExecution{ID: "started-repair", Status: model.TaskExecutionStarting, CreatedAt: now.Add(-time.Minute)}
+	dispatcher := &reconcileTestDispatcher{states: map[string]*KubernetesExecutionState{
+		execution.ID: {Phase: kubernetesPhaseFailed, PodUID: "pod-1", MainContainerStarted: true, Reason: "Error"},
+	}, errs: map[string]error{}}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	reconciler := NewKubernetesReconciler(dispatcher, service, KubernetesReconcilerConfig{}, nil)
+	reconciler.now = func() time.Time { return now }
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if !service.started[execution.ID] || len(service.failures) != 1 {
+		t.Fatalf("started=%v failures=%v", service.started, service.failures)
+	}
+}
+
+func TestKubernetesReconcilerRetriesDurableCleanup(t *testing.T) {
+	execution := &model.TaskExecution{ID: "cleanup", Status: model.TaskExecutionFailed, FinalizationStatus: model.TaskExecutionFinalizationDone, CleanupStatus: model.TaskExecutionCleanupPending}
+	dispatcher := &reconcileTestDispatcher{states: map[string]*KubernetesExecutionState{}, errs: map[string]error{}, deleteErrs: []error{errors.New("delete failed"), nil}}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	reconciler := NewKubernetesReconciler(dispatcher, service, KubernetesReconcilerConfig{}, nil)
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.mu.Lock()
+	deletes := dispatcher.deletes
+	dispatcher.mu.Unlock()
+	service.mu.Lock()
+	cleanup := service.cleanup[execution.ID]
+	service.mu.Unlock()
+	if deletes != 2 || cleanup != "done" {
+		t.Fatalf("deletes=%d cleanup=%q", deletes, cleanup)
 	}
 }

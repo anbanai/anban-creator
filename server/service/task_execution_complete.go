@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,8 +17,8 @@ import (
 )
 
 var ErrStaleTaskExecution = errors.New("task execution is no longer current")
-
-const cloudFinalizationLease = time.Minute
+var ErrFinalizationLeaseLost = errors.New("task execution finalization lease lost")
+var ErrCloudPublishingAmbiguous = errors.New("cloud draft publication outcome is ambiguous and requires reconciliation")
 
 // CompleteCloudExecution records one attempt's immutable terminal outcome, then
 // resumes the durable business finalizer. Only the task's current attempt may
@@ -127,14 +128,16 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 		return nil
 	}
 	token := uuid.NewString()
-	won, err := s.repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, token, cloudFinalizationLease)
+	won, err := s.repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, token, s.cloudFinalizationLease())
 	if err != nil {
 		return fmt.Errorf("claim execution finalization: %w", err)
 	}
 	if !won {
 		return nil
 	}
+	leaseCtx, stopLease, leaseLost := s.renewFinalizationLease(ctx, execution.ID, token)
 	defer func() {
+		stopLease()
 		if releaseErr := s.repo.TaskExecutions().ReleaseFinalization(context.WithoutCancel(ctx), execution.ID, token); err == nil && releaseErr != nil {
 			err = releaseErr
 		}
@@ -150,115 +153,368 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 	if stage == "" {
 		stage = model.TaskExecutionFinalizationTerminal
 	}
-	if s.finalizationAfterStage != nil {
+	if stage == model.TaskExecutionFinalizationTerminal && s.finalizationAfterStage != nil {
 		if err := s.finalizationAfterStage(stage); err != nil {
 			return err
 		}
 	}
-	if stage == model.TaskExecutionFinalizationTerminal {
-		if execution.Status == model.TaskExecutionSucceeded {
-			err = s.repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, execution.ID)
-		} else {
-			err = s.repo.TaskFiles().DiscardCurrentExecution(ctx, task.ID, execution.ID)
-		}
+	for stage != model.TaskExecutionFinalizationDone {
+		next, step, err := s.cloudFinalizationStep(task, execution, result, stage)
 		if err != nil {
-			return fmt.Errorf("finalize execution artifacts: %w", err)
-		}
-		if s.finalizationAfterStage != nil {
-			if err := s.finalizationAfterStage(model.TaskExecutionFinalizationArtifacts); err != nil {
-				return err
-			}
-		}
-		if err = s.advanceExecutionFinalization(ctx, execution.ID, token, stage, model.TaskExecutionFinalizationArtifacts); err != nil {
 			return err
 		}
-		stage = model.TaskExecutionFinalizationArtifacts
-	}
-	if stage == model.TaskExecutionFinalizationArtifacts {
-		if result != nil {
-			if err = s.UpdateExecutionResult(ctx, task.ID, result); err != nil {
-				return err
-			}
-		}
-		if s.creditSvc != nil {
-			if err = s.creditSvc.SettleAgentRuntime(ctx, task, result); err != nil {
-				return fmt.Errorf("settle agent runtime: %w", err)
-			}
-		}
-		if err = s.RebuildWorkflowStatus(ctx, task.ID); err != nil {
-			return fmt.Errorf("rebuild workflow status: %w", err)
-		}
-		if execution.Status == model.TaskExecutionSucceeded {
-			s.finalizeCloudPublishing(ctx, task, result)
-		}
-		if err = s.finalizeExecutionTaskStatus(ctx, task, execution, result); err != nil {
+		if err := step(leaseCtx); err != nil {
 			return err
 		}
 		if s.finalizationAfterStage != nil {
-			if err := s.finalizationAfterStage(model.TaskExecutionFinalizationTask); err != nil {
+			if err := s.finalizationAfterStage(next); err != nil {
 				return err
 			}
 		}
-		if err = s.advanceExecutionFinalization(ctx, execution.ID, token, stage, model.TaskExecutionFinalizationTask); err != nil {
+		if err := finalizationLeaseError(leaseLost); err != nil {
 			return err
 		}
-		stage = model.TaskExecutionFinalizationTask
-	}
-	if stage == model.TaskExecutionFinalizationTask {
-		status, errMsg := taskTerminalFromExecution(execution, result)
-		s.notifyTerminal(ctx, task, status, errMsg)
-		s.syncCloudSlotAndDispatch(ctx, task)
-		if err = s.advanceExecutionFinalization(ctx, execution.ID, token, stage, model.TaskExecutionFinalizationDone); err != nil {
+		renewed, err := s.renewFinalizationClaim(leaseCtx, execution.ID, token)
+		if err != nil {
+			return fmt.Errorf("renew finalization before advancing to %s: %w", next, err)
+		}
+		if !renewed {
+			return ErrFinalizationLeaseLost
+		}
+		if err := s.advanceExecutionFinalization(leaseCtx, execution.ID, token, stage, next); err != nil {
 			return err
+		}
+		stage = next
+		if s.finalizationAfterAdvance != nil {
+			if err := s.finalizationAfterAdvance(stage); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func (s *TaskService) syncCloudSlotAndDispatch(ctx context.Context, task *model.Task) {
-	if task == nil || task.ProjectID == "" {
-		return
-	}
-	if s.pubsub != nil {
-		if running, err := s.repo.Tasks().CountRunningByProject(ctx, task.ProjectID); err != nil {
-			s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("count running tasks for cloud slot reconciliation")
-		} else if err := s.pubsub.SyncProjectCount(ctx, task.ProjectID, running); err != nil {
-			s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("reconcile cloud concurrency slot")
-		}
-	}
-	if err := s.DispatchPendingTasks(ctx, task.ProjectID); err != nil {
-		s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("dispatch pending tasks after cloud finalization")
+type cloudFinalizationStep func(context.Context) error
+
+func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult, stage string) (string, cloudFinalizationStep, error) {
+	switch stage {
+	case model.TaskExecutionFinalizationTerminal:
+		return model.TaskExecutionFinalizationArtifacts, func(ctx context.Context) error {
+			if execution.Status == model.TaskExecutionSucceeded {
+				return s.repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, execution.ID)
+			}
+			return s.repo.TaskFiles().DiscardCurrentExecution(ctx, task.ID, execution.ID)
+		}, nil
+	case model.TaskExecutionFinalizationArtifacts:
+		return model.TaskExecutionFinalizationResult, func(ctx context.Context) error {
+			return s.UpdateExecutionResult(ctx, task.ID, result)
+		}, nil
+	case model.TaskExecutionFinalizationResult:
+		return model.TaskExecutionFinalizationWorkflow, func(ctx context.Context) error {
+			return s.RebuildWorkflowStatus(ctx, task.ID)
+		}, nil
+	case model.TaskExecutionFinalizationWorkflow:
+		return model.TaskExecutionFinalizationPublishing, func(ctx context.Context) error {
+			if execution.Status != model.TaskExecutionSucceeded {
+				return s.markCloudPublishingSkipped(ctx, execution)
+			}
+			return s.finalizeCloudPublishing(ctx, task, execution, result)
+		}, nil
+	case model.TaskExecutionFinalizationPublishing:
+		return model.TaskExecutionFinalizationTask, func(ctx context.Context) error {
+			return s.finalizeExecutionTaskStatus(ctx, task, execution, result)
+		}, nil
+	case model.TaskExecutionFinalizationTask:
+		return model.TaskExecutionFinalizationSettlement, func(ctx context.Context) error {
+			return s.settleCloudExecution(ctx, task, execution, result)
+		}, nil
+	case model.TaskExecutionFinalizationSettlement:
+		return model.TaskExecutionFinalizationSlot, func(ctx context.Context) error {
+			return s.syncCloudSlot(ctx, task)
+		}, nil
+	case model.TaskExecutionFinalizationSlot:
+		return model.TaskExecutionFinalizationDispatch, func(ctx context.Context) error {
+			if task.ProjectID == "" {
+				return nil
+			}
+			return s.DispatchPendingTasks(ctx, task.ProjectID)
+		}, nil
+	case model.TaskExecutionFinalizationDispatch:
+		return model.TaskExecutionFinalizationNotification, func(ctx context.Context) error {
+			status, errMsg := taskTerminalFromExecution(execution, result)
+			return s.notifyTerminalDurable(ctx, task, status, errMsg)
+		}, nil
+	case model.TaskExecutionFinalizationNotification:
+		return model.TaskExecutionFinalizationDone, func(context.Context) error { return nil }, nil
+	default:
+		return "", nil, fmt.Errorf("unknown execution finalization stage %q", stage)
 	}
 }
 
-func (s *TaskService) finalizeCloudPublishing(ctx context.Context, task *model.Task, result *agent.ExecutionResult) {
-	if s.publishingSvc == nil || task == nil || result == nil || task.ProjectID == "" {
-		return
+func (s *TaskService) syncCloudSlot(ctx context.Context, task *model.Task) error {
+	if task == nil || task.ProjectID == "" {
+		return nil
 	}
-	project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
-	if err != nil || project == nil || !project.GetEnablePublishing() {
-		return
-	}
-	published := wasPublishedByAgent(result.LogText)
-	var articles []DraftArticleInput
-	if !published && task.Type == model.ScopeArticle {
-		articles, err = s.extractArticleDraftFromTaskFiles(ctx, task.ID)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("extract cloud article draft for publishing")
-			return
+	if s.pubsub != nil {
+		if running, err := s.repo.Tasks().CountRunningByProject(ctx, task.ProjectID); err != nil {
+			return fmt.Errorf("count running tasks for cloud slot reconciliation: %w", err)
+		} else if err := s.pubsub.SyncProjectCount(ctx, task.ProjectID, running); err != nil {
+			return fmt.Errorf("reconcile cloud concurrency slot: %w", err)
 		}
 	}
-	if project.GetRequirePublishApproval() && !published && len(articles) > 0 {
-		s.holdPublishForApproval(ctx, task.ID, articles)
-		return
+	return nil
+}
+
+func (s *TaskService) settleCloudExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
+	if s.creditSvc == nil {
+		return nil
 	}
-	if published || len(articles) > 0 {
-		publishCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		taskCopy, projectCopy := *task, *project
-		go func() {
-			defer cancel()
-			s.autoPublishWithData(publishCtx, &taskCopy, &projectCopy, articles, result.LogText)
-		}()
+	if err := s.creditSvc.SettleAgentRuntime(ctx, task, result); err != nil {
+		return fmt.Errorf("settle agent runtime: %w", err)
+	}
+	if execution.Status != model.TaskExecutionSucceeded && !task.GoalMode {
+		if err := s.creditSvc.RefundForTask(ctx, task.ID, execution.TerminalReason); err != nil {
+			return fmt.Errorf("refund terminal cloud task: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *TaskService) markCloudPublishingSkipped(ctx context.Context, execution *model.TaskExecution) error {
+	latest, err := s.repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		return err
+	}
+	switch latest.PublishingStatus {
+	case model.TaskExecutionPublishingSkipped, model.TaskExecutionPublishingSucceeded:
+		return nil
+	case model.TaskExecutionPublishingInFlight, model.TaskExecutionPublishingAmbiguous:
+		return ErrCloudPublishingAmbiguous
+	}
+	won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, "", model.TaskExecutionPublishingSkipped, []byte(`{"reason":"not_applicable"}`))
+	if err != nil {
+		return err
+	}
+	if !won {
+		return fmt.Errorf("mark cloud publishing skipped: state changed concurrently")
+	}
+	execution.PublishingStatus = model.TaskExecutionPublishingSkipped
+	return nil
+}
+
+func (s *TaskService) finalizeCloudPublishing(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
+	latestExecution, err := s.repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		return err
+	}
+	latestTask, err := s.repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	switch latestExecution.PublishingStatus {
+	case model.TaskExecutionPublishingSucceeded:
+		if !latestTask.Published {
+			return s.setPublishedAndMaybeTrack(ctx, latestTask.UserID, latestTask, true)
+		}
+		return nil
+	case model.TaskExecutionPublishingSkipped:
+		return nil
+	case model.TaskExecutionPublishingInFlight, model.TaskExecutionPublishingAmbiguous:
+		return ErrCloudPublishingAmbiguous
+	}
+	if s.cloudPublisher == nil || latestTask.ProjectID == "" || result == nil {
+		return s.markCloudPublishingSkipped(ctx, latestExecution)
+	}
+	project, err := s.repo.Projects().FindByID(ctx, latestTask.ProjectID)
+	if err != nil {
+		return fmt.Errorf("load project for cloud publishing: %w", err)
+	}
+	if !project.GetEnablePublishing() {
+		return s.markCloudPublishingSkipped(ctx, latestExecution)
+	}
+	if wasPublishedByAgent(result.LogText) || latestTask.Published {
+		if err := s.setPublishedAndMaybeTrack(ctx, latestTask.UserID, latestTask, true); err != nil {
+			return err
+		}
+		won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, "", model.TaskExecutionPublishingSucceeded, []byte(`{"source":"agent"}`))
+		if err != nil {
+			return err
+		}
+		if !won {
+			return fmt.Errorf("record agent publication: state changed concurrently")
+		}
+		return nil
+	}
+	if latestTask.Type != model.ScopeArticle {
+		return s.markCloudPublishingSkipped(ctx, latestExecution)
+	}
+	articles, err := s.extractArticleDraftFromTaskFiles(ctx, latestTask.ID)
+	if err != nil {
+		return fmt.Errorf("extract cloud article draft: %w", err)
+	}
+	if len(articles) == 0 {
+		return s.markCloudPublishingSkipped(ctx, latestExecution)
+	}
+	if project.GetRequirePublishApproval() {
+		encoded, err := json.Marshal(articles)
+		if err != nil {
+			return err
+		}
+		if err := s.repo.Tasks().UpdatePublishApproval(ctx, task.ID, model.PublishApprovalStatePending, encoded); err != nil {
+			return fmt.Errorf("persist cloud publish approval: %w", err)
+		}
+		won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, "", model.TaskExecutionPublishingSkipped, []byte(`{"reason":"approval_pending"}`))
+		if err != nil {
+			return err
+		}
+		if !won {
+			return fmt.Errorf("record publish approval hold: state changed concurrently")
+		}
+		return nil
+	}
+	won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, "", model.TaskExecutionPublishingInFlight, nil)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return fmt.Errorf("claim cloud publication: state changed concurrently")
+	}
+	publishCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	published, publishErr := s.cloudPublisher.PublishDraft(publishCtx, latestTask.UserID, project.ID, articles)
+	cancel()
+	if publishErr != nil {
+		detail, _ := json.Marshal(map[string]string{"error": publishErr.Error()})
+		_, _ = s.repo.TaskExecutions().TransitionPublishing(context.WithoutCancel(ctx), execution.ID, model.TaskExecutionPublishingInFlight, model.TaskExecutionPublishingAmbiguous, detail)
+		return fmt.Errorf("publish cloud draft (outcome may be ambiguous): %w", publishErr)
+	}
+	if s.finalizationAfterEffect != nil {
+		if err := s.finalizationAfterEffect(model.TaskExecutionFinalizationPublishing); err != nil {
+			return err
+		}
+	}
+	publishResult, err := json.Marshal(published)
+	if err != nil {
+		return err
+	}
+	won, err = s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, model.TaskExecutionPublishingInFlight, model.TaskExecutionPublishingSucceeded, publishResult)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return ErrCloudPublishingAmbiguous
+	}
+	return s.setPublishedAndMaybeTrack(ctx, latestTask.UserID, latestTask, true)
+}
+
+// ResolveCloudPublishing closes the only ambiguity the WeChat draft API cannot
+// resolve itself: the provider accepted a draft but the server died before it
+// persisted the response. An operator/reconciliation adapter must confirm the
+// downstream outcome; true continues without another provider call, while
+// false resets the durable operation and retries it under the finalization lease.
+func (s *TaskService) ResolveCloudPublishing(ctx context.Context, executionID string, published bool) error {
+	execution, task, err := s.currentExecution(ctx, executionID)
+	if err != nil {
+		return err
+	}
+	if execution.PublishingStatus != model.TaskExecutionPublishingInFlight && execution.PublishingStatus != model.TaskExecutionPublishingAmbiguous {
+		return fmt.Errorf("cloud publishing is not awaiting resolution: %s", execution.PublishingStatus)
+	}
+	target := ""
+	var detail []byte
+	if published {
+		target = model.TaskExecutionPublishingSucceeded
+		detail = []byte(`{"source":"reconciled"}`)
+	}
+	won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, execution.PublishingStatus, target, detail)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return fmt.Errorf("resolve cloud publishing: state changed concurrently")
+	}
+	execution.PublishingStatus = target
+	if published {
+		if err := s.setPublishedAndMaybeTrack(ctx, task.UserID, task, true); err != nil {
+			return err
+		}
+	}
+	return s.finalizeTaskFromExecution(ctx, task, execution)
+}
+
+func (s *TaskService) cloudFinalizationLease() time.Duration {
+	if s.finalizationLease > 0 {
+		return s.finalizationLease
+	}
+	return time.Minute
+}
+
+func (s *TaskService) cloudFinalizationRenewInterval() time.Duration {
+	lease := s.cloudFinalizationLease()
+	interval := s.finalizationRenewEvery
+	if interval <= 0 || interval >= lease/3 {
+		interval = lease / 4
+	}
+	if interval <= 0 {
+		interval = time.Millisecond
+	}
+	return interval
+}
+
+func (s *TaskService) renewFinalizationLease(parent context.Context, executionID, token string) (context.Context, func(), <-chan error) {
+	ctx, cancel := context.WithCancel(parent)
+	stop := make(chan struct{})
+	stopped := make(chan struct{})
+	lost := make(chan error, 1)
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(s.cloudFinalizationRenewInterval())
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				won, err := s.renewFinalizationClaim(ctx, executionID, token)
+				if err == nil && won {
+					continue
+				}
+				if err == nil {
+					err = ErrFinalizationLeaseLost
+				}
+				select {
+				case lost <- err:
+				default:
+				}
+				cancel()
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			close(stop)
+			cancel()
+			<-stopped
+		})
+	}, lost
+}
+
+func (s *TaskService) renewFinalizationClaim(ctx context.Context, executionID, token string) (bool, error) {
+	if s.finalizationRenewClaim != nil {
+		return s.finalizationRenewClaim(ctx, executionID, token)
+	}
+	return s.repo.TaskExecutions().RenewFinalizationClaim(ctx, executionID, token)
+}
+
+func finalizationLeaseError(lost <-chan error) error {
+	select {
+	case err := <-lost:
+		return fmt.Errorf("%w: %v", ErrFinalizationLeaseLost, err)
+	default:
+		return nil
 	}
 }
 
@@ -296,7 +552,6 @@ func (s *TaskService) finalizeExecutionTaskStatus(ctx context.Context, task *mod
 	}
 	if target != model.TaskStatusCompleted {
 		task.Status = target
-		s.refundTaskByMode(ctx, task, execution.TerminalReason)
 	}
 	return nil
 }
@@ -408,10 +663,43 @@ func (s *TaskService) cancelCloudExecution(ctx context.Context, task *model.Task
 	if err := s.finalizeTaskFromExecution(ctx, task, execution); err != nil {
 		return err
 	}
-	// The observable terminal DB state and artifact discard always precede the
-	// external delete. A delete failure cannot reopen either row.
-	if err := s.kubernetesDispatcher.Delete(ctx, execution); err != nil {
-		return fmt.Errorf("delete cancelled Kubernetes Job: %w", err)
+	return s.cleanupCancelledExecution(ctx, execution)
+}
+
+func (s *TaskService) cleanupCancelledExecution(ctx context.Context, execution *model.TaskExecution) (err error) {
+	token := uuid.NewString()
+	won, err := s.repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, token, s.cloudFinalizationLease())
+	if err != nil || !won {
+		return err
+	}
+	defer func() {
+		if releaseErr := s.repo.TaskExecutions().ReleaseCleanup(context.WithoutCancel(ctx), execution.ID, token); err == nil && releaseErr != nil {
+			err = releaseErr
+		}
+	}()
+	deleteCtx, cancel := context.WithTimeout(ctx, s.cloudFinalizationLease()/2)
+	deleteErr := s.kubernetesDispatcher.Delete(deleteCtx, execution)
+	cancel()
+	if deleteErr != nil {
+		backoff := s.cleanupRetryBackoff
+		if backoff <= 0 {
+			backoff = 10 * time.Second
+		}
+		failed, failErr := s.repo.TaskExecutions().FailCleanup(context.WithoutCancel(ctx), execution.ID, token, time.Now().Add(backoff))
+		if failErr != nil {
+			return errors.Join(fmt.Errorf("delete cancelled Kubernetes Job: %w", deleteErr), failErr)
+		}
+		if !failed {
+			return errors.Join(fmt.Errorf("delete cancelled Kubernetes Job: %w", deleteErr), errors.New("cancelled execution cleanup lease lost while recording retry"))
+		}
+		return fmt.Errorf("delete cancelled Kubernetes Job: %w", deleteErr)
+	}
+	completed, err := s.repo.TaskExecutions().CompleteCleanup(ctx, execution.ID, token)
+	if err != nil {
+		return err
+	}
+	if !completed {
+		return errors.New("cancelled execution cleanup lease lost")
 	}
 	return nil
 }

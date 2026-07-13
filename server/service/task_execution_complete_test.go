@@ -125,11 +125,19 @@ func TestCompleteCloudExecutionConcurrentDuplicate(t *testing.T) {
 }
 
 func TestCompleteCloudExecutionResumesEveryDurableStage(t *testing.T) {
-	for _, stage := range []string{
+	stages := []string{
 		model.TaskExecutionFinalizationTerminal,
 		model.TaskExecutionFinalizationArtifacts,
+		model.TaskExecutionFinalizationResult,
+		model.TaskExecutionFinalizationWorkflow,
+		model.TaskExecutionFinalizationPublishing,
 		model.TaskExecutionFinalizationTask,
-	} {
+		model.TaskExecutionFinalizationSettlement,
+		model.TaskExecutionFinalizationSlot,
+		model.TaskExecutionFinalizationDispatch,
+		model.TaskExecutionFinalizationNotification,
+	}
+	for _, stage := range stages {
 		t.Run(stage, func(t *testing.T) {
 			svc, repo, task, execution := setupCloudCompletionTest(t, true)
 			injected := false
@@ -154,6 +162,164 @@ func TestCompleteCloudExecutionResumesEveryDurableStage(t *testing.T) {
 				t.Fatalf("task=%s finalization=%s", foundTask.Status, foundExecution.FinalizationStatus)
 			}
 		})
+	}
+	markerStages := append(append([]string(nil), stages[1:]...), model.TaskExecutionFinalizationDone)
+	for _, stage := range markerStages {
+		t.Run("after-marker-"+stage, func(t *testing.T) {
+			svc, repo, task, execution := setupCloudCompletionTest(t, true)
+			injected := false
+			svc.finalizationAfterAdvance = func(got string) error {
+				if got == stage && !injected {
+					injected = true
+					return errors.New("injected failure after durable marker")
+				}
+				return nil
+			}
+			result := &agent.ExecutionResult{Success: true, RemoteArtifacts: true}
+			if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err == nil {
+				t.Fatal("expected injected failure")
+			}
+			svc.finalizationAfterAdvance = nil
+			if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err != nil {
+				t.Fatalf("resume: %v", err)
+			}
+			foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
+			foundExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+			if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone {
+				t.Fatalf("task=%s finalization=%s", foundTask.Status, foundExecution.FinalizationStatus)
+			}
+		})
+	}
+}
+
+func TestFinalizationLeaseRenewsAcrossLongStage(t *testing.T) {
+	svc, repo, _, execution := setupCloudCompletionTest(t, true)
+	svc.finalizationLease = 40 * time.Millisecond
+	svc.finalizationRenewEvery = 5 * time.Millisecond
+	entered, release := make(chan struct{}), make(chan struct{})
+	svc.finalizationAfterStage = func(stage string) error {
+		if stage == model.TaskExecutionFinalizationArtifacts {
+			close(entered)
+			<-release
+		}
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.CompleteCloudExecution(context.Background(), execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true})
+	}()
+	<-entered
+	time.Sleep(80 * time.Millisecond)
+	won, err := repo.TaskExecutions().ClaimFinalization(context.Background(), execution.ID, uuid.NewString(), 40*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if won {
+		t.Fatal("renewed finalization lease was stolen")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFinalizationRenewalLossPreventsStageAdvance(t *testing.T) {
+	svc, repo, _, execution := setupCloudCompletionTest(t, true)
+	svc.finalizationLease = 30 * time.Millisecond
+	svc.finalizationRenewEvery = 2 * time.Millisecond
+	svc.finalizationRenewClaim = func(context.Context, string, string) (bool, error) { return false, nil }
+	svc.finalizationAfterStage = func(stage string) error {
+		if stage == model.TaskExecutionFinalizationArtifacts {
+			time.Sleep(20 * time.Millisecond)
+		}
+		return nil
+	}
+	err := svc.CompleteCloudExecution(context.Background(), execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true})
+	if !errors.Is(err, ErrFinalizationLeaseLost) {
+		t.Fatalf("error=%v, want lease lost", err)
+	}
+	found, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if found.FinalizationStatus != model.TaskExecutionFinalizationTerminal {
+		t.Fatalf("stage advanced after lease loss: %s", found.FinalizationStatus)
+	}
+}
+
+type ambiguousPublishFake struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *ambiguousPublishFake) PublishDraft(context.Context, string, string, []DraftArticleInput) (*PublishDraftResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return &PublishDraftResult{MediaID: "media-1"}, nil
+}
+
+func (p *ambiguousPublishFake) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+func TestCloudPublishingAmbiguityNeverCallsProviderTwice(t *testing.T) {
+	db := setupTaskTestDB(t)
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
+	}
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, projectID, taskID, executionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	project := &model.Project{ID: projectID, UserID: userID, Name: "publish", Platform: model.PlatformArticle, Status: model.ProjectStatusActive, Config: model.ProjectConfig{EnablePublishing: true}}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	execution := &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, ManifestStatus: model.TaskExecutionManifestPending}
+	if err := repo.TaskExecutions().Create(ctx, execution); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{"draft-key": []byte(`{"articles":[{"title":"T","content":"<p>body</p>"}]}`)}}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/draft.json", FileName: "draft.json", FileSize: 50, OSSKey: "draft-key", StorageProvider: "oss"}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	publisher := &ambiguousPublishFake{}
+	svc.cloudPublisher = publisher
+	svc.finalizationAfterEffect = func(stage string) error {
+		if stage == model.TaskExecutionFinalizationPublishing {
+			return errors.New("crash after provider success")
+		}
+		return nil
+	}
+	result := &agent.ExecutionResult{Success: true, RemoteArtifacts: true}
+	if err := svc.CompleteCloudExecution(ctx, executionID, result); err == nil {
+		t.Fatal("expected injected publish crash")
+	}
+	svc.finalizationAfterEffect = nil
+	if err := svc.CompleteCloudExecution(ctx, executionID, result); !errors.Is(err, ErrCloudPublishingAmbiguous) {
+		t.Fatalf("retry error=%v, want ambiguous", err)
+	}
+	if publisher.callCount() != 1 {
+		t.Fatalf("provider calls=%d, want 1", publisher.callCount())
+	}
+	found, _ := repo.TaskExecutions().FindByID(ctx, executionID)
+	if found.PublishingStatus != model.TaskExecutionPublishingInFlight || found.FinalizationStatus != model.TaskExecutionFinalizationWorkflow {
+		t.Fatalf("publishing=%s stage=%s", found.PublishingStatus, found.FinalizationStatus)
+	}
+	if err := svc.ResolveCloudPublishing(ctx, executionID, true); err != nil {
+		t.Fatalf("resolve confirmed provider success: %v", err)
+	}
+	if publisher.callCount() != 1 {
+		t.Fatalf("provider calls after resolution=%d, want 1", publisher.callCount())
+	}
+	found, _ = repo.TaskExecutions().FindByID(ctx, executionID)
+	if found.PublishingStatus != model.TaskExecutionPublishingSucceeded || found.FinalizationStatus != model.TaskExecutionFinalizationDone {
+		t.Fatalf("resolved publishing=%s stage=%s", found.PublishingStatus, found.FinalizationStatus)
 	}
 }
 
@@ -180,6 +346,7 @@ func TestCancelCloudMarksAttemptBeforeDeleteAndDoesNotRollBack(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true)
 	dispatcher := &cancelOrderingDispatcher{repo: repo, deleteErr: errors.New("delete unavailable")}
 	svc.SetKubernetesDispatcher(dispatcher)
+	svc.cleanupRetryBackoff = time.Millisecond
 	err := svc.CancelForUser(context.Background(), task.UserID, task.ID)
 	if err == nil {
 		t.Fatal("expected delete error")
@@ -191,6 +358,18 @@ func TestCancelCloudMarksAttemptBeforeDeleteAndDoesNotRollBack(t *testing.T) {
 	}
 	if foundExecution.CompletedAt == nil || time.Since(*foundExecution.CompletedAt) > time.Minute {
 		t.Fatalf("completed_at = %v", foundExecution.CompletedAt)
+	}
+	if foundExecution.CleanupStatus != model.TaskExecutionCleanupPending {
+		t.Fatalf("cleanup status after delete error=%s", foundExecution.CleanupStatus)
+	}
+	dispatcher.deleteErr = nil
+	time.Sleep(2 * time.Millisecond)
+	if err := svc.CancelForUser(context.Background(), task.UserID, task.ID); err != nil {
+		t.Fatalf("retry cancellation cleanup: %v", err)
+	}
+	foundExecution, _ = repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if foundExecution.CleanupStatus != model.TaskExecutionCleanupDone {
+		t.Fatalf("cleanup status after retry=%s", foundExecution.CleanupStatus)
 	}
 }
 
@@ -210,6 +389,20 @@ func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
 		foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
 		if current.Attempt != 2 || current.Status != model.TaskExecutionStarting || old.Status != model.TaskExecutionFailed || foundTask.Status != model.TaskStatusRunning {
 			t.Fatalf("current=%+v old=%s task=%s", current, old.Status, foundTask.Status)
+		}
+		if old.CleanupStatus != model.TaskExecutionCleanupPending {
+			t.Fatalf("old cleanup status=%s", old.CleanupStatus)
+		}
+		reconcilable, err := repo.TaskExecutions().FindReconcilable(context.Background(), time.Now().Add(time.Second), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		foundOld := false
+		for _, candidate := range reconcilable {
+			foundOld = foundOld || candidate.ID == old.ID
+		}
+		if !foundOld {
+			t.Fatal("replaced terminal execution was excluded before cleanup")
 		}
 	})
 
@@ -258,5 +451,24 @@ func TestConcurrentPreStartReconcileCreatesOneReplacement(t *testing.T) {
 	}
 	if current.Attempt != 2 || next != 3 || dispatcher.createCount() != 1 {
 		t.Fatalf("current attempt=%d next=%d jobs=%d", current.Attempt, next, dispatcher.createCount())
+	}
+}
+
+func TestReconcilerStartedRepairPreventsPreStartReplacement(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	dispatcher := &dispatchTestDispatcher{}
+	svc.SetKubernetesDispatcher(dispatcher)
+	if err := svc.RecordExecutionRuntime(context.Background(), execution.ID, "pod-1", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "job_failed", nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
+	if current.ID != execution.ID || current.Attempt != 1 || !current.Started || current.Status != model.TaskExecutionFailed {
+		t.Fatalf("current=%+v", current)
+	}
+	if dispatcher.createCount() != 0 {
+		t.Fatalf("replacement jobs=%d", dispatcher.createCount())
 	}
 }

@@ -200,6 +200,98 @@ func TestTaskExecutionRepositoryRuntimeIdentityPreservesExistingValues(t *testin
 	}
 }
 
+func TestTaskExecutionFinalizationLeaseRenewalAndTakeover(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).
+		Updates(map[string]any{"finalization_status": model.TaskExecutionFinalizationArtifacts, "cleanup_status": model.TaskExecutionCleanupPending}).Error; err != nil {
+		t.Fatal(err)
+	}
+	first := uuid.NewString()
+	won, err := repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, first, 30*time.Millisecond)
+	if err != nil || !won {
+		t.Fatalf("first claim won=%v err=%v", won, err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	renewed, err := repo.TaskExecutions().RenewFinalizationClaim(ctx, execution.ID, first)
+	if err != nil || !renewed {
+		t.Fatalf("renewed=%v err=%v", renewed, err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	won, err = repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, uuid.NewString(), 30*time.Millisecond)
+	if err != nil || won {
+		t.Fatalf("renewed claim stolen won=%v err=%v", won, err)
+	}
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).Update("finalization_at", time.Now().Add(-time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+	second := uuid.NewString()
+	won, err = repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, second, 30*time.Millisecond)
+	if err != nil || !won {
+		t.Fatalf("abandoned lease takeover won=%v err=%v", won, err)
+	}
+	renewed, err = repo.TaskExecutions().RenewFinalizationClaim(ctx, execution.ID, first)
+	if err != nil || renewed {
+		t.Fatalf("stale owner renewed=%v err=%v", renewed, err)
+	}
+}
+
+func TestTaskExecutionCleanupClaimIsDurableAndExclusive(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).
+		Updates(map[string]any{"finalization_status": model.TaskExecutionFinalizationDone, "cleanup_status": model.TaskExecutionCleanupPending}).Error; err != nil {
+		t.Fatal(err)
+	}
+	first, second := uuid.NewString(), uuid.NewString()
+	won, err := repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, first, time.Minute)
+	if err != nil || !won {
+		t.Fatalf("first cleanup claim won=%v err=%v", won, err)
+	}
+	won, err = repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, second, time.Minute)
+	if err != nil || won {
+		t.Fatalf("second cleanup claim won=%v err=%v", won, err)
+	}
+	completed, err := repo.TaskExecutions().CompleteCleanup(ctx, execution.ID, first)
+	if err != nil || !completed {
+		t.Fatalf("complete cleanup=%v err=%v", completed, err)
+	}
+	found, _ := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if found.CleanupStatus != model.TaskExecutionCleanupDone {
+		t.Fatalf("cleanup status=%s", found.CleanupStatus)
+	}
+}
+
+func TestTaskExecutionCleanupFailureBacksOff(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).Update("cleanup_status", model.TaskExecutionCleanupPending).Error; err != nil {
+		t.Fatal(err)
+	}
+	token := uuid.NewString()
+	won, err := repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, token, time.Minute)
+	if err != nil || !won {
+		t.Fatalf("claim won=%v err=%v", won, err)
+	}
+	next := time.Now().Add(30 * time.Millisecond)
+	failed, err := repo.TaskExecutions().FailCleanup(ctx, execution.ID, token, next)
+	if err != nil || !failed {
+		t.Fatalf("fail cleanup=%v err=%v", failed, err)
+	}
+	won, err = repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, uuid.NewString(), time.Minute)
+	if err != nil || won {
+		t.Fatalf("cleanup ignored backoff won=%v err=%v", won, err)
+	}
+	time.Sleep(35 * time.Millisecond)
+	won, err = repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, uuid.NewString(), time.Minute)
+	if err != nil || !won {
+		t.Fatalf("cleanup not retryable after backoff won=%v err=%v", won, err)
+	}
+}
+
 func TestTaskExecutionRepositoryRejectsDuplicateAttempt(t *testing.T) {
 	repo := setupTaskExecutionRepository(t)
 	ctx := context.Background()

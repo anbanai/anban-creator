@@ -188,7 +188,7 @@ type TaskExecutionRepository interface {
 	ClaimDispatch(ctx context.Context, id, token string, leaseDuration time.Duration) (bool, error)
 	AbandonDispatch(ctx context.Context, id, token string) (bool, error)
 	CompleteDispatch(ctx context.Context, id, token string) (bool, error)
-	FailDispatch(ctx context.Context, id, token, reason string, diagnostics []byte) (bool, error)
+	FailDispatch(ctx context.Context, id, token, reason string, diagnostics, result []byte) (bool, error)
 	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)
 	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
 	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)
@@ -197,7 +197,14 @@ type TaskExecutionRepository interface {
 	Transition(ctx context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error)
 	ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error)
 	AdvanceFinalization(ctx context.Context, id, token, from, to string) (bool, error)
+	RenewFinalizationClaim(ctx context.Context, id, token string) (bool, error)
 	ReleaseFinalization(ctx context.Context, id, token string) error
+	RecordRuntimeStarted(ctx context.Context, id, podUID string) (bool, error)
+	TransitionPublishing(ctx context.Context, id, from, to string, result []byte) (bool, error)
+	ClaimCleanup(ctx context.Context, id, token string, lease time.Duration) (bool, error)
+	CompleteCleanup(ctx context.Context, id, token string) (bool, error)
+	FailCleanup(ctx context.Context, id, token string, next time.Time) (bool, error)
+	ReleaseCleanup(ctx context.Context, id, token string) error
 }
 
 // PendingUploadRepository tracks browser-direct uploads until submit finalizes them.

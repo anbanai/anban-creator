@@ -266,7 +266,7 @@ func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID str
 		// to '' (cloud); only "local" tasks are skipped here. "local_claimed"
 		// tasks are already status=running so they never match this query.
 		Where("execution_target <> ?", model.ExecutionTargetLocal).
-		Where("NOT (retry_count > 0 AND updated_at > DATE_SUB(NOW(), INTERVAL 2 MINUTE))").
+		Where("NOT (retry_count > 0 AND updated_at > ?)", time.Now().Add(-2*time.Minute)).
 		Order("created_at ASC").
 		Limit(limit).
 		Find(&tasks).Error

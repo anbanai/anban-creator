@@ -107,6 +107,15 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 		Status:    model.TaskStatusPending,
 		Prompt:    "dispatch me",
 	}
+	if err := repo.Projects().Create(context.Background(), &model.Project{
+		ID:       task.ProjectID,
+		UserID:   task.UserID,
+		Name:     "dispatch project",
+		Platform: task.Type,
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -205,7 +214,7 @@ func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 		t.Fatalf("dispatch error = %v, want %v", err, dispatcher.err)
 	}
 	execution := mustCurrentExecution(t, repo, task.ID)
-	if execution.Status != model.TaskExecutionFailed || execution.CompletedAt == nil || execution.TerminalReason != "dispatch_failed" {
+	if execution.Status != model.TaskExecutionFailed || execution.CompletedAt == nil || execution.TerminalReason != "dispatch_failed" || execution.FinalizationStatus != model.TaskExecutionFinalizationDone || execution.CleanupStatus != model.TaskExecutionCleanupPending {
 		t.Fatalf("failed execution = %+v", execution)
 	}
 	failedTask, findErr := repo.Tasks().FindByID(context.Background(), task.ID)
@@ -221,8 +230,8 @@ func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("replayed dispatch calls = %d, want 1", dispatcher.callCount())
 	}
-	if count, err := rdb.Get(context.Background(), projectRunningCountPrefix+task.ProjectID).Int64(); err != nil || count != 0 {
-		t.Fatalf("terminal slot count = %d, %v; want 0", count, err)
+	if exists, err := rdb.Exists(context.Background(), projectRunningCountPrefix+task.ProjectID).Result(); err != nil || exists != 0 {
+		t.Fatalf("terminal slot key exists = %d, %v; want 0", exists, err)
 	}
 }
 
@@ -341,9 +350,8 @@ func TestDispatchCloudTaskUsesDatabaseTimeForActiveClaim(t *testing.T) {
 	}
 }
 
-func TestDispatchCloudTaskFailureRollbackIsReclaimedAndTerminalized(t *testing.T) {
+func TestDispatchCloudTaskFailureFinalizationResumesWithoutRedispatch(t *testing.T) {
 	svc, repo, db, dispatcher, task := setupDispatchTest(t)
-	svc.SetKubernetesDispatchLease(time.Minute)
 	dispatcher.err = agent.NewPermanentDispatchError(errors.New("job identity mismatch"))
 	trigger := `CREATE TRIGGER reject_task_failure BEFORE UPDATE OF status ON tasks
 		WHEN NEW.status = 'failed' BEGIN SELECT RAISE(ABORT, 'task failure rejected'); END`
@@ -356,26 +364,22 @@ func TestDispatchCloudTaskFailureRollbackIsReclaimedAndTerminalized(t *testing.T
 	}
 	execution := mustCurrentExecution(t, repo, task.ID)
 	currentTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
-	if execution.Status != model.TaskExecutionDispatching || currentTask.Status != model.TaskStatusRunning {
-		t.Fatalf("rolled back state: execution=%s task=%s", execution.Status, currentTask.Status)
+	if execution.Status != model.TaskExecutionFailed || execution.FinalizationStatus != model.TaskExecutionFinalizationPublishing || currentTask.Status != model.TaskStatusRunning {
+		t.Fatalf("durable interrupted state: execution=%s finalization=%s task=%s", execution.Status, execution.FinalizationStatus, currentTask.Status)
 	}
-	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); !errors.Is(err, ErrDispatchInProgress) {
-		t.Fatalf("active failed claim replay = %v, want ErrDispatchInProgress", err)
-	}
-	ageDispatchClaim(t, db, execution.ID, 2*time.Minute)
 	if err := db.Exec("DROP TRIGGER reject_task_failure").Error; err != nil {
 		t.Fatalf("drop failure trigger: %v", err)
 	}
-	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
-		t.Fatal("reclaimed failed dispatch should report the dispatcher error")
+	if err := svc.ResumeExecutionFinalization(context.Background(), execution.ID); err != nil {
+		t.Fatalf("resume failed dispatch finalization: %v", err)
 	}
 	execution = mustCurrentExecution(t, repo, task.ID)
 	currentTask, _ = repo.Tasks().FindByID(context.Background(), task.ID)
-	if execution.Status != model.TaskExecutionFailed || currentTask.Status != model.TaskStatusFailed {
-		t.Fatalf("repaired terminal state: execution=%s task=%s", execution.Status, currentTask.Status)
+	if execution.Status != model.TaskExecutionFailed || execution.FinalizationStatus != model.TaskExecutionFinalizationDone || currentTask.Status != model.TaskStatusFailed {
+		t.Fatalf("repaired terminal state: execution=%s finalization=%s task=%s", execution.Status, execution.FinalizationStatus, currentTask.Status)
 	}
-	if dispatcher.callCount() != 2 {
-		t.Fatalf("dispatch calls = %d, want 2", dispatcher.callCount())
+	if dispatcher.callCount() != 1 {
+		t.Fatalf("dispatch calls = %d, want 1", dispatcher.callCount())
 	}
 }
 

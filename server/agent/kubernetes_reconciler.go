@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
@@ -16,9 +17,13 @@ import (
 
 type KubernetesReconcileService interface {
 	FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error)
-	RecordExecutionPod(context.Context, string, string) error
+	RecordExecutionRuntime(context.Context, string, string, bool) error
 	ResumeExecutionFinalization(context.Context, string) error
 	ReconcileExecutionFailure(context.Context, string, string, string, []byte, int) error
+	ClaimExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
+	CompleteExecutionCleanup(context.Context, string, string) (bool, error)
+	FailExecutionCleanup(context.Context, string, string, time.Time) (bool, error)
+	ReleaseExecutionCleanup(context.Context, string, string) error
 }
 
 type KubernetesReconcilerConfig struct {
@@ -29,6 +34,8 @@ type KubernetesReconcilerConfig struct {
 	MissingResourceGrace time.Duration
 	HeartbeatTimeout     time.Duration
 	PreStartRetryLimit   int
+	CleanupLease         time.Duration
+	CleanupRetryBackoff  time.Duration
 }
 
 type KubernetesReconciler struct {
@@ -51,6 +58,12 @@ func NewKubernetesReconciler(dispatcher KubernetesDispatcher, service Kubernetes
 	}
 	if cfg.MissingResourceGrace <= 0 {
 		cfg.MissingResourceGrace = 30 * time.Second
+	}
+	if cfg.CleanupLease <= 0 {
+		cfg.CleanupLease = time.Minute
+	}
+	if cfg.CleanupRetryBackoff <= 0 {
+		cfg.CleanupRetryBackoff = 10 * time.Second
 	}
 	return &KubernetesReconciler{dispatcher: dispatcher, service: service, config: cfg, logger: logger, now: time.Now}
 }
@@ -108,7 +121,9 @@ func (r *KubernetesReconciler) ReconcileOnce(ctx context.Context) error {
 
 func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *model.TaskExecution, now time.Time) error {
 	if isTerminalKubernetesExecution(execution.Status) {
-		return r.service.ResumeExecutionFinalization(ctx, execution.ID)
+		finalizeErr := r.service.ResumeExecutionFinalization(ctx, execution.ID)
+		cleanupErr := r.cleanupExecution(ctx, execution)
+		return errors.Join(finalizeErr, cleanupErr)
 	}
 	state, err := r.dispatcher.Inspect(ctx, execution)
 	if err != nil {
@@ -121,9 +136,12 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 		}
 		return err
 	}
-	if state.PodUID != "" {
-		if err := r.service.RecordExecutionPod(ctx, execution.ID, state.PodUID); err != nil {
+	if state.PodUID != "" || state.MainContainerStarted {
+		if err := r.service.RecordExecutionRuntime(ctx, execution.ID, state.PodUID, state.MainContainerStarted); err != nil {
 			return err
+		}
+		if state.MainContainerStarted {
+			execution.Started = true
 		}
 	}
 
@@ -162,7 +180,44 @@ func (r *KubernetesReconciler) fail(ctx context.Context, execution *model.TaskEx
 	if err := r.service.ReconcileExecutionFailure(ctx, execution.ID, status, reason, diagnostics, r.config.PreStartRetryLimit); err != nil {
 		return err
 	}
-	return r.dispatcher.Delete(ctx, execution)
+	return r.cleanupExecution(ctx, execution)
+}
+
+func (r *KubernetesReconciler) cleanupExecution(ctx context.Context, execution *model.TaskExecution) (err error) {
+	if execution == nil || execution.CleanupStatus == model.TaskExecutionCleanupDone {
+		return nil
+	}
+	token := uuid.NewString()
+	won, err := r.service.ClaimExecutionCleanup(ctx, execution.ID, token, r.config.CleanupLease)
+	if err != nil || !won {
+		return err
+	}
+	defer func() {
+		if releaseErr := r.service.ReleaseExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token); err == nil && releaseErr != nil {
+			err = releaseErr
+		}
+	}()
+	deleteCtx, cancel := context.WithTimeout(ctx, r.config.CleanupLease/2)
+	deleteErr := r.dispatcher.Delete(deleteCtx, execution)
+	cancel()
+	if deleteErr != nil {
+		failed, failErr := r.service.FailExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token, time.Now().Add(r.config.CleanupRetryBackoff))
+		if failErr != nil {
+			return errors.Join(deleteErr, failErr)
+		}
+		if !failed {
+			return errors.Join(deleteErr, errors.New("Kubernetes execution cleanup lease lost while recording retry"))
+		}
+		return deleteErr
+	}
+	completed, err := r.service.CompleteExecutionCleanup(ctx, execution.ID, token)
+	if err != nil {
+		return err
+	}
+	if !completed {
+		return errors.New("Kubernetes execution cleanup lease lost")
+	}
+	return nil
 }
 
 func exitCodeValue(exitCode *int32) any {

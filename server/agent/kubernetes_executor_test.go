@@ -645,6 +645,9 @@ func TestKubernetesDispatcherInspectMapsJobAndPodTermination(t *testing.T) {
 	if state.Reason != "OOMKilled" || state.Message != "memory limit exceeded" {
 		t.Fatalf("diagnostics = %q/%q, want termination diagnostics", state.Reason, state.Message)
 	}
+	if !state.MainContainerStarted {
+		t.Fatal("terminated agent container must prove execution started")
+	}
 }
 
 func TestKubernetesDispatcherInspectMapsPendingAndCompleteJobs(t *testing.T) {
@@ -741,7 +744,10 @@ func TestKubernetesDispatcherInspectKeepsRunningPodRunning(t *testing.T) {
 			Namespace: "anban",
 			Labels:    map[string]string{kubernetesExecutionIDLabel: testExecution().ID},
 		},
-		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{{
+			Name:  kubernetesAgentContainerName,
+			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		}}},
 	}
 	ownTestPod(job, pod)
 	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), testExecution())
@@ -750,6 +756,9 @@ func TestKubernetesDispatcherInspectKeepsRunningPodRunning(t *testing.T) {
 	}
 	if state.Phase != kubernetesPhaseRunning {
 		t.Fatalf("phase = %q, want running for a running Pod", state.Phase)
+	}
+	if !state.MainContainerStarted {
+		t.Fatal("running agent container must prove execution started")
 	}
 }
 
@@ -773,6 +782,9 @@ func TestKubernetesDispatcherInspectMapsContainerWaitingDiagnostics(t *testing.T
 			}
 			if state.Phase != kubernetesPhasePending || state.Reason != reason || state.Message != "waiting message" {
 				t.Fatalf("state = %#v, want pending waiting diagnostics", state)
+			}
+			if state.MainContainerStarted {
+				t.Fatal("waiting container must remain pre-start")
 			}
 		})
 	}
