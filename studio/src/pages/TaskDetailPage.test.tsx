@@ -356,7 +356,6 @@ describe('TaskDetailPage', () => {
   it('does not invent an interruption reason or preserved workspace when failure details are absent', async () => {
     mockTask(taskWith({
       status: 'failed',
-      error_message: null,
       result: { files: null, output: '' },
     }))
 

@@ -107,7 +107,6 @@ vi.mock('@/lib/api', async () => {
             prompt: '帮我写一篇新品发布公众号文章',
             status: 'pending',
             progress: 0,
-            error_message: null,
             plan_id: null,
             project_id: 'project-1',
             result: { files: null, output: '' },

@@ -56,7 +56,6 @@ const fixtures = vi.hoisted(() => {
     prompt: '审批任务',
     status: 'completed',
     progress: 100,
-    error_message: null,
     plan_id: null,
     project_id: project.id,
     result: { files: null, output: '' },
