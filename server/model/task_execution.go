@@ -19,7 +19,7 @@ type TaskExecution struct {
 	JobName            string         `gorm:"type:varchar(63);index" json:"job_name,omitempty"`
 	PodUID             string         `gorm:"type:varchar(64)" json:"pod_uid,omitempty"`
 	Started            bool           `gorm:"default:false;not null" json:"started"`
-	ManifestStatus     string         `gorm:"type:varchar(20);default:''" json:"manifest_status,omitempty"`
+	ManifestStatus     string         `gorm:"type:varchar(20);default:'';check:chk_task_execution_manifest_status,manifest_status IN ('','pending','published','discarded','rejected')" json:"manifest_status,omitempty"`
 	TerminalReason     string         `gorm:"type:varchar(80);default:''" json:"terminal_reason,omitempty"`
 	Diagnostics        datatypes.JSON `gorm:"type:json" json:"diagnostics,omitempty"`
 	LastHeartbeatAt    *time.Time     `json:"last_heartbeat_at,omitempty"`
@@ -38,6 +38,13 @@ const (
 	TaskExecutionFailed      = "failed"
 	TaskExecutionCancelled   = "cancelled"
 	TaskExecutionTimedOut    = "timed_out"
+)
+
+const (
+	TaskExecutionManifestPending   = "pending"
+	TaskExecutionManifestPublished = "published"
+	TaskExecutionManifestDiscarded = "discarded"
+	TaskExecutionManifestRejected  = "rejected"
 )
 
 // ExecutionTransition contains optional fields persisted with a status CAS.

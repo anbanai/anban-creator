@@ -177,8 +177,8 @@ type TaskFileRepository interface {
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
 	PublishCurrentExecution(ctx context.Context, taskID, executionID string) error
-	DiscardExecution(ctx context.Context, executionID string) error
-	ReplacePendingExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
+	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
+	ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
 }
 
 // TaskExecutionRepository provides durable execution-attempt persistence.

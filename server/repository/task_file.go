@@ -18,6 +18,7 @@ var (
 	ErrNoPendingExecutionArtifacts = errors.New("no pending execution artifacts")
 	ErrTaskFileExecutionNotCurrent = errors.New("task file execution is not current")
 	ErrTaskFileTaskNotRunning      = errors.New("task is not running for artifact publication")
+	ErrTaskFileManifestState       = errors.New("task file manifest state conflict")
 )
 
 type taskFileRepository struct {
@@ -105,46 +106,85 @@ func (r *taskFileRepository) PublishCurrentExecution(ctx context.Context, taskID
 		return ErrTaskFileExecutionNotCurrent
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var task model.Task
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", taskID).First(&task).Error; err != nil {
+		task, execution, err := lockCurrentArtifactExecution(tx, taskID, executionID)
+		if err != nil {
 			return err
 		}
-		if task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
-			return ErrTaskFileExecutionNotCurrent
+		if execution.ManifestStatus == model.TaskExecutionManifestPublished {
+			return nil
 		}
-		if task.Status != model.TaskStatusRunning {
-			return ErrTaskFileTaskNotRunning
+		if err := requireRunningArtifactExecution(task, execution); err != nil {
+			return err
 		}
-		var pending, published int64
+		if execution.ManifestStatus == model.TaskExecutionManifestDiscarded {
+			return ErrTaskFileManifestState
+		}
+		if execution.ManifestStatus != model.TaskExecutionManifestPending {
+			return ErrNoPendingExecutionArtifacts
+		}
+		var pending int64
 		if err := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).Count(&pending).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePublished).Count(&published).Error; err != nil {
-			return err
-		}
 		if pending == 0 {
-			if published > 0 {
-				return nil
-			}
 			return ErrNoPendingExecutionArtifacts
 		}
 		if err := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id <> ? AND state = ?", taskID, executionID, model.TaskFileStatePublished).Update("state", model.TaskFileStateSuperseded).Error; err != nil {
 			return err
 		}
-		return tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).Update("state", model.TaskFileStatePublished).Error
+		result := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).Update("state", model.TaskFileStatePublished)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != pending {
+			return fmt.Errorf("%w: published %d of %d rows", ErrTaskFileManifestState, result.RowsAffected, pending)
+		}
+		statusResult := tx.Model(&model.TaskExecution{}).Where("id = ? AND manifest_status = ?", executionID, model.TaskExecutionManifestPending).Update("manifest_status", model.TaskExecutionManifestPublished)
+		if statusResult.Error != nil {
+			return statusResult.Error
+		}
+		if statusResult.RowsAffected != 1 {
+			return ErrTaskFileManifestState
+		}
+		return nil
 	})
 }
 
-// DiscardExecution retains audit metadata while making pending rows permanently invisible.
-func (r *taskFileRepository) DiscardExecution(ctx context.Context, executionID string) error {
-	if strings.TrimSpace(executionID) == "" {
-		return fmt.Errorf("execution_id is required")
-	}
-	return r.db.WithContext(ctx).Model(&model.TaskFile{}).Where("execution_id = ? AND state = ?", executionID, model.TaskFileStatePending).Update("state", model.TaskFileStateSuperseded).Error
+// DiscardCurrentExecution retains audit metadata while making pending rows permanently invisible.
+func (r *taskFileRepository) DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, execution, err := lockCurrentArtifactExecution(tx, taskID, executionID)
+		if err != nil {
+			return err
+		}
+		if execution.ManifestStatus == model.TaskExecutionManifestPublished {
+			return ErrTaskFileManifestState
+		}
+		if execution.ManifestStatus == model.TaskExecutionManifestDiscarded {
+			return nil
+		}
+		if err := requireRunningArtifactExecution(task, execution); err != nil {
+			return err
+		}
+		if execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending {
+			return ErrTaskFileManifestState
+		}
+		if err := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).Update("state", model.TaskFileStateSuperseded).Error; err != nil {
+			return err
+		}
+		statusResult := tx.Model(&model.TaskExecution{}).Where("id = ? AND manifest_status = ?", executionID, execution.ManifestStatus).Update("manifest_status", model.TaskExecutionManifestDiscarded)
+		if statusResult.Error != nil {
+			return statusResult.Error
+		}
+		if statusResult.RowsAffected != 1 {
+			return ErrTaskFileManifestState
+		}
+		return nil
+	})
 }
 
-// ReplacePendingExecution atomically replaces only one attempt's unpublished manifest.
-func (r *taskFileRepository) ReplacePendingExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error {
+// ReplacePendingCurrentExecution atomically replaces only the current running attempt's unpublished manifest.
+func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
 		return fmt.Errorf("task_id and execution_id are required")
 	}
@@ -161,12 +201,15 @@ func (r *taskFileRepository) ReplacePendingExecution(ctx context.Context, taskID
 		}
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var published int64
-		if err := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePublished).Count(&published).Error; err != nil {
+		task, execution, err := lockCurrentArtifactExecution(tx, taskID, executionID)
+		if err != nil {
 			return err
 		}
-		if published > 0 {
-			return fmt.Errorf("execution artifacts are already published")
+		if execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending {
+			return ErrTaskFileManifestState
+		}
+		if err := requireRunningArtifactExecution(task, execution); err != nil {
+			return err
 		}
 		if err := tx.Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).Delete(&model.TaskFile{}).Error; err != nil {
 			return err
@@ -179,8 +222,40 @@ func (r *taskFileRepository) ReplacePendingExecution(ctx context.Context, taskID
 				return err
 			}
 		}
+		statusResult := tx.Model(&model.TaskExecution{}).Where("id = ? AND manifest_status = ?", executionID, execution.ManifestStatus).Update("manifest_status", model.TaskExecutionManifestPending)
+		if statusResult.Error != nil {
+			return statusResult.Error
+		}
+		if statusResult.RowsAffected != 1 {
+			return ErrTaskFileManifestState
+		}
 		return nil
 	})
+}
+
+func lockCurrentArtifactExecution(tx *gorm.DB, taskID, executionID string) (*model.Task, *model.TaskExecution, error) {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
+		return nil, nil, ErrTaskFileExecutionNotCurrent
+	}
+	var task model.Task
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", taskID).First(&task).Error; err != nil {
+		return nil, nil, err
+	}
+	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+		return nil, nil, ErrTaskFileExecutionNotCurrent
+	}
+	var execution model.TaskExecution
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND task_id = ?", executionID, taskID).First(&execution).Error; err != nil {
+		return nil, nil, err
+	}
+	return &task, &execution, nil
+}
+
+func requireRunningArtifactExecution(task *model.Task, execution *model.TaskExecution) error {
+	if task.Status != model.TaskStatusRunning || execution.Status != model.TaskExecutionRunning {
+		return ErrTaskFileTaskNotRunning
+	}
+	return nil
 }
 
 func (r *taskFileRepository) BatchCreate(ctx context.Context, files []*model.TaskFile) error {

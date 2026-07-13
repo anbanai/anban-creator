@@ -236,7 +236,10 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		files = append(files, taskFile)
 	}
 	if executionID != "" {
-		if err := s.repo.TaskFiles().ReplacePendingExecution(ctx, task.ID, executionID, files); err != nil {
+		if err := s.repo.TaskFiles().ReplacePendingCurrentExecution(ctx, task.ID, executionID, files); err != nil {
+			if errors.Is(err, repository.ErrTaskFileExecutionNotCurrent) || errors.Is(err, repository.ErrTaskFileTaskNotRunning) || errors.Is(err, repository.ErrTaskFileManifestState) {
+				return fmt.Errorf("%w: %v", ErrTaskArtifactExecutionConflict, err)
+			}
 			return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
 		}
 		return nil
