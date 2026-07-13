@@ -503,8 +503,8 @@ func (s *TaskService) renewFinalizationLease(parent context.Context, executionID
 	return ctx, func() {
 		once.Do(func() {
 			close(stop)
-			cancel()
 			<-stopped
+			cancel()
 		})
 	}, lost
 }

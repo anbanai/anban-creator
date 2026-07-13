@@ -30,8 +30,8 @@ func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 		URL:         " " + publicURL + " ",
 		FileName:    " product.png ",
 		ContentType: " image/png ",
-		UploadID:    " upload-1 ",
-		Key:         " key-1 ",
+		UploadID:    " attacker-upload ",
+		Key:         " uploads/pending/victim/attacker-upload/secret.png ",
 		Instruction: "  保持包装和 Logo  ",
 	}}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: map[string]bool{"image": true}})
 
@@ -53,11 +53,8 @@ func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	if got[0].ContentType != "image/png" {
 		t.Fatalf("content type = %q", got[0].ContentType)
 	}
-	if got[0].UploadID != "upload-1" {
-		t.Fatalf("upload id = %q", got[0].UploadID)
-	}
-	if got[0].Key != "key-1" {
-		t.Fatalf("key = %q", got[0].Key)
+	if got[0].UploadID != "" || got[0].Key != "" {
+		t.Fatalf("client storage authority persisted: %#v", got[0])
 	}
 	if got[0].Instruction != "保持包装和 Logo" {
 		t.Fatalf("instruction = %q", got[0].Instruction)
