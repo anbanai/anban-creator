@@ -296,11 +296,18 @@ func (h *AgentHandler) PrepareArtifactUpload(c fiber.Ctx) error {
 		if isAgentTaskAccessError(err) {
 			return Error(c, fiber.StatusForbidden, "task access denied")
 		}
-		if strings.Contains(err.Error(), "storage provider") || strings.Contains(err.Error(), "OSS storage") || strings.Contains(err.Error(), "credential") {
+		if errors.Is(err, service.ErrTaskArtifactUnavailable) {
 			h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("prepare agent artifact upload unavailable")
-			return Error(c, fiber.StatusServiceUnavailable, err.Error())
+			return Error(c, fiber.StatusServiceUnavailable, "task artifact storage temporarily unavailable")
 		}
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		if errors.Is(err, service.ErrTaskArtifactExecutionConflict) {
+			return Error(c, fiber.StatusConflict, "task execution is no longer current")
+		}
+		if errors.Is(err, service.ErrTaskArtifactInvalid) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("prepare agent artifact upload failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to prepare task artifact upload")
 	}
 	return Success(c, result)
 }
@@ -324,8 +331,19 @@ func (h *AgentHandler) ReportArtifactManifest(c fiber.Ctx) error {
 		if isAgentTaskAccessError(err) {
 			return Error(c, fiber.StatusForbidden, "task access denied")
 		}
-		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("agent artifact manifest rejected")
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		switch {
+		case errors.Is(err, service.ErrTaskArtifactExecutionConflict):
+			return Error(c, fiber.StatusConflict, "task execution is no longer current")
+		case errors.Is(err, service.ErrTaskArtifactInvalid):
+			h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("agent artifact manifest rejected")
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrTaskArtifactUnavailable):
+			h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("agent artifact storage unavailable")
+			return Error(c, fiber.StatusServiceUnavailable, "task artifact storage temporarily unavailable")
+		default:
+			h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("agent artifact manifest failed")
+			return Error(c, fiber.StatusInternalServerError, "failed to persist task artifact manifest")
+		}
 	}
 	return Success(c, fiber.Map{"ok": true})
 }

@@ -342,6 +342,49 @@ func TestAgentAPIKeyProgressBehaviorIsPreserved(t *testing.T) {
 	}
 }
 
+func TestAgentAPIKeyCannotUseLegacyArtifactContractForCloudTask(t *testing.T) {
+	app, repo, task, _, _, rawAPIKey, store := setupExecutionScopedAgentApp(t)
+	for _, endpoint := range []struct{ path, body string }{
+		{"/agent/artifacts/prepare", `{"task_id":"` + task.ID + `","relative_path":"output/content.md","size":7}`},
+		{"/agent/artifacts/manifest", `{"task_id":"` + task.ID + `","files":[]}`},
+	} {
+		req := agentJSONRequest(endpoint.path, endpoint.body)
+		req.Header.Set("Authorization", "Bearer "+rawAPIKey)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != fiber.StatusConflict {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("%s status/body = %d/%s", endpoint.path, resp.StatusCode, body)
+		}
+	}
+	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
+	if len(files) != 0 || store.uploadKey != "" {
+		t.Fatalf("rejected requests caused side effects: files=%#v upload=%q", files, store.uploadKey)
+	}
+}
+
+func TestAgentArtifactManifestPersistenceFailureIsRedacted(t *testing.T) {
+	app, _, task, executionID, token, _, store := setupExecutionScopedAgentApp(t)
+	key := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/executions/" + executionID + "/artifacts/output/content.md"
+	store.stats = map[string]*storage.ObjectInfo{key: {Key: key, Size: 7, ContentType: "text/markdown"}}
+	file := `{"relative_path":"output/content.md","object_key":"` + key + `","size":7,"sha256":"` + strings.Repeat("a", 64) + `"}`
+	req := agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+task.ID+`","execution_id":"`+executionID+`","files":[`+file+`,`+file+`]}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusInternalServerError || !strings.Contains(string(body), "failed to persist") {
+		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "UNIQUE") || strings.Contains(string(body), "constraint") {
+		t.Fatalf("database detail leaked: %s", body)
+	}
+}
+
 func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
 	t.Helper()
 	db := setupTaskHandlerTestDB(t)
@@ -469,6 +512,7 @@ type fakeAgentArtifactStorage struct {
 	uploadKey         string
 	uploadContentType string
 	stats             map[string]*storage.ObjectInfo
+	statErr           error
 }
 
 func (f *fakeAgentArtifactStorage) Name() string { return "oss" }
@@ -496,11 +540,42 @@ func (f *fakeAgentArtifactStorage) IsOwnedURL(rawURL string) bool {
 	return strings.HasPrefix(rawURL, "https://cdn.example.com/")
 }
 func (f *fakeAgentArtifactStorage) StatObject(_ context.Context, key string) (*storage.ObjectInfo, error) {
+	if f.statErr != nil {
+		return nil, f.statErr
+	}
 	if f.stats == nil || f.stats[key] == nil {
 		return nil, os.ErrNotExist
 	}
 	cp := *f.stats[key]
 	return &cp, nil
+}
+
+func TestAgentArtifactManifestErrorTaxonomy(t *testing.T) {
+	app, _, task, store, rawKey, _ := setupAgentArtifactApp(t)
+	wantKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/output/article.md"
+	request := func(body string) (int, string) {
+		req := httptest.NewRequest(http.MethodPost, "/agent/artifacts/manifest", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+rawKey)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(data)
+	}
+	invalidStatus, _ := request(`{"task_id":"` + task.ID + `","files":[{"relative_path":"../bad","object_key":"bad","size":1,"sha256":"` + strings.Repeat("a", 64) + `"}]}`)
+	if invalidStatus != fiber.StatusBadRequest {
+		t.Fatalf("invalid status = %d", invalidStatus)
+	}
+	store.statErr = errors.New("secret backend endpoint timed out")
+	unavailableStatus, body := request(`{"task_id":"` + task.ID + `","files":[{"relative_path":"output/article.md","object_key":"` + wantKey + `","size":1,"sha256":"` + strings.Repeat("a", 64) + `"}]}`)
+	if unavailableStatus != fiber.StatusServiceUnavailable {
+		t.Fatalf("unavailable status/body = %d/%s", unavailableStatus, body)
+	}
+	if strings.Contains(body, "secret backend") || !strings.Contains(body, "temporarily unavailable") {
+		t.Fatalf("backend detail leaked: %s", body)
+	}
 }
 
 func setupAgentArtifactApp(t *testing.T) (*fiber.App, repository.Repository, *model.Task, *fakeAgentArtifactStorage, string, string) {

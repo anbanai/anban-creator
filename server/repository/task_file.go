@@ -2,13 +2,22 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path"
+	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/google/uuid"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+)
+
+var (
+	ErrNoPendingExecutionArtifacts = errors.New("no pending execution artifacts")
+	ErrTaskFileExecutionNotCurrent = errors.New("task file execution is not current")
+	ErrTaskFileTaskNotRunning      = errors.New("task is not running for artifact publication")
 )
 
 type taskFileRepository struct {
@@ -20,6 +29,9 @@ func newTaskFileRepository(db *gorm.DB) TaskFileRepository {
 }
 
 func (r *taskFileRepository) Create(ctx context.Context, file *model.TaskFile) error {
+	if err := validateTaskFileMutation(file); err != nil {
+		return err
+	}
 	if file.ID == "" {
 		file.ID = uuid.New().String()
 	}
@@ -30,6 +42,9 @@ func (r *taskFileRepository) Create(ctx context.Context, file *model.TaskFile) e
 // (task_id, execution_id, file_path) conflict.
 // The original ID is preserved when a conflict occurs.
 func (r *taskFileRepository) Upsert(ctx context.Context, file *model.TaskFile) (*model.TaskFile, error) {
+	if err := validateTaskFileMutation(file); err != nil {
+		return nil, err
+	}
 	if file.ID == "" {
 		file.ID = uuid.New().String()
 	}
@@ -82,10 +97,37 @@ func (r *taskFileRepository) FindByExecutionID(ctx context.Context, executionID 
 	return files, nil
 }
 
-// PublishExecution atomically replaces a task's published artifact set. The
-// caller must validate that executionID is still the task's current execution.
-func (r *taskFileRepository) PublishExecution(ctx context.Context, taskID, executionID string) error {
+// PublishCurrentExecution is the guarded Task 8 publication contract. It locks
+// the task row and validates the current running attempt in the same transaction
+// that swaps the published artifact set.
+func (r *taskFileRepository) PublishCurrentExecution(ctx context.Context, taskID, executionID string) error {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
+		return ErrTaskFileExecutionNotCurrent
+	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task model.Task
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", taskID).First(&task).Error; err != nil {
+			return err
+		}
+		if task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+			return ErrTaskFileExecutionNotCurrent
+		}
+		if task.Status != model.TaskStatusRunning {
+			return ErrTaskFileTaskNotRunning
+		}
+		var pending, published int64
+		if err := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).Count(&pending).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePublished).Count(&published).Error; err != nil {
+			return err
+		}
+		if pending == 0 {
+			if published > 0 {
+				return nil
+			}
+			return ErrNoPendingExecutionArtifacts
+		}
 		if err := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id <> ? AND state = ?", taskID, executionID, model.TaskFileStatePublished).Update("state", model.TaskFileStateSuperseded).Error; err != nil {
 			return err
 		}
@@ -95,11 +137,29 @@ func (r *taskFileRepository) PublishExecution(ctx context.Context, taskID, execu
 
 // DiscardExecution retains audit metadata while making pending rows permanently invisible.
 func (r *taskFileRepository) DiscardExecution(ctx context.Context, executionID string) error {
+	if strings.TrimSpace(executionID) == "" {
+		return fmt.Errorf("execution_id is required")
+	}
 	return r.db.WithContext(ctx).Model(&model.TaskFile{}).Where("execution_id = ? AND state = ?", executionID, model.TaskFileStatePending).Update("state", model.TaskFileStateSuperseded).Error
 }
 
 // ReplacePendingExecution atomically replaces only one attempt's unpublished manifest.
 func (r *taskFileRepository) ReplacePendingExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
+		return fmt.Errorf("task_id and execution_id are required")
+	}
+	for _, file := range files {
+		if file == nil {
+			return fmt.Errorf("task file is required")
+		}
+		file.TaskID, file.ExecutionID, file.State = taskID, executionID, model.TaskFileStatePending
+		if err := validateTaskFileMutation(file); err != nil {
+			return err
+		}
+		if err := validateTaskFileRelativePath(file.FilePath); err != nil {
+			return err
+		}
+	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var published int64
 		if err := tx.Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePublished).Count(&published).Error; err != nil {
@@ -128,11 +188,44 @@ func (r *taskFileRepository) BatchCreate(ctx context.Context, files []*model.Tas
 		return nil
 	}
 	for _, f := range files {
+		if err := validateTaskFileMutation(f); err != nil {
+			return err
+		}
 		if f.ID == "" {
 			f.ID = uuid.New().String()
 		}
 	}
 	return r.db.WithContext(ctx).Create(files).Error
+}
+
+func validateTaskFileMutation(file *model.TaskFile) error {
+	if file == nil {
+		return fmt.Errorf("task file is required")
+	}
+	if strings.TrimSpace(file.TaskID) == "" {
+		return fmt.Errorf("task file task_id is required")
+	}
+	if file.State == "" {
+		file.State = model.TaskFileStatePublished
+	}
+	switch file.State {
+	case model.TaskFileStatePending, model.TaskFileStatePublished, model.TaskFileStateSuperseded:
+	default:
+		return fmt.Errorf("invalid task file state %q", file.State)
+	}
+	if strings.TrimSpace(file.FilePath) == "" {
+		return fmt.Errorf("invalid task file path %q", file.FilePath)
+	}
+	return nil
+}
+
+func validateTaskFileRelativePath(filePath string) error {
+	rawPath := strings.TrimSpace(strings.ReplaceAll(filePath, "\\", "/"))
+	cleaned := path.Clean(rawPath)
+	if cleaned == "." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "/") || cleaned != rawPath || rawPath != filePath {
+		return fmt.Errorf("invalid task file path %q", filePath)
+	}
+	return nil
 }
 
 func (r *taskFileRepository) FindByID(ctx context.Context, id string) (*model.TaskFile, error) {

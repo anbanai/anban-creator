@@ -322,7 +322,7 @@ func TestExecutionArtifactManifestStaysPendingUntilPublication(t *testing.T) {
 	if len(pending) != 1 || pending[0].State != model.TaskFileStatePending {
 		t.Fatalf("pending = %#v", pending)
 	}
-	if err := repo.TaskFiles().PublishExecution(ctx, task.ID, executionID); err != nil {
+	if err := repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, executionID); err != nil {
 		t.Fatal(err)
 	}
 	visible, _ = repo.TaskFiles().FindByTaskID(ctx, task.ID)

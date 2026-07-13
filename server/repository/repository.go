@@ -176,7 +176,7 @@ type TaskFileRepository interface {
 	BatchCreate(ctx context.Context, files []*model.TaskFile) error
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
-	PublishExecution(ctx context.Context, taskID, executionID string) error
+	PublishCurrentExecution(ctx context.Context, taskID, executionID string) error
 	DiscardExecution(ctx context.Context, executionID string) error
 	ReplacePendingExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
 }
