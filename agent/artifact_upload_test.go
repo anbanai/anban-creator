@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -199,6 +201,36 @@ func TestJobArtifactHashCancellationPreservesCompletionReserve(t *testing.T) {
 type slowArtifactReader struct {
 	io.ReadCloser
 	delay time.Duration
+}
+
+func TestLocalArtifactFinalizationUsesFreshContextAfterRunCancellation(t *testing.T) {
+	t.Setenv(homeTemplateEnv, "")
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
+
+	var prepared atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/agent/artifacts/prepare" {
+			prepared.Store(true)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{}})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	cancelRun()
+	cfg := &Config{
+		ServerURL: server.URL, APIKey: "key", TaskID: "task-1", TaskType: "article",
+		Topic: "write", Workspace: root, MaxTurns: 1, ArtifactUploadMode: ArtifactUploadDirect,
+	}
+	if err := runAgent(runCtx, cfg, io.Discard, io.Discard); err == nil {
+		t.Fatal("canceled agent run unexpectedly succeeded")
+	}
+	if !prepared.Load() {
+		t.Fatal("local artifact finalization inherited the canceled run context")
+	}
 }
 
 func (r *slowArtifactReader) Read(p []byte) (int, error) {
