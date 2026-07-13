@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -26,6 +28,10 @@ const (
 	maxBootstrapResponse     = 2 << 20
 	maxBootstrapFileBytes    = 64 << 20
 	maxBootstrapTotalBytes   = 512 << 20
+	maxBootstrapFiles        = 256
+	maxBootstrapTurns        = 1000
+	maxBootstrapModelBytes   = 256
+	maxBootstrapPromptBytes  = 1 << 20
 	bootstrapRequestTimeout  = 30 * time.Second
 	bootstrapDownloadTimeout = 2 * time.Minute
 )
@@ -89,6 +95,9 @@ func BootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error
 	if err := validateBootstrapIdentity(cfg.ExecutionID, &envelope.Data); err != nil {
 		return nil, err
 	}
+	if err := validateBootstrapRuntime(&envelope.Data); err != nil {
+		return &envelope.Data, err
+	}
 	if err := materializeBootstrap(ctx, cfg.Workspace, envelope.Data.Files, bootstrapDownloadClient()); err != nil {
 		return &envelope.Data, fmt.Errorf("materialize bootstrap workspace: %w", err)
 	}
@@ -96,14 +105,11 @@ func BootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error
 }
 
 func readProjectedToken(path string) (string, error) {
-	info, err := os.Lstat(path)
+	resolved, info, err := resolveProjectedTokenPath(path)
 	if err != nil {
-		return "", fmt.Errorf("lstat projected token: %w", err)
+		return "", err
 	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("projected token must be a regular non-symlink file")
-	}
-	f, err := os.Open(path)
+	f, err := os.Open(resolved)
 	if err != nil {
 		return "", fmt.Errorf("open projected token: %w", err)
 	}
@@ -126,9 +132,91 @@ func readProjectedToken(path string) (string, error) {
 	return token, nil
 }
 
+func resolveProjectedTokenPath(path string) (string, os.FileInfo, error) {
+	visible, err := filepath.Abs(strings.TrimSpace(path))
+	if err != nil || strings.TrimSpace(path) == "" {
+		return "", nil, fmt.Errorf("resolve projected token path")
+	}
+	root := filepath.Dir(visible)
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve projected token root: %w", err)
+	}
+	rootInfo, err := os.Lstat(canonicalRoot)
+	if err != nil || !rootInfo.IsDir() {
+		return "", nil, fmt.Errorf("projected token root must be a directory")
+	}
+	rel, err := filepath.Rel(root, visible)
+	if err != nil || !pathWithinRoot(rel) {
+		return "", nil, fmt.Errorf("projected token path escapes volume root")
+	}
+	components := splitPathComponents(rel)
+	current := canonicalRoot
+	for links := 0; ; {
+		if len(components) == 0 {
+			return "", nil, fmt.Errorf("projected token target is invalid")
+		}
+		component := components[0]
+		components = components[1:]
+		candidate := filepath.Join(current, component)
+		info, err := os.Lstat(candidate)
+		if err != nil {
+			return "", nil, fmt.Errorf("resolve projected token target: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			links++
+			if links > 32 {
+				return "", nil, fmt.Errorf("projected token has too many symlinks")
+			}
+			target, err := os.Readlink(candidate)
+			if err != nil {
+				return "", nil, fmt.Errorf("read projected token symlink: %w", err)
+			}
+			if filepath.IsAbs(target) || filepath.VolumeName(target) != "" {
+				return "", nil, fmt.Errorf("projected token symlink must be relative")
+			}
+			expanded := filepath.Clean(filepath.Join(current, target))
+			expandedRel, err := filepath.Rel(canonicalRoot, expanded)
+			if err != nil || !pathWithinRoot(expandedRel) {
+				return "", nil, fmt.Errorf("projected token symlink escapes volume root")
+			}
+			components = append(splitPathComponents(expandedRel), components...)
+			current = canonicalRoot
+			continue
+		}
+		if len(components) > 0 {
+			if !info.IsDir() {
+				return "", nil, fmt.Errorf("projected token parent is not a directory")
+			}
+			current = candidate
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			return "", nil, fmt.Errorf("projected token target must be a regular file")
+		}
+		return candidate, info, nil
+	}
+}
+
+func pathWithinRoot(rel string) bool {
+	return rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func splitPathComponents(path string) []string {
+	parts := strings.Split(filepath.Clean(path), string(filepath.Separator))
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" && part != "." {
+			result = append(result, part)
+		}
+	}
+	return result
+}
+
 func decodeBoundedJSON(r io.Reader, limit int64, out any) error {
 	limited := &io.LimitedReader{R: r, N: limit + 1}
 	decoder := json.NewDecoder(limited)
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
 		return err
 	}
@@ -143,6 +231,13 @@ func decodeBoundedJSON(r io.Reader, limit int64, out any) error {
 		return fmt.Errorf("response exceeds size limit")
 	}
 	return nil
+}
+
+func validateBootstrapResponse(executionID string, response *BootstrapResponse) error {
+	if err := validateBootstrapIdentity(executionID, response); err != nil {
+		return err
+	}
+	return validateBootstrapRuntime(response)
 }
 
 func validateBootstrapIdentity(executionID string, response *BootstrapResponse) error {
@@ -171,15 +266,59 @@ func validateBootstrapIdentity(executionID string, response *BootstrapResponse) 
 	return nil
 }
 
+func validateBootstrapRuntime(response *BootstrapResponse) error {
+	if response == nil {
+		return fmt.Errorf("bootstrap response is missing")
+	}
+	if !validBootstrapTaskType(response.TaskType) {
+		return fmt.Errorf("bootstrap task type is invalid")
+	}
+	if strings.TrimSpace(response.Prompt) == "" || len(response.Prompt) > maxBootstrapPromptBytes {
+		return fmt.Errorf("bootstrap prompt is invalid")
+	}
+	if response.MaxTurns <= 0 || response.MaxTurns > maxBootstrapTurns {
+		return fmt.Errorf("bootstrap max turns is invalid")
+	}
+	expectedAgent := "anban:" + serveragent.TaskTypeToAgent(response.TaskType)
+	if response.AgentFlag != expectedAgent {
+		return fmt.Errorf("bootstrap agent flag is invalid")
+	}
+	if response.AutoMemoryDirectory != ".claude/memory" {
+		return fmt.Errorf("bootstrap auto memory directory is invalid")
+	}
+	if strings.TrimSpace(response.Model) != response.Model || len(response.Model) > maxBootstrapModelBytes {
+		return fmt.Errorf("bootstrap model is invalid")
+	}
+	if len(response.Files) > maxBootstrapFiles {
+		return fmt.Errorf("bootstrap file count exceeds limit")
+	}
+	if _, err := preflightBootstrapFiles(response.Files); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validBootstrapTaskType(taskType string) bool {
+	switch taskType {
+	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformVideoCreator, model.PlatformVideoEditor, model.PlatformMontage:
+		return true
+	default:
+		return false
+	}
+}
+
 func bootstrapDownloadClient() *http.Client {
 	client := &http.Client{Timeout: bootstrapDownloadTimeout}
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 5 {
-			return fmt.Errorf("too many bootstrap download redirects")
-		}
-		return validateBootstrapDownloadURL(req.URL)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 	return client
+}
+
+type preparedBootstrapFile struct {
+	file BootstrapFile
+	rel  string
+	mode os.FileMode
 }
 
 func materializeBootstrap(ctx context.Context, workspace string, files []BootstrapFile, client *http.Client) error {
@@ -187,25 +326,13 @@ func materializeBootstrap(ctx context.Context, workspace string, files []Bootstr
 	if err != nil {
 		return err
 	}
-	seen := make(map[string]string, len(files))
+	prepared, err := preflightBootstrapFiles(files)
+	if err != nil {
+		return err
+	}
 	var total int64
-	for _, file := range files {
-		rel, err := cleanBootstrapPath(file.Path)
-		if err != nil {
-			return err
-		}
-		folded := strings.ToLower(filepath.ToSlash(rel))
-		if previous, ok := seen[folded]; ok {
-			return fmt.Errorf("duplicate bootstrap path %q conflicts with %q", rel, previous)
-		}
-		seen[folded] = rel
-		if (file.Text == "") == (strings.TrimSpace(file.DownloadURL) == "") {
-			return fmt.Errorf("bootstrap file %q must have exactly one content source", rel)
-		}
-		mode := os.FileMode(file.Mode)
-		if file.Mode > 0o777 || mode&0o022 != 0 || mode&0o111 != 0 || file.Mode&0o7000 != 0 || (mode != 0o600 && mode != 0o644) {
-			return fmt.Errorf("unsafe bootstrap file mode %#o", file.Mode)
-		}
+	for _, preparedFile := range prepared {
+		file, rel, mode := preparedFile.file, preparedFile.rel, preparedFile.mode
 		parent := filepath.Dir(filepath.Join(root, rel))
 		if err := secureMkdirAll(root, parent); err != nil {
 			return err
@@ -217,10 +344,7 @@ func materializeBootstrap(ctx context.Context, workspace string, files []Bootstr
 			if client == nil {
 				return fmt.Errorf("bootstrap download client is required")
 			}
-			parsed, err := url.Parse(strings.TrimSpace(file.DownloadURL))
-			if err != nil || validateBootstrapDownloadURL(parsed) != nil {
-				return fmt.Errorf("unsafe bootstrap download URL for %q", rel)
-			}
+			parsed, _ := url.Parse(strings.TrimSpace(file.DownloadURL))
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 			if err != nil {
 				return fmt.Errorf("create bootstrap download %q: %w", rel, err)
@@ -258,14 +382,79 @@ func materializeBootstrap(ctx context.Context, workspace string, files []Bootstr
 	return nil
 }
 
+func preflightBootstrapFiles(files []BootstrapFile) ([]preparedBootstrapFile, error) {
+	if len(files) > maxBootstrapFiles {
+		return nil, fmt.Errorf("bootstrap file count exceeds limit")
+	}
+	seen := make(map[string]string, len(files))
+	prepared := make([]preparedBootstrapFile, 0, len(files))
+	var textTotal int64
+	for _, file := range files {
+		rel, err := cleanBootstrapPath(file.Path)
+		if err != nil {
+			return nil, err
+		}
+		folded := serveragent.PortableFilenameKey(filepath.ToSlash(rel))
+		if previous, ok := seen[folded]; ok {
+			return nil, fmt.Errorf("duplicate bootstrap path %q conflicts with %q", rel, previous)
+		}
+		seen[folded] = rel
+		memoryKey := serveragent.PortableFilenameKey(".claude/memory")
+		if folded == memoryKey || strings.HasPrefix(folded, memoryKey+"/") {
+			return nil, fmt.Errorf("bootstrap path %q targets protected auto memory", rel)
+		}
+		if (file.Text == "") == (strings.TrimSpace(file.DownloadURL) == "") {
+			return nil, fmt.Errorf("bootstrap file %q must have exactly one content source", rel)
+		}
+		mode := os.FileMode(file.Mode)
+		if file.Mode > 0o777 || mode&0o022 != 0 || mode&0o111 != 0 || file.Mode&0o7000 != 0 || (mode != 0o600 && mode != 0o644) {
+			return nil, fmt.Errorf("unsafe bootstrap file mode %#o", file.Mode)
+		}
+		if file.Text != "" {
+			if len(file.Text) > maxBootstrapFileBytes {
+				return nil, fmt.Errorf("bootstrap file %q exceeds size limit", rel)
+			}
+			textTotal += int64(len(file.Text))
+			if textTotal > maxBootstrapTotalBytes {
+				return nil, fmt.Errorf("bootstrap materialization exceeds size limit")
+			}
+		} else {
+			parsed, err := url.Parse(strings.TrimSpace(file.DownloadURL))
+			if err != nil || validateBootstrapDownloadURL(parsed) != nil {
+				return nil, fmt.Errorf("unsafe bootstrap download URL for %q", rel)
+			}
+		}
+		prepared = append(prepared, preparedBootstrapFile{file: file, rel: rel, mode: mode})
+	}
+	for key, rel := range seen {
+		ancestor := key
+		for {
+			index := strings.LastIndex(ancestor, "/")
+			if index < 0 {
+				break
+			}
+			ancestor = ancestor[:index]
+			if conflicting, exists := seen[ancestor]; exists {
+				return nil, fmt.Errorf("bootstrap path %q conflicts with file path %q", rel, conflicting)
+			}
+		}
+	}
+	return prepared, nil
+}
+
 func cleanBootstrapPath(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || filepath.IsAbs(raw) || filepath.VolumeName(raw) != "" || portableDrivePath(raw) || strings.Contains(raw, "\\") {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed != raw || filepath.IsAbs(raw) || filepath.VolumeName(raw) != "" || portableDrivePath(raw) || strings.Contains(raw, "\\") {
 		return "", fmt.Errorf("bootstrap path %q must be clean and relative", raw)
 	}
 	clean := filepath.Clean(filepath.FromSlash(raw))
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.ToSlash(clean) != raw {
 		return "", fmt.Errorf("bootstrap path %q escapes workspace or is not clean", raw)
+	}
+	for _, component := range strings.Split(filepath.ToSlash(clean), "/") {
+		if err := serveragent.ValidatePortableFilenameComponent(component); err != nil {
+			return "", fmt.Errorf("bootstrap path %q is not portable: %w", raw, err)
+		}
 	}
 	return clean, nil
 }

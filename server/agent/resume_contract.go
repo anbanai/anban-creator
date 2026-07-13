@@ -133,6 +133,17 @@ func ValidatePortableFilenameComponent(name string) error {
 	if name == "" || bytes > maxPortableFilenameBytes || units > maxPortableFilenameUTF16Units {
 		return fmt.Errorf("filename component exceeds portable limits")
 	}
+	if strings.TrimRight(name, ". ") != name {
+		return fmt.Errorf("filename component has a non-portable trailing character")
+	}
+	if isWindowsReservedResumeFilename(name) {
+		return fmt.Errorf("filename component uses a reserved portable name")
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return fmt.Errorf("filename component contains a non-portable character")
+		}
+	}
 	return nil
 }
 

@@ -63,6 +63,19 @@ func TestPrepareResumeAttachmentFilenameRejectsNonPortableOriginal(t *testing.T)
 	}
 }
 
+func TestValidatePortableFilenameComponentRejectsReservedAndTrailingNames(t *testing.T) {
+	for _, name := range []string{"CON", "con.txt", "LPT1.log", "file.", "file ", "bad?.txt", "bad\x00.txt"} {
+		if err := ValidatePortableFilenameComponent(name); err == nil {
+			t.Fatalf("portable component %q accepted", name)
+		}
+	}
+	for _, name := range []string{".claude", "settings.json", "Stra\u00dfe.txt"} {
+		if err := ValidatePortableFilenameComponent(name); err != nil {
+			t.Fatalf("portable component %q rejected: %v", name, err)
+		}
+	}
+}
+
 func TestPrepareResumeAttachmentFilenameBoundsLongNamesAndCollisionSuffixes(t *testing.T) {
 	for _, raw := range []string{
 		strings.Repeat("a", 300) + ".txt",

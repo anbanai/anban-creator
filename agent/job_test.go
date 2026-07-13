@@ -2,10 +2,46 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+func TestJobCommandDoesNotRunAfterInvalidBootstrapResponse(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("workload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	completed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/agent/complete" {
+			completed = true
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/api/v1/agent/progress" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+			"execution_token": testExecutionToken(t, "execution-1", "task-1", "project-1"),
+			"task_id":         "task-1", "task_type": "", "project_id": "project-1", "prompt": "write",
+			"max_turns": 40, "agent_flag": "", "auto_memory_directory": ".claude/memory",
+		}})
+	}))
+	defer server.Close()
+	ran := false
+	cmd := newAgentCommand(io.Discard, io.Discard, func(context.Context, *Config) error { ran = true; return nil })
+	err := cmd.Run(context.Background(), []string{"anban", "job", "--server-url", server.URL, "--execution-id", "execution-1", "--workspace", t.TempDir(), "--workload-token-file", tokenFile})
+	if err == nil || ran || !completed {
+		t.Fatalf("err=%v ran=%v completed=%v", err, ran, completed)
+	}
+}
 
 func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 	var order []string
