@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/agent"
@@ -57,6 +59,29 @@ func setupCloudCompletionTest(t *testing.T, withArtifact bool, startedOverride .
 		}
 	}
 	return svc, repo, task, execution
+}
+
+type replaySafeEnqueuer struct {
+	calls    int
+	accepted int
+	seen     map[string]struct{}
+}
+
+func (e *replaySafeEnqueuer) Enqueue(string, []byte) error { return nil }
+
+func (e *replaySafeEnqueuer) EnqueueIn(string, []byte, time.Duration) error { return nil }
+
+func (e *replaySafeEnqueuer) EnqueueUnique(_ string, _ []byte, uniqueKey string) (bool, error) {
+	e.calls++
+	if e.seen == nil {
+		e.seen = make(map[string]struct{})
+	}
+	if _, exists := e.seen[uniqueKey]; exists {
+		return false, nil
+	}
+	e.seen[uniqueKey] = struct{}{}
+	e.accepted++
+	return true, nil
 }
 
 func TestCompleteCloudExecutionCurrentAttemptAndDuplicate(t *testing.T) {
@@ -189,6 +214,77 @@ func TestCompleteCloudExecutionResumesEveryDurableStage(t *testing.T) {
 				t.Fatalf("task=%s finalization=%s", foundTask.Status, foundExecution.FinalizationStatus)
 			}
 		})
+	}
+}
+
+func TestFinalizationDispatchReplayDoesNotDuplicateQueueOrInflateSlot(t *testing.T) {
+	db := setupTaskTestDB(t)
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
+	}
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, projectID := uuid.NewString(), uuid.NewString()
+	project := &model.Project{ID: projectID, UserID: userID, Name: "dispatch", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	executionID := uuid.NewString()
+	completedTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
+	if err := repo.Tasks().Create(ctx, completedTask); err != nil {
+		t.Fatal(err)
+	}
+	pendingTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending}
+	if err := repo.Tasks().Create(ctx, pendingTask); err != nil {
+		t.Fatal(err)
+	}
+	execution := &model.TaskExecution{ID: executionID, TaskID: completedTask.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, ManifestStatus: model.TaskExecutionManifestPending}
+	if err := repo.TaskExecutions().Create(ctx, execution); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{{
+		ID: uuid.NewString(), TaskID: completedTask.ID, ExecutionID: executionID, State: model.TaskFileStatePending,
+		Role: "content", FilePath: "output/content.md", FileName: "content.md", FileSize: 8,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	logger := zerolog.New(io.Discard)
+	enqueuer := &replaySafeEnqueuer{}
+	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	injected := false
+	svc.finalizationAfterStage = func(stage string) error {
+		if stage == model.TaskExecutionFinalizationDispatch && !injected {
+			injected = true
+			return errors.New("crash after pending dispatch")
+		}
+		return nil
+	}
+	result := &agent.ExecutionResult{Success: true, RemoteArtifacts: true}
+	if err := svc.CompleteCloudExecution(ctx, executionID, result); err == nil {
+		t.Fatal("expected injected crash after dispatch side effect")
+	}
+	found, _ := repo.TaskExecutions().FindByID(ctx, executionID)
+	if found.FinalizationStatus != model.TaskExecutionFinalizationSlot || enqueuer.calls != 1 || enqueuer.accepted != 1 {
+		t.Fatalf("interrupted stage=%s enqueue calls=%d accepted=%d", found.FinalizationStatus, enqueuer.calls, enqueuer.accepted)
+	}
+	if count, err := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int64(); err != nil || count != 1 {
+		t.Fatalf("slot count after first dispatch=%d err=%v, want 1", count, err)
+	}
+
+	svc.finalizationAfterStage = nil
+	if err := svc.ResumeExecutionFinalization(ctx, executionID); err != nil {
+		t.Fatalf("resume finalization: %v", err)
+	}
+	found, _ = repo.TaskExecutions().FindByID(ctx, executionID)
+	if found.FinalizationStatus != model.TaskExecutionFinalizationDone || enqueuer.calls != 2 || enqueuer.accepted != 1 {
+		t.Fatalf("resumed stage=%s enqueue calls=%d accepted=%d", found.FinalizationStatus, enqueuer.calls, enqueuer.accepted)
+	}
+	if count, err := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int64(); err != nil || count != 1 {
+		t.Fatalf("slot count after replay=%d err=%v, want stable 1", count, err)
 	}
 }
 

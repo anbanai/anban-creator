@@ -45,6 +45,9 @@ func (n *noopEnqueuer) Enqueue(taskType string, payload []byte) error { return n
 func (n *noopEnqueuer) EnqueueIn(taskType string, payload []byte, delay time.Duration) error {
 	return nil
 }
+func (n *noopEnqueuer) EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error) {
+	return true, nil
+}
 
 // ---------------------------------------------------------------------------
 // setupTestRouter creates a full Fiber app with in-memory SQLite for E2E tests.

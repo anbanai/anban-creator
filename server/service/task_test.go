@@ -99,7 +99,8 @@ func setupTaskServiceWithCredits(t *testing.T, creditSvc *CreditService) (*TaskS
 
 // mockEnqueuer captures enqueued tasks without executing them.
 type mockEnqueuer struct {
-	enqueued []string
+	enqueued  []string
+	uniqueIDs map[string]struct{}
 }
 
 type cancelingFailTaskEnqueuer struct {
@@ -117,6 +118,11 @@ func (e cancelingFailTaskEnqueuer) EnqueueIn(string, []byte, time.Duration) erro
 	return e.err
 }
 
+func (e cancelingFailTaskEnqueuer) EnqueueUnique(string, []byte, string) (bool, error) {
+	e.cancel()
+	return false, e.err
+}
+
 func (m *mockEnqueuer) Enqueue(taskType string, payload []byte) error {
 	m.enqueued = append(m.enqueued, taskType)
 	return nil
@@ -125,6 +131,18 @@ func (m *mockEnqueuer) Enqueue(taskType string, payload []byte) error {
 func (m *mockEnqueuer) EnqueueIn(taskType string, payload []byte, delay time.Duration) error {
 	m.enqueued = append(m.enqueued, taskType)
 	return nil
+}
+
+func (m *mockEnqueuer) EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error) {
+	if m.uniqueIDs == nil {
+		m.uniqueIDs = make(map[string]struct{})
+	}
+	if _, exists := m.uniqueIDs[uniqueKey]; exists {
+		return false, nil
+	}
+	m.uniqueIDs[uniqueKey] = struct{}{}
+	m.enqueued = append(m.enqueued, taskType)
+	return true, nil
 }
 
 type resumeTestStorage struct {

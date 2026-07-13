@@ -27,6 +27,10 @@ type TaskEnqueuer interface {
 	EnqueueIn(taskType string, payload []byte, delay time.Duration) error
 }
 
+type UniqueTaskEnqueuer interface {
+	EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error)
+}
+
 type PublishedTrackingService interface {
 	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error
 }
@@ -1398,11 +1402,25 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 			return fmt.Errorf("marshal payload: %w", err)
 		}
 
-		if err := s.enqueuer.Enqueue(TypeContentGenerate, payload); err != nil {
+		uniqueEnqueuer, ok := s.enqueuer.(UniqueTaskEnqueuer)
+		if !ok {
 			if s.pubsub != nil && s.pubsub.Available() && project != nil {
 				s.pubsub.ReleaseSlot(ctx, project.ID)
 			}
+			return errors.New("content task enqueuer does not support idempotent enqueue")
+		}
+		enqueued, err := uniqueEnqueuer.EnqueueUnique(TypeContentGenerate, payload, task.ID)
+		if err != nil || !enqueued {
+			if s.pubsub != nil && s.pubsub.Available() && project != nil {
+				s.pubsub.ReleaseSlot(ctx, project.ID)
+			}
+		}
+		if err != nil {
 			return fmt.Errorf("enqueue task: %w", err)
+		}
+		if !enqueued {
+			s.logger.Info().Str("task_id", task.ID).Msg("task already enqueued for async execution")
+			return nil
 		}
 
 		s.logger.Info().Str("task_id", task.ID).Msg("task enqueued for async execution")
