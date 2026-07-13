@@ -77,7 +77,7 @@ export const mockTasks: PaginatedResponse<Task> = {
       prompt: '测试任务',
       status: 'completed',
       progress: 100,
-      error: null,
+      error_message: null,
       plan_id: null,
       project_id: 'ch-1',
       result: { files: null, output: '测试输出' },

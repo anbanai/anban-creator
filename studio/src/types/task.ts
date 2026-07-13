@@ -62,7 +62,8 @@ export interface Task {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
-  error: string | null
+  // Failure detail persisted by server model.Task.ErrorMessage.
+  error_message?: string | null
   plan_id?: string | null
   project_id: string
   result: TaskResult

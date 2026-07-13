@@ -43,7 +43,7 @@ function task(overrides: Partial<Task> = {}): Task {
     prompt: '写文章',
     status: 'completed',
     progress: 100,
-    error: null,
+    error_message: null,
     plan_id: null,
     project_id: 'project-1',
     result: { files: null, output: '' },
@@ -166,8 +166,13 @@ describe('studio business UX helpers', () => {
   })
 
   it('labels the primary task action signal', () => {
-    expect(taskActionSignal(task({ status: 'failed', error: '模型超时' }))).toMatchObject({
+    expect(taskActionSignal(task({ status: 'failed', error_message: '模型超时' }))).toMatchObject({
       label: '查看失败原因',
+      tone: 'risk',
+    })
+    expect(taskActionSignal(task({ status: 'failed', error_message: null }))).toMatchObject({
+      label: '查看任务状态',
+      hint: '未返回失败详情',
       tone: 'risk',
     })
     expect(taskActionSignal(task({ publish_approval_state: 'pending' }))).toMatchObject({

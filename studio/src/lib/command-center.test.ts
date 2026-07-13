@@ -20,7 +20,7 @@ function task(overrides: Partial<Task>): Task {
     prompt: '写一篇内容',
     status: 'completed',
     progress: 100,
-    error: null,
+    error_message: null,
     plan_id: null,
     project_id: 'project-1',
     result: { files: null, output: '' },
@@ -81,7 +81,7 @@ describe('command center rules', () => {
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [
         task({ id: 'running', status: 'running', progress: 42 }),
-        task({ id: 'failed', status: 'failed', error: '模型超时' }),
+        task({ id: 'failed', status: 'failed', error_message: '模型超时' }),
         task({ id: 'approval', publish_approval_state: 'pending' }),
       ],
       plans: [
@@ -108,7 +108,7 @@ describe('command center rules', () => {
     const signals = buildCommandCenterSignals({
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [
-        task({ id: 'failed', status: 'failed', title: '失败任务', error: '执行失败' }),
+        task({ id: 'failed', status: 'failed', title: '失败任务', error_message: '执行失败' }),
         task({ id: 'approval', title: '待审批任务', publish_approval_state: 'pending' }),
       ],
       plans: [],

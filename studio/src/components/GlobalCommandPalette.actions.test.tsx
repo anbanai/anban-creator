@@ -29,7 +29,7 @@ vi.mock('@/lib/api', async () => {
             prompt: '失败任务',
             status: 'failed',
             progress: 0,
-            error: '模型超时',
+            error_message: '模型超时',
             plan_id: null,
             project_id: 'project-1',
             result: { files: null, output: '' },

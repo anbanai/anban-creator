@@ -34,6 +34,7 @@ import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
 import { isVideoCreator, isVideoEditor, isVideoPlatform } from '@/lib/video-platforms'
 import { formatCreditDescription } from '@/lib/credit-display'
+import { taskFailureMessage } from '@/lib/studio-ux'
 
 function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): string | null {
   const metadata = tx.metadata
@@ -262,7 +263,7 @@ export default function TaskDetailPage() {
       fileLabels: resumeFiles.map((item) => item.label),
     }),
     onSuccess: () => {
-      toast.success('已提交，任务将基于原目录继续执行')
+      toast.success('已提交，任务将结合已有上下文继续执行')
       setShowResumeDialog(false)
       setResumePrompt('')
       setResumeFiles([])
@@ -450,6 +451,7 @@ export default function TaskDetailPage() {
 
   const canCancel = task.status === 'pending' || task.status === 'running'
   const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+  const failureMessage = taskFailureMessage(task)
   const currentTask = task
   const snapshot = task.project_snapshot
   const showProjectParameters = Boolean(snapshot?.platform || project)
@@ -1206,20 +1208,24 @@ export default function TaskDetailPage() {
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">执行中断</p>
+                    <p className="text-sm font-medium text-foreground">
+                      {failureMessage ? '执行失败' : '任务未完成'}
+                    </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      当前工作目录已保留，可以从失败点补充信息后继续推进。
+                      {failureMessage
+                        ? '任务已停止，可根据失败原因补充信息后继续。'
+                        : '服务端将任务标记为失败，但没有返回失败详情。'}
                     </p>
                   </div>
                 </div>
-                {task.error && (
+                {failureMessage && (
                   <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
                     <p className="text-xs font-medium text-destructive">失败原因</p>
-                    <p className="mt-1 text-sm text-foreground">{task.error}</p>
+                    <p className="mt-1 text-sm text-foreground">{failureMessage}</p>
                   </div>
                 )}
                 <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                  页面顶部可继续执行当前工作目录，或克隆为一个全新任务。
+                  可在页面顶部继续此任务，或克隆为一个全新任务。
                 </p>
               </div>
             ) : task.status === 'cancelled' ? (
@@ -1228,7 +1234,7 @@ export default function TaskDetailPage() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-foreground">执行已停止</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    当前任务没有继续运行。页面顶部可继续执行当前工作目录，或克隆为一个全新任务。
+                    当前任务没有继续运行。可在页面顶部继续此任务，或克隆为一个全新任务。
                   </p>
                 </div>
               </div>
@@ -1414,7 +1420,7 @@ export default function TaskDetailPage() {
           <DialogHeader>
             <DialogTitle>继续执行此任务</DialogTitle>
             <DialogDescription>
-              提供补充指令和文件后，任务会基于原工作目录继续执行。
+              提供补充指令和文件后，任务会结合已有上下文继续执行。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

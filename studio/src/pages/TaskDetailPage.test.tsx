@@ -335,10 +335,10 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByRole('button', { name: /再试一次/ })).not.toBeInTheDocument()
   })
 
-  it('shows failed-task diagnosis without duplicating header actions', async () => {
+  it('shows failed-task diagnosis from the deployed API error_message field without duplicating header actions', async () => {
     mockTask(taskWith({
       status: 'failed',
-      error: '模型超时',
+      error_message: '模型超时',
       result: { files: null, output: '' },
     }))
 
@@ -346,11 +346,26 @@ describe('TaskDetailPage', () => {
 
     expect(await screen.findAllByRole('button', { name: /继续执行/ })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: /克隆任务/ })).toHaveLength(1)
-    expect(screen.getByText('执行中断')).toBeInTheDocument()
+    expect(screen.getByText('执行失败')).toBeInTheDocument()
     expect(screen.getByText('模型超时')).toBeInTheDocument()
-    expect(screen.getByText('页面顶部可继续执行当前工作目录，或克隆为一个全新任务。')).toBeInTheDocument()
+    expect(screen.getByText('可在页面顶部继续此任务，或克隆为一个全新任务。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /返回任务列表/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /检查项目配置/ })).not.toBeInTheDocument()
+  })
+
+  it('does not invent an interruption reason or preserved workspace when failure details are absent', async () => {
+    mockTask(taskWith({
+      status: 'failed',
+      error_message: null,
+      result: { files: null, output: '' },
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('任务未完成')).toBeInTheDocument()
+    expect(screen.getByText('服务端将任务标记为失败，但没有返回失败详情。')).toBeInTheDocument()
+    expect(screen.queryByText('失败原因')).not.toBeInTheDocument()
+    expect(screen.queryByText(/工作目录已保留/)).not.toBeInTheDocument()
   })
 
   it('shows project parameters without the low-value reference image preview', async () => {

@@ -164,9 +164,16 @@ export interface TaskActionSignal {
   tone: 'risk' | 'publishing' | 'running' | 'success' | 'neutral'
 }
 
+export function taskFailureMessage(task: Pick<Task, 'error_message'>): string | null {
+  return task.error_message?.trim() || null
+}
+
 export function taskActionSignal(task: Task): TaskActionSignal {
   if (task.status === 'failed') {
-    return { label: '查看失败原因', hint: task.error || '进入详情后可重试或克隆', tone: 'risk' }
+    const failureMessage = taskFailureMessage(task)
+    return failureMessage
+      ? { label: '查看失败原因', hint: failureMessage, tone: 'risk' }
+      : { label: '查看任务状态', hint: '未返回失败详情', tone: 'risk' }
   }
   if (task.publish_approval_state === 'pending') {
     return { label: '处理发布审批', hint: '审核后放行到公众号草稿箱', tone: 'publishing' }
