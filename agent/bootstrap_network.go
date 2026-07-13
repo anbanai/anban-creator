@@ -6,7 +6,10 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
+
+const bootstrapDialAttemptTimeout = 10 * time.Second
 
 type bootstrapIPResolver interface {
 	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
@@ -55,11 +58,17 @@ func bootstrapSecureDialContext(resolver bootstrapIPResolver, dial bootstrapDial
 				return nil, fmt.Errorf("bootstrap DNS resolver is unavailable")
 			}
 			addresses, err = resolver.LookupIPAddr(ctx, host)
+			if cause := context.Cause(ctx); cause != nil {
+				return nil, cause
+			}
 			if err != nil || len(addresses) == 0 {
 				return nil, fmt.Errorf("resolve bootstrap download host")
 			}
 		}
 		for _, address := range addresses {
+			if cause := context.Cause(ctx); cause != nil {
+				return nil, cause
+			}
 			if !safeBootstrapIP(address.IP) {
 				return nil, fmt.Errorf("bootstrap download host resolved to an unsafe address")
 			}
@@ -67,8 +76,41 @@ func bootstrapSecureDialContext(resolver bootstrapIPResolver, dial bootstrapDial
 		if dial == nil {
 			return nil, fmt.Errorf("bootstrap network dialer is unavailable")
 		}
-		return dial(ctx, network, net.JoinHostPort(addresses[0].IP.String(), port))
+		for i, address := range addresses {
+			if cause := context.Cause(ctx); cause != nil {
+				return nil, cause
+			}
+			attemptCtx, cancel := bootstrapDialAttemptContext(ctx, len(addresses)-i)
+			// Dial the validated address directly. The HTTP transport still uses
+			// the request hostname for TLS SNI and certificate verification.
+			conn, dialErr := dial(attemptCtx, network, net.JoinHostPort(address.IP.String(), port))
+			cancel()
+			if dialErr == nil && conn != nil {
+				return conn, nil
+			}
+			if cause := context.Cause(ctx); cause != nil {
+				return nil, cause
+			}
+		}
+		return nil, fmt.Errorf("dial bootstrap download host: all %d validated addresses failed", len(addresses))
 	}
+}
+
+func bootstrapDialAttemptContext(ctx context.Context, remainingAddresses int) (context.Context, context.CancelFunc) {
+	timeout := bootstrapDialAttemptTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remainingAddresses > 0 {
+			remaining /= time.Duration(remainingAddresses)
+		}
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+	if timeout < time.Nanosecond {
+		timeout = time.Nanosecond
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 func safeBootstrapIP(ip net.IP) bool {
