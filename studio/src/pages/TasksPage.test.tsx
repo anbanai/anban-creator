@@ -239,7 +239,6 @@ describe('TasksPage Seednote reference materials', () => {
       title: '新建种草笔记',
       prompt: '',
       status: 'pending',
-      error: null,
       project_id: seednoteProject.id,
     } as Task)
   })
