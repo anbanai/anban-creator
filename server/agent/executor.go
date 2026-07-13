@@ -34,6 +34,15 @@ func filterAgentEnv(env map[string]string) map[string]string {
 	return filtered
 }
 
+func isManagedContainerEnv(key string) bool {
+	switch key {
+	case "HOME", "PATH":
+		return true
+	default:
+		return false
+	}
+}
+
 func montageSubmoduleRuntimePath(pluginDir string) string {
 	if strings.TrimSpace(pluginDir) != "" {
 		if absPluginDir, err := filepath.Abs(pluginDir); err == nil {

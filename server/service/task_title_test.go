@@ -110,6 +110,18 @@ func TestExtractTitleFromWorkspace_SkipsDotfiles(t *testing.T) {
 	}
 }
 
+func TestExtractTitleFromWorkspace_SkipsDockerRuntimeHome(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".anban-runtime-home", "cached.html"),
+		`<html><body><h1>Private Runtime Title</h1></body></html>`)
+	writeFile(t, filepath.Join(dir, "article.md"), "# Visible Title")
+
+	got := ExtractTitleFromWorkspace(dir)
+	if got != "Visible Title" {
+		t.Errorf("ExtractTitleFromWorkspace() = %q, want %q", got, "Visible Title")
+	}
+}
+
 func TestExtractTitleFromWorkspace_NoOutputDir(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "article.html"),

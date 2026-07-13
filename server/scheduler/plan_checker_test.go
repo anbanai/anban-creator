@@ -36,6 +36,11 @@ func (e *recordingEnqueuer) EnqueueIn(taskType string, payload []byte, delay tim
 	return nil
 }
 
+func (e *recordingEnqueuer) EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error) {
+	e.items = append(e.items, queuedTask{taskType: taskType, payload: append([]byte(nil), payload...)})
+	return true, nil
+}
+
 func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskService, *recordingEnqueuer, *zerolog.Logger) {
 	t.Helper()
 

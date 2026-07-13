@@ -175,6 +175,7 @@ type Task struct {
 	// unclaimed ones back to cloud so tasks never get stuck when no desktop is
 	// online. ExecutorInfo records which desktop claimed the task (diagnostics).
 	ExecutionTarget    string                           `gorm:"type:varchar(20);default:''" json:"execution_target,omitempty"`
+	CurrentExecutionID *string                          `gorm:"type:char(36);index" json:"current_execution_id,omitempty"`
 	LocalClaimDeadline *time.Time                       `gorm:"index" json:"local_claim_deadline,omitempty"`
 	ExecutorInfo       datatypes.JSONType[ExecutorMeta] `gorm:"type:json" json:"executor_info"`
 

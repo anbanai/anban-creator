@@ -102,6 +102,21 @@ func TestValidateSeednoteArtifactsFromTaskFiles(t *testing.T) {
 	}
 }
 
+func TestDockerRuntimeHomeIsNotMeaningfulOutput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DockerRuntimeHomeDirName, ".claude", "plugins", "installed_plugins.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := ValidateTaskArtifactsFromWorkDir(&model.Task{Type: model.PlatformArticle}, dir)
+	if got.Valid || got.MeaningfulFileCount != 0 {
+		t.Fatalf("runtime home validation = %#v, want no meaningful output", got)
+	}
+}
+
 func TestValidateMomentsArtifactsFromWorkDir(t *testing.T) {
 	tests := []struct {
 		name  string

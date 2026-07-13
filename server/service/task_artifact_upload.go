@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -12,10 +13,18 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const maxTaskArtifactUploadBytes = 512 * 1024 * 1024
+
+var (
+	ErrTaskArtifactInvalid           = errors.New("invalid task artifact request")
+	ErrTaskArtifactUnavailable       = errors.New("task artifact storage unavailable")
+	ErrTaskArtifactPersistence       = errors.New("task artifact persistence failed")
+	ErrTaskArtifactExecutionConflict = errors.New("task artifact execution conflict")
+)
 
 type taskArtifactObjectStatProvider interface {
 	StatObject(ctx context.Context, key string) (*storage.ObjectInfo, error)
@@ -23,6 +32,7 @@ type taskArtifactObjectStatProvider interface {
 
 type TaskArtifactPrepareRequest struct {
 	TaskID       string `json:"task_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
 	RelativePath string `json:"relative_path"`
 	Filename     string `json:"filename"`
 	ContentType  string `json:"content_type"`
@@ -31,8 +41,9 @@ type TaskArtifactPrepareRequest struct {
 }
 
 type TaskArtifactManifestRequest struct {
-	TaskID string                     `json:"task_id"`
-	Files  []TaskArtifactManifestFile `json:"files"`
+	TaskID      string                     `json:"task_id"`
+	ExecutionID string                     `json:"execution_id,omitempty"`
+	Files       []TaskArtifactManifestFile `json:"files"`
 }
 
 type TaskArtifactManifestFile struct {
@@ -45,37 +56,44 @@ type TaskArtifactManifestFile struct {
 	Role         string `json:"role"`
 }
 
-func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, authenticatedUserID string, cfg DirectUploadConfig, req TaskArtifactPrepareRequest) (*DirectUploadPrepareResult, error) {
+func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, authenticatedUserID, authenticatedExecutionID string, cfg DirectUploadConfig, req TaskArtifactPrepareRequest) (*DirectUploadPrepareResult, error) {
 	if s == nil || s.store == nil {
-		return nil, fmt.Errorf("storage provider is not available")
+		return nil, fmt.Errorf("%w: storage provider is not available", ErrTaskArtifactUnavailable)
 	}
 	if s.store.Name() != "oss" {
-		return nil, fmt.Errorf("task artifact direct uploads require OSS storage")
+		return nil, fmt.Errorf("%w: direct uploads require OSS storage", ErrTaskArtifactUnavailable)
 	}
 	taskID = firstNonEmptyString(strings.TrimSpace(taskID), strings.TrimSpace(req.TaskID))
 	if taskID == "" {
-		return nil, fmt.Errorf("task_id is required")
+		return nil, taskArtifactInvalidf("task_id is required")
+	}
+	if strings.TrimSpace(req.TaskID) != "" && req.TaskID != taskID {
+		return nil, taskArtifactInvalidf("request task_id does not match task scope")
 	}
 	task, err := s.ValidateAgentTaskAccess(ctx, taskID, authenticatedUserID)
 	if err != nil {
 		return nil, err
 	}
-	relPath, err := cleanTaskArtifactRelativePath(task, req.RelativePath)
+	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID, req.ExecutionID)
 	if err != nil {
 		return nil, err
 	}
+	relPath, err := cleanTaskArtifactRelativePath(task, req.RelativePath)
+	if err != nil {
+		return nil, taskArtifactInvalidf("%v", err)
+	}
 	if req.Size <= 0 {
-		return nil, fmt.Errorf("file size is required")
+		return nil, taskArtifactInvalidf("file size is required")
 	}
 	if req.Size > maxTaskArtifactUploadBytes {
-		return nil, fmt.Errorf("file size exceeds the %d MB limit", maxTaskArtifactUploadBytes/(1024*1024))
+		return nil, taskArtifactInvalidf("file size exceeds the %d MB limit", maxTaskArtifactUploadBytes/(1024*1024))
 	}
 	if req.SHA256 != "" && !validTaskArtifactSHA256(req.SHA256) {
-		return nil, fmt.Errorf("sha256 must be a 64-character hex string")
+		return nil, taskArtifactInvalidf("sha256 must be a 64-character hex string")
 	}
 
 	contentType := normalizeTaskArtifactContentType(req.ContentType, relPath)
-	key := buildTaskArtifactStorageKey(task, relPath)
+	key := buildTaskArtifactStorageKey(task, executionID, relPath)
 	now := time.Now
 	if cfg.Now != nil {
 		now = cfg.Now
@@ -87,7 +105,7 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	expiresAt := now().Add(time.Duration(expiresSeconds) * time.Second)
 	uploadURL, err := s.store.UploadURL(ctx, key, contentType, expiresSeconds)
 	if err != nil {
-		return nil, fmt.Errorf("create signed upload URL: %w", err)
+		return nil, fmt.Errorf("%w: create signed upload URL: %v", ErrTaskArtifactUnavailable, err)
 	}
 
 	issuer := cfg.CredentialIssuer
@@ -102,10 +120,10 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 		STSEndpoint: cfg.Storage.STSEndpoint,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("issue upload credential: %w", err)
+		return nil, fmt.Errorf("%w: issue upload credential: %v", ErrTaskArtifactUnavailable, err)
 	}
 	if cred == nil {
-		return nil, fmt.Errorf("upload credential issuer returned no credential")
+		return nil, fmt.Errorf("%w: upload credential issuer returned no credential", ErrTaskArtifactUnavailable)
 	}
 	if cred.ExpiresAt.IsZero() {
 		cred.ExpiresAt = expiresAt
@@ -129,54 +147,59 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	}, nil
 }
 
-func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, authenticatedUserID string, req TaskArtifactManifestRequest) error {
+func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, authenticatedUserID, authenticatedExecutionID string, req TaskArtifactManifestRequest) error {
 	if s == nil || s.repo == nil {
-		return fmt.Errorf("task service repository is not available")
+		return fmt.Errorf("%w: repository is not available", ErrTaskArtifactPersistence)
 	}
 	if s.store == nil {
-		return fmt.Errorf("storage provider is not available")
+		return fmt.Errorf("%w: storage provider is not available", ErrTaskArtifactUnavailable)
 	}
 	taskID = firstNonEmptyString(strings.TrimSpace(taskID), strings.TrimSpace(req.TaskID))
 	if taskID == "" {
-		return fmt.Errorf("task_id is required")
+		return taskArtifactInvalidf("task_id is required")
 	}
 	if strings.TrimSpace(req.TaskID) != "" && req.TaskID != taskID {
-		return fmt.Errorf("manifest task_id does not match request task_id")
+		return taskArtifactInvalidf("manifest task_id does not match request task_id")
 	}
 	task, err := s.ValidateAgentTaskAccess(ctx, taskID, authenticatedUserID)
 	if err != nil {
 		return err
 	}
-	prefix := buildTaskArtifactStoragePrefix(task)
+	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID, req.ExecutionID)
+	if err != nil {
+		return err
+	}
+	prefix := buildTaskArtifactStoragePrefix(task, executionID)
+	files := make([]*model.TaskFile, 0, len(req.Files))
 	for _, file := range req.Files {
 		relPath, err := cleanTaskArtifactRelativePath(task, file.RelativePath)
 		if err != nil {
-			return err
+			return taskArtifactInvalidf("%v", err)
 		}
 		objectKey := strings.TrimPrefix(strings.TrimSpace(file.ObjectKey), "/")
 		if objectKey == "" {
-			return fmt.Errorf("object_key is required for %s", relPath)
+			return taskArtifactInvalidf("object_key is required for %s", relPath)
 		}
 		if !strings.HasPrefix(objectKey, prefix) {
-			return fmt.Errorf("object key %q is outside task artifact prefix %q", objectKey, prefix)
+			return taskArtifactInvalidf("object key %q is outside task artifact prefix %q", objectKey, prefix)
 		}
-		expectedKey := buildTaskArtifactStorageKey(task, relPath)
+		expectedKey := buildTaskArtifactStorageKey(task, executionID, relPath)
 		if objectKey != expectedKey {
-			return fmt.Errorf("object key %q does not match relative path %q", objectKey, relPath)
+			return taskArtifactInvalidf("object key %q does not match relative path %q", objectKey, relPath)
 		}
 		if !validTaskArtifactSHA256(file.SHA256) {
-			return fmt.Errorf("sha256 must be a 64-character hex string for %s", relPath)
+			return taskArtifactInvalidf("sha256 must be a 64-character hex string for %s", relPath)
 		}
 		contentType := normalizeTaskArtifactContentType(file.ContentType, relPath)
 		size := file.Size
 		if statProvider, ok := s.store.(taskArtifactObjectStatProvider); ok {
 			stat, err := statProvider.StatObject(ctx, objectKey)
 			if err != nil {
-				return fmt.Errorf("stat task artifact %s: %w", objectKey, err)
+				return fmt.Errorf("%w: stat task artifact %s: %v", ErrTaskArtifactUnavailable, objectKey, err)
 			}
 			if stat.Size > 0 {
 				if size > 0 && stat.Size != size {
-					return fmt.Errorf("task artifact %s size mismatch: manifest=%d storage=%d", relPath, size, stat.Size)
+					return taskArtifactInvalidf("task artifact %s size mismatch: manifest=%d storage=%d", relPath, size, stat.Size)
 				}
 				size = stat.Size
 			}
@@ -185,7 +208,7 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 			}
 		}
 		if size <= 0 {
-			return fmt.Errorf("file size is required for %s", relPath)
+			return taskArtifactInvalidf("file size is required for %s", relPath)
 		}
 
 		filename := filepath.Base(relPath)
@@ -195,6 +218,8 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		}
 		taskFile := &model.TaskFile{
 			TaskID:          task.ID,
+			ExecutionID:     executionID,
+			State:           model.TaskFileStatePublished,
 			Role:            role,
 			FileName:        filename,
 			MimeType:        contentType,
@@ -205,19 +230,58 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 			StorageProvider: s.store.Name(),
 			FilePath:        relPath,
 		}
-		if _, err := s.repo.TaskFiles().Upsert(ctx, taskFile); err != nil {
-			return fmt.Errorf("persist task artifact %s: %w", relPath, err)
+		if executionID != "" {
+			taskFile.State = model.TaskFileStatePending
 		}
+		files = append(files, taskFile)
 	}
-	return nil
+	if executionID != "" {
+		if err := s.repo.TaskFiles().ReplacePendingCurrentExecution(ctx, task.ID, executionID, files); err != nil {
+			if errors.Is(err, repository.ErrTaskFileExecutionNotCurrent) || errors.Is(err, repository.ErrTaskFileTaskNotRunning) || errors.Is(err, repository.ErrTaskFileManifestState) {
+				return fmt.Errorf("%w: %v", ErrTaskArtifactExecutionConflict, err)
+			}
+			return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
+		}
+		return nil
+	}
+	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		for _, file := range files {
+			if _, err := tx.TaskFiles().Upsert(ctx, file); err != nil {
+				return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
+			}
+		}
+		return nil
+	})
 }
 
-func buildTaskArtifactStoragePrefix(task *model.Task) string {
-	return path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID, "artifacts") + "/"
+func buildTaskArtifactStoragePrefix(task *model.Task, executionID string) string {
+	segments := []string{"uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID}
+	if executionID != "" {
+		segments = append(segments, "executions", executionID)
+	}
+	return path.Join(append(segments, "artifacts")...) + "/"
 }
 
-func buildTaskArtifactStorageKey(task *model.Task, relPath string) string {
-	return buildTaskArtifactStoragePrefix(task) + filepath.ToSlash(relPath)
+func buildTaskArtifactStorageKey(task *model.Task, executionID, relPath string) string {
+	return buildTaskArtifactStoragePrefix(task, executionID) + filepath.ToSlash(relPath)
+}
+
+func (s *TaskService) validateTaskArtifactExecution(ctx context.Context, task *model.Task, userID, authenticatedExecutionID, requestedExecutionID string) (string, error) {
+	authenticatedExecutionID = strings.TrimSpace(authenticatedExecutionID)
+	requestedExecutionID = strings.TrimSpace(requestedExecutionID)
+	if authenticatedExecutionID == "" {
+		if task.CurrentExecutionID != nil || requestedExecutionID != "" {
+			return "", fmt.Errorf("%w: execution identity requires an execution token", ErrTaskArtifactExecutionConflict)
+		}
+		return "", nil
+	}
+	if requestedExecutionID == "" || requestedExecutionID != authenticatedExecutionID {
+		return "", fmt.Errorf("%w: execution identity does not match request", ErrTaskArtifactExecutionConflict)
+	}
+	if err := s.ValidateAgentExecutionAccess(ctx, userID, task.ProjectID, task.ID, authenticatedExecutionID); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrTaskArtifactExecutionConflict, err)
+	}
+	return authenticatedExecutionID, nil
 }
 
 func cleanTaskArtifactRelativePath(task *model.Task, relPath string) (string, error) {
@@ -264,4 +328,8 @@ func validTaskArtifactSHA256(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
+}
+
+func taskArtifactInvalidf(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrTaskArtifactInvalid, fmt.Sprintf(format, args...))
 }

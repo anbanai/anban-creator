@@ -93,8 +93,10 @@ func normalizeHandlerEntryAttachment(a model.EntryAttachment) model.EntryAttachm
 	a.FileName = strings.TrimSpace(a.FileName)
 	a.ContentType = strings.TrimSpace(a.ContentType)
 	a.Role = strings.TrimSpace(a.Role)
-	a.UploadID = strings.TrimSpace(a.UploadID)
-	a.Key = strings.TrimSpace(a.Key)
+	// URL is validated/finalized against server-side upload records below.
+	// Client-provided storage identifiers never cross the handler boundary.
+	a.UploadID = ""
+	a.Key = ""
 	return a
 }
 

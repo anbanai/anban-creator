@@ -12,7 +12,9 @@ import (
 type Config struct {
 	ServerURL                string
 	APIKey                   string
+	ExecutionID              string
 	TaskID                   string
+	ProjectID                string
 	TaskType                 string
 	Topic                    string
 	Goal                     string
@@ -26,6 +28,7 @@ type Config struct {
 	ArticleWithCover         bool
 	ArticleWithContentImages bool
 	ArtifactUploadMode       string
+	BootstrapPrompt          string
 }
 
 const (
@@ -110,18 +113,30 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 }
 
 func (c *Config) UserPrompt() string {
+	if strings.TrimSpace(c.BootstrapPrompt) != "" {
+		return serveragent.AppendResumeContextToPrompt(c.BootstrapPrompt, c.Workspace)
+	}
 	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{
 		TaskType:                 c.TaskType,
 		Topic:                    c.Topic,
 		Goal:                     c.Goal,
 		TaskID:                   c.TaskID,
-		ProjectID:                os.Getenv("ANBAN_DEFAULT_PROJECT"),
+		ProjectID:                firstNonEmpty(c.ProjectID, os.Getenv("ANBAN_DEFAULT_PROJECT")),
 		HasContentImage:          c.HasContentImage,
 		HasTailImage:             c.HasTailImage,
 		ArticleWithCover:         &c.ArticleWithCover,
 		ArticleWithContentImages: &c.ArticleWithContentImages,
 	})
 	return serveragent.AppendResumeContextToPrompt(prompt, c.Workspace)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func montageProviderEnvFromProcess(taskType string) map[string]string {

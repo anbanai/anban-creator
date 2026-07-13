@@ -39,17 +39,24 @@ spec:
             - name: ANBAN_CLAUDE_EXECUTOR
               value: kubernetes
             - name: ANBAN_CLAUDE_AGENT_SERVER_URL
-              value: http://${micro_service_name}-svc.${namespace}.svc.cluster.local:8080
+              value: https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443
+            - name: ANBAN_SERVER_TLS_CERT_FILE
+              value: /var/run/secrets/anban-server-tls/tls.crt
+            - name: ANBAN_SERVER_TLS_KEY_FILE
+              value: /var/run/secrets/anban-server-tls/tls.key
             - name: ANBAN_AGENT_NAMESPACE
               value: ${namespace}
             - name: ANBAN_AGENT_IMAGE
               value: ${agent_image_repo}
-            - name: ANBAN_AGENT_POD_REVISION
-              value: ${version_switch}
             - name: ANBAN_AGENT_SERVICE_ACCOUNT
               value: creator-agent-runner
-            - name: ANBAN_AGENT_WORKSPACE_PVC
-              value: anban-creator
+            - name: ANBAN_AGENT_SERVER_CA_SECRET
+              value: anban-server-tls
+            - name: ANBAN_AGENT_EXECUTION_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-execution-token
+                  key: token-secret
             - name: ANBAN_AGENT_IMAGE_PULL_SECRET
               value: ${imagePullSecret}
           name: ${micro_service_name}-${version_switch}
@@ -68,9 +75,22 @@ spec:
           volumeMounts:
             - mountPath: /app/conf
               name: ${micro_service_name}-config
+            - mountPath: /var/run/secrets/anban-server-tls
+              name: anban-server-tls
+              readOnly: true
       imagePullSecrets:
         - name: ${imagePullSecret}
       volumes:
+        - name: anban-server-tls
+          secret:
+            secretName: anban-server-tls
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+              - key: ca.crt
+                path: ca.crt
         - name: ${micro_service_name}-config
           configMap:
             defaultMode: 420
@@ -90,8 +110,8 @@ spec:
   selector:
     app: ${micro_service_name}
   ports:
-    - name: http-8080
-      port: 8080
+    - name: https-8443
+      port: 8443
       protocol: TCP
       targetPort: 8080
   type: ClusterIP

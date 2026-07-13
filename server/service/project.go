@@ -47,6 +47,11 @@ type ProjectService struct {
 	logger       *zerolog.Logger
 	templateSvc  *TemplateService
 	videoCatalog VideoModelCatalog
+	memory       ProjectMemoryLifecycle
+}
+
+type ProjectMemoryLifecycle interface {
+	DeleteProjectMemory(context.Context, string) error
 }
 
 // NewProjectService creates a new ProjectService.
@@ -64,6 +69,10 @@ func (s *ProjectService) SetVideoCatalog(catalog VideoModelCatalog) {
 		return
 	}
 	s.videoCatalog = catalog
+}
+
+func (s *ProjectService) SetProjectMemoryLifecycle(memory ProjectMemoryLifecycle) {
+	s.memory = memory
 }
 
 func (s *ProjectService) resolvedVideoCatalog() VideoModelCatalog {
@@ -329,6 +338,11 @@ func (s *ProjectService) Delete(ctx context.Context, userID, projectID string) e
 
 	if err := s.repo.Projects().Delete(ctx, projectID); err != nil {
 		return fmt.Errorf("delete project: %w", err)
+	}
+	if s.memory != nil {
+		if err := s.memory.DeleteProjectMemory(ctx, projectID); err != nil {
+			return fmt.Errorf("delete project memory: %w", err)
+		}
 	}
 	return nil
 }

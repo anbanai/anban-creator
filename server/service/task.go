@@ -27,8 +27,16 @@ type TaskEnqueuer interface {
 	EnqueueIn(taskType string, payload []byte, delay time.Duration) error
 }
 
+type UniqueTaskEnqueuer interface {
+	EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error)
+}
+
 type PublishedTrackingService interface {
 	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error
+}
+
+type cloudDraftPublisher interface {
+	PublishDraft(context.Context, string, string, []DraftArticleInput) (*PublishDraftResult, error)
 }
 
 // TypeContentGenerate is the Asynq task type for content generation.
@@ -36,24 +44,36 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo                  repository.Repository
-	executor              agent.TaskExecutor
-	logger                *zerolog.Logger
-	enqueuer              TaskEnqueuer
-	store                 storage.Provider
-	creditSvc             *CreditService
-	publishingSvc         *PublishingService
-	taskLogDir            string
-	workspaceSvc          *WorkspaceService
-	workspaceDir          string
-	pubsub                *RedisPubSub
-	pubsubCancel          context.CancelFunc // stops the listenCancelEvents goroutine
-	cancelFuncs           sync.Map           // taskID → context.CancelFunc
-	seednoteTrackingSvc   PublishedTrackingService
-	videoCatalog          VideoModelCatalog
-	videoCreditMultiplier int
-	videoBilling          srvconfig.BillingConfig
-	montageCfg            srvconfig.MontageConfig
+	repo                     repository.Repository
+	executor                 agent.TaskExecutor
+	kubernetesDispatcher     agent.KubernetesDispatcher
+	dispatchLeaseDuration    time.Duration
+	dispatchBeforeCreate     func()
+	finalizationAfterStage   func(string) error
+	finalizationAfterEffect  func(string) error
+	finalizationAfterAdvance func(string) error
+	finalizationLease        time.Duration
+	finalizationRenewEvery   time.Duration
+	finalizationRenewClaim   func(context.Context, string, string) (bool, error)
+	cleanupRetryBackoff      time.Duration
+	projectConcurrencyCap    int
+	logger                   *zerolog.Logger
+	enqueuer                 TaskEnqueuer
+	store                    storage.Provider
+	creditSvc                *CreditService
+	publishingSvc            *PublishingService
+	cloudPublisher           cloudDraftPublisher
+	taskLogDir               string
+	workspaceSvc             *WorkspaceService
+	workspaceDir             string
+	pubsub                   *RedisPubSub
+	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
+	cancelFuncs              sync.Map           // taskID → context.CancelFunc
+	seednoteTrackingSvc      PublishedTrackingService
+	videoCatalog             VideoModelCatalog
+	videoCreditMultiplier    int
+	videoBilling             srvconfig.BillingConfig
+	montageCfg               srvconfig.MontageConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
 	ilinkNotifier  *IlinkNotifier
@@ -73,11 +93,7 @@ type TaskService struct {
 	defaultModel      string
 	maxTurnsOverrides map[string]int
 	memoryMgr         *projectmemory.ProjectMemoryManager
-	// projectConcurrencyCap optionally lowers per-project concurrency for
-	// executors that reuse a mutable project workspace, such as Kubernetes
-	// project Pods. Zero means no service-level cap.
-	projectConcurrencyCap int
-	nasResumeEnabled      bool
+	nasResumeEnabled  bool
 }
 
 // NewTaskService creates a new TaskService.
@@ -96,19 +112,23 @@ func NewTaskService(
 	publishingSvc *PublishingService,
 ) *TaskService {
 	svc := &TaskService{
-		repo:             repo,
-		executor:         executor,
-		logger:           logger,
-		enqueuer:         enqueuer,
-		store:            store,
-		creditSvc:        creditSvc,
-		publishingSvc:    publishingSvc,
-		taskLogDir:       taskLogDir,
-		workspaceSvc:     workspaceSvc,
-		workspaceDir:     workspaceDir,
-		pubsub:           pubsub,
-		executionTimeout: 60 * time.Minute,
-		persistTimeout:   10 * time.Minute,
+		repo:                   repo,
+		executor:               executor,
+		logger:                 logger,
+		enqueuer:               enqueuer,
+		store:                  store,
+		creditSvc:              creditSvc,
+		publishingSvc:          publishingSvc,
+		cloudPublisher:         publishingSvc,
+		taskLogDir:             taskLogDir,
+		workspaceSvc:           workspaceSvc,
+		workspaceDir:           workspaceDir,
+		pubsub:                 pubsub,
+		executionTimeout:       60 * time.Minute,
+		persistTimeout:         10 * time.Minute,
+		finalizationLease:      time.Minute,
+		finalizationRenewEvery: 15 * time.Second,
+		cleanupRetryBackoff:    10 * time.Second,
 	}
 	svc.montageCfg = defaultMontageServiceConfig()
 
@@ -230,6 +250,13 @@ func (s *TaskService) notifyTerminal(ctx context.Context, task *model.Task, stat
 	}
 }
 
+func (s *TaskService) notifyTerminalDurable(ctx context.Context, task *model.Task, status, errMsg string) error {
+	if s.ilinkNotifier == nil {
+		return nil
+	}
+	return s.ilinkNotifier.NotifyTerminalDurable(ctx, task, status, errMsg)
+}
+
 // SetTopicPoolService sets the topic pool service for plan-task integration.
 func (s *TaskService) SetTopicPoolService(svc *TopicPoolService) {
 	s.topicPoolSvc = svc
@@ -300,7 +327,7 @@ func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int 
 	if project != nil && project.MaxConcurrentTasks > 0 {
 		maxConcurrent = project.MaxConcurrentTasks
 	}
-	if s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
+	if s.kubernetesDispatcher == nil && s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
 		return s.projectConcurrencyCap
 	}
 	return maxConcurrent
@@ -1153,6 +1180,9 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 	if userID != "" && taskErr == nil && task != nil && task.UserID != userID {
 		return fmt.Errorf("task not found")
 	}
+	if taskErr == nil && task != nil && task.CurrentExecutionID != nil && s.kubernetesDispatcher != nil {
+		return s.cancelCloudExecution(ctx, task, userID)
+	}
 
 	// Atomically transition status: only pending or running can be cancelled.
 	swapped, err := s.compareAndSwapCancelStatus(ctx, id, userID, model.TaskStatusRunning)
@@ -1372,11 +1402,25 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 			return fmt.Errorf("marshal payload: %w", err)
 		}
 
-		if err := s.enqueuer.Enqueue(TypeContentGenerate, payload); err != nil {
+		uniqueEnqueuer, ok := s.enqueuer.(UniqueTaskEnqueuer)
+		if !ok {
 			if s.pubsub != nil && s.pubsub.Available() && project != nil {
 				s.pubsub.ReleaseSlot(ctx, project.ID)
 			}
+			return errors.New("content task enqueuer does not support idempotent enqueue")
+		}
+		enqueued, err := uniqueEnqueuer.EnqueueUnique(TypeContentGenerate, payload, task.ID)
+		if err != nil || !enqueued {
+			if s.pubsub != nil && s.pubsub.Available() && project != nil {
+				s.pubsub.ReleaseSlot(ctx, project.ID)
+			}
+		}
+		if err != nil {
 			return fmt.Errorf("enqueue task: %w", err)
+		}
+		if !enqueued {
+			s.logger.Info().Str("task_id", task.ID).Msg("task already enqueued for async execution")
+			return nil
 		}
 
 		s.logger.Info().Str("task_id", task.ID).Msg("task enqueued for async execution")
@@ -1455,13 +1499,15 @@ func (s *TaskService) DispatchPendingTasks(ctx context.Context, projectID string
 		return fmt.Errorf("find pending: %w", err)
 	}
 
+	var dispatchErr error
 	for _, t := range pending {
 		if err := s.EnqueueExecution(ctx, t, project); err != nil {
 			s.logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to dispatch pending task")
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("dispatch pending task %s: %w", t.ID, err))
 		}
 	}
 
-	return nil
+	return dispatchErr
 }
 
 // RefundForTask refunds credits for a failed task. This is a public wrapper
