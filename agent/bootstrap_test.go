@@ -243,6 +243,23 @@ func TestValidateBootstrapIdentityRejectsOversizedOrNonCompactJWT(t *testing.T) 
 	}
 }
 
+func TestWindowsBootstrapModeCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		desired, actual os.FileMode
+		want            bool
+	}{
+		{desired: 0o600, actual: 0o666, want: true},
+		{desired: 0o644, actual: 0o666, want: true},
+		{desired: 0o444, actual: 0o444, want: true},
+		{desired: 0o444, actual: 0o666, want: false},
+		{desired: 0o644, actual: 0o444, want: false},
+	} {
+		if got := windowsBootstrapModeCompatible(tc.desired, tc.actual); got != tc.want {
+			t.Fatalf("mode(%#o,%#o)=%v want %v", tc.desired, tc.actual, got, tc.want)
+		}
+	}
+}
+
 func TestBootstrapJobDoesNotFollowRedirectWithWorkloadToken(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenFile, []byte("token"), 0o600); err != nil {

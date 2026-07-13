@@ -14,6 +14,10 @@ import (
 )
 
 func TestJobCommandDoesNotRunAfterInvalidBootstrapResponse(t *testing.T) {
+	t.Setenv(jobFinalizationTimeoutEnv, "60ms")
+	previousReserve := jobCompletionReserve
+	jobCompletionReserve = 20 * time.Millisecond
+	t.Cleanup(func() { jobCompletionReserve = previousReserve })
 	tokenFile := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenFile, []byte("workload"), 0o600); err != nil {
 		t.Fatal(err)
@@ -26,7 +30,7 @@ func TestJobCommandDoesNotRunAfterInvalidBootstrapResponse(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/api/v1/agent/progress" {
-			w.WriteHeader(http.StatusOK)
+			time.Sleep(50 * time.Millisecond)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
@@ -85,21 +89,30 @@ func TestJobCommandAcceptsOnlyBootstrapFlags(t *testing.T) {
 }
 
 func TestFinalizationContextIsBoundedForJob(t *testing.T) {
-	t.Setenv(jobFinalizationTimeoutEnv, "25ms")
-	ctx, cancel := finalizationContext(&Config{ExecutionID: "execution-1"})
-	defer cancel()
-	if _, ok := ctx.Deadline(); !ok {
+	t.Setenv(jobFinalizationTimeoutEnv, "40ms")
+	previousReserve := jobCompletionReserve
+	jobCompletionReserve = 15 * time.Millisecond
+	t.Cleanup(func() { jobCompletionReserve = previousReserve })
+	window := newFinalizationWindow(&Config{ExecutionID: "execution-1"})
+	workCtx, cancelWork := window.workContext()
+	defer cancelWork()
+	if _, ok := workCtx.Deadline(); !ok {
 		t.Fatal("job finalization context has no deadline")
 	}
 	select {
-	case <-ctx.Done():
+	case <-workCtx.Done():
 	case <-time.After(time.Second):
-		t.Fatal("job finalization context did not time out")
+		t.Fatal("job pre-completion context did not time out")
+	}
+	completeCtx, cancelComplete := window.completionContext()
+	defer cancelComplete()
+	if completeCtx.Err() != nil {
+		t.Fatalf("completion reserve was already expired: %v", completeCtx.Err())
 	}
 }
 
 func TestFinalizationContextCanBeCancelled(t *testing.T) {
-	ctx, cancel := finalizationContext(&Config{ExecutionID: "execution-1"})
+	ctx, cancel := newFinalizationWindow(&Config{ExecutionID: "execution-1"}).workContext()
 	cancel()
 	select {
 	case <-ctx.Done():

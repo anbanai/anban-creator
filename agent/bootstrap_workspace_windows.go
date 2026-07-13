@@ -45,7 +45,7 @@ func materializePreparedBootstrap(ctx context.Context, root string, prepared []p
 		if os.IsNotExist(err) {
 			continue
 		}
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != item.mode {
+		if err != nil || !info.Mode().IsRegular() || !windowsBootstrapModeCompatible(item.mode, info.Mode()) {
 			return fmt.Errorf("bootstrap target %q conflicts with existing file", item.rel)
 		}
 		equal, err := filesEqual(target, filepath.Join(stage, fmt.Sprintf("%06d", i)))

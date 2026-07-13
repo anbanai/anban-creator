@@ -30,6 +30,7 @@ type createdBootstrapEntry struct {
 }
 
 var errBootstrapParentMissing = errors.New("bootstrap parent missing")
+var bootstrapFsync = unix.Fsync
 
 func materializePreparedBootstrap(ctx context.Context, root string, prepared []preparedBootstrapFile, client *http.Client) error {
 	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
@@ -111,13 +112,15 @@ func materializePreparedBootstrap(ctx context.Context, root string, prepared []p
 		}
 		err = unix.Linkat(stageFD, item.name, parentFD, base, 0)
 		if err == nil {
-			err = unix.Fsync(parentFD)
+			createdFiles = append(createdFiles, createdBootstrapEntry{parentFD: parentFD, name: base})
+			err = bootstrapFsync(parentFD)
 		}
 		if err != nil {
-			unix.Close(parentFD)
+			if len(createdFiles) == 0 || createdFiles[len(createdFiles)-1].parentFD != parentFD {
+				unix.Close(parentFD)
+			}
 			return fmt.Errorf("publish bootstrap file %q: %w", item.prepared.rel, err)
 		}
-		createdFiles = append(createdFiles, createdBootstrapEntry{parentFD: parentFD, name: base})
 	}
 	rollback = false
 	return nil

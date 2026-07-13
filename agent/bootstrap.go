@@ -374,6 +374,10 @@ type preparedBootstrapFile struct {
 
 var bootstrapCommitHook func(string) error
 
+func windowsBootstrapModeCompatible(desired, actual os.FileMode) bool {
+	return (desired.Perm()&0o222 != 0) == (actual.Perm()&0o222 != 0)
+}
+
 func materializeBootstrap(ctx context.Context, workspace string, files []BootstrapFile, client *http.Client) error {
 	root, err := validateWorkspaceRoot(workspace)
 	if err != nil {

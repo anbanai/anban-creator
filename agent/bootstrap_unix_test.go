@@ -94,6 +94,28 @@ func TestMaterializeBootstrapParentSwapCannotEscapePinnedDirectory(t *testing.T)
 	}
 }
 
+func TestMaterializeBootstrapPostLinkFsyncFailureRollsBackLink(t *testing.T) {
+	root := t.TempDir()
+	failNext := false
+	previousFsync := bootstrapFsync
+	bootstrapFsync = func(fd int) error {
+		if failNext {
+			failNext = false
+			return errors.New("forced fsync failure")
+		}
+		return previousFsync(fd)
+	}
+	bootstrapCommitHook = func(string) error { failNext = true; return nil }
+	t.Cleanup(func() { bootstrapFsync = previousFsync; bootstrapCommitHook = nil })
+	err := materializeBootstrap(context.Background(), root, []BootstrapFile{{Path: "output.txt", Text: "x", Mode: 0o644}}, nil)
+	if err == nil {
+		t.Fatal("expected fsync failure")
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "output.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("link survived rollback: %v", statErr)
+	}
+}
+
 func assertBootstrapWorkspaceEmpty(t *testing.T, root string) {
 	t.Helper()
 	entries, err := os.ReadDir(root)

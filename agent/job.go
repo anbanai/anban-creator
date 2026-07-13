@@ -33,10 +33,13 @@ func newJobCommand(bootstrap bootstrapJobFunc, run runAgentFunc) *cli.Command {
 					cfg := jobRuntimeConfig(jobCfg, response)
 					result := serverExecutionFailure(jobCfg.Workspace, err)
 					reporter := NewReporter(cfg)
-					finalCtx, cancel := finalizationContext(cfg)
-					defer cancel()
-					_ = reporter.ReportResult(finalCtx, result)
-					_ = reporter.ReportComplete(finalCtx, result)
+					window := newFinalizationWindow(cfg)
+					workCtx, cancelWork := window.workContext()
+					_ = reporter.ReportResult(workCtx, result)
+					cancelWork()
+					completeCtx, cancelComplete := window.completionContext()
+					_ = reporter.ReportComplete(completeCtx, result)
+					cancelComplete()
 				}
 				return fmt.Errorf("bootstrap job: %w", err)
 			}

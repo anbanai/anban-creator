@@ -2119,8 +2119,6 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.AgentServerURL) == "" {
 			errs = append(errs, "claude.agent_server_url is required when claude.executor is \"kubernetes\"")
-		} else if parsed, err := url.Parse(strings.TrimSpace(c.Claude.AgentServerURL)); err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || (parsed.Path != "" && parsed.Path != "/") || strings.Contains(parsed.Host, ":") && parsed.Port() == "" {
-			errs = append(errs, "claude.agent_server_url must be an unambiguous HTTPS origin when claude.executor is \"kubernetes\"")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.Namespace) == "" {
 			errs = append(errs, "claude.kubernetes.namespace is required")
