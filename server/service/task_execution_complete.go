@@ -163,8 +163,12 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 		if err != nil {
 			return err
 		}
-		if err := step(leaseCtx); err != nil {
-			return err
+		stepErr := step(leaseCtx)
+		if leaseErr := finalizationLeaseError(leaseLost); leaseErr != nil {
+			return leaseErr
+		}
+		if stepErr != nil {
+			return stepErr
 		}
 		if s.finalizationAfterStage != nil {
 			if err := s.finalizationAfterStage(next); err != nil {
@@ -176,6 +180,9 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 		}
 		renewed, err := s.renewFinalizationClaim(leaseCtx, execution.ID, token)
 		if err != nil {
+			if leaseErr := finalizationLeaseError(leaseLost); leaseErr != nil {
+				return leaseErr
+			}
 			return fmt.Errorf("renew finalization before advancing to %s: %w", next, err)
 		}
 		if !renewed {
@@ -685,7 +692,7 @@ func (s *TaskService) cleanupCancelledExecution(ctx context.Context, execution *
 		if backoff <= 0 {
 			backoff = 10 * time.Second
 		}
-		failed, failErr := s.repo.TaskExecutions().FailCleanup(context.WithoutCancel(ctx), execution.ID, token, time.Now().Add(backoff))
+		failed, failErr := s.repo.TaskExecutions().FailCleanup(context.WithoutCancel(ctx), execution.ID, token, backoff)
 		if failErr != nil {
 			return errors.Join(fmt.Errorf("delete cancelled Kubernetes Job: %w", deleteErr), failErr)
 		}

@@ -17,12 +17,13 @@ import (
 
 type KubernetesReconcileService interface {
 	FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error)
-	RecordExecutionRuntime(context.Context, string, string, bool) error
+	RecordExecutionPod(context.Context, string, string) error
+	ResumeExecutionDispatch(context.Context, string) error
 	ResumeExecutionFinalization(context.Context, string) error
 	ReconcileExecutionFailure(context.Context, string, string, string, []byte, int) error
 	ClaimExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
 	CompleteExecutionCleanup(context.Context, string, string) (bool, error)
-	FailExecutionCleanup(context.Context, string, string, time.Time) (bool, error)
+	FailExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
 	ReleaseExecutionCleanup(context.Context, string, string) error
 }
 
@@ -125,6 +126,9 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 		cleanupErr := r.cleanupExecution(ctx, execution)
 		return errors.Join(finalizeErr, cleanupErr)
 	}
+	if execution.Status == model.TaskExecutionCreated || execution.Status == model.TaskExecutionDispatching {
+		return r.service.ResumeExecutionDispatch(ctx, execution.ID)
+	}
 	state, err := r.dispatcher.Inspect(ctx, execution)
 	if err != nil {
 		missingSince := execution.UpdatedAt
@@ -136,12 +140,9 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 		}
 		return err
 	}
-	if state.PodUID != "" || state.MainContainerStarted {
-		if err := r.service.RecordExecutionRuntime(ctx, execution.ID, state.PodUID, state.MainContainerStarted); err != nil {
+	if state.PodUID != "" {
+		if err := r.service.RecordExecutionPod(ctx, execution.ID, state.PodUID); err != nil {
 			return err
-		}
-		if state.MainContainerStarted {
-			execution.Started = true
 		}
 	}
 
@@ -201,7 +202,7 @@ func (r *KubernetesReconciler) cleanupExecution(ctx context.Context, execution *
 	deleteErr := r.dispatcher.Delete(deleteCtx, execution)
 	cancel()
 	if deleteErr != nil {
-		failed, failErr := r.service.FailExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token, time.Now().Add(r.config.CleanupRetryBackoff))
+		failed, failErr := r.service.FailExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token, r.config.CleanupRetryBackoff)
 		if failErr != nil {
 			return errors.Join(deleteErr, failErr)
 		}

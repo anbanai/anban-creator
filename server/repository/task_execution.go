@@ -253,28 +253,36 @@ func (r *taskExecutionRepository) Transition(
 }
 
 func (r *taskExecutionRepository) ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error) {
-	if lease <= 0 {
-		return false, fmt.Errorf("finalization lease duration must be positive")
+	now, stalePredicate, staleArg, _, err := databaseLeaseClock(r.db, "finalization_at", lease)
+	if err != nil {
+		return false, fmt.Errorf("finalization lease: %w", err)
 	}
-	stale := time.Now().Add(-lease)
 	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND finalization_status <> ?", id, model.TaskExecutionFinalizationDone).
-		Where("finalization_token = '' OR finalization_at IS NULL OR finalization_at <= ?", stale).
-		Updates(map[string]any{"finalization_token": token, "finalization_at": time.Now()})
+		Where("finalization_token = '' OR finalization_at IS NULL OR "+stalePredicate, staleArg).
+		Updates(map[string]any{"finalization_token": token, "finalization_at": now})
 	return result.RowsAffected == 1, result.Error
 }
 
 func (r *taskExecutionRepository) AdvanceFinalization(ctx context.Context, id, token, from, to string) (bool, error) {
+	now, err := databaseNow(r.db)
+	if err != nil {
+		return false, err
+	}
 	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND finalization_token = ? AND finalization_status = ?", id, token, from).
-		Updates(map[string]any{"finalization_status": to, "finalization_at": time.Now()})
+		Updates(map[string]any{"finalization_status": to, "finalization_at": now})
 	return result.RowsAffected == 1, result.Error
 }
 
 func (r *taskExecutionRepository) RenewFinalizationClaim(ctx context.Context, id, token string) (bool, error) {
+	now, err := databaseNow(r.db)
+	if err != nil {
+		return false, err
+	}
 	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND finalization_token = ? AND finalization_status <> ?", id, token, model.TaskExecutionFinalizationDone).
-		Update("finalization_at", time.Now())
+		Update("finalization_at", now)
 	return result.RowsAffected == 1, result.Error
 }
 
@@ -282,19 +290,6 @@ func (r *taskExecutionRepository) ReleaseFinalization(ctx context.Context, id, t
 	return r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND finalization_token = ?", id, token).
 		Updates(map[string]any{"finalization_token": "", "finalization_at": nil}).Error
-}
-
-func (r *taskExecutionRepository) RecordRuntimeStarted(ctx context.Context, id, podUID string) (bool, error) {
-	now := time.Now()
-	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
-		Where("id = ? AND status IN ? AND (pod_uid = '' OR pod_uid = ?)", id, []string{model.TaskExecutionStarting, model.TaskExecutionRunning}, podUID).
-		Updates(map[string]any{
-			"status":     model.TaskExecutionRunning,
-			"started":    true,
-			"started_at": gorm.Expr("COALESCE(started_at, ?)", now),
-			"pod_uid":    podUID,
-		})
-	return result.RowsAffected == 1, result.Error
 }
 
 func (r *taskExecutionRepository) TransitionPublishing(ctx context.Context, id, from, to string, publishResult []byte) (bool, error) {
@@ -309,15 +304,15 @@ func (r *taskExecutionRepository) TransitionPublishing(ctx context.Context, id, 
 }
 
 func (r *taskExecutionRepository) ClaimCleanup(ctx context.Context, id, token string, lease time.Duration) (bool, error) {
-	if lease <= 0 {
-		return false, fmt.Errorf("cleanup lease duration must be positive")
+	now, stalePredicate, staleArg, duePredicate, err := databaseLeaseClock(r.db, "cleanup_at", lease)
+	if err != nil {
+		return false, fmt.Errorf("cleanup lease: %w", err)
 	}
-	stale := time.Now().Add(-lease)
 	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND cleanup_status = ?", id, model.TaskExecutionCleanupPending).
-		Where("cleanup_next_at IS NULL OR cleanup_next_at <= ?", time.Now()).
-		Where("cleanup_token = '' OR cleanup_at IS NULL OR cleanup_at <= ?", stale).
-		Updates(map[string]any{"cleanup_token": token, "cleanup_at": time.Now()})
+		Where("cleanup_next_at IS NULL OR "+duePredicate).
+		Where("cleanup_token = '' OR cleanup_at IS NULL OR "+stalePredicate, staleArg).
+		Updates(map[string]any{"cleanup_token": token, "cleanup_at": now})
 	return result.RowsAffected == 1, result.Error
 }
 
@@ -328,7 +323,11 @@ func (r *taskExecutionRepository) CompleteCleanup(ctx context.Context, id, token
 	return result.RowsAffected == 1, result.Error
 }
 
-func (r *taskExecutionRepository) FailCleanup(ctx context.Context, id, token string, next time.Time) (bool, error) {
+func (r *taskExecutionRepository) FailCleanup(ctx context.Context, id, token string, backoff time.Duration) (bool, error) {
+	next, err := databaseFuture(r.db, backoff)
+	if err != nil {
+		return false, fmt.Errorf("cleanup retry backoff: %w", err)
+	}
 	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND cleanup_status = ? AND cleanup_token = ?", id, model.TaskExecutionCleanupPending, token).
 		Updates(map[string]any{
@@ -338,6 +337,53 @@ func (r *taskExecutionRepository) FailCleanup(ctx context.Context, id, token str
 			"cleanup_attempts": gorm.Expr("cleanup_attempts + 1"),
 		})
 	return result.RowsAffected == 1, result.Error
+}
+
+func databaseNow(db *gorm.DB) (clause.Expr, error) {
+	switch db.Dialector.Name() {
+	case "mysql":
+		return gorm.Expr("CURRENT_TIMESTAMP(6)"), nil
+	case "sqlite":
+		return gorm.Expr("STRFTIME('%Y-%m-%d %H:%M:%f', 'now')"), nil
+	default:
+		return clause.Expr{}, fmt.Errorf("leases are unsupported for database dialect %q", db.Dialector.Name())
+	}
+}
+
+func databaseLeaseClock(db *gorm.DB, column string, lease time.Duration) (clause.Expr, string, int64, string, error) {
+	if lease <= 0 {
+		return clause.Expr{}, "", 0, "", fmt.Errorf("lease duration must be positive")
+	}
+	now, err := databaseNow(db)
+	if err != nil {
+		return clause.Expr{}, "", 0, "", err
+	}
+	switch db.Dialector.Name() {
+	case "mysql":
+		return now, column + " <= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND)", lease.Microseconds(), "cleanup_next_at <= CURRENT_TIMESTAMP(6)", nil
+	case "sqlite":
+		milliseconds := lease.Milliseconds()
+		if milliseconds == 0 {
+			milliseconds = 1
+		}
+		return now, "JULIANDAY(" + column + ") <= JULIANDAY('now') - (? / 86400000.0)", milliseconds, "JULIANDAY(cleanup_next_at) <= JULIANDAY('now')", nil
+	default:
+		return clause.Expr{}, "", 0, "", fmt.Errorf("leases are unsupported for database dialect %q", db.Dialector.Name())
+	}
+}
+
+func databaseFuture(db *gorm.DB, delay time.Duration) (clause.Expr, error) {
+	if delay <= 0 {
+		return clause.Expr{}, fmt.Errorf("retry delay must be positive")
+	}
+	switch db.Dialector.Name() {
+	case "mysql":
+		return gorm.Expr("DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND)", delay.Microseconds()), nil
+	case "sqlite":
+		return gorm.Expr("STRFTIME('%Y-%m-%d %H:%M:%f', 'now', ?)", fmt.Sprintf("+%.6f seconds", delay.Seconds())), nil
+	default:
+		return clause.Expr{}, fmt.Errorf("leases are unsupported for database dialect %q", db.Dialector.Name())
+	}
 }
 
 func (r *taskExecutionRepository) ReleaseCleanup(ctx context.Context, id, token string) error {

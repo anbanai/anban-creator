@@ -492,6 +492,7 @@ func main() {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
+		agentHandler.SetAdminAPIKey(cfg.Credits.AdminAPIKey)
 		agentHandler.SetDirectUploadConfig(service.DirectUploadConfig{
 			Storage: cfg.Storage,
 		})

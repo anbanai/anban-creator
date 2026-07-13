@@ -323,9 +323,14 @@ func TestFinalizationRenewalLossPreventsStageAdvance(t *testing.T) {
 	svc, repo, _, execution := setupCloudCompletionTest(t, true)
 	svc.finalizationLease = 30 * time.Millisecond
 	svc.finalizationRenewEvery = 2 * time.Millisecond
-	svc.finalizationRenewClaim = func(context.Context, string, string) (bool, error) { return false, nil }
+	stageFinished := make(chan struct{})
+	svc.finalizationRenewClaim = func(context.Context, string, string) (bool, error) {
+		<-stageFinished
+		return false, nil
+	}
 	svc.finalizationAfterStage = func(stage string) error {
 		if stage == model.TaskExecutionFinalizationArtifacts {
+			close(stageFinished)
 			time.Sleep(20 * time.Millisecond)
 		}
 		return nil
@@ -334,7 +339,10 @@ func TestFinalizationRenewalLossPreventsStageAdvance(t *testing.T) {
 	if !errors.Is(err, ErrFinalizationLeaseLost) {
 		t.Fatalf("error=%v, want lease lost", err)
 	}
-	found, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	found, findErr := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
 	if found.FinalizationStatus != model.TaskExecutionFinalizationTerminal {
 		t.Fatalf("stage advanced after lease loss: %s", found.FinalizationStatus)
 	}
@@ -517,6 +525,35 @@ func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
 	})
 }
 
+func TestReplacementDispatchResumesSameAttemptAfterTransientFailure(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	dispatcher := &dispatchTestDispatcher{err: errors.New("temporary Kubernetes API failure")}
+	svc.SetKubernetesDispatcher(dispatcher)
+	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err == nil {
+		t.Fatal("expected first replacement dispatch to fail")
+	}
+	replacement, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement.Attempt != 2 || replacement.Status != model.TaskExecutionCreated {
+		t.Fatalf("replacement=%+v", replacement)
+	}
+	dispatcher.mu.Lock()
+	dispatcher.err = nil
+	dispatcher.mu.Unlock()
+	if err := svc.ResumeExecutionDispatch(context.Background(), replacement.ID); err != nil {
+		t.Fatal(err)
+	}
+	current, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.ID != replacement.ID || current.Attempt != 2 || current.Status != model.TaskExecutionStarting || dispatcher.callCount() != 2 || dispatcher.createCount() != 1 {
+		t.Fatalf("current=%+v calls=%d creates=%d", current, dispatcher.callCount(), dispatcher.createCount())
+	}
+}
+
 func TestConcurrentPreStartReconcileCreatesOneReplacement(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{}
@@ -550,12 +587,14 @@ func TestConcurrentPreStartReconcileCreatesOneReplacement(t *testing.T) {
 	}
 }
 
-func TestReconcilerStartedRepairPreventsPreStartReplacement(t *testing.T) {
+func TestBootstrapStartedBoundaryPreventsPreStartReplacement(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{}
 	svc.SetKubernetesDispatcher(dispatcher)
-	if err := svc.RecordExecutionRuntime(context.Background(), execution.ID, "pod-1", true); err != nil {
-		t.Fatal(err)
+	if won, err := repo.TaskExecutions().Transition(context.Background(), execution.ID,
+		[]string{model.TaskExecutionStarting}, model.TaskExecutionRunning,
+		model.ExecutionTransition{Started: true, PodUID: "pod-1"}); err != nil || !won {
+		t.Fatalf("mark bootstrap started: won=%v err=%v", won, err)
 	}
 	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "job_failed", nil, 1); err != nil {
 		t.Fatal(err)

@@ -195,6 +195,8 @@ func NewRouter(svc *Services) *fiber.App {
 		agentAPI.Post("/progress", svc.AgentHandler.Progress)
 		agentAPI.Post("/claim", svc.AgentHandler.Claim)
 		agentAPI.Post("/complete", svc.AgentHandler.Complete)
+		adminAgentLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
+		app.Post("/api/v1/admin/agent/executions/:executionID/publishing", adminAgentLimiter, svc.AgentHandler.ResolvePublishing)
 	}
 
 	// ---------------------------------------------------------------------------

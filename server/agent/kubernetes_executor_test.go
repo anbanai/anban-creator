@@ -645,9 +645,6 @@ func TestKubernetesDispatcherInspectMapsJobAndPodTermination(t *testing.T) {
 	if state.Reason != "OOMKilled" || state.Message != "memory limit exceeded" {
 		t.Fatalf("diagnostics = %q/%q, want termination diagnostics", state.Reason, state.Message)
 	}
-	if !state.MainContainerStarted {
-		t.Fatal("terminated agent container must prove execution started")
-	}
 }
 
 func TestKubernetesDispatcherInspectMapsPendingAndCompleteJobs(t *testing.T) {
@@ -757,9 +754,6 @@ func TestKubernetesDispatcherInspectKeepsRunningPodRunning(t *testing.T) {
 	if state.Phase != kubernetesPhaseRunning {
 		t.Fatalf("phase = %q, want running for a running Pod", state.Phase)
 	}
-	if !state.MainContainerStarted {
-		t.Fatal("running agent container must prove execution started")
-	}
 }
 
 func TestKubernetesDispatcherInspectMapsContainerWaitingDiagnostics(t *testing.T) {
@@ -782,9 +776,6 @@ func TestKubernetesDispatcherInspectMapsContainerWaitingDiagnostics(t *testing.T
 			}
 			if state.Phase != kubernetesPhasePending || state.Reason != reason || state.Message != "waiting message" {
 				t.Fatalf("state = %#v, want pending waiting diagnostics", state)
-			}
-			if state.MainContainerStarted {
-				t.Fatal("waiting container must remain pre-start")
 			}
 		})
 	}

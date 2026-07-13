@@ -40,6 +40,7 @@ type AgentHandler struct {
 	apiKeySvc        *service.APIKeyService
 	store            storage.Provider
 	staticKey        string
+	adminAPIKey      string
 	directUploadCfg  service.DirectUploadConfig
 	executionTokens  *auth.ExecutionTokenService
 	workloadVerifier workloadVerifier
@@ -49,6 +50,10 @@ type AgentHandler struct {
 
 func (h *AgentHandler) SetExecutionTokenService(tokens *auth.ExecutionTokenService) {
 	h.executionTokens = tokens
+}
+
+func (h *AgentHandler) SetAdminAPIKey(key string) {
+	h.adminAPIKey = key
 }
 
 func (h *AgentHandler) SetBootstrap(verifier workloadVerifier, bootstrapper agentBootstrapper) {
@@ -498,6 +503,44 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		}
 		h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("complete agent task failed")
 		return Error(c, fiber.StatusInternalServerError, "complete failed")
+	}
+	return Success(c, fiber.Map{"ok": true})
+}
+
+// ResolvePublishing lets an operator close an ambiguous external publish.
+// It intentionally does not use agent authentication: execution JWTs must not
+// be able to assert an external side effect that the Agent cannot observe.
+func (h *AgentHandler) ResolvePublishing(c fiber.Ctx) error {
+	credential := strings.TrimSpace(c.Get("X-Admin-API-Key"))
+	if credential == "" {
+		authorization := strings.TrimSpace(c.Get("Authorization"))
+		parts := strings.SplitN(authorization, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			credential = strings.TrimSpace(parts[1])
+		}
+	}
+	if h.adminAPIKey == "" || subtle.ConstantTimeCompare([]byte(credential), []byte(h.adminAPIKey)) != 1 {
+		return Error(c, fiber.StatusUnauthorized, "invalid admin api key")
+	}
+	if h.taskSvc == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
+	}
+	var req struct {
+		Published *bool `json:"published"`
+	}
+	if err := c.Bind().Body(&req); err != nil || req.Published == nil {
+		return Error(c, fiber.StatusBadRequest, "published is required")
+	}
+	executionID := strings.TrimSpace(c.Params("executionID"))
+	if executionID == "" {
+		return Error(c, fiber.StatusBadRequest, "execution_id is required")
+	}
+	if err := h.taskSvc.ResolveCloudPublishing(c.Context(), executionID, *req.Published); err != nil {
+		if errors.Is(err, service.ErrStaleTaskExecution) || strings.Contains(err.Error(), "not awaiting resolution") || strings.Contains(err.Error(), "state changed concurrently") {
+			return Error(c, fiber.StatusConflict, "publishing resolution conflict")
+		}
+		h.logger.Error().Err(err).Str("execution_id", executionID).Msg("resolve cloud publishing failed")
+		return Error(c, fiber.StatusInternalServerError, "resolve publishing failed")
 	}
 	return Success(c, fiber.Map{"ok": true})
 }

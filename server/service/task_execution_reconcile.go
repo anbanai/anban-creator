@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,7 +20,7 @@ func (s *TaskService) FindReconcilableExecutions(ctx context.Context, before tim
 	return s.repo.TaskExecutions().FindReconcilable(ctx, before, limit)
 }
 
-func (s *TaskService) RecordExecutionRuntime(ctx context.Context, executionID, podUID string, started bool) error {
+func (s *TaskService) RecordExecutionPod(ctx context.Context, executionID, podUID string) error {
 	execution, _, err := s.currentExecution(ctx, executionID)
 	if err != nil {
 		return err
@@ -30,20 +31,24 @@ func (s *TaskService) RecordExecutionRuntime(ctx context.Context, executionID, p
 	if podUID != "" && execution.PodUID != "" && execution.PodUID != podUID {
 		return fmt.Errorf("execution pod identity changed from %s to %s", execution.PodUID, podUID)
 	}
-	if started {
-		won, err := s.repo.TaskExecutions().RecordRuntimeStarted(ctx, executionID, podUID)
-		if err != nil {
-			return err
-		}
-		if !won {
-			return fmt.Errorf("record execution start lost guarded transition")
-		}
-		return nil
-	}
 	if podUID == "" || execution.PodUID == podUID {
 		return nil
 	}
 	return s.repo.TaskExecutions().SetRuntimeIdentity(ctx, executionID, "", "", podUID)
+}
+
+func (s *TaskService) ResumeExecutionDispatch(ctx context.Context, executionID string) error {
+	execution, task, err := s.currentExecution(ctx, executionID)
+	if err != nil {
+		return err
+	}
+	if execution.Status != model.TaskExecutionCreated && execution.Status != model.TaskExecutionDispatching {
+		return nil
+	}
+	if err := s.dispatchCurrentExecution(ctx, task, execution); err != nil && !errors.Is(err, ErrDispatchInProgress) {
+		return err
+	}
+	return nil
 }
 
 func (s *TaskService) ResumeExecutionFinalization(ctx context.Context, executionID string) error {
@@ -72,8 +77,8 @@ func (s *TaskService) CompleteExecutionCleanup(ctx context.Context, executionID,
 	return s.repo.TaskExecutions().CompleteCleanup(ctx, executionID, token)
 }
 
-func (s *TaskService) FailExecutionCleanup(ctx context.Context, executionID, token string, next time.Time) (bool, error) {
-	return s.repo.TaskExecutions().FailCleanup(ctx, executionID, token, next)
+func (s *TaskService) FailExecutionCleanup(ctx context.Context, executionID, token string, backoff time.Duration) (bool, error) {
+	return s.repo.TaskExecutions().FailCleanup(ctx, executionID, token, backoff)
 }
 
 func (s *TaskService) ReleaseExecutionCleanup(ctx context.Context, executionID, token string) error {

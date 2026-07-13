@@ -276,8 +276,7 @@ func TestTaskExecutionCleanupFailureBacksOff(t *testing.T) {
 	if err != nil || !won {
 		t.Fatalf("claim won=%v err=%v", won, err)
 	}
-	next := time.Now().Add(30 * time.Millisecond)
-	failed, err := repo.TaskExecutions().FailCleanup(ctx, execution.ID, token, next)
+	failed, err := repo.TaskExecutions().FailCleanup(ctx, execution.ID, token, 30*time.Millisecond)
 	if err != nil || !failed {
 		t.Fatalf("fail cleanup=%v err=%v", failed, err)
 	}

@@ -33,13 +33,12 @@ type KubernetesDispatcher interface {
 }
 
 type KubernetesExecutionState struct {
-	Phase                string
-	PodUID               string
-	Reason               string
-	Message              string
-	ExitCode             *int32
-	CompletedAt          *time.Time
-	MainContainerStarted bool
+	Phase       string
+	PodUID      string
+	Reason      string
+	Message     string
+	ExitCode    *int32
+	CompletedAt *time.Time
 }
 
 type kubernetesJobDispatcher struct {
@@ -426,9 +425,6 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name != kubernetesAgentContainerName {
 			continue
-		}
-		if status.State.Running != nil || status.State.Terminated != nil {
-			state.MainContainerStarted = true
 		}
 		if status.State.Waiting != nil && !jobTerminal {
 			state.Reason = status.State.Waiting.Reason

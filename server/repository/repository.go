@@ -199,11 +199,10 @@ type TaskExecutionRepository interface {
 	AdvanceFinalization(ctx context.Context, id, token, from, to string) (bool, error)
 	RenewFinalizationClaim(ctx context.Context, id, token string) (bool, error)
 	ReleaseFinalization(ctx context.Context, id, token string) error
-	RecordRuntimeStarted(ctx context.Context, id, podUID string) (bool, error)
 	TransitionPublishing(ctx context.Context, id, from, to string, result []byte) (bool, error)
 	ClaimCleanup(ctx context.Context, id, token string, lease time.Duration) (bool, error)
 	CompleteCleanup(ctx context.Context, id, token string) (bool, error)
-	FailCleanup(ctx context.Context, id, token string, next time.Time) (bool, error)
+	FailCleanup(ctx context.Context, id, token string, backoff time.Duration) (bool, error)
 	ReleaseCleanup(ctx context.Context, id, token string) error
 }
 
