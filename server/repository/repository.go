@@ -195,6 +195,9 @@ type TaskExecutionRepository interface {
 	SetRuntimeIdentity(ctx context.Context, id, namespace, jobName, podUID string) error
 	UpdateHeartbeat(ctx context.Context, id string, now time.Time) error
 	Transition(ctx context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error)
+	ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error)
+	AdvanceFinalization(ctx context.Context, id, token, from, to string) (bool, error)
+	ReleaseFinalization(ctx context.Context, id, token string) error
 }
 
 // PendingUploadRepository tracks browser-direct uploads until submit finalizes them.

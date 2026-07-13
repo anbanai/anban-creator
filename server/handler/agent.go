@@ -485,8 +485,18 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
-	if err := h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, req.Result); err != nil {
-		h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("complete local task failed")
+	executionID := h.authenticatedExecutionID(c)
+	var err error
+	if executionID != "" {
+		err = h.taskSvc.CompleteCloudExecution(c.Context(), executionID, req.Result)
+	} else {
+		err = h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, req.Result)
+	}
+	if err != nil {
+		if errors.Is(err, service.ErrStaleTaskExecution) {
+			return Error(c, fiber.StatusConflict, "task execution is no longer current")
+		}
+		h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("complete agent task failed")
 		return Error(c, fiber.StatusInternalServerError, "complete failed")
 	}
 	return Success(c, fiber.Map{"ok": true})

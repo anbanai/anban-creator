@@ -113,7 +113,7 @@ func (r *taskFileRepository) PublishCurrentExecution(ctx context.Context, taskID
 		if execution.ManifestStatus == model.TaskExecutionManifestPublished {
 			return nil
 		}
-		if err := requireRunningArtifactExecution(task, execution); err != nil {
+		if err := requirePublishableArtifactExecution(task, execution); err != nil {
 			return err
 		}
 		if execution.ManifestStatus == model.TaskExecutionManifestDiscarded {
@@ -163,7 +163,7 @@ func (r *taskFileRepository) DiscardCurrentExecution(ctx context.Context, taskID
 		if execution.ManifestStatus == model.TaskExecutionManifestDiscarded {
 			return nil
 		}
-		if err := requireRunningArtifactExecution(task, execution); err != nil {
+		if err := requireDiscardableArtifactExecution(task, execution); err != nil {
 			return err
 		}
 		if execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending {
@@ -256,6 +256,29 @@ func requireRunningArtifactExecution(task *model.Task, execution *model.TaskExec
 		return ErrTaskFileTaskNotRunning
 	}
 	return nil
+}
+
+func requirePublishableArtifactExecution(task *model.Task, execution *model.TaskExecution) error {
+	if task.Status == model.TaskStatusRunning &&
+		(execution.Status == model.TaskExecutionRunning || execution.Status == model.TaskExecutionSucceeded) {
+		return nil
+	}
+	return ErrTaskFileTaskNotRunning
+}
+
+func requireDiscardableArtifactExecution(task *model.Task, execution *model.TaskExecution) error {
+	if task.Status == model.TaskStatusRunning {
+		switch execution.Status {
+		case model.TaskExecutionCreated, model.TaskExecutionDispatching, model.TaskExecutionStarting, model.TaskExecutionRunning:
+			return nil
+		}
+	}
+	if execution.Status == model.TaskExecutionFailed || execution.Status == model.TaskExecutionCancelled || execution.Status == model.TaskExecutionTimedOut {
+		if task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
+			return nil
+		}
+	}
+	return ErrTaskFileTaskNotRunning
 }
 
 func (r *taskFileRepository) BatchCreate(ctx context.Context, files []*model.TaskFile) error {

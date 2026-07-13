@@ -36,28 +36,29 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo                  repository.Repository
-	executor              agent.TaskExecutor
-	kubernetesDispatcher  agent.KubernetesDispatcher
-	dispatchLeaseDuration time.Duration
-	dispatchBeforeCreate  func()
-	projectConcurrencyCap int
-	logger                *zerolog.Logger
-	enqueuer              TaskEnqueuer
-	store                 storage.Provider
-	creditSvc             *CreditService
-	publishingSvc         *PublishingService
-	taskLogDir            string
-	workspaceSvc          *WorkspaceService
-	workspaceDir          string
-	pubsub                *RedisPubSub
-	pubsubCancel          context.CancelFunc // stops the listenCancelEvents goroutine
-	cancelFuncs           sync.Map           // taskID → context.CancelFunc
-	seednoteTrackingSvc   PublishedTrackingService
-	videoCatalog          VideoModelCatalog
-	videoCreditMultiplier int
-	videoBilling          srvconfig.BillingConfig
-	montageCfg            srvconfig.MontageConfig
+	repo                   repository.Repository
+	executor               agent.TaskExecutor
+	kubernetesDispatcher   agent.KubernetesDispatcher
+	dispatchLeaseDuration  time.Duration
+	dispatchBeforeCreate   func()
+	finalizationAfterStage func(string) error
+	projectConcurrencyCap  int
+	logger                 *zerolog.Logger
+	enqueuer               TaskEnqueuer
+	store                  storage.Provider
+	creditSvc              *CreditService
+	publishingSvc          *PublishingService
+	taskLogDir             string
+	workspaceSvc           *WorkspaceService
+	workspaceDir           string
+	pubsub                 *RedisPubSub
+	pubsubCancel           context.CancelFunc // stops the listenCancelEvents goroutine
+	cancelFuncs            sync.Map           // taskID → context.CancelFunc
+	seednoteTrackingSvc    PublishedTrackingService
+	videoCatalog           VideoModelCatalog
+	videoCreditMultiplier  int
+	videoBilling           srvconfig.BillingConfig
+	montageCfg             srvconfig.MontageConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
 	ilinkNotifier  *IlinkNotifier
@@ -1152,6 +1153,9 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 	task, taskErr := s.repo.Tasks().FindByID(ctx, id)
 	if userID != "" && taskErr == nil && task != nil && task.UserID != userID {
 		return fmt.Errorf("task not found")
+	}
+	if taskErr == nil && task != nil && task.CurrentExecutionID != nil && s.kubernetesDispatcher != nil {
+		return s.cancelCloudExecution(ctx, task, userID)
 	}
 
 	// Atomically transition status: only pending or running can be cancelled.

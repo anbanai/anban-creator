@@ -20,6 +20,10 @@ type TaskExecution struct {
 	PodUID             string         `gorm:"type:varchar(64)" json:"pod_uid,omitempty"`
 	Started            bool           `gorm:"default:false;not null" json:"started"`
 	ManifestStatus     string         `gorm:"type:varchar(20);default:'';check:chk_task_execution_manifest_status,manifest_status IN ('','pending','published','discarded','rejected')" json:"manifest_status,omitempty"`
+	FinalizationStatus string         `gorm:"type:varchar(20);default:'';index" json:"finalization_status,omitempty"`
+	FinalizationToken  string         `gorm:"type:char(36);default:'';index" json:"-"`
+	FinalizationAt     *time.Time     `json:"-"`
+	Result             datatypes.JSON `gorm:"type:json" json:"-"`
 	TerminalReason     string         `gorm:"type:varchar(80);default:''" json:"terminal_reason,omitempty"`
 	Diagnostics        datatypes.JSON `gorm:"type:json" json:"diagnostics,omitempty"`
 	LastHeartbeatAt    *time.Time     `json:"last_heartbeat_at,omitempty"`
@@ -41,6 +45,13 @@ const (
 )
 
 const (
+	TaskExecutionFinalizationTerminal  = "terminal"
+	TaskExecutionFinalizationArtifacts = "artifacts"
+	TaskExecutionFinalizationTask      = "task"
+	TaskExecutionFinalizationDone      = "done"
+)
+
+const (
 	TaskExecutionManifestPending   = "pending"
 	TaskExecutionManifestPublished = "published"
 	TaskExecutionManifestDiscarded = "discarded"
@@ -49,9 +60,11 @@ const (
 
 // ExecutionTransition contains optional fields persisted with a status CAS.
 type ExecutionTransition struct {
-	Started        bool
-	PodUID         string
-	ManifestStatus string
-	TerminalReason string
-	Diagnostics    datatypes.JSON
+	Started            bool
+	PodUID             string
+	ManifestStatus     string
+	TerminalReason     string
+	Diagnostics        datatypes.JSON
+	Result             datatypes.JSON
+	FinalizationStatus string
 }

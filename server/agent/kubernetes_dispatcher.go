@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -32,11 +33,12 @@ type KubernetesDispatcher interface {
 }
 
 type KubernetesExecutionState struct {
-	Phase    string
-	PodUID   string
-	Reason   string
-	Message  string
-	ExitCode *int32
+	Phase       string
+	PodUID      string
+	Reason      string
+	Message     string
+	ExitCode    *int32
+	CompletedAt *time.Time
 }
 
 type kubernetesJobDispatcher struct {
@@ -388,11 +390,15 @@ func inspectJob(job *batchv1.Job) *KubernetesExecutionState {
 			state.Phase = kubernetesPhaseFailed
 			state.Reason = condition.Reason
 			state.Message = condition.Message
+			completedAt := condition.LastTransitionTime.Time
+			state.CompletedAt = &completedAt
 			return state
 		case batchv1.JobComplete:
 			state.Phase = kubernetesPhaseSucceeded
 			state.Reason = condition.Reason
 			state.Message = condition.Message
+			completedAt := condition.LastTransitionTime.Time
+			state.CompletedAt = &completedAt
 			return state
 		}
 	}
@@ -429,6 +435,10 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 			continue
 		}
 		terminated := status.State.Terminated
+		if !terminated.FinishedAt.IsZero() {
+			completedAt := terminated.FinishedAt.Time
+			state.CompletedAt = &completedAt
+		}
 		exitCode := terminated.ExitCode
 		state.ExitCode = &exitCode
 		if state.Phase == kubernetesPhasePending || state.Phase == kubernetesPhaseRunning {

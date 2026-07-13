@@ -158,12 +158,12 @@ func (r *taskExecutionRepository) FindCurrentByTaskID(ctx context.Context, taskI
 func (r *taskExecutionRepository) FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error) {
 	var executions []*model.TaskExecution
 	err := r.db.WithContext(ctx).
-		Where("status IN ? AND updated_at <= ?", []string{
+		Where("(status IN ? AND updated_at <= ?) OR (status IN ? AND finalization_status <> '' AND finalization_status <> ?)", []string{
 			model.TaskExecutionCreated,
 			model.TaskExecutionDispatching,
 			model.TaskExecutionStarting,
 			model.TaskExecutionRunning,
-		}, before).
+		}, before, []string{model.TaskExecutionSucceeded, model.TaskExecutionFailed, model.TaskExecutionCancelled, model.TaskExecutionTimedOut}, model.TaskExecutionFinalizationDone).
 		Order("updated_at ASC").
 		Limit(limit).
 		Find(&executions).Error
@@ -223,6 +223,12 @@ func (r *taskExecutionRepository) Transition(
 	if len(change.Diagnostics) > 0 {
 		updates["diagnostics"] = change.Diagnostics
 	}
+	if len(change.Result) > 0 {
+		updates["result"] = change.Result
+	}
+	if change.FinalizationStatus != "" {
+		updates["finalization_status"] = change.FinalizationStatus
+	}
 	if isTerminalTaskExecutionStatus(to) {
 		updates["completed_at"] = now
 	}
@@ -235,6 +241,31 @@ func (r *taskExecutionRepository) Transition(
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+func (r *taskExecutionRepository) ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error) {
+	if lease <= 0 {
+		return false, fmt.Errorf("finalization lease duration must be positive")
+	}
+	stale := time.Now().Add(-lease)
+	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
+		Where("id = ? AND finalization_status <> ?", id, model.TaskExecutionFinalizationDone).
+		Where("finalization_token = '' OR finalization_at IS NULL OR finalization_at <= ?", stale).
+		Updates(map[string]any{"finalization_token": token, "finalization_at": time.Now()})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *taskExecutionRepository) AdvanceFinalization(ctx context.Context, id, token, from, to string) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
+		Where("id = ? AND finalization_token = ? AND finalization_status = ?", id, token, from).
+		Updates(map[string]any{"finalization_status": to, "finalization_at": time.Now()})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *taskExecutionRepository) ReleaseFinalization(ctx context.Context, id, token string) error {
+	return r.db.WithContext(ctx).Model(&model.TaskExecution{}).
+		Where("id = ? AND finalization_token = ?", id, token).
+		Updates(map[string]any{"finalization_token": "", "finalization_at": nil}).Error
 }
 
 func isTerminalTaskExecutionStatus(status string) bool {
