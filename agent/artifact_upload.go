@@ -83,6 +83,10 @@ type ArtifactUploader struct {
 	putObject func(context.Context, *ArtifactPrepareResponse, string, string) (string, error)
 }
 
+var openArtifactFile = func(path string) (io.ReadCloser, error) {
+	return os.Open(path)
+}
+
 func NewArtifactUploader(cfg *Config, reporter ArtifactReporter) *ArtifactUploader {
 	return &ArtifactUploader{
 		cfg:       cfg,
@@ -91,8 +95,8 @@ func NewArtifactUploader(cfg *Config, reporter ArtifactReporter) *ArtifactUpload
 	}
 }
 
-func ScanWorkspaceArtifacts(root string) ([]WorkspaceArtifact, error) {
-	return scanWorkspaceArtifacts(root, "")
+func ScanWorkspaceArtifacts(ctx context.Context, root string) ([]WorkspaceArtifact, error) {
+	return scanWorkspaceArtifacts(ctx, root, "")
 }
 
 func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result *serveragent.ExecutionResult) error {
@@ -103,9 +107,15 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 	if result != nil && strings.TrimSpace(result.WorkDir) != "" {
 		workDir = result.WorkDir
 	}
+	if err := artifactContextCause(ctx); err != nil {
+		return err
+	}
 	if u.cfg.ExecutionID != "" {
 		outputDir := filepath.Join(workDir, "output")
 		info, err := os.Lstat(outputDir)
+		if cause := artifactContextCause(ctx); cause != nil {
+			return cause
+		}
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -116,7 +126,7 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 			return fmt.Errorf("job output must be a real directory")
 		}
 	}
-	files, err := scanWorkspaceArtifacts(workDir, u.cfg.TaskType)
+	files, err := scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
 	if err != nil {
 		return err
 	}
@@ -130,6 +140,9 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 		Files:       make([]ArtifactManifestFile, 0, len(files)),
 	}
 	for _, file := range files {
+		if err := artifactContextCause(ctx); err != nil {
+			return err
+		}
 		prepared, err := u.reporter.PrepareArtifactUpload(ctx, ArtifactPrepareRequest{
 			TaskID:       u.cfg.TaskID,
 			ExecutionID:  u.cfg.ExecutionID,
@@ -141,6 +154,9 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 		})
 		if err != nil {
 			return fmt.Errorf("prepare artifact upload %s: %w", file.RelativePath, err)
+		}
+		if err := artifactContextCause(ctx); err != nil {
+			return err
 		}
 		if prepared == nil {
 			return fmt.Errorf("prepare artifact upload %s: empty response", file.RelativePath)
@@ -156,6 +172,9 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 		if err != nil {
 			return fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
 		}
+		if err := artifactContextCause(ctx); err != nil {
+			return err
+		}
 		objectKey := strings.TrimSpace(prepared.Key)
 		if objectKey == "" {
 			return fmt.Errorf("prepare artifact upload %s returned empty object key", file.RelativePath)
@@ -169,6 +188,9 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 			ETag:         etag,
 		})
 	}
+	if err := artifactContextCause(ctx); err != nil {
+		return err
+	}
 	if err := u.reporter.ReportArtifactManifest(ctx, manifest); err != nil {
 		return fmt.Errorf("report artifact manifest: %w", err)
 	}
@@ -176,7 +198,10 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 	return nil
 }
 
-func scanWorkspaceArtifacts(root, taskType string) ([]WorkspaceArtifact, error) {
+func scanWorkspaceArtifacts(ctx context.Context, root, taskType string) ([]WorkspaceArtifact, error) {
+	if err := artifactContextCause(ctx); err != nil {
+		return nil, err
+	}
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return nil, fmt.Errorf("workspace is required")
@@ -187,16 +212,25 @@ func scanWorkspaceArtifacts(root, taskType string) ([]WorkspaceArtifact, error) 
 		}
 		return nil, fmt.Errorf("stat workspace: %w", err)
 	}
+	if err := artifactContextCause(ctx); err != nil {
+		return nil, err
+	}
 
 	scanDir := root
 	outputDir := filepath.Join(root, "output")
 	if info, err := os.Stat(outputDir); err == nil && info.IsDir() {
 		scanDir = outputDir
 	}
+	if err := artifactContextCause(ctx); err != nil {
+		return nil, err
+	}
 
 	task := taskForArtifactFiltering(taskType)
 	var files []WorkspaceArtifact
 	err := filepath.WalkDir(scanDir, func(path string, d fs.DirEntry, err error) error {
+		if cause := artifactContextCause(ctx); cause != nil {
+			return cause
+		}
 		if err != nil {
 			return err
 		}
@@ -213,11 +247,14 @@ func scanWorkspaceArtifacts(root, taskType string) ([]WorkspaceArtifact, error) 
 		if err != nil {
 			return err
 		}
+		if cause := artifactContextCause(ctx); cause != nil {
+			return cause
+		}
 		if !info.Mode().IsRegular() {
 			return nil
 		}
 
-		artifact, err := describeWorkspaceArtifact(root, path, info)
+		artifact, err := describeWorkspaceArtifact(ctx, root, path, info)
 		if err != nil {
 			return err
 		}
@@ -230,44 +267,82 @@ func scanWorkspaceArtifacts(root, taskType string) ([]WorkspaceArtifact, error) 
 	if err != nil {
 		return nil, err
 	}
+	if err := artifactContextCause(ctx); err != nil {
+		return nil, err
+	}
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].RelativePath < files[j].RelativePath
 	})
 	return files, nil
 }
 
-func describeWorkspaceArtifact(root, path string, info fs.FileInfo) (WorkspaceArtifact, error) {
+func describeWorkspaceArtifact(ctx context.Context, root, path string, info fs.FileInfo) (WorkspaceArtifact, error) {
+	if err := artifactContextCause(ctx); err != nil {
+		return WorkspaceArtifact{}, err
+	}
 	relPath, err := filepath.Rel(root, path)
 	if err != nil {
 		relPath = filepath.Base(path)
 	}
 	relPath = filepath.ToSlash(relPath)
-	hash, err := fileSHA256(path)
+	hash, err := fileSHA256(ctx, path)
 	if err != nil {
+		return WorkspaceArtifact{}, err
+	}
+	if err := artifactContextCause(ctx); err != nil {
+		return WorkspaceArtifact{}, err
+	}
+	contentType := service.DetectTaskFileMIME(path)
+	if err := artifactContextCause(ctx); err != nil {
 		return WorkspaceArtifact{}, err
 	}
 	return WorkspaceArtifact{
 		LocalPath:    path,
 		RelativePath: relPath,
 		Filename:     filepath.Base(path),
-		ContentType:  service.DetectTaskFileMIME(path),
+		ContentType:  contentType,
 		Size:         info.Size(),
 		SHA256:       hash,
 	}, nil
 }
 
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
+func fileSHA256(ctx context.Context, path string) (string, error) {
+	if err := artifactContextCause(ctx); err != nil {
+		return "", err
+	}
+	f, err := openArtifactFile(path)
 	if err != nil {
 		return "", fmt.Errorf("open artifact %s: %w", path, err)
 	}
 	defer f.Close()
 
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("hash artifact %s: %w", path, err)
+	buffer := make([]byte, 32*1024)
+	for {
+		if err := artifactContextCause(ctx); err != nil {
+			return "", err
+		}
+		// A kernel-blocked Read cannot be canceled portably; context checks
+		// between chunks keep the userspace hashing loop bounded.
+		n, readErr := f.Read(buffer)
+		if n > 0 {
+			_, _ = h.Write(buffer[:n])
+		}
+		if err := artifactContextCause(ctx); err != nil {
+			return "", err
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", fmt.Errorf("hash artifact %s: %w", path, readErr)
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func artifactContextCause(ctx context.Context) error {
+	return context.Cause(ctx)
 }
 
 func taskForArtifactFiltering(taskType string) *model.Task {

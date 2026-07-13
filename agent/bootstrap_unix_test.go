@@ -116,6 +116,19 @@ func TestMaterializeBootstrapPostLinkFsyncFailureRollsBackLink(t *testing.T) {
 	}
 }
 
+func TestMaterializeBootstrapDupFailureAfterMkdirRollsBackDirectory(t *testing.T) {
+	root := t.TempDir()
+	previousDup := bootstrapRollbackDup
+	bootstrapRollbackDup = func(int) (int, error) { return -1, errors.New("forced dup failure") }
+	t.Cleanup(func() { bootstrapRollbackDup = previousDup })
+
+	err := materializeBootstrap(context.Background(), root, []BootstrapFile{{Path: "new/dir/output.txt", Text: "x", Mode: 0o644}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "forced dup failure") {
+		t.Fatalf("materializeBootstrap error = %v, want dup failure", err)
+	}
+	assertBootstrapWorkspaceEmpty(t, root)
+}
+
 func assertBootstrapWorkspaceEmpty(t *testing.T, root string) {
 	t.Helper()
 	entries, err := os.ReadDir(root)

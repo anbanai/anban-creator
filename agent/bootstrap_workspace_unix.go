@@ -31,6 +31,7 @@ type createdBootstrapEntry struct {
 
 var errBootstrapParentMissing = errors.New("bootstrap parent missing")
 var bootstrapFsync = unix.Fsync
+var bootstrapRollbackDup = unix.Dup
 
 func materializePreparedBootstrap(ctx context.Context, root string, prepared []preparedBootstrapFile, client *http.Client) error {
 	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
@@ -253,10 +254,14 @@ func openBootstrapParentAt(rootFD int, rel string, create bool, createdDirs *[]c
 				return -1, "", mkdirErr
 			}
 			if createdDirs != nil && mkdirErr == nil {
-				rollbackFD, dupErr := unix.Dup(current)
+				rollbackFD, dupErr := bootstrapRollbackDup(current)
 				if dupErr != nil {
+					cleanupErr := unix.Unlinkat(current, component, unix.AT_REMOVEDIR)
 					unix.Close(current)
-					return -1, "", dupErr
+					if cleanupErr != nil {
+						return -1, "", fmt.Errorf("track created bootstrap parent %q: %w", currentRel, errors.Join(dupErr, fmt.Errorf("remove untracked directory: %w", cleanupErr)))
+					}
+					return -1, "", fmt.Errorf("track created bootstrap parent %q: %w", currentRel, dupErr)
 				}
 				*createdDirs = append(*createdDirs, createdBootstrapEntry{parentFD: rollbackFD, name: component})
 			}

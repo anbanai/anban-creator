@@ -110,7 +110,11 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 
 	if cfg.ArtifactUploadMode == ArtifactUploadDirect {
 		uploader := NewArtifactUploader(cfg, reporter)
-		if uploadErr := uploader.UploadWorkspaceArtifacts(workCtx, result); uploadErr != nil {
+		uploadCtx := ctx
+		if strings.TrimSpace(cfg.ExecutionID) != "" {
+			uploadCtx = workCtx
+		}
+		if uploadErr := uploader.UploadWorkspaceArtifacts(uploadCtx, result); uploadErr != nil {
 			_ = reporter.ReportProgress(workCtx, "artifact upload failed: "+uploadErr.Error())
 			fmt.Fprintf(stderr, "failed to upload artifacts: %v\n", uploadErr)
 			if result.Success {
