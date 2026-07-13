@@ -150,9 +150,8 @@ func TestDockerRuntimeAgentSourceUsesResolvedLocalIdentity(t *testing.T) {
 	if strings.Contains(dockerExecutor, "if err == nil {\n\t\t\t_ = e.dockerCLI.ContainerExecStart") {
 		t.Fatal("Docker executor must not ignore persistent workspace preparation failures")
 	}
-	legacyKubernetes := readTextFile(t, filepath.Join(root, "server", "agent", "kubernetes_executor.go"))
-	if strings.Contains(legacyKubernetes, "node:node") || !strings.Contains(legacyKubernetes, `chown -R " + ContainerRuntimeUser`) {
-		t.Fatal("legacy Kubernetes executor must use numeric workspace ownership until Task 9 removal")
+	if _, err := os.Stat(filepath.Join(root, "server", "agent", "kubernetes_executor.go")); !os.IsNotExist(err) {
+		t.Fatalf("legacy Kubernetes executor must be deleted, stat error = %v", err)
 	}
 }
 
@@ -188,6 +187,26 @@ func TestDockerRuntimeAgentImageSnapshotsInstalledHomeState(t *testing.T) {
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("Dockerfile.agent must not broadly snapshot user home via %q", forbidden)
+		}
+	}
+}
+
+func TestDockerRuntimeAgentImageIsImmutableOneShotJobRuntime(t *testing.T) {
+	body := readTextFile(t, filepath.Join(repositoryRoot(t), "Dockerfile.agent"))
+	for _, want := range []string{
+		`find /anbanai -type l -print -quit`,
+		`chown -R root:root /anbanai`,
+		`chmod -R a=rX /anbanai`,
+		`ENTRYPOINT ["tini", "--", "anban"]`,
+		`CMD ["job"]`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Dockerfile.agent missing immutable one-shot contract %q", want)
+		}
+	}
+	for _, forbidden := range []string{`CMD ["sleep", "infinity"]`, `USER root\nWORKDIR /workspace`} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("Dockerfile.agent retains reusable runtime contract %q", forbidden)
 		}
 	}
 }

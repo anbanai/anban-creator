@@ -3,8 +3,6 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
-	"path"
 	"regexp"
 	"strings"
 
@@ -15,7 +13,6 @@ import (
 
 const (
 	kubernetesAgentAppName       = "anban-agent"
-	kubernetesAgentNamePrefix    = "anban-agent"
 	kubernetesUserIDLabel        = "anban.ai/user-id"
 	kubernetesProjectIDLabel     = "anban.ai/project-id"
 	kubernetesTaskIDLabel        = "anban.ai/task-id"
@@ -26,26 +23,6 @@ const (
 )
 
 var kubernetesNameUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
-
-func kubernetesAgentPodName(task *model.Task) string {
-	userID, projectID := "", ""
-	if task != nil {
-		userID = task.UserID
-		projectID = task.ProjectID
-	}
-	user := kubernetesSafeNamePart(userID)
-	project := kubernetesSafeNamePart(projectID)
-	hash := kubernetesHashSuffix(userID + "\x00" + projectID)
-	base := fmt.Sprintf("%s-%s-%s", kubernetesAgentNamePrefix, user, project)
-	maxBaseLen := 63 - len(hash) - 1
-	if len(base) > maxBaseLen {
-		base = strings.Trim(base[:maxBaseLen], "-")
-	}
-	if base == "" {
-		base = kubernetesAgentNamePrefix
-	}
-	return strings.Trim(base+"-"+hash, "-")
-}
 
 func kubernetesJobName(executionID string) string {
 	return kubernetesIdentityName(kubernetesJobNamePrefix, executionID)
@@ -87,22 +64,6 @@ func kubernetesAgentLabels(task *model.Task) map[string]string {
 	return labels
 }
 
-func kubernetesWorkspacePath(mountPath string, task *model.Task) string {
-	userID, projectID, taskID := "", "", ""
-	if task != nil {
-		userID = task.UserID
-		projectID = task.ProjectID
-		taskID = task.ID
-	}
-	return path.Join(
-		strings.TrimSpace(mountPath),
-		"users", kubernetesSafePathPart(userID),
-		"projects", kubernetesSafePathPart(projectID),
-		"tasks", kubernetesSafePathPart(taskID),
-		"workspace",
-	)
-}
-
 func kubernetesSafeNamePart(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.ReplaceAll(value, "_", "-")
@@ -113,17 +74,6 @@ func kubernetesSafeNamePart(value string) string {
 	}
 	if len(value) > 24 {
 		return strings.Trim(value[:24], "-")
-	}
-	return value
-}
-
-func kubernetesSafePathPart(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.ReplaceAll(value, "/", "-")
-	value = strings.ReplaceAll(value, "\\", "-")
-	value = strings.Trim(value, ". ")
-	if value == "" {
-		return "unknown"
 	}
 	return value
 }

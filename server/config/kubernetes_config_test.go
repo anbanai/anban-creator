@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,14 +17,14 @@ func baseKubernetesConfigForTest() Config {
 		Claude: ClaudeConfig{
 			Executor: "kubernetes",
 			Kubernetes: KubernetesConfig{
-				Namespace:          "anbanai-prod",
-				AgentImage:         "registry.example.com/anban-agent:latest",
-				ServiceAccount:     "creator-agent-runner",
-				WorkspacePVCName:   "anban-creator",
-				MemoryStorageClass: "alicloud-nas",
-				MemorySize:         "1Gi",
+				Namespace:            "anbanai-prod",
+				AgentImage:           "registry.example.com/anban-agent:latest",
+				ServiceAccount:       "creator-agent-runner",
+				MemoryStorageClass:   "alicloud-nas",
+				MemorySize:           "1Gi",
+				ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
 			},
-			AgentServerURL: "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080",
+			AgentServerURL: "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443",
 		},
 		Storage: StorageConfig{
 			Provider:        "oss",
@@ -62,6 +63,9 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.Namespace != "default" {
 		t.Fatalf("namespace = %q, want default", cfg.Claude.Kubernetes.Namespace)
 	}
+	if cfg.Claude.Kubernetes.ServerCASecret != "anban-server-tls" {
+		t.Fatalf("server CA secret = %q, want anban-server-tls", cfg.Claude.Kubernetes.ServerCASecret)
+	}
 	if cfg.Claude.Kubernetes.MemorySize != "1Gi" {
 		t.Fatalf("memory size = %q, want 1Gi", cfg.Claude.Kubernetes.MemorySize)
 	}
@@ -95,11 +99,11 @@ storage:
   sts_role_arn: "acs:ram::123:role/upload"
 claude:
   executor: "kubernetes"
-  agent_server_url: "http://creator-api-svc:8080"
+  agent_server_url: "https://creator-api-svc:8443"
   kubernetes:
     agent_image: "registry.example.com/anban-agent:latest"
     service_account: "creator-agent-runner"
-    workspace_pvc_name: "anban-creator"
+    execution_token_secret: "0123456789abcdef0123456789abcdef"
     memory_storage_class: "alicloud-nas"
     memory_size: "1Gi"
     completion_grace_seconds: 0
@@ -133,6 +137,15 @@ func TestValidateKubernetesRequiresExplicitMemoryStorageClass(t *testing.T) {
 	}
 }
 
+func TestKubernetesConfigHasNoReusablePodFields(t *testing.T) {
+	typ := reflect.TypeOf(KubernetesConfig{})
+	for _, name := range []string{"WorkspaceMountPath", "WorkspacePVCName", "PodRevision", "PodTTLSeconds", "ExecTimeoutSec"} {
+		if _, ok := typ.FieldByName(name); ok {
+			t.Fatalf("obsolete field %s remains", name)
+		}
+	}
+}
+
 func TestValidateKubernetesRequiresOSS(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	cfg.Storage.Provider = "local"
@@ -148,6 +161,15 @@ func TestValidateKubernetesRequiresAgentServerURL(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "claude.agent_server_url is required when claude.executor is \"kubernetes\"") {
 		t.Fatalf("Validate() error = %v, want agent_server_url requirement", err)
+	}
+}
+
+func TestValidateKubernetesRequiresHTTPSAgentServerURL(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Claude.AgentServerURL = "http://creator-api-svc:8080"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.agent_server_url must use https://") {
+		t.Fatalf("Validate() error = %v, want Kubernetes HTTPS requirement", err)
 	}
 }
 
@@ -170,6 +192,13 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 				cfg.Claude.Kubernetes.ServiceAccount = ""
 			},
 			wantErr: "claude.kubernetes.service_account is required",
+		},
+		{
+			name: "execution token secret",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.ExecutionTokenSecret = "too-short"
+			},
+			wantErr: "claude.kubernetes.execution_token_secret must be at least 32 bytes",
 		},
 		{
 			name: "memory storage class",
@@ -253,8 +282,8 @@ func TestValidateKubernetesAllowsZeroJobControls(t *testing.T) {
 
 func TestAgentServerURLUsesConfiguredKubernetesServiceURL(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
-	cfg.Claude.AgentServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080/"
-	if got := cfg.AgentServerURL(); got != "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080" {
+	cfg.Claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443/"
+	if got := cfg.AgentServerURL(); got != "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443" {
 		t.Fatalf("AgentServerURL() = %q", got)
 	}
 }

@@ -1104,18 +1104,14 @@ type DockerConfig struct {
 	WorkspaceDir  string `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
 }
 
-// KubernetesConfig holds ACK/Kubernetes executor settings during the Job runtime migration.
+// KubernetesConfig holds ACK/Kubernetes Job runtime settings.
 type KubernetesConfig struct {
-	Namespace       string `yaml:"namespace"`
-	AgentImage      string `yaml:"agent_image"`
-	ServiceAccount  string `yaml:"service_account"`
-	ImagePullSecret string `yaml:"image_pull_secret"`
-	// Legacy reusable-Pod settings are deleted atomically with the old executor and main wiring.
-	WorkspaceMountPath string `yaml:"workspace_mount_path"`
-	WorkspacePVCName   string `yaml:"workspace_pvc_name"`
-	PodRevision        string `yaml:"pod_revision"`
-	PodTTLSeconds      int    `yaml:"pod_ttl_seconds"`
-	ExecTimeoutSec     int    `yaml:"exec_timeout_seconds"`
+	Namespace            string `yaml:"namespace"`
+	AgentImage           string `yaml:"agent_image"`
+	ServiceAccount       string `yaml:"service_account"`
+	ImagePullSecret      string `yaml:"image_pull_secret"`
+	ServerCASecret       string `yaml:"server_ca_secret"`
+	ExecutionTokenSecret string `yaml:"execution_token_secret"`
 
 	MemoryStorageClass      string                   `yaml:"memory_storage_class"`
 	MemorySize              string                   `yaml:"memory_size"`
@@ -1618,20 +1614,8 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.Namespace == "" {
 		c.Claude.Kubernetes.Namespace = "default"
 	}
-	if c.Claude.Kubernetes.WorkspaceMountPath == "" {
-		c.Claude.Kubernetes.WorkspaceMountPath = "/workspace"
-	}
-	if c.Claude.Kubernetes.PodRevision == "" {
-		c.Claude.Kubernetes.PodRevision = strings.TrimSpace(os.Getenv("ANBAN_AGENT_POD_REVISION"))
-		if c.Claude.Kubernetes.PodRevision == "" {
-			c.Claude.Kubernetes.PodRevision = strings.TrimSpace(os.Getenv("version_switch"))
-		}
-	}
-	if c.Claude.Kubernetes.PodTTLSeconds == 0 {
-		c.Claude.Kubernetes.PodTTLSeconds = 24 * 3600
-	}
-	if c.Claude.Kubernetes.ExecTimeoutSec == 0 {
-		c.Claude.Kubernetes.ExecTimeoutSec = c.Claude.Docker.TimeoutSec
+	if c.Claude.Kubernetes.ServerCASecret == "" {
+		c.Claude.Kubernetes.ServerCASecret = "anban-server-tls"
 	}
 	if c.Claude.Kubernetes.MemorySize == "" {
 		c.Claude.Kubernetes.MemorySize = "1Gi"
@@ -2119,6 +2103,8 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.AgentServerURL) == "" {
 			errs = append(errs, "claude.agent_server_url is required when claude.executor is \"kubernetes\"")
+		} else if !strings.HasPrefix(strings.TrimSpace(c.Claude.AgentServerURL), "https://") {
+			errs = append(errs, "claude.agent_server_url must use https:// when claude.executor is \"kubernetes\"")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.Namespace) == "" {
 			errs = append(errs, "claude.kubernetes.namespace is required")
@@ -2128,6 +2114,12 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
 			errs = append(errs, "claude.kubernetes.service_account is required")
+		}
+		if strings.TrimSpace(c.Claude.Kubernetes.ServerCASecret) == "" {
+			errs = append(errs, "claude.kubernetes.server_ca_secret is required")
+		}
+		if len(c.Claude.Kubernetes.ExecutionTokenSecret) < 32 {
+			errs = append(errs, "claude.kubernetes.execution_token_secret must be at least 32 bytes")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.MemoryStorageClass) == "" {
 			errs = append(errs, "claude.kubernetes.memory_storage_class is required")
@@ -2149,20 +2141,6 @@ func (c *Config) Validate() error {
 		}
 		if c.Claude.Kubernetes.PreStartRetryLimit < 0 {
 			errs = append(errs, "claude.kubernetes.pre_start_retry_limit must not be negative")
-		}
-		if strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath) == "" {
-			errs = append(errs, "claude.kubernetes.workspace_mount_path is required")
-		} else if !strings.HasPrefix(strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath), "/") {
-			errs = append(errs, "claude.kubernetes.workspace_mount_path must be absolute")
-		}
-		if strings.TrimSpace(c.Claude.Kubernetes.WorkspacePVCName) == "" {
-			errs = append(errs, "claude.kubernetes.workspace_pvc_name is required")
-		}
-		if c.Claude.Kubernetes.ExecTimeoutSec <= 0 {
-			errs = append(errs, "claude.kubernetes.exec_timeout_seconds must be positive")
-		}
-		if c.Claude.Kubernetes.PodTTLSeconds <= 0 {
-			errs = append(errs, "claude.kubernetes.pod_ttl_seconds must be positive")
 		}
 	}
 

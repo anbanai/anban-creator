@@ -32,6 +32,14 @@ COPY --from=builder /out/anban /usr/local/bin/anban
 COPY claudecode/   /anbanai/
 COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
 
+RUN set -eux; \
+    if [ -n "$(find /anbanai -type l -print -quit)" ]; then \
+      echo >&2 "/anbanai must not contain symlinks"; \
+      exit 1; \
+    fi; \
+    chown -R root:root /anbanai; \
+    chmod -R a=rX /anbanai
+
 ENV CLAUDE_PLUGIN_ROOT=/anbanai
 ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template
 ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage
@@ -81,5 +89,5 @@ RUN set -eux; \
 USER 1000:1000
 WORKDIR /workspace
 
-ENTRYPOINT ["tini", "--"]
-CMD ["sleep", "infinity"]
+ENTRYPOINT ["tini", "--", "anban"]
+CMD ["job"]

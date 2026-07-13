@@ -18,10 +18,14 @@ import (
 const (
 	kubernetesAgentUID               int64 = 1000
 	kubernetesAgentGID               int64 = 1000
+	kubernetesAgentContainerName           = "agent"
 	kubernetesMemoryMountName              = "memory"
 	kubernetesTokenVolumeName              = "workload-token"
 	kubernetesTmpVolumeName                = "tmp"
 	kubernetesHomeVolumeName               = "home"
+	kubernetesServerCAVolumeName           = "server-ca"
+	kubernetesServerCAMountPath            = "/var/run/secrets/anban-server-ca"
+	kubernetesServerCAFile                 = kubernetesServerCAMountPath + "/ca.crt"
 	kubernetesMemoryMountPath              = "/workspace/.claude/memory"
 	kubernetesTokenMountPath               = "/var/run/secrets/anban"
 	kubernetesTokenFile                    = kubernetesTokenMountPath + "/token"
@@ -79,6 +83,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						ImagePullPolicy: corev1.PullAlways,
 						Env: []corev1.EnvVar{
 							{Name: "HOME", Value: ContainerHomePath},
+							{Name: "SSL_CERT_FILE", Value: kubernetesServerCAFile},
 							{Name: kubernetesFinalizationTimeoutEnv, Value: strconv.FormatInt(kubernetesFinalizationTimeoutSeconds(cfg.CompletionGraceSeconds, cfg.ActiveDeadlineSeconds), 10) + "s"},
 						},
 						Command: []string{"anban"},
@@ -107,6 +112,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 							{Name: kubernetesTmpVolumeName, MountPath: "/tmp"},
 							{Name: kubernetesHomeVolumeName, MountPath: "/home/node"},
 							{Name: kubernetesTokenVolumeName, MountPath: kubernetesTokenMountPath, ReadOnly: true},
+							{Name: kubernetesServerCAVolumeName, MountPath: kubernetesServerCAMountPath, ReadOnly: true},
 						},
 					}},
 					Volumes: []corev1.Volume{
@@ -122,6 +128,10 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 								Path:              "token",
 							}}},
 						}}},
+						{Name: kubernetesServerCAVolumeName, VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+							SecretName: cfg.ServerCASecret,
+							Items:      []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
+						}}},
 					},
 				},
 			},
@@ -132,6 +142,20 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	}
 	job.Annotations = map[string]string{kubernetesObjectConfigHashLabel: kubernetesObjectHash(job.Spec)}
 	return job
+}
+
+func kubernetesResourceList(values map[string]string) corev1.ResourceList {
+	if len(values) == 0 {
+		return nil
+	}
+	out := corev1.ResourceList{}
+	for name, raw := range values {
+		quantity, err := resource.ParseQuantity(raw)
+		if err == nil {
+			out[corev1.ResourceName(name)] = quantity
+		}
+	}
+	return out
 }
 
 func kubernetesFinalizationTimeoutSeconds(grace int, activeDeadline int64) int64 {

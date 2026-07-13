@@ -68,6 +68,11 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 		t.Fatalf("home volume = %#v, want writable emptyDir", home)
 	}
 	assertMount(t, c, kubernetesTokenVolumeName, kubernetesTokenMountPath, true)
+	assertMount(t, c, kubernetesServerCAVolumeName, kubernetesServerCAMountPath, true)
+	caVolume := requireTestVolume(t, job, kubernetesServerCAVolumeName)
+	if caVolume.Secret == nil || caVolume.Secret.SecretName != "anban-server-tls" || len(caVolume.Secret.Items) != 1 || caVolume.Secret.Items[0].Key != "ca.crt" {
+		t.Fatalf("server CA volume = %#v", caVolume)
+	}
 	assertProjectedAudience(t, spec.Volumes, kubernetesTokenAudience)
 	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
 		t.Fatalf("automount token = %#v, want false", spec.AutomountServiceAccountToken)
@@ -87,8 +92,8 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if got := strings.Join(append(c.Command, c.Args...), " "); strings.Contains(got, testTask().Prompt) {
 		t.Fatalf("command embeds task prompt: %q", got)
 	}
-	if len(c.Env) != 2 || c.Env[0].Name != "HOME" || c.Env[0].Value != "/home/node" || c.Env[1].Name != "ANBAN_JOB_FINALIZATION_TIMEOUT" || c.Env[1].Value != "25s" {
-		t.Fatalf("environment = %#v, want HOME and grace-aligned finalization timeout", c.Env)
+	if len(c.Env) != 3 || c.Env[0].Name != "HOME" || c.Env[0].Value != "/home/node" || c.Env[1].Name != "SSL_CERT_FILE" || c.Env[1].Value != kubernetesServerCAFile || c.Env[2].Name != "ANBAN_JOB_FINALIZATION_TIMEOUT" || c.Env[2].Value != "25s" {
+		t.Fatalf("environment = %#v, want HOME, server CA, and grace-aligned finalization timeout", c.Env)
 	}
 	if c.Resources.Requests.Cpu().String() != "500m" || c.Resources.Limits.Memory().String() != "2Gi" {
 		t.Fatalf("resources = %#v, want configured requests and limits", c.Resources)
@@ -918,13 +923,6 @@ func TestKubernetesDispatcherRecoversFromJobCreateAlreadyExistsRace(t *testing.T
 	}
 }
 
-func TestLegacyKubernetesWorkspaceInitUsesNumericOwnership(t *testing.T) {
-	got := kubernetesWorkspaceInitScript("/workspace/project")
-	if !strings.Contains(got, "chown -R 1000:1000") || strings.Contains(got, "node:node") {
-		t.Fatalf("workspace init script = %q, want numeric runtime ownership", got)
-	}
-}
-
 func testJobConfig() kubernetesJobConfig {
 	return kubernetesJobConfig{
 		KubernetesConfig: srvconfig.KubernetesConfig{
@@ -932,6 +930,7 @@ func testJobConfig() kubernetesJobConfig {
 			AgentImage:              "registry.example.com/anban-agent:v2",
 			ServiceAccount:          "creator-agent-runner",
 			ImagePullSecret:         "acr-secret",
+			ServerCASecret:          "anban-server-tls",
 			MemoryStorageClass:      "alicloud-nas",
 			MemorySize:              "1Gi",
 			ActiveDeadlineSeconds:   900,

@@ -73,18 +73,6 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 		t.Fatalf("env = %#v, want exactly one managed HOME and PATH", env)
 	}
 
-	kubernetesEnv := (&KubernetesExecutor{
-		serverURL: "http://localhost:8080/",
-		claudeEnv: map[string]string{
-			"HOME": "/configured-home",
-			"PATH": "/configured-bin",
-		},
-	}).buildAgentEnv(&ExecutionOptions{
-		Task: &model.Task{ID: "task-1", Type: model.PlatformArticle},
-	})
-	if !slices.Contains(kubernetesEnv, "HOME=/home/node") || countEnvKey(kubernetesEnv, "HOME") != 1 || countEnvKey(kubernetesEnv, "PATH") != 1 {
-		t.Fatalf("legacy Kubernetes env = %#v, want exactly one managed HOME and PATH", kubernetesEnv)
-	}
 }
 
 func TestDockerExecutorDoesNotExposeMontageProviderEnvToOtherTasks(t *testing.T) {
