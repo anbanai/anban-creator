@@ -259,7 +259,7 @@ func (s *TaskService) validateTaskArtifactExecution(ctx context.Context, task *m
 	authenticatedExecutionID = strings.TrimSpace(authenticatedExecutionID)
 	requestedExecutionID = strings.TrimSpace(requestedExecutionID)
 	if authenticatedExecutionID == "" {
-		if requestedExecutionID != "" {
+		if task.CurrentExecutionID != nil || requestedExecutionID != "" {
 			return "", fmt.Errorf("execution identity requires an execution token")
 		}
 		return "", nil

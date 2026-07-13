@@ -274,6 +274,7 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 			t.Run(endpoint.name+"/"+mode, func(t *testing.T) {
 				app, repo, task, executionID, token, _, store := setupExecutionScopedAgentApp(t)
 				requestTaskID := task.ID
+				expectedTaskStatus := model.TaskStatusRunning
 				switch mode {
 				case "cross_task":
 					requestTaskID = uuid.NewString()
@@ -293,6 +294,7 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 						t.Fatal(err)
 					}
 					persisted.Status = model.TaskStatusFailed
+					expectedTaskStatus = model.TaskStatusFailed
 					if err := repo.Tasks().Update(context.Background(), persisted); err != nil {
 						t.Fatal(err)
 					}
@@ -318,7 +320,7 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if persisted.ProgressLog != "" || persisted.Status != model.TaskStatusRunning || len(files) != 0 || store.uploadKey != "" {
+					if persisted.ProgressLog != "" || persisted.Status != expectedTaskStatus || len(files) != 0 || store.uploadKey != "" {
 						t.Fatalf("rejected request caused side effect: task=%#v files=%d upload=%q", persisted, len(files), store.uploadKey)
 					}
 				}

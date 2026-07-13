@@ -360,3 +360,36 @@ func TestExecutionArtifactPrepareRejectsMissingOrStaleIdentity(t *testing.T) {
 		t.Fatal("stale authenticated execution accepted")
 	}
 }
+
+func TestCloudTaskRejectsLegacyArtifactRequestsWithoutExecutionIdentity(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := uuid.NewString()
+	task.CurrentExecutionID = &executionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		TaskID: task.ID, RelativePath: "output/article.md", Size: 7,
+	})
+	if err == nil || !strings.Contains(err.Error(), "execution identity") {
+		t.Fatalf("legacy prepare error = %v, want execution identity rejection", err)
+	}
+	if store.uploadKey != "" {
+		t.Fatalf("rejected prepare signed object %q", store.uploadKey)
+	}
+
+	err = svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, "", TaskArtifactManifestRequest{TaskID: task.ID, Files: nil})
+	if err == nil || !strings.Contains(err.Error(), "execution identity") {
+		t.Fatalf("legacy manifest error = %v, want execution identity rejection", err)
+	}
+	rows, findErr := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if findErr != nil || len(rows) != 0 {
+		t.Fatalf("rejected manifest rows = %#v, %v", rows, findErr)
+	}
+}
