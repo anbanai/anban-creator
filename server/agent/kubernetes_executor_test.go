@@ -76,6 +76,9 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if caVolume.Secret == nil || caVolume.Secret.SecretName != "anban-server-tls" || len(caVolume.Secret.Items) != 1 || caVolume.Secret.Items[0].Key != "ca.crt" {
 		t.Fatalf("server CA volume = %#v", caVolume)
 	}
+	if caVolume.Secret.DefaultMode == nil || *caVolume.Secret.DefaultMode != corev1.SecretVolumeSourceDefaultMode {
+		t.Fatalf("server CA default mode = %#v, want %d", caVolume.Secret.DefaultMode, corev1.SecretVolumeSourceDefaultMode)
+	}
 	assertProjectedAudience(t, spec.Volumes, kubernetesTokenAudience)
 	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
 		t.Fatalf("automount token = %#v, want false", spec.AutomountServiceAccountToken)
@@ -333,6 +336,19 @@ func TestVerifyKubernetesJobIgnoresSafeAPIServerDefaults(t *testing.T) {
 	existing.Spec.Template.Spec.Containers[0].TerminationMessagePolicy = corev1.TerminationMessageReadFile
 	if err := verifyJob(existing, desired, testExecution(), testTask()); err != nil {
 		t.Fatalf("verifyJob with API defaults: %v", err)
+	}
+}
+
+func TestVerifyKubernetesJobNormalizesSecretVolumeDefaultMode(t *testing.T) {
+	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	existing := desired.DeepCopy()
+	desiredServerCA := requireTestVolume(t, desired, kubernetesServerCAVolumeName).Secret
+	existingServerCA := requireTestVolume(t, existing, kubernetesServerCAVolumeName).Secret
+	desiredServerCA.DefaultMode = nil
+	existingServerCA.DefaultMode = int32Ptr(corev1.SecretVolumeSourceDefaultMode)
+
+	if err := verifyJob(existing, desired, testExecution(), testTask()); err != nil {
+		t.Fatalf("verifyJob with secret default mode: %v", err)
 	}
 }
 

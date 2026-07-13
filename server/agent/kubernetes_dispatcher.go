@@ -365,6 +365,9 @@ func normalizeJobPodDefaults(spec *corev1.PodSpec) {
 	for i := range spec.Containers {
 		normalizeContainerDefaults(&spec.Containers[i])
 	}
+	for i := range spec.Volumes {
+		normalizeVolumeDefaults(&spec.Volumes[i])
+	}
 }
 
 func normalizeContainerDefaults(container *corev1.Container) {
@@ -373,6 +376,15 @@ func normalizeContainerDefaults(container *corev1.Container) {
 	}
 	if container.TerminationMessagePolicy == "" {
 		container.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	}
+}
+
+func normalizeVolumeDefaults(volume *corev1.Volume) {
+	if volume.Secret != nil && volume.Secret.DefaultMode == nil {
+		volume.Secret.DefaultMode = int32Ptr(corev1.SecretVolumeSourceDefaultMode)
+	}
+	if volume.Projected != nil && volume.Projected.DefaultMode == nil {
+		volume.Projected.DefaultMode = int32Ptr(corev1.ProjectedVolumeSourceDefaultMode)
 	}
 }
 
