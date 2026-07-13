@@ -783,6 +783,11 @@ git commit -m "feat(server): finalize and reconcile kubernetes jobs"
 
 ### Task 9: Wire Production and Delete the Reusable Pod Runtime
 
+The Kubernetes `claude.agent_server_url` must be an HTTPS origin backed by the
+cluster's trusted service certificate. Task 9 deployment wiring must provision
+that TLS endpoint; plain HTTP service URLs are not a supported compatibility
+path for one-shot Jobs.
+
 **Files:**
 - Modify: `server/main.go`
 - Modify: `server/mcp/mcp.go`

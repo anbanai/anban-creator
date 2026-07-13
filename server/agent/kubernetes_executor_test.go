@@ -81,14 +81,14 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if len(spec.ImagePullSecrets) != 1 || spec.ImagePullSecrets[0].Name != "acr-secret" {
 		t.Fatalf("image pull secrets = %#v, want acr-secret", spec.ImagePullSecrets)
 	}
-	if got := strings.Join(append(c.Command, c.Args...), " "); !strings.Contains(got, "anban job") || !strings.Contains(got, "--server-url http://creator-server:8080") || !strings.Contains(got, "--execution-id execution-1") || !strings.Contains(got, "--workload-token-file "+kubernetesTokenFile) {
+	if got := strings.Join(append(c.Command, c.Args...), " "); !strings.Contains(got, "anban job") || !strings.Contains(got, "--server-url https://creator-server:8443") || !strings.Contains(got, "--execution-id execution-1") || !strings.Contains(got, "--workload-token-file "+kubernetesTokenFile) {
 		t.Fatalf("command = %q, want one-shot job bootstrap args", got)
 	}
 	if got := strings.Join(append(c.Command, c.Args...), " "); strings.Contains(got, testTask().Prompt) {
 		t.Fatalf("command embeds task prompt: %q", got)
 	}
-	if len(c.Env) != 1 || c.Env[0].Name != "HOME" || c.Env[0].Value != "/home/node" {
-		t.Fatalf("environment = %#v, want only explicit HOME", c.Env)
+	if len(c.Env) != 2 || c.Env[0].Name != "HOME" || c.Env[0].Value != "/home/node" || c.Env[1].Name != "ANBAN_JOB_FINALIZATION_TIMEOUT" || c.Env[1].Value != "25s" {
+		t.Fatalf("environment = %#v, want HOME and grace-aligned finalization timeout", c.Env)
 	}
 	if c.Resources.Requests.Cpu().String() != "500m" || c.Resources.Limits.Memory().String() != "2Gi" {
 		t.Fatalf("resources = %#v, want configured requests and limits", c.Resources)
@@ -105,6 +105,25 @@ func TestBuildProjectMemoryPVCUsesNASStorageClass(t *testing.T) {
 	}
 	if pvc.Spec.Resources.Requests.Storage().String() != "1Gi" {
 		t.Fatalf("storage request = %s, want 1Gi", pvc.Spec.Resources.Requests.Storage().String())
+	}
+}
+
+func TestKubernetesFinalizationTimeoutIsBoundedByGraceAndDeadline(t *testing.T) {
+	tests := []struct {
+		grace    int
+		deadline int64
+		want     int64
+	}{
+		{grace: 30, deadline: 900, want: 25},
+		{grace: 4, deadline: 900, want: 4},
+		{grace: 600, deadline: 900, want: 300},
+		{grace: 600, deadline: 20, want: 15},
+		{grace: 0, deadline: 20, want: 15},
+	}
+	for _, tc := range tests {
+		if got := kubernetesFinalizationTimeoutSeconds(tc.grace, tc.deadline); got != tc.want {
+			t.Fatalf("timeout(%d,%d)=%d want %d", tc.grace, tc.deadline, got, tc.want)
+		}
 	}
 }
 
@@ -914,12 +933,13 @@ func testJobConfig() kubernetesJobConfig {
 			MemorySize:              "1Gi",
 			ActiveDeadlineSeconds:   900,
 			TTLSecondsAfterFinished: 120,
+			CompletionGraceSeconds:  30,
 			Resources: srvconfig.KubernetesResourceConfig{
 				Requests: map[string]string{"cpu": "500m", "memory": "1Gi"},
 				Limits:   map[string]string{"cpu": "2", "memory": "2Gi"},
 			},
 		},
-		ServerURL: "http://creator-server:8080",
+		ServerURL: "https://creator-server:8443",
 	}
 }
 

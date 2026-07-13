@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -15,17 +16,18 @@ import (
 )
 
 const (
-	kubernetesAgentUID              int64 = 1000
-	kubernetesAgentGID              int64 = 1000
-	kubernetesMemoryMountName             = "memory"
-	kubernetesTokenVolumeName             = "workload-token"
-	kubernetesTmpVolumeName               = "tmp"
-	kubernetesHomeVolumeName              = "home"
-	kubernetesMemoryMountPath             = "/workspace/.claude/memory"
-	kubernetesTokenMountPath              = "/var/run/secrets/anban"
-	kubernetesTokenFile                   = kubernetesTokenMountPath + "/token"
-	kubernetesTokenAudience               = "anban-server"
-	kubernetesObjectConfigHashLabel       = "anban.ai/config-hash"
+	kubernetesAgentUID               int64 = 1000
+	kubernetesAgentGID               int64 = 1000
+	kubernetesMemoryMountName              = "memory"
+	kubernetesTokenVolumeName              = "workload-token"
+	kubernetesTmpVolumeName                = "tmp"
+	kubernetesHomeVolumeName               = "home"
+	kubernetesMemoryMountPath              = "/workspace/.claude/memory"
+	kubernetesTokenMountPath               = "/var/run/secrets/anban"
+	kubernetesTokenFile                    = kubernetesTokenMountPath + "/token"
+	kubernetesTokenAudience                = "anban-server"
+	kubernetesObjectConfigHashLabel        = "anban.ai/config-hash"
+	kubernetesFinalizationTimeoutEnv       = "ANBAN_JOB_FINALIZATION_TIMEOUT"
 )
 
 type kubernetesJobConfig struct {
@@ -75,8 +77,11 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						Name:            kubernetesAgentContainerName,
 						Image:           cfg.AgentImage,
 						ImagePullPolicy: corev1.PullAlways,
-						Env:             []corev1.EnvVar{{Name: "HOME", Value: ContainerHomePath}},
-						Command:         []string{"anban"},
+						Env: []corev1.EnvVar{
+							{Name: "HOME", Value: ContainerHomePath},
+							{Name: kubernetesFinalizationTimeoutEnv, Value: strconv.FormatInt(kubernetesFinalizationTimeoutSeconds(cfg.CompletionGraceSeconds, cfg.ActiveDeadlineSeconds), 10) + "s"},
+						},
+						Command: []string{"anban"},
 						Args: []string{
 							"job",
 							"--server-url", strings.TrimRight(cfg.ServerURL, "/"),
@@ -127,6 +132,23 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	}
 	job.Annotations = map[string]string{kubernetesObjectConfigHashLabel: kubernetesObjectHash(job.Spec)}
 	return job
+}
+
+func kubernetesFinalizationTimeoutSeconds(grace int, activeDeadline int64) int64 {
+	seconds := int64(grace)
+	if seconds <= 0 || activeDeadline > 0 && activeDeadline < seconds {
+		seconds = activeDeadline
+	}
+	if seconds <= 0 {
+		return 1
+	}
+	if seconds > 5 {
+		seconds -= 5
+	}
+	if seconds > 300 {
+		return 300
+	}
+	return seconds
 }
 
 func buildProjectMemoryPVC(cfg kubernetesJobConfig, projectID string) *corev1.PersistentVolumeClaim {

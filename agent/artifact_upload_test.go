@@ -161,6 +161,42 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	}
 }
 
+func TestJobArtifactUploaderDoesNotFallbackOutsideOutput(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "content.md", "internal draft")
+	writeAgentArtifactTestFile(t, root, ".task-context", "TASK_ID=task-1")
+	writeAgentArtifactTestFile(t, root, ".anban-creator/settings.json", "{}")
+	writeAgentArtifactTestFile(t, root, ".claude/memory/MEMORY.md", "memory")
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
+	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
+		t.Fatal("job without output must not upload")
+		return "", nil
+	}
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reporter.prepared) != 0 || len(reporter.manifest.Files) != 0 || len(reporter.progress) != 0 {
+		t.Fatalf("job uploaded workspace internals: prepared=%v manifest=%v progress=%v", reporter.prepared, reporter.manifest, reporter.progress)
+	}
+}
+
+func TestJobArtifactUploaderDoesNotFallbackWhenOutputIsEmpty(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "content.md", "internal draft")
+	if err := os.Mkdir(filepath.Join(root, "output"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reporter.prepared) != 0 || len(reporter.manifest.Files) != 0 {
+		t.Fatalf("empty output fell back to workspace: %+v", reporter)
+	}
+}
+
 func writeAgentArtifactTestFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))

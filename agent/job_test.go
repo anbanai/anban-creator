@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestJobCommandDoesNotRunAfterInvalidBootstrapResponse(t *testing.T) {
@@ -36,8 +37,8 @@ func TestJobCommandDoesNotRunAfterInvalidBootstrapResponse(t *testing.T) {
 	}))
 	defer server.Close()
 	ran := false
-	cmd := newAgentCommand(io.Discard, io.Discard, func(context.Context, *Config) error { ran = true; return nil })
-	err := cmd.Run(context.Background(), []string{"anban", "job", "--server-url", server.URL, "--execution-id", "execution-1", "--workspace", t.TempDir(), "--workload-token-file", tokenFile})
+	cmd := newJobCommand(testBootstrapJob, func(context.Context, *Config) error { ran = true; return nil })
+	err := cmd.Run(context.Background(), []string{"job", "--server-url", server.URL, "--execution-id", "execution-1", "--workspace", t.TempDir(), "--workload-token-file", tokenFile})
 	if err == nil || ran || !completed {
 		t.Fatalf("err=%v ran=%v completed=%v", err, ran, completed)
 	}
@@ -81,4 +82,28 @@ func TestJobCommandAcceptsOnlyBootstrapFlags(t *testing.T) {
 	}
 	w := io.Discard
 	cmd.Writer, cmd.ErrWriter = w, w
+}
+
+func TestFinalizationContextIsBoundedForJob(t *testing.T) {
+	t.Setenv(jobFinalizationTimeoutEnv, "25ms")
+	ctx, cancel := finalizationContext(&Config{ExecutionID: "execution-1"})
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("job finalization context has no deadline")
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("job finalization context did not time out")
+	}
+}
+
+func TestFinalizationContextCanBeCancelled(t *testing.T) {
+	ctx, cancel := finalizationContext(&Config{ExecutionID: "execution-1"})
+	cancel()
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("cancel did not stop finalization context")
+	}
 }

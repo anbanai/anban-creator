@@ -395,7 +395,7 @@ image_presets:
 
 claude:
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
-  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc:8080}"
+  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # Agent 执行器类型：local 用于开发；docker 用于单机容器；kubernetes 用于生产队列。
   executor: "${ANBAN_CLAUDE_EXECUTOR:-local}"
   # 是否启用 agent 沙箱隔离。生产建议 true。

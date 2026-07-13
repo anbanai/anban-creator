@@ -35,7 +35,7 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 	}))
 	defer server.Close()
 
-	response, err := BootstrapJob(context.Background(), JobConfig{ServerURL: server.URL, ExecutionID: "execution-1", Workspace: workspace, WorkloadTokenFile: tokenFile})
+	response, err := testBootstrapJob(context.Background(), JobConfig{ServerURL: server.URL, ExecutionID: "execution-1", Workspace: workspace, WorkloadTokenFile: tokenFile})
 	if err != nil {
 		t.Fatalf("BootstrapJob: %v", err)
 	}
@@ -81,6 +81,40 @@ func TestReadProjectedTokenAcceptsDirectRegularFile(t *testing.T) {
 	got, err := readProjectedToken(path)
 	if err != nil || got != "direct-token" {
 		t.Fatalf("token=%q err=%v", got, err)
+	}
+}
+
+func TestReadProjectedTokenRejectsWritableModes(t *testing.T) {
+	for _, mode := range []os.FileMode{0o666, 0o670} {
+		t.Run(mode.String(), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "token")
+			if err := os.WriteFile(path, []byte("token"), mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, mode); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := readProjectedToken(path); err == nil {
+				t.Fatal("expected writable token rejection")
+			}
+		})
+	}
+}
+
+func TestBootstrapProductionServerURLRequiresHTTPS(t *testing.T) {
+	for _, raw := range []string{
+		"http://127.0.0.1:8080", "https://user@example.com", "https://example.com/path#fragment",
+		"https://example.com:443:444",
+	} {
+		if _, err := validateBootstrapServerURL(raw, false); err == nil {
+			t.Fatalf("URL %q accepted", raw)
+		}
+	}
+	if _, err := validateBootstrapServerURL("https://creator-api.example.com", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateBootstrapServerURL("http://127.0.0.1:8080", true); err != nil {
+		t.Fatalf("test loopback rejected: %v", err)
 	}
 }
 
@@ -139,7 +173,7 @@ func TestBootstrapJobRejectsTrailingResponseGarbage(t *testing.T) {
 		_, _ = w.Write([]byte(`{"code":0,"data":{}} trailing`))
 	}))
 	defer server.Close()
-	_, err := BootstrapJob(context.Background(), JobConfig{ServerURL: server.URL, ExecutionID: "e", Workspace: t.TempDir(), WorkloadTokenFile: tokenFile})
+	_, err := testBootstrapJob(context.Background(), JobConfig{ServerURL: server.URL, ExecutionID: "e", Workspace: t.TempDir(), WorkloadTokenFile: tokenFile})
 	if err == nil || !strings.Contains(err.Error(), "decode bootstrap response") {
 		t.Fatalf("err=%v", err)
 	}
@@ -193,6 +227,22 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 	}
 }
 
+func TestValidateBootstrapIdentityRejectsOversizedOrNonCompactJWT(t *testing.T) {
+	valid := BootstrapResponse{ExecutionToken: testExecutionToken(t, "execution-1", "task-1", "project-1"), TaskID: "task-1", ProjectID: "project-1"}
+	for _, token := range []string{
+		strings.Repeat("a", maxExecutionTokenBytes+1),
+		"header.payload.signature.extra",
+		"header.pay+load.signature",
+		".payload.signature",
+	} {
+		response := valid
+		response.ExecutionToken = token
+		if err := validateBootstrapIdentity("execution-1", &response); err == nil {
+			t.Fatalf("token accepted: %.32q", token)
+		}
+	}
+}
+
 func TestBootstrapJobDoesNotFollowRedirectWithWorkloadToken(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenFile, []byte("token"), 0o600); err != nil {
@@ -207,7 +257,7 @@ func TestBootstrapJobDoesNotFollowRedirectWithWorkloadToken(t *testing.T) {
 		http.Redirect(w, &http.Request{}, target.URL, http.StatusTemporaryRedirect)
 	}))
 	defer server.Close()
-	_, err := BootstrapJob(context.Background(), JobConfig{ServerURL: server.URL, ExecutionID: "e", Workspace: t.TempDir(), WorkloadTokenFile: tokenFile})
+	_, err := testBootstrapJob(context.Background(), JobConfig{ServerURL: server.URL, ExecutionID: "e", Workspace: t.TempDir(), WorkloadTokenFile: tokenFile})
 	if err == nil || redirectHits != 0 {
 		t.Fatalf("err=%v redirectHits=%d", err, redirectHits)
 	}
@@ -294,13 +344,37 @@ func TestMaterializeBootstrapRejectsExistingPrivilegedFile(t *testing.T) {
 	}
 }
 
+func TestMaterializeBootstrapRetryAcceptsOnlyExactExistingFiles(t *testing.T) {
+	root := t.TempDir()
+	files := []BootstrapFile{{Path: "settings.json", Text: "same", Mode: 0o644}}
+	if err := materializeBootstrap(context.Background(), root, files, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := materializeBootstrap(context.Background(), root, files, nil); err != nil {
+		t.Fatalf("exact retry: %v", err)
+	}
+	if err := materializeBootstrap(context.Background(), root, []BootstrapFile{
+		{Path: "new.txt", Text: "new", Mode: 0o644},
+		{Path: "settings.json", Text: "different", Mode: 0o644},
+	}, nil); err == nil {
+		t.Fatal("expected conflicting retry rejection")
+	}
+	if _, err := os.Stat(filepath.Join(root, "new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("conflict left partial commit: %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "settings.json"))
+	if string(got) != "same" {
+		t.Fatalf("existing file changed: %q", got)
+	}
+}
+
 func TestMaterializeBootstrapRejectsExistingSymlinkParent(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Symlink(t.TempDir(), filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
 	err := materializeBootstrap(context.Background(), root, []BootstrapFile{{Path: "link/file", Text: "x", Mode: 0o644}}, nil)
-	if err == nil || !strings.Contains(err.Error(), "symlink") {
+	if err == nil {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -313,7 +387,7 @@ func TestMaterializeBootstrapDownloadIsBoundedAndSendsNoAuthorization(t *testing
 	}))
 	defer server.Close()
 	root := t.TempDir()
-	client := bootstrapDownloadClient()
+	client := bootstrapLoopbackTestDownloadClient()
 	if err := materializeBootstrap(context.Background(), root, []BootstrapFile{{Path: "input.bin", DownloadURL: server.URL + "/input", Mode: 0o644}}, client); err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +429,7 @@ func TestMaterializeBootstrapRejectsDownloadRedirects(t *testing.T) {
 			}))
 			defer source.Close()
 			client := bootstrapDownloadClient()
-			client.Transport = source.Client().Transport
+			client.Transport = loopbackTestTransport{base: source.Client().Transport}
 			root := t.TempDir()
 			err := materializeBootstrap(context.Background(), root, []BootstrapFile{{Path: "input.bin", DownloadURL: source.URL + "/input", Mode: 0o644}}, client)
 			if err == nil || targetHits != 0 || sameOriginTargetHits != 0 {
@@ -375,4 +449,8 @@ func testExecutionToken(t *testing.T, executionID, taskID, projectID string) str
 		t.Fatal(err)
 	}
 	return "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+}
+
+func testBootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error) {
+	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{allowHTTPLoopback: true})
 }

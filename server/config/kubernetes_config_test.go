@@ -23,7 +23,7 @@ func baseKubernetesConfigForTest() Config {
 				MemoryStorageClass: "alicloud-nas",
 				MemorySize:         "1Gi",
 			},
-			AgentServerURL: "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080",
+			AgentServerURL: "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443",
 		},
 		Storage: StorageConfig{
 			Provider:        "oss",
@@ -95,7 +95,7 @@ storage:
   sts_role_arn: "acs:ram::123:role/upload"
 claude:
   executor: "kubernetes"
-  agent_server_url: "http://creator-api-svc:8080"
+  agent_server_url: "https://creator-api-svc:8443"
   kubernetes:
     agent_image: "registry.example.com/anban-agent:latest"
     service_account: "creator-agent-runner"
@@ -148,6 +148,23 @@ func TestValidateKubernetesRequiresAgentServerURL(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "claude.agent_server_url is required when claude.executor is \"kubernetes\"") {
 		t.Fatalf("Validate() error = %v, want agent_server_url requirement", err)
+	}
+}
+
+func TestValidateKubernetesRequiresTrustedHTTPSAgentServerURL(t *testing.T) {
+	for _, raw := range []string{
+		"http://creator-api-svc:8080",
+		"https://user@creator-api-svc:8443",
+		"https://creator-api-svc:8443/path#fragment",
+		"https://creator-api-svc:8443:9443",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.Claude.AgentServerURL = raw
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("Kubernetes agent URL %q accepted", raw)
+			}
+		})
 	}
 }
 
@@ -253,8 +270,8 @@ func TestValidateKubernetesAllowsZeroJobControls(t *testing.T) {
 
 func TestAgentServerURLUsesConfiguredKubernetesServiceURL(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
-	cfg.Claude.AgentServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080/"
-	if got := cfg.AgentServerURL(); got != "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080" {
+	cfg.Claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443/"
+	if got := cfg.AgentServerURL(); got != "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443" {
 		t.Fatalf("AgentServerURL() = %q", got)
 	}
 }

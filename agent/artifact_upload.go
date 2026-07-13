@@ -103,6 +103,19 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 	if result != nil && strings.TrimSpace(result.WorkDir) != "" {
 		workDir = result.WorkDir
 	}
+	if u.cfg.ExecutionID != "" {
+		outputDir := filepath.Join(workDir, "output")
+		info, err := os.Lstat(outputDir)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("inspect job output directory: %w", err)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("job output must be a real directory")
+		}
+	}
 	files, err := scanWorkspaceArtifacts(workDir, u.cfg.TaskType)
 	if err != nil {
 		return err

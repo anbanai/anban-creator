@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -32,6 +31,7 @@ const (
 	maxBootstrapTurns        = 1000
 	maxBootstrapModelBytes   = 256
 	maxBootstrapPromptBytes  = 1 << 20
+	maxExecutionTokenBytes   = 16 << 10
 	bootstrapRequestTimeout  = 30 * time.Second
 	bootstrapDownloadTimeout = 2 * time.Minute
 )
@@ -53,8 +53,21 @@ type bootstrapEnvelope struct {
 }
 
 func BootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error) {
+	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{})
+}
+
+type bootstrapRequestPolicy struct {
+	allowHTTPLoopback bool
+	client            *http.Client
+}
+
+func bootstrapJobWithPolicy(ctx context.Context, cfg JobConfig, policy bootstrapRequestPolicy) (*BootstrapResponse, error) {
 	if strings.TrimSpace(cfg.ServerURL) == "" || strings.TrimSpace(cfg.ExecutionID) == "" || strings.TrimSpace(cfg.Workspace) == "" || strings.TrimSpace(cfg.WorkloadTokenFile) == "" {
 		return nil, fmt.Errorf("server-url, execution-id, workspace, and workload-token-file are required")
+	}
+	serverURL, err := validateBootstrapServerURL(cfg.ServerURL, policy.allowHTTPLoopback)
+	if err != nil {
+		return nil, err
 	}
 	token, err := readProjectedToken(cfg.WorkloadTokenFile)
 	if err != nil {
@@ -64,18 +77,17 @@ func BootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error
 	if err != nil {
 		return nil, fmt.Errorf("marshal bootstrap request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.ServerURL, "/")+"/api/v1/agent/bootstrap", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL.String()+"/api/v1/agent/bootstrap", bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create bootstrap request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{
-		Timeout: bootstrapRequestTimeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+	client := policy.client
+	if client == nil {
+		client = &http.Client{Timeout: bootstrapRequestTimeout}
 	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("send bootstrap request: %w", err)
@@ -104,10 +116,32 @@ func BootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error
 	return &envelope.Data, nil
 }
 
+func validateBootstrapServerURL(raw string, allowHTTPLoopback bool) (*url.URL, error) {
+	trimmed := strings.TrimSpace(raw)
+	parsed, err := url.Parse(trimmed)
+	if err != nil || trimmed == "" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return nil, fmt.Errorf("bootstrap server URL is invalid")
+	}
+	if _, err := net.LookupPort("tcp", parsed.Port()); parsed.Port() != "" && err != nil {
+		return nil, fmt.Errorf("bootstrap server URL is invalid")
+	}
+	if parsed.Scheme != "https" {
+		ip := net.ParseIP(parsed.Hostname())
+		if !allowHTTPLoopback || parsed.Scheme != "http" || ip == nil || !ip.IsLoopback() {
+			return nil, fmt.Errorf("bootstrap server URL must use HTTPS")
+		}
+	}
+	parsed.Path = ""
+	return parsed, nil
+}
+
 func readProjectedToken(path string) (string, error) {
 	resolved, info, err := resolveProjectedTokenPath(path)
 	if err != nil {
 		return "", err
+	}
+	if info.Mode().Perm()&0o022 != 0 || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
+		return "", fmt.Errorf("projected token has unsafe permissions")
 	}
 	f, err := os.Open(resolved)
 	if err != nil {
@@ -115,7 +149,7 @@ func readProjectedToken(path string) (string, error) {
 	}
 	defer f.Close()
 	opened, err := f.Stat()
-	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || opened.Mode().Perm()&0o022 != 0 || opened.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
 		return "", fmt.Errorf("projected token changed while opening")
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, maxWorkloadTokenBytes+1))
@@ -244,6 +278,9 @@ func validateBootstrapIdentity(executionID string, response *BootstrapResponse) 
 	if response == nil || strings.TrimSpace(response.ExecutionToken) == "" || strings.TrimSpace(response.TaskID) == "" || strings.TrimSpace(response.ProjectID) == "" {
 		return fmt.Errorf("bootstrap response identity is incomplete")
 	}
+	if len(response.ExecutionToken) > maxExecutionTokenBytes || !compactExecutionToken(response.ExecutionToken) {
+		return fmt.Errorf("bootstrap execution token is malformed")
+	}
 	parts := strings.Split(response.ExecutionToken, ".")
 	if len(parts) != 3 {
 		return fmt.Errorf("bootstrap execution token is malformed")
@@ -264,6 +301,24 @@ func validateBootstrapIdentity(executionID string, response *BootstrapResponse) 
 		return fmt.Errorf("bootstrap response identity mismatch")
 	}
 	return nil
+}
+
+func compactExecutionToken(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validateBootstrapRuntime(response *BootstrapResponse) error {
@@ -292,7 +347,7 @@ func validateBootstrapRuntime(response *BootstrapResponse) error {
 	if len(response.Files) > maxBootstrapFiles {
 		return fmt.Errorf("bootstrap file count exceeds limit")
 	}
-	if _, err := preflightBootstrapFiles(response.Files); err != nil {
+	if _, err := preflightBootstrapFiles(response.Files, false); err != nil {
 		return err
 	}
 	return nil
@@ -308,11 +363,7 @@ func validBootstrapTaskType(taskType string) bool {
 }
 
 func bootstrapDownloadClient() *http.Client {
-	client := &http.Client{Timeout: bootstrapDownloadTimeout}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-	return client
+	return newBootstrapDownloadClient(net.DefaultResolver, (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext)
 }
 
 type preparedBootstrapFile struct {
@@ -321,68 +372,71 @@ type preparedBootstrapFile struct {
 	mode os.FileMode
 }
 
+var bootstrapCommitHook func(string) error
+
 func materializeBootstrap(ctx context.Context, workspace string, files []BootstrapFile, client *http.Client) error {
 	root, err := validateWorkspaceRoot(workspace)
 	if err != nil {
 		return err
 	}
-	prepared, err := preflightBootstrapFiles(files)
+	prepared, err := preflightBootstrapFiles(files, bootstrapClientAllowsHTTPLoopback(client))
 	if err != nil {
 		return err
 	}
-	var total int64
-	for _, preparedFile := range prepared {
-		file, rel, mode := preparedFile.file, preparedFile.rel, preparedFile.mode
-		parent := filepath.Dir(filepath.Join(root, rel))
-		if err := secureMkdirAll(root, parent); err != nil {
-			return err
-		}
-		var source io.ReadCloser
-		if file.Text != "" {
-			source = io.NopCloser(strings.NewReader(file.Text))
-		} else {
-			if client == nil {
-				return fmt.Errorf("bootstrap download client is required")
-			}
-			parsed, _ := url.Parse(strings.TrimSpace(file.DownloadURL))
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
-			if err != nil {
-				return fmt.Errorf("create bootstrap download %q: %w", rel, err)
-			}
-			resp, err := client.Do(req)
-			if err != nil {
-				return fmt.Errorf("download bootstrap file %q failed", rel)
-			}
-			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-				resp.Body.Close()
-				return fmt.Errorf("download bootstrap file %q failed: HTTP %d", rel, resp.StatusCode)
-			}
-			if resp.ContentLength > maxBootstrapFileBytes || (resp.ContentLength >= 0 && total+resp.ContentLength > maxBootstrapTotalBytes) {
-				resp.Body.Close()
-				return fmt.Errorf("bootstrap file %q exceeds size limit", rel)
-			}
-			source = resp.Body
-		}
-		remaining := int64(maxBootstrapTotalBytes) - total
-		fileLimit := int64(maxBootstrapFileBytes)
-		if remaining < fileLimit {
-			fileLimit = remaining
-		}
-		if fileLimit <= 0 {
-			source.Close()
-			return fmt.Errorf("bootstrap materialization exceeds size limit")
-		}
-		written, err := atomicBootstrapWrite(root, rel, mode, source, fileLimit)
-		source.Close()
-		if err != nil {
-			return err
-		}
-		total += written
+	return materializePreparedBootstrap(ctx, root, prepared, client)
+}
+
+func stageBootstrapSource(ctx context.Context, prepared preparedBootstrapFile, client *http.Client, target *os.File, total *int64) error {
+	remaining := int64(maxBootstrapTotalBytes) - *total
+	limit := int64(maxBootstrapFileBytes)
+	if remaining < limit {
+		limit = remaining
 	}
+	if limit <= 0 {
+		return fmt.Errorf("bootstrap materialization exceeds size limit")
+	}
+	var source io.ReadCloser
+	if prepared.file.Text != "" {
+		source = io.NopCloser(strings.NewReader(prepared.file.Text))
+	} else {
+		if client == nil {
+			return fmt.Errorf("bootstrap download client is required")
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(prepared.file.DownloadURL), nil)
+		if err != nil {
+			return fmt.Errorf("create bootstrap download %q: %w", prepared.rel, err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("download bootstrap file %q failed", prepared.rel)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			resp.Body.Close()
+			return fmt.Errorf("download bootstrap file %q failed: HTTP %d", prepared.rel, resp.StatusCode)
+		}
+		if resp.ContentLength > limit {
+			resp.Body.Close()
+			return fmt.Errorf("bootstrap file %q exceeds size limit", prepared.rel)
+		}
+		source = resp.Body
+	}
+	defer source.Close()
+	written, err := io.Copy(target, io.LimitReader(source, limit+1))
+	if err != nil {
+		return fmt.Errorf("stage bootstrap file %q: %w", prepared.rel, err)
+	}
+	if written > limit {
+		return fmt.Errorf("bootstrap file %q exceeds size limit", prepared.rel)
+	}
+	*total += written
 	return nil
 }
 
-func preflightBootstrapFiles(files []BootstrapFile) ([]preparedBootstrapFile, error) {
+func bootstrapLoopbackTestDownloadClient() *http.Client {
+	return &http.Client{Timeout: bootstrapDownloadTimeout, Transport: loopbackTestTransport{base: http.DefaultTransport}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+func preflightBootstrapFiles(files []BootstrapFile, allowHTTPLoopback bool) ([]preparedBootstrapFile, error) {
 	if len(files) > maxBootstrapFiles {
 		return nil, fmt.Errorf("bootstrap file count exceeds limit")
 	}
@@ -420,7 +474,7 @@ func preflightBootstrapFiles(files []BootstrapFile) ([]preparedBootstrapFile, er
 			}
 		} else {
 			parsed, err := url.Parse(strings.TrimSpace(file.DownloadURL))
-			if err != nil || validateBootstrapDownloadURL(parsed) != nil {
+			if err != nil || validateBootstrapDownloadURL(parsed, allowHTTPLoopback) != nil {
 				return nil, fmt.Errorf("unsafe bootstrap download URL for %q", rel)
 			}
 		}
@@ -482,107 +536,6 @@ func validateWorkspaceRoot(workspace string) (string, error) {
 	return root, nil
 }
 
-func secureMkdirAll(root, target string) error {
-	rel, err := filepath.Rel(root, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("directory escapes workspace")
-	}
-	current := root
-	for _, component := range strings.Split(rel, string(filepath.Separator)) {
-		if component == "" || component == "." {
-			continue
-		}
-		current = filepath.Join(current, component)
-		info, err := os.Lstat(current)
-		if os.IsNotExist(err) {
-			if err := os.Mkdir(current, 0o755); err != nil && !os.IsExist(err) {
-				return fmt.Errorf("create bootstrap directory: %w", err)
-			}
-			info, err = os.Lstat(current)
-		}
-		if err != nil {
-			return fmt.Errorf("lstat bootstrap directory: %w", err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("bootstrap parent %q is a symlink", current)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("bootstrap parent %q is not a directory", current)
-		}
-	}
-	return nil
-}
-
-func atomicBootstrapWrite(root, rel string, mode os.FileMode, source io.Reader, limit int64) (int64, error) {
-	target := filepath.Join(root, rel)
-	parent := filepath.Dir(target)
-	if err := secureMkdirAll(root, parent); err != nil {
-		return 0, err
-	}
-	temp, err := os.CreateTemp(parent, ".anban-bootstrap-*")
-	if err != nil {
-		return 0, fmt.Errorf("create bootstrap temp file: %w", err)
-	}
-	tempPath := temp.Name()
-	remove := true
-	defer func() {
-		if remove {
-			_ = os.Remove(tempPath)
-		}
-	}()
-	written, copyErr := io.Copy(temp, io.LimitReader(source, limit+1))
-	if copyErr == nil && written > limit {
-		copyErr = fmt.Errorf("file exceeds size limit")
-	}
-	if copyErr == nil {
-		copyErr = temp.Chmod(mode)
-	}
-	if copyErr == nil {
-		copyErr = temp.Sync()
-	}
-	closeErr := temp.Close()
-	if copyErr != nil {
-		return written, fmt.Errorf("write bootstrap file %q: %w", rel, copyErr)
-	}
-	if closeErr != nil {
-		return written, fmt.Errorf("close bootstrap file %q: %w", rel, closeErr)
-	}
-	if err := secureMkdirAll(root, parent); err != nil {
-		return written, err
-	}
-	if info, err := os.Lstat(target); err == nil {
-		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
-			return written, fmt.Errorf("bootstrap target %q is a symlink or special file", rel)
-		}
-		equal, err := filesEqual(target, tempPath)
-		if err != nil {
-			return written, err
-		}
-		if !equal || info.Mode().Perm() != mode {
-			return written, fmt.Errorf("bootstrap target %q conflicts with existing file", rel)
-		}
-		return written, nil
-	} else if !os.IsNotExist(err) {
-		return written, fmt.Errorf("lstat bootstrap target %q: %w", rel, err)
-	}
-	// Hard-link publication is an atomic no-clobber operation in one directory.
-	// Unlike Rename, it cannot replace a target created after the final Lstat.
-	if err := os.Link(tempPath, target); err != nil {
-		return written, fmt.Errorf("publish bootstrap file %q: %w", rel, err)
-	}
-	if err := os.Remove(tempPath); err != nil {
-		return written, fmt.Errorf("remove bootstrap temp file %q: %w", rel, err)
-	}
-	remove = false
-	if runtime.GOOS != "windows" {
-		if dir, err := os.Open(parent); err == nil {
-			_ = dir.Sync()
-			_ = dir.Close()
-		}
-	}
-	return written, nil
-}
-
 func filesEqual(a, b string) (bool, error) {
 	aFile, err := os.Open(a)
 	if err != nil {
@@ -615,22 +568,19 @@ func filesEqual(a, b string) (bool, error) {
 	return bytes.Equal(aHash.Sum(nil), bHash.Sum(nil)), nil
 }
 
-func validateBootstrapDownloadURL(u *url.URL) error {
-	if u == nil || u.User != nil || u.Hostname() == "" {
+func validateBootstrapDownloadURL(u *url.URL, allowHTTPLoopback bool) error {
+	if u == nil || u.User != nil || u.Hostname() == "" || u.Fragment != "" {
 		return fmt.Errorf("invalid download URL")
 	}
-	if strings.EqualFold(u.Scheme, "https") {
+	ip := net.ParseIP(u.Hostname())
+	if allowHTTPLoopback && ip != nil && ip.IsLoopback() && (u.Scheme == "http" || u.Scheme == "https") {
 		return nil
 	}
-	if !strings.EqualFold(u.Scheme, "http") {
+	if u.Scheme != "https" {
 		return fmt.Errorf("download URL must use HTTPS")
 	}
-	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
-	if host == "localhost" {
-		return nil
+	if ip != nil && !safeBootstrapIP(ip) {
+		return fmt.Errorf("download URL resolves to an unsafe address")
 	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return nil
-	}
-	return fmt.Errorf("download URL must use HTTPS")
+	return nil
 }
