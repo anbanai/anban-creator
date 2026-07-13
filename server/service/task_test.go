@@ -35,7 +35,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("failed to open test db: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&model.Plan{}, &model.Task{}, &model.User{},
+		&model.Plan{}, &model.Task{}, &model.TaskExecution{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
 		&model.CreditTransaction{}, &model.TopicPool{}, &model.VideoGeneration{},
 		&model.IlinkBinding{}, &model.IlinkNotification{},
@@ -99,7 +99,8 @@ func setupTaskServiceWithCredits(t *testing.T, creditSvc *CreditService) (*TaskS
 
 // mockEnqueuer captures enqueued tasks without executing them.
 type mockEnqueuer struct {
-	enqueued []string
+	enqueued  []string
+	uniqueIDs map[string]struct{}
 }
 
 type cancelingFailTaskEnqueuer struct {
@@ -117,6 +118,11 @@ func (e cancelingFailTaskEnqueuer) EnqueueIn(string, []byte, time.Duration) erro
 	return e.err
 }
 
+func (e cancelingFailTaskEnqueuer) EnqueueUnique(string, []byte, string) (bool, error) {
+	e.cancel()
+	return false, e.err
+}
+
 func (m *mockEnqueuer) Enqueue(taskType string, payload []byte) error {
 	m.enqueued = append(m.enqueued, taskType)
 	return nil
@@ -125,6 +131,18 @@ func (m *mockEnqueuer) Enqueue(taskType string, payload []byte) error {
 func (m *mockEnqueuer) EnqueueIn(taskType string, payload []byte, delay time.Duration) error {
 	m.enqueued = append(m.enqueued, taskType)
 	return nil
+}
+
+func (m *mockEnqueuer) EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error) {
+	if m.uniqueIDs == nil {
+		m.uniqueIDs = make(map[string]struct{})
+	}
+	if _, exists := m.uniqueIDs[uniqueKey]; exists {
+		return false, nil
+	}
+	m.uniqueIDs[uniqueKey] = struct{}{}
+	m.enqueued = append(m.enqueued, taskType)
+	return true, nil
 }
 
 type resumeTestStorage struct {
@@ -2552,6 +2570,12 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 				Reader:       strings.NewReader("feedback"),
 				Size:         int64(len("feedback")),
 			},
+			{
+				OriginalName: "客户 反馈.txt",
+				Label:        "第二份反馈",
+				Reader:       strings.NewReader("feedback-2"),
+				Size:         int64(len("feedback-2")),
+			},
 		},
 	})
 	if err != nil {
@@ -2575,22 +2599,22 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 		t.Fatalf("find resumed task: %v", err)
 	}
 	var latestText string
-	var resumeFile model.EntryAttachment
+	var resumeFiles []model.EntryAttachment
 	for _, attachment := range found.InputAttachments.Data() {
 		switch attachment.Role {
 		case model.EntryAttachmentRoleResumeLatest:
 			latestText = attachment.Text
 		case model.EntryAttachmentRoleResumeFile:
-			resumeFile = attachment
+			resumeFiles = append(resumeFiles, attachment)
 		}
 	}
-	for _, want := range []string{"请基于现有草稿补充案例", "客户反馈", "客户 反馈.txt", "attachments/客户_反馈.txt"} {
+	for _, want := range []string{"请基于现有草稿补充案例", "客户反馈", "客户 反馈.txt", "attachments/客户_反馈.txt", "attachments/客户_反馈_2.txt"} {
 		if !strings.Contains(latestText, want) {
 			t.Fatalf("resume latest missing %q:\n%s", want, latestText)
 		}
 	}
-	if resumeFile.FileName != "客户_反馈.txt" || string(store.files[resumeFile.Key]) != "feedback" {
-		t.Fatalf("resume file = %#v data=%q", resumeFile, store.files[resumeFile.Key])
+	if len(resumeFiles) != 2 || resumeFiles[0].FileName != "客户_反馈.txt" || resumeFiles[1].FileName != "客户_反馈_2.txt" || string(store.files[resumeFiles[0].Key]) != "feedback" || string(store.files[resumeFiles[1].Key]) != "feedback-2" {
+		t.Fatalf("resume files = %#v", resumeFiles)
 	}
 }
 
@@ -2719,6 +2743,46 @@ func TestTaskService_ResumeStorageFailureCleansPartialUploads(t *testing.T) {
 	}
 	if found.Status != model.TaskStatusFailed || len(found.InputAttachments.Data()) != 0 {
 		t.Fatalf("task changed after upload failure: status=%q attachments=%#v", found.Status, found.InputAttachments.Data())
+	}
+}
+
+func TestTaskService_ResumeRejectsNonPortableFilenameAndCleansPartialUploads(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := &resumeTestStorage{files: map[string][]byte{}}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续", Files: []ResumeTaskFile{
+		{OriginalName: "first.md", Reader: strings.NewReader("first")},
+		{OriginalName: "CON.txt", Reader: strings.NewReader("reserved")},
+	}})
+	if err == nil {
+		t.Fatal("Windows reserved resume filename accepted")
+	}
+	if len(store.files) != 0 || len(store.deleted) != 1 || !strings.HasSuffix(store.deleted[0], "/first.md") {
+		t.Fatalf("partial portable-name failure cleanup files=%v deleted=%v", store.files, store.deleted)
+	}
+	found, findErr := repo.Tasks().FindByID(ctx, task.ID)
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
+	if found.Status != model.TaskStatusFailed || len(found.InputAttachments.Data()) != 0 {
+		t.Fatalf("task changed after portable-name failure: status=%q attachments=%#v", found.Status, found.InputAttachments.Data())
 	}
 }
 
@@ -2853,7 +2917,7 @@ func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
 	}
 }
 
-func TestTaskServiceProjectConcurrencyCapOverridesProjectLimit(t *testing.T) {
+func TestTaskServiceLegacyProjectConcurrencyCapOverridesProjectLimit(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetProjectConcurrencyCap(1)
 	ctx := context.Background()
@@ -2894,7 +2958,59 @@ func TestTaskServiceProjectConcurrencyCapOverridesProjectLimit(t *testing.T) {
 		t.Fatalf("EnqueueExecution: %v", err)
 	}
 	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 0 {
-		t.Fatalf("enqueued = %d, want 0 because cap=1 and project already has a running task", got)
+		t.Fatalf("enqueued = %d, want 0 while legacy Kubernetes cap is 1", got)
+	}
+}
+
+func TestTaskServiceJobDispatcherIgnoresLegacyProjectConcurrencyCap(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetProjectConcurrencyCap(1)
+	svc.SetKubernetesDispatcher(&dispatchTestDispatcher{})
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.MaxConcurrentTasks = 10
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	var pending *model.Task
+	for _, status := range []string{model.TaskStatusRunning, model.TaskStatusPending} {
+		created := &model.Task{
+			ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+			Type: model.PlatformArticle, Status: status,
+		}
+		if err := repo.Tasks().Create(ctx, created); err != nil {
+			t.Fatal(err)
+		}
+		if status == model.TaskStatusPending {
+			pending = created
+		}
+	}
+	if err := svc.EnqueueExecution(ctx, pending, project); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 1 {
+		t.Fatalf("enqueued = %d, want 1 under configured project limit", got)
+	}
+}
+
+func TestTaskServiceProjectConcurrencyModes(t *testing.T) {
+	svc, _ := setupTaskServiceWithEnqueuer(t)
+	project := &model.Project{MaxConcurrentTasks: 8}
+	if got := svc.effectiveProjectMaxConcurrent(project); got != 8 {
+		t.Fatalf("local/Docker configured limit = %d, want 8", got)
+	}
+	svc.SetProjectConcurrencyCap(1)
+	if got := svc.effectiveProjectMaxConcurrent(project); got != 1 {
+		t.Fatalf("legacy Kubernetes limit = %d, want 1", got)
+	}
+	svc.SetKubernetesDispatcher(&dispatchTestDispatcher{})
+	if got := svc.effectiveProjectMaxConcurrent(project); got != 8 {
+		t.Fatalf("Job dispatcher configured limit = %d, want 8", got)
 	}
 }
 

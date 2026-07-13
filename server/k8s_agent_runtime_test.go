@@ -23,6 +23,7 @@ type k8sManifestDoc struct {
 		Name string `yaml:"name"`
 	} `yaml:"roleRef"`
 	Rules []struct {
+		APIGroups []string `yaml:"apiGroups"`
 		Resources []string `yaml:"resources"`
 		Verbs     []string `yaml:"verbs"`
 	} `yaml:"rules"`
@@ -52,8 +53,8 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 	}
 	text := string(raw)
 	docs := splitKubernetesYAMLDocuments(text)
-	if len(docs) != 4 {
-		t.Fatalf("ACK agent runtime manifest has %d YAML document(s), want server ServiceAccount, agent ServiceAccount, Role, and RoleBinding", len(docs))
+	if len(docs) != 6 {
+		t.Fatalf("ACK agent runtime manifest has %d YAML document(s), want two ServiceAccounts, Role, ClusterRole, ClusterRoleBinding, and RoleBinding", len(docs))
 	}
 	parsedDocs := make([]k8sManifestDoc, 0, len(docs))
 	for _, doc := range docs {
@@ -67,6 +68,8 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 		{kind: "ServiceAccount", name: "creator-server"},
 		{kind: "ServiceAccount", name: "creator-agent-runner"},
 		{kind: "Role", name: "creator-agent-runner"},
+		{kind: "ClusterRole", name: "creator-server-tokenreview"},
+		{kind: "ClusterRoleBinding", name: "creator-server-tokenreview"},
 		{kind: "RoleBinding", name: "creator-agent-runner"},
 	}
 	for i, want := range wantKindsAndNames {
@@ -75,13 +78,23 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 		}
 	}
 	role := parsedDocs[2]
-	if !roleAllows(role, "pods", "get", "list", "watch", "create", "delete") {
-		t.Fatalf("Role must allow pod lifecycle management: %#v", role.Rules)
+	if !roleAllows(role, "jobs", "get", "list", "watch", "create", "delete") {
+		t.Fatalf("Role must allow Job lifecycle management: %#v", role.Rules)
 	}
-	if !roleAllows(role, "pods/exec", "create", "get") {
-		t.Fatalf("Role must allow pod exec: %#v", role.Rules)
+	if !roleAllows(role, "persistentvolumeclaims", "get", "create", "delete") {
+		t.Fatalf("Role must allow PVC lifecycle management: %#v", role.Rules)
 	}
-	binding := parsedDocs[3]
+	if !roleAllows(role, "pods", "get", "list", "watch") || !roleAllows(role, "pods/log", "get", "list", "watch") {
+		t.Fatalf("Role must allow Pod and log reads: %#v", role.Rules)
+	}
+	if roleAllows(role, "pods", "create") || roleAllows(role, "pods/exec", "create") {
+		t.Fatalf("Role must not allow Pod creation or exec: %#v", role.Rules)
+	}
+	clusterRole := parsedDocs[3]
+	if !roleAllows(clusterRole, "tokenreviews", "create") || len(clusterRole.Rules) != 1 || !containsString(clusterRole.Rules[0].APIGroups, "authentication.k8s.io") {
+		t.Fatalf("ClusterRole must only create TokenReviews: %#v", clusterRole.Rules)
+	}
+	binding := parsedDocs[5]
 	if len(binding.Subjects) != 1 || binding.Subjects[0].Kind != "ServiceAccount" || binding.Subjects[0].Name != "creator-server" || binding.Subjects[0].Namespace != "${namespace}" {
 		t.Fatalf("RoleBinding subject = %#v, want creator-server service account in template namespace", binding.Subjects)
 	}
@@ -123,13 +136,14 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 	env := deploymentEnvMap(t, deployment)
 	for name, want := range map[string]string{
 		"ANBAN_CLAUDE_EXECUTOR":         "kubernetes",
-		"ANBAN_CLAUDE_AGENT_SERVER_URL": "http://${micro_service_name}-svc.${namespace}.svc.cluster.local:8080",
+		"ANBAN_CLAUDE_AGENT_SERVER_URL": "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
 		"ANBAN_AGENT_NAMESPACE":         "${namespace}",
 		"ANBAN_AGENT_IMAGE":             "${agent_image_repo}",
-		"ANBAN_AGENT_POD_REVISION":      "${version_switch}",
 		"ANBAN_AGENT_SERVICE_ACCOUNT":   "creator-agent-runner",
-		"ANBAN_AGENT_WORKSPACE_PVC":     "anban-creator",
+		"ANBAN_AGENT_SERVER_CA_SECRET":  "anban-server-tls",
 		"ANBAN_AGENT_IMAGE_PULL_SECRET": "${imagePullSecret}",
+		"ANBAN_SERVER_TLS_CERT_FILE":    "/var/run/secrets/anban-server-tls/tls.crt",
+		"ANBAN_SERVER_TLS_KEY_FILE":     "/var/run/secrets/anban-server-tls/tls.key",
 	} {
 		if got := env[name]; got != want {
 			t.Fatalf("server env %s = %q, want %q", name, got, want)
@@ -144,9 +158,6 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 	configExample, err := os.ReadFile("config.example.yaml")
 	if err != nil {
 		t.Fatalf("read config example: %v", err)
-	}
-	if !strings.Contains(string(configExample), `workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-creator}"`) {
-		t.Fatalf("config example must use the existing anban-creator PVC default")
 	}
 	configYAML, err := os.ReadFile("config.yaml")
 	if err != nil {
@@ -163,12 +174,22 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 			`executor: "${ANBAN_CLAUDE_EXECUTOR:-local}"`,
 			`agent_image: "${ANBAN_AGENT_IMAGE}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
-			`workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-creator}"`,
-			`pod_revision: "${ANBAN_AGENT_POD_REVISION}"`,
+			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-server-tls}"`,
+			`execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"`,
 		} {
 			if !strings.Contains(body.text, want) {
 				t.Fatalf("%s must include Kubernetes config %q", body.name, want)
 			}
+		}
+	}
+	for _, forbidden := range []string{"workspace_mount_path", "workspace_pvc_name", "pod_revision", "pod_ttl_seconds", "exec_timeout_seconds"} {
+		if strings.Contains(string(configExample), forbidden) || strings.Contains(string(configYAML), forbidden) {
+			t.Fatalf("obsolete reusable-Pod config key %q remains", forbidden)
+		}
+	}
+	for _, want := range []string{"port: 8443", "targetPort: 8080", "secretName: anban-server-tls", "mountPath: /var/run/secrets/anban-server-tls"} {
+		if !strings.Contains(string(serverDeployment), want) {
+			t.Fatalf("server deployment missing TLS contract %q", want)
 		}
 	}
 }

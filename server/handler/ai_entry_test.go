@@ -178,6 +178,8 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 		"attachments":[{
 			"type":"image",
 			"url":"https://cdn.example.com/uploads/pending/user-1/upload-1/ref.png",
+			"key":"uploads/pending/victim/other/secret.png",
+			"upload_id":"other",
 			"file_name":"ref.png",
 			"content_type":"image/png",
 			"size":123
@@ -193,6 +195,9 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 	}
 	if len(pending.finalizedIDs) != 1 || pending.finalizedIDs[0] != "upload-1" {
 		t.Fatalf("finalized IDs = %#v, want upload-1", pending.finalizedIDs)
+	}
+	if got := submitter.req.Attachments[0]; got.Key != "" || got.UploadID != "" {
+		t.Fatalf("client storage authority persisted: %#v", got)
 	}
 }
 

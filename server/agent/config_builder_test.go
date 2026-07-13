@@ -321,6 +321,13 @@ func TestDownloadInputAttachmentsSkipsResumeRoles(t *testing.T) {
 
 func TestMaterializeResumeInputsWritesLatestAndAttachments(t *testing.T) {
 	workDir := t.TempDir()
+	staleDir := filepath.Join(workDir, appconfig.ConfigDir, "resume", "attachments")
+	if err := os.MkdirAll(staleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, "stale.txt"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	store := &fakeStore{
 		readData: map[string][]byte{
 			"resume/task-1/attachments/feedback.txt": []byte("feedback bytes"),
@@ -346,19 +353,15 @@ func TestMaterializeResumeInputsWritesLatestAndAttachments(t *testing.T) {
 	if string(latest) != body {
 		t.Fatalf("latest.md = %q, want %q", latest, body)
 	}
-	matches, err := filepath.Glob(filepath.Join(workDir, appconfig.ConfigDir, "resume", "*", "attachments", "feedback.txt"))
-	if err != nil {
-		t.Fatalf("glob resume attachment: %v", err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("resume attachment matches = %v, want one", matches)
-	}
-	got, err := os.ReadFile(matches[0])
+	got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "resume", "attachments", "feedback.txt"))
 	if err != nil {
 		t.Fatalf("read resume attachment: %v", err)
 	}
 	if string(got) != "feedback bytes" {
 		t.Fatalf("resume attachment = %q, want feedback bytes", got)
+	}
+	if _, err := os.Stat(filepath.Join(staleDir, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("stale resume attachment survived materialization: %v", err)
 	}
 }
 
@@ -375,6 +378,41 @@ func TestMaterializeResumeInputsFailsWhenResumeAttachmentMissing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "resume", "latest.md")); !os.IsNotExist(err) {
 		t.Fatalf("latest.md should not be published when resume attachment is missing, statErr=%v", err)
+	}
+}
+
+func TestMaterializeResumeInputsRejectsPortableFilenameCollision(t *testing.T) {
+	for _, names := range [][2]string{
+		{"Foo.txt", "foo.txt"},
+		{"Straße.txt", "STRASSE.txt"},
+		{"Résumé.txt", "Re\u0301sume\u0301.txt"},
+	} {
+		workDir := t.TempDir()
+		attachments := []model.EntryAttachment{
+			{Text: "read attachments/" + names[0], Role: model.EntryAttachmentRoleResumeLatest},
+			{Text: "one", FileName: names[0], Role: model.EntryAttachmentRoleResumeFile},
+			{Text: "two", FileName: names[1], Role: model.EntryAttachmentRoleResumeFile},
+		}
+		if _, err := MaterializeResumeInputs(context.Background(), nil, noopLogger(), workDir, attachments); err == nil {
+			t.Fatalf("case-folded duplicate resume filenames %q accepted", names)
+		}
+		if _, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "resume", "latest.md")); !os.IsNotExist(err) {
+			t.Fatalf("latest.md published for invalid resume set: %v", err)
+		}
+	}
+}
+
+func TestMaterializeResumeInputsRejectsOverlongFilenameBeforeFilesystemWrites(t *testing.T) {
+	workDir := t.TempDir()
+	attachments := []model.EntryAttachment{
+		{Text: "read attachment", Role: model.EntryAttachmentRoleResumeLatest},
+		{Text: "content", FileName: strings.Repeat("a", 256), Role: model.EntryAttachmentRoleResumeFile},
+	}
+	if _, err := MaterializeResumeInputs(context.Background(), nil, noopLogger(), workDir, attachments); err == nil {
+		t.Fatal("overlong resume filename accepted")
+	}
+	if _, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "resume")); !os.IsNotExist(err) {
+		t.Fatalf("resume directory created before portable validation: %v", err)
 	}
 }
 

@@ -187,6 +187,7 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.AgentHandler != nil {
 		agentLimiter := appmiddleware.RateLimit(svc.Redis, 300, 1*time.Minute)
+		app.Post("/api/v1/agent/bootstrap", agentLimiter, svc.AgentHandler.WorkloadAuthMiddleware, svc.AgentHandler.Bootstrap)
 		agentAPI := app.Group("/api/v1/agent", agentLimiter, svc.AgentHandler.AuthMiddleware)
 		agentAPI.Post("/upload", svc.AgentHandler.Upload)
 		agentAPI.Post("/artifacts/prepare", svc.AgentHandler.PrepareArtifactUpload)
@@ -194,6 +195,8 @@ func NewRouter(svc *Services) *fiber.App {
 		agentAPI.Post("/progress", svc.AgentHandler.Progress)
 		agentAPI.Post("/claim", svc.AgentHandler.Claim)
 		agentAPI.Post("/complete", svc.AgentHandler.Complete)
+		adminAgentLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
+		app.Post("/api/v1/admin/agent/executions/:executionID/publishing", adminAgentLimiter, svc.AgentHandler.ResolvePublishing)
 	}
 
 	// ---------------------------------------------------------------------------

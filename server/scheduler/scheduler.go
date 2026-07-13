@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,9 +28,14 @@ type TaskEnqueuer interface {
 	EnqueueIn(taskType string, payload []byte, delay time.Duration) error
 }
 
+type asynqEnqueueClient interface {
+	Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
+	Close() error
+}
+
 // AsynqClient wraps an asynq.Client for enqueuing tasks.
 type AsynqClient struct {
-	client  *asynq.Client
+	client  asynqEnqueueClient
 	timeout time.Duration
 }
 
@@ -61,6 +67,20 @@ func (c *AsynqClient) Enqueue(taskType string, payload []byte) error {
 		asynq.Timeout(c.effectiveTimeout()),
 	)
 	return err
+}
+
+// EnqueueUnique treats an existing task ID as a successful replay.
+func (c *AsynqClient) EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error) {
+	_, err := c.client.Enqueue(
+		asynq.NewTask(taskType, payload),
+		asynq.TaskID(uniqueKey),
+		asynq.MaxRetry(3),
+		asynq.Timeout(c.effectiveTimeout()),
+	)
+	if errors.Is(err, asynq.ErrTaskIDConflict) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // EnqueueIn creates an Asynq task and enqueues it with a delay.

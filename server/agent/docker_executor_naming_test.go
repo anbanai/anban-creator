@@ -41,7 +41,7 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	}
 }
 
-func TestCleanupOrphanedContainersIncludesCurrentAndLegacyNameFilters(t *testing.T) {
+func TestCleanupOrphanedContainersUsesCurrentNameFilter(t *testing.T) {
 	var gotFilters map[string]map[string]bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal([]byte(r.URL.Query().Get("filters")), &gotFilters); err != nil {
@@ -64,10 +64,11 @@ func TestCleanupOrphanedContainersIncludesCurrentAndLegacyNameFilters(t *testing
 	e := &DockerExecutor{dockerCLI: cli}
 	e.CleanupOrphanedContainers()
 
-	for _, want := range []string{"^/creator-agent-task-", "^/anban-creator-task-"} {
-		if !gotFilters["name"][want] {
-			t.Errorf("Docker name filters = %#v, want %q", gotFilters["name"], want)
-		}
+	if want := "^/creator-agent-task-"; !gotFilters["name"][want] {
+		t.Errorf("Docker name filters = %#v, want %q", gotFilters["name"], want)
+	}
+	if len(gotFilters["name"]) != 1 {
+		t.Errorf("Docker name filters = %#v, want current runtime only", gotFilters["name"])
 	}
 }
 
@@ -142,13 +143,19 @@ func TestDockerExecutorPassesContainerAutoMemoryDirectory(t *testing.T) {
 }
 
 func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
-	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
+	e := &DockerExecutor{
+		serverURL: "http://localhost:8080/",
+		claudeEnv: map[string]string{
+			"HOME": "/configured-home",
+			"PATH": "/configured-bin",
+		},
+	}
 
 	env := e.buildAgentEnv(&ExecutionOptions{
 		Task:               &model.Task{ID: "task-1", Type: model.PlatformMontage},
 		Project:            &model.Project{ID: "project-1"},
 		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
-	})
+	}, dockerRuntimeHome("/workspace/task-1"))
 
 	if !slices.Contains(env, "ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage") {
 		t.Fatalf("env = %#v, want Montage runtime path", env)
@@ -156,6 +163,13 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 	if !slices.Contains(env, "FAL_KEY=fal-secret") {
 		t.Fatalf("env = %#v, want Montage provider env", env)
 	}
+	if !slices.Contains(env, "HOME=/workspace/task-1/.anban-runtime-home") || slices.Contains(env, "HOME=/home/node") {
+		t.Fatalf("env = %#v, want task-scoped Docker HOME", env)
+	}
+	if countEnvKey(env, "HOME") != 1 || countEnvKey(env, "PATH") != 1 {
+		t.Fatalf("env = %#v, want exactly one managed HOME and PATH", env)
+	}
+
 }
 
 func TestDockerExecutorDoesNotExposeMontageProviderEnvToOtherTasks(t *testing.T) {
@@ -164,7 +178,7 @@ func TestDockerExecutorDoesNotExposeMontageProviderEnvToOtherTasks(t *testing.T)
 	env := e.buildAgentEnv(&ExecutionOptions{
 		Task:               &model.Task{ID: "task-1", Type: model.PlatformArticle},
 		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
-	})
+	}, dockerRuntimeHome("/workspace"))
 
 	if slices.Contains(env, "FAL_KEY=fal-secret") {
 		t.Fatalf("env = %#v, non-Montage task must not receive Montage provider env", env)
@@ -178,4 +192,15 @@ func flagValue(args []string, flag string) string {
 		}
 	}
 	return ""
+}
+
+func countEnvKey(env []string, key string) int {
+	prefix := key + "="
+	count := 0
+	for _, value := range env {
+		if len(value) >= len(prefix) && value[:len(prefix)] == prefix {
+			count++
+		}
+	}
+	return count
 }

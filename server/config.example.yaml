@@ -1,5 +1,7 @@
 server:
   port: 8080
+  tls_cert_file: "${ANBAN_SERVER_TLS_CERT_FILE}"
+  tls_key_file: "${ANBAN_SERVER_TLS_KEY_FILE}"
   host: "0.0.0.0"
 
 logging:
@@ -394,8 +396,8 @@ image_presets:
     min_tier: "pro"
 
 claude:
-  # Agent Pod/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
-  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc:8080}"
+  # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
+  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # Agent 执行器类型：local 用于开发；docker 用于单机容器；kubernetes 用于生产队列。
   executor: "${ANBAN_CLAUDE_EXECUTOR:-local}"
   # 是否启用 agent 沙箱隔离。生产建议 true。
@@ -403,32 +405,35 @@ claude:
   # Agent 插件目录，必须包含 agents/、skills/ 等分发资产。
   plugin_dir: "/anbanai"
   kubernetes:
-    # Agent Pod 所在命名空间。
+    # Agent Job 所在命名空间。
     namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"
     # Agent 镜像。生产镜像必须包含 anban agent 二进制、Claude/Codex 运行时、
     # Anban 插件资产、ffmpeg/浏览器/Node/Python 以及 third_party/OpenMontage。
     agent_image: "${ANBAN_AGENT_IMAGE}"
-    # Agent Pod 使用的 Kubernetes ServiceAccount。
+    # Agent Job 使用的 Kubernetes ServiceAccount。
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
     # 私有镜像仓库拉取 secret；公开镜像可留空。
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
-    # Agent Pod 内工作区挂载路径，必须是绝对路径。
-    workspace_mount_path: "/workspace"
-    # 持久化工作区 PVC，建议绑定 NAS/云盘，便于大素材和执行日志留存。
-    workspace_pvc_name: "${ANBAN_AGENT_WORKSPACE_PVC:-anban-creator}"
-    # Agent Pod 版本标识；ACK 发布时建议设为当前 version_switch 或镜像 digest，
-    # 这样使用 latest tag 时，已有项目 Pod 也会被检测为漂移并重建。
-    pod_revision: "${ANBAN_AGENT_POD_REVISION}"
-    # 空闲 Agent Pod 保留时间，单位秒。
-    pod_ttl_seconds: 86400
-    # 单次任务执行超时，单位秒；应大于 montage.timeout_minutes * 60。
-    exec_timeout_seconds: 3600
+    # Agent Job 校验 Server TLS 使用的 CA Secret，仅挂载 ca.crt。
+    server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-server-tls}"
+    # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
+    execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
+    # 项目记忆 PVC 使用的 RWX 存储类与容量。
+    memory_storage_class: "${ANBAN_AGENT_MEMORY_STORAGE_CLASS:-alicloud-nas}"
+    memory_size: "${ANBAN_AGENT_MEMORY_SIZE:-1Gi}"
+    # Job 执行截止时间与 agent 上报完成后的退出宽限期，单位秒。
+    active_deadline_seconds: 3600
+    completion_grace_seconds: 30
+    # 已完成 Job 的自动清理时间，单位秒。
+    ttl_seconds_after_finished: 600
+    # Job 启动前失败时允许创建新执行尝试的次数。
+    pre_start_retry_limit: 1
     resources:
-      # Agent Pod 资源请求，影响调度保证。
+      # Agent Job 资源请求，影响调度保证。
       requests:
         cpu: "500m"
         memory: "1Gi"
-      # Agent Pod 资源上限。Montage 处理视频建议至少 4C/8Gi 起。
+      # Agent Job 资源上限。Montage 处理视频建议至少 4C/8Gi 起。
       limits:
         cpu: "4"
         memory: "8Gi"

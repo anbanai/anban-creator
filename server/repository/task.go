@@ -266,7 +266,7 @@ func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID str
 		// to '' (cloud); only "local" tasks are skipped here. "local_claimed"
 		// tasks are already status=running so they never match this query.
 		Where("execution_target <> ?", model.ExecutionTargetLocal).
-		Where("NOT (retry_count > 0 AND updated_at > DATE_SUB(NOW(), INTERVAL 2 MINUTE))").
+		Where("NOT (retry_count > 0 AND updated_at > ?)", time.Now().Add(-2*time.Minute)).
 		Order("created_at ASC").
 		Limit(limit).
 		Find(&tasks).Error
@@ -443,6 +443,36 @@ func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskI
 		Updates(map[string]interface{}{
 			"status":        newStatus,
 			"error_message": errorMsg,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// SetCurrentExecution records the active durable attempt only while the task is
+// running. Callers create the execution and update this pointer in one transaction.
+func (r *taskRepository) SetCurrentExecution(ctx context.Context, taskID, executionID string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status = ?", taskID, model.TaskStatusRunning).
+		Update("current_execution_id", executionID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// FailRunningTask guardedly records a pre-start terminal failure. The status,
+// diagnostic message, and completion timestamp change atomically.
+func (r *taskRepository) FailRunningTask(ctx context.Context, taskID, errorMsg string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status = ?", taskID, model.TaskStatusRunning).
+		Updates(map[string]interface{}{
+			"status":        model.TaskStatusFailed,
+			"error_message": errorMsg,
+			"completed_at":  time.Now(),
 		})
 	if result.Error != nil {
 		return false, result.Error

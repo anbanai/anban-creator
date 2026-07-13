@@ -146,28 +146,70 @@ git add server/model/task.go server/model/task_execution.go server/model/model.g
 git commit -m "feat(server): add durable task execution attempts"
 ```
 
-### Task 2: Replace Kubernetes Pod Configuration with Job Configuration
+### Task 2: Add Kubernetes Job Configuration Alongside Pod Configuration
 
 **Files:**
 - Modify: `server/config/config.go`
 - Modify: `server/config.yaml`
 - Modify: `server/config.example.yaml`
 - Modify: `server/config/kubernetes_config_test.go`
+- Modify: `docs/superpowers/plans/2026-07-12-kubernetes-agent-job-runtime.md`
 
-- [ ] **Step 1: Replace old config assertions with Job config assertions**
+- [ ] **Step 1: Add Job config default and validation assertions**
 
 ```go
 func TestKubernetesJobRuntimeDefaults(t *testing.T) {
-	cfg := baseKubernetesConfigForTest()
-	if cfg.Claude.Kubernetes.MemoryStorageClass != "alicloud-nas" { t.Fatal("memory storage class") }
+	cfg := Config{}
+	cfg.applyDefaults()
+	if cfg.Claude.Kubernetes.Namespace != "default" { t.Fatal("namespace") }
+	if cfg.Claude.Kubernetes.MemorySize != "1Gi" { t.Fatal("memory size") }
 	if cfg.Claude.Kubernetes.ActiveDeadlineSeconds != 3600 { t.Fatal("active deadline") }
+	if cfg.Claude.Kubernetes.CompletionGraceSeconds != 30 { t.Fatal("completion grace") }
 	if cfg.Claude.Kubernetes.TTLSecondsAfterFinished != 600 { t.Fatal("job ttl") }
+	if cfg.Claude.Kubernetes.PreStartRetryLimit != 1 { t.Fatal("pre-start retry limit") }
 }
+```
 
-func TestKubernetesConfigHasNoReusablePodFields(t *testing.T) {
-	typ := reflect.TypeOf(KubernetesConfig{})
-	for _, name := range []string{"WorkspaceMountPath", "WorkspacePVCName", "PodRevision", "PodTTLSeconds", "ExecTimeoutSec"} {
-		if _, ok := typ.FieldByName(name); ok { t.Fatalf("obsolete field %s remains", name) }
+Add these cases to `TestValidateKubernetesJobRuntimeRequirements`:
+
+```go
+{
+	name: "zero memory size",
+	mutate: func(cfg *Config) { cfg.Claude.Kubernetes.MemorySize = "0" },
+	wantErr: "claude.kubernetes.memory_size must be positive",
+},
+{
+	name: "negative memory size",
+	mutate: func(cfg *Config) { cfg.Claude.Kubernetes.MemorySize = "-1Gi" },
+	wantErr: "claude.kubernetes.memory_size must be positive",
+},
+{
+	name: "negative completion grace",
+	mutate: func(cfg *Config) { cfg.Claude.Kubernetes.CompletionGraceSeconds = -1 },
+	wantErr: "claude.kubernetes.completion_grace_seconds must not be negative",
+},
+{
+	name: "negative pre-start retry limit",
+	mutate: func(cfg *Config) { cfg.Claude.Kubernetes.PreStartRetryLimit = -1 },
+	wantErr: "claude.kubernetes.pre_start_retry_limit must not be negative",
+},
+```
+
+Keep the existing invalid-quantity case and add an explicit valid case with
+both completion grace and pre-start retries set to zero. Add a real `NewConfig`
+test with both YAML keys explicitly set to `0` and assert they remain zero after
+loading and defaults. Keep
+`memory_storage_class` explicit in YAML and valid fixtures, and prove omission
+survives defaults:
+
+```go
+func TestValidateKubernetesRequiresExplicitMemoryStorageClass(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Claude.Kubernetes.MemoryStorageClass = ""
+	cfg.applyDefaults()
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.kubernetes.memory_storage_class is required") {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }
 ```
@@ -176,9 +218,9 @@ func TestKubernetesConfigHasNoReusablePodFields(t *testing.T) {
 
 Run: `go test ./server/config -run 'Kubernetes' -count=1`
 
-Expected: FAIL because the new fields are absent and old fields remain.
+Expected: FAIL because the new fields and validation are absent.
 
-- [ ] **Step 3: Replace `KubernetesConfig`**
+- [ ] **Step 3: Extend `KubernetesConfig` additively**
 
 ```go
 type KubernetesConfig struct {
@@ -186,32 +228,63 @@ type KubernetesConfig struct {
 	AgentImage                string                   `yaml:"agent_image"`
 	ServiceAccount            string                   `yaml:"service_account"`
 	ImagePullSecret           string                   `yaml:"image_pull_secret"`
+	WorkspaceMountPath        string                   `yaml:"workspace_mount_path"`
+	WorkspacePVCName          string                   `yaml:"workspace_pvc_name"`
+	PodRevision               string                   `yaml:"pod_revision"`
+	PodTTLSeconds             int                      `yaml:"pod_ttl_seconds"`
+	ExecTimeoutSec            int                      `yaml:"exec_timeout_seconds"`
 	MemoryStorageClass        string                   `yaml:"memory_storage_class"`
 	MemorySize                string                   `yaml:"memory_size"`
 	ActiveDeadlineSeconds     int64                    `yaml:"active_deadline_seconds"`
 	CompletionGraceSeconds    int                      `yaml:"completion_grace_seconds"`
+	completionGraceSet        bool                     `yaml:"-"`
 	TTLSecondsAfterFinished   int32                    `yaml:"ttl_seconds_after_finished"`
 	PreStartRetryLimit        int                      `yaml:"pre_start_retry_limit"`
+	preStartRetryLimitSet     bool                     `yaml:"-"`
 	Resources                 KubernetesResourceConfig `yaml:"resources"`
 }
 ```
 
+Implement `KubernetesConfig.UnmarshalYAML` using a non-recursive alias and scan
+the mapping node for `completion_grace_seconds` and `pre_start_retry_limit`.
+Decode into a fresh alias before assigning it back so repeated unmarshalling
+resets presence state. In `applyDefaults`, default zero values only when the
+corresponding presence flag is false. Keep the exported values as integers.
+
 Defaults: namespace `default`, memory size `1Gi`, active deadline `3600`,
-completion grace `30`, Job TTL `600`, pre-start retries `1`. Validation requires
-OSS, STS role, Agent Server URL, image, service account, storage class, a valid
-quantity for memory size, and positive deadline/TTL values.
+completion grace `30`, Job TTL `600`, pre-start retries `1`. Completion grace
+and pre-start retry defaults apply only when their YAML keys are omitted;
+explicit YAML zero remains zero. Validation requires OSS, STS role, Agent
+Server URL, image, service account, storage class, a valid positive quantity for
+memory size, positive deadline/TTL values, non-negative completion grace, and a
+non-negative pre-start retry limit. Storage class has no Go default and must be
+explicit.
+
+Retain the legacy reusable-Pod fields, defaults, validation, and YAML keys in
+this task solely because `server/agent/kubernetes_executor.go` and the current
+`server/main.go` wiring still compile and run. This is an intermediate build
+contract, not a compatibility adapter. Task 9 deletes those fields and keys in
+the same commit that deletes the old executor and changes main wiring.
 
 - [ ] **Step 4: Update YAML and run tests**
 
 Run: `go test ./server/config -run 'Kubernetes' -count=1`
 
-Expected: PASS and no config text contains `pod_revision`, `pods/exec`,
-`workspace_pvc_name`, or `exec_timeout_seconds`.
+Expected: PASS. Then verify the additive checkpoint remains buildable:
+
+```bash
+go test ./...
+go build -o /tmp/anban-creator-server-task2 ./server
+go build -o /tmp/anban-task2 ./agent
+```
+
+Expected: all commands PASS. Do not assert absence of legacy fields or YAML
+keys in Task 2; those removal assertions belong to Task 9.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add server/config/config.go server/config/config.yaml server/config/config.example.yaml server/config/kubernetes_config_test.go
+git add server/config/config.go server/config.yaml server/config.example.yaml server/config/kubernetes_config_test.go docs/superpowers/plans/2026-07-12-kubernetes-agent-job-runtime.md
 git commit -m "refactor(config): define kubernetes job runtime"
 ```
 
@@ -476,10 +549,14 @@ git commit -m "feat(server): bootstrap jobs with workload identity"
 - Create: `agent/bootstrap_test.go`
 - Create: `agent/job.go`
 - Create: `agent/job_test.go`
+- Preserve/extend: `agent/home_template.go` (added by Task 3)
+- Preserve/extend: `agent/home_template_test.go` (added by Task 3)
 - Modify: `agent/main.go`
 - Modify: `agent/config.go`
 - Modify: `agent/reporter.go`
 - Modify: `agent/artifact_upload.go`
+- Modify: `agent/runner.go`
+- Modify: `agent/runner_contract_test.go`
 
 - [ ] **Step 1: Write failing bootstrap materialization tests**
 
@@ -494,14 +571,14 @@ func TestJobCommandBootstrapsBeforeRunningClaude(t *testing.T) {
 	cmd := newJobCommand(func(context.Context, JobConfig) (*BootstrapResponse, error) {
 		order = append(order, "bootstrap"); return testBootstrap(), nil
 	}, func(context.Context, *Config) error { order = append(order, "run"); return nil })
-	runCommandForTest(t, cmd, "job", "--execution-id", "e1", "--server-url", "http://server", "--token-file", writeToken(t))
+	runCommandForTest(t, cmd, "job", "--execution-id", "e1", "--server-url", "http://server", "--workload-token-file", writeToken(t))
 	if diff := cmp.Diff([]string{"bootstrap", "run"}, order); diff != "" { t.Fatal(diff) }
 }
 ```
 
 - [ ] **Step 2: Run tests and verify RED**
 
-Run: `go test ./agent -run 'Bootstrap|JobCommand' -count=1`
+Run: `go test ./agent -run 'Bootstrap|JobCommand|HomeTemplate' -count=1`
 
 Expected: FAIL because the Job command and bootstrap client do not exist.
 
@@ -525,18 +602,32 @@ type agentEnvelope struct {
 ```
 
 The Job command accepts only `server-url`, `execution-id`, `workspace`, and
-`token-file`; bootstrap supplies all task-specific options. Include
+`workload-token-file`; bootstrap supplies all task-specific options. Include
 `execution_id` in progress, prepare, manifest, and completion requests. Keep
 `anban run` unchanged for desktop/local callers.
 
+The shared Runner must load `CLAUDE_PLUGIN_ROOT` with the SDK's local-plugin
+option when that environment variable is set. Kubernetes mounts a writable
+`emptyDir` over `/home/node`, so Job execution must discover the immutable
+Anban plugin from `/anbanai` rather than relying on image-baked user-home state.
+The image and Job must explicitly set `HOME=/home/node` and run Agent work as
+numeric UID/GID `1000:1000`; do not depend on a `node` passwd or group name.
+When `ANBAN_HOME_TEMPLATE` is set, seed missing files from that immutable image
+directory into `$HOME` before constructing the Claude SDK client. Preserve any
+newer runtime files, make seeded content writable by the runtime user, and fail
+on symlinks, path escapes, special files, type conflicts, or credential files.
+When `CLAUDE_PLUGIN_ROOT` is unset, preserve the existing local/desktop plugin
+discovery behavior and continue passing the configured Agent flag. When
+`ANBAN_HOME_TEMPLATE` is unset, local/desktop home behavior remains unchanged.
+
 - [ ] **Step 5: Run tests and commit**
 
-Run: `go test ./agent -run 'Bootstrap|JobCommand|Reporter|Artifact' -count=1`
+Run: `go test ./agent -run 'Bootstrap|JobCommand|Reporter|Artifact|Runner|HomeTemplate|Plugin' -count=1`
 
 Expected: PASS.
 
 ```bash
-git add agent/bootstrap.go agent/bootstrap_test.go agent/job.go agent/job_test.go agent/main.go agent/config.go agent/reporter.go agent/artifact_upload.go
+git add agent/bootstrap.go agent/bootstrap_test.go agent/job.go agent/job_test.go agent/home_template.go agent/home_template_test.go agent/main.go agent/config.go agent/reporter.go agent/artifact_upload.go agent/runner.go agent/runner_contract_test.go
 git commit -m "feat(agent): run one-shot kubernetes jobs"
 ```
 
@@ -692,8 +783,16 @@ git commit -m "feat(server): finalize and reconcile kubernetes jobs"
 
 ### Task 9: Wire Production and Delete the Reusable Pod Runtime
 
+Task 9 must atomically provision the server TLS listener, certificate and trust
+chain, Kubernetes Service TLS port, and the matching HTTPS
+`claude.agent_server_url` before it enables the Job dispatcher. The current
+legacy Pod runtime keeps its HTTP Service URL until that rollout; the Job Agent
+itself remains HTTPS-only and therefore fails closed if enabled prematurely.
+
 **Files:**
 - Modify: `server/main.go`
+- Modify: `server/mcp/mcp.go`
+- Modify: `server/mcp/mcp_test.go`
 - Delete: `server/agent/kubernetes_executor.go`
 - Modify: `server/agent/kubernetes_executor_test.go`
 - Modify: `server/service/project.go`
@@ -702,6 +801,11 @@ git commit -m "feat(server): finalize and reconcile kubernetes jobs"
 - Modify: `server/Deployment.yaml`
 - Modify: `server/k8s_agent_runtime_test.go`
 - Modify: `Dockerfile.agent`
+- Modify: `server/agent/docker_runtime_contract_test.go`
+- Modify: `server/config/config.go`
+- Modify: `server/config.yaml`
+- Modify: `server/config.example.yaml`
+- Modify: `server/config/kubernetes_config_test.go`
 
 - [ ] **Step 1: Rewrite manifest tests first**
 
@@ -715,13 +819,22 @@ func TestACKAgentRuntimeUsesJobsWithoutExec(t *testing.T) {
 	clusterRole := requireKind(t, docs, "ClusterRole")
 	assertAllows(t, clusterRole, "authentication.k8s.io", "tokenreviews", "create")
 }
+
+func TestKubernetesConfigHasNoReusablePodFields(t *testing.T) {
+	typ := reflect.TypeOf(KubernetesConfig{})
+	for _, name := range []string{"WorkspaceMountPath", "WorkspacePVCName", "PodRevision", "PodTTLSeconds", "ExecTimeoutSec"} {
+		if _, ok := typ.FieldByName(name); ok { t.Fatalf("obsolete field %s remains", name) }
+	}
+}
 ```
 
 - [ ] **Step 2: Run tests and verify RED**
 
-Run: `go test ./server -run 'ACKAgentRuntime' -count=1`
+Run: `go test ./server ./server/config -run 'ACKAgentRuntime|KubernetesConfigHasNoReusablePodFields' -count=1`
 
-Expected: FAIL because the manifest still grants Pod exec and lacks Job/PVC/TokenReview permissions.
+Expected: FAIL because the manifest still grants Pod exec and lacks
+Job/PVC/TokenReview permissions, and the intermediate config still contains
+legacy reusable-Pod fields.
 
 - [ ] **Step 3: Wire dispatcher, identity verifier, and reconciler**
 
@@ -730,6 +843,14 @@ dispatcher, workload verifier, execution token service, and reconciler; set the
 dispatcher on `TaskService`; set verifier/token service on `AgentHandler`; start
 the reconciler with the Server lifecycle context. Do not construct a synchronous
 Kubernetes `TaskExecutor` or OSS `ProjectMemoryManager` for Kubernetes mode.
+
+Extend MCP bearer authentication to accept execution JWTs and centrally enforce
+the claimed user/project/task/current-execution scope on every tool call before
+dispatch. A token for task T1 must be unable to read, mutate, cancel, publish, or
+generate assets for T2 even when both tasks share the same user. Preserve API-key
+and static-key authentication for desktop/local callers, and add an HTTP tool-call
+test proving the cross-task request is rejected. Wire this execution-aware MCP
+verifier from `main.go` with the same token service and `TaskService` authorizer.
 
 Add a project-memory lifecycle dependency to `ProjectService`. After the
 existing guarded project deletion succeeds, call `DeleteProjectMemory` with the
@@ -750,21 +871,48 @@ rg -n -g '!**/*_test.go' "pods/exec|remotecommand|copyWorkspaceBundle|execAgentC
 
 Expected: no production hits; removal assertions in tests are allowed.
 
+In the same cutover, delete `WorkspaceMountPath`, `WorkspacePVCName`,
+`PodRevision`, `PodTTLSeconds`, and `ExecTimeoutSec` from `KubernetesConfig`;
+remove their defaults and validation; and remove `workspace_mount_path`,
+`workspace_pvc_name`, `pod_revision`, `pod_ttl_seconds`, and
+`exec_timeout_seconds` from both YAML files. Verify config text contains none of
+the removed runtime contract:
+
+```bash
+rg -n "pod_revision|pods/exec|workspace_pvc_name|exec_timeout_seconds" server/config/config.go server/config.yaml server/config.example.yaml
+```
+
+Expected: no matches. This atomic deletion is mandatory; no final compatibility
+path remains.
+
 - [ ] **Step 5: Update runtime manifests and Agent image**
 
 Grant Server namespace Job/PVC/Pod-read permissions and cluster TokenReview
 permission, remove Pod create/exec permissions, keep Agent ServiceAccount without
 API permissions, and add optional NetworkPolicy. Ensure the image contains the
 `anban job` command and writable directories are supplied only by Job volumes.
+Keep `/anbanai` immutable and outside the writable `/home/node` volume, retain
+Runner loading through `CLAUDE_PLUGIN_ROOT=/anbanai`, and make the image's numeric runtime
+identity explicitly match the Job security context UID/GID `1000:1000`. Verify
+the pinned base provides numeric UID and GID 1000, create `/home/node` with
+numeric ownership, set `HOME=/home/node`, and use `USER 1000:1000` without
+creating or requiring a `node` account. After
+all numeric-runtime-user skill and plugin installation, allowlist only the three installed
+skill directories, the known/installed plugin registry files, and the Anban
+plugin cache into `/opt/anban-home-template`; never copy `.claude` or the user
+home wholesale. Set `ANBAN_HOME_TEMPLATE` to that path and reject missing
+required inputs, credentials, special files, and image-template symlinks. The
+Runner must seed that immutable template into the writable Job home without
+overwriting runtime-created files.
 
 - [ ] **Step 6: Run targeted tests and commit**
 
-Run: `go test ./server ./server/agent ./server/config -run 'Kubernetes|ACKAgentRuntime' -count=1`
+Run: `go test ./server ./server/agent ./server/config ./agent -run 'Kubernetes|ACKAgentRuntime|DockerRuntime|Runner|HomeTemplate|Plugin' -count=1`
 
 Expected: PASS.
 
 ```bash
-git add server/main.go server/agent/kubernetes_executor.go server/agent/kubernetes_executor_test.go server/service/project.go server/service/project_test.go deploy/k8s/ack-agent-runtime.yaml server/Deployment.yaml server/k8s_agent_runtime_test.go Dockerfile.agent
+git add server/main.go server/agent/kubernetes_executor.go server/agent/kubernetes_executor_test.go server/agent/docker_runtime_contract_test.go server/service/project.go server/service/project_test.go deploy/k8s/ack-agent-runtime.yaml server/Deployment.yaml server/k8s_agent_runtime_test.go Dockerfile.agent server/config/config.go server/config.yaml server/config.example.yaml server/config/kubernetes_config_test.go
 git commit -m "refactor(server): replace kubernetes pod executor with jobs"
 ```
 

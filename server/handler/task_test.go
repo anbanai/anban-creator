@@ -37,6 +37,10 @@ func (noopTaskEnqueuer) EnqueueIn(string, []byte, time.Duration) error {
 	return nil
 }
 
+func (noopTaskEnqueuer) EnqueueUnique(string, []byte, string) (bool, error) {
+	return true, nil
+}
+
 func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{})
