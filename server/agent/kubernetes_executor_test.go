@@ -108,8 +108,8 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 
 func TestBuildProjectMemoryPVCUsesNASStorageClass(t *testing.T) {
 	pvc := buildProjectMemoryPVC(testJobConfig(), "project-1")
-	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "alicloud-nas" {
-		t.Fatalf("storage class = %#v, want alicloud-nas", pvc.Spec.StorageClassName)
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "nas-sc-creator" {
+		t.Fatalf("storage class = %#v, want nas-sc-creator", pvc.Spec.StorageClassName)
 	}
 	if !slices.Contains(pvc.Spec.AccessModes, corev1.ReadWriteMany) {
 		t.Fatalf("access modes = %#v, want RWX", pvc.Spec.AccessModes)
@@ -965,7 +965,7 @@ func testJobConfig() kubernetesJobConfig {
 			ServiceAccount:          "creator-agent-runner",
 			ImagePullSecret:         "acr-secret",
 			ServerCASecret:          "anban-server-tls",
-			MemoryStorageClass:      "alicloud-nas",
+			MemoryStorageClass:      "nas-sc-creator",
 			MemorySize:              "1Gi",
 			ActiveDeadlineSeconds:   900,
 			TTLSecondsAfterFinished: 120,

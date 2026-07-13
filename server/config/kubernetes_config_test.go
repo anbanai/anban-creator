@@ -21,7 +21,7 @@ func baseKubernetesConfigForTest() Config {
 				Namespace:            "anbanai-prod",
 				AgentImage:           "registry.example.com/creator-agent:latest",
 				ServiceAccount:       "creator-agent-runner",
-				MemoryStorageClass:   "alicloud-nas",
+				MemoryStorageClass:   "nas-sc-creator",
 				MemorySize:           "1Gi",
 				ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
 			},
@@ -108,7 +108,7 @@ claude:
     agent_image: "registry.example.com/creator-agent:latest"
     service_account: "creator-agent-runner"
     execution_token_secret: "0123456789abcdef0123456789abcdef"
-    memory_storage_class: "alicloud-nas"
+    memory_storage_class: "nas-sc-creator"
     memory_size: "1Gi"
     completion_grace_seconds: 0
     pre_start_retry_limit: 0

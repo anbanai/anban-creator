@@ -135,15 +135,17 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 	}
 	env := deploymentEnvMap(t, deployment)
 	for name, want := range map[string]string{
-		"ANBAN_CLAUDE_EXECUTOR":         "kubernetes",
-		"ANBAN_CLAUDE_AGENT_SERVER_URL": "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
-		"ANBAN_AGENT_NAMESPACE":         "${namespace}",
-		"ANBAN_AGENT_IMAGE":             "${agent_image_repo}",
-		"ANBAN_AGENT_SERVICE_ACCOUNT":   "creator-agent-runner",
-		"ANBAN_AGENT_SERVER_CA_SECRET":  "anban-server-tls",
-		"ANBAN_AGENT_IMAGE_PULL_SECRET": "${imagePullSecret}",
-		"ANBAN_SERVER_TLS_CERT_FILE":    "/var/run/secrets/anban-server-tls/tls.crt",
-		"ANBAN_SERVER_TLS_KEY_FILE":     "/var/run/secrets/anban-server-tls/tls.key",
+		"ANBAN_CLAUDE_EXECUTOR":            "kubernetes",
+		"ANBAN_CLAUDE_AGENT_SERVER_URL":    "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
+		"ANBAN_AGENT_NAMESPACE":            "${namespace}",
+		"ANBAN_AGENT_IMAGE":                "${agent_image_repo}",
+		"ANBAN_AGENT_SERVICE_ACCOUNT":      "creator-agent-runner",
+		"ANBAN_AGENT_SERVER_CA_SECRET":     "anban-server-tls",
+		"ANBAN_AGENT_IMAGE_PULL_SECRET":    "${imagePullSecret}",
+		"ANBAN_AGENT_MEMORY_STORAGE_CLASS": "nas-sc-creator",
+		"ANBAN_SERVER_TLS_CERT_FILE":       "/var/run/secrets/anban-server-tls/tls.crt",
+		"ANBAN_SERVER_TLS_KEY_FILE":        "/var/run/secrets/anban-server-tls/tls.key",
+		"SSL_CERT_FILE":                    "/var/run/secrets/anban-server-tls/ca.crt",
 	} {
 		if got := env[name]; got != want {
 			t.Fatalf("server env %s = %q, want %q", name, got, want)

@@ -421,7 +421,7 @@ claude:
     # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
     execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
     # 项目记忆 PVC 使用的 RWX 存储类与容量。
-    memory_storage_class: "${ANBAN_AGENT_MEMORY_STORAGE_CLASS:-alicloud-nas}"
+    memory_storage_class: "${ANBAN_AGENT_MEMORY_STORAGE_CLASS:-nas-sc-creator}"
     memory_size: "${ANBAN_AGENT_MEMORY_SIZE:-1Gi}"
     # Job 执行截止时间与 agent 上报完成后的退出宽限期，单位秒。
     active_deadline_seconds: 3600
