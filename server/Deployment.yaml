@@ -39,7 +39,7 @@ spec:
             - name: ANBAN_CLAUDE_EXECUTOR
               value: kubernetes
             - name: ANBAN_CLAUDE_AGENT_SERVER_URL
-              value: https://anban-creator-server:8443
+              value: https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443
             - name: ANBAN_SERVER_TLS_CERT_FILE
               value: /var/run/secrets/anban-server-tls/tls.crt
             - name: ANBAN_SERVER_TLS_KEY_FILE

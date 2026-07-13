@@ -129,8 +129,10 @@ type EmailConfig struct {
 }
 
 type ServerConfig struct {
-	Port int    `yaml:"port"` // default 8080
-	Host string `yaml:"host"` // default "0.0.0.0"
+	Port        int    `yaml:"port"` // default 8080
+	Host        string `yaml:"host"` // default "0.0.0.0"
+	TLSCertFile string `yaml:"tls_cert_file"`
+	TLSKeyFile  string `yaml:"tls_key_file"`
 }
 
 type LoggingConfig struct {
@@ -2095,6 +2097,9 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Claude.Executor == "kubernetes" {
+		if strings.TrimSpace(c.Server.TLSCertFile) == "" || strings.TrimSpace(c.Server.TLSKeyFile) == "" {
+			errs = append(errs, "server.tls_cert_file and server.tls_key_file are required when claude.executor is \"kubernetes\"")
+		}
 		if c.Storage.Provider != "oss" {
 			errs = append(errs, "claude.kubernetes requires storage.provider to be \"oss\"")
 		}
@@ -2142,6 +2147,9 @@ func (c *Config) Validate() error {
 		if c.Claude.Kubernetes.PreStartRetryLimit < 0 {
 			errs = append(errs, "claude.kubernetes.pre_start_retry_limit must not be negative")
 		}
+	}
+	if (strings.TrimSpace(c.Server.TLSCertFile) == "") != (strings.TrimSpace(c.Server.TLSKeyFile) == "") {
+		errs = append(errs, "server.tls_cert_file and server.tls_key_file must be configured together")
 	}
 
 	if c.Claude.AgentServerURL != "" {

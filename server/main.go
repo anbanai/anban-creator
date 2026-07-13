@@ -12,10 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/auth"
@@ -212,7 +215,7 @@ func main() {
 	}
 
 	var memoryMgr *projectmemory.ProjectMemoryManager
-	if cfg.Memory.Enabled && store != nil {
+	if cfg.Claude.Executor != "kubernetes" && cfg.Memory.Enabled && store != nil {
 		memoryMgr = projectmemory.NewProjectMemoryManager(store, cfg.Memory, service.NewRedisMemoryLocker(rdb, log), *log)
 		log.Info().
 			Str("provider", cfg.Memory.Provider).
@@ -223,6 +226,12 @@ func main() {
 
 	// 12. Create agent executor.
 	var agentExecutor agent.TaskExecutor
+	var kubeClient kubernetes.Interface
+	var kubeDispatcher agent.KubernetesDispatcher
+	var kubeVerifier *agent.KubernetesWorkloadVerifier
+	var executionTokens *auth.ExecutionTokenService
+	var bootstrapSvc *service.AgentBootstrapService
+	var kubeReconciler *agent.KubernetesReconciler
 	switch cfg.Claude.Executor {
 	case "docker":
 		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
@@ -239,19 +248,18 @@ func main() {
 			Bool("per_user_mcp", apiKeySvc != nil).
 			Msg("docker agent executor created")
 	case "kubernetes":
-		kubeExec, err := agent.NewKubernetesExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Kubernetes, cfg.AgentServerURL(), cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
+		restConfig, err := rest.InClusterConfig()
 		if err != nil {
-			log.Fatal().Err(err).Msg("failed to create Kubernetes executor")
+			log.Fatal().Err(err).Msg("failed to load Kubernetes in-cluster config")
 		}
-		agentExecutor = kubeExec
+		kubeClient, err = kubernetes.NewForConfig(restConfig)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create Kubernetes client")
+		}
 		log.Info().
 			Str("namespace", cfg.Claude.Kubernetes.Namespace).
 			Str("image", cfg.Claude.Kubernetes.AgentImage).
-			Str("workspace_pvc", cfg.Claude.Kubernetes.WorkspacePVCName).
-			Str("workspace_mount_path", cfg.Claude.Kubernetes.WorkspaceMountPath).
-			Int("exec_timeout_sec", cfg.Claude.Kubernetes.ExecTimeoutSec).
-			Bool("per_user_mcp", apiKeySvc != nil).
-			Msg("kubernetes agent executor created")
+			Msg("Kubernetes Job runtime client created")
 	default:
 		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)
 		log.Info().
@@ -315,9 +323,39 @@ func main() {
 		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
 		taskSvc.SetExecutorDefaults(cfg.Claude.Model, cfg.Claude.MaxTurns)
 		if cfg.Claude.Executor == "kubernetes" {
+			var err error
+			executionTokens, err = auth.NewExecutionTokenService(cfg.Claude.Kubernetes.ExecutionTokenSecret)
+			if err != nil {
+				log.Fatal().Err(err).Msg("failed to create Kubernetes execution token service")
+			}
+			kubeDispatcher, err = agent.NewKubernetesDispatcherWithClient(cfg.Claude.Kubernetes, cfg.AgentServerURL(), kubeClient)
+			if err != nil {
+				log.Fatal().Err(err).Msg("failed to create Kubernetes Job dispatcher")
+			}
+			kubeVerifier, err = agent.NewKubernetesWorkloadVerifier(kubeClient, cfg.Claude.Kubernetes.Namespace, cfg.Claude.Kubernetes.ServiceAccount)
+			if err != nil {
+				log.Fatal().Err(err).Msg("failed to create Kubernetes workload verifier")
+			}
+			activeDeadline := time.Duration(cfg.Claude.Kubernetes.ActiveDeadlineSeconds) * time.Second
+			bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{
+				Model:                   cfg.Claude.Model,
+				MaxTurns:                cfg.Claude.MaxTurns,
+				TokenTTL:                activeDeadline,
+				ActiveDeadline:          activeDeadline,
+				SignedURLTTL:            cfg.Storage.DirectUploadExpiresSeconds,
+				Store:                   store,
+				ImageAPIConfig:          &cfg.ImageAPI,
+				MontageToolPolicy:       cfg.Montage.ToolPolicy,
+				MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
+			}, *log)
+			taskSvc.SetKubernetesDispatcher(kubeDispatcher)
+			projectSvc.SetProjectMemoryLifecycle(kubeDispatcher)
+			kubeReconciler = agent.NewKubernetesReconciler(kubeDispatcher, taskSvc, agent.KubernetesReconcilerConfig{
+				PreStartRetryLimit: cfg.Claude.Kubernetes.PreStartRetryLimit,
+			}, log)
 			taskSvc.SetNASResumeEnabled(true)
 			taskSvc.SetProjectConcurrencyCap(1)
-			log.Info().Msg("kubernetes executor enabled: project task concurrency capped at 1 per project pod")
+			log.Info().Msg("Kubernetes Job runtime enabled: project task concurrency capped at 1 per memory PVC")
 		}
 		if count, err := taskSvc.ClearArtifactTitles(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clear artifact task titles")
@@ -493,6 +531,10 @@ func main() {
 		}
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
 		agentHandler.SetAdminAPIKey(cfg.Credits.AdminAPIKey)
+		if executionTokens != nil {
+			agentHandler.SetExecutionTokenService(executionTokens)
+			agentHandler.SetBootstrap(kubeVerifier, bootstrapSvc)
+		}
 		agentHandler.SetDirectUploadConfig(service.DirectUploadConfig{
 			Storage: cfg.Storage,
 		})
@@ -643,7 +685,7 @@ func main() {
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcp.SetLogger(log)
-		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc))
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
@@ -653,7 +695,7 @@ func main() {
 			Bool("publishing_tools", publishingSvc != nil).
 			Msg("MCP handler initialized with tools (official SDK)")
 	} else {
-		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc))
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")
 	}
 
@@ -668,6 +710,11 @@ func main() {
 		schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 		defer schedulerCancel()
 		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log, rdb)
+	}
+	if kubeReconciler != nil {
+		reconcilerCtx, reconcilerCancel := context.WithCancel(context.Background())
+		defer reconcilerCancel()
+		go kubeReconciler.Run(reconcilerCtx)
 	}
 
 	// 15.2 Clean up expirable derived records without touching NAS task workspaces.
@@ -836,8 +883,16 @@ func main() {
 		close(shutdownDone)
 	}()
 
-	log.Info().Str("addr", addr).Msg("server starting")
-	if err := app.Listen(addr); err != nil {
+	listenConfig := fiber.ListenConfig{}
+	if cfg.Server.TLSCertFile != "" || cfg.Server.TLSKeyFile != "" {
+		if cfg.Server.TLSCertFile == "" || cfg.Server.TLSKeyFile == "" {
+			log.Fatal().Msg("server TLS requires both certificate and key files")
+		}
+		listenConfig.CertFile = cfg.Server.TLSCertFile
+		listenConfig.CertKeyFile = cfg.Server.TLSKeyFile
+	}
+	log.Info().Str("addr", addr).Bool("tls", listenConfig.CertFile != "").Msg("server starting")
+	if err := app.Listen(addr, listenConfig); err != nil {
 		log.Error().Err(err).Msg("server listen error")
 	}
 

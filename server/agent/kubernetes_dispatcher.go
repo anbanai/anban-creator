@@ -57,7 +57,15 @@ func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, serverURL string) (
 	if err != nil {
 		return nil, fmt.Errorf("kubernetes client: %w", err)
 	}
-	return &kubernetesJobDispatcher{config: kubernetesJobConfig{KubernetesConfig: cfg, ServerURL: serverURL}, kube: client}, nil
+	return NewKubernetesDispatcherWithClient(cfg, serverURL, client)
+}
+
+func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, serverURL string, client kubernetes.Interface) (KubernetesDispatcher, error) {
+	if client == nil {
+		return nil, fmt.Errorf("kubernetes client is required")
+	}
+	jobCfg := kubernetesJobConfig{KubernetesConfig: cfg, ServerURL: serverURL}
+	return &kubernetesJobDispatcher{config: jobCfg, kube: client}, nil
 }
 
 func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) error {

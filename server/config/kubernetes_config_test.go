@@ -11,6 +11,7 @@ import (
 
 func baseKubernetesConfigForTest() Config {
 	cfg := Config{
+		Server:   ServerConfig{TLSCertFile: "/tls/tls.crt", TLSKeyFile: "/tls/tls.key"},
 		Database: DatabaseConfig{DSN: "dsn"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
 		Asynq:    AsynqConfig{ContentGenerateTimeout: time.Hour},
@@ -88,6 +89,9 @@ func TestNewConfigPreservesExplicitZeroKubernetesJobControls(t *testing.T) {
 	body := []byte(`
 database:
   dsn: "dsn"
+server:
+  tls_cert_file: "/tls/tls.crt"
+  tls_key_file: "/tls/tls.key"
 jwt:
   secret_key: "secret"
 storage:

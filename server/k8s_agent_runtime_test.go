@@ -136,7 +136,7 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 	env := deploymentEnvMap(t, deployment)
 	for name, want := range map[string]string{
 		"ANBAN_CLAUDE_EXECUTOR":         "kubernetes",
-		"ANBAN_CLAUDE_AGENT_SERVER_URL": "https://anban-creator-server:8443",
+		"ANBAN_CLAUDE_AGENT_SERVER_URL": "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
 		"ANBAN_AGENT_NAMESPACE":         "${namespace}",
 		"ANBAN_AGENT_IMAGE":             "${agent_image_repo}",
 		"ANBAN_AGENT_SERVICE_ACCOUNT":   "creator-agent-runner",
