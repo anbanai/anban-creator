@@ -179,15 +179,15 @@ func TestVideoOverlaySkillFiles(t *testing.T) {
 	}
 }
 
-func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
+func TestAgentDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(root, "Dockerfile.server"))
+	raw, err := os.ReadFile(filepath.Join(root, "Dockerfile.agent"))
 	if err != nil {
-		t.Fatalf("server Dockerfile missing: %v", err)
+		t.Fatalf("agent Dockerfile missing: %v", err)
 	}
 	body := string(raw)
 	for _, want := range []string{
@@ -204,11 +204,11 @@ func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 		"-y",
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("server Dockerfile should install official video overlay skills, missing %q", want)
+			t.Fatalf("agent Dockerfile should install official video overlay skills, missing %q", want)
 		}
 	}
 	if strings.Index(body, "USER node") > strings.Index(body, "npx -y skills@latest add heygen-com/hyperframes") {
-		t.Fatalf("server Dockerfile should install official skills as the node user")
+		t.Fatalf("agent Dockerfile should install official skills as the node user")
 	}
 }
 

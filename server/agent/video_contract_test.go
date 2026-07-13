@@ -216,20 +216,19 @@ func TestVideoDistributionDoesNotExposeUnifiedVideoAgent(t *testing.T) {
 	}
 }
 
-func TestDockerfilesInstallPluginWithSeedance20Skill(t *testing.T) {
-	for _, path := range []string{"../../Dockerfile.agent", "../../Dockerfile.server"} {
-		text := readRepoFile(t, path)
-		for _, want := range []string{
-			"claude plugin marketplace add /anbanai",
-			"claude plugin install --scope user anban@anbanai",
-		} {
-			if !strings.Contains(text, want) {
-				t.Fatalf("%s missing %q", path, want)
-			}
+func TestAgentDockerfileInstallsPluginWithSeedance20Skill(t *testing.T) {
+	path := "../../Dockerfile.agent"
+	text := readRepoFile(t, path)
+	for _, want := range []string{
+		"claude plugin marketplace add /anbanai",
+		"claude plugin install --scope user anban@anbanai",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("%s missing %q", path, want)
 		}
-		if !strings.Contains(text, "COPY claudecode/") || !strings.Contains(text, "/anbanai/") {
-			t.Fatalf("%s must copy claudecode plugin assets into /anbanai", path)
-		}
+	}
+	if !strings.Contains(text, "COPY claudecode/") || !strings.Contains(text, "/anbanai/") {
+		t.Fatalf("%s must copy claudecode plugin assets into /anbanai", path)
 	}
 
 	if _, err := os.Stat("../../claudecode/skills/seedance-20/SKILL.md"); err != nil {

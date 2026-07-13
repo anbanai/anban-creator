@@ -176,85 +176,84 @@ func makeVariableAssignments(text, variable string) []string {
 	return values
 }
 
-func TestDockerfilesUseOpenHandsAgentRuntime(t *testing.T) {
+func TestAgentDockerfileUsesOpenHandsAgentRuntime(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, tc := range []struct {
-		name       string
-		path       string
-		wantServer bool
-	}{
-		{
-			name:       "server",
-			path:       filepath.Join(root, "Dockerfile.server"),
-			wantServer: true,
-		},
-		{
-			name: "agent",
-			path: filepath.Join(root, "Dockerfile.agent"),
-		},
+	path := filepath.Join(root, "Dockerfile.agent")
+	body := readTextFile(t, path)
+	for _, want := range []string{
+		"FROM ghcr.io/openhands/agent-server:1.23.0-python",
+		"apt-get install -y --no-install-recommends ca-certificates curl git jq fontconfig fonts-noto-cjk python3",
+		"if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then",
+		"apt-get install -y --no-install-recommends ffmpeg",
+		"npm install -g @anthropic-ai/claude-code",
+		"COPY claudecode/",
+		"COPY third_party/OpenMontage/ /app/third_party/OpenMontage/",
+		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
+		"ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage",
+		"npx -y skills@latest add heygen-com/hyperframes",
+		"--skill music-to-video",
+		"--skill slideshow",
+		"npx -y skills@latest add remotion-dev/skills",
+		"--skill remotion-best-practices",
+		"claude plugin install --scope user anban@anbanai",
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			body := readTextFile(t, tc.path)
-			for _, want := range []string{
-				"FROM ghcr.io/openhands/agent-server:1.23.0-python",
-				"apt-get install -y --no-install-recommends ca-certificates curl git jq fontconfig fonts-noto-cjk python3",
-				"if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then",
-				"apt-get install -y --no-install-recommends ffmpeg",
-				"npm install -g @anthropic-ai/claude-code",
-				"COPY claudecode/",
-				"COPY third_party/OpenMontage/ /app/third_party/OpenMontage/",
-				"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
-				"ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage",
-				"npx -y skills@latest add heygen-com/hyperframes",
-				"--skill music-to-video",
-				"--skill slideshow",
-				"npx -y skills@latest add remotion-dev/skills",
-				"--skill remotion-best-practices",
-				"claude plugin install --scope user anban@anbanai",
-			} {
-				if !strings.Contains(body, want) {
-					t.Fatalf("%s missing %q", tc.path, want)
-				}
-			}
-			if tc.wantServer {
-				for _, want := range []string{
-					"go build -ldflags=\"-s -w\" -o /anban-creator-server ./server/",
-					"go build -ldflags=\"-s -w\" -o /anban ./agent",
-					"COPY --from=builder /anban-creator-server /app/anban-creator-server",
-					"COPY --from=builder /anban /usr/local/bin/anban",
-					"ENTRYPOINT []",
-					`CMD ["/app/anban-creator-server", "-config", "/app/conf/config.yaml"]`,
-				} {
-					if !strings.Contains(body, want) {
-						t.Fatalf("%s missing server runtime contract %q", tc.path, want)
-					}
-				}
-			}
-		})
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s missing %q", path, want)
+		}
 	}
 }
 
-func TestOpenHandsRuntimeDockerfilesInstallPackagesAsRoot(t *testing.T) {
+func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, path := range []string{
-		filepath.Join(root, "Dockerfile.server"),
-		filepath.Join(root, "Dockerfile.agent"),
+	path := filepath.Join(root, "Dockerfile.server")
+	body := readTextFile(t, path)
+	for _, want := range []string{
+		"FROM alpine:3.23",
+		"apk add --no-cache ca-certificates ffmpeg tzdata",
+		"go build -ldflags=\"-s -w\" -o /anban-creator-server ./server/",
+		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
+		"addgroup -S -g 1000 anban",
+		"adduser -S -D -u 1000 -G anban -h /home/anban anban",
+		"chown -R 1000:1000 /app/data",
+		"USER 1000:1000",
+		`CMD ["/app/anban-creator-server", "-config", "/app/conf/config.yaml"]`,
 	} {
-		t.Run(filepath.ToSlash(path), func(t *testing.T) {
-			body := readTextFile(t, path)
-			from := strings.Index(body, "FROM ghcr.io/openhands/agent-server:1.23.0-python")
-			if from < 0 {
-				t.Fatalf("%s missing OpenHands runtime stage", path)
-			}
-			apt := strings.Index(body[from:], "apt-get update")
-			if apt < 0 {
-				t.Fatalf("%s missing apt-get update in OpenHands runtime stage", path)
-			}
-			beforeApt := body[from : from+apt]
-			if !strings.Contains(beforeApt, "USER root") {
-				t.Fatalf("%s must switch to USER root before apt-get update because the OpenHands base image may default to a non-root user", path)
-			}
-		})
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s missing minimal server runtime contract %q", path, want)
+		}
+	}
+	for _, forbidden := range []string{
+		"ghcr.io/openhands/agent-server",
+		"./agent",
+		"/usr/local/bin/anban",
+		"COPY claudecode/",
+		"COPY third_party/OpenMontage/",
+		"CLAUDE_PLUGIN_ROOT",
+		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"npm install",
+		"npx -y skills",
+		"claude plugin",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("%s must not contain Agent runtime dependency %q", path, forbidden)
+		}
+	}
+}
+
+func TestOpenHandsAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
+	path := filepath.Join(repositoryRoot(t), "Dockerfile.agent")
+	body := readTextFile(t, path)
+	from := strings.Index(body, "FROM ghcr.io/openhands/agent-server:1.23.0-python")
+	if from < 0 {
+		t.Fatalf("%s missing OpenHands runtime stage", path)
+	}
+	apt := strings.Index(body[from:], "apt-get update")
+	if apt < 0 {
+		t.Fatalf("%s missing apt-get update in OpenHands runtime stage", path)
+	}
+	beforeApt := body[from : from+apt]
+	if !strings.Contains(beforeApt, "USER root") {
+		t.Fatalf("%s must switch to USER root before apt-get update because the OpenHands base image may default to a non-root user", path)
 	}
 }
 

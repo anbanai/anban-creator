@@ -20,8 +20,6 @@ export interface UploadToOSSResult {
   publicUrl: string
   contentType: string
   size: number
-  inputDurationSeconds?: number
-  warning?: string
 }
 
 interface PrepareUploadResponse {

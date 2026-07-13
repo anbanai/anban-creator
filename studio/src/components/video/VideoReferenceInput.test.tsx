@@ -128,7 +128,7 @@ describe('VideoReferenceInput', () => {
       target: {
         files: [
           new File(['image'], 'cup.png', { type: 'image/png' }),
-          new File(['video'], 'bad.mp4', { type: 'video/mp4' }),
+          new File(['audio'], 'bad.mp3', { type: 'audio/mpeg' }),
         ],
       },
     })
@@ -140,7 +140,7 @@ describe('VideoReferenceInput', () => {
         file_name: 'cup.png',
       })])
     })
-    expect(await screen.findByText('bad.mp4：OSS 上传失败，请重试')).toBeInTheDocument()
+    expect(await screen.findByText('bad.mp3：OSS 上传失败，请重试')).toBeInTheDocument()
   })
 
   it('shows upload progress for the active media file', async () => {
@@ -221,6 +221,46 @@ describe('VideoReferenceInput', () => {
         input_duration_seconds: 12.5,
       })])
     })
+    createObjectURL.mockRestore()
+    revokeObjectURL.mockRestore()
+    createElement.mockRestore()
+  })
+
+  it('rejects a local video before upload when browser metadata cannot be read', async () => {
+    const onChange = vi.fn()
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:unreadable-video')
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const createElement = vi.spyOn(document, 'createElement')
+    const originalCreateElement = createElement.getMockImplementation()
+    createElement.mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      const element = originalCreateElement
+        ? originalCreateElement(tagName, options)
+        : Document.prototype.createElement.call(document, tagName, options)
+      if (tagName === 'video') {
+        Object.defineProperty(element, 'load', {
+          value: vi.fn(() => {
+            setTimeout(() => {
+              ;(element as HTMLVideoElement).onerror?.(new Event('error'))
+            }, 0)
+          }),
+          configurable: true,
+        })
+      }
+      return element
+    })
+
+    render(<VideoReferenceInput value={[]} onChange={onChange} />)
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(['video'], 'unreadable.mp4', { type: 'video/mp4' })],
+      },
+    })
+
+    expect(await screen.findByText('unreadable.mp4：无法读取视频时长，请转换为浏览器支持的 MP4、MOV 或 WebM 后重试。')).toBeInTheDocument()
+    expect(uploadToOSS).not.toHaveBeenCalled()
+    expect(onChange).not.toHaveBeenCalled()
     createObjectURL.mockRestore()
     revokeObjectURL.mockRestore()
     createElement.mockRestore()
