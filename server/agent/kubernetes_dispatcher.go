@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -268,8 +271,15 @@ func verifyJob(existing, desired *batchv1.Job, execution *model.TaskExecution, t
 	if err := verifyRequiredLabels(existing.Spec.Template.Labels, desired.Spec.Template.Labels); err != nil {
 		return fmt.Errorf("Kubernetes Job %q configuration mismatch: template %w", existing.Name, err)
 	}
-	if !apiequality.Semantic.DeepEqual(normalizedJobSpec(existing), normalizedJobSpec(desired)) {
-		return fmt.Errorf("Kubernetes Job %q configuration mismatch for execution %q task %q", existing.Name, execution.ID, task.ID)
+	existingSpec := normalizedJobSpec(existing)
+	desiredSpec := normalizedJobSpec(desired)
+	if !apiequality.Semantic.DeepEqual(existingSpec, desiredSpec) {
+		fields := jobSpecMismatchPaths(existingSpec, desiredSpec, 8)
+		detail := ""
+		if len(fields) > 0 {
+			detail = ": differing fields " + strings.Join(fields, ", ")
+		}
+		return fmt.Errorf("Kubernetes Job %q configuration mismatch for execution %q task %q%s", existing.Name, execution.ID, task.ID, detail)
 	}
 	return nil
 }
@@ -335,6 +345,9 @@ func normalizeGeneratedJobSelector(job *batchv1.Job, spec *batchv1.JobSpec) {
 }
 
 func normalizeJobPodDefaults(spec *corev1.PodSpec) {
+	if spec.DeprecatedServiceAccount == spec.ServiceAccountName {
+		spec.DeprecatedServiceAccount = ""
+	}
 	if spec.DNSPolicy == "" {
 		spec.DNSPolicy = corev1.DNSClusterFirst
 	}
@@ -385,6 +398,62 @@ func normalizeVolumeDefaults(volume *corev1.Volume) {
 	}
 	if volume.Projected != nil && volume.Projected.DefaultMode == nil {
 		volume.Projected.DefaultMode = int32Ptr(corev1.ProjectedVolumeSourceDefaultMode)
+	}
+}
+
+func jobSpecMismatchPaths(existing, desired batchv1.JobSpec, limit int) []string {
+	existingJSON, existingErr := json.Marshal(existing)
+	desiredJSON, desiredErr := json.Marshal(desired)
+	if existingErr != nil || desiredErr != nil {
+		return nil
+	}
+	var existingValue any
+	var desiredValue any
+	if json.Unmarshal(existingJSON, &existingValue) != nil || json.Unmarshal(desiredJSON, &desiredValue) != nil {
+		return nil
+	}
+	paths := make([]string, 0, limit)
+	collectJSONMismatchPaths(existingValue, desiredValue, "spec", limit, &paths)
+	return paths
+}
+
+func collectJSONMismatchPaths(existing, desired any, path string, limit int, paths *[]string) {
+	if len(*paths) >= limit || reflect.DeepEqual(existing, desired) {
+		return
+	}
+	switch existingValue := existing.(type) {
+	case map[string]any:
+		desiredValue, ok := desired.(map[string]any)
+		if !ok {
+			*paths = append(*paths, path)
+			return
+		}
+		keys := make(map[string]struct{}, len(existingValue)+len(desiredValue))
+		for key := range existingValue {
+			keys[key] = struct{}{}
+		}
+		for key := range desiredValue {
+			keys[key] = struct{}{}
+		}
+		ordered := make([]string, 0, len(keys))
+		for key := range keys {
+			ordered = append(ordered, key)
+		}
+		sort.Strings(ordered)
+		for _, key := range ordered {
+			collectJSONMismatchPaths(existingValue[key], desiredValue[key], path+"."+key, limit, paths)
+		}
+	case []any:
+		desiredValue, ok := desired.([]any)
+		if !ok || len(existingValue) != len(desiredValue) {
+			*paths = append(*paths, path)
+			return
+		}
+		for i := range existingValue {
+			collectJSONMismatchPaths(existingValue[i], desiredValue[i], fmt.Sprintf("%s[%d]", path, i), limit, paths)
+		}
+	default:
+		*paths = append(*paths, path)
 	}
 }
 

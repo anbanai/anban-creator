@@ -229,6 +229,9 @@ func TestVerifyKubernetesJobRejectsSecurityAndRuntimeSpecMutation(t *testing.T) 
 		}},
 		{name: "restart", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure }},
 		{name: "service account", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.ServiceAccountName = "foreign" }},
+		{name: "deprecated service account conflict", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.DeprecatedServiceAccount = "foreign"
+		}},
 		{name: "automount", mutate: func(job *batchv1.Job) { *job.Spec.Template.Spec.AutomountServiceAccountToken = true }},
 		{name: "grace", mutate: func(job *batchv1.Job) { *job.Spec.Template.Spec.TerminationGracePeriodSeconds++ }},
 		{name: "host network", mutate: func(job *batchv1.Job) { job.Spec.Template.Spec.HostNetwork = true }},
@@ -329,6 +332,7 @@ func TestVerifyKubernetesJobIgnoresSafeAPIServerDefaults(t *testing.T) {
 	enableServiceLinks := true
 	existing.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirst
 	existing.Spec.Template.Spec.SchedulerName = corev1.DefaultSchedulerName
+	existing.Spec.Template.Spec.DeprecatedServiceAccount = existing.Spec.Template.Spec.ServiceAccountName
 	existing.Spec.Template.Spec.EnableServiceLinks = &enableServiceLinks
 	existing.Spec.Template.Spec.HostUsers = boolPtr(true)
 	existing.Spec.Template.Spec.ShareProcessNamespace = boolPtr(false)
@@ -349,6 +353,17 @@ func TestVerifyKubernetesJobNormalizesSecretVolumeDefaultMode(t *testing.T) {
 
 	if err := verifyJob(existing, desired, testExecution(), testTask()); err != nil {
 		t.Fatalf("verifyJob with secret default mode: %v", err)
+	}
+}
+
+func TestVerifyKubernetesJobReportsDifferingFields(t *testing.T) {
+	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	existing := desired.DeepCopy()
+	existing.Spec.Template.Spec.Containers[0].Image = "foreign/image"
+
+	err := verifyJob(existing, desired, testExecution(), testTask())
+	if err == nil || !strings.Contains(err.Error(), "spec.template.spec.containers[0].image") {
+		t.Fatalf("verifyJob error = %v, want differing image field", err)
 	}
 }
 
