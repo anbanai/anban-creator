@@ -24,9 +24,11 @@ RUN bun run build
 # Stage 2: serve the static bundle with nginx.
 FROM nginx:1.24-alpine
 
-# Default backend host for docker-compose (service name "server"). Override in
-# k8s via the BACKEND_HOST env var so nginx resolves the correct Service name.
+# Docker/local defaults preserve the existing HTTP backend contract. ACK
+# overrides all three values to reach the TLS-enabled Server Service.
 ENV BACKEND_HOST=server
+ENV BACKEND_SCHEME=http
+ENV BACKEND_PORT=8080
 
 # nginx config reverse-proxies /api (incl. SSE) and /ws to the backend.
 COPY default.conf.template /etc/nginx/templates/default.conf.template
