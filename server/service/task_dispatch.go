@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/agent"
@@ -105,7 +106,8 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 	execution.Status = model.TaskExecutionDispatching
 	execution.DispatchClaimToken = token
 
-	if err := s.kubernetesDispatcher.Dispatch(ctx, execution, task); err != nil {
+	runtimeIdentity, err := s.kubernetesDispatcher.Dispatch(ctx, execution, task)
+	if err != nil {
 		if agent.IsPermanentDispatchError(err) {
 			return s.failDispatch(ctx, task, execution, token, err)
 		}
@@ -118,7 +120,10 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 		}
 		return fmt.Errorf("ambiguous Kubernetes dispatch: %w", err)
 	}
-	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token)
+	if runtimeIdentity == nil || strings.TrimSpace(runtimeIdentity.Namespace) == "" || strings.TrimSpace(runtimeIdentity.JobName) == "" {
+		return fmt.Errorf("Kubernetes dispatcher returned incomplete runtime identity")
+	}
+	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token, runtimeIdentity.Namespace, runtimeIdentity.JobName)
 	if err != nil {
 		return fmt.Errorf("mark Kubernetes execution starting: %w", err)
 	}

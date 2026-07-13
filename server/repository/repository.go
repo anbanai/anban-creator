@@ -187,7 +187,7 @@ type TaskExecutionRepository interface {
 	NextAttempt(ctx context.Context, taskID string) (int, error)
 	ClaimDispatch(ctx context.Context, id, token string, leaseDuration time.Duration) (bool, error)
 	AbandonDispatch(ctx context.Context, id, token string) (bool, error)
-	CompleteDispatch(ctx context.Context, id, token string) (bool, error)
+	CompleteDispatch(ctx context.Context, id, token, namespace, jobName string) (bool, error)
 	FailDispatch(ctx context.Context, id, token, reason string, diagnostics, result []byte) (bool, error)
 	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)
 	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)

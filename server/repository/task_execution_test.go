@@ -336,11 +336,11 @@ func TestTaskExecutionDispatchClaimLeaseIsTokenGuarded(t *testing.T) {
 	if err != nil || won {
 		t.Fatalf("stale owner abandonment = %v, %v", won, err)
 	}
-	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-1")
+	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-1", "stale-namespace", "stale-job")
 	if err != nil || won {
 		t.Fatalf("stale owner completion = %v, %v", won, err)
 	}
-	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-2")
+	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-2", "anban", "agent-job-1")
 	if err != nil || !won {
 		t.Fatalf("current owner completion = %v, %v", won, err)
 	}
@@ -348,7 +348,7 @@ func TestTaskExecutionDispatchClaimLeaseIsTokenGuarded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find completed dispatch: %v", err)
 	}
-	if found.Status != model.TaskExecutionStarting || found.DispatchClaimToken != "" || found.DispatchClaimedAt != nil {
+	if found.Status != model.TaskExecutionStarting || found.DispatchClaimToken != "" || found.DispatchClaimedAt != nil || found.Namespace != "anban" || found.JobName != "agent-job-1" {
 		t.Fatalf("completed dispatch = %+v", found)
 	}
 }

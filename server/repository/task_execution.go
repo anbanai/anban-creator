@@ -97,7 +97,7 @@ func (r *taskExecutionRepository) AbandonDispatch(ctx context.Context, id, token
 	return result.RowsAffected > 0, nil
 }
 
-func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token string) (bool, error) {
+func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token, namespace, jobName string) (bool, error) {
 	result := r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
 		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token).
@@ -105,6 +105,8 @@ func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, toke
 			"status":               model.TaskExecutionStarting,
 			"dispatch_claim_token": "",
 			"dispatch_claimed_at":  nil,
+			"namespace":            namespace,
+			"job_name":             jobName,
 		})
 	if result.Error != nil {
 		return false, result.Error

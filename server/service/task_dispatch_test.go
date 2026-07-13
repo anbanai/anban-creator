@@ -32,7 +32,7 @@ type dispatchTestDispatcher struct {
 	release           chan struct{}
 }
 
-func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) error {
+func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*agent.KubernetesRuntimeIdentity, error) {
 	d.mu.Lock()
 	d.calls++
 	if d.seen == nil {
@@ -55,7 +55,10 @@ func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.Ta
 	if release != nil {
 		<-release
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return &agent.KubernetesRuntimeIdentity{Namespace: "anban", JobName: "job-" + execution.ID}, nil
 }
 
 func (d *dispatchTestDispatcher) Delete(context.Context, *model.TaskExecution) error {
@@ -159,6 +162,9 @@ func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterJobAccepted(t *testing
 	current := mustCurrentExecution(t, repo, task.ID)
 	if current.Attempt != 1 || current.Target != "kubernetes" || current.Status != model.TaskExecutionStarting {
 		t.Fatalf("current execution = %+v", current)
+	}
+	if current.Namespace != "anban" || current.JobName != "job-"+current.ID {
+		t.Fatalf("runtime identity = %q/%q, want persisted namespace and Job name", current.Namespace, current.JobName)
 	}
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
 		t.Fatal(err)

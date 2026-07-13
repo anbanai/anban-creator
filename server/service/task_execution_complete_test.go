@@ -433,8 +433,8 @@ type cancelOrderingDispatcher struct {
 	deleteErr      error
 }
 
-func (*cancelOrderingDispatcher) Dispatch(context.Context, *model.TaskExecution, *model.Task) error {
-	return nil
+func (*cancelOrderingDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*agent.KubernetesRuntimeIdentity, error) {
+	return &agent.KubernetesRuntimeIdentity{Namespace: "anban", JobName: "job-" + execution.ID}, nil
 }
 func (d *cancelOrderingDispatcher) Delete(_ context.Context, execution *model.TaskExecution) error {
 	found, _ := d.repo.TaskExecutions().FindByID(context.Background(), execution.ID)

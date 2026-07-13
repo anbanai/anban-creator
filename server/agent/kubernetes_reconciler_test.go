@@ -21,8 +21,8 @@ type reconcileTestDispatcher struct {
 	deletes    int
 }
 
-func (*reconcileTestDispatcher) Dispatch(context.Context, *model.TaskExecution, *model.Task) error {
-	return nil
+func (*reconcileTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*KubernetesRuntimeIdentity, error) {
+	return &KubernetesRuntimeIdentity{Namespace: "anban", JobName: "job-" + execution.ID}, nil
 }
 func (d *reconcileTestDispatcher) Delete(context.Context, *model.TaskExecution) error {
 	d.mu.Lock()

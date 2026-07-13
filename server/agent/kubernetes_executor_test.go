@@ -182,10 +182,14 @@ func TestKubernetesDispatcherDispatchCreatesAndReusesObjects(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
 	d := testDispatcher(client)
-	if err := d.Dispatch(ctx, testExecution(), testTask()); err != nil {
+	identity, err := d.Dispatch(ctx, testExecution(), testTask())
+	if err != nil {
 		t.Fatalf("first Dispatch: %v", err)
 	}
-	if err := d.Dispatch(ctx, testExecution(), testTask()); err != nil {
+	if identity == nil || identity.Namespace != "anban" || identity.JobName != kubernetesJobName(testExecution().ID) {
+		t.Fatalf("runtime identity = %+v, want created Job identity", identity)
+	}
+	if _, err := d.Dispatch(ctx, testExecution(), testTask()); err != nil {
 		t.Fatalf("idempotent Dispatch: %v", err)
 	}
 	jobs, err := client.BatchV1().Jobs("anban").List(ctx, metav1.ListOptions{})
@@ -427,7 +431,7 @@ func TestKubernetesDispatcherRejectsMissingOrMismatchedRequiredLabels(t *testing
 					} else {
 						labels[label] = "conflicting-value"
 					}
-					err := testDispatcher(object.client(job, pvc)).Dispatch(ctx, testExecution(), testTask())
+					_, err := testDispatcher(object.client(job, pvc)).Dispatch(ctx, testExecution(), testTask())
 					if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
 						t.Fatalf("Dispatch error = %v, want identity mismatch", err)
 					}
@@ -445,7 +449,7 @@ func TestKubernetesDispatcherLeavesCreateTimeoutAmbiguous(t *testing.T) {
 	client.PrependReactor("create", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, context.DeadlineExceeded
 	})
-	err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
+	_, err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
 	if err == nil {
 		t.Fatal("expected create timeout")
 	}
@@ -496,7 +500,7 @@ func TestKubernetesDispatcherClassifiesAPIErrors(t *testing.T) {
 				client.PrependReactor(operation.verb, operation.resource, func(ktesting.Action) (bool, runtime.Object, error) {
 					return true, nil, testCase.err
 				})
-				err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
+				_, err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
 				if err == nil {
 					t.Fatal("expected API error")
 				}
@@ -517,7 +521,7 @@ func TestKubernetesDispatcherClassifiesAPIErrors(t *testing.T) {
 			client.PrependReactor("create", resourceName, func(ktesting.Action) (bool, runtime.Object, error) {
 				return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: resourceName}, "anban")
 			})
-			err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
+			_, err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
 			if err == nil || !IsPermanentDispatchError(err) {
 				t.Fatalf("create NotFound error = %v, want permanent", err)
 			}
@@ -539,7 +543,7 @@ func TestKubernetesDispatcherLeavesPostAlreadyExistsNotFoundRetryable(t *testing
 			client.PrependReactor("create", resourceName, func(ktesting.Action) (bool, runtime.Object, error) {
 				return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: resourceName}, "object-1")
 			})
-			err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
+			_, err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
 			if err == nil {
 				t.Fatal("expected post-AlreadyExists disappearance error")
 			}
@@ -901,7 +905,7 @@ func TestKubernetesDispatcherStopsWhenPVCProvisioningFails(t *testing.T) {
 	client.PrependReactor("create", "persistentvolumeclaims", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "persistentvolumeclaims"}, "memory", nil)
 	})
-	err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
+	_, err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask())
 	if err == nil || !strings.Contains(err.Error(), "create project memory PVC") {
 		t.Fatalf("Dispatch error = %v, want PVC creation error", err)
 	}
@@ -926,7 +930,7 @@ func TestKubernetesDispatcherRecoversFromPVCCreateAlreadyExistsRace(t *testing.T
 	client.PrependReactor("create", "persistentvolumeclaims", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "persistentvolumeclaims"}, desiredPVC.Name)
 	})
-	if err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask()); err != nil {
+	if _, err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask()); err != nil {
 		t.Fatalf("Dispatch after PVC create race: %v", err)
 	}
 	if gets != 2 {
@@ -949,7 +953,7 @@ func TestKubernetesDispatcherRecoversFromJobCreateAlreadyExistsRace(t *testing.T
 	client.PrependReactor("create", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "jobs"}, desiredJob.Name)
 	})
-	if err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask()); err != nil {
+	if _, err := testDispatcher(client).Dispatch(context.Background(), testExecution(), testTask()); err != nil {
 		t.Fatalf("Dispatch after Job create race: %v", err)
 	}
 	if gets != 2 {

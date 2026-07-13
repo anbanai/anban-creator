@@ -29,10 +29,15 @@ const (
 )
 
 type KubernetesDispatcher interface {
-	Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) error
+	Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*KubernetesRuntimeIdentity, error)
 	Delete(ctx context.Context, execution *model.TaskExecution) error
 	DeleteProjectMemory(ctx context.Context, projectID string) error
 	Inspect(ctx context.Context, execution *model.TaskExecution) (*KubernetesExecutionState, error)
+}
+
+type KubernetesRuntimeIdentity struct {
+	Namespace string
+	JobName   string
 }
 
 type KubernetesExecutionState struct {
@@ -71,18 +76,18 @@ func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, serverURL
 	return &kubernetesJobDispatcher{config: jobCfg, kube: client}, nil
 }
 
-func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) error {
+func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*KubernetesRuntimeIdentity, error) {
 	if err := d.validate(execution); err != nil {
-		return NewPermanentDispatchError(err)
+		return nil, NewPermanentDispatchError(err)
 	}
 	if task == nil {
-		return NewPermanentDispatchError(fmt.Errorf("task is required"))
+		return nil, NewPermanentDispatchError(fmt.Errorf("task is required"))
 	}
 	if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.ProjectID) == "" {
-		return NewPermanentDispatchError(fmt.Errorf("task ID and project ID are required"))
+		return nil, NewPermanentDispatchError(fmt.Errorf("task ID and project ID are required"))
 	}
 	if execution.TaskID != task.ID {
-		return NewPermanentDispatchError(fmt.Errorf("execution task identity mismatch: execution has %q, task has %q", execution.TaskID, task.ID))
+		return nil, NewPermanentDispatchError(fmt.Errorf("execution task identity mismatch: execution has %q, task has %q", execution.TaskID, task.ID))
 	}
 
 	desiredPVC := buildProjectMemoryPVC(d.config, task.ProjectID)
@@ -91,20 +96,20 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 	if apierrors.IsNotFound(err) {
 		existingPVC, err = pvcs.Create(ctx, desiredPVC, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("create project memory PVC %q: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, true))
+			return nil, fmt.Errorf("create project memory PVC %q: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, true))
 		}
 		if apierrors.IsAlreadyExists(err) {
 			existingPVC, err = pvcs.Get(ctx, desiredPVC.Name, metav1.GetOptions{})
 			if err != nil {
-				return fmt.Errorf("get project memory PVC %q after create conflict: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, false))
+				return nil, fmt.Errorf("get project memory PVC %q after create conflict: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, false))
 			}
 		}
 	} else if err != nil {
-		return fmt.Errorf("get project memory PVC %q: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, false))
+		return nil, fmt.Errorf("get project memory PVC %q: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, false))
 	}
 	if existingPVC != nil {
 		if err := verifyPVC(existingPVC, desiredPVC, task.ProjectID); err != nil {
-			return NewPermanentDispatchError(err)
+			return nil, NewPermanentDispatchError(err)
 		}
 	}
 
@@ -114,23 +119,23 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 	if apierrors.IsNotFound(err) {
 		existingJob, err = jobs.Create(ctx, desiredJob, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("create Kubernetes Job %q: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, true))
+			return nil, fmt.Errorf("create Kubernetes Job %q: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, true))
 		}
 		if apierrors.IsAlreadyExists(err) {
 			existingJob, err = jobs.Get(ctx, desiredJob.Name, metav1.GetOptions{})
 			if err != nil {
-				return fmt.Errorf("get Kubernetes Job %q after create conflict: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, false))
+				return nil, fmt.Errorf("get Kubernetes Job %q after create conflict: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, false))
 			}
 		}
 	} else if err != nil {
-		return fmt.Errorf("get Kubernetes Job %q: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, false))
+		return nil, fmt.Errorf("get Kubernetes Job %q: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, false))
 	}
 	if existingJob != nil {
 		if err := verifyJob(existingJob, desiredJob, execution, task); err != nil {
-			return NewPermanentDispatchError(err)
+			return nil, NewPermanentDispatchError(err)
 		}
 	}
-	return nil
+	return &KubernetesRuntimeIdentity{Namespace: desiredJob.Namespace, JobName: desiredJob.Name}, nil
 }
 
 func classifyKubernetesDispatchAPIError(err error, create bool) error {
