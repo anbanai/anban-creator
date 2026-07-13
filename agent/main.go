@@ -52,6 +52,7 @@ func newAgentCommand(stdout, stderr io.Writer, run runAgentFunc) *cli.Command {
 		},
 		Commands: []*cli.Command{
 			newRunCommand(run),
+			newJobCommand(BootstrapJob, run),
 			newVideoCommand(stdout),
 		},
 	}

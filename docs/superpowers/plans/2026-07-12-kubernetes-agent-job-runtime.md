@@ -549,8 +549,8 @@ git commit -m "feat(server): bootstrap jobs with workload identity"
 - Create: `agent/bootstrap_test.go`
 - Create: `agent/job.go`
 - Create: `agent/job_test.go`
-- Create: `agent/home_template.go`
-- Create: `agent/home_template_test.go`
+- Preserve/extend: `agent/home_template.go` (added by Task 3)
+- Preserve/extend: `agent/home_template_test.go` (added by Task 3)
 - Modify: `agent/main.go`
 - Modify: `agent/config.go`
 - Modify: `agent/reporter.go`
@@ -571,7 +571,7 @@ func TestJobCommandBootstrapsBeforeRunningClaude(t *testing.T) {
 	cmd := newJobCommand(func(context.Context, JobConfig) (*BootstrapResponse, error) {
 		order = append(order, "bootstrap"); return testBootstrap(), nil
 	}, func(context.Context, *Config) error { order = append(order, "run"); return nil })
-	runCommandForTest(t, cmd, "job", "--execution-id", "e1", "--server-url", "http://server", "--token-file", writeToken(t))
+	runCommandForTest(t, cmd, "job", "--execution-id", "e1", "--server-url", "http://server", "--workload-token-file", writeToken(t))
 	if diff := cmp.Diff([]string{"bootstrap", "run"}, order); diff != "" { t.Fatal(diff) }
 }
 ```
@@ -602,7 +602,7 @@ type agentEnvelope struct {
 ```
 
 The Job command accepts only `server-url`, `execution-id`, `workspace`, and
-`token-file`; bootstrap supplies all task-specific options. Include
+`workload-token-file`; bootstrap supplies all task-specific options. Include
 `execution_id` in progress, prepare, manifest, and completion requests. Keep
 `anban run` unchanged for desktop/local callers.
 

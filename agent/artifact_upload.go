@@ -21,6 +21,7 @@ import (
 
 type ArtifactPrepareRequest struct {
 	TaskID       string `json:"task_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
 	RelativePath string `json:"relative_path"`
 	Filename     string `json:"filename"`
 	ContentType  string `json:"content_type"`
@@ -46,8 +47,9 @@ type ArtifactPrepareResponse struct {
 }
 
 type ArtifactManifestRequest struct {
-	TaskID string                 `json:"task_id"`
-	Files  []ArtifactManifestFile `json:"files"`
+	TaskID      string                 `json:"task_id"`
+	ExecutionID string                 `json:"execution_id,omitempty"`
+	Files       []ArtifactManifestFile `json:"files"`
 }
 
 type ArtifactManifestFile struct {
@@ -110,12 +112,14 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 	}
 
 	manifest := ArtifactManifestRequest{
-		TaskID: u.cfg.TaskID,
-		Files:  make([]ArtifactManifestFile, 0, len(files)),
+		TaskID:      u.cfg.TaskID,
+		ExecutionID: u.cfg.ExecutionID,
+		Files:       make([]ArtifactManifestFile, 0, len(files)),
 	}
 	for _, file := range files {
 		prepared, err := u.reporter.PrepareArtifactUpload(ctx, ArtifactPrepareRequest{
 			TaskID:       u.cfg.TaskID,
+			ExecutionID:  u.cfg.ExecutionID,
 			RelativePath: file.RelativePath,
 			Filename:     file.Filename,
 			ContentType:  file.ContentType,
