@@ -253,24 +253,24 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 	endpoints := []struct {
 		name    string
 		path    string
-		request func(string) *http.Request
+		request func(string, string) *http.Request
 	}{
-		{"progress", "/agent/progress", func(taskID string) *http.Request {
+		{"progress", "/agent/progress", func(taskID, _ string) *http.Request {
 			return agentJSONRequest("/agent/progress", `{"task_id":"`+taskID+`","message":"working"}`)
 		}},
-		{"upload", "/agent/upload", agentMultipartUploadRequest},
-		{"prepare", "/agent/artifacts/prepare", func(taskID string) *http.Request {
-			return agentJSONRequest("/agent/artifacts/prepare", `{"task_id":"`+taskID+`","relative_path":"output/content.md","filename":"content.md","content_type":"text/markdown","size":7}`)
+		{"upload", "/agent/upload", func(taskID, _ string) *http.Request { return agentMultipartUploadRequest(taskID) }},
+		{"prepare", "/agent/artifacts/prepare", func(taskID, executionID string) *http.Request {
+			return agentJSONRequest("/agent/artifacts/prepare", `{"task_id":"`+taskID+`","execution_id":"`+executionID+`","relative_path":"output/content.md","filename":"content.md","content_type":"text/markdown","size":7}`)
 		}},
-		{"manifest", "/agent/artifacts/manifest", func(taskID string) *http.Request {
-			return agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+taskID+`","files":[]}`)
+		{"manifest", "/agent/artifacts/manifest", func(taskID, executionID string) *http.Request {
+			return agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+taskID+`","execution_id":"`+executionID+`","files":[]}`)
 		}},
-		{"complete", "/agent/complete", func(taskID string) *http.Request {
+		{"complete", "/agent/complete", func(taskID, _ string) *http.Request {
 			return agentJSONRequest("/agent/complete", `{"task_id":"`+taskID+`"}`)
 		}},
 	}
 	for _, endpoint := range endpoints {
-		for _, mode := range []string{"current", "cross_task", "stale"} {
+		for _, mode := range []string{"current", "cross_task", "stale", "terminal"} {
 			t.Run(endpoint.name+"/"+mode, func(t *testing.T) {
 				app, repo, task, executionID, token, _, store := setupExecutionScopedAgentApp(t)
 				requestTaskID := task.ID
@@ -287,8 +287,17 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 					if err := repo.Tasks().Update(context.Background(), persisted); err != nil {
 						t.Fatal(err)
 					}
+				case "terminal":
+					persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					persisted.Status = model.TaskStatusFailed
+					if err := repo.Tasks().Update(context.Background(), persisted); err != nil {
+						t.Fatal(err)
+					}
 				}
-				req := endpoint.request(requestTaskID)
+				req := endpoint.request(requestTaskID, executionID)
 				req.Header.Set("Authorization", "Bearer "+token)
 				resp, err := app.Test(req)
 				if err != nil {

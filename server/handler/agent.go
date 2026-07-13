@@ -164,6 +164,11 @@ func (h *AgentHandler) authenticatedUserID(c fiber.Ctx) string {
 	return userID
 }
 
+func (h *AgentHandler) authenticatedExecutionID(c fiber.Ctx) string {
+	executionID, _ := c.Locals(agentExecutionIDContextKey).(string)
+	return executionID
+}
+
 func (h *AgentHandler) authorizeClaimScope(c fiber.Ctx, taskID string) error {
 	claimTaskID, _ := c.Locals(agentTaskIDContextKey).(string)
 	if claimTaskID != "" && claimTaskID != taskID {
@@ -286,7 +291,7 @@ func (h *AgentHandler) PrepareArtifactUpload(c fiber.Ctx) error {
 	if err := h.authorizeClaimScope(c, req.TaskID); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
-	result, err := h.taskSvc.PrepareTaskArtifactUpload(c.Context(), req.TaskID, h.authenticatedUserID(c), h.directUploadCfg, req)
+	result, err := h.taskSvc.PrepareTaskArtifactUpload(c.Context(), req.TaskID, h.authenticatedUserID(c), h.authenticatedExecutionID(c), h.directUploadCfg, req)
 	if err != nil {
 		if isAgentTaskAccessError(err) {
 			return Error(c, fiber.StatusForbidden, "task access denied")
@@ -315,7 +320,7 @@ func (h *AgentHandler) ReportArtifactManifest(c fiber.Ctx) error {
 	if err := h.authorizeClaimScope(c, req.TaskID); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
-	if err := h.taskSvc.FinalizeTaskArtifactManifest(c.Context(), req.TaskID, h.authenticatedUserID(c), req); err != nil {
+	if err := h.taskSvc.FinalizeTaskArtifactManifest(c.Context(), req.TaskID, h.authenticatedUserID(c), h.authenticatedExecutionID(c), req); err != nil {
 		if isAgentTaskAccessError(err) {
 			return Error(c, fiber.StatusForbidden, "task access denied")
 		}

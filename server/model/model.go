@@ -35,5 +35,8 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 
-	return MigrateDurableTaskWorkspaceSchema(db)
+	if err := MigrateDurableTaskWorkspaceSchema(db); err != nil {
+		return err
+	}
+	return MigrateTaskFileExecutionSchema(db)
 }

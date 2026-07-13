@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
@@ -23,6 +24,7 @@ type taskArtifactObjectStatProvider interface {
 
 type TaskArtifactPrepareRequest struct {
 	TaskID       string `json:"task_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
 	RelativePath string `json:"relative_path"`
 	Filename     string `json:"filename"`
 	ContentType  string `json:"content_type"`
@@ -31,8 +33,9 @@ type TaskArtifactPrepareRequest struct {
 }
 
 type TaskArtifactManifestRequest struct {
-	TaskID string                     `json:"task_id"`
-	Files  []TaskArtifactManifestFile `json:"files"`
+	TaskID      string                     `json:"task_id"`
+	ExecutionID string                     `json:"execution_id,omitempty"`
+	Files       []TaskArtifactManifestFile `json:"files"`
 }
 
 type TaskArtifactManifestFile struct {
@@ -45,7 +48,7 @@ type TaskArtifactManifestFile struct {
 	Role         string `json:"role"`
 }
 
-func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, authenticatedUserID string, cfg DirectUploadConfig, req TaskArtifactPrepareRequest) (*DirectUploadPrepareResult, error) {
+func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, authenticatedUserID, authenticatedExecutionID string, cfg DirectUploadConfig, req TaskArtifactPrepareRequest) (*DirectUploadPrepareResult, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("storage provider is not available")
 	}
@@ -56,7 +59,14 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	if taskID == "" {
 		return nil, fmt.Errorf("task_id is required")
 	}
+	if strings.TrimSpace(req.TaskID) != "" && req.TaskID != taskID {
+		return nil, fmt.Errorf("request task_id does not match task scope")
+	}
 	task, err := s.ValidateAgentTaskAccess(ctx, taskID, authenticatedUserID)
+	if err != nil {
+		return nil, err
+	}
+	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID, req.ExecutionID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +85,7 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	}
 
 	contentType := normalizeTaskArtifactContentType(req.ContentType, relPath)
-	key := buildTaskArtifactStorageKey(task, relPath)
+	key := buildTaskArtifactStorageKey(task, executionID, relPath)
 	now := time.Now
 	if cfg.Now != nil {
 		now = cfg.Now
@@ -129,7 +139,7 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	}, nil
 }
 
-func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, authenticatedUserID string, req TaskArtifactManifestRequest) error {
+func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, authenticatedUserID, authenticatedExecutionID string, req TaskArtifactManifestRequest) error {
 	if s == nil || s.repo == nil {
 		return fmt.Errorf("task service repository is not available")
 	}
@@ -147,7 +157,12 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 	if err != nil {
 		return err
 	}
-	prefix := buildTaskArtifactStoragePrefix(task)
+	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID, req.ExecutionID)
+	if err != nil {
+		return err
+	}
+	prefix := buildTaskArtifactStoragePrefix(task, executionID)
+	files := make([]*model.TaskFile, 0, len(req.Files))
 	for _, file := range req.Files {
 		relPath, err := cleanTaskArtifactRelativePath(task, file.RelativePath)
 		if err != nil {
@@ -160,7 +175,7 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		if !strings.HasPrefix(objectKey, prefix) {
 			return fmt.Errorf("object key %q is outside task artifact prefix %q", objectKey, prefix)
 		}
-		expectedKey := buildTaskArtifactStorageKey(task, relPath)
+		expectedKey := buildTaskArtifactStorageKey(task, executionID, relPath)
 		if objectKey != expectedKey {
 			return fmt.Errorf("object key %q does not match relative path %q", objectKey, relPath)
 		}
@@ -195,6 +210,8 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		}
 		taskFile := &model.TaskFile{
 			TaskID:          task.ID,
+			ExecutionID:     executionID,
+			State:           model.TaskFileStatePublished,
 			Role:            role,
 			FileName:        filename,
 			MimeType:        contentType,
@@ -205,19 +222,55 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 			StorageProvider: s.store.Name(),
 			FilePath:        relPath,
 		}
-		if _, err := s.repo.TaskFiles().Upsert(ctx, taskFile); err != nil {
-			return fmt.Errorf("persist task artifact %s: %w", relPath, err)
+		if executionID != "" {
+			taskFile.State = model.TaskFileStatePending
 		}
+		files = append(files, taskFile)
 	}
-	return nil
+	if executionID != "" {
+		if err := s.repo.TaskFiles().ReplacePendingExecution(ctx, task.ID, executionID, files); err != nil {
+			return fmt.Errorf("persist task artifact manifest: %w", err)
+		}
+		return nil
+	}
+	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		for _, file := range files {
+			if _, err := tx.TaskFiles().Upsert(ctx, file); err != nil {
+				return fmt.Errorf("persist task artifact %s: %w", file.FilePath, err)
+			}
+		}
+		return nil
+	})
 }
 
-func buildTaskArtifactStoragePrefix(task *model.Task) string {
-	return path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID, "artifacts") + "/"
+func buildTaskArtifactStoragePrefix(task *model.Task, executionID string) string {
+	segments := []string{"uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID}
+	if executionID != "" {
+		segments = append(segments, "executions", executionID)
+	}
+	return path.Join(append(segments, "artifacts")...) + "/"
 }
 
-func buildTaskArtifactStorageKey(task *model.Task, relPath string) string {
-	return buildTaskArtifactStoragePrefix(task) + filepath.ToSlash(relPath)
+func buildTaskArtifactStorageKey(task *model.Task, executionID, relPath string) string {
+	return buildTaskArtifactStoragePrefix(task, executionID) + filepath.ToSlash(relPath)
+}
+
+func (s *TaskService) validateTaskArtifactExecution(ctx context.Context, task *model.Task, userID, authenticatedExecutionID, requestedExecutionID string) (string, error) {
+	authenticatedExecutionID = strings.TrimSpace(authenticatedExecutionID)
+	requestedExecutionID = strings.TrimSpace(requestedExecutionID)
+	if authenticatedExecutionID == "" {
+		if requestedExecutionID != "" {
+			return "", fmt.Errorf("execution identity requires an execution token")
+		}
+		return "", nil
+	}
+	if requestedExecutionID == "" || requestedExecutionID != authenticatedExecutionID {
+		return "", fmt.Errorf("execution identity does not match request")
+	}
+	if err := s.ValidateAgentExecutionAccess(ctx, userID, task.ProjectID, task.ID, authenticatedExecutionID); err != nil {
+		return "", err
+	}
+	return authenticatedExecutionID, nil
 }
 
 func cleanTaskArtifactRelativePath(task *model.Task, relPath string) (string, error) {

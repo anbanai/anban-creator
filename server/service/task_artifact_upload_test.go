@@ -141,7 +141,7 @@ func taskArtifactDirectUploadConfig(t *testing.T) DirectUploadConfig {
 func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 	svc, _, store, task := newTaskArtifactTestService(t)
 
-	result, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+	result, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
 		RelativePath: "output/article.md",
 		Filename:     "article.md",
 		ContentType:  "text/markdown",
@@ -176,7 +176,7 @@ func TestPrepareTaskArtifactUploadRejectsUnsafeRelativePath(t *testing.T) {
 		{name: "runtime directory", relPath: ".git/config", wantMessage: "refusing to upload runtime directory"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+			_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
 				RelativePath: tt.relPath,
 				Filename:     "secret.md",
 				ContentType:  "text/markdown",
@@ -192,7 +192,7 @@ func TestPrepareTaskArtifactUploadRejectsUnsafeRelativePath(t *testing.T) {
 func TestPrepareTaskArtifactUploadRejectsWrongUserAndNonOSSStorage(t *testing.T) {
 	svc, _, store, task := newTaskArtifactTestService(t)
 
-	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, uuid.NewString(), taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, uuid.NewString(), "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
 		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
@@ -202,7 +202,7 @@ func TestPrepareTaskArtifactUploadRejectsWrongUserAndNonOSSStorage(t *testing.T)
 	}
 
 	store.name = "local"
-	_, err = svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+	_, err = svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
 		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
@@ -220,7 +220,7 @@ func TestPrepareTaskArtifactUploadRejectsMissingSTSRole(t *testing.T) {
 	cfg.Storage.AccessKeyID = "ak"
 	cfg.Storage.AccessKeySecret = "secret"
 
-	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, cfg, TaskArtifactPrepareRequest{
+	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", cfg, TaskArtifactPrepareRequest{
 		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
@@ -233,7 +233,7 @@ func TestPrepareTaskArtifactUploadRejectsMissingSTSRole(t *testing.T) {
 func TestFinalizeTaskArtifactManifestRejectsObjectOutsideTaskPrefix(t *testing.T) {
 	svc, _, _, task := newTaskArtifactTestService(t)
 
-	err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, TaskArtifactManifestRequest{
+	err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, "", TaskArtifactManifestRequest{
 		TaskID: task.ID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: "output/article.md",
@@ -263,7 +263,7 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 		},
 	}
 
-	if err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, TaskArtifactManifestRequest{
+	if err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, "", TaskArtifactManifestRequest{
 		TaskID: task.ID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: "output/article.md",
@@ -293,5 +293,70 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 	}
 	if file.FileSize != int64(len(body)) || file.ContentHash != hash {
 		t.Fatalf("file size/hash = %d/%q, want %d/%q", file.FileSize, file.ContentHash, len(body), hash)
+	}
+}
+
+func TestExecutionArtifactManifestStaysPendingUntilPublication(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := uuid.NewString()
+	task.CurrentExecutionID = &executionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+	objectKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/executions/" + executionID + "/artifacts/output/article.md"
+	store.stats = map[string]*storage.ObjectInfo{objectKey: {Key: objectKey, Size: 7, ContentType: "text/markdown"}}
+	req := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{{RelativePath: "output/article.md", ObjectKey: objectKey, Size: 7, SHA256: strings.Repeat("a", 64)}}}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, req); err != nil {
+		t.Fatal(err)
+	}
+	visible, _ := repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	if len(visible) != 0 {
+		t.Fatalf("pending manifest leaked: %#v", visible)
+	}
+	pending, _ := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if len(pending) != 1 || pending[0].State != model.TaskFileStatePending {
+		t.Fatalf("pending = %#v", pending)
+	}
+	if err := repo.TaskFiles().PublishExecution(ctx, task.ID, executionID); err != nil {
+		t.Fatal(err)
+	}
+	visible, _ = repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	if len(visible) != 1 || visible[0].ExecutionID != executionID {
+		t.Fatalf("published = %#v", visible)
+	}
+}
+
+func TestExecutionArtifactPrepareRejectsMissingOrStaleIdentity(t *testing.T) {
+	svc, repo, _, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := uuid.NewString()
+	task.CurrentExecutionID = &executionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+	request := TaskArtifactPrepareRequest{TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", Size: 7}
+	result, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "/executions/" + executionID + "/artifacts/output/article.md"
+	if !strings.Contains(result.Key, want) {
+		t.Fatalf("key = %q, want segment %q", result.Key, want)
+	}
+	if _, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), request); err == nil || !strings.Contains(err.Error(), "execution identity") {
+		t.Fatalf("API-key execution impersonation error = %v", err)
+	}
+	other := uuid.NewString()
+	if _, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, other, taskArtifactDirectUploadConfig(t), request); err == nil {
+		t.Fatal("stale authenticated execution accepted")
 	}
 }

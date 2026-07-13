@@ -170,11 +170,15 @@ type TaskFileRepository interface {
 	FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error)
 	FindByID(ctx context.Context, id string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
+	FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)
 	FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error)
 	BatchCreate(ctx context.Context, files []*model.TaskFile) error
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
+	PublishExecution(ctx context.Context, taskID, executionID string) error
+	DiscardExecution(ctx context.Context, executionID string) error
+	ReplacePendingExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
 }
 
 // TaskExecutionRepository provides durable execution-attempt persistence.

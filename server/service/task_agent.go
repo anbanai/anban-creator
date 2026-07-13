@@ -31,7 +31,7 @@ func (s *TaskService) ValidateAgentExecutionAccess(ctx context.Context, userID, 
 	if err != nil {
 		return fmt.Errorf("find task: %w", err)
 	}
-	if task.UserID != userID || task.ProjectID != projectID || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+	if task.UserID != userID || task.ProjectID != projectID || task.Status != model.TaskStatusRunning || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
 		return fmt.Errorf("execution token does not match current task execution")
 	}
 	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
