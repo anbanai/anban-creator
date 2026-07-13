@@ -8,6 +8,18 @@ import { api } from '@/lib/api'
 
 const mockNavigate = vi.fn()
 
+const mockReferenceUsageSummary = vi.hoisted(() => vi.fn(({ task }: { task: { title?: string } }) => {
+  if (task.title === '触发摘要组件失败') {
+    throw new Error('summary render failed')
+  }
+  return null
+}))
+
+vi.mock('@/components/tasks/ReferenceUsageSummary', () => ({
+  default: mockReferenceUsageSummary,
+  ReferenceUsageSummary: mockReferenceUsageSummary,
+}))
+
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
   return {
@@ -165,6 +177,50 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
     expect(screen.queryByText('03-draft.md')).not.toBeInTheDocument()
+  })
+
+
+  it('keeps task status and generated files visible when the reference summary crashes', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      title: '触发摘要组件失败',
+      status: 'completed',
+      progress: 100,
+      input_attachments: [{ type: 'image', file_name: 'front.png' }],
+      result: { files: null, output: '' },
+    }))
+    vi.mocked(api.tasks.files).mockResolvedValue([
+      {
+        id: 'file-summary',
+        task_id: 'task-1',
+        role: 'artifact',
+        file_name: 'reference-usage-summary.json',
+        mime_type: 'application/json',
+        file_size: 1024,
+        url: '/api/v1/files/file-summary',
+        created_at: '2026-07-10T00:00:00Z',
+      },
+      {
+        id: 'file-1',
+        task_id: 'task-1',
+        role: 'output',
+        file_name: 'article.html',
+        mime_type: 'text/html',
+        file_size: 1024,
+        url: '/api/v1/files/file-1',
+        created_at: '2026-07-10T00:00:01Z',
+      },
+    ])
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('已完成')).toBeInTheDocument()
+    const summaryFallback = await screen.findByText('参考素材摘要暂时无法显示')
+    const filesHeading = await screen.findByText('生成文件 (2)')
+    expect(summaryFallback).toBeInTheDocument()
+    expect(filesHeading).toBeInTheDocument()
+    expect(summaryFallback.compareDocumentPosition(filesHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeInTheDocument()
   })
 
   it('disables delivery controls for payment-required tasks', async () => {

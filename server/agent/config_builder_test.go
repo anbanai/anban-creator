@@ -456,3 +456,169 @@ func TestWriteProjectCLAUDEMD(t *testing.T) {
 		}
 	})
 }
+
+func TestDownloadInputAttachmentsKeepsOriginalIndicesAndWritesErrors(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/first.png", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "failed", http.StatusInternalServerError)
+	})
+	mux.HandleFunc("/second.png", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("second-image"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	workDir := t.TempDir()
+	attachments := []model.EntryAttachment{
+		{
+			Type:        "image",
+			URL:         srv.URL + "/first.png",
+			FileName:    "first.png",
+			ContentType: "image/png",
+			Instruction: "正面",
+			UploadID:    "up-1",
+		},
+		{
+			Type:        "image",
+			URL:         srv.URL + "/second.png",
+			FileName:    "second.png",
+			ContentType: "image/png",
+			Instruction: "侧面",
+			UploadID:    "up-2",
+		},
+	}
+
+	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, attachments); count != 1 {
+		t.Fatalf("DownloadInputAttachments count = %d, want 1", count)
+	}
+	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
+	indexRaw, err := os.ReadFile(filepath.Join(base, "index.json"))
+	if err != nil {
+		t.Fatalf("read index.json: %v", err)
+	}
+	var index []MaterializedInputAttachment
+	if err := json.Unmarshal(indexRaw, &index); err != nil {
+		t.Fatalf("decode index.json: %v", err)
+	}
+	if len(index) != 1 {
+		t.Fatalf("index = %#v, want one entry", index)
+	}
+	if index[0].AttachmentIndex != 2 {
+		t.Fatalf("attachment_index = %d, want 2", index[0].AttachmentIndex)
+	}
+	if got := filepath.Base(index[0].Path); got != "attachment_02_second.png" {
+		t.Fatalf("materialized basename = %q, want attachment_02_second.png", got)
+	}
+	if index[0].Instruction != "侧面" {
+		t.Fatalf("instruction = %q, want 侧面", index[0].Instruction)
+	}
+	if index[0].UploadID != "up-2" {
+		t.Fatalf("upload_id = %q, want up-2", index[0].UploadID)
+	}
+
+	failureRaw, err := os.ReadFile(filepath.Join(base, "errors.json"))
+	if err != nil {
+		t.Fatalf("read errors.json: %v", err)
+	}
+	var failures []MaterializedInputAttachmentError
+	if err := json.Unmarshal(failureRaw, &failures); err != nil {
+		t.Fatalf("decode errors.json: %v", err)
+	}
+	if len(failures) != 1 {
+		t.Fatalf("failures = %#v, want one entry", failures)
+	}
+	if failures[0].AttachmentIndex != 1 {
+		t.Fatalf("failure attachment_index = %d, want 1", failures[0].AttachmentIndex)
+	}
+	if !strings.Contains(failures[0].Error, "500") {
+		t.Fatalf("failure error = %q, want HTTP 500 detail", failures[0].Error)
+	}
+	if failures[0].Instruction != "正面" {
+		t.Fatalf("failure instruction = %q, want 正面", failures[0].Instruction)
+	}
+}
+
+func TestDownloadInputAttachmentsSkipsResumeRolesWithoutRenumbering(t *testing.T) {
+	workDir := t.TempDir()
+	attachments := []model.EntryAttachment{
+		{
+			Type:     "document",
+			Text:     "resume",
+			FileName: "latest.md",
+			Role:     model.EntryAttachmentRoleResumeLatest,
+		},
+		{
+			Type:        "text",
+			Text:        "product details",
+			FileName:    "product.txt",
+			ContentType: "text/plain",
+		},
+	}
+
+	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, attachments); count != 1 {
+		t.Fatalf("DownloadInputAttachments count = %d, want 1", count)
+	}
+	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
+	if _, err := os.Stat(filepath.Join(base, "attachment_02_product.txt")); err != nil {
+		t.Fatalf("expected original index filename: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "attachment_01_product.txt")); !os.IsNotExist(err) {
+		t.Fatalf("attachment should not be renumbered, statErr=%v", err)
+	}
+	indexRaw, err := os.ReadFile(filepath.Join(base, "index.json"))
+	if err != nil {
+		t.Fatalf("read index.json: %v", err)
+	}
+	var index []MaterializedInputAttachment
+	if err := json.Unmarshal(indexRaw, &index); err != nil {
+		t.Fatalf("decode index.json: %v", err)
+	}
+	if len(index) != 1 || index[0].AttachmentIndex != 2 {
+		t.Fatalf("index = %#v, want attachment index 2", index)
+	}
+}
+
+func TestDownloadInputAttachmentsRemovesStaleErrorsOnSuccess(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/fail.png", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "failed", http.StatusBadGateway)
+	})
+	mux.HandleFunc("/success.png", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("success"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	workDir := t.TempDir()
+	failure := []model.EntryAttachment{{
+		Type: "image", URL: srv.URL + "/fail.png", FileName: "fail.png", ContentType: "image/png",
+	}}
+	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, failure); count != 0 {
+		t.Fatalf("failure materialization count = %d, want 0", count)
+	}
+	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
+	if _, err := os.Stat(filepath.Join(base, "errors.json")); err != nil {
+		t.Fatalf("expected errors.json after failed run: %v", err)
+	}
+
+	success := []model.EntryAttachment{{
+		Type: "image", URL: srv.URL + "/success.png", FileName: "success.png", ContentType: "image/png",
+	}}
+	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, success); count != 1 {
+		t.Fatalf("success materialization count = %d, want 1", count)
+	}
+	if _, err := os.Stat(filepath.Join(base, "errors.json")); !os.IsNotExist(err) {
+		t.Fatalf("stale errors.json should be removed, statErr=%v", err)
+	}
+	indexRaw, err := os.ReadFile(filepath.Join(base, "index.json"))
+	if err != nil {
+		t.Fatalf("read rewritten index.json: %v", err)
+	}
+	var index []MaterializedInputAttachment
+	if err := json.Unmarshal(indexRaw, &index); err != nil {
+		t.Fatalf("decode rewritten index.json: %v", err)
+	}
+	if len(index) != 1 || filepath.Base(index[0].Path) != "attachment_01_success.png" {
+		t.Fatalf("rewritten index = %#v", index)
+	}
+}

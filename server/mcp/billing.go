@@ -409,37 +409,47 @@ func resolveImageModelWithSource(ctx context.Context, userID string) (provider, 
 	return "", "", ""
 }
 
-// resolveImageBillingModel mirrors generate_image's provider selection for
-// billing/logging. A persisted task image_model_key must win over the server
-// default; otherwise a user choosing GPT Image can be billed/logged as the
-// default Volcengine model while generation uses OpenAI.
-func resolveImageBillingModel(ctx context.Context, userID, imageModelKey string) (provider, mdl, source string, err error) {
-	if imageModelKey != "" && billSvc != nil {
-		if billSvc.modelConfigSvc != nil {
-			cfg, src, err := billSvc.modelConfigSvc.ResolveImageConfigForTaskKey(ctx, userID, imageModelKey)
-			if err != nil {
-				return "", "", "", err
-			}
-			if cfg != nil {
-				if cfg.Cover != nil && cfg.Cover.Provider != "" {
-					return cfg.Cover.Provider, cfg.Cover.Model, src, nil
-				}
-				if cfg.Content != nil && cfg.Content.Provider != "" {
-					return cfg.Content.Provider, cfg.Content.Model, src, nil
-				}
-			}
-		}
-		if billSvc.config != nil {
-			for _, p := range billSvc.config.ImagePresets {
-				if p.Key == imageModelKey {
-					return p.Provider, p.Model, "preset:" + p.Key, nil
-				}
-			}
-		}
-		return "", "", "", fmt.Errorf("unknown image model key %q", imageModelKey)
+// resolveImageBillingModel is deliberately a pure descriptor reader. The
+// resolver owns all task-key, tier, capability, and image-slot decisions; billing
+// must never independently resolve a model and diverge from generation.
+func resolveImageBillingModel(resolved *service.ResolvedImageModel) (provider, mdl, source string, err error) {
+	if resolved == nil || resolved.Provider == "" || resolved.Model == "" {
+		return "", "", "", fmt.Errorf("resolved image model is incomplete")
 	}
-	provider, mdl, source = resolveImageModelWithSource(ctx, userID)
-	return provider, mdl, source, nil
+	return resolved.Provider, resolved.Model, resolved.Source, nil
+}
+
+type imageGenerationBiller struct{}
+
+// NewImageGenerationBiller returns the concrete MCP image biller. It relies on
+// the billing services installed through SetBillingServices, matching the rest
+// of the MCP billing helpers while accepting only a resolved descriptor.
+func NewImageGenerationBiller() ImageGenerationBiller {
+	return imageGenerationBiller{}
+}
+
+func (imageGenerationBiller) PrepareImageGeneration(
+	ctx context.Context,
+	userID, taskID, imageType string,
+	resolved *service.ResolvedImageModel,
+) (ImageGenerationBillingDecision, error) {
+	provider, modelID, source, err := resolveImageBillingModel(resolved)
+	if err != nil {
+		return ImageGenerationBillingDecision{}, err
+	}
+	decision := ImageGenerationBillingDecision{
+		Provider: provider,
+		Model:    modelID,
+		Source:   source,
+	}
+	decision.DynamicProvider, decision.DynamicModel, decision.DynamicRoute, decision.Dynamic = resolveDynamicImageGenerationBillingRoute(imageType, modelID, source)
+	if decision.Dynamic {
+		return decision, nil
+	}
+	if err := maybeDeductForResolvedModel(ctx, userID, model.CreditTypeImageGen, provider, modelID, 1, taskID, source); err != nil {
+		return decision, err
+	}
+	return decision, nil
 }
 
 // resolveEcommerceImageProvider returns the provider/model the agent's

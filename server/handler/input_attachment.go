@@ -1,69 +1,58 @@
 package handler
 
 import (
+	"context"
+	"fmt"
+	"path"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/gofiber/fiber/v3"
-	"github.com/rs/zerolog"
-
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
-type AIEntryHandler struct {
-	submitter service.AIEntrySubmitter
-	pending   service.PendingUploadRepository
-	logger    *zerolog.Logger
+const (
+	aiEntryMediaAttachmentMaxBytes     int64 = 50 * 1024 * 1024
+	aiEntryDocumentAttachmentMaxBytes  int64 = 25 * 1024 * 1024
+	inputAttachmentInstructionMaxRunes       = 1000
+)
+
+type InputAttachmentValidationOptions struct {
+	MaxCount     int
+	AllowedTypes map[string]bool
 }
 
-func NewAIEntryHandler(submitter service.AIEntrySubmitter, pending service.PendingUploadRepository, logger *zerolog.Logger) *AIEntryHandler {
-	if logger == nil {
-		nop := zerolog.Nop()
-		logger = &nop
+func validateInputAttachments(ctx context.Context, pending service.PendingUploadRepository, userID string, attachments []model.EntryAttachment, options InputAttachmentValidationOptions) ([]model.EntryAttachment, error) {
+	if options.MaxCount > 0 && len(attachments) > options.MaxCount {
+		return nil, fmt.Errorf("at most %d attachments are allowed", options.MaxCount)
 	}
-	return &AIEntryHandler{submitter: submitter, pending: pending, logger: logger}
-}
-
-func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-	var req service.AIEntrySubmitRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-	req.UserID = userID
-	req.Channel = strings.TrimSpace(req.Channel)
-	if req.Channel == "" {
-		req.Channel = "studio"
-	}
-	req.ProjectID = strings.TrimSpace(req.ProjectID)
-	req.Text = strings.TrimSpace(req.Text)
-	if req.ProjectID == "" {
-		return Error(c, fiber.StatusBadRequest, "project_id is required")
-	}
-	if utf8.RuneCountInString(req.Text) > maxTaskPromptCharacters {
-		return Error(c, fiber.StatusBadRequest, "text must not exceed 5120 characters")
-	}
-	validatedAttachments, err := validateInputAttachments(c.Context(), h.pending, userID, req.Attachments, InputAttachmentValidationOptions{
-		AllowedTypes: map[string]bool{"image": true, "audio": true, "video": true, "document": true, "text": true},
-	})
-	if err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-	req.Attachments = validatedAttachments
-	if h.submitter == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "AI entry service is not available")
-	}
-	result, err := h.submitter.Submit(c.Context(), req)
-	if err != nil {
-		if h.logger != nil {
-			h.logger.Error().Err(err).Str("user_id", userID).Msg("ai entry submit failed")
+	normalized := make([]model.EntryAttachment, len(attachments))
+	urls := make([]string, 0, len(attachments))
+	for i, raw := range attachments {
+		a := normalizeHandlerEntryAttachment(raw)
+		if utf8.RuneCountInString(a.Instruction) > inputAttachmentInstructionMaxRunes {
+			return nil, fmt.Errorf("attachment instruction must not exceed %d characters", inputAttachmentInstructionMaxRunes)
 		}
-		return Error(c, fiber.StatusInternalServerError, "failed to submit AI entry")
+		if err := validateHandlerEntryAttachment(&a); err != nil {
+			return nil, fmt.Errorf("attachment %d: %w", i+1, err)
+		}
+		if len(options.AllowedTypes) > 0 && !options.AllowedTypes[a.Type] {
+			return nil, fmt.Errorf("attachment type %s is not allowed", a.Type)
+		}
+		if a.URL != "" {
+			if !validAIEntryAttachmentURL(a.URL, pending != nil) {
+				return nil, fmt.Errorf("attachment URLs must be internal file URLs or registered pending-upload URLs")
+			}
+			urls = append(urls, a.URL)
+		}
+		normalized[i] = a
 	}
-	return Success(c, result)
+	if pending != nil {
+		if err := finalizePendingURLs(ctx, pending, userID, service.DirectUploadPurposeAIEntryAttachment, urls); err != nil {
+			return nil, err
+		}
+	}
+	return normalized, nil
 }
 
 func normalizeHandlerEntryAttachment(a model.EntryAttachment) model.EntryAttachment {
@@ -73,10 +62,9 @@ func normalizeHandlerEntryAttachment(a model.EntryAttachment) model.EntryAttachm
 	a.FileName = strings.TrimSpace(a.FileName)
 	a.ContentType = strings.TrimSpace(a.ContentType)
 	a.Role = strings.TrimSpace(a.Role)
-	// URL is validated/finalized against server-side upload records below.
-	// Client-provided storage identifiers never cross the handler boundary.
-	a.UploadID = ""
-	a.Key = ""
+	a.UploadID = strings.TrimSpace(a.UploadID)
+	a.Key = strings.TrimSpace(a.Key)
+	a.Instruction = strings.TrimSpace(a.Instruction)
 	return a
 }
 

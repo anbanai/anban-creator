@@ -113,7 +113,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	if _, ok := args["image_model_key"]; ok {
 		return errorResult("image_model_key is not accepted by generate_image; the server resolves image models from task/project configuration"), nil
 	}
-	if svcs == nil || svcs.ImageSvc == nil {
+	if svcs == nil || svcs.ImageGenerator == nil {
 		return errorResult("image service not available"), nil
 	}
 
@@ -134,6 +134,12 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	size, _ := args["size"].(string)
 	refPath, _ := args["ref_image_path"].(string)
 	refPaths := parseStringArray(args, "ref_image_paths")
+	// The multi-reference array is authoritative. Ignore the legacy singleton
+	// entirely when the caller supplies an array so preflight, billing, and the
+	// provider all observe the exact same reference set.
+	if len(refPaths) > 0 {
+		refPath = ""
+	}
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
 		return errorResult("task_id is required"), nil
@@ -159,7 +165,6 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	if t.ProjectID != projectID {
 		return errorResult("task does not belong to the requested project"), nil
 	}
-	imageModelKey := t.ImageModelKey
 	if watermark == nil && t.Watermark {
 		wm := true
 		watermark = &wm
@@ -186,6 +191,50 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	if uploadToCDN && outputPath == "" {
 		return errorResult("output_path is required when upload_to_cdn is true"), nil
 	}
+	if uploadToCDN && svcs.ImageSvc == nil {
+		return errorResult("image upload service not available"), nil
+	}
+	// Vision verification is part of the requested generation contract. Validate
+	// it before model resolution, billing, or provider calls so malformed calls
+	// never generate an image that cannot be verified.
+	if verifyWithVision {
+		if verificationPrompt == "" {
+			return errorResult("verification_prompt is required when verify_with_vision is true"), nil
+		}
+		if svcs.WritingSvc == nil {
+			return errorResult("writing/vision service not available for verification"), nil
+		}
+	}
+	if svcs.ImageModelResolver == nil {
+		return errorResult("image model resolver not available"), nil
+	}
+	if svcs.ImageGenerationBiller == nil {
+		return errorResult("image billing service not available"), nil
+	}
+
+	// ref_image_paths is the authoritative multi-reference input. The legacy
+	// ref_image_path contributes one reference only when no array was supplied.
+	referenceCount := len(refPathsForService)
+	if referenceCount == 0 && strings.TrimSpace(refPathForService) != "" {
+		referenceCount = 1
+	}
+	resolved, err := svcs.ImageModelResolver.ResolveImageModelForGeneration(
+		ctx,
+		userID,
+		t.ImageModelKey,
+		imageType,
+		referenceCount,
+	)
+	if err != nil {
+		var limitErr *service.ImageReferenceLimitError
+		if errors.As(err, &limitErr) {
+			return errorResult(limitErr.Error()), nil
+		}
+		return errorResult(fmt.Sprintf("image model unavailable: %v", err)), nil
+	}
+	if resolved == nil {
+		return errorResult("image model unavailable: resolver returned no descriptor"), nil
+	}
 
 	if mcpLog != nil {
 		evt := mcpLog.Info().
@@ -195,9 +244,14 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			Str("project_id", projectID).
 			Str("image_type", imageType).
 			Str("size", size).
-			Str("image_model_key", imageModelKey).
+			Str("provider", resolved.Provider).
+			Str("model", resolved.Model).
+			Str("model_source", resolved.Source).
+			Str("selection_reason", resolved.SelectionReason).
+			Bool("supports_reference", resolved.SupportsReference).
+			Int("max_reference_images", resolved.MaxReferenceImages).
 			Str("ref_image_path", refPathForService).
-			Int("ref_image_paths_count", len(refPaths)).
+			Int("reference_count", referenceCount).
 			Str("output_path", outputPathForService)
 		if watermark != nil {
 			evt = evt.Bool("watermark", *watermark)
@@ -212,42 +266,36 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			Msg("MCP generate_image called")
 	}
 
-	billingProvider, billingModel, billingSource, err := resolveImageBillingModel(ctx, userID, imageModelKey)
+	billingDecision, err := svcs.ImageGenerationBiller.PrepareImageGeneration(ctx, userID, taskID, imageType, resolved)
 	if err != nil {
-		return errorResult(fmt.Sprintf("image model unavailable: %v", err)), nil
-	}
-	dynamicProvider, dynamicModel, dynamicRoute, dynamicBilling := resolveDynamicImageGenerationBillingRoute(imageType, billingModel, billingSource)
-	if !dynamicBilling {
-		if err := maybeDeductForResolvedModel(ctx, userID, model.CreditTypeImageGen, billingProvider, billingModel, 1, taskID, billingSource); err != nil {
-			if mcpLog != nil {
-				// billingError below also logs the err with tool name; this entry
-				// adds task_id/project_id/stage so concurrent-task greps can land.
-				mcpLog.Warn().
-					Str("tool", "generate_image").
-					Str("task_id", taskID).
-					Str("project_id", projectID).
-					Str("user_id", userID).
-					Str("stage", "deduct").
-					Str("image_model_key", imageModelKey).
-					Str("billing_provider", billingProvider).
-					Str("billing_model", billingModel).
-					Str("billing_source", billingSource).
-					Err(err).
-					Msg("MCP generate_image failed")
-			}
-			return billingError("generate image", err), nil
+		if mcpLog != nil {
+			// billingError below also logs the err with tool name; this entry
+			// adds task_id/project_id/stage so concurrent-task greps can land.
+			mcpLog.Warn().
+				Str("tool", "generate_image").
+				Str("task_id", taskID).
+				Str("project_id", projectID).
+				Str("user_id", userID).
+				Str("stage", "deduct").
+				Str("provider", resolved.Provider).
+				Str("model", resolved.Model).
+				Str("model_source", resolved.Source).
+				Err(err).
+				Msg("MCP generate_image failed")
 		}
-	} else if mcpLog != nil {
+		return billingError("generate image", err), nil
+	}
+	if billingDecision.Dynamic && mcpLog != nil {
 		mcpLog.Debug().
 			Str("tool", "generate_image").
 			Str("task_id", taskID).
 			Str("user_id", userID).
-			Str("billing_provider", dynamicProvider).
-			Str("billing_model", dynamicModel).
+			Str("billing_provider", billingDecision.DynamicProvider).
+			Str("billing_model", billingDecision.DynamicModel).
 			Msg("MCP generate_image defers dynamic usage billing until provider response")
 	}
 
-	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, projectID, prompt, imageType, outputPathForService, refPathForService, refPathsForService, taskID, size, imageModelKey, watermark)
+	result, err := svcs.ImageGenerator.GenerateImage(ctx, userID, projectID, prompt, imageType, outputPathForService, refPathForService, refPathsForService, taskID, size, resolved, watermark)
 	if err != nil {
 		if mcpLog != nil {
 			mcpLog.Warn().
@@ -256,7 +304,10 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				Str("project_id", projectID).
 				Str("user_id", userID).
 				Str("stage", "generate").
-				Str("image_model_key", imageModelKey).
+				Str("provider", resolved.Provider).
+				Str("model", resolved.Model).
+				Str("model_source", resolved.Source).
+				Str("selection_reason", resolved.SelectionReason).
 				Str("failure_reason", categorizeImageGenFailure(err, refPathForService)).
 				Bool("ref_image_mode", refPathForService != "").
 				Err(err).
@@ -264,34 +315,21 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		}
 		return billingError("generate image", err), nil
 	}
+	if result == nil {
+		return billingError("generate image", fmt.Errorf("image generator returned no result")), nil
+	}
+	// Public selection metadata always comes from the descriptor resolved during
+	// preflight, not from task keys or another model-config lookup.
+	result.Provider = resolved.Provider
+	result.Model = resolved.Model
+	result.SelectionReason = resolved.SelectionReason
+	result.SupportsReference = resolved.SupportsReference
+	result.MaxReferenceImages = resolved.MaxReferenceImages
 	defer result.CleanupLocalFile()
 	if outputPathResolved && result.FilePath == outputPathForService {
 		result.FilePath = logicalOutputPath
 		if result.LocalFilePath == "" {
 			result.LocalFilePath = outputPathForService
-		}
-	}
-
-	if dynamicBilling {
-		if result.Usage == nil {
-			return billingError("generate image", fmt.Errorf("%s usage is required for billing", dynamicModel)), nil
-		}
-		usage := srvconfig.ImageGenerationUsage{
-			Size:                   firstNonEmpty(result.Size, size),
-			Count:                  1,
-			TextInputTokens:        result.Usage.TextInputTokens,
-			TextCachedInputTokens:  result.Usage.TextCachedInputTokens,
-			ImageInputTokens:       result.Usage.ImageInputTokens,
-			ImageCachedInputTokens: result.Usage.ImageCachedInputTokens,
-			ImageOutputTokens:      result.Usage.ImageOutputTokens,
-			TotalTokens:            result.Usage.TotalTokens,
-			ReferenceImageCount:    len(refPaths),
-		}
-		if refPath != "" {
-			usage.ReferenceImageCount++
-		}
-		if _, err := maybeDeductImageGenerationUsage(ctx, userID, taskID, dynamicRoute, dynamicProvider, dynamicModel, usage); err != nil {
-			return billingError("generate image", err), nil
 		}
 	}
 
@@ -324,12 +362,32 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		}
 	}
 
+	// Settle usage-based billing only after the generated bytes cross the task-file
+	// durability boundary. If settlement fails, the task still terminates with an
+	// error, but the already-generated asset remains available for audit/resume.
+	if billingDecision.Dynamic {
+		if result.Usage == nil {
+			return billingError("generate image", fmt.Errorf("%s usage is required for billing", billingDecision.DynamicModel)), nil
+		}
+		usage := srvconfig.ImageGenerationUsage{
+			Size:                   firstNonEmpty(result.Size, size),
+			Count:                  1,
+			TextInputTokens:        result.Usage.TextInputTokens,
+			TextCachedInputTokens:  result.Usage.TextCachedInputTokens,
+			ImageInputTokens:       result.Usage.ImageInputTokens,
+			ImageCachedInputTokens: result.Usage.ImageCachedInputTokens,
+			ImageOutputTokens:      result.Usage.ImageOutputTokens,
+			TotalTokens:            result.Usage.TotalTokens,
+			ReferenceImageCount:    referenceCount,
+		}
+		if _, err := maybeDeductImageGenerationUsage(ctx, userID, taskID, billingDecision.DynamicRoute, billingDecision.DynamicProvider, billingDecision.DynamicModel, usage); err != nil {
+			return billingError("generate image", err), nil
+		}
+	}
+
 	if mcpLog != nil {
-		// result.Provider/Model reflect what the provider actually ran (built
-		// from its response in image.go buildImageResult), which may differ
-		// from resolveImageModel() used for billing at line 168 — e.g. when
-		// the project overrides the user-level config. result.* is the source
-		// of truth for "what generated this image".
+		// Provider/model/capability metadata comes from the one descriptor shared
+		// by preflight, billing, and generation.
 		// On the task path DownloadURL is now a short fetchable storage URL
 		// (rewritten above by registerGeneratedImageTaskFile); for ad-hoc
 		// generation (no task_id) it may still be a multi-MB base64 data URL.
@@ -342,9 +400,12 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			Str("tool", "generate_image").
 			Str("task_id", taskID).
 			Str("project_id", projectID).
-			Str("image_model_key", imageModelKey).
-			Str("billing_provider", billingProvider).
-			Str("billing_model", billingModel).
+			Str("billing_provider", resolved.Provider).
+			Str("billing_model", resolved.Model).
+			Str("model_source", resolved.Source).
+			Str("selection_reason", resolved.SelectionReason).
+			Bool("supports_reference", resolved.SupportsReference).
+			Int("max_reference_images", resolved.MaxReferenceImages).
 			Str("provider", result.Provider).
 			Str("model", result.Model).
 			Str("size", result.Size).
@@ -360,12 +421,6 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	// explicitly requests it; failures do not block the response — the agent
 	// decides whether to retry based on the returned verification object.
 	if verifyWithVision {
-		if verificationPrompt == "" {
-			return errorResult("verification_prompt is required when verify_with_vision is true"), nil
-		}
-		if svcs.WritingSvc == nil {
-			return errorResult("writing/vision service not available for verification"), nil
-		}
 		verification, vErr := runImageVerification(ctx, userID, taskID, result, verificationPrompt)
 		if vErr != nil {
 			// Verification failed for operational reasons (vision API down,
@@ -1200,8 +1255,8 @@ func generateImageInputSchema() map[string]any {
 			"image_type":          map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
 			"output_path":         map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, but required when upload_to_cdn=true since the upload reads this file). Use a writable server path such as /tmp/...; this server-local path lives on the MCP server host, not the agent client's current working directory. In task calls, relative paths such as output/cover.png are resolved from the task workspace when visible to the MCP server; otherwise the server persists the image as a task_file and returns a durable download_url."},
 			"size":                map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides project default when provided; providers may still return a different crop/ratio."},
-			"ref_image_path":      map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
-			"ref_image_paths":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Additional server-local reference image paths for multi-reference fidelity (optional). OpenAI/Gemini merge these with ref_image_path (up to ~16 total); Volcengine/Seedream 5.0 Pro supports multiple reference images up to its configured provider limit. For e-commerce product-photo consistency, pass only the product photos relevant to THIS image's depicted part (per the product-photo list / 产品图清单), not all photos; pair with a named-fidelity prompt naming the exact list index. Use file_path values returned by generate_image/download_image."},
+			"ref_image_path":      map[string]any{"type": "string", "description": "Legacy single server-local reference image path (optional). Use file_path returned by generate_image/download_image, not a client-local path. The server automatically validates the resolved model's reference capability and returns the actual accessible limit when exceeded."},
+			"ref_image_paths":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Server-local reference image paths relevant to this output (optional). Pass only the original images selected for this image; the server automatically chooses a capable model, validates its reference capacity, and returns the actual accessible limit when exceeded. Use file_path returned by generate_image/download_image."},
 			"task_id":             map[string]any{"type": "string", "description": "Task ID. The server resolves the image model from this task; agents must not pass model keys."},
 			"watermark":           map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
 			"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities/matches the chapter content. The image-understanding call is billed by actual usage and associated with task_id.", "default": false},

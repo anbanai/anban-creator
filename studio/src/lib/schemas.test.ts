@@ -165,6 +165,71 @@ describe('createTaskSchema', () => {
     expect(result.image_ratio).toBe('')
   })
 
+  it('defaults task input attachments to an empty snapshot', () => {
+    const result = createTaskSchema.parse({
+      project_id: 'seednote-1',
+      type: 'seednote',
+      prompt: '测试',
+    })
+
+    expect(result.input_attachments).toEqual([])
+  })
+
+  it('accepts up to 16 Seednote images with 1000 Unicode code points per instruction', () => {
+    const result = createTaskSchema.safeParse({
+      project_id: 'seednote-1',
+      type: 'seednote',
+      prompt: '测试',
+      input_attachments: Array.from({ length: 16 }, (_, index) => ({
+        type: 'image',
+        url: `/reference-${index + 1}.png`,
+        instruction: '😀'.repeat(1000),
+      })),
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects more than 16 Seednote reference images', () => {
+    const result = createTaskSchema.safeParse({
+      project_id: 'seednote-1',
+      type: 'seednote',
+      prompt: '测试',
+      input_attachments: Array.from({ length: 17 }, (_, index) => ({
+        type: 'image',
+        url: `/reference-${index + 1}.png`,
+      })),
+    })
+
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects non-image Seednote reference materials', () => {
+    const result = createTaskSchema.safeParse({
+      project_id: 'seednote-1',
+      type: 'seednote',
+      prompt: '测试',
+      input_attachments: [{ type: 'document', url: '/brief.pdf' }],
+    })
+
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a reference instruction over 1000 Unicode code points', () => {
+    const result = createTaskSchema.safeParse({
+      project_id: 'seednote-1',
+      type: 'seednote',
+      prompt: '测试',
+      input_attachments: [{
+        type: 'image',
+        url: '/reference.png',
+        instruction: '😀'.repeat(1001),
+      }],
+    })
+
+    expect(result.success).toBe(false)
+  })
+
   it('defaults article image toggles to true (legacy "always generate both")', () => {
     const result = createTaskSchema.parse({
       project_id: 'ch-1',
@@ -328,6 +393,45 @@ describe('createTaskSchema', () => {
 })
 
 describe('planSchema', () => {
+  it('defaults plan input attachments to an empty snapshot', () => {
+    const result = planSchema.parse({
+      type: 'seednote',
+      cron_expr: '0 9 * * 1',
+    })
+
+    expect(result.input_attachments).toEqual([])
+  })
+
+  it('accepts up to 16 image references for Seednote plans', () => {
+    const result = planSchema.safeParse({
+      type: 'seednote',
+      cron_expr: '0 9 * * 1',
+      input_attachments: Array.from({ length: 16 }, (_, index) => ({
+        type: 'image',
+        url: `/plan-reference-${index + 1}.png`,
+      })),
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects more than 16 references and non-image Seednote plan materials', () => {
+    expect(planSchema.safeParse({
+      type: 'seednote',
+      cron_expr: '0 9 * * 1',
+      input_attachments: Array.from({ length: 17 }, (_, index) => ({
+        type: 'image',
+        url: `/plan-reference-${index + 1}.png`,
+      })),
+    }).success).toBe(false)
+
+    expect(planSchema.safeParse({
+      type: 'seednote',
+      cron_expr: '0 9 * * 1',
+      input_attachments: [{ type: 'document', url: '/brief.pdf' }],
+    }).success).toBe(false)
+  })
+
   it('accepts valid plan data', () => {
     expect(planSchema.safeParse({
       type: 'article',

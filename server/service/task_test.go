@@ -3740,3 +3740,100 @@ func TestTaskService_RebuildWorkflowStatus(t *testing.T) {
 		t.Fatalf("review score = %d, want 91", status.Review.OverallScore)
 	}
 }
+
+func TestCreateManualClonesInputAttachments(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	input := []model.EntryAttachment{{
+		Type:        "image",
+		URL:         "/api/v1/files/product.png",
+		FileName:    "product.png",
+		ContentType: "image/png",
+		Instruction: "保持包装和 Logo",
+	}}
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:           userID,
+		ProjectID:        projectID,
+		Prompt:           "生成种草图文",
+		Quantity:         1,
+		InputAttachments: input,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	input[0].Instruction = "调用方后续修改"
+	input[0].FileName = "mutated.png"
+
+	returned := tasks[0].InputAttachments.Data()
+	if len(returned) != 1 || returned[0].Instruction != "保持包装和 Logo" || returned[0].FileName != "product.png" {
+		t.Fatalf("returned attachment snapshot = %#v", returned)
+	}
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	stored := found.InputAttachments.Data()
+	if len(stored) != 1 || stored[0].Instruction != "保持包装和 Logo" || stored[0].FileName != "product.png" {
+		t.Fatalf("persisted attachment snapshot = %#v", stored)
+	}
+}
+
+func TestCreateFromPlanClonesAttachmentSnapshotPerTask(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "plantasksnapshot",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	plan := &model.Plan{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformSeednote,
+		Status:    model.PlanStatusActive,
+		CronExpr:  "0 9 * * *",
+		Prompt:    "根据产品参考图生成种草内容",
+	}
+	plan.SetInputAttachments([]model.EntryAttachment{{
+		Type: "image", URL: "https://cdn.example.com/product.png", Instruction: "保留原始包装",
+	}})
+	if err := repo.Plans().Create(ctx, plan); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+
+	taskA, err := svc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("CreateFromPlan A: %v", err)
+	}
+	taskB, err := svc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("CreateFromPlan B: %v", err)
+	}
+
+	plan.SetInputAttachments([]model.EntryAttachment{{
+		Type: "image", URL: "https://cdn.example.com/product.png", Instruction: "计划后来修改",
+	}})
+	if err := repo.Plans().Update(ctx, plan); err != nil {
+		t.Fatalf("update plan: %v", err)
+	}
+
+	for label, taskID := range map[string]string{"task A": taskA.ID, "task B": taskB.ID} {
+		stored, err := repo.Tasks().FindByID(ctx, taskID)
+		if err != nil {
+			t.Fatalf("find %s: %v", label, err)
+		}
+		got := stored.InputAttachments.Data()
+		if len(got) != 1 || got[0].Instruction != "保留原始包装" {
+			t.Fatalf("%s attachments = %#v, want original plan snapshot", label, got)
+		}
+	}
+}

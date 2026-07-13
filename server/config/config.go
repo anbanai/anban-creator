@@ -56,14 +56,16 @@ type Config struct {
 // ImageModelPreset defines a system-managed image model that users can select
 // when creating tasks or plans. Each preset has a minimum tier that gates access.
 type ImageModelPreset struct {
-	Key           string `yaml:"key"`            // unique identifier, e.g. "volcengine-standard"
-	DisplayName   string `yaml:"display_name"`   // user-facing label
-	ProviderRoute string `yaml:"provider_route"` // semantic route, e.g. image_generation.designer.seedream
-	Provider      string `yaml:"provider"`       // derived provider kind or legacy direct provider
-	Model         string `yaml:"model"`          // concrete model id
-	Endpoint      string `yaml:"endpoint"`
-	APIKey        string `yaml:"api_key"`
-	MinTier       string `yaml:"min_tier"` // free / pro / enterprise
+	Key           string                       `yaml:"key"`            // unique identifier, e.g. "volcengine-standard"
+	DisplayName   string                       `yaml:"display_name"`   // user-facing label
+	ProviderRoute string                       `yaml:"provider_route"` // semantic route, e.g. image_generation.designer.seedream
+	Provider      string                       `yaml:"provider"`       // derived provider kind or legacy direct provider
+	Model         string                       `yaml:"model"`          // concrete model id
+	Endpoint      string                       `yaml:"endpoint"`
+	APIKey        string                       `yaml:"api_key"`
+	MinTier       string                       `yaml:"min_tier"` // free / pro / enterprise
+	QualityRank   int                          `yaml:"quality_rank"`
+	Capabilities  DesignerProviderCapabilities `yaml:"capabilities"`
 }
 
 // maxImageModelKeyLen matches the varchar(50) column size on Task/Plan.ImageModelKey.
@@ -394,6 +396,7 @@ type ImageGenerationRouteConfig struct {
 	Model          string                       `yaml:"model"`
 	Alias          string                       `yaml:"alias"`
 	Enabled        bool                         `yaml:"enabled"`
+	QualityRank    int                          `yaml:"quality_rank" json:"quality_rank"`
 	ResponseFormat string                       `yaml:"response_format"`
 	Capabilities   DesignerProviderCapabilities `yaml:"capabilities" json:"capabilities"`
 }
@@ -1709,6 +1712,9 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		c.ImageAPI.designerOrder = c.ImageAPI.designerOrder[:0]
 		for key, route := range c.ModelRoutes.ImageGeneration.Designer {
 			routeName := "model_routes.image_generation.designer." + key
+			if route.Enabled && route.QualityRank <= 0 {
+				return fmt.Errorf("%s.quality_rank must be positive when enabled", routeName)
+			}
 			if err := validateDesignerProviderCapabilities(routeName+".capabilities", route.Capabilities); err != nil {
 				return err
 			}
@@ -1765,6 +1771,8 @@ func (c *Config) resolveImagePresetRoutes() error {
 		preset.Model = route.Model
 		preset.Endpoint = provider.BaseURL
 		preset.APIKey = provider.APIKey
+		preset.QualityRank = route.QualityRank
+		preset.Capabilities = route.Capabilities
 	}
 	return nil
 }
@@ -2074,6 +2082,9 @@ func (c *Config) Validate() error {
 	}
 
 	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+		if route.Enabled && route.QualityRank <= 0 {
+			errs = append(errs, "model_routes.image_generation.designer."+key+".quality_rank must be positive when enabled")
+		}
 		if err := validateDesignerProviderCapabilities("model_routes.image_generation.designer."+key+".capabilities", route.Capabilities); err != nil {
 			errs = append(errs, err.Error())
 		}

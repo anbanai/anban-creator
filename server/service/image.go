@@ -31,21 +31,24 @@ import (
 
 // ImageResult is the response for single image generation.
 type ImageResult struct {
-	FilePath        string                      `json:"file_path"`
-	LocalFilePath   string                      `json:"-"`
-	DownloadURL     string                      `json:"download_url,omitempty"`
-	Size            string                      `json:"size"`
-	Width           int                         `json:"width,omitempty"`
-	Height          int                         `json:"height,omitempty"`
-	Prompt          string                      `json:"prompt,omitempty"`
-	ImageType       string                      `json:"image_type,omitempty"`
-	Provider        string                      `json:"provider,omitempty"`
-	Model           string                      `json:"model,omitempty"`
-	RevisedPrompt   string                      `json:"revised_prompt,omitempty"`
-	ResponseType    string                      `json:"response_type,omitempty"`
-	ResponsePreview string                      `json:"response_preview,omitempty"`
-	OutputMIME      string                      `json:"output_mime,omitempty"`
-	Usage           *image.ImageGenerationUsage `json:"usage,omitempty"`
+	FilePath           string                      `json:"file_path"`
+	LocalFilePath      string                      `json:"-"`
+	DownloadURL        string                      `json:"download_url,omitempty"`
+	Size               string                      `json:"size"`
+	Width              int                         `json:"width,omitempty"`
+	Height             int                         `json:"height,omitempty"`
+	Prompt             string                      `json:"prompt,omitempty"`
+	ImageType          string                      `json:"image_type,omitempty"`
+	Provider           string                      `json:"provider,omitempty"`
+	Model              string                      `json:"model,omitempty"`
+	SelectionReason    string                      `json:"selection_reason,omitempty"`
+	SupportsReference  bool                        `json:"supports_reference"`
+	MaxReferenceImages int                         `json:"max_reference_images"`
+	RevisedPrompt      string                      `json:"revised_prompt,omitempty"`
+	ResponseType       string                      `json:"response_type,omitempty"`
+	ResponsePreview    string                      `json:"response_preview,omitempty"`
+	OutputMIME         string                      `json:"output_mime,omitempty"`
+	Usage              *image.ImageGenerationUsage `json:"usage,omitempty"`
 	// WeChatURL/MediaID are populated when generate_image is called with
 	// upload_to_cdn=true and the image is uploaded to the project's CDN
 	// (WeChat material library for article projects) in the same call.
@@ -293,6 +296,38 @@ func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *a
 	return nil
 }
 
+func resolveProjectImageAPI(
+	appCfg *appconfig.Config,
+	effectiveCfg *srvconfig.ImageAPIConfig,
+	platform string,
+	imageType string,
+) *appconfig.ImageAPI {
+	apiCfg := resolveAppImageAPI(appCfg, platform, imageType)
+	if apiCfg == nil && platform == model.ScopeEcommerce {
+		// Ecommerce has no platform-specific app-config section. Keep the
+		// historical Cover→Content precedence used by project profiles/billing.
+		if effectiveCfg != nil {
+			if effectiveCfg.Cover != nil {
+				apiCfg = effectiveCfg.Cover
+			} else if effectiveCfg.Content != nil {
+				apiCfg = effectiveCfg.Content
+			}
+		}
+	}
+	if apiCfg == nil && model.IsVideoCreatorPlatform(platform) {
+		// Video visual anchors behave like content assets, so Content wins and
+		// Cover remains the compatibility fallback.
+		if effectiveCfg != nil {
+			if effectiveCfg.Content != nil {
+				apiCfg = effectiveCfg.Content
+			} else if effectiveCfg.Cover != nil {
+				apiCfg = effectiveCfg.Cover
+			}
+		}
+	}
+	return apiCfg
+}
+
 // buildProcessor creates a new image.Processor for the given project and image type.
 // imageModelKey (optional) routes through ResolveImageConfigForTaskKey so that per-task
 // model selection takes effect: empty = server default / user override;
@@ -336,39 +371,48 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 		return nil, fmt.Errorf("build app config: %w", err)
 	}
 
-	apiCfg := resolveAppImageAPI(appCfg, ch.Platform, imageType)
-	if apiCfg == nil && ch.Platform == model.ScopeEcommerce {
-		// Ecommerce has no platform-specific app-config section (unlike
-		// article/seednote): it reuses the generic image_api and resolves the
-		// provider/model per-task via imageModelKey, surfaced to the agent by
-		// get_project_profile (resolveEcommerceImageProvider). Use the already-
-		// resolved effectiveCfg directly — Cover first, then Content — mirroring
-		// resolveEcommerceImageProvider so the provider the agent is told about
-		// is exactly the one generate_image uses. Without this branch every
-		// ecommerce generate_image call errors "no image API config available".
-		if effectiveCfg != nil {
-			if effectiveCfg.Cover != nil {
-				apiCfg = effectiveCfg.Cover
-			} else if effectiveCfg.Content != nil {
-				apiCfg = effectiveCfg.Content
-			}
-		}
-	}
-	if apiCfg == nil && model.IsVideoCreatorPlatform(ch.Platform) {
-		// Video projects use generate_image only for temporary visual anchors
-		// that become video references. They have no dedicated app-config image
-		// section, so reuse the generic image API with Content preferred because
-		// anchors behave like internal content assets, not publication covers.
-		if effectiveCfg != nil {
-			if effectiveCfg.Content != nil {
-				apiCfg = effectiveCfg.Content
-			} else if effectiveCfg.Cover != nil {
-				apiCfg = effectiveCfg.Cover
-			}
-		}
-	}
+	apiCfg := resolveProjectImageAPI(appCfg, effectiveCfg, ch.Platform, imageType)
 	if apiCfg == nil {
 		return nil, fmt.Errorf("no image API config available for type %q", imageType)
+	}
+
+	return image.NewProcessor(appCfg, apiCfg, s.logger), nil
+}
+
+// buildProcessorForResolved builds the generation processor from an immutable
+// descriptor selected before billing. The selected project/image-type slot must
+// still match the descriptor exactly, preventing cover/content route drift.
+func (s *ImageService) buildProcessorForResolved(
+	ch *model.Project,
+	imageType string,
+	resolved *ResolvedImageModel,
+) (*image.Processor, error) {
+	if ch == nil {
+		return nil, fmt.Errorf("project is required")
+	}
+	imageType, err := normalizeGenerationImageType(imageType)
+	if err != nil {
+		return nil, err
+	}
+	if resolved == nil || resolved.Config == nil || strings.TrimSpace(resolved.Provider) == "" || strings.TrimSpace(resolved.Model) == "" {
+		return nil, fmt.Errorf("resolved image model is incomplete")
+	}
+
+	appCfg, err := agent.BuildAppConfig(ch, ResolveStyle(ch, nil), resolved.Config, "", false, "")
+	if err != nil {
+		return nil, fmt.Errorf("build app config: %w", err)
+	}
+	apiCfg := resolveProjectImageAPI(appCfg, resolved.Config, ch.Platform, imageType)
+	if apiCfg == nil {
+		return nil, fmt.Errorf("no image API config available for type %q", imageType)
+	}
+
+	actualProvider := imageProviderKind(apiCfg.Provider)
+	actualModel := strings.TrimSpace(apiCfg.Model)
+	expectedProvider := imageProviderKind(resolved.Provider)
+	expectedModel := strings.TrimSpace(resolved.Model)
+	if actualProvider != expectedProvider || actualModel != expectedModel {
+		return nil, fmt.Errorf("resolved image model does not match image type configuration")
 	}
 
 	return image.NewProcessor(appCfg, apiCfg, s.logger), nil
@@ -469,13 +513,10 @@ func (s *ImageService) generateWithRetry(
 // GenerateImage generates a single image using the project's image provider.
 // Returns the download URL (remote CDN URL or data URL) for the agent to download.
 // If outputPath is provided, also saves the image to that path and returns file_path.
-//
-// imageModelKey (optional) controls which image provider/model is used for this
-// generation, overriding the user-level and server-level defaults. The caller is
-// responsible for having validated that the user's tier permits this key.
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
-	userID, projectID, prompt, imageType, outputPath, refPath string, refPaths []string, taskID, size, imageModelKey string,
+	userID, projectID, prompt, imageType, outputPath, refPath string, refPaths []string, taskID, size string,
+	resolved *ResolvedImageModel,
 	watermark *bool,
 ) (*ImageResult, error) {
 	ch, err := s.repo.Projects().FindByID(ctx, projectID)
@@ -483,7 +524,7 @@ func (s *ImageService) GenerateImage(
 		return nil, fmt.Errorf("find project: %w", err)
 	}
 
-	processor, err := s.buildProcessor(ctx, ch, imageType, imageModelKey)
+	processor, err := s.buildProcessorForResolved(ch, imageType, resolved)
 	if err != nil {
 		return nil, err
 	}
@@ -510,6 +551,14 @@ func (s *ImageService) GenerateImage(
 	}
 
 	result := buildImageResult(rawResult, imageType)
+	if resolved != nil {
+		if imageProviderKind(result.Provider) != imageProviderKind(resolved.Provider) || strings.TrimSpace(result.Model) != strings.TrimSpace(resolved.Model) {
+			return nil, fmt.Errorf("generated image provider/model does not match resolved image model")
+		}
+		result.SelectionReason = resolved.SelectionReason
+		result.SupportsReference = resolved.SupportsReference
+		result.MaxReferenceImages = resolved.MaxReferenceImages
+	}
 
 	s.logger.Info().
 		Str("project_id", projectID).

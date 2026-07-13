@@ -960,6 +960,61 @@ func TestBuildAccountInfo_NoTemplateNamespace(t *testing.T) {
 	}
 }
 
+func TestBuildAccountInfoExposesImageGenerationCapability(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	project := createAccountInfoProject(t, repo, userID, "clean editorial collage")
+	task := &model.Task{
+		ID:            uuid.New().String(),
+		UserID:        userID,
+		ProjectID:     project.ID,
+		Type:          model.PlatformSeednote,
+		Status:        model.TaskStatusPending,
+		ImageModelKey: "preferred-key",
+	}
+	task.SetProjectSnapshot(model.SnapshotProject(project))
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	resolved := &service.ResolvedImageModel{
+		Key:                "server-only-key",
+		Provider:           "openai",
+		Model:              "gpt-image-2",
+		Source:             "preset:openai-gpt-image",
+		SupportsReference:  true,
+		MaxReferenceImages: 16,
+		SelectionReason:    "preferred",
+	}
+	resolver := &fakeImageModelResolver{resolved: resolved}
+	svcs.ImageModelResolver = resolver
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"project_id": project.ID,
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	imageGeneration, ok := info["image_generation"].(map[string]any)
+	if !ok {
+		t.Fatalf("image_generation block missing: %#v", info)
+	}
+	if imageGeneration["provider"] != resolved.Provider || imageGeneration["model"] != resolved.Model {
+		t.Fatalf("image_generation model = %#v", imageGeneration)
+	}
+	if imageGeneration["supports_reference"] != true || imageGeneration["max_reference_images"] != 16 || imageGeneration["selection_reason"] != "preferred" {
+		t.Fatalf("image_generation capabilities = %#v", imageGeneration)
+	}
+	if _, ok := imageGeneration["key"]; ok || strings.Contains(mustJSON(t, imageGeneration), resolved.Key) {
+		t.Fatalf("image_generation must not expose resolved key: %#v", imageGeneration)
+	}
+	if resolver.calls != 1 || resolver.userID != userID || resolver.imageModelKey != task.ImageModelKey || resolver.imageType != "content" || resolver.referenceCount != 0 {
+		t.Fatalf("resolver calls/args = %d user=%q key=%q type=%q refs=%d", resolver.calls, resolver.userID, resolver.imageModelKey, resolver.imageType, resolver.referenceCount)
+	}
+}
+
 func TestBuildAccountInfo_EcommerceProjectAutoReturnsEcommerceBlockWithoutScope(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
@@ -1190,4 +1245,13 @@ func TestParseStringArray(t *testing.T) {
 	if gotScalar := parseStringArray(args, "scalar"); gotScalar != nil {
 		t.Errorf("scalar (non-array) = %v, want nil", gotScalar)
 	}
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JSON: %v", err)
+	}
+	return string(data)
 }

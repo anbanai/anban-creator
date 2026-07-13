@@ -1,12 +1,16 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DashboardPage from './DashboardPage'
+import type { ReferenceMaterialInputProps } from '@/components/ReferenceMaterialInput'
 import { api } from '@/lib/api'
-import { uploadToOSS } from '@/lib/direct-upload'
 import { render } from '@/test/test-utils'
+import type { InputAttachment } from '@/types/input-attachment'
 
 const navigateMock = vi.fn()
+const referenceMaterialInputHarness = vi.hoisted(() => ({
+  props: undefined as ReferenceMaterialInputProps | undefined,
+}))
 
 const { articleProject, seednoteProject, ecommerceProject } = vi.hoisted(() => {
   const articleProject = {
@@ -71,14 +75,11 @@ vi.mock('@/contexts/AuthContext', () => ({
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), message: vi.fn(), success: vi.fn() } }))
 
-vi.mock('@/lib/direct-upload', () => ({
-  uploadToOSS: vi.fn().mockResolvedValue({
-    uploadId: 'upload-1',
-    key: 'uploads/pending/user/upload-1/ref.png',
-    publicUrl: 'https://cdn.example.com/uploads/pending/user/upload-1/ref.png',
-    contentType: 'image/png',
-    size: 123,
-  }),
+vi.mock('@/components/ReferenceMaterialInput', () => ({
+  ReferenceMaterialInput: (props: ReferenceMaterialInputProps) => {
+    referenceMaterialInputHarness.props = props
+    return <div data-testid="reference-material-input" />
+  },
 }))
 
 vi.mock('@/lib/tauri', () => ({
@@ -157,7 +158,7 @@ describe('DashboardPage AI entry', () => {
   beforeEach(() => {
     navigateMock.mockClear()
     vi.mocked(api.aiEntry.submit).mockClear()
-    vi.mocked(uploadToOSS).mockClear()
+    referenceMaterialInputHarness.props = undefined
   })
 
   it('sends first-time users to project creation from the AI entry', async () => {
@@ -185,7 +186,21 @@ describe('DashboardPage AI entry', () => {
     expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
   })
 
-  it('renders a Codex-style AI entry and creates a task with uploaded attachments', async () => {
+  it('renders a Codex-style AI entry and submits every shared attachment unchanged', async () => {
+    const attachments: InputAttachment[] = [
+      {
+        type: 'image',
+        url: '/product.png',
+        file_name: 'product.png',
+        content_type: 'image/png',
+        instruction: '保持包装和 Logo 准确',
+      },
+      { type: 'audio', url: '/voice.mp3', file_name: 'voice.mp3', content_type: 'audio/mpeg' },
+      { type: 'video', url: '/demo.mp4', file_name: 'demo.mp4', content_type: 'video/mp4' },
+      { type: 'document', url: '/brief.pdf', file_name: 'brief.pdf', content_type: 'application/pdf' },
+      { type: 'text', url: '/notes.txt', file_name: 'notes.txt', content_type: 'text/plain' },
+    ]
+
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
@@ -201,17 +216,12 @@ describe('DashboardPage AI entry', () => {
     expect(screen.queryByText('下一步')).not.toBeInTheDocument()
     expect(screen.queryByText('最近任务')).not.toBeInTheDocument()
     await waitFor(() => expect(screen.queryByText('还没有任务')).not.toBeInTheDocument())
+    await waitFor(() => expect(referenceMaterialInputHarness.props).toBeDefined())
 
+    expect(referenceMaterialInputHarness.props?.allowedTypes).toEqual(['image', 'audio', 'video', 'document', 'text'])
+    expect(referenceMaterialInputHarness.props?.instructionEnabled).toBe(true)
+    act(() => referenceMaterialInputHarness.props?.onChange(attachments))
     fireEvent.change(prompt, { target: { value: '帮我写一篇新品发布公众号文章' } })
-    const fileInput = screen.getByLabelText('上传参考素材')
-    const file = new File(['img'], 'ref.png', { type: 'image/png' })
-    fireEvent.change(fileInput, { target: { files: [file] } })
-
-    await waitFor(() => expect(uploadToOSS).toHaveBeenCalledWith(expect.objectContaining({
-      purpose: 'ai_entry_attachment',
-      file,
-    })))
-
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
@@ -219,13 +229,22 @@ describe('DashboardPage AI entry', () => {
       project_id: 'project-1',
       text: '帮我写一篇新品发布公众号文章',
       execution_target: 'local',
-      attachments: [expect.objectContaining({
-        type: 'image',
-        url: 'https://cdn.example.com/uploads/pending/user/upload-1/ref.png',
-        file_name: 'ref.png',
-      })],
+      attachments,
     }))
     expect(navigateMock).toHaveBeenCalledWith('/tasks/task-ai-1')
+  })
+
+  it('disables submission while the shared reference input is uploading', async () => {
+    render(<DashboardPage />)
+
+    const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
+    fireEvent.change(prompt, { target: { value: '写一篇新品介绍' } })
+    await waitFor(() => expect(referenceMaterialInputHarness.props).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
+
+    act(() => referenceMaterialInputHarness.props?.onUploadingChange?.(true))
+
+    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
   })
 
   it('uses the selected project from the composer menu when multiple projects exist', async () => {

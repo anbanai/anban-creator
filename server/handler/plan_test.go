@@ -477,3 +477,112 @@ func TestCreatePlan_MomentsProjectReturnsBadRequest(t *testing.T) {
 		t.Fatalf("response = %s, want unsupported moments message", raw)
 	}
 }
+
+func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "planhandlerattachments",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformSeednote,
+		Name:     "Seednote",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	planSvc := service.NewPlanService(repo, &logger)
+	h := NewPlanHandler(planSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/plans", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+	app.Put("/plans/:id", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Update(c)
+	})
+
+	invalidBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"}]}`
+	invalidReq := httptest.NewRequest("POST", "/plans", strings.NewReader(invalidBody))
+	invalidReq.Header.Set("Content-Type", "application/json")
+	invalidResp, err := app.Test(invalidReq)
+	if err != nil {
+		t.Fatalf("invalid create request failed: %v", err)
+	}
+	if invalidResp.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("invalid create status = %d, want 400", invalidResp.StatusCode)
+	}
+
+	createBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png","instruction":"  聚焦包装正面  "}]}`
+	createReq := httptest.NewRequest("POST", "/plans", strings.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := app.Test(createReq)
+	if err != nil {
+		t.Fatalf("create request failed: %v", err)
+	}
+	if createResp.StatusCode != fiber.StatusOK {
+		raw, _ := io.ReadAll(createResp.Body)
+		t.Fatalf("create status = %d, want 200; response = %s", createResp.StatusCode, raw)
+	}
+
+	plans, err := repo.Plans().FindByUserID(ctx, userID, projectID, 0, 10)
+	if err != nil {
+		t.Fatalf("find plans: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans len = %d, want 1", len(plans))
+	}
+	planID := plans[0].ID
+	got := plans[0].InputAttachments.Data()
+	if len(got) != 1 || got[0].Instruction != "聚焦包装正面" {
+		t.Fatalf("created attachments = %#v, want normalized image", got)
+	}
+
+	omitReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"prompt":"updated"}`))
+	omitReq.Header.Set("Content-Type", "application/json")
+	omitResp, err := app.Test(omitReq)
+	if err != nil {
+		t.Fatalf("omitted update request failed: %v", err)
+	}
+	if omitResp.StatusCode != fiber.StatusOK {
+		t.Fatalf("omitted update status = %d, want 200", omitResp.StatusCode)
+	}
+	retained, err := repo.Plans().FindByID(ctx, planID)
+	if err != nil {
+		t.Fatalf("find retained plan: %v", err)
+	}
+	if got := retained.InputAttachments.Data(); len(got) != 1 || got[0].Instruction != "聚焦包装正面" {
+		t.Fatalf("attachments after omitted update = %#v, want retained image", got)
+	}
+
+	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"input_attachments":[]}`))
+	clearReq.Header.Set("Content-Type", "application/json")
+	clearResp, err := app.Test(clearReq)
+	if err != nil {
+		t.Fatalf("clear update request failed: %v", err)
+	}
+	if clearResp.StatusCode != fiber.StatusOK {
+		t.Fatalf("clear update status = %d, want 200", clearResp.StatusCode)
+	}
+	cleared, err := repo.Plans().FindByID(ctx, planID)
+	if err != nil {
+		t.Fatalf("find cleared plan: %v", err)
+	}
+	if got := cleared.InputAttachments.Data(); len(got) != 0 {
+		t.Fatalf("attachments after explicit empty update = %#v, want empty", got)
+	}
+}

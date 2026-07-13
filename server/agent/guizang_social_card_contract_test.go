@@ -29,9 +29,10 @@ func TestGuizangSocialCardRoutingIsRemoved(t *testing.T) {
 		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
 	}
 	for _, plugin := range []string{"claudecode", "openclaw", "codex"} {
-		for _, skill := range []string{"moments", "seednote-visual-design", "article-visual-design", "article-cover-design"} {
+		for _, skill := range []string{"moments", "seednote", "seednote-visual-design", "article-visual-design", "article-cover-design"} {
 			files = append(files, filepath.Join(root, plugin, "skills", skill, "SKILL.md"))
 		}
+		files = append(files, filepath.Join(root, plugin, "skills", "seednote-visual-design", "references", "content.md"))
 	}
 
 	for _, file := range files {

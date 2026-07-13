@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,14 +31,26 @@ const maxInputAttachmentBytes int64 = 50 << 20 // 50 MB
 var unsafeAttachmentFilenameRunes = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 type MaterializedInputAttachment struct {
-	Index       int    `json:"index"`
-	Type        string `json:"type,omitempty"`
-	URL         string `json:"url,omitempty"`
-	Text        string `json:"text,omitempty"`
-	FileName    string `json:"file_name,omitempty"`
-	ContentType string `json:"content_type,omitempty"`
-	Size        int64  `json:"size,omitempty"`
-	Path        string `json:"path,omitempty"`
+	AttachmentIndex int    `json:"attachment_index"`
+	Type            string `json:"type,omitempty"`
+	URL             string `json:"url,omitempty"`
+	Text            string `json:"text,omitempty"`
+	FileName        string `json:"file_name,omitempty"`
+	ContentType     string `json:"content_type,omitempty"`
+	Size            int64  `json:"size,omitempty"`
+	Path            string `json:"path,omitempty"`
+	Instruction     string `json:"instruction,omitempty"`
+	UploadID        string `json:"upload_id,omitempty"`
+}
+
+type MaterializedInputAttachmentError struct {
+	AttachmentIndex int    `json:"attachment_index"`
+	Type            string `json:"type,omitempty"`
+	URL             string `json:"url,omitempty"`
+	FileName        string `json:"file_name,omitempty"`
+	Instruction     string `json:"instruction,omitempty"`
+	UploadID        string `json:"upload_id,omitempty"`
+	Error           string `json:"error"`
 }
 
 // EffectiveProject returns the task snapshot view when a task carries one,
@@ -376,9 +389,6 @@ func DownloadProductImages(ctx context.Context, store storage.Provider, logger *
 // DownloadInputAttachments materializes AI-entry attachments into
 // .anban-creator/input-attachments and writes index.json with stable local paths.
 func DownloadInputAttachments(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, attachments []model.EntryAttachment) int {
-	if len(attachments) == 0 {
-		return 0
-	}
 	destDir := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		if logger != nil {
@@ -388,10 +398,14 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 	}
 
 	index := make([]MaterializedInputAttachment, 0, len(attachments))
+	failures := make([]MaterializedInputAttachmentError, 0)
 	for i, attachment := range attachments {
 		if model.IsResumeEntryAttachment(attachment) {
 			continue
 		}
+		attachmentIndex := i + 1
+		name := inputAttachmentFilename(attachmentIndex, attachment)
+		path := filepath.Join(destDir, name)
 		var data []byte
 		var err error
 		if strings.TrimSpace(attachment.URL) != "" {
@@ -402,13 +416,30 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 			continue
 		}
 		if err != nil {
+			failures = append(failures, MaterializedInputAttachmentError{
+				AttachmentIndex: attachmentIndex,
+				Type:            attachment.Type,
+				URL:             attachment.URL,
+				FileName:        attachment.FileName,
+				Instruction:     attachment.Instruction,
+				UploadID:        attachment.UploadID,
+				Error:           err.Error(),
+			})
 			if logger != nil {
-				logger.Warn().Err(err).Str("url", attachment.URL).Int("index", i+1).Msg("failed to download input attachment, skipping")
+				logger.Warn().Err(err).Str("url", attachment.URL).Int("index", attachmentIndex).Msg("failed to download input attachment, skipping")
 			}
 			continue
 		}
-		name := inputAttachmentFilename(i+1, attachment)
-		if err := os.WriteFile(filepath.Join(destDir, name), data, 0o644); err != nil {
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			failures = append(failures, MaterializedInputAttachmentError{
+				AttachmentIndex: attachmentIndex,
+				Type:            attachment.Type,
+				URL:             attachment.URL,
+				FileName:        attachment.FileName,
+				Instruction:     attachment.Instruction,
+				UploadID:        attachment.UploadID,
+				Error:           err.Error(),
+			})
 			if logger != nil {
 				logger.Warn().Err(err).Str("name", name).Msg("write input attachment failed, skipping")
 			}
@@ -416,22 +447,38 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 		}
 		relPath := filepath.ToSlash(filepath.Join(appconfig.ConfigDir, "input-attachments", name))
 		index = append(index, MaterializedInputAttachment{
-			Index:       i + 1,
-			Type:        attachment.Type,
-			URL:         attachment.URL,
-			Text:        attachment.Text,
-			FileName:    attachment.FileName,
-			ContentType: attachment.ContentType,
-			Size:        attachment.Size,
-			Path:        relPath,
+			AttachmentIndex: attachmentIndex,
+			Type:            attachment.Type,
+			URL:             attachment.URL,
+			Text:            attachment.Text,
+			FileName:        attachment.FileName,
+			ContentType:     attachment.ContentType,
+			Size:            attachment.Size,
+			Path:            relPath,
+			Instruction:     attachment.Instruction,
+			UploadID:        attachment.UploadID,
 		})
 	}
-	if len(index) > 0 {
-		if indexBytes, err := json.MarshalIndent(index, "", "  "); err == nil {
-			if err := os.WriteFile(filepath.Join(destDir, "index.json"), indexBytes, 0o644); err != nil && logger != nil {
-				logger.Warn().Err(err).Msg("write input attachments index.json failed")
-			}
+
+	if indexBytes, err := json.MarshalIndent(index, "", "  "); err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("marshal input attachments index.json failed")
 		}
+	} else if err := os.WriteFile(filepath.Join(destDir, "index.json"), indexBytes, 0o644); err != nil && logger != nil {
+		logger.Warn().Err(err).Msg("write input attachments index.json failed")
+	}
+
+	errorsPath := filepath.Join(destDir, "errors.json")
+	if len(failures) > 0 {
+		if failureBytes, err := json.MarshalIndent(failures, "", "  "); err != nil {
+			if logger != nil {
+				logger.Warn().Err(err).Msg("marshal input attachments errors.json failed")
+			}
+		} else if err := os.WriteFile(errorsPath, failureBytes, 0o644); err != nil && logger != nil {
+			logger.Warn().Err(err).Msg("write input attachments errors.json failed")
+		}
+	} else if err := os.Remove(errorsPath); err != nil && !errors.Is(err, os.ErrNotExist) && logger != nil {
+		logger.Warn().Err(err).Msg("remove stale input attachments errors.json failed")
 	}
 	return len(index)
 }

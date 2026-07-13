@@ -21,6 +21,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
+import ReferenceUsageSummary from '@/components/tasks/ReferenceUsageSummary'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
@@ -1267,6 +1269,25 @@ export default function TaskDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <ErrorBoundary
+        key={`reference-usage-${task.id}`}
+        fallback={(
+          <Card className="border-amber-500/30">
+            <CardContent className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">参考素材摘要暂时无法显示</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  任务状态与生成文件不受影响，可稍后刷新页面重试。
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      >
+        <ReferenceUsageSummary task={task} files={files ?? []} />
+      </ErrorBoundary>
 
       {/* Files (top priority - most useful content) */}
       {files && files.length > 0 && (

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -6,9 +6,21 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import TasksPage from './TasksPage'
 import { api } from '@/lib/api'
 import { createTestQueryClient } from '@/test/test-utils'
-import type { Project, Task } from '@/types'
+import type { ReferenceMaterialInputProps } from '@/components/ReferenceMaterialInput'
+import type { InputAttachment, Project, Task } from '@/types'
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), message: vi.fn(), success: vi.fn() } }))
+
+const referenceMaterialInputHarness = vi.hoisted(() => ({
+  props: undefined as ReferenceMaterialInputProps | undefined,
+}))
+
+vi.mock('@/components/ReferenceMaterialInput', () => ({
+  ReferenceMaterialInput: (props: ReferenceMaterialInputProps) => {
+    referenceMaterialInputHarness.props = props
+    return <div />
+  },
+}))
 
 const fixtures = vi.hoisted(() => {
   const project = {
@@ -195,5 +207,103 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(await screen.findByText(/基础任务费：3000 × 1 =/)).toBeInTheDocument()
     expect(screen.queryByText(/模块套餐预估/)).not.toBeInTheDocument()
     expect(screen.getByText(/所选交付模块会影响后续图片生成和理解操作用量/)).toBeInTheDocument()
+  })
+})
+
+
+describe('TasksPage Seednote reference materials', () => {
+  const seednoteProject = {
+    ...fixtures.project,
+    id: 'project-seednote',
+    platform: 'seednote',
+    name: '种草项目',
+    image_ratio: '3:4',
+  } as Project
+
+  const ecommerceProject = {
+    ...fixtures.project,
+    id: 'project-ecommerce',
+    platform: 'ecommerce',
+    name: '电商项目',
+  } as Project
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    referenceMaterialInputHarness.props = undefined
+    vi.mocked(api.tasks.list).mockResolvedValue({ items: [], total: 0 })
+    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+    vi.mocked(api.tasks.create).mockResolvedValue({
+      ...fixtures.failedTask,
+      id: 'created-seednote-task',
+      type: 'seednote',
+      title: '新建种草笔记',
+      prompt: '',
+      status: 'pending',
+      error: null,
+      project_id: seednoteProject.id,
+    } as Task)
+  })
+
+  it('configures Seednote image references and submits their snapshot', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
+    const attachments: InputAttachment[] = [{
+      type: 'image',
+      url: '/product.png',
+      file_name: 'product.png',
+      content_type: 'image/png',
+      upload_id: 'upload-1',
+      key: 'uploads/product.png',
+      instruction: '保持包装和 Logo 准确',
+    }]
+
+    renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
+
+    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props).toBeDefined())
+    expect(screen.getByRole('region', { name: 'Seednote 参考素材' })).toBeInTheDocument()
+    expect(referenceMaterialInputHarness.props).toEqual(expect.objectContaining({
+      allowedTypes: ['image'],
+      maxCount: 16,
+      instructionEnabled: true,
+      instructionMaxLength: 1000,
+    }))
+
+    act(() => {
+      referenceMaterialInputHarness.props?.onChange(attachments)
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => {
+      expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'seednote',
+        input_attachments: attachments,
+      }))
+    })
+  })
+
+  it('blocks Seednote creation while reference images are uploading', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
+
+    renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
+
+    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props).toBeDefined())
+
+    act(() => {
+      referenceMaterialInputHarness.props?.onUploadingChange?.(true)
+    })
+
+    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+  })
+
+  it('keeps the ecommerce product-photo uploader isolated from Seednote references', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([ecommerceProject])
+
+    renderTasksPage(`/tasks?create=true&type=ecommerce&project_id=${ecommerceProject.id}&intent=new`)
+
+    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByText('添加产品图')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Seednote 参考素材' })).not.toBeInTheDocument()
+    expect(referenceMaterialInputHarness.props).toBeUndefined()
   })
 })
