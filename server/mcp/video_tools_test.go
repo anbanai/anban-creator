@@ -1322,9 +1322,15 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 	if got, _ := pricing["operation_billing_rule"].(string); !strings.Contains(got, "video_gen") {
 		t.Fatalf("videocreator.pricing.operation_billing_rule = %v, want video_gen rule", pricing["operation_billing_rule"])
 	}
+	if _, ok := pricing["insufficient_credit_rule"]; ok {
+		t.Fatalf("videocreator.pricing must not expose an execution-time balance gate: %#v", pricing)
+	}
 	brief, ok := info["agent_brief"].(string)
 	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "面向露营人群的咖啡杯项目") || !strings.Contains(brief, "CLAUDE.md") || !strings.Contains(brief, "video_creator_input") || !strings.Contains(brief, "seedance-20") || !strings.Contains(brief, "video_gen") {
 		t.Fatalf("agent_brief missing video project context: %#v", info["agent_brief"])
+	}
+	if strings.Contains(strings.ToLower(brief), "recharge") || strings.Contains(brief, "余额不足") || strings.Contains(brief, "充值") {
+		t.Fatalf("agent_brief must not gate execution on credit balance: %s", brief)
 	}
 	if strings.Contains(brief, "自然光、真实手持") {
 		t.Fatalf("agent_brief leaked visual_style into video instructions: %s", brief)

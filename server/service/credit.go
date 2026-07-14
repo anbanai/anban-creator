@@ -669,14 +669,10 @@ func (s *CreditService) deductForOperation(ctx context.Context, userID, opType s
 
 	var newBalance int
 	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-		var ok bool
 		var err error
-		newBalance, ok, err = txRepo.Users().DeductCredits(ctx, userID, totalCost)
+		newBalance, err = txRepo.Users().AdjustBalance(ctx, userID, -totalCost)
 		if err != nil {
-			return fmt.Errorf("deduct credits: %w", err)
-		}
-		if !ok {
-			return ErrInsufficientCredits
+			return fmt.Errorf("adjust balance: %w", err)
 		}
 
 		tx := &model.CreditTransaction{

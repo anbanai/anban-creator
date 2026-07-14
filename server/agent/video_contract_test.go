@@ -116,6 +116,27 @@ func TestVideoSkillContractsUseVideoCreatorInputReferences(t *testing.T) {
 	}
 }
 
+func TestVideoSkillsDoNotGateExecutionOnCreditBalance(t *testing.T) {
+	for _, path := range []string{
+		"../../claudecode/skills/seedance-20/references/mcp-contract.md",
+		"../../codex/skills/seedance-20/references/mcp-contract.md",
+		"../../openclaw/skills/seedance-20/references/mcp-contract.md",
+		"../../claudecode/skills/seedance-20/references/anban-mcp-contract.md",
+		"../../codex/skills/seedance-20/references/anban-mcp-contract.md",
+		"../../openclaw/skills/seedance-20/references/anban-mcp-contract.md",
+		"../../claudecode/skills/dreamina-video/references/mcp-contract.md",
+		"../../codex/skills/dreamina-video/references/mcp-contract.md",
+		"../../openclaw/skills/dreamina-video/references/mcp-contract.md",
+	} {
+		body := strings.ToLower(readRepoFile(t, path))
+		for _, forbidden := range []string{"balance cannot cover", "insufficient credits", "recharge"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s must not gate workflow execution on %q", path, forbidden)
+			}
+		}
+	}
+}
+
 func TestSplitVideoHookQualityGatesAreRegistered(t *testing.T) {
 	text := readRepoFile(t, "../../claudecode/hooks/hooks.json")
 	for _, want := range []string{
