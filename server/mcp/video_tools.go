@@ -2021,7 +2021,7 @@ func maybeDeductVideo(ctx context.Context, userID, taskID string, plan *service.
 		PriceSnapshot:  priceSnapshot,
 	}
 	operationID := videoOperationID(taskID)
-	_, err := billSvc.creditSvc.DeductForOperationWithMetadata(ctx, userID, model.CreditTypeVideoGen, plan.EstimatedCredits, metadata, operationID, taskID)
+	_, err := billSvc.creditSvc.DeductForMCPOperationWithMetadata(ctx, userID, model.CreditTypeVideoGen, plan.EstimatedCredits, metadata, operationID, taskID)
 	return operationID, err
 }
 

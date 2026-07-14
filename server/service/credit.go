@@ -641,19 +641,30 @@ func (s *CreditService) ModelCosts() map[string]map[string]int {
 	return s.cfg.ModelCosts
 }
 
-// DeductForOperation deducts credits for a single MCP tool operation.
+// DeductForOperation deducts credits for a single non-MCP operation and rejects
+// the charge when the current balance is insufficient.
 // The amount parameter is the total credits to deduct (already calculated by the caller).
 // Optional args are operationID, then taskID. operationID gives refund idempotency;
 // taskID lets task detail pages show operation-level credit consumption.
 func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType string, amount int, operationID ...string) (int, error) {
-	return s.deductForOperation(ctx, userID, opType, amount, nil, operationID...)
+	return s.deductForOperation(ctx, userID, opType, amount, nil, false, operationID...)
 }
 
 func (s *CreditService) DeductForOperationWithMetadata(ctx context.Context, userID, opType string, amount int, metadata model.CreditTransactionMetadata, operationID ...string) (int, error) {
-	return s.deductForOperation(ctx, userID, opType, amount, &metadata, operationID...)
+	return s.deductForOperation(ctx, userID, opType, amount, &metadata, false, operationID...)
 }
 
-func (s *CreditService) deductForOperation(ctx context.Context, userID, opType string, amount int, metadata *model.CreditTransactionMetadata, operationID ...string) (int, error) {
+// DeductForMCPOperation records MCP usage without interrupting an already
+// accepted workflow when its balance crosses below zero.
+func (s *CreditService) DeductForMCPOperation(ctx context.Context, userID, opType string, amount int, operationID ...string) (int, error) {
+	return s.deductForOperation(ctx, userID, opType, amount, nil, true, operationID...)
+}
+
+func (s *CreditService) DeductForMCPOperationWithMetadata(ctx context.Context, userID, opType string, amount int, metadata model.CreditTransactionMetadata, operationID ...string) (int, error) {
+	return s.deductForOperation(ctx, userID, opType, amount, &metadata, true, operationID...)
+}
+
+func (s *CreditService) deductForOperation(ctx context.Context, userID, opType string, amount int, metadata *model.CreditTransactionMetadata, allowOverdraft bool, operationID ...string) (int, error) {
 	if amount <= 0 {
 		return 0, ErrInvalidAmount
 	}
@@ -669,10 +680,22 @@ func (s *CreditService) deductForOperation(ctx context.Context, userID, opType s
 
 	var newBalance int
 	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-		var err error
-		newBalance, err = txRepo.Users().AdjustBalance(ctx, userID, -totalCost)
-		if err != nil {
-			return fmt.Errorf("adjust balance: %w", err)
+		if allowOverdraft {
+			var err error
+			newBalance, err = txRepo.Users().AdjustBalance(ctx, userID, -totalCost)
+			if err != nil {
+				return fmt.Errorf("adjust balance: %w", err)
+			}
+		} else {
+			var ok bool
+			var err error
+			newBalance, ok, err = txRepo.Users().DeductCredits(ctx, userID, totalCost)
+			if err != nil {
+				return fmt.Errorf("deduct credits: %w", err)
+			}
+			if !ok {
+				return ErrInsufficientCredits
+			}
 		}
 
 		tx := &model.CreditTransaction{

@@ -109,7 +109,7 @@ func TestDeductForOperationStoresTaskIDAndLongOperationID(t *testing.T) {
 	}
 }
 
-func TestDeductForOperationAllowsNegativeBalance(t *testing.T) {
+func TestDeductForMCPOperationAllowsNegativeBalance(t *testing.T) {
 	tests := []struct {
 		name   string
 		taskID string
@@ -130,7 +130,7 @@ func TestDeductForOperationAllowsNegativeBalance(t *testing.T) {
 				args = append(args, tt.taskID)
 			}
 
-			balance, err := svc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, 120, args...)
+			balance, err := svc.DeductForMCPOperation(ctx, userID, model.CreditTypeImageGen, 120, args...)
 			if err != nil {
 				t.Fatalf("deduct operation: %v", err)
 			}
@@ -160,6 +160,25 @@ func TestDeductForOperationAllowsNegativeBalance(t *testing.T) {
 				t.Fatalf("transaction task_id = %v, want %q", tx.TaskID, tt.taskID)
 			}
 		})
+	}
+}
+
+func TestDeductForOperationRejectsNegativeBalanceOutsideMCP(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 50)
+	svc := newTestCreditService(repo)
+
+	_, err := svc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, 120, "designer-generation")
+	if !errors.Is(err, ErrInsufficientCredits) {
+		t.Fatalf("DeductForOperation error = %v, want ErrInsufficientCredits", err)
+	}
+	balance, err := svc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if balance != 50 {
+		t.Fatalf("balance = %d, want unchanged 50", balance)
 	}
 }
 

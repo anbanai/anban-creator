@@ -32,10 +32,12 @@ the same behavior. Their affected plugin manifests receive patch version bumps.
 
 ## Server behavior
 
-`CreditService.deductForOperation` uses an atomic balance adjustment that permits
-a negative result. It creates the existing operation transaction in the same
-database transaction. Task-creation methods continue using the conditional
-deduction that rejects insufficient credits.
+MCP billing uses the explicit `DeductForMCPOperation*` methods, which perform an
+atomic balance adjustment that permits a negative result and create the existing
+operation transaction in the same database transaction. The shared
+`DeductForOperation*` methods remain fail-closed for non-MCP surfaces such as
+interactive Designer generation. Task-creation methods also continue using the
+conditional deduction that rejects insufficient credits.
 
 No Agent-side call to `get_credit_balance` is added. The MCP tool may remain
 available for non-workflow account surfaces, but task workflows do not use it.

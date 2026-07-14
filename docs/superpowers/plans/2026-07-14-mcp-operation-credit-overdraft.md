@@ -4,7 +4,7 @@
 
 **Goal:** Keep task-creation credit validation while making MCP operation billing non-blocking and removing balance-gated control flow from Agent and Skill content.
 
-**Architecture:** Task creation continues through `DeductCredits`, which conditionally updates only sufficient balances. MCP operation billing changes only `CreditService.deductForOperation` to use `AdjustBalance(-amount)`, preserving its transaction, metadata, attribution, idempotency, and refund behavior. Video workflow documents retain pricing facts but remove balance checks and recharge instructions across all three plugin distributions.
+**Architecture:** Task creation and non-MCP operations continue through `DeductCredits`, which conditionally updates only sufficient balances. MCP call sites use explicit `DeductForMCPOperation*` methods backed by `AdjustBalance(-amount)`, preserving transaction, metadata, attribution, idempotency, and refund behavior without broadening overdraft to interactive non-MCP surfaces. Video workflow documents retain pricing facts but remove balance checks and recharge instructions across all three plugin distributions.
 
 **Tech Stack:** Go, GORM, SQLite-backed Go tests, Markdown plugin skills, JSON plugin manifests.
 
@@ -18,29 +18,19 @@
 
 - [x] **Step 1: Write the failing operation-overdraft tests**
 
-Add table-driven coverage that calls `DeductForOperation` with and without an optional `task_id`, starts at 50 credits, deducts 120, and expects a returned and persisted balance of -70. Assert the operation transaction keeps its optional `task_id` and `balance_after=-70`.
+Add table-driven coverage that calls `DeductForMCPOperation` with and without an optional `task_id`, starts at 50 credits, deducts 120, and expects a returned and persisted balance of -70. Assert the operation transaction keeps its optional `task_id` and `balance_after=-70`. Add a separate test proving `DeductForOperation` still rejects the same charge outside MCP.
 
 - [x] **Step 2: Run the focused service tests and verify RED**
 
-Run: `go test ./server/service -run 'TestDeductForOperationAllowsNegativeBalance|TestDeductForTaskWithAmount_InsufficientCredits' -count=1`
+Run: `go test ./server/service -run 'TestDeductForMCPOperationAllowsNegativeBalance|TestDeductForOperationRejectsNegativeBalanceOutsideMCP|TestDeductForTaskWithAmount_InsufficientCredits' -count=1`
 
 Expected: the operation-overdraft test fails with `insufficient credits`; the task-creation test passes.
 
-- [x] **Step 3: Make operation deduction unconditional**
+- [x] **Step 3: Make MCP operation deduction unconditional**
 
-In `CreditService.deductForOperation`, replace:
-
-```go
-newBalance, ok, err = txRepo.Users().DeductCredits(ctx, userID, totalCost)
-if err != nil {
-    return fmt.Errorf("deduct credits: %w", err)
-}
-if !ok {
-    return ErrInsufficientCredits
-}
-```
-
-with:
+Add explicit `DeductForMCPOperation*` entry points and route MCP billing call
+sites through them. Keep the existing `DeductForOperation*` entry points
+fail-closed for non-MCP callers.
 
 ```go
 newBalance, err = txRepo.Users().AdjustBalance(ctx, userID, -totalCost)
@@ -51,7 +41,7 @@ if err != nil {
 
 - [x] **Step 4: Run the focused service tests and verify GREEN**
 
-Run: `go test ./server/service -run 'TestDeductForOperationAllowsNegativeBalance|TestDeductForTaskWithAmount_InsufficientCredits' -count=1`
+Run: `go test ./server/service -run 'TestDeductForMCPOperationAllowsNegativeBalance|TestDeductForOperationRejectsNegativeBalanceOutsideMCP|TestDeductForTaskWithAmount_InsufficientCredits' -count=1`
 
 Expected: PASS.
 

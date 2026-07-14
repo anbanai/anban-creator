@@ -112,7 +112,7 @@ func maybeDeductUnderstandingTokens(ctx context.Context, userID, taskID, opType 
 		PriceSnapshot:            priceSnapshot,
 	}
 	operationID := fmt.Sprintf("%s:%s:%d:%d", opType, taskID, usage.TotalTokens, time.Now().UnixNano())
-	_, err = billSvc.creditSvc.DeductForOperationWithMetadata(ctx, userID, opType, cost.FinalCredits, metadata, operationID, taskID)
+	_, err = billSvc.creditSvc.DeductForMCPOperationWithMetadata(ctx, userID, opType, cost.FinalCredits, metadata, operationID, taskID)
 	if err != nil {
 		return 0, err
 	}
@@ -230,7 +230,7 @@ func maybeDeductImageGenerationUsage(ctx context.Context, userID, taskID, route,
 		PriceSnapshot:          priceSnapshot,
 	}
 	operationID := fmt.Sprintf("%s:%s:%d:%d", model.CreditTypeImageGen, taskID, usage.TotalTokens, time.Now().UnixNano())
-	_, err = billSvc.creditSvc.DeductForOperationWithMetadata(ctx, userID, model.CreditTypeImageGen, cost.FinalCredits, metadata, operationID, taskID)
+	_, err = billSvc.creditSvc.DeductForMCPOperationWithMetadata(ctx, userID, model.CreditTypeImageGen, cost.FinalCredits, metadata, operationID, taskID)
 	if err != nil {
 		return 0, err
 	}
@@ -288,7 +288,7 @@ func maybeDeductForResolvedModel(ctx context.Context, userID, opType, provider, 
 		}
 		opArgs = append(opArgs, taskID)
 	}
-	_, err := billSvc.creditSvc.DeductForOperation(ctx, userID, opType, cost*count, opArgs...)
+	_, err := billSvc.creditSvc.DeductForMCPOperation(ctx, userID, opType, cost*count, opArgs...)
 	return err
 }
 
