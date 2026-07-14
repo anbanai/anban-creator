@@ -41,6 +41,16 @@ func TestManagedAgentRuntimePolicyUsesExplicitAllowedTools(t *testing.T) {
 	if opts.Hooks == nil {
 		t.Fatal("managed policy must register SDK hooks")
 	}
+	if opts.CanUseTool == nil {
+		t.Fatal("managed policy must reject permission prompts for unlisted tools")
+	}
+	result, err := opts.CanUseTool(context.Background(), "UnknownTool", nil, claudecode.ToolPermissionContext{})
+	if err != nil {
+		t.Fatalf("CanUseTool: %v", err)
+	}
+	if _, ok := result.(claudecode.PermissionResultDeny); !ok {
+		t.Fatalf("CanUseTool result = %#v, want deny", result)
+	}
 }
 
 func TestWithManagedMCPAccessUsesProgrammaticHTTPServer(t *testing.T) {

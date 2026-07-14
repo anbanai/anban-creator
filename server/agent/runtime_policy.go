@@ -44,6 +44,19 @@ func WithManagedAgentRuntimePolicy() claudecode.Option {
 	return func(opts *claudecode.Options) {
 		claudecode.WithAllowedTools(ManagedAgentAllowedTools()...)(opts)
 		claudecode.WithDisallowedTools(ManagedAgentDisallowedTools()...)(opts)
+		// The current Go SDK does not expose Claude Code's dontAsk mode. Allowed
+		// rules approve the managed surface first; this callback deterministically
+		// denies every unlisted tool that would otherwise require interaction.
+		claudecode.WithCanUseTool(func(
+			_ context.Context,
+			toolName string,
+			_ map[string]any,
+			_ claudecode.ToolPermissionContext,
+		) (claudecode.PermissionResult, error) {
+			return claudecode.NewPermissionResultDeny(
+				fmt.Sprintf("tool %q is outside the managed Agent SDK allowlist", toolName),
+			), nil
+		})(opts)
 		managedMCPBoundaryHook()(opts)
 	}
 }
