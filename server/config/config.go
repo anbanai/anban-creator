@@ -2150,6 +2150,33 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, route := range []struct {
+		name     string
+		provider string
+		model    string
+	}{
+		{
+			name:     "model_routes.image_understanding",
+			provider: c.ModelRoutes.ImageUnderstanding.Provider,
+			model:    c.ModelRoutes.ImageUnderstanding.Model,
+		},
+		{
+			name:     "model_routes.video_understanding",
+			provider: c.ModelRoutes.VideoUnderstanding.Provider,
+			model:    c.ModelRoutes.VideoUnderstanding.Model,
+		},
+	} {
+		provider := strings.TrimSpace(route.provider)
+		modelName := strings.TrimSpace(route.model)
+		if provider == "" || modelName == "" {
+			continue
+		}
+		priceKey := provider + "/" + modelName
+		if _, ok := c.ModelPrices.TokenModels[priceKey]; !ok {
+			errs = append(errs, fmt.Sprintf("%s requires model_prices.token_models.%s", route.name, priceKey))
+		}
+	}
+
 	switch c.Claude.Executor {
 	case "local", "docker", "kubernetes":
 	default:

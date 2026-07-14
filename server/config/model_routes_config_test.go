@@ -265,6 +265,72 @@ claude:
 	}
 }
 
+func TestSemanticModelConfigRequiresUnderstandingRoutePrices(t *testing.T) {
+	t.Setenv("MOONSHOT_API_KEY", "moonshot-test")
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+
+	for _, tc := range []struct {
+		name      string
+		route     string
+		wantRoute string
+		wantPrice string
+	}{
+		{
+			name: "image understanding",
+			route: `
+  image_understanding:
+    provider: moonshot
+    model: kimi-k2.7-code
+    require_usage: true`,
+			wantRoute: "model_routes.image_understanding",
+			wantPrice: "model_prices.token_models.moonshot/kimi-k2.7-code",
+		},
+		{
+			name: "video understanding",
+			route: `
+  video_understanding:
+    provider: moonshot
+    model: kimi-k2.7-code-highspeed
+    require_usage: true`,
+			wantRoute: "model_routes.video_understanding",
+			wantPrice: "model_prices.token_models.moonshot/kimi-k2.7-code-highspeed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfgPath := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "-")+".yaml")
+			body := []byte(`
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_providers:
+  moonshot:
+    protocol: openai_compatible
+    base_url: https://api.moonshot.cn/v1
+    api_key: "${MOONSHOT_API_KEY}"
+model_routes:` + tc.route + `
+claude:
+  plugin_dir: "` + pluginDir + `"
+`)
+			if err := os.WriteFile(cfgPath, body, 0644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			_, err := NewConfig(cfgPath)
+			if err == nil {
+				t.Fatal("NewConfig() succeeded without understanding model price")
+			}
+			for _, want := range []string{tc.wantRoute, tc.wantPrice} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestSemanticModelConfigRejectsDesignerRoutesWithoutCapabilities(t *testing.T) {
 	t.Setenv("WANGCAI_OPENAI_API_KEY", "wangcai-test")
 	dir := t.TempDir()
