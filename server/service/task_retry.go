@@ -69,7 +69,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		ec := src.Ecommerce.Data()
 		params.Ecommerce = &ec
 	}
-	if attachments := src.InputAttachments.Data(); len(attachments) > 0 {
+	if attachments := cloneOriginalInputAttachments(src.InputAttachments.Data()); len(attachments) > 0 {
 		params.InputAttachments = attachments
 	}
 	if model.IsVideoCreatorPlatform(src.Type) {
@@ -98,4 +98,14 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
 	return tasks[0], nil
+}
+
+func cloneOriginalInputAttachments(attachments []model.EntryAttachment) []model.EntryAttachment {
+	originals := make([]model.EntryAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if !model.IsResumeEntryAttachment(attachment) {
+			originals = append(originals, attachment)
+		}
+	}
+	return originals
 }

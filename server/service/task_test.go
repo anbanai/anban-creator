@@ -2461,6 +2461,11 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		Goal:       "keep the same goal",
 		GoalMode:   true,
 	}
+	src.SetInputAttachments([]model.EntryAttachment{
+		{Role: "brief", Text: "original input", FileName: "brief.txt"},
+		{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue old workspace", FileName: "latest.md"},
+		{Role: model.EntryAttachmentRoleResumeFile, Key: "resume/feedback.pdf", FileName: "feedback.pdf"},
+	})
 	if err := repo.Tasks().Create(ctx, src); err != nil {
 		t.Fatalf("create source task: %v", err)
 	}
@@ -2481,12 +2486,19 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	if clone.InputSourceTaskID != src.ID {
 		t.Fatalf("clone input source = %q, want %q", clone.InputSourceTaskID, src.ID)
 	}
+	cloneAttachments := clone.InputAttachments.Data()
+	if len(cloneAttachments) != 1 || cloneAttachments[0].Role != "brief" || cloneAttachments[0].Text != "original input" {
+		t.Fatalf("clone attachments = %#v, want only original task inputs", cloneAttachments)
+	}
 	foundSrc, err := repo.Tasks().FindByID(ctx, src.ID)
 	if err != nil {
 		t.Fatalf("find source task: %v", err)
 	}
 	if foundSrc.Status != model.TaskStatusCompleted {
 		t.Fatalf("source status = %q, want completed", foundSrc.Status)
+	}
+	if len(foundSrc.InputAttachments.Data()) != 3 {
+		t.Fatalf("source resume inputs were mutated: %#v", foundSrc.InputAttachments.Data())
 	}
 }
 
