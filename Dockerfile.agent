@@ -29,8 +29,11 @@ RUN set -eux; \
     install -d -m 0755 -o 1000 -g 1000 /home/node; \
     rm -rf /var/lib/apt/lists/*
 
+# Upgrade Claude Code and the Go Agent SDK together after an execution smoke test.
+ARG CLAUDE_CODE_VERSION=2.1.208
 ARG MCPORTER_VERSION=0.9.0
-RUN npm install -g @anthropic-ai/claude-code "mcporter@${MCPORTER_VERSION}" && \
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "mcporter@${MCPORTER_VERSION}" && \
+    claude --version && \
     mcporter --version && \
     gh --version
 

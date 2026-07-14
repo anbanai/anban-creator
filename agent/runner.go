@@ -55,7 +55,19 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 			return fmt.Errorf("send query: %w", err)
 		}
 
-		for msg := range client.ReceiveMessages(ctx) {
+		response := client.ReceiveResponse(ctx)
+		defer response.Close()
+		for {
+			msg, receiveErr := response.Next(ctx)
+			if errors.Is(receiveErr, claudecode.ErrNoMoreMessages) {
+				return serveragent.ValidateManagedPluginResult(pluginInitValidated, nil)
+			}
+			if receiveErr != nil {
+				return fmt.Errorf("receive managed agent stream: %w", receiveErr)
+			}
+			if msg == nil {
+				continue
+			}
 			switch m := msg.(type) {
 			case *claudecode.SystemMessage:
 				if m.Subtype == "init" {
@@ -124,7 +136,6 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				return nil
 			}
 		}
-		return serveragent.ValidateManagedPluginResult(pluginInitValidated, nil)
 	}, sdkOpts...)
 	if err != nil {
 		if result.Error == "" {

@@ -274,5 +274,11 @@ func TestManagedAgentExecutorsUseRuntimePolicy(t *testing.T) {
 		if strings.Contains(body, "claudecode.PermissionModeBypassPermissions") {
 			t.Fatalf("%s must not bypass the managed allowlist", path)
 		}
+		if !strings.Contains(body, "client.ReceiveResponse(ctx)") {
+			t.Fatalf("%s must consume the SDK response iterator so asynchronous stream errors are preserved", path)
+		}
+		if strings.Contains(body, "client.ReceiveMessages(ctx)") {
+			t.Fatalf("%s must not discard SDK stream errors through the message-only channel", path)
+		}
 	}
 }
