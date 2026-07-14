@@ -715,6 +715,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	toolUseSummary := make(map[string]int)
 	var turnNum int
 	var resultMsg *claudecode.ResultMessage
+	pluginInitValidated := false
 
 	// Capture CLI stderr for diagnostics.
 	sdkOpts = append(sdkOpts, claudecode.WithStderrCallback(func(line string) {
@@ -743,6 +744,13 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 		for msg := range client.ReceiveMessages(ctx) {
 			switch m := msg.(type) {
+			case *claudecode.SystemMessage:
+				if m.Subtype == "init" {
+					if err := ValidateManagedPluginInit(m, opts.Task.Type); err != nil {
+						return err
+					}
+					pluginInitValidated = true
+				}
 			case *claudecode.AssistantMessage:
 				if m.HasError() {
 					e.logger.Error().
@@ -830,6 +838,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 					}
 				}
 			case *claudecode.ResultMessage:
+				if !pluginInitValidated {
+					return fmt.Errorf("managed plugin readiness failed: Claude Code did not emit system/init")
+				}
 				resultMsg = m
 				if m.IsError {
 					errMsg := ResultMessageError(m, lastToolErrorTool, lastToolError)

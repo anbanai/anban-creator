@@ -128,6 +128,46 @@ func ValidateManagedMCPStatus(status *claudecode.McpStatusResponse, taskType str
 	return nil
 }
 
+// ValidateManagedPluginInit verifies the SDK system/init inventory instead of
+// assuming that a plugin path on disk was discovered by Claude Code.
+func ValidateManagedPluginInit(message *claudecode.SystemMessage, taskType string) error {
+	if message == nil || message.Subtype != "init" {
+		return fmt.Errorf("managed plugin readiness failed: missing system/init message")
+	}
+	if !initPluginNames(message.Data["plugins"])["anban"] {
+		return fmt.Errorf("managed plugin readiness failed: plugin %q is not loaded", "anban")
+	}
+	if strings.TrimSpace(taskType) == "seednote" {
+		if !initStringValues(message.Data["skills"])["anban:seednote"] {
+			return fmt.Errorf("managed plugin readiness failed: skill %q is not loaded", "anban:seednote")
+		}
+	}
+	return nil
+}
+
+func initPluginNames(value any) map[string]bool {
+	result := make(map[string]bool)
+	items, _ := value.([]any)
+	for _, item := range items {
+		plugin, _ := item.(map[string]any)
+		if name, _ := plugin["name"].(string); strings.TrimSpace(name) != "" {
+			result[strings.TrimSpace(name)] = true
+		}
+	}
+	return result
+}
+
+func initStringValues(value any) map[string]bool {
+	result := make(map[string]bool)
+	items, _ := value.([]any)
+	for _, item := range items {
+		if name, _ := item.(string); strings.TrimSpace(name) != "" {
+			result[strings.TrimSpace(name)] = true
+		}
+	}
+	return result
+}
+
 func managedRequiredMCPTools(taskType string) []string {
 	if strings.TrimSpace(taskType) != "seednote" {
 		return nil

@@ -43,6 +43,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 	var lastToolErrorTool string
 	var lastToolError string
 	var turnNum int
+	pluginInitValidated := false
 	toolCalls := make(map[string]trackedToolCall)
 	toolUseSummary := make(map[string]int)
 
@@ -60,6 +61,13 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 
 		for msg := range client.ReceiveMessages(ctx) {
 			switch m := msg.(type) {
+			case *claudecode.SystemMessage:
+				if m.Subtype == "init" {
+					if err := serveragent.ValidateManagedPluginInit(m, r.cfg.TaskType); err != nil {
+						return err
+					}
+					pluginInitValidated = true
+				}
 			case *claudecode.AssistantMessage:
 				turnNum++
 				for _, block := range m.Content {
@@ -94,6 +102,9 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 					}
 				}
 			case *claudecode.ResultMessage:
+				if !pluginInitValidated {
+					return errors.New("managed plugin readiness failed: Claude Code did not emit system/init")
+				}
 				result.Success = !m.IsError
 				result.ResultSubtype = m.Subtype
 				result.LogText = resultText

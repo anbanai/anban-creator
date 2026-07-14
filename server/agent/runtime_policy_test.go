@@ -112,6 +112,32 @@ func TestValidateManagedMCPStatusRejectsDisconnectedServer(t *testing.T) {
 	}
 }
 
+func TestValidateManagedPluginInitRequiresAnbanSeednoteSkill(t *testing.T) {
+	message := &claudecode.SystemMessage{
+		Subtype: "init",
+		Data: map[string]any{
+			"plugins": []any{map[string]any{"name": "anban", "path": "/plugins/anban"}},
+			"skills":  []any{"anban:seednote", "anban:seednote-writing"},
+		},
+	}
+	if err := ValidateManagedPluginInit(message, "seednote"); err != nil {
+		t.Fatalf("ValidateManagedPluginInit: %v", err)
+	}
+	message.Data["skills"] = []any{"anban:seednote-writing"}
+	if err := ValidateManagedPluginInit(message, "seednote"); err == nil || !strings.Contains(err.Error(), "anban:seednote") {
+		t.Fatalf("error = %v, want missing Seednote skill", err)
+	}
+}
+
+func TestValidateManagedPluginInitRequiresAnbanPlugin(t *testing.T) {
+	message := &claudecode.SystemMessage{Subtype: "init", Data: map[string]any{
+		"plugins": []any{map[string]any{"name": "other"}},
+	}}
+	if err := ValidateManagedPluginInit(message, "article"); err == nil || !strings.Contains(err.Error(), "anban") {
+		t.Fatalf("error = %v, want missing plugin", err)
+	}
+}
+
 func TestManagedAgentExecutorsUseRuntimePolicy(t *testing.T) {
 	for _, path := range []string{
 		"executor.go",
