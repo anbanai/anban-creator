@@ -362,6 +362,7 @@ type TokenUsage struct {
 type ExecutionResult struct {
 	Success         bool   `json:"success"`
 	Error           string `json:"error,omitempty"`
+	ResultSubtype   string `json:"result_subtype,omitempty"`
 	WorkDir         string `json:"work_dir,omitempty"`
 	RemoteArtifacts bool   `json:"remote_artifacts,omitempty"`
 	LogText         string `json:"log_text,omitempty"`
@@ -824,10 +825,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			case *claudecode.ResultMessage:
 				resultMsg = m
 				if m.IsError {
-					errMsg := fallbackAgentError("unknown error", lastToolErrorTool, lastToolError)
-					if m.Result != nil {
-						errMsg = *m.Result
-					}
+					errMsg := ResultMessageError(m, lastToolErrorTool, lastToolError)
 					e.logger.Error().
 						Str("task_id", opts.Task.ID).
 						Str("subtype", m.Subtype).
@@ -920,6 +918,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			Model:             agentModel,
 		}
 		if resultMsg != nil {
+			result.ResultSubtype = resultMsg.Subtype
 			result.NumTurns = resultMsg.NumTurns
 			result.SessionID = resultMsg.SessionID
 			result.DurationMs = resultMsg.DurationMs
@@ -949,6 +948,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		Model:             agentModel,
 	}
 	if resultMsg != nil {
+		result.ResultSubtype = resultMsg.Subtype
 		result.NumTurns = resultMsg.NumTurns
 		result.SessionID = resultMsg.SessionID
 		result.DurationMs = resultMsg.DurationMs

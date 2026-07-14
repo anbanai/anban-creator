@@ -88,6 +88,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				}
 			case *claudecode.ResultMessage:
 				result.Success = !m.IsError
+				result.ResultSubtype = m.Subtype
 				result.LogText = resultText
 				result.NumTurns = m.NumTurns
 				result.SessionID = m.SessionID
@@ -98,17 +99,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				result.LastToolErrorTool = lastToolErrorTool
 				result.LastToolError = lastToolError
 				if m.IsError {
-					if m.Result != nil {
-						result.Error = *m.Result
-					} else if lastToolError != "" {
-						if lastToolErrorTool != "" {
-							result.Error = "last tool error from " + lastToolErrorTool + ": " + lastToolError
-						} else {
-							result.Error = "last tool error: " + lastToolError
-						}
-					} else {
-						result.Error = "unknown agent error"
-					}
+					result.Error = serveragent.ResultMessageError(m, lastToolErrorTool, lastToolError)
 					serveragent.PopulateUsageFields(result, m)
 					return errors.New(result.Error)
 				}
