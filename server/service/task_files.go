@@ -145,6 +145,24 @@ func buildTaskStorageKey(userID, taskID, relPath string) string {
 // returned. If the path exists with new content, the storage object and DB row
 // are overwritten so resumed tasks can refresh their deliverables.
 func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	return s.uploadTaskFileFromReader(ctx, nil, taskID, userID, "", relPath, reader, mimeType, fileSize)
+}
+
+// UploadExecutionTaskFileFromReader persists an MCP-produced artifact as part
+// of the current cloud attempt. It remains pending until the durable execution
+// finalizer publishes the complete attempt artifact set.
+func (s *TaskService) UploadExecutionTaskFileFromReader(ctx context.Context, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	task, err := s.ValidateAgentTaskAccess(ctx, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ValidateAgentExecutionAccess(ctx, userID, task.ProjectID, taskID, executionID); err != nil {
+		return nil, err
+	}
+	return s.uploadTaskFileFromReader(ctx, task, taskID, userID, executionID, relPath, reader, mimeType, fileSize)
+}
+
+func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.Task, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
 	if s.store == nil {
 		return nil, fmt.Errorf("no storage provider configured: cannot upload files for task %s", taskID)
 	}
@@ -177,15 +195,23 @@ func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, user
 	contentHash := hex.EncodeToString(h.Sum(nil))
 	reader = io.MultiReader(&buf, reader)
 
-	existing, err := s.repo.TaskFiles().FindExisting(ctx, taskID, cleanRelPath)
-	if err != nil {
-		return nil, fmt.Errorf("check existing task file: %w", err)
-	}
-	if existing != nil && existing.ContentHash == contentHash {
-		return existing, nil
+	if executionID == "" {
+		existing, err := s.repo.TaskFiles().FindExisting(ctx, taskID, cleanRelPath)
+		if err != nil {
+			return nil, fmt.Errorf("check existing task file: %w", err)
+		}
+		if existing != nil && existing.ContentHash == contentHash {
+			return existing, nil
+		}
 	}
 
 	ossKey := buildTaskStorageKey(userID, taskID, cleanRelPath)
+	if executionID != "" {
+		if task == nil {
+			return nil, fmt.Errorf("task is required for execution artifact upload")
+		}
+		ossKey = buildTaskMCPArtifactStoragePrefix(task, executionID) + filepath.ToSlash(cleanRelPath)
+	}
 	uploadResult, err := s.store.Upload(ctx, ossKey, reader, mimeType)
 	if err != nil {
 		return nil, fmt.Errorf("upload file %s: %w", cleanRelPath, err)
@@ -197,6 +223,7 @@ func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, user
 
 	taskFile := &model.TaskFile{
 		TaskID:          taskID,
+		ExecutionID:     executionID,
 		Role:            DetermineTaskFileRole(filename, mimeType),
 		FileName:        filename,
 		MimeType:        mimeType,
@@ -207,7 +234,12 @@ func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, user
 		StorageProvider: s.store.Name(),
 		FilePath:        cleanRelPath,
 	}
-	persisted, err := s.repo.TaskFiles().Upsert(ctx, taskFile)
+	var persisted *model.TaskFile
+	if executionID != "" {
+		persisted, err = s.repo.TaskFiles().UpsertPendingCurrentExecution(ctx, taskID, executionID, taskFile)
+	} else {
+		persisted, err = s.repo.TaskFiles().Upsert(ctx, taskFile)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("persist task file %s: %w", cleanRelPath, err)
 	}

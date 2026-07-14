@@ -178,6 +178,7 @@ type TaskFileRepository interface {
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
 	PublishCurrentExecution(ctx context.Context, taskID, executionID string) error
 	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
+	UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error)
 	ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
 }
 

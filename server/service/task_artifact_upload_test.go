@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -160,6 +161,62 @@ func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 	}
 	if result.STSAccessKeyID != "sts-ak" || result.STSSecurityToken != "sts-token" {
 		t.Fatalf("sts fields = %#v", result)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestPreservesExecutionMCPArtifacts(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	task.Type = model.PlatformSeednote
+	task.HasContentImage = true
+	executionID := uuid.NewString()
+	task.CurrentExecutionID = &executionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes",
+		Status: model.TaskExecutionRunning, Started: true, StartedAt: &now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	generated, err := svc.UploadExecutionTaskFileFromReader(ctx, task.ID, task.UserID, executionID,
+		"output/seednote/title/image_01.png", strings.NewReader("png"), "image/png", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generated.ExecutionID != executionID || generated.State != model.TaskFileStatePending || !strings.Contains(generated.OSSKey, "/mcp/") {
+		t.Fatalf("generated execution artifact = %#v", generated)
+	}
+
+	paths := []string{
+		"output/seednote/title/content.md",
+		"output/seednote/title/image-plan.md",
+		"output/seednote/title/cover.png",
+	}
+	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID}
+	store.stats = make(map[string]*storage.ObjectInfo, len(paths))
+	for _, relPath := range paths {
+		key := buildTaskArtifactStorageKey(task, executionID, relPath)
+		store.stats[key] = &storage.ObjectInfo{Key: key, Size: 3, ContentType: DetectTaskFileMIME(relPath)}
+		manifest.Files = append(manifest.Files, TaskArtifactManifestFile{
+			RelativePath: relPath, ObjectKey: key, ContentType: DetectTaskFileMIME(relPath), Size: 3, SHA256: strings.Repeat("a", 64),
+		})
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 4 {
+		t.Fatalf("pending artifact count = %d, want 4: %#v", len(pending), pending)
+	}
+	if validation := serveragent.ValidateTaskArtifactsFromTaskFiles(task, pending); !validation.Valid {
+		t.Fatalf("merged execution artifacts are invalid: %#v", validation)
 	}
 }
 

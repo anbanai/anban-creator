@@ -765,10 +765,11 @@ func callToolText(res *mcp.CallToolResult) string {
 // is a no-op so tests can exercise both the URL and OSSURL branches of the
 // helper (the real EnrichFilesWithURLs only sets URL when OSSKey != "").
 type fakeTaskFileRegistrar struct {
-	uploadCalls  []fakeUploadCall
-	uploadResult *model.TaskFile
-	uploadErr    error
-	enrichCalled bool
+	uploadCalls          []fakeUploadCall
+	executionUploadCalls []fakeExecutionUploadCall
+	uploadResult         *model.TaskFile
+	uploadErr            error
+	enrichCalled         bool
 }
 
 type fakeUploadCall struct {
@@ -776,9 +777,20 @@ type fakeUploadCall struct {
 	size                          int64
 }
 
+type fakeExecutionUploadCall struct {
+	taskID, userID, executionID, relPath, mime string
+	size                                       int64
+}
+
 func (f *fakeTaskFileRegistrar) UploadTaskFileFromReader(_ context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
 	io.Copy(io.Discard, reader) // drain so the helper's file handle closes cleanly
 	f.uploadCalls = append(f.uploadCalls, fakeUploadCall{taskID, userID, relPath, mimeType, fileSize})
+	return f.uploadResult, f.uploadErr
+}
+
+func (f *fakeTaskFileRegistrar) UploadExecutionTaskFileFromReader(_ context.Context, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	io.Copy(io.Discard, reader)
+	f.executionUploadCalls = append(f.executionUploadCalls, fakeExecutionUploadCall{taskID, userID, executionID, relPath, mimeType, fileSize})
 	return f.uploadResult, f.uploadErr
 }
 
@@ -830,6 +842,27 @@ func TestRegisterGeneratedImageTaskFile_RegistersAndReturnsFetchableURL(t *testi
 	}
 	if !fake.enrichCalled {
 		t.Error("[FAIL] EnrichFilesWithURLs was not called")
+	}
+}
+
+func TestRegisterGeneratedImageTaskFileScopesManagedCallToExecution(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "image_01.png")
+	if err := os.WriteFile(tmp, []byte("fake-png-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeTaskFileRegistrar{uploadResult: &model.TaskFile{URL: "https://cdn.example.com/image_01.png"}}
+	ctx := withMCPExecutionID(context.Background(), "execution-1")
+	result := &service.ImageResult{FilePath: "output/seednote/title/image_01.png", LocalFilePath: tmp, OutputMIME: "image/png"}
+
+	if _, err := registerGeneratedImageTaskFile(ctx, fake, "task-1", "user-1", result); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.uploadCalls) != 0 || len(fake.executionUploadCalls) != 1 {
+		t.Fatalf("legacy calls=%d execution calls=%d", len(fake.uploadCalls), len(fake.executionUploadCalls))
+	}
+	call := fake.executionUploadCalls[0]
+	if call.executionID != "execution-1" || call.relPath != "output/seednote/title/image_01.png" {
+		t.Fatalf("execution upload = %#v", call)
 	}
 }
 
@@ -1068,11 +1101,12 @@ func TestRegisterGeneratedImageTaskFile_UploadErrorPropagates(t *testing.T) {
 }
 
 type fakeRenderedImageRegistrar struct {
-	uploadCalls  []fakeUploadCall
-	uploadResult *model.TaskFile
-	uploadErr    error
-	enrichCalled bool
-	updateCalls  []fakeRenderedImageUpdateCall
+	uploadCalls          []fakeUploadCall
+	executionUploadCalls []fakeExecutionUploadCall
+	uploadResult         *model.TaskFile
+	uploadErr            error
+	enrichCalled         bool
+	updateCalls          []fakeRenderedImageUpdateCall
 }
 
 type fakeRenderedImageUpdateCall struct {
@@ -1082,6 +1116,12 @@ type fakeRenderedImageUpdateCall struct {
 func (f *fakeRenderedImageRegistrar) UploadTaskFileFromReader(_ context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
 	io.Copy(io.Discard, reader)
 	f.uploadCalls = append(f.uploadCalls, fakeUploadCall{taskID, userID, relPath, mimeType, fileSize})
+	return f.uploadResult, f.uploadErr
+}
+
+func (f *fakeRenderedImageRegistrar) UploadExecutionTaskFileFromReader(_ context.Context, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	io.Copy(io.Discard, reader)
+	f.executionUploadCalls = append(f.executionUploadCalls, fakeExecutionUploadCall{taskID, userID, executionID, relPath, mimeType, fileSize})
 	return f.uploadResult, f.uploadErr
 }
 

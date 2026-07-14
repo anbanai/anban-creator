@@ -660,6 +660,21 @@ type taskFileRegistrar interface {
 	EnrichFilesWithURLs(ctx context.Context, files []*model.TaskFile)
 }
 
+type executionTaskFileRegistrar interface {
+	UploadExecutionTaskFileFromReader(ctx context.Context, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error)
+}
+
+func uploadMCPTaskFileFromReader(ctx context.Context, reg taskFileRegistrar, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	if executionID := getExecutionID(ctx); executionID != "" {
+		executionReg, ok := reg.(executionTaskFileRegistrar)
+		if !ok {
+			return nil, fmt.Errorf("task file registrar does not support execution-scoped artifacts")
+		}
+		return executionReg.UploadExecutionTaskFileFromReader(ctx, taskID, userID, executionID, relPath, reader, mimeType, fileSize)
+	}
+	return reg.UploadTaskFileFromReader(ctx, taskID, userID, relPath, reader, mimeType, fileSize)
+}
+
 // registerGeneratedImageTaskFile records the generated image as a task_files
 // row. The bytes are read from result.SavedFilePath(), while result.FilePath is
 // kept as the logical task-relative path (UploadTaskFileFromReader dedupes by
@@ -683,7 +698,7 @@ func registerGeneratedImageTaskFile(ctx context.Context, reg taskFileRegistrar, 
 		mimeType = service.DetectTaskFileMIME(sourcePath)
 	}
 
-	tf, err := reg.UploadTaskFileFromReader(ctx, taskID, userID, result.FilePath, f, mimeType, info.Size())
+	tf, err := uploadMCPTaskFileFromReader(ctx, reg, taskID, userID, result.FilePath, f, mimeType, info.Size())
 	if err != nil {
 		return "", fmt.Errorf("register task file: %w", err)
 	}
@@ -725,8 +740,7 @@ type renderedImageRegistrationResult struct {
 }
 
 type renderedImageRegistrar interface {
-	UploadTaskFileFromReader(ctx context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error)
-	EnrichFilesWithURLs(ctx context.Context, files []*model.TaskFile)
+	taskFileRegistrar
 	UpdateTaskFileMetadata(ctx context.Context, file *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error)
 }
 
@@ -824,7 +838,7 @@ func registerRenderedImageAsset(ctx context.Context, reg renderedImageRegistrar,
 		}
 	}
 
-	tf, err := reg.UploadTaskFileFromReader(ctx, taskID, userID, name, bytes.NewReader(payload.data), payload.mimeType, int64(len(payload.data)))
+	tf, err := uploadMCPTaskFileFromReader(ctx, reg, taskID, userID, name, bytes.NewReader(payload.data), payload.mimeType, int64(len(payload.data)))
 	if err != nil {
 		return nil, fmt.Errorf("register task file: %w", err)
 	}

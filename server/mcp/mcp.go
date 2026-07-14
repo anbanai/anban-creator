@@ -309,7 +309,7 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 			http.Error(w, "execution token is not authorized for the current task execution", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(withMCPExecutionID(r.Context(), executionID)))
 	})
 }
 
@@ -401,8 +401,19 @@ func getUserID(ctx context.Context) string {
 
 type mcpUserIDContextKey struct{}
 
+type mcpExecutionIDContextKey struct{}
+
 func withMCPUserID(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, mcpUserIDContextKey{}, userID)
+}
+
+func withMCPExecutionID(ctx context.Context, executionID string) context.Context {
+	return context.WithValue(ctx, mcpExecutionIDContextKey{}, strings.TrimSpace(executionID))
+}
+
+func getExecutionID(ctx context.Context) string {
+	executionID, _ := ctx.Value(mcpExecutionIDContextKey{}).(string)
+	return strings.TrimSpace(executionID)
 }
 
 // textResult creates a CallToolResult with JSON text content.

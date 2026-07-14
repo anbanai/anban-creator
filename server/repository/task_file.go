@@ -183,6 +183,66 @@ func (r *taskFileRepository) DiscardCurrentExecution(ctx context.Context, taskID
 	})
 }
 
+// UpsertPendingCurrentExecution registers one server-produced artifact without
+// replacing the Job's pending workspace manifest. The task and execution rows
+// are locked in the same order as the other artifact mutations.
+func (r *taskFileRepository) UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error) {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" || file == nil {
+		return nil, fmt.Errorf("task_id, execution_id, and task file are required")
+	}
+	file.TaskID, file.ExecutionID, file.State = taskID, executionID, model.TaskFileStatePending
+	if err := validateTaskFileMutation(file); err != nil {
+		return nil, err
+	}
+	if err := validateTaskFileRelativePath(file.FilePath); err != nil {
+		return nil, err
+	}
+
+	var persisted model.TaskFile
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, execution, err := lockCurrentArtifactExecution(tx, taskID, executionID)
+		if err != nil {
+			return err
+		}
+		if execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending {
+			return ErrTaskFileManifestState
+		}
+		if err := requireRunningArtifactExecution(task, execution); err != nil {
+			return err
+		}
+		if file.ID == "" {
+			file.ID = uuid.NewString()
+		}
+		result := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "task_id"}, {Name: "execution_id"}, {Name: "file_path"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"state", "file_name", "mime_type", "file_size", "oss_key", "oss_url",
+				"storage_provider", "role", "content_hash", "media_id", "wechat_url",
+			}),
+		}).Create(file)
+		if result.Error != nil {
+			return result.Error
+		}
+		if execution.ManifestStatus == "" {
+			statusResult := tx.Model(&model.TaskExecution{}).
+				Where("id = ? AND manifest_status = ''", executionID).
+				Update("manifest_status", model.TaskExecutionManifestPending)
+			if statusResult.Error != nil {
+				return statusResult.Error
+			}
+			if statusResult.RowsAffected != 1 {
+				return ErrTaskFileManifestState
+			}
+		}
+		return tx.Where("task_id = ? AND execution_id = ? AND file_path = ?", taskID, executionID, file.FilePath).
+			First(&persisted).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &persisted, nil
+}
+
 // ReplacePendingCurrentExecution atomically replaces only the current running attempt's unpublished manifest.
 func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {

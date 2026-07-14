@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -236,6 +237,10 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		files = append(files, taskFile)
 	}
 	if executionID != "" {
+		files, err = s.mergeExecutionMCPArtifacts(ctx, task, executionID, files)
+		if err != nil {
+			return fmt.Errorf("%w: preserve server-generated artifacts: %v", ErrTaskArtifactPersistence, err)
+		}
 		if err := s.repo.TaskFiles().ReplacePendingCurrentExecution(ctx, task.ID, executionID, files); err != nil {
 			if errors.Is(err, repository.ErrTaskFileExecutionNotCurrent) || errors.Is(err, repository.ErrTaskFileTaskNotRunning) || errors.Is(err, repository.ErrTaskFileManifestState) {
 				return fmt.Errorf("%w: %v", ErrTaskArtifactExecutionConflict, err)
@@ -252,6 +257,34 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		}
 		return nil
 	})
+}
+
+func buildTaskMCPArtifactStoragePrefix(task *model.Task, executionID string) string {
+	return buildTaskArtifactStoragePrefix(task, executionID) + "mcp/"
+}
+
+func (s *TaskService) mergeExecutionMCPArtifacts(ctx context.Context, task *model.Task, executionID string, manifestFiles []*model.TaskFile) ([]*model.TaskFile, error) {
+	existing, err := s.repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil {
+		return nil, err
+	}
+	prefix := buildTaskMCPArtifactStoragePrefix(task, executionID)
+	manifestPaths := make(map[string]bool, len(manifestFiles))
+	for _, file := range manifestFiles {
+		if file != nil {
+			manifestPaths[file.FilePath] = true
+		}
+	}
+	merged := make([]*model.TaskFile, 0, len(existing)+len(manifestFiles))
+	for _, file := range existing {
+		if file == nil || file.State != model.TaskFileStatePending || !strings.HasPrefix(file.OSSKey, prefix) || manifestPaths[file.FilePath] {
+			continue
+		}
+		merged = append(merged, file)
+	}
+	merged = append(merged, manifestFiles...)
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].FilePath < merged[j].FilePath })
+	return merged, nil
 }
 
 func buildTaskArtifactStoragePrefix(task *model.Task, executionID string) string {
