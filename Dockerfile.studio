@@ -8,7 +8,7 @@
 # reverse-proxies /api + /ws to the backend compose service.
 
 # Stage 1: build the production bundle.
-FROM oven/bun:1.3 AS build
+FROM oven/bun:latest AS build
 WORKDIR /app
 
 # Cache dependency install. --frozen-lockfile makes the build reproducible and
@@ -22,7 +22,7 @@ COPY . .
 RUN bun run build
 
 # Stage 2: serve the static bundle with nginx.
-FROM nginx:1.24-alpine
+FROM nginx:alpine
 
 # Docker/local defaults preserve the existing HTTP backend contract. ACK
 # overrides all three values to reach the TLS-enabled Server Service.

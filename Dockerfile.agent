@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR /src
 
@@ -8,7 +8,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/anban ./agent
 
-FROM ghcr.io/openhands/agent-server:1.23.0-python
+FROM ghcr.io/openhands/agent-server:latest-python
 
 USER root
 
@@ -21,8 +21,8 @@ RUN set -eux; \
     if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then \
       apt-get install -y --no-install-recommends ffmpeg; \
     fi; \
-    getent passwd 1000 >/dev/null || { echo >&2 "pinned OpenHands base must provide UID 1000"; exit 1; }; \
-    getent group 1000 >/dev/null || { echo >&2 "pinned OpenHands base must provide GID 1000"; exit 1; }; \
+    getent passwd 1000 >/dev/null || { echo >&2 "OpenHands base must provide UID 1000"; exit 1; }; \
+    getent group 1000 >/dev/null || { echo >&2 "OpenHands base must provide GID 1000"; exit 1; }; \
     install -d -m 0755 -o 1000 -g 1000 /home/node; \
     rm -rf /var/lib/apt/lists/*
 

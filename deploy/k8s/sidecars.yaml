@@ -105,7 +105,7 @@ spec:
         kubernetes.io/arch: amd64
       containers:
         - name: seednote
-          image: xpzouying/xiaohongshu-mcp
+          image: xpzouying/xiaohongshu-mcp:latest
           ports:
             - containerPort: 18060
           env:

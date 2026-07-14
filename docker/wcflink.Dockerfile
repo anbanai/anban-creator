@@ -6,7 +6,7 @@
 # image is a static binary on alpine.
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.25-alpine AS builder
+FROM golang:alpine AS builder
 ARG WCFLINK_REPO=https://github.com/lich0821/wcfLink.git
 ARG WCFLINK_REF=refs/tags/v0.1.0
 ARG WCFLINK_COMMIT=fb0999b81043c91e8fddb780eb2ecf03f1f8588f
@@ -23,7 +23,7 @@ RUN go mod download
 
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/wcfLink ./cmd/wcfLink
 
-FROM alpine:3.20
+FROM alpine:latest
 RUN apk add --no-cache ca-certificates wget tzdata
 WORKDIR /app
 COPY --from=builder /out/wcfLink /app/wcfLink

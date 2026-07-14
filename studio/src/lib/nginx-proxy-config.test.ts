@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 describe('Studio nginx backend proxy contract', () => {
   it('keeps local HTTP defaults while ACK selects the TLS service', () => {
     const template = readFileSync('default.conf.template', 'utf8')
-    const dockerfile = readFileSync('Dockerfile', 'utf8')
+    const dockerfile = readFileSync('../Dockerfile.studio', 'utf8')
     const deployment = readFileSync('Deployment.yaml', 'utf8')
 
     expect(template).toContain('proxy_pass ${BACKEND_SCHEME}://${BACKEND_HOST}:${BACKEND_PORT};')

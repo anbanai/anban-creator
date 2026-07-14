@@ -181,7 +181,7 @@ func TestAgentDockerfileUsesOpenHandsAgentRuntime(t *testing.T) {
 	path := filepath.Join(root, "Dockerfile.agent")
 	body := readTextFile(t, path)
 	for _, want := range []string{
-		"FROM ghcr.io/openhands/agent-server:1.23.0-python",
+		"FROM ghcr.io/openhands/agent-server:latest-python",
 		"apt-get install -y --no-install-recommends ca-certificates curl git jq fontconfig fonts-noto-cjk python3",
 		"if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then",
 		"apt-get install -y --no-install-recommends ffmpeg",
@@ -208,7 +208,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	path := filepath.Join(root, "Dockerfile.server")
 	body := readTextFile(t, path)
 	for _, want := range []string{
-		"FROM alpine:3.23",
+		"FROM alpine:latest",
 		"apk add --no-cache ca-certificates ffmpeg tzdata",
 		"go build -ldflags=\"-s -w\" -o /anban-creator-server ./server/",
 		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
@@ -243,7 +243,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 func TestOpenHandsAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
 	path := filepath.Join(repositoryRoot(t), "Dockerfile.agent")
 	body := readTextFile(t, path)
-	from := strings.Index(body, "FROM ghcr.io/openhands/agent-server:1.23.0-python")
+	from := strings.Index(body, "FROM ghcr.io/openhands/agent-server:latest-python")
 	if from < 0 {
 		t.Fatalf("%s missing OpenHands runtime stage", path)
 	}
@@ -418,5 +418,53 @@ func TestServerDockerfileIsRootEntrypoint(t *testing.T) {
 		t.Fatalf("server/Dockerfile must not exist; use root Dockerfile.server so CI context is unambiguous")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat server/Dockerfile: %v", err)
+	}
+}
+
+func TestStudioDockerfileIsRootEntrypoint(t *testing.T) {
+	root := repositoryRoot(t)
+	if _, err := os.Stat(filepath.Join(root, "Dockerfile.studio")); err != nil {
+		t.Fatalf("Dockerfile.studio must exist at repository root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "studio", "Dockerfile")); err == nil {
+		t.Fatalf("studio/Dockerfile must not exist; use root Dockerfile.studio so application Dockerfiles share one entrypoint convention")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat studio/Dockerfile: %v", err)
+	}
+}
+
+func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, tc := range []struct {
+		path string
+		want []string
+	}{
+		{
+			path: filepath.Join(root, "Dockerfile.agent"),
+			want: []string{"FROM golang:alpine AS builder", "FROM ghcr.io/openhands/agent-server:latest-python"},
+		},
+		{
+			path: filepath.Join(root, "Dockerfile.server"),
+			want: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
+		},
+		{
+			path: filepath.Join(root, "Dockerfile.studio"),
+			want: []string{"FROM oven/bun:latest AS build", "FROM nginx:alpine"},
+		},
+		{
+			path: filepath.Join(root, "docker", "wcflink.Dockerfile"),
+			want: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
+		},
+		{
+			path: filepath.Join(root, "docker-compose.yml"),
+			want: []string{"image: mysql:latest", "image: redis:alpine", "image: xpzouying/xiaohongshu-mcp:latest", "dockerfile: ../Dockerfile.studio"},
+		},
+	} {
+		body := readTextFile(t, tc.path)
+		for _, want := range tc.want {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing rolling image/build contract %q", tc.path, want)
+			}
+		}
 	}
 }

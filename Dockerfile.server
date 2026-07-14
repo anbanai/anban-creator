@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR /build
 
@@ -8,7 +8,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server ./server/
 
-FROM alpine:3.23
+FROM alpine:latest
 
 RUN set -eux; \
     apk add --no-cache ca-certificates ffmpeg tzdata; \
