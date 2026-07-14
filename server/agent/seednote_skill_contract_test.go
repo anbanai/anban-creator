@@ -462,7 +462,9 @@ func TestSeednoteAgentUsesAgentReachForExternalXHSData(t *testing.T) {
 				"active_backend",
 				"唯一外部数据入口",
 				"backend 顺序和可用性完全由 Agent-Reach 决定",
-				"不生成虚构热门数据",
+				"原创模式不得",
+				"账号画像",
+				"不得生成虚构热门数据",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing Agent-Reach contract term %q", path, want)
@@ -483,7 +485,7 @@ func TestSeednoteAgentUsesAgentReachForExternalXHSData(t *testing.T) {
 	}
 }
 
-func TestAgentReachSkillsRequireHealthyBackendInManagedRuntime(t *testing.T) {
+func TestAgentReachSkillsTreatUnavailableBackendAsOptionalForOriginalResearch(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	canonicalPath := filepath.Join(root, "claudecode", "skills", "agent-reach", "SKILL.md")
 	canonicalData, err := os.ReadFile(canonicalPath)
@@ -497,7 +499,9 @@ func TestAgentReachSkillsRequireHealthyBackendInManagedRuntime(t *testing.T) {
 		"OpenCLI",
 		"xiaohongshu-mcp",
 		"xhs-cli (xiaohongshu-cli)",
-		"runtime packaging fault",
+		"optional enhancement for original Seednote research",
+		"must not create `failure-state.json`",
+		"source content can be resolved",
 		"Do not run `pip`, `pipx`, `npm`, `agent-reach install`",
 		"channel_status",
 	} {
@@ -537,9 +541,9 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 				"agent-reach doctor --json",
 				`status == "ok"`,
 				"active_backend",
-				"channel_status=ok",
+				"channel_status=<ok|warn|off|error|missing>",
 				"xhs-cli (xiaohongshu-cli)",
-				"data_source=agent-reach",
+				"data_source=<agent-reach|task_topic|topic_pool|project_context>",
 				"backend_command_family",
 				"token_source",
 				"missing_fields",
@@ -549,7 +553,10 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 				"不要在 Anban 内自行判断",
 				"实际可用性、安装、登录和 fallback 顺序由 Agent-Reach 决定",
 				"只作为 legacy/server/internal fallback，不进入新 seednote 研究主路径",
-				"CLI 缺失、未登录和无健康 backend 永远不是数据不足",
+				"原创模式不得失败、不得写 `failure-state.json`",
+				"missing_fields=external_hot_data",
+				"无外部数据时不得套用 CES",
+				"这条失败规则不适用于原创模式",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing Agent-Reach research contract term %q", path, want)
@@ -599,6 +606,7 @@ func TestSeednoteSkillsDoNotUseLegacyXHSMCPAsMainPath(t *testing.T) {
 			for _, want := range []string{
 				"seednote-research",
 				"Agent-Reach",
+				"原创模式不得因 Agent-Reach 不可用写 `failure-state.json`",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing seednote Agent-Reach handoff term %q", path, want)
