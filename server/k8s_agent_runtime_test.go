@@ -36,11 +36,27 @@ type deploymentDoc struct {
 			Spec struct {
 				ServiceAccountName string `yaml:"serviceAccountName"`
 				Containers         []struct {
-					Env []struct {
+					Name string `yaml:"name"`
+					Env  []struct {
 						Name  string `yaml:"name"`
 						Value string `yaml:"value"`
 					} `yaml:"env"`
+					VolumeMounts []struct {
+						Name      string `yaml:"name"`
+						MountPath string `yaml:"mountPath"`
+						ReadOnly  bool   `yaml:"readOnly"`
+					} `yaml:"volumeMounts"`
 				} `yaml:"containers"`
+				Volumes []struct {
+					Name   string `yaml:"name"`
+					Secret struct {
+						SecretName string `yaml:"secretName"`
+						Items      []struct {
+							Key  string `yaml:"key"`
+							Path string `yaml:"path"`
+						} `yaml:"items"`
+					} `yaml:"secret"`
+				} `yaml:"volumes"`
 			} `yaml:"spec"`
 		} `yaml:"template"`
 	} `yaml:"spec"`
@@ -140,14 +156,14 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 		"ANBAN_AGENT_NAMESPACE":           "${namespace}",
 		"ANBAN_AGENT_IMAGE":               "${agent_image_repo}",
 		"ANBAN_AGENT_SERVICE_ACCOUNT":     "creator-agent-runner",
-		"ANBAN_AGENT_SERVER_CA_SECRET":    "anban-server-tls",
+		"ANBAN_AGENT_SERVER_CA_SECRET":    "anban-internal-ca",
 		"ANBAN_AGENT_IMAGE_PULL_SECRET":   "${imagePullSecret}",
 		"ANBAN_AGENT_NAS_STORAGE_CLASS":   "nas-sc-creator",
 		"ANBAN_AGENT_PROJECT_MEMORY_SIZE": "1Gi",
 		"ANBAN_AGENT_TASK_WORKSPACE_SIZE": "10Gi",
 		"ANBAN_SERVER_TLS_CERT_FILE":      "/var/run/secrets/anban-server-tls/tls.crt",
 		"ANBAN_SERVER_TLS_KEY_FILE":       "/var/run/secrets/anban-server-tls/tls.key",
-		"SSL_CERT_FILE":                   "/var/run/secrets/anban-server-tls/ca.crt",
+		"SSL_CERT_FILE":                   "/var/run/secrets/anban-internal-ca/ca.crt",
 	} {
 		if got := env[name]; got != want {
 			t.Fatalf("server env %s = %q, want %q", name, got, want)
@@ -158,6 +174,8 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 			t.Fatalf("server deployment must not include obsolete value %q", forbidden)
 		}
 	}
+	assertDeploymentTLSVolume(t, deployment, "anban-server-tls", "/var/run/secrets/anban-server-tls", "anban-server-tls", []string{"tls.crt", "tls.key"})
+	assertDeploymentTLSVolume(t, deployment, "anban-internal-ca", "/var/run/secrets/anban-internal-ca", "anban-internal-ca", []string{"ca.crt"})
 
 	configExample, err := os.ReadFile("config.example.yaml")
 	if err != nil {
@@ -178,7 +196,7 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 			`executor: "${ANBAN_CLAUDE_EXECUTOR:-local}"`,
 			`agent_image: "${ANBAN_AGENT_IMAGE}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
-			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-server-tls}"`,
+			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"`,
 			`execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"`,
 		} {
 			if !strings.Contains(body.text, want) {
@@ -191,7 +209,14 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 			t.Fatalf("obsolete reusable-Pod config key %q remains", forbidden)
 		}
 	}
-	for _, want := range []string{"port: 8443", "targetPort: 8080", "secretName: anban-server-tls", "mountPath: /var/run/secrets/anban-server-tls"} {
+	for _, want := range []string{
+		"port: 8443",
+		"targetPort: 8080",
+		"secretName: anban-server-tls",
+		"mountPath: /var/run/secrets/anban-server-tls",
+		"secretName: anban-internal-ca",
+		"mountPath: /var/run/secrets/anban-internal-ca",
+	} {
 		if !strings.Contains(string(serverDeployment), want) {
 			t.Fatalf("server deployment missing TLS contract %q", want)
 		}
@@ -239,6 +264,41 @@ func deploymentEnvMap(t *testing.T, doc deploymentDoc) map[string]string {
 		env[pair.Name] = pair.Value
 	}
 	return env
+}
+
+func assertDeploymentTLSVolume(t *testing.T, doc deploymentDoc, volumeName, mountPath, secretName string, keys []string) {
+	t.Helper()
+	container := doc.Spec.Template.Spec.Containers[0]
+	foundMount := false
+	for _, mount := range container.VolumeMounts {
+		if mount.Name == volumeName {
+			foundMount = mount.MountPath == mountPath && mount.ReadOnly
+			break
+		}
+	}
+	if !foundMount {
+		t.Fatalf("server volume mount %q must be read-only at %q", volumeName, mountPath)
+	}
+	for _, volume := range doc.Spec.Template.Spec.Volumes {
+		if volume.Name != volumeName {
+			continue
+		}
+		if volume.Secret.SecretName != secretName {
+			t.Fatalf("server volume %q secret = %q, want %q", volumeName, volume.Secret.SecretName, secretName)
+		}
+		gotKeys := make([]string, 0, len(volume.Secret.Items))
+		for _, item := range volume.Secret.Items {
+			if item.Key != item.Path {
+				t.Fatalf("server volume %q item %q path = %q, want same name", volumeName, item.Key, item.Path)
+			}
+			gotKeys = append(gotKeys, item.Key)
+		}
+		if strings.Join(gotKeys, ",") != strings.Join(keys, ",") {
+			t.Fatalf("server volume %q keys = %v, want %v", volumeName, gotKeys, keys)
+		}
+		return
+	}
+	t.Fatalf("server volume %q is missing", volumeName)
 }
 
 func splitKubernetesYAMLDocuments(text string) []string {

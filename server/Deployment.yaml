@@ -45,7 +45,7 @@ spec:
             - name: ANBAN_SERVER_TLS_KEY_FILE
               value: /var/run/secrets/anban-server-tls/tls.key
             - name: SSL_CERT_FILE
-              value: /var/run/secrets/anban-server-tls/ca.crt
+              value: /var/run/secrets/anban-internal-ca/ca.crt
             - name: ANBAN_AGENT_NAMESPACE
               value: ${namespace}
             - name: ANBAN_AGENT_IMAGE
@@ -53,7 +53,7 @@ spec:
             - name: ANBAN_AGENT_SERVICE_ACCOUNT
               value: creator-agent-runner
             - name: ANBAN_AGENT_SERVER_CA_SECRET
-              value: anban-server-tls
+              value: anban-internal-ca
             - name: ANBAN_AGENT_NAS_STORAGE_CLASS
               value: nas-sc-creator
             - name: ANBAN_AGENT_PROJECT_MEMORY_SIZE
@@ -86,6 +86,9 @@ spec:
             - mountPath: /var/run/secrets/anban-server-tls
               name: anban-server-tls
               readOnly: true
+            - mountPath: /var/run/secrets/anban-internal-ca
+              name: anban-internal-ca
+              readOnly: true
       imagePullSecrets:
         - name: ${imagePullSecret}
       volumes:
@@ -97,6 +100,10 @@ spec:
                 path: tls.crt
               - key: tls.key
                 path: tls.key
+        - name: anban-internal-ca
+          secret:
+            secretName: anban-internal-ca
+            items:
               - key: ca.crt
                 path: ca.crt
         - name: ${micro_service_name}-config

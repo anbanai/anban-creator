@@ -65,8 +65,8 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.Namespace != "default" {
 		t.Fatalf("namespace = %q, want default", cfg.Claude.Kubernetes.Namespace)
 	}
-	if cfg.Claude.Kubernetes.ServerCASecret != "anban-server-tls" {
-		t.Fatalf("server CA secret = %q, want anban-server-tls", cfg.Claude.Kubernetes.ServerCASecret)
+	if cfg.Claude.Kubernetes.ServerCASecret != "anban-internal-ca" {
+		t.Fatalf("server CA secret = %q, want anban-internal-ca", cfg.Claude.Kubernetes.ServerCASecret)
 	}
 	if cfg.Claude.Kubernetes.ProjectMemorySize != "1Gi" {
 		t.Fatalf("project memory size = %q, want 1Gi", cfg.Claude.Kubernetes.ProjectMemorySize)

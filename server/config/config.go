@@ -1674,7 +1674,7 @@ func (c *Config) applyDefaults() {
 		c.Claude.Kubernetes.Namespace = "default"
 	}
 	if c.Claude.Kubernetes.ServerCASecret == "" {
-		c.Claude.Kubernetes.ServerCASecret = "anban-server-tls"
+		c.Claude.Kubernetes.ServerCASecret = "anban-internal-ca"
 	}
 	if c.Claude.Kubernetes.ProjectMemorySize == "" {
 		c.Claude.Kubernetes.ProjectMemorySize = "1Gi"
