@@ -291,6 +291,9 @@ func TestClaudeCodeSkillsStayWithinOfficialSizeGuideline(t *testing.T) {
 		if d.IsDir() || filepath.Base(path) != "SKILL.md" {
 			return nil
 		}
+		if isUpstreamHumanizerSkillPath(path) {
+			return nil
+		}
 		lineCount := strings.Count(readRepoFile(t, path), "\n") + 1
 		if lineCount > 500 {
 			t.Fatalf("%s has %d lines; keep SKILL.md under 500 lines and move detail to references/", path, lineCount)
@@ -309,6 +312,9 @@ func TestClaudeCodeSkillsUseOfficialInvocationContract(t *testing.T) {
 			return err
 		}
 		if d.IsDir() || filepath.Base(path) != "SKILL.md" {
+			return nil
+		}
+		if isUpstreamHumanizerSkillPath(path) {
 			return nil
 		}
 		fm := readYAMLFrontmatter(t, path)
@@ -360,6 +366,9 @@ func TestClaudeCodeSkillsHaveProgressiveExamples(t *testing.T) {
 			continue
 		}
 		skill := entry.Name()
+		if skill == "humanizer" {
+			continue
+		}
 		skillPath := filepath.Join(root, "claudecode", "skills", skill, "SKILL.md")
 		if _, err := os.Stat(skillPath); err != nil {
 			t.Fatalf("%s missing SKILL.md: %v", skill, err)

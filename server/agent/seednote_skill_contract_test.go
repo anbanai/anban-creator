@@ -127,7 +127,9 @@ func TestSeednoteVisualWorkflowSelectsAndVerifiesReferencesPerOutput(t *testing.
 				"不得把所有素材传给所有页面",
 				"超过服务端返回的数量上限时按当页相关性排序选择子集",
 				"只传当前输出图相关的原始路径",
-				"每张生成图片都使用动态编写的 `analyze_image` prompt 核验",
+				"每张生成图片都要根据当页职责和参考素材用途动态编写 `verification_prompt`",
+				"verify_with_vision=true",
+				"`analyze_image` 只用于理解输入参考图",
 				"每张输出图最多 3 次生成尝试",
 				"初次生成计入",
 			} {
@@ -297,7 +299,8 @@ func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
 		"model",
 		"output_path",
 		"下一步建议",
-		"可恢复失败态",
+		"failure-state.json",
+		"verify_with_vision=true",
 	}
 
 	for _, path := range paths {
@@ -329,11 +332,11 @@ func TestSeednoteAgentsTreatImageFailuresAsRecoverableFailedState(t *testing.T) 
 		"image-review.md",
 		"provider",
 		"model",
-		"output_path",
-		"error",
-		"下一步建议",
+		"verification.passed=true",
+		"failure-state.json",
 		"停止在图片阶段",
-		"可恢复失败态",
+		"不得提前删除",
+		"archive_workspace",
 	}
 	forbidden := []string{
 		"单张内容图失败时重试一次，仍失败则跳过",
@@ -546,6 +549,7 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 				"不要在 Anban 内自行判断",
 				"实际可用性、安装、登录和 fallback 顺序由 Agent-Reach 决定",
 				"只作为 legacy/server/internal fallback，不进入新 seednote 研究主路径",
+				"CLI 缺失、未登录和无健康 backend 永远不是数据不足",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing Agent-Reach research contract term %q", path, want)

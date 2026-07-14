@@ -83,7 +83,7 @@ type UserPromptParams struct {
 }
 
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
-// The agent definition is loaded via WithAgent() (system prompt), so the user
+// The plugin agent runs as the main Claude Code session via --agent, so the user
 // message only needs to provide the topic or an autonomous execution instruction.
 //
 // The prompt is behavioral only — it never carries the visual / writer / author / theme
@@ -590,28 +590,34 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	})
 	userPrompt = AppendResumeContextToPrompt(userPrompt, workDir)
 
-	// Load agent definition from plugin directory and pass via WithAgent()
-	// (SDK programmatic subagents) instead of --agent CLI flag lookup.
-	agentDef, agentErr := loadAgentDefinition(e.pluginDir, agentName)
-	if agentErr != nil {
+	// Validate the plugin agent definition before starting it as the main
+	// session. A programmatic WithAgent definition would only register a
+	// delegatable subagent and would not load the agent's declared skills.
+	if _, agentErr := loadAgentDefinition(e.pluginDir, agentName); agentErr != nil {
 		return nil, fmt.Errorf("load agent definition %q: %w", agentName, agentErr)
 	}
+	agentFlag := "anban:" + agentName
 
 	// 6. Build SDK options.
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(maxTurns),
 		claudecode.WithCwd(workDir),
-		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
+		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
 		// Load both user and project setting sources so the per-task CLAUDE.md
 		// written into workDir is picked up by Claude Code as project memory.
 		claudecode.WithSettingSources(claudecode.SettingSourceUser, claudecode.SettingSourceProject),
-		claudecode.WithAgent(agentName, *agentDef),
+		claudecode.WithExtraArgs(map[string]*string{"agent": &agentFlag}),
 		WithManagedAgentRuntimePolicy(),
 	}
 
 	if e.pluginDir != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithLocalPlugin(e.pluginDir))
 	}
+	stopHook, err := ManagedTaskStopHook(opts.Task.Type, workDir, e.pluginDir)
+	if err != nil {
+		return nil, err
+	}
+	sdkOpts = append(sdkOpts, stopHook)
 
 	// Only set model if explicitly configured; otherwise let Claude CLI use env vars.
 	if agentModel != "" {
@@ -663,15 +669,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// Note: WithMcpServers replaces the entire map, so this must be the only call.
 	mcpInjected := e.serverBaseURL != ""
 	if mcpInjected {
-		sdkOpts = append(sdkOpts, claudecode.WithMcpServers(map[string]claudecode.McpServerConfig{
-			"anban": &claudecode.McpHTTPServerConfig{
-				Type: claudecode.McpServerTypeHTTP,
-				URL:  e.serverBaseURL + "/mcp",
-				Headers: map[string]string{
-					"Authorization": "Bearer " + mcpAPIKey,
-				},
-			},
-		}))
+		sdkOpts = append(sdkOpts, WithManagedMCPAccess(e.serverBaseURL, mcpAPIKey))
 	}
 
 	// Log full MCP config snapshot for debugging.
@@ -729,7 +727,16 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		}
 	}))
 
-	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
+	err = claudecode.WithClient(ctx, func(client claudecode.Client) error {
+		if mcpInjected {
+			mcpStatus, err := client.GetMcpStatus(ctx)
+			if err != nil {
+				return fmt.Errorf("check managed MCP readiness: %w", err)
+			}
+			if err := ValidateManagedMCPStatus(mcpStatus, opts.Task.Type); err != nil {
+				return err
+			}
+		}
 		if err := client.Query(ctx, userPrompt); err != nil {
 			return fmt.Errorf("send query: %w", err)
 		}

@@ -42,26 +42,32 @@ func TestValidateSeednoteArtifactsFromWorkDir(t *testing.T) {
 		{
 			name:  "cover content mode succeeds with required files",
 			task:  model.Task{Type: model.PlatformSeednote, HasContentImage: true},
-			files: []string{"output/content.md", "output/image-plan.md", "output/cover.png", "output/image_01.png"},
+			files: append(seednoteRequiredArtifactPaths("output"), "output/cover.png", "output/image_01.png"),
 			valid: true,
 		},
 		{
 			name:  "extra tail does not fail cover content mode",
 			task:  model.Task{Type: model.PlatformSeednote, HasContentImage: true},
-			files: []string{"output/content.md", "output/image-plan.md", "output/cover.png", "output/image_01.png", "output/tail.png"},
+			files: append(seednoteRequiredArtifactPaths("output"), "output/cover.png", "output/image_01.png", "output/tail.png"),
 			valid: true,
 		},
 		{
 			name:  "tail mode requires tail",
 			task:  model.Task{Type: model.PlatformSeednote, HasTailImage: true},
-			files: []string{"output/content.md", "output/image-plan.md", "output/cover.png"},
+			files: append(seednoteRequiredArtifactPaths("output"), "output/cover.png"),
 			valid: false,
 		},
 		{
 			name:  "cover only mode does not require content image",
 			task:  model.Task{Type: model.PlatformSeednote},
-			files: []string{"output/content.md", "output/image-plan.md", "output/cover.png"},
+			files: append(seednoteRequiredArtifactPaths("output"), "output/cover.png"),
 			valid: true,
+		},
+		{
+			name:  "structured recoverable failure is not success",
+			task:  model.Task{Type: model.PlatformSeednote},
+			files: []string{"output/failure-state.json"},
+			valid: false,
 		},
 	}
 
@@ -90,16 +96,36 @@ func TestValidateSeednoteArtifactsFromTaskFiles(t *testing.T) {
 	task := &model.Task{Type: model.PlatformSeednote, HasContentImage: true}
 	files := []*model.TaskFile{
 		{FileName: "CLAUDE.md", FilePath: "CLAUDE.md"},
-		{FileName: "content.md", FilePath: "output/seednote/title/content.md"},
-		{FileName: "image-plan.md", FilePath: "output/seednote/title/image-plan.md"},
 		{FileName: "cover.png", FilePath: "output/seednote/title/cover.png"},
 		{FileName: "image_01.png", FilePath: "output/seednote/title/image_01.png"},
+	}
+	for _, path := range seednoteRequiredArtifactPaths("output/seednote/title") {
+		files = append(files, &model.TaskFile{FileName: filepath.Base(path), FilePath: path})
 	}
 
 	got := ValidateTaskArtifactsFromTaskFiles(task, files)
 	if !got.Valid {
 		t.Fatalf("expected task_files artifacts to be valid: %#v", got)
 	}
+}
+
+func seednoteRequiredArtifactPaths(prefix string) []string {
+	names := []string{
+		"content.md",
+		"request-analysis.json",
+		"request-analysis.md",
+		"reference-analysis.json",
+		"reference-analysis.md",
+		"image-plan.md",
+		"image-prompts.md",
+		"image-review.md",
+		"reference-usage-summary.json",
+	}
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		paths = append(paths, filepath.Join(prefix, name))
+	}
+	return paths
 }
 
 func TestDockerRuntimeHomeIsNotMeaningfulOutput(t *testing.T) {

@@ -18,6 +18,9 @@ func TestAllSkillsDeclareImageRatioRule(t *testing.T) {
 			if d.IsDir() || filepath.Base(path) != "SKILL.md" {
 				return nil
 			}
+			if isUpstreamHumanizerSkillPath(path) {
+				return nil
+			}
 			t.Run(plugin+"/"+filepath.Base(filepath.Dir(path)), func(t *testing.T) {
 				raw, err := os.ReadFile(path)
 				if err != nil {

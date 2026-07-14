@@ -1,0 +1,251 @@
+package agent
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	claudecode "github.com/severity1/claude-agent-sdk-go"
+)
+
+func TestManagedTaskStopHookRunsSeednoteGateForMainAgent(t *testing.T) {
+	workspace := t.TempDir()
+	pluginRoot := t.TempDir()
+	hooksDir := filepath.Join(pluginRoot, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(hooksDir, "seednote-quality-gate.sh")
+	body := "#!/bin/sh\ninput=$(cat)\ncase \"$input\" in *'managed_main_session'*) printf '%s' '{\"decision\":\"block\",\"reason\":\"gate-ran\"}' ;; *) exit 2 ;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	option, err := ManagedTaskStopHook("seednote", workspace, pluginRoot)
+	if err != nil {
+		t.Fatalf("ManagedTaskStopHook: %v", err)
+	}
+	opts := claudecode.NewOptions(option)
+	hooks, ok := opts.Hooks.(map[claudecode.HookEvent][]claudecode.HookMatcher)
+	if !ok || len(hooks[claudecode.HookEventStop]) != 1 {
+		t.Fatalf("hooks = %#v", opts.Hooks)
+	}
+	callback := hooks[claudecode.HookEventStop][0].Hooks[0]
+	result, err := callback(context.Background(), &claudecode.StopHookInput{}, nil, claudecode.HookContext{})
+	if err != nil {
+		t.Fatalf("callback: %v", err)
+	}
+	if result.Decision == nil || *result.Decision != "block" || result.Reason == nil || *result.Reason != "gate-ran" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestManagedTaskStopHookSkipsOtherTaskTypes(t *testing.T) {
+	option, err := ManagedTaskStopHook("article", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("ManagedTaskStopHook: %v", err)
+	}
+	if got := claudecode.NewOptions(option).Hooks; got != nil {
+		t.Fatalf("hooks = %#v, want nil", got)
+	}
+}
+
+func TestSeednoteQualityGateAcceptsServerVerificationSchema(t *testing.T) {
+	workspace := t.TempDir()
+	seednoteDir := writeSeednoteGateFixture(t, workspace, true)
+	output := runSeednoteQualityGate(t, workspace)
+	if strings.TrimSpace(output) != "" {
+		t.Fatalf("quality gate blocked a passing verification in %s: %s", seednoteDir, output)
+	}
+}
+
+func TestSeednoteQualityGateBlocksFailedServerVerification(t *testing.T) {
+	workspace := t.TempDir()
+	writeSeednoteGateFixture(t, workspace, false)
+	output := runSeednoteQualityGate(t, workspace)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("parse quality gate output %q: %v", output, err)
+	}
+	if result["decision"] != "block" || !strings.Contains(result["reason"].(string), "passed=False") {
+		t.Fatalf("quality gate output = %#v, want failed verification block", result)
+	}
+}
+
+func TestSeednoteQualityGateBlocksMissingPlannedContentImages(t *testing.T) {
+	workspace := t.TempDir()
+	seednoteDir := writeSeednoteGateFixture(t, workspace, true)
+	if err := os.WriteFile(filepath.Join(seednoteDir, "image-plan.md"), []byte("计划图片数量: 4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runSeednoteQualityGate(t, workspace)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("parse quality gate output %q: %v", output, err)
+	}
+	reason, _ := result["reason"].(string)
+	if result["decision"] != "block" || !strings.Contains(reason, "当前 1 张，应等于 image-plan.md 声明的 4 张") {
+		t.Fatalf("quality gate output = %#v, want missing planned image block", result)
+	}
+}
+
+func TestSeednoteQualityGateAcceptsRecoverableFailure(t *testing.T) {
+	workspace := t.TempDir()
+	failure := map[string]any{
+		"status":      "recoverable_failure",
+		"stage":       "visual_generation",
+		"error_code":  "image_provider_unavailable",
+		"message":     "image provider is unavailable",
+		"resume_from": "generate_images",
+	}
+	data, err := json.Marshal(failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(workspace, "output")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "failure-state.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if output := runSeednoteQualityGate(t, workspace); strings.TrimSpace(output) != "" {
+		t.Fatalf("quality gate blocked a valid recoverable failure: %s", output)
+	}
+}
+
+func TestSeednoteQualityGateBlocksMalformedRecoverableFailure(t *testing.T) {
+	workspace := t.TempDir()
+	outputDir := filepath.Join(workspace, "output")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(outputDir, "failure-state.json"),
+		[]byte(`{"status":"recoverable_failure","stage":"visual_generation"}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runSeednoteQualityGate(t, workspace)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("parse quality gate output %q: %v", output, err)
+	}
+	reason, _ := result["reason"].(string)
+	if result["decision"] != "block" || !strings.Contains(reason, "失败态文件不完整") {
+		t.Fatalf("quality gate output = %#v, want malformed failure-state block", result)
+	}
+}
+
+func TestSeednoteQualityGateBlocksUnarchivedManagedMainSuccess(t *testing.T) {
+	workspace := t.TempDir()
+	archivedDir := writeSeednoteGateFixture(t, workspace, true)
+	outputDir := filepath.Join(workspace, "output")
+	for _, entry := range mustReadDir(t, archivedDir) {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(archivedDir, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(outputDir, entry.Name()), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.RemoveAll(filepath.Join(workspace, "output", "seednote")); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runSeednoteQualityGate(t, workspace)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("parse quality gate output %q: %v", output, err)
+	}
+	reason, _ := result["reason"].(string)
+	if result["decision"] != "block" || !strings.Contains(reason, "尚未完成 archive_workspace") {
+		t.Fatalf("quality gate output = %#v, want unarchived managed-main block", result)
+	}
+}
+
+func TestSeednoteQualityGateStaysMirroredForClaudeAndCodex(t *testing.T) {
+	root := repoRoot(t)
+	claudeHook := readRepoFile(t, filepath.Join(root, "claudecode", "hooks", "seednote-quality-gate.sh"))
+	codexHook := readRepoFile(t, filepath.Join(root, "codex", "hooks", "seednote-quality-gate.sh"))
+	if codexHook != claudeHook {
+		t.Fatal("Claude and Codex seednote quality gates must stay byte-identical")
+	}
+}
+
+func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) string {
+	t.Helper()
+	dir := filepath.Join(workspace, "output", "seednote", "title")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"content.md",
+		"request-analysis.json",
+		"request-analysis.md",
+		"reference-analysis.json",
+		"reference-analysis.md",
+		"image-prompts.md",
+		"image-review.md",
+		"cover.png",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "image-plan.md"), []byte("计划图片数量: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := json.Marshal(map[string]any{
+		"version": "1.0",
+		"outputs": []any{map[string]any{
+			"file_name":    "cover.png",
+			"verification": map[string]any{"passed": passed, "score": "high"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "reference-usage-summary.json"), summary, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func runSeednoteQualityGate(t *testing.T, workspace string) string {
+	t.Helper()
+	script := filepath.Join(repoRoot(t), "claudecode", "hooks", "seednote-quality-gate.sh")
+	cmd := exec.Command("bash", script)
+	cmd.Dir = workspace
+	cmd.Env = append(os.Environ(), "CLAUDE_PROJECT_DIR="+workspace)
+	cmd.Stdin = strings.NewReader(`{"agent_type":"anban:seednote","managed_main_session":true}`)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("run seednote quality gate: %v\nstdout: %s\nstderr: %s", err, output, stderr.String())
+	}
+	return string(output)
+}
+
+func mustReadDir(t *testing.T, path string) []os.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entries
+}

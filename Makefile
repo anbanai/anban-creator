@@ -11,7 +11,7 @@ STUDIO_IMAGE := anban-creator-studio:latest
 SERVER_CONFIG := server/config.yaml
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
-        server-build server-run server-dev server-test git-sync-setup agent-reach-update \
+        server-build server-run server-dev server-test git-sync-setup agent-reach-update humanizer-update \
         agent-build-native plugin-binaries \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
@@ -61,6 +61,11 @@ git-sync-setup:
 # Rebuild the Agent image after committing the updated submodule gitlink.
 agent-reach-update:
 	@scripts/update-agent-reach.sh
+
+# Fast-forward the pinned upstream Humanizer source and mirror its SKILL.md.
+# Review the upstream diff and bump plugin versions before release.
+humanizer-update:
+	@scripts/update-humanizer.sh
 
 # Run all CI checks (format, vet, test, lint)
 ci: fmt vet test lint
@@ -197,6 +202,7 @@ help:
 	@echo "  make lint          - Lint code (requires golangci-lint)"
 	@echo "  make deps          - Download and tidy dependencies"
 	@echo "  make agent-reach-update - Pull Agent-Reach main and update its gitlink"
+	@echo "  make humanizer-update - Pull upstream Humanizer and sync all plugin copies"
 	@echo "  make clean         - Remove build artifacts"
 	@echo "  make distclean     - Remove build artifacts + dependencies"
 	@echo ""

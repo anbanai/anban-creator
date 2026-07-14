@@ -591,6 +591,10 @@ func (s *ImageService) GenerateImage(
 		}
 		result.OutputMIME = outputMIME
 		result.localCleanup = cleanup
+		if err := populateImageResultDimensions(result); err != nil {
+			result.CleanupLocalFile()
+			return nil, fmt.Errorf("read generated image dimensions: %w", err)
+		}
 	}
 
 	// Force WeChat ARTICLE covers to the exact 900×383 (2.35:1) spec. No
@@ -616,6 +620,8 @@ func (s *ImageService) GenerateImage(
 			result.CleanupLocalFile()
 			return nil, fmt.Errorf("cover dimensions %dx%d, expected %dx%d", w, h, image.WeChatCoverWidth, image.WeChatCoverHeight)
 		}
+		result.Width = w
+		result.Height = h
 		s.logger.Info().
 			Str("project_id", projectID).
 			Int("width", w).Int("height", h).
@@ -623,6 +629,19 @@ func (s *ImageService) GenerateImage(
 	}
 
 	return result, nil
+}
+
+func populateImageResultDimensions(result *ImageResult) error {
+	if result == nil || result.SavedFilePath() == "" {
+		return fmt.Errorf("saved image path is required")
+	}
+	w, h, err := image.GetImageDimensions(result.SavedFilePath())
+	if err != nil {
+		return err
+	}
+	result.Width = w
+	result.Height = h
+	return nil
 }
 
 // UploadImage uploads a local image. For WeChat platforms (article), uploads

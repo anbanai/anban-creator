@@ -47,6 +47,13 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 	toolUseSummary := make(map[string]int)
 
 	err = claudecode.WithClient(ctx, func(client claudecode.Client) error {
+		mcpStatus, err := client.GetMcpStatus(ctx)
+		if err != nil {
+			return fmt.Errorf("check managed MCP readiness: %w", err)
+		}
+		if err := serveragent.ValidateManagedMCPStatus(mcpStatus, r.cfg.TaskType); err != nil {
+			return err
+		}
 		if err := client.Query(ctx, r.cfg.UserPrompt()); err != nil {
 			return fmt.Errorf("send query: %w", err)
 		}
@@ -144,7 +151,7 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(r.cfg.MaxTurns),
 		claudecode.WithCwd(r.cfg.Workspace),
-		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
+		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
 		// Load both user and project setting sources so a CLAUDE.md in the
 		// workspace (e.g., written by the desktop shell in the future) is picked up
 		// by Claude Code as project memory.
@@ -159,9 +166,21 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 			_ = r.reporter.ReportProgress(ctx, strings.TrimSpace(line))
 		}),
 	}
-	if pluginRoot := strings.TrimSpace(os.Getenv("CLAUDE_PLUGIN_ROOT")); pluginRoot != "" {
+	if r.cfg.ServerURL != "" && r.cfg.APIKey != "" {
+		sdkOpts = append(sdkOpts, serveragent.WithManagedMCPAccess(r.cfg.ServerURL, r.cfg.APIKey))
+	}
+	if r.cfg.ProjectID != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBAN_DEFAULT_PROJECT", r.cfg.ProjectID))
+	}
+	pluginRoot := strings.TrimSpace(os.Getenv("CLAUDE_PLUGIN_ROOT"))
+	if pluginRoot != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithLocalPlugin(pluginRoot))
 	}
+	stopHook, err := serveragent.ManagedTaskStopHook(r.cfg.TaskType, r.cfg.Workspace, pluginRoot)
+	if err != nil {
+		return nil, err
+	}
+	sdkOpts = append(sdkOpts, stopHook)
 	for _, key := range serveragent.ClaudeRuntimeEnvKeys() {
 		if value, ok := r.cfg.RuntimeEnv[key]; ok {
 			sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))

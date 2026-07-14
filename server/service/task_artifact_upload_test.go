@@ -191,10 +191,9 @@ func TestFinalizeTaskArtifactManifestPreservesExecutionMCPArtifacts(t *testing.T
 		t.Fatalf("generated execution artifact = %#v", generated)
 	}
 
-	paths := []string{
-		"output/seednote/title/content.md",
-		"output/seednote/title/image-plan.md",
-		"output/seednote/title/cover.png",
+	var paths []string
+	for _, name := range seednoteCompletionArtifactNamesForTest(false, false) {
+		paths = append(paths, "output/seednote/title/"+name)
 	}
 	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID}
 	store.stats = make(map[string]*storage.ObjectInfo, len(paths))
@@ -212,8 +211,9 @@ func TestFinalizeTaskArtifactManifestPreservesExecutionMCPArtifacts(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 4 {
-		t.Fatalf("pending artifact count = %d, want 4: %#v", len(pending), pending)
+	wantCount := len(paths) + 1
+	if len(pending) != wantCount {
+		t.Fatalf("pending artifact count = %d, want %d: %#v", len(pending), wantCount, pending)
 	}
 	if validation := serveragent.ValidateTaskArtifactsFromTaskFiles(task, pending); !validation.Valid {
 		t.Fatalf("merged execution artifacts are invalid: %#v", validation)

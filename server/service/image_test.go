@@ -168,6 +168,23 @@ func TestSaveGeneratedImageForOutputFallsBackToTempWhenTaskPathUnavailable(t *te
 	}
 }
 
+func TestPopulateImageResultDimensionsReportsSavedBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "generated.png")
+	if err := os.WriteFile(path, tinyImagePNG(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := &ImageResult{FilePath: path, Size: "1:1"}
+	if err := populateImageResultDimensions(result); err != nil {
+		t.Fatalf("populateImageResultDimensions: %v", err)
+	}
+	if result.Width != 1 || result.Height != 1 {
+		t.Fatalf("actual dimensions = %dx%d, want 1x1", result.Width, result.Height)
+	}
+	if result.Size != "1:1" {
+		t.Fatalf("provider size metadata changed to %q", result.Size)
+	}
+}
+
 func TestDetectTaskFileMIMEUsesImageContentBeforeExtension(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	img.Set(0, 0, color.RGBA{R: 10, G: 20, B: 30, A: 255})

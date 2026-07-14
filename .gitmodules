@@ -22,3 +22,8 @@
 	url = https://github.com/Panniantong/Agent-Reach.git
 	branch = main
 	shallow = true
+[submodule "third_party/Humanizer"]
+	path = third_party/Humanizer
+	url = https://github.com/blader/humanizer.git
+	branch = main
+	shallow = true

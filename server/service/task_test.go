@@ -2285,14 +2285,14 @@ func TestTaskService_HandleExecutionCompletesWithSeednoteDeliverables(t *testing
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		t.Fatalf("mkdir output: %v", err)
 	}
-	for name, data := range map[string][]byte{
-		"content.md":     []byte("# 标题\n\n正文"),
-		"image-plan.md":  []byte("# 图片内容规划"),
-		"cover.png":      []byte("png"),
-		"image_01.png":   []byte("png"),
+	artifacts := map[string][]byte{
 		"compliance.md":  []byte("ok"),
 		"topic-note.txt": []byte("ok"),
-	} {
+	}
+	for _, name := range seednoteCompletionArtifactNamesForTest(true, false) {
+		artifacts[name] = []byte("fixture")
+	}
+	for name, data := range artifacts {
 		if err := os.WriteFile(filepath.Join(outputDir, name), data, 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
