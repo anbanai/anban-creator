@@ -170,7 +170,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const review = await screen.findByText('发布前检查')
-    const parameters = await screen.findByText('项目参数')
+    const parameters = await screen.findByText('任务配置')
     const files = await screen.findByText('生成文件 (1)')
     expect(review.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -264,7 +264,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const rerunButton = await screen.findByRole('button', { name: /克隆任务/ })
+    fireEvent.click(await screen.findByRole('button', { name: '更多任务操作' }))
+    const rerunButton = await screen.findByRole('menuitem', { name: /克隆任务/ })
     fireEvent.click(rerunButton)
 
     await waitFor(() => {
@@ -282,7 +283,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const continueButton = await screen.findByRole('button', { name: /继续执行/ })
+    const continueButton = await screen.findByRole('button', { name: '补充信息并继续' })
     fireEvent.click(continueButton)
 
     const dialogTitle = await screen.findByText('继续执行此任务')
@@ -319,7 +320,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const continueButton = await screen.findByRole('button', { name: /继续执行/ })
+    const continueButton = await screen.findByRole('button', { name: '补充信息并继续' })
     fireEvent.click(continueButton)
 
     const dialogTitle = await screen.findByText('继续执行此任务')
@@ -385,7 +386,8 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findAllByRole('button', { name: /继续执行/ })).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: /克隆任务/ })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: /克隆任务/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '更多任务操作' })).toBeInTheDocument()
     expect(screen.getByText('执行已停止')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /再试一次/ })).not.toBeInTheDocument()
@@ -400,11 +402,13 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findAllByRole('button', { name: /继续执行/ })).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: /克隆任务/ })).toHaveLength(1)
+    expect(await screen.findByRole('button', { name: '补充信息并继续' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /继续执行/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /克隆任务/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '更多任务操作' })).toBeInTheDocument()
     expect(screen.getByText('执行失败')).toBeInTheDocument()
     expect(screen.getByText('模型超时')).toBeInTheDocument()
-    expect(screen.getByText('可在页面顶部继续此任务，或克隆为一个全新任务。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '补充信息并继续' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /返回任务列表/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /检查项目配置/ })).not.toBeInTheDocument()
   })
@@ -418,7 +422,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByText('任务未完成')).toBeInTheDocument()
-    expect(screen.getByText('服务端将任务标记为失败，但没有返回失败详情。')).toBeInTheDocument()
+    expect(screen.getByText('服务端没有返回失败详情，可继续执行并补充说明。')).toBeInTheDocument()
     expect(screen.queryByText('失败原因')).not.toBeInTheDocument()
     expect(screen.queryByText(/工作目录已保留/)).not.toBeInTheDocument()
   })
@@ -482,21 +486,21 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('项目参数')).toBeInTheDocument()
+    expect(await screen.findByText('任务配置')).toBeInTheDocument()
     expect(screen.queryByText('项目快照')).not.toBeInTheDocument()
     expect(screen.getByText('快照项目')).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: '参考图' })).not.toBeInTheDocument()
     expect(screen.queryByText('参考图')).not.toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
-    const parameterCard = screen.getByText('项目参数').closest('[data-slot="card"]') as HTMLElement
-    const parameterContent = within(parameterCard).getByText('视觉风格').closest('[data-slot="card-content"]')
-    const visualStyleBlock = within(parameterCard).getByText('视觉风格').parentElement
-    const imageRatioBlock = within(parameterCard).getByText('图片比例').parentElement
-    const imageModelBlock = within(parameterCard).getByText('图片模型').parentElement
-    expect(visualStyleBlock?.parentElement).toBe(parameterContent)
-    expect(imageRatioBlock?.parentElement?.parentElement).toBe(parameterContent)
-    expect(imageModelBlock?.parentElement?.parentElement).toBe(parameterContent)
+    const parameterDetails = screen.getByText('任务配置').closest('details') as HTMLDetailsElement
+    expect(parameterDetails).toBeTruthy()
+    expect(parameterDetails.open).toBe(false)
+    fireEvent.click(within(parameterDetails).getByText('任务配置'))
+    expect(parameterDetails.open).toBe(true)
+    expect(within(parameterDetails).getByText('视觉风格')).toBeInTheDocument()
+    expect(within(parameterDetails).getByText('图片比例')).toBeInTheDocument()
+    expect(within(parameterDetails).getByText('图片模型')).toBeInTheDocument()
     expect(screen.getByText('安般')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()

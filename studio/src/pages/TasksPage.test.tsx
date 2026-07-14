@@ -161,7 +161,7 @@ describe('TasksPage URL-driven recovery filters', () => {
       expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ status: undefined }))
     })
 
-    fireEvent.click(await screen.findByRole('link', { name: /失败待恢复/ }))
+    fireEvent.click(await screen.findByRole('link', { name: /失败任务/ }))
 
     await waitFor(() => {
       expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }))

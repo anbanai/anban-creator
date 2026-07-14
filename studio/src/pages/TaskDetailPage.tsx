@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Streamdown } from 'streamdown'
-import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban, Upload, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ChevronDown, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban, Upload, X } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -31,6 +31,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
@@ -674,8 +675,8 @@ export default function TaskDetailPage() {
               <BreadcrumbItem>
                 <BreadcrumbLink render={<Link to="/tasks" />}>任务</BreadcrumbLink>
               </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
+              <BreadcrumbSeparator className="hidden sm:list-item" />
+              <BreadcrumbItem className="hidden sm:inline-flex">
                 <BreadcrumbPage>{task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
@@ -715,10 +716,10 @@ export default function TaskDetailPage() {
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-          {task.status === 'completed' && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {task.status === 'completed' && !task.published && (
             <Button
-              variant={task.published ? 'outline' : 'default'}
+              variant="default"
               size="sm"
               loading={togglePublished.isPending}
               disabled={billingLocked}
@@ -728,7 +729,7 @@ export default function TaskDetailPage() {
               }}
             >
               <Eye className="h-4 w-4" />
-              {task.published ? '已发布' : '标记已发布'}
+              标记已发布
             </Button>
           )}
           {canCancel && (
@@ -741,32 +742,79 @@ export default function TaskDetailPage() {
               取消任务
             </Button>
           )}
-          {!canCancel && (
-            <Button
-              variant="ghost"
-              size="sm"
-              loading={deleteMutation.isPending}
-              onClick={() => setShowDeleteDialog(true)}
-              className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
-            >
-              <Trash2 className="h-4 w-4" />
-              删除
+          {canClone && task.status !== 'failed' && (
+            <Button variant={task.status === 'completed' && !task.published ? 'outline' : 'default'} size="sm" onClick={() => setShowResumeDialog(true)}>
+              <Send className="h-4 w-4" />
+              继续执行
             </Button>
           )}
-          {canClone && (
-            <>
-              <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
-                <Send className="h-4 w-4" />
-                继续执行
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleClone()}>
-                <RefreshCw className="h-4 w-4" />
-                克隆任务
-              </Button>
-            </>
+          {!canCancel && (
+            <DropdownMenu>
+              <DropdownMenuTrigger aria-label="更多任务操作" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                <MoreHorizontal className="h-4 w-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                {canClone && (
+                  <DropdownMenuItem onClick={() => void handleClone()}>
+                    <RefreshCw className="h-4 w-4" />
+                    克隆任务
+                  </DropdownMenuItem>
+                )}
+                {canClone && <DropdownMenuSeparator />}
+                <DropdownMenuItem variant="destructive" onClick={() => setShowDeleteDialog(true)}>
+                  <Trash2 className="h-4 w-4" />
+                  删除任务
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>
+
+      {task.status !== 'completed' && (
+        <section className={`rounded-lg border p-4 ${task.status === 'failed' ? 'border-destructive/35 bg-destructive/5' : 'border-border bg-card'}`}>
+          {task.status === 'failed' ? (
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-foreground">{failureMessage ? '执行失败' : '任务未完成'}</h2>
+                  <p className="mt-1 break-words text-sm text-muted-foreground">
+                    {failureMessage || '服务端没有返回失败详情，可继续执行并补充说明。'}
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" className="shrink-0" onClick={() => setShowResumeDialog(true)}>
+                <Send className="h-4 w-4" />
+                补充信息并继续
+              </Button>
+            </div>
+          ) : task.status === 'cancelled' ? (
+            <div className="flex items-start gap-3">
+              <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">执行已停止</h2>
+                <p className="mt-1 text-sm text-muted-foreground">可继续此任务，已有上下文和文件会被保留。</p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  {isRunning && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
+                  <h2 className="truncate text-sm font-semibold text-foreground">{progressTitle}</h2>
+                </div>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-primary">{progressValue}%</span>
+              </div>
+              <Progress value={progressValue} className="w-full" />
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                {progressStage && <span>{progressStageLabel[progressStage] ?? progressStage}</span>}
+                {progressDescription && <span>{progressDescription}</span>}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {billingLocked && (
         <Card className="border-amber-500/40 bg-amber-500/10">
@@ -861,35 +909,33 @@ export default function TaskDetailPage() {
         <WorkflowReviewSummary workflow={task.workflow_status} />
       )}
 
-      {/* Details (stats) */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card size="sm" className="bg-card/70">
-          <CardContent>
+      <details className="group rounded-lg border border-border bg-card">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+          <span>任务信息</span>
+          <span className="flex min-w-0 items-center gap-2 text-xs font-normal text-muted-foreground">
+            <span className="hidden truncate sm:inline">{formatFullDateTimeCN(task.created_at)} · {task.plan_id ? '计划任务' : '手动创建'}</span>
+            <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
+          </span>
+        </summary>
+        <div className="grid gap-4 border-t border-border px-4 py-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div>
             <p className="text-xs text-muted-foreground">创建时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.created_at)}</p>
-          </CardContent>
-        </Card>
-        <Card size="sm" className="bg-card/70">
-          <CardContent>
+          </div>
+          <div>
             <p className="text-xs text-muted-foreground">开始时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.started_at)}</p>
-          </CardContent>
-        </Card>
-        <Card size="sm" className="bg-card/70">
-          <CardContent>
+          </div>
+          <div>
             <p className="text-xs text-muted-foreground">完成时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.completed_at)}</p>
-          </CardContent>
-        </Card>
-        <Card size="sm" className="bg-card/70">
-          <CardContent>
+          </div>
+          <div>
             <p className="text-xs text-muted-foreground">来源</p>
             <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
-          </CardContent>
-        </Card>
-        {showCreditDetails && (
-          <Card size="sm" className="bg-card/70">
-            <CardContent className="flex items-center justify-between gap-3">
+          </div>
+          {showCreditDetails && (
+            <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs text-muted-foreground">积分消耗</p>
                 <p className="mt-1 text-sm font-medium text-foreground">{netConsumedCredits.toLocaleString()}</p>
@@ -897,10 +943,10 @@ export default function TaskDetailPage() {
               <Button size="sm" variant="ghost" onClick={() => setShowCreditDialog(true)}>
                 明细
               </Button>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      </details>
 
       {showCreditDetails && (
         <Dialog open={showCreditDialog} onOpenChange={setShowCreditDialog}>
@@ -978,19 +1024,20 @@ export default function TaskDetailPage() {
       )}
 
       {showProjectParameters && (
-        <Card size="sm" className="border-border/70">
-          <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <details className="group rounded-lg border border-border bg-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
             <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">项目参数</p>
-              <h2 className="mt-1 truncate text-base font-semibold text-foreground">
-                {projectParameterName}
-              </h2>
+              <span className="text-sm font-medium text-foreground">任务配置</span>
+              <span className="ml-2 text-xs text-muted-foreground">{projectParameterName}</span>
             </div>
-            <Badge variant="outline" className="w-fit">
-              {contentTypeLabel[snapshot?.platform || project?.platform || task.type] || snapshot?.platform || project?.platform || task.type}
-            </Badge>
-          </div>
-          <CardContent className="space-y-4">
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge variant="outline" className="hidden sm:inline-flex">
+                {contentTypeLabel[snapshot?.platform || project?.platform || task.type] || snapshot?.platform || project?.platform || task.type}
+              </Badge>
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+            </div>
+          </summary>
+          <div className="space-y-4 border-t border-border px-4 py-4">
             <div className="min-w-0">
               <p className="text-xs text-muted-foreground">视觉风格</p>
               <p className="mt-1 rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
@@ -1063,8 +1110,8 @@ export default function TaskDetailPage() {
                 </div>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </details>
       )}
 
       {showVideoUserInput && (
@@ -1202,74 +1249,6 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {task.status !== 'completed' && (
-        <Card>
-          <CardContent>
-            {task.status === 'failed' ? (
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">
-                      {failureMessage ? '执行失败' : '任务未完成'}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {failureMessage
-                        ? '任务已停止，可根据失败原因补充信息后继续。'
-                        : '服务端将任务标记为失败，但没有返回失败详情。'}
-                    </p>
-                  </div>
-                </div>
-                {failureMessage && (
-                  <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
-                    <p className="text-xs font-medium text-destructive">失败原因</p>
-                    <p className="mt-1 text-sm text-foreground">{failureMessage}</p>
-                  </div>
-                )}
-                <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                  可在页面顶部继续此任务，或克隆为一个全新任务。
-                </p>
-              </div>
-            ) : task.status === 'cancelled' ? (
-              <div className="flex items-start gap-3">
-                <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">执行已停止</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    当前任务没有继续运行。可在页面顶部继续此任务，或克隆为一个全新任务。
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  {progressStage ? (
-                    <span className="text-xs text-muted-foreground">
-                      阶段：{progressStageLabel[progressStage] ?? progressStage}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground/60">执行中</span>
-                  )}
-                  <span className="shrink-0 text-sm font-semibold text-primary tabular-nums">
-                    {progressValue}%
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {isRunning && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
-                  <span className="min-w-0 truncate text-base font-semibold text-foreground">
-                    {progressTitle}
-                  </span>
-                </div>
-                <Progress value={progressValue} className="w-full" />
-                {progressDescription && (
-                  <p className="text-xs text-muted-foreground">{progressDescription}</p>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       <ErrorBoundary
         key={`reference-usage-${task.id}`}
         fallback={(
@@ -1368,10 +1347,13 @@ export default function TaskDetailPage() {
 
       {/* Live Output / SSE Logs */}
       {showLogs && (
-        <Card>
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold text-foreground">执行日志</h2>
-            <div className="flex items-center gap-2">
+        <details className="group rounded-lg border border-border bg-card" open={task.status === 'running'}>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+            <span>执行日志 <span className="ml-1 text-xs font-normal text-muted-foreground">{displayLogs.length} 条</span></span>
+            <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="border-t border-border">
+            <div className="flex items-center justify-end gap-2 px-4 py-2">
               <Button
                 variant="ghost"
                 size="xs"
@@ -1392,7 +1374,6 @@ export default function TaskDetailPage() {
                 复制
               </Button>
             </div>
-          </div>
           <div ref={logContainerRef} className="max-h-96 overflow-y-auto bg-background/50 px-4 py-3">
             {sseError && (
               <div className="mb-2 flex items-center gap-2">
@@ -1419,7 +1400,8 @@ export default function TaskDetailPage() {
               </Streamdown>
             )}
           </div>
-        </Card>
+          </div>
+        </details>
       )}
 
       {/* Result output for completed tasks */}

@@ -1,7 +1,7 @@
 import type { CreditPricing } from '@/types/credits'
 import type { Project, ProjectStats, Task, TaskType } from '@/types'
 import { projectsReturnHref } from '@/lib/command-center'
-import { contentTypeLabel, platformDefaultRatio } from '@/lib/labels'
+import { platformDefaultRatio } from '@/lib/labels'
 import { taskCostFor } from '@/lib/pricing'
 import { isVideoCreator, isVideoPlatform } from '@/lib/video-platforms'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
@@ -172,7 +172,7 @@ export function taskActionSignal(task: Task): TaskActionSignal {
   if (task.status === 'failed') {
     const failureMessage = taskFailureMessage(task)
     return failureMessage
-      ? { label: '查看失败原因', hint: failureMessage, tone: 'risk' }
+      ? { label: '查看失败原因', hint: '进入详情后可继续执行或克隆', tone: 'risk' }
       : { label: '查看任务状态', hint: '未返回失败详情', tone: 'risk' }
   }
   if (task.publish_approval_state === 'pending') {
@@ -193,7 +193,7 @@ export function taskActionSignal(task: Task): TaskActionSignal {
       tone: 'success',
     }
   }
-  return { label: contentTypeLabel[task.type] || '查看任务', hint: '进入详情', tone: 'neutral' }
+  return { label: '查看详情', hint: '进入任务详情', tone: 'neutral' }
 }
 
 export interface SettingsReadinessListItem {

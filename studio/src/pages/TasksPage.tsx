@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus, Ban, RotateCcw, Trash2, Send, Settings, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus, Ban, RotateCcw, Trash2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -478,12 +478,10 @@ export default function TasksPage() {
     },
   }
 
-  const runningCount = tasks.filter((t) => t.status === 'running').length
   const queueStats = useMemo(() => ({
     active: tasks.filter((t) => t.status === 'running' || t.status === 'pending').length,
     failed: tasks.filter((t) => t.status === 'failed').length,
     approval: tasks.filter((t) => t.publish_approval_state === 'pending').length,
-    completed: tasks.filter((t) => t.status === 'completed').length,
   }), [tasks])
 
   const costPreview = taskCreationCostPreview({
@@ -510,9 +508,9 @@ export default function TasksPage() {
       <PageHeader
         title="任务"
         description={
-          runningCount > 0
-            ? <>跟踪和管理你的内容任务。<span className="ml-1 text-primary">({runningCount} 运行中)</span></>
-            : '跟踪和管理你的内容任务。'
+          queueStats.active > 0 || queueStats.failed > 0 || queueStats.approval > 0
+            ? <>{queueStats.active > 0 ? `${queueStats.active} 个执行中` : '暂无执行中任务'}{queueStats.failed > 0 ? ` · ${queueStats.failed} 个失败待处理` : ''}{queueStats.approval > 0 ? ` · ${queueStats.approval} 个待发布` : ''}</>
+            : '查看进度、产物与发布状态。'
         }
       >
         <Button onClick={openCreate}>
@@ -521,49 +519,22 @@ export default function TasksPage() {
         </Button>
       </PageHeader>
 
-      <section className="rounded-lg border border-border bg-card p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">恢复工作台</h2>
-            <p className="mt-1 text-sm text-muted-foreground">把运行、失败、待发布和最近完成的任务先排成队列。</p>
-          </div>
-          <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/settings" />}>
-            <Settings className="h-4 w-4" />
-            检查设置
-          </Button>
+      {(queueStats.failed > 0 || queueStats.approval > 0) && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-border py-3 text-sm">
+          <span className="font-medium text-foreground">需要处理</span>
+          {queueStats.failed > 0 && (
+            <Link to="/tasks?status=failed" className="inline-flex items-center gap-1.5 text-destructive hover:underline">
+              <AlertTriangle className="h-4 w-4" />
+              {queueStats.failed} 个失败任务
+            </Link>
+          )}
+          {queueStats.approval > 0 && (
+            <Link to="/tasks?status=completed" className="text-primary hover:underline">
+              {queueStats.approval} 个待发布确认
+            </Link>
+          )}
         </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <TaskQueueLink
-            to="/tasks?status=running"
-            icon={Clock3}
-            label="运行队列"
-            value={queueStats.active}
-            description="查看正在推进或等待执行的任务"
-          />
-          <TaskQueueLink
-            to="/tasks?status=failed"
-            icon={AlertTriangle}
-            label="失败待恢复"
-            value={queueStats.failed}
-            description="进入详情查看失败原因，重试或克隆"
-            urgent={queueStats.failed > 0}
-          />
-          <TaskQueueLink
-            to="/tasks?status=completed"
-            icon={Send}
-            label="待发布确认"
-            value={queueStats.approval}
-            description="审核后放行到公众号草稿箱"
-          />
-          <TaskQueueLink
-            to="/tasks?status=completed"
-            icon={CheckCircle2}
-            label="最近完成"
-            value={queueStats.completed}
-            description="下载、发布标记或复用配置"
-          />
-        </div>
-      </section>
+      )}
 
       {/* Filters row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -653,67 +624,68 @@ export default function TasksPage() {
         />
       ) : (
         <>
-        <div className="space-y-2">
-          <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <Button variant="secondary" size="sm" onClick={toggleSelectCompletedOnPage} disabled={completedTasksOnPage.length === 0}>
-                {allCompletedSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                {allCompletedSelected ? '取消全选已完成' : '全选已完成'}
-              </Button>
-              <span className="text-muted-foreground">
-                已选 {selectedTaskIds.length} 个，{selectedCompletedTasks.length} 个可下载
-              </span>
-              {selectedTaskIds.length > selectedCompletedTasks.length && (
-                <span className="text-xs text-muted-foreground">仅打包已完成任务</span>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {selectedTaskIds.length > 0 && (
+        <div className="space-y-3">
+          {selectedTaskIds.length > 0 && (
+            <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-lg border border-primary/30 bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Button variant="secondary" size="sm" onClick={toggleSelectCompletedOnPage} disabled={completedTasksOnPage.length === 0}>
+                  {allCompletedSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                  {allCompletedSelected ? '取消全选已完成' : '全选已完成'}
+                </Button>
+                <span className="text-muted-foreground">
+                  已选 {selectedTaskIds.length} 个，{selectedCompletedTasks.length} 个可下载
+                </span>
+                {selectedTaskIds.length > selectedCompletedTasks.length && (
+                  <span className="text-xs text-muted-foreground">仅打包已完成任务</span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setSelectedTaskIds([])} disabled={bulkAnyPending}>
                   清空选择
                 </Button>
-              )}
-              {/* 批量操作：每个按钮只对它能作用的子集生效（计数即实际提交数），
-                  点击进入二次确认。cancel/clone=outline，delete=destructive 以示不可逆。 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkAction('cancel')}
-                disabled={selectedCancellable.length === 0 || bulkAnyPending}
-              >
-                <Ban className="h-4 w-4" />
-                取消{selectedCancellable.length > 0 ? ` (${selectedCancellable.length})` : ''}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkAction('clone')}
-                disabled={selectedCloneable.length === 0 || bulkAnyPending}
-              >
-                <RotateCcw className="h-4 w-4" />
-                克隆{selectedCloneable.length > 0 ? ` (${selectedCloneable.length})` : ''}
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setBulkAction('delete')}
-                disabled={selectedDeletable.length === 0 || bulkAnyPending}
-              >
-                <Trash2 className="h-4 w-4" />
-                删除{selectedDeletable.length > 0 ? ` (${selectedDeletable.length})` : ''}
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleBulkDownload}
-                loading={bulkDownloadMutation.isPending}
-                disabled={selectedCompletedTasks.length === 0 || bulkAnyPending}
-              >
-                <Download className="h-4 w-4" />
-                下载选中文件
-              </Button>
+                {/* 批量操作：每个按钮只对它能作用的子集生效（计数即实际提交数），
+                    点击进入二次确认。cancel/clone=outline，delete=destructive 以示不可逆。 */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkAction('cancel')}
+                  disabled={selectedCancellable.length === 0 || bulkAnyPending}
+                >
+                  <Ban className="h-4 w-4" />
+                  取消{selectedCancellable.length > 0 ? ` (${selectedCancellable.length})` : ''}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkAction('clone')}
+                  disabled={selectedCloneable.length === 0 || bulkAnyPending}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  克隆{selectedCloneable.length > 0 ? ` (${selectedCloneable.length})` : ''}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setBulkAction('delete')}
+                  disabled={selectedDeletable.length === 0 || bulkAnyPending}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  删除{selectedDeletable.length > 0 ? ` (${selectedDeletable.length})` : ''}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleBulkDownload}
+                  loading={bulkDownloadMutation.isPending}
+                  disabled={selectedCompletedTasks.length === 0 || bulkAnyPending}
+                >
+                  <Download className="h-4 w-4" />
+                  下载选中文件
+                </Button>
+              </div>
             </div>
-          </div>
-          {filteredTasks.map((task) => {
+          )}
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            {filteredTasks.map((task) => {
             const project = projectMap[task.project_id]
             const borderColor = platformBorderColor[task.type] || ''
             const hoverBorderColor = platformHoverBorderColor[task.type] || ''
@@ -721,8 +693,8 @@ export default function TasksPage() {
             const actionSignal = taskActionSignal(task)
 
             return (
-              <Link key={task.id} to={`/tasks/${task.id}`} className="block">
-                <div className={`rounded-lg border border-border bg-card p-4 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-sm active:scale-[0.99]`}>
+              <Link key={task.id} to={`/tasks/${task.id}`} className="block border-b border-border last:border-b-0">
+                <div className={`border-l-2 p-4 ${borderColor} ${hoverBorderColor} transition-colors hover:bg-muted/35`}>
                   <div className="flex items-start gap-3">
                     <button
                       type="button"
@@ -739,19 +711,15 @@ export default function TasksPage() {
                     >
                       {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
-                    <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={task.type} />
+                    <span className="hidden sm:block">
+                      <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={task.type} />
+                    </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
                         <div className="flex shrink-0 items-center gap-1.5">
                           <Badge variant={statusBadgeVariant(task.status)}>
                             {taskStatusLabel[task.status] || task.status}
-                          </Badge>
-                          <Badge
-                            variant={actionSignal.tone === 'risk' ? 'destructive' : actionSignal.tone === 'success' ? 'secondary' : 'outline'}
-                            className="text-[10px]"
-                          >
-                            {actionSignal.label}
                           </Badge>
                         </div>
                       </div>
@@ -762,7 +730,8 @@ export default function TasksPage() {
                         <Badge variant="outline" className="text-[10px]">
                           {contentTypeLabel[task.type] || task.type}
                         </Badge>
-                        <span>{actionSignal.hint}</span>
+                        <span className={actionSignal.tone === 'risk' ? 'text-destructive' : 'text-muted-foreground'}>{actionSignal.label}</span>
+                        {actionSignal.tone !== 'risk' && <span>{actionSignal.hint}</span>}
                         {(task.execution_target === 'local' || task.execution_target === 'local_claimed') && (
                           <span>本地{task.execution_target === 'local' ? '待认领' : '运行中'}</span>
                         )}
@@ -810,7 +779,8 @@ export default function TasksPage() {
                 </div>
               </Link>
             )
-          })}
+            })}
+          </div>
         </div>
 
         {totalPages > 1 && (
@@ -1417,44 +1387,5 @@ export default function TasksPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-function TaskQueueLink({
-  to,
-  icon: Icon,
-  label,
-  value,
-  description,
-  urgent = false,
-}: {
-  to: string
-  icon: LucideIcon
-  label: string
-  value: number
-  description: string
-  urgent?: boolean
-}) {
-  return (
-    <Link
-      to={to}
-      className={`group flex items-start justify-between gap-3 rounded-lg border p-3 transition-colors ${
-        urgent
-          ? 'border-destructive/30 bg-destructive/5 hover:bg-destructive/10'
-          : 'border-border bg-background hover:border-primary/30 hover:bg-accent'
-      }`}
-    >
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <Icon className={`h-4 w-4 ${urgent ? 'text-destructive' : 'text-muted-foreground'}`} />
-          <span className="text-sm font-medium text-foreground">{label}</span>
-        </div>
-        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{description}</p>
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <span className="text-xl font-semibold tabular-nums text-foreground">{value}</span>
-        <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
-      </div>
-    </Link>
   )
 }
