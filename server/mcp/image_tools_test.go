@@ -126,8 +126,10 @@ func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {
 	if !ok {
 		t.Fatalf("schema required missing or wrong type: %#v", schema["required"])
 	}
-	if !containsAnyString(required, "task_id") {
-		t.Fatalf("generate_image schema must require task_id, got %#v", required)
+	for _, name := range []string{"task_id", "output_path"} {
+		if !containsAnyString(required, name) {
+			t.Fatalf("generate_image schema must require %s, got %#v", name, required)
+		}
 	}
 }
 
@@ -190,6 +192,7 @@ func TestGenerateImageResolvesModelOnce(t *testing.T) {
 			"project_id": %q,
 			"task_id": %q,
 			"prompt": "generate a cover",
+			"output_path": "output/cover.png",
 			"image_type": "cover",
 			"ref_image_paths": [%q, %q]
 		}`, projectID, taskID, ref1, ref2))},
@@ -278,9 +281,10 @@ func TestGenerateImagePreservesGeneratedTaskFileWhenDynamicBillingFails(t *testi
 	}
 
 	args, err := json.Marshal(map[string]any{
-		"project_id": projectID,
-		"task_id":    taskID,
-		"prompt":     "generate",
+		"project_id":  projectID,
+		"task_id":     taskID,
+		"prompt":      "generate",
+		"output_path": "output/generated.png",
 	})
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
@@ -336,6 +340,7 @@ func TestGenerateImageUsesMultiReferenceArrayAsAuthoritativeInput(t *testing.T) 
 		"project_id":      projectID,
 		"task_id":         taskID,
 		"prompt":          "generate",
+		"output_path":     "output/generated.png",
 		"ref_image_path":  legacyRef,
 		"ref_image_paths": []string{arrayRef1, arrayRef2},
 	})
@@ -400,6 +405,7 @@ func TestGenerateImageValidatesVisionPreconditionsBeforeBillingOrGeneration(t *t
 				"project_id":          projectID,
 				"task_id":             taskID,
 				"prompt":              "generate",
+				"output_path":         "output/generated.png",
 				"verify_with_vision":  true,
 				"verification_prompt": tt.verificationPrompt,
 			})
@@ -456,6 +462,7 @@ func TestGenerateImageReturnsActualReferenceLimit(t *testing.T) {
 		"project_id":      projectID,
 		"task_id":         taskID,
 		"prompt":          "generate",
+		"output_path":     "output/generated.png",
 		"ref_image_paths": refs,
 	})
 	if err != nil {
@@ -1066,6 +1073,35 @@ func TestRegisterGeneratedImageTaskFile_FallsBackToOSSURL(t *testing.T) {
 	}
 	if url != "https://oss.example.com/u/t/output/image_01.png" {
 		t.Errorf("[FAIL] url = %q, want OSSURL fallback when URL unset", url)
+	}
+}
+
+func TestRegisterGeneratedImageTaskFile_RejectsMissingFetchableURL(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "image_01.png")
+	if err := os.WriteFile(tmp, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	fake := &fakeTaskFileRegistrar{uploadResult: &model.TaskFile{}}
+	res := &service.ImageResult{FilePath: tmp, OutputMIME: "image/png"}
+
+	_, err := registerGeneratedImageTaskFile(context.Background(), fake, "task-1", "user-1", res)
+	if err == nil || !strings.Contains(err.Error(), "no fetchable URL") {
+		t.Fatalf("error = %v, want missing fetchable URL", err)
+	}
+}
+
+func TestSanitizeTaskImageDownloadURLRemovesInlineBase64(t *testing.T) {
+	result := &service.ImageResult{DownloadURL: "data:image/png;base64," + strings.Repeat("A", 2*1024*1024)}
+	sanitizeTaskImageDownloadURL(result)
+	if result.DownloadURL != "" {
+		t.Fatalf("DownloadURL retained %d inline bytes", len(result.DownloadURL))
+	}
+
+	httpsURL := "https://cdn.example.com/image.png"
+	result.DownloadURL = httpsURL
+	sanitizeTaskImageDownloadURL(result)
+	if result.DownloadURL != httpsURL {
+		t.Fatalf("DownloadURL = %q, want %q", result.DownloadURL, httpsURL)
 	}
 }
 

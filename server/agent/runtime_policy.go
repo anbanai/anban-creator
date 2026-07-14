@@ -15,6 +15,7 @@ const ManagedMCPServerName = "anban"
 const (
 	managedMCPReadyTimeout      = 30 * time.Second
 	managedMCPReadyPollInterval = 250 * time.Millisecond
+	managedAgentMaxBufferSize   = 16 * 1024 * 1024
 )
 
 type managedMCPStatusGetter interface {
@@ -52,6 +53,7 @@ func ManagedAgentAllowedTools() []string {
 
 func WithManagedAgentRuntimePolicy() claudecode.Option {
 	return func(opts *claudecode.Options) {
+		claudecode.WithMaxBufferSize(managedAgentMaxBufferSize)(opts)
 		claudecode.WithAllowedTools(ManagedAgentAllowedTools()...)(opts)
 		claudecode.WithDisallowedTools(ManagedAgentDisallowedTools()...)(opts)
 		// The current Go SDK does not expose Claude Code's dontAsk mode. Allowed

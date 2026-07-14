@@ -32,6 +32,13 @@ func TestManagedAgentRuntimePolicySetsSDKDisallowedTools(t *testing.T) {
 	}
 }
 
+func TestManagedAgentRuntimePolicyAllowsLargeStructuredMessages(t *testing.T) {
+	opts := claudecode.NewOptions(WithManagedAgentRuntimePolicy())
+	if opts.MaxBufferSize == nil || *opts.MaxBufferSize != managedAgentMaxBufferSize {
+		t.Fatalf("MaxBufferSize = %v, want %d", opts.MaxBufferSize, managedAgentMaxBufferSize)
+	}
+}
+
 func TestManagedAgentRuntimePolicyUsesExplicitAllowedTools(t *testing.T) {
 	opts := claudecode.NewOptions(WithManagedAgentRuntimePolicy())
 	for _, want := range []string{"Read", "Write", "Bash", "Skill", "TaskCreate", "mcp__anban__*"} {
