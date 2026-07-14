@@ -121,6 +121,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						Env: []corev1.EnvVar{
 							{Name: "HOME", Value: kubernetesRuntimeHomePath},
 							{Name: "SSL_CERT_FILE", Value: kubernetesServerCAFile},
+							{Name: "NODE_EXTRA_CA_CERTS", Value: kubernetesServerCAFile},
 							{Name: kubernetesFinalizationTimeoutEnv, Value: strconv.FormatInt(kubernetesFinalizationTimeoutSeconds(cfg.CompletionGraceSeconds, cfg.ActiveDeadlineSeconds), 10) + "s"},
 						},
 						Command: []string{"anban"},

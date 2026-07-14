@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
@@ -130,6 +131,60 @@ func TestValidateManagedMCPStatusRejectsConnectedServerWithoutTools(t *testing.T
 	}}}
 	if err := ValidateManagedMCPStatus(status, "article"); err == nil || !strings.Contains(err.Error(), "exposed no tools") {
 		t.Fatalf("error = %v, want empty tool inventory failure", err)
+	}
+}
+
+type managedMCPStatusSequence struct {
+	statuses []*claudecode.McpStatusResponse
+	calls    int
+}
+
+func (s *managedMCPStatusSequence) GetMcpStatus(context.Context) (*claudecode.McpStatusResponse, error) {
+	index := s.calls
+	s.calls++
+	if index >= len(s.statuses) {
+		index = len(s.statuses) - 1
+	}
+	return s.statuses[index], nil
+}
+
+func TestWaitForManagedMCPReadyPollsPendingUntilConnected(t *testing.T) {
+	client := &managedMCPStatusSequence{statuses: []*claudecode.McpStatusResponse{
+		{McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusPending}}},
+		{McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusConnected, Tools: []claudecode.McpToolInfo{{Name: "update_task_progress"}}}}},
+	}}
+	if err := waitForManagedMCPReady(context.Background(), client, "article", time.Second, time.Millisecond); err != nil {
+		t.Fatalf("waitForManagedMCPReady: %v", err)
+	}
+	if client.calls != 2 {
+		t.Fatalf("GetMcpStatus calls = %d, want 2", client.calls)
+	}
+}
+
+func TestWaitForManagedMCPReadyFailsTerminalStateImmediately(t *testing.T) {
+	detail := "tls: failed to verify certificate"
+	client := &managedMCPStatusSequence{statuses: []*claudecode.McpStatusResponse{{
+		McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusFailed, Error: &detail}},
+	}}}
+	err := waitForManagedMCPReady(context.Background(), client, "article", time.Second, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), detail) {
+		t.Fatalf("error = %v, want terminal TLS detail", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("GetMcpStatus calls = %d, want 1", client.calls)
+	}
+}
+
+func TestWaitForManagedMCPReadyTimesOutWithPendingStatus(t *testing.T) {
+	client := &managedMCPStatusSequence{statuses: []*claudecode.McpStatusResponse{{
+		McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusPending}},
+	}}}
+	err := waitForManagedMCPReady(context.Background(), client, "article", 5*time.Millisecond, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), `status is "pending" after waiting 5ms`) {
+		t.Fatalf("error = %v, want bounded pending timeout", err)
+	}
+	if client.calls < 2 {
+		t.Fatalf("GetMcpStatus calls = %d, want polling", client.calls)
 	}
 }
 

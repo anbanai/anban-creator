@@ -5,11 +5,21 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
 const ManagedMCPServerName = "anban"
+
+const (
+	managedMCPReadyTimeout      = 30 * time.Second
+	managedMCPReadyPollInterval = 250 * time.Millisecond
+)
+
+type managedMCPStatusGetter interface {
+	GetMcpStatus(context.Context) (*claudecode.McpStatusResponse, error)
+}
 
 var managedAgentAllowedTools = []string{
 	"Read",
@@ -88,6 +98,59 @@ func WithManagedMCPAccess(serverURL, apiKey string) claudecode.Option {
 		}
 		opts.ExtraArgs["strict-mcp-config"] = nil
 	}
+}
+
+// WaitForManagedMCPReady allows Claude Code's asynchronous MCP initialization
+// to leave the pending state before the first user prompt is sent. Terminal
+// states still fail immediately so their connection or authentication detail
+// is not hidden behind the readiness timeout.
+func WaitForManagedMCPReady(ctx context.Context, client managedMCPStatusGetter, taskType string) error {
+	return waitForManagedMCPReady(ctx, client, taskType, managedMCPReadyTimeout, managedMCPReadyPollInterval)
+}
+
+func waitForManagedMCPReady(ctx context.Context, client managedMCPStatusGetter, taskType string, timeout, pollInterval time.Duration) error {
+	readyCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		status, err := client.GetMcpStatus(readyCtx)
+		if err != nil {
+			return fmt.Errorf("check managed MCP readiness: %w", err)
+		}
+		validationErr := ValidateManagedMCPStatus(status, taskType)
+		if validationErr == nil {
+			return nil
+		}
+		if !managedMCPIsPending(status) {
+			return validationErr
+		}
+
+		timer := time.NewTimer(pollInterval)
+		select {
+		case <-readyCtx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			if ctx.Err() != nil {
+				return fmt.Errorf("check managed MCP readiness: %w", ctx.Err())
+			}
+			return fmt.Errorf("%w after waiting %s", validationErr, timeout)
+		case <-timer.C:
+		}
+	}
+}
+
+func managedMCPIsPending(status *claudecode.McpStatusResponse) bool {
+	if status == nil {
+		return false
+	}
+	for i := range status.McpServers {
+		server := &status.McpServers[i]
+		if server.Name == ManagedMCPServerName {
+			return server.Status == claudecode.McpServerConnectionStatusPending
+		}
+	}
+	return false
 }
 
 // ValidateManagedMCPStatus performs the SDK-native readiness check before the

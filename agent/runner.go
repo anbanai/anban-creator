@@ -48,11 +48,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 	toolUseSummary := make(map[string]int)
 
 	err = claudecode.WithClient(ctx, func(client claudecode.Client) error {
-		mcpStatus, err := client.GetMcpStatus(ctx)
-		if err != nil {
-			return fmt.Errorf("check managed MCP readiness: %w", err)
-		}
-		if err := serveragent.ValidateManagedMCPStatus(mcpStatus, r.cfg.TaskType); err != nil {
+		if err := serveragent.WaitForManagedMCPReady(ctx, client, r.cfg.TaskType); err != nil {
 			return err
 		}
 		if err := client.Query(ctx, r.cfg.UserPrompt()); err != nil {

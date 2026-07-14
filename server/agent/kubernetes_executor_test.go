@@ -113,8 +113,12 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if got := strings.Join(append(c.Command, c.Args...), " "); strings.Contains(got, testTask().Prompt) {
 		t.Fatalf("command embeds task prompt: %q", got)
 	}
-	if len(c.Env) != 3 || c.Env[0].Name != "HOME" || c.Env[0].Value != kubernetesRuntimeHomePath || c.Env[1].Name != "SSL_CERT_FILE" || c.Env[1].Value != kubernetesServerCAFile || c.Env[2].Name != "ANBAN_JOB_FINALIZATION_TIMEOUT" || c.Env[2].Value != "25s" {
-		t.Fatalf("environment = %#v, want HOME, server CA, and grace-aligned finalization timeout", c.Env)
+	if len(c.Env) != 4 ||
+		c.Env[0].Name != "HOME" || c.Env[0].Value != kubernetesRuntimeHomePath ||
+		c.Env[1].Name != "SSL_CERT_FILE" || c.Env[1].Value != kubernetesServerCAFile ||
+		c.Env[2].Name != "NODE_EXTRA_CA_CERTS" || c.Env[2].Value != kubernetesServerCAFile ||
+		c.Env[3].Name != "ANBAN_JOB_FINALIZATION_TIMEOUT" || c.Env[3].Value != "25s" {
+		t.Fatalf("environment = %#v, want HOME, Go and Node server CA trust, and grace-aligned finalization timeout", c.Env)
 	}
 	if c.Resources.Requests.Cpu().String() != "500m" || c.Resources.Limits.Memory().String() != "2Gi" {
 		t.Fatalf("resources = %#v, want configured requests and limits", c.Resources)

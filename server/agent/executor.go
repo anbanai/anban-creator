@@ -739,11 +739,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 	err = claudecode.WithClient(ctx, func(client claudecode.Client) error {
 		if mcpInjected {
-			mcpStatus, err := client.GetMcpStatus(ctx)
-			if err != nil {
-				return fmt.Errorf("check managed MCP readiness: %w", err)
-			}
-			if err := ValidateManagedMCPStatus(mcpStatus, opts.Task.Type); err != nil {
+			if err := WaitForManagedMCPReady(ctx, client, opts.Task.Type); err != nil {
 				return err
 			}
 		}
