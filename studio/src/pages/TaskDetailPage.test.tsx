@@ -45,6 +45,7 @@ vi.mock('@/lib/api', async () => {
         get: vi.fn(),
         clone: vi.fn(),
         resume: vi.fn(),
+        markPublished: vi.fn(),
         files: vi.fn().mockResolvedValue([]),
         downloadZipBlob: vi.fn(),
         videoProduction: vi.fn(),
@@ -95,6 +96,7 @@ describe('TaskDetailPage', () => {
     })
     vi.mocked(api.tasks.clone).mockResolvedValue(taskWith({ id: 'task-clone', status: 'pending' }))
     vi.mocked(api.tasks.resume).mockResolvedValue(taskWith({ id: 'task-1', status: 'pending' }))
+    vi.mocked(api.tasks.markPublished).mockResolvedValue(taskWith({ id: 'task-1', status: 'completed', published: false }))
     vi.mocked(api.tasks.downloadZipBlob).mockResolvedValue(new Blob(['zip'], { type: 'application/zip' }))
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
@@ -271,6 +273,24 @@ describe('TaskDetailPage', () => {
     await waitFor(() => {
       expect(api.tasks.clone).toHaveBeenCalledWith('task-1')
       expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone')
+    })
+  })
+
+  it('keeps the low-frequency unpublish action in the more menu', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'completed',
+      published: true,
+      result: { files: null, output: '' },
+    }))
+
+    render(<TaskDetailPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '更多任务操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '取消发布标记' }))
+
+    await waitFor(() => {
+      expect(api.tasks.markPublished).toHaveBeenCalledWith('task-1', false)
     })
   })
 

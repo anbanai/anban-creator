@@ -754,6 +754,18 @@ export default function TaskDetailPage() {
                 <MoreHorizontal className="h-4 w-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
+                {task.status === 'completed' && task.published && (
+                  <DropdownMenuItem
+                    disabled={billingLocked || togglePublished.isPending}
+                    onClick={() => {
+                      if (billingLocked) return
+                      void submit(async () => togglePublished.mutateAsync({ published: false })).catch(() => {})
+                    }}
+                  >
+                    <Eye className="h-4 w-4" />
+                    取消发布标记
+                  </DropdownMenuItem>
+                )}
                 {canClone && (
                   <DropdownMenuItem onClick={() => void handleClone()}>
                     <RefreshCw className="h-4 w-4" />
