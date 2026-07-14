@@ -50,6 +50,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	readOnlyRoot := true
 	allowPrivilegeEscalation := false
 	tokenExpiration := projectedTokenExpiration(activeDeadline)
+	resources := cfg.ResourcesForTask(taskType(task))
 
 	labels := kubernetesExecutionLabels(execution, task)
 	job := &batchv1.Job{
@@ -103,8 +104,8 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 						},
 						Resources: corev1.ResourceRequirements{
-							Requests: kubernetesResourceList(cfg.Resources.Requests),
-							Limits:   kubernetesResourceList(cfg.Resources.Limits),
+							Requests: kubernetesResourceList(resources.Requests),
+							Limits:   kubernetesResourceList(resources.Limits),
 						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: kubernetesWorkspaceMountName, MountPath: "/workspace"},
@@ -140,6 +141,11 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	}
 	if strings.TrimSpace(cfg.ImagePullSecret) != "" {
 		job.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: cfg.ImagePullSecret}}
+	}
+	if strings.TrimSpace(cfg.RuntimeEnvSecret) != "" {
+		job.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{
+			SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: cfg.RuntimeEnvSecret}},
+		}}
 	}
 	job.Annotations = map[string]string{kubernetesObjectConfigHashLabel: kubernetesObjectHash(job.Spec)}
 	return job
@@ -238,6 +244,13 @@ func projectID(task *model.Task) string {
 		return ""
 	}
 	return task.ProjectID
+}
+
+func taskType(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	return task.Type
 }
 
 func kubernetesObjectHash(value any) string {

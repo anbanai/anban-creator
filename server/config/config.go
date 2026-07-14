@@ -53,6 +53,32 @@ type Config struct {
 	Memory             MemoryConfig                    `yaml:"memory"`
 }
 
+func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceConfig) []string {
+	var errs []string
+	parsedRequests := make(map[string]resource.Quantity, len(cfg.Requests))
+	parsedLimits := make(map[string]resource.Quantity, len(cfg.Limits))
+	for group, values := range map[string]map[string]string{"requests": cfg.Requests, "limits": cfg.Limits} {
+		for name, raw := range values {
+			quantity, err := resource.ParseQuantity(strings.TrimSpace(raw))
+			if strings.TrimSpace(name) == "" || err != nil || quantity.Sign() <= 0 {
+				errs = append(errs, fmt.Sprintf("%s.%s.%s must be a positive Kubernetes quantity", configPath, group, name))
+				continue
+			}
+			if group == "requests" {
+				parsedRequests[name] = quantity
+			} else {
+				parsedLimits[name] = quantity
+			}
+		}
+	}
+	for name, request := range parsedRequests {
+		if limit, ok := parsedLimits[name]; ok && request.Cmp(limit) > 0 {
+			errs = append(errs, fmt.Sprintf("%s.requests.%s must not exceed its limit", configPath, name))
+		}
+	}
+	return errs
+}
+
 // ImageModelPreset defines a system-managed image model that users can select
 // when creating tasks or plans. Each preset has a minimum tier that gates access.
 type ImageModelPreset struct {
@@ -1116,17 +1142,19 @@ type KubernetesConfig struct {
 	ServiceAccount       string `yaml:"service_account"`
 	ImagePullSecret      string `yaml:"image_pull_secret"`
 	ServerCASecret       string `yaml:"server_ca_secret"`
+	RuntimeEnvSecret     string `yaml:"runtime_env_secret"`
 	ExecutionTokenSecret string `yaml:"execution_token_secret"`
 
-	MemoryStorageClass      string                   `yaml:"memory_storage_class"`
-	MemorySize              string                   `yaml:"memory_size"`
-	ActiveDeadlineSeconds   int64                    `yaml:"active_deadline_seconds"`
-	CompletionGraceSeconds  int                      `yaml:"completion_grace_seconds"`
-	completionGraceSet      bool                     `yaml:"-"`
-	TTLSecondsAfterFinished int32                    `yaml:"ttl_seconds_after_finished"`
-	PreStartRetryLimit      int                      `yaml:"pre_start_retry_limit"`
-	preStartRetryLimitSet   bool                     `yaml:"-"`
-	Resources               KubernetesResourceConfig `yaml:"resources"`
+	MemoryStorageClass      string                              `yaml:"memory_storage_class"`
+	MemorySize              string                              `yaml:"memory_size"`
+	ActiveDeadlineSeconds   int64                               `yaml:"active_deadline_seconds"`
+	CompletionGraceSeconds  int                                 `yaml:"completion_grace_seconds"`
+	completionGraceSet      bool                                `yaml:"-"`
+	TTLSecondsAfterFinished int32                               `yaml:"ttl_seconds_after_finished"`
+	PreStartRetryLimit      int                                 `yaml:"pre_start_retry_limit"`
+	preStartRetryLimitSet   bool                                `yaml:"-"`
+	Resources               KubernetesResourceConfig            `yaml:"resources"`
+	ResourceProfiles        map[string]KubernetesResourceConfig `yaml:"resource_profiles"`
 }
 
 func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -1153,6 +1181,30 @@ func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
 type KubernetesResourceConfig struct {
 	Requests map[string]string `yaml:"requests"`
 	Limits   map[string]string `yaml:"limits"`
+}
+
+// ResourcesForTask returns a copy of the default resource contract overlaid by
+// the task-specific profile. Profiles may override individual resource keys.
+func (c KubernetesConfig) ResourcesForTask(taskType string) KubernetesResourceConfig {
+	profile := c.ResourceProfiles[strings.TrimSpace(taskType)]
+	return KubernetesResourceConfig{
+		Requests: mergeKubernetesResourceValues(c.Resources.Requests, profile.Requests),
+		Limits:   mergeKubernetesResourceValues(c.Resources.Limits, profile.Limits),
+	}
+}
+
+func mergeKubernetesResourceValues(base, override map[string]string) map[string]string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(base)+len(override))
+	for name, value := range base {
+		merged[name] = value
+	}
+	for name, value := range override {
+		merged[name] = value
+	}
+	return merged
 }
 
 // MemoryConfig holds Claude Code project memory projection settings.
@@ -1621,6 +1673,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Claude.Kubernetes.ServerCASecret == "" {
 		c.Claude.Kubernetes.ServerCASecret = "anban-server-tls"
+	}
+	if c.Claude.Kubernetes.RuntimeEnvSecret == "" {
+		c.Claude.Kubernetes.RuntimeEnvSecret = "anban-agent-runtime-env"
 	}
 	if c.Claude.Kubernetes.MemorySize == "" {
 		c.Claude.Kubernetes.MemorySize = "1Gi"
@@ -2134,6 +2189,9 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Claude.Kubernetes.ServerCASecret) == "" {
 			errs = append(errs, "claude.kubernetes.server_ca_secret is required")
 		}
+		if strings.TrimSpace(c.Claude.Kubernetes.RuntimeEnvSecret) == "" {
+			errs = append(errs, "claude.kubernetes.runtime_env_secret is required")
+		}
 		if len(c.Claude.Kubernetes.ExecutionTokenSecret) < 32 {
 			errs = append(errs, "claude.kubernetes.execution_token_secret must be at least 32 bytes")
 		}
@@ -2157,6 +2215,15 @@ func (c *Config) Validate() error {
 		}
 		if c.Claude.Kubernetes.PreStartRetryLimit < 0 {
 			errs = append(errs, "claude.kubernetes.pre_start_retry_limit must not be negative")
+		}
+		errs = append(errs, validateKubernetesResourceConfig("claude.kubernetes.resources", c.Claude.Kubernetes.Resources)...)
+		for taskType := range c.Claude.Kubernetes.ResourceProfiles {
+			if strings.TrimSpace(taskType) == "" {
+				errs = append(errs, "claude.kubernetes.resource_profiles contains an empty task type")
+				continue
+			}
+			effective := c.Claude.Kubernetes.ResourcesForTask(taskType)
+			errs = append(errs, validateKubernetesResourceConfig("claude.kubernetes.resource_profiles."+taskType, effective)...)
 		}
 	}
 	if (strings.TrimSpace(c.Server.TLSCertFile) == "") != (strings.TrimSpace(c.Server.TLSKeyFile) == "") {

@@ -141,6 +141,7 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 		"ANBAN_AGENT_IMAGE":                "${agent_image_repo}",
 		"ANBAN_AGENT_SERVICE_ACCOUNT":      "creator-agent-runner",
 		"ANBAN_AGENT_SERVER_CA_SECRET":     "anban-server-tls",
+		"ANBAN_AGENT_RUNTIME_ENV_SECRET":   "anban-agent-runtime-env",
 		"ANBAN_AGENT_IMAGE_PULL_SECRET":    "${imagePullSecret}",
 		"ANBAN_AGENT_MEMORY_STORAGE_CLASS": "nas-sc-creator",
 		"ANBAN_SERVER_TLS_CERT_FILE":       "/var/run/secrets/anban-server-tls/tls.crt",
@@ -177,6 +178,7 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 			`agent_image: "${ANBAN_AGENT_IMAGE}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
 			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-server-tls}"`,
+			`runtime_env_secret: "${ANBAN_AGENT_RUNTIME_ENV_SECRET:-anban-agent-runtime-env}"`,
 			`execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"`,
 		} {
 			if !strings.Contains(body.text, want) {

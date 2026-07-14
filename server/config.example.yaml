@@ -416,6 +416,8 @@ claude:
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
     # Agent Job 校验 Server TLS 使用的 CA Secret，仅挂载 ca.crt。
     server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-server-tls}"
+    # Claude Code 运行时认证与模型环境，通过 envFrom 原生注入 Agent Job。
+    runtime_env_secret: "${ANBAN_AGENT_RUNTIME_ENV_SECRET:-anban-agent-runtime-env}"
     # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
     execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
     # 项目记忆 PVC 使用的 RWX 存储类与容量。
@@ -429,14 +431,35 @@ claude:
     # Job 启动前失败时允许创建新执行尝试的次数。
     pre_start_retry_limit: 1
     resources:
-      # Agent Job 资源请求，影响调度保证。
+      # 未配置专属档位的任务使用此默认资源。
       requests:
-        cpu: "500m"
-        memory: "1Gi"
-      # Agent Job 资源上限。Montage 处理视频建议至少 4C/8Gi 起。
+        cpu: "1"
+        memory: "2Gi"
       limits:
-        cpu: "4"
-        memory: "8Gi"
+        cpu: "2"
+        memory: "4Gi"
+    resource_profiles:
+      moments:
+        requests: { cpu: "500m", memory: "1Gi" }
+        limits: { cpu: "1", memory: "2Gi" }
+      article:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      seednote:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      ecommerce:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      videocreator:
+        requests: { cpu: "2", memory: "4Gi" }
+        limits: { cpu: "4", memory: "7Gi" }
+      videoeditor:
+        requests: { cpu: "2", memory: "4Gi" }
+        limits: { cpu: "4", memory: "7Gi" }
+      montage:
+        requests: { cpu: "2", memory: "4Gi" }
+        limits: { cpu: "4", memory: "7Gi" }
   max_turns:
     moments: 25
     viral_analysis: 30

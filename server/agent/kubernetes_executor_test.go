@@ -92,6 +92,9 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if len(spec.ImagePullSecrets) != 1 || spec.ImagePullSecrets[0].Name != "acr-secret" {
 		t.Fatalf("image pull secrets = %#v, want acr-secret", spec.ImagePullSecrets)
 	}
+	if len(c.EnvFrom) != 1 || c.EnvFrom[0].SecretRef == nil || c.EnvFrom[0].SecretRef.Name != "anban-agent-runtime-env" {
+		t.Fatalf("runtime env sources = %#v, want Agent runtime Secret", c.EnvFrom)
+	}
 	if got := strings.Join(append(c.Command, c.Args...), " "); !strings.Contains(got, "anban job") || !strings.Contains(got, "--server-url https://creator-server:8443") || !strings.Contains(got, "--execution-id execution-1") || !strings.Contains(got, "--workload-token-file "+kubernetesTokenFile) {
 		t.Fatalf("command = %q, want one-shot job bootstrap args", got)
 	}
@@ -116,6 +119,28 @@ func TestBuildProjectMemoryPVCUsesNASStorageClass(t *testing.T) {
 	}
 	if pvc.Spec.Resources.Requests.Storage().String() != "1Gi" {
 		t.Fatalf("storage request = %s, want 1Gi", pvc.Spec.Resources.Requests.Storage().String())
+	}
+}
+
+func TestBuildKubernetesJobUsesTaskResourceProfile(t *testing.T) {
+	cfg := testJobConfig()
+	cfg.ResourceProfiles = map[string]srvconfig.KubernetesResourceConfig{
+		model.PlatformVideoCreator: {
+			Requests: map[string]string{"cpu": "2", "memory": "4Gi"},
+			Limits:   map[string]string{"cpu": "4", "memory": "7Gi"},
+		},
+	}
+	task := testTask()
+	task.Type = model.PlatformVideoCreator
+	resources := buildKubernetesJob(cfg, testExecution(), task).Spec.Template.Spec.Containers[0].Resources
+	if resources.Requests.Cpu().String() != "2" || resources.Requests.Memory().String() != "4Gi" || resources.Limits.Cpu().String() != "4" || resources.Limits.Memory().String() != "7Gi" {
+		t.Fatalf("video resources = %#v, want task profile", resources)
+	}
+
+	task.Type = "future-task"
+	resources = buildKubernetesJob(cfg, testExecution(), task).Spec.Template.Spec.Containers[0].Resources
+	if resources.Requests.Cpu().String() != "500m" || resources.Limits.Memory().String() != "2Gi" {
+		t.Fatalf("fallback resources = %#v, want defaults", resources)
 	}
 }
 
@@ -969,6 +994,7 @@ func testJobConfig() kubernetesJobConfig {
 			ServiceAccount:          "creator-agent-runner",
 			ImagePullSecret:         "acr-secret",
 			ServerCASecret:          "anban-server-tls",
+			RuntimeEnvSecret:        "anban-agent-runtime-env",
 			MemoryStorageClass:      "nas-sc-creator",
 			MemorySize:              "1Gi",
 			ActiveDeadlineSeconds:   900,

@@ -67,6 +67,9 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.ServerCASecret != "anban-server-tls" {
 		t.Fatalf("server CA secret = %q, want anban-server-tls", cfg.Claude.Kubernetes.ServerCASecret)
 	}
+	if cfg.Claude.Kubernetes.RuntimeEnvSecret != "anban-agent-runtime-env" {
+		t.Fatalf("runtime env secret = %q, want anban-agent-runtime-env", cfg.Claude.Kubernetes.RuntimeEnvSecret)
+	}
 	if cfg.Claude.Kubernetes.MemorySize != "1Gi" {
 		t.Fatalf("memory size = %q, want 1Gi", cfg.Claude.Kubernetes.MemorySize)
 	}
@@ -81,6 +84,50 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	}
 	if cfg.Claude.Kubernetes.PreStartRetryLimit != 1 {
 		t.Fatal("pre-start retry limit")
+	}
+}
+
+func TestKubernetesResourcesForTaskOverlaysDefaults(t *testing.T) {
+	cfg := KubernetesConfig{
+		Resources: KubernetesResourceConfig{
+			Requests: map[string]string{"cpu": "1", "memory": "2Gi"},
+			Limits:   map[string]string{"cpu": "2", "memory": "4Gi"},
+		},
+		ResourceProfiles: map[string]KubernetesResourceConfig{
+			"video": {
+				Requests: map[string]string{"cpu": "2"},
+				Limits:   map[string]string{"cpu": "4", "memory": "7Gi"},
+			},
+		},
+	}
+	got := cfg.ResourcesForTask("video")
+	if got.Requests["cpu"] != "2" || got.Requests["memory"] != "2Gi" || got.Limits["cpu"] != "4" || got.Limits["memory"] != "7Gi" {
+		t.Fatalf("profile resources = %#v", got)
+	}
+	got.Requests["cpu"] = "mutated"
+	if cfg.Resources.Requests["cpu"] != "1" {
+		t.Fatal("resource selection mutated config defaults")
+	}
+}
+
+func TestValidateKubernetesResourceProfiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile KubernetesResourceConfig
+		want    string
+	}{
+		{name: "invalid quantity", profile: KubernetesResourceConfig{Requests: map[string]string{"cpu": "invalid"}}, want: "must be a positive Kubernetes quantity"},
+		{name: "request exceeds limit", profile: KubernetesResourceConfig{Requests: map[string]string{"memory": "5Gi"}, Limits: map[string]string{"memory": "4Gi"}}, want: "must not exceed its limit"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.Claude.Kubernetes.Resources = KubernetesResourceConfig{Requests: map[string]string{"cpu": "1", "memory": "2Gi"}, Limits: map[string]string{"cpu": "2", "memory": "4Gi"}}
+			cfg.Claude.Kubernetes.ResourceProfiles = map[string]KubernetesResourceConfig{"seednote": test.profile}
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
