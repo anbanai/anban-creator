@@ -171,6 +171,11 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 	if pluginRoot := strings.TrimSpace(os.Getenv("CLAUDE_PLUGIN_ROOT")); pluginRoot != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithLocalPlugin(pluginRoot))
 	}
+	for _, key := range serveragent.ClaudeRuntimeEnvKeys() {
+		if value, ok := r.cfg.RuntimeEnv[key]; ok {
+			sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
+		}
+	}
 	for key, value := range montageProviderEnvFromProcess(r.cfg.TaskType) {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
 	}

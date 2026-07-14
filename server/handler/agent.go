@@ -196,6 +196,7 @@ type agentBootstrapRequest struct {
 }
 
 func (h *AgentHandler) Bootstrap(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
 	if h.workloadVerifier == nil || h.bootstrapper == nil {
 		return Error(c, fiber.StatusServiceUnavailable, "agent bootstrap unavailable")
 	}

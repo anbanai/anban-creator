@@ -114,6 +114,9 @@ func TestAgentExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	if resp.StatusCode != 200 || verifier.gotToken != "workload-token" || verifier.gotExecutionID != "execution-1" {
 		t.Fatalf("bootstrap status/token/id = %d/%q/%q", resp.StatusCode, verifier.gotToken, verifier.gotExecutionID)
 	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("bootstrap Cache-Control = %q, want no-store", got)
+	}
 }
 
 func TestAgentInvalidJWTDoesNotDowngradeToStaticKey(t *testing.T) {

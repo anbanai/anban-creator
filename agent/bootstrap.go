@@ -344,6 +344,9 @@ func validateBootstrapRuntime(response *BootstrapResponse) error {
 	if strings.TrimSpace(response.Model) != response.Model || len(response.Model) > maxBootstrapModelBytes {
 		return fmt.Errorf("bootstrap model is invalid")
 	}
+	if err := serveragent.ValidateClaudeRuntimeEnv(response.RuntimeEnv); err != nil {
+		return fmt.Errorf("bootstrap runtime environment is invalid: %w", err)
+	}
 	if len(response.Files) > maxBootstrapFiles {
 		return fmt.Errorf("bootstrap file count exceeds limit")
 	}

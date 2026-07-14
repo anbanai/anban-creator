@@ -29,6 +29,7 @@ type Config struct {
 	ArticleWithContentImages bool
 	ArtifactUploadMode       string
 	BootstrapPrompt          string
+	RuntimeEnv               map[string]string
 }
 
 const (

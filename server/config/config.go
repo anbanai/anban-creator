@@ -1110,8 +1110,9 @@ func (c FunASRConfig) Complete() bool {
 }
 
 // ClaudeConfig holds configuration for the Claude CLI subprocess.
-// The Env map is passed as environment variables to the CLI process,
-// supporting auth tokens, base URLs, model overrides, etc.
+// The Env map is the single source for Claude subprocess configuration. The
+// Kubernetes executor delivers only the explicit Claude allowlist over its
+// authenticated bootstrap channel; values never enter the Job specification.
 type ClaudeConfig struct {
 	Model          string            `yaml:"model"`    // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
 	Executor       string            `yaml:"executor"` // "local" (default), "docker", or "kubernetes"
@@ -1142,7 +1143,6 @@ type KubernetesConfig struct {
 	ServiceAccount       string `yaml:"service_account"`
 	ImagePullSecret      string `yaml:"image_pull_secret"`
 	ServerCASecret       string `yaml:"server_ca_secret"`
-	RuntimeEnvSecret     string `yaml:"runtime_env_secret"`
 	ExecutionTokenSecret string `yaml:"execution_token_secret"`
 
 	MemoryStorageClass      string                              `yaml:"memory_storage_class"`
@@ -1674,9 +1674,6 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.ServerCASecret == "" {
 		c.Claude.Kubernetes.ServerCASecret = "anban-server-tls"
 	}
-	if c.Claude.Kubernetes.RuntimeEnvSecret == "" {
-		c.Claude.Kubernetes.RuntimeEnvSecret = "anban-agent-runtime-env"
-	}
 	if c.Claude.Kubernetes.MemorySize == "" {
 		c.Claude.Kubernetes.MemorySize = "1Gi"
 	}
@@ -2188,9 +2185,6 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.ServerCASecret) == "" {
 			errs = append(errs, "claude.kubernetes.server_ca_secret is required")
-		}
-		if strings.TrimSpace(c.Claude.Kubernetes.RuntimeEnvSecret) == "" {
-			errs = append(errs, "claude.kubernetes.runtime_env_secret is required")
 		}
 		if len(c.Claude.Kubernetes.ExecutionTokenSecret) < 32 {
 			errs = append(errs, "claude.kubernetes.execution_token_secret must be at least 32 bytes")

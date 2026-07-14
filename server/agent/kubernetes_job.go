@@ -142,11 +142,6 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	if strings.TrimSpace(cfg.ImagePullSecret) != "" {
 		job.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: cfg.ImagePullSecret}}
 	}
-	if strings.TrimSpace(cfg.RuntimeEnvSecret) != "" {
-		job.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{
-			SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: cfg.RuntimeEnvSecret}},
-		}}
-	}
 	job.Annotations = map[string]string{kubernetesObjectConfigHashLabel: kubernetesObjectHash(job.Spec)}
 	return job
 }

@@ -178,7 +178,11 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	store := &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, RuntimeEnv: map[string]string{
+		"ANTHROPIC_AUTH_TOKEN": "bootstrap-secret",
+		"ANTHROPIC_BASE_URL":   "https://anthropic.example.com",
+		"PATH":                 "/untrusted/bin",
+	}}, zerolog.Nop())
 	identity := &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-1", PodUID: "pod-uid-1", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, JobDeadline: time.Now().Add(4 * time.Minute)}
 	first, err := svc.Bootstrap(ctx, identity)
 	if err != nil {
@@ -186,6 +190,9 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 	}
 	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
+	}
+	if first.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "bootstrap-secret" || first.RuntimeEnv["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || len(first.RuntimeEnv) != 2 {
+		t.Fatalf("runtime environment = %#v, want only allowlisted Claude values", first.RuntimeEnv)
 	}
 	if len(first.Files) < 2 {
 		t.Fatalf("files = %#v", first.Files)

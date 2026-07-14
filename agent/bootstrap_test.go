@@ -214,6 +214,9 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		{"wrong agent flag", func(r *BootstrapResponse) { r.AgentFlag = "anban:seednote" }},
 		{"wrong auto memory", func(r *BootstrapResponse) { r.AutoMemoryDirectory = ".claude/other" }},
 		{"long model", func(r *BootstrapResponse) { r.Model = strings.Repeat("m", maxBootstrapModelBytes+1) }},
+		{"unknown runtime environment", func(r *BootstrapResponse) { r.RuntimeEnv = map[string]string{"PATH": "/tmp/bin"} }},
+		{"empty runtime environment value", func(r *BootstrapResponse) { r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": ""} }},
+		{"oversized runtime environment value", func(r *BootstrapResponse) { r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)} }},
 		{"too many files", func(r *BootstrapResponse) { r.Files = make([]BootstrapFile, maxBootstrapFiles+1) }},
 	}
 	for _, tc := range tests {

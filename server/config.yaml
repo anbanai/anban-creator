@@ -418,8 +418,6 @@ claude:
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
     # Agent Job 校验 Server TLS 使用的 CA Secret，仅挂载 ca.crt。
     server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-server-tls}"
-    # Claude Code 运行时认证与模型环境，通过 envFrom 原生注入 Agent Job。
-    runtime_env_secret: "${ANBAN_AGENT_RUNTIME_ENV_SECRET:-anban-agent-runtime-env}"
     # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
     execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
     # 项目记忆 PVC 使用的 RWX 存储类与容量。
@@ -476,6 +474,8 @@ claude:
     montage: 90
   # Agent 执行日志目录。生产建议挂载持久卷，便于失败诊断和审计。
   task_log_dir: "./data/logs/tasks"
+  # Claude 运行时环境的唯一配置源。Kubernetes Job 启动后经认证 Bootstrap
+  # 临时获取 allowlist 内的值，仅注入 Claude 子进程，不写入 JobSpec/PVC/OSS。
   env:
     # Claude Code/兼容模型认证 token。必须通过环境变量注入，禁止写明文密钥。
     ANTHROPIC_AUTH_TOKEN: "${CLAUDE_CODE_AUTH_TOKEN}"

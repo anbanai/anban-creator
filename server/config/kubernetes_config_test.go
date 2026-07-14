@@ -67,9 +67,6 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.ServerCASecret != "anban-server-tls" {
 		t.Fatalf("server CA secret = %q, want anban-server-tls", cfg.Claude.Kubernetes.ServerCASecret)
 	}
-	if cfg.Claude.Kubernetes.RuntimeEnvSecret != "anban-agent-runtime-env" {
-		t.Fatalf("runtime env secret = %q, want anban-agent-runtime-env", cfg.Claude.Kubernetes.RuntimeEnvSecret)
-	}
 	if cfg.Claude.Kubernetes.MemorySize != "1Gi" {
 		t.Fatalf("memory size = %q, want 1Gi", cfg.Claude.Kubernetes.MemorySize)
 	}

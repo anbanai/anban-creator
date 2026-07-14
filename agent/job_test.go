@@ -55,11 +55,14 @@ func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 		if cfg.ExecutionID != "execution-1" || cfg.WorkloadTokenFile != "/token" {
 			t.Fatalf("job config=%+v", cfg)
 		}
-		return &BootstrapResponse{ExecutionToken: "jwt", TaskID: "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write", Model: "sonnet", MaxTurns: 9, AgentFlag: "anban:wechatarticle", AutoMemoryDirectory: ".claude/memory"}, nil
+		return &BootstrapResponse{ExecutionToken: "jwt", TaskID: "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write", Model: "sonnet", MaxTurns: 9, AgentFlag: "anban:wechatarticle", AutoMemoryDirectory: ".claude/memory", RuntimeEnv: map[string]string{
+			"ANTHROPIC_AUTH_TOKEN": "runtime-token",
+			"ANBAN_API_KEY":        "must-not-override",
+		}}, nil
 	}
 	run := func(_ context.Context, cfg *Config) error {
 		order = append(order, "run")
-		if cfg.APIKey != "jwt" || cfg.ExecutionID != "execution-1" || cfg.TaskID != "task-1" || cfg.Topic != "write" || cfg.ArtifactUploadMode != ArtifactUploadDirect {
+		if cfg.APIKey != "jwt" || cfg.ExecutionID != "execution-1" || cfg.TaskID != "task-1" || cfg.Topic != "write" || cfg.ArtifactUploadMode != ArtifactUploadDirect || cfg.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" || len(cfg.RuntimeEnv) != 1 {
 			t.Fatalf("runtime config=%+v", cfg)
 		}
 		return nil

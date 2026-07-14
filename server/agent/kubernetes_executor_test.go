@@ -92,8 +92,8 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if len(spec.ImagePullSecrets) != 1 || spec.ImagePullSecrets[0].Name != "acr-secret" {
 		t.Fatalf("image pull secrets = %#v, want acr-secret", spec.ImagePullSecrets)
 	}
-	if len(c.EnvFrom) != 1 || c.EnvFrom[0].SecretRef == nil || c.EnvFrom[0].SecretRef.Name != "anban-agent-runtime-env" {
-		t.Fatalf("runtime env sources = %#v, want Agent runtime Secret", c.EnvFrom)
+	if len(c.EnvFrom) != 0 {
+		t.Fatalf("runtime env sources = %#v, want bootstrap-only credentials", c.EnvFrom)
 	}
 	if got := strings.Join(append(c.Command, c.Args...), " "); !strings.Contains(got, "anban job") || !strings.Contains(got, "--server-url https://creator-server:8443") || !strings.Contains(got, "--execution-id execution-1") || !strings.Contains(got, "--workload-token-file "+kubernetesTokenFile) {
 		t.Fatalf("command = %q, want one-shot job bootstrap args", got)
@@ -994,7 +994,6 @@ func testJobConfig() kubernetesJobConfig {
 			ServiceAccount:          "creator-agent-runner",
 			ImagePullSecret:         "acr-secret",
 			ServerCASecret:          "anban-server-tls",
-			RuntimeEnvSecret:        "anban-agent-runtime-env",
 			MemoryStorageClass:      "nas-sc-creator",
 			MemorySize:              "1Gi",
 			ActiveDeadlineSeconds:   900,

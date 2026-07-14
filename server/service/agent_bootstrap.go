@@ -31,16 +31,17 @@ type BootstrapFile struct {
 }
 
 type AgentBootstrapResponse struct {
-	ExecutionToken      string          `json:"execution_token"`
-	TaskID              string          `json:"task_id"`
-	TaskType            string          `json:"task_type"`
-	ProjectID           string          `json:"project_id"`
-	Prompt              string          `json:"prompt"`
-	Model               string          `json:"model"`
-	MaxTurns            int             `json:"max_turns"`
-	AgentFlag           string          `json:"agent_flag"`
-	AutoMemoryDirectory string          `json:"auto_memory_directory"`
-	Files               []BootstrapFile `json:"files"`
+	ExecutionToken      string            `json:"execution_token"`
+	TaskID              string            `json:"task_id"`
+	TaskType            string            `json:"task_type"`
+	ProjectID           string            `json:"project_id"`
+	Prompt              string            `json:"prompt"`
+	Model               string            `json:"model"`
+	MaxTurns            int               `json:"max_turns"`
+	AgentFlag           string            `json:"agent_flag"`
+	AutoMemoryDirectory string            `json:"auto_memory_directory"`
+	RuntimeEnv          map[string]string `json:"runtime_env,omitempty"`
+	Files               []BootstrapFile   `json:"files"`
 }
 
 type AgentBootstrapConfig struct {
@@ -53,6 +54,7 @@ type AgentBootstrapConfig struct {
 	ImageAPIConfig          *srvconfig.ImageAPIConfig
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
+	RuntimeEnv              map[string]string
 }
 
 type AgentBootstrapService struct {
@@ -243,7 +245,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{TaskType: task.Type, Topic: task.Prompt, Goal: task.Goal, TaskID: task.ID, ProjectID: task.ProjectID, HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage, ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages})
-	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", Files: files}, nil
+	runtimeEnv := serveragent.ClaudeRuntimeEnv(s.cfg.RuntimeEnv)
+	if err := serveragent.ValidateClaudeRuntimeEnv(runtimeEnv); err != nil {
+		return nil, fmt.Errorf("build Claude runtime environment: %w", err)
+	}
+	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", RuntimeEnv: runtimeEnv, Files: files}, nil
 }
 
 func (s *AgentBootstrapService) buildProductFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {

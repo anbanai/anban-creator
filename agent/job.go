@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/urfave/cli/v3"
 )
 
@@ -61,6 +62,7 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		TaskType:            response.TaskType,
 		Topic:               response.Prompt,
 		BootstrapPrompt:     response.Prompt,
+		RuntimeEnv:          serveragent.ClaudeRuntimeEnv(response.RuntimeEnv),
 		Workspace:           jobCfg.Workspace,
 		Model:               response.Model,
 		AgentFlag:           response.AgentFlag,

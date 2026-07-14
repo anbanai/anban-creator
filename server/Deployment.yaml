@@ -54,8 +54,6 @@ spec:
               value: creator-agent-runner
             - name: ANBAN_AGENT_SERVER_CA_SECRET
               value: anban-server-tls
-            - name: ANBAN_AGENT_RUNTIME_ENV_SECRET
-              value: anban-agent-runtime-env
             - name: ANBAN_AGENT_MEMORY_STORAGE_CLASS
               value: nas-sc-creator
             - name: ANBAN_AGENT_EXECUTION_TOKEN_SECRET

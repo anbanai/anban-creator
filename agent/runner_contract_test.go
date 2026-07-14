@@ -46,3 +46,26 @@ func TestRunnerOptionsLeaveLocalPluginUnsetWithoutEnvironment(t *testing.T) {
 		t.Fatalf("plugins = %#v, want none without CLAUDE_PLUGIN_ROOT", got)
 	}
 }
+
+func TestRunnerOptionsInjectBootstrapClaudeEnvironmentWithoutOverridingExecutionIdentity(t *testing.T) {
+	runner := NewRunner(&Config{
+		Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10,
+		ServerURL: "https://server.example.com", APIKey: "execution-jwt",
+		RuntimeEnv: map[string]string{
+			"ANTHROPIC_AUTH_TOKEN": "runtime-token",
+			"ANTHROPIC_BASE_URL":   "https://anthropic.example.com",
+			"ANBAN_API_KEY":        "must-not-override",
+		},
+	}, nil, nil)
+	opts, err := runner.buildSDKOptions(context.Background())
+	if err != nil {
+		t.Fatalf("buildSDKOptions: %v", err)
+	}
+	got := claudecode.NewOptions(opts...).ExtraEnv
+	if got["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" || got["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" {
+		t.Fatalf("Claude runtime environment = %#v", got)
+	}
+	if got["ANBAN_API_KEY"] != "execution-jwt" || got["ANBAN_API_URL"] != "https://server.example.com" {
+		t.Fatalf("execution identity environment = %#v", got)
+	}
+}
