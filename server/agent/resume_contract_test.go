@@ -110,3 +110,26 @@ func TestCanonicalResumeAttachmentFilenameRejectsOverlongPersistedName(t *testin
 		t.Fatal("overlong persisted resume filename accepted")
 	}
 }
+
+func TestExecutionResumePathsAreImmutablePerExecution(t *testing.T) {
+	firstContext, err := ExecutionResumeContextPath("execution-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondContext, err := ExecutionResumeContextPath("execution-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachment, err := ExecutionResumeAttachmentPath("execution-1", "feedback.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstContext == secondContext || firstContext != ".anban-creator/resume/executions/execution-1/latest.md" || attachment != ".anban-creator/resume/executions/execution-1/attachments/feedback.pdf" {
+		t.Fatalf("execution resume paths = %q %q %q", firstContext, secondContext, attachment)
+	}
+	for _, invalid := range []string{"", "../escape", "execution/escape", " execution-1"} {
+		if _, err := ExecutionResumeContextPath(invalid); err == nil {
+			t.Fatalf("invalid execution ID %q accepted", invalid)
+		}
+	}
+}

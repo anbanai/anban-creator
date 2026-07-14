@@ -40,6 +40,8 @@ type AgentBootstrapResponse struct {
 	MaxTurns            int               `json:"max_turns"`
 	AgentFlag           string            `json:"agent_flag"`
 	AutoMemoryDirectory string            `json:"auto_memory_directory"`
+	ResumeSessionID     string            `json:"resume_session_id,omitempty"`
+	ResumeContextPath   string            `json:"resume_context_path,omitempty"`
 	RuntimeEnv          map[string]string `json:"runtime_env,omitempty"`
 	Files               []BootstrapFile   `json:"files"`
 }
@@ -218,7 +220,8 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		}
 		files = append(files, BootstrapFile{Path: ".anban-creator/reference.png", DownloadURL: signed, Mode: 0644})
 	}
-	attachmentFiles, err := s.buildAttachmentFiles(ctx, task, task.InputAttachments.Data(), credentialDeadline)
+	attachments := task.InputAttachments.Data()
+	attachmentFiles, err := s.buildAttachmentFiles(ctx, execution.ID, task, attachments, credentialDeadline)
 	if err != nil {
 		return nil, err
 	}
@@ -245,11 +248,21 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{TaskType: task.Type, Topic: task.Prompt, Goal: task.Goal, TaskID: task.ID, ProjectID: task.ProjectID, HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage, ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages})
+	resumeContextPath := ""
+	for _, attachment := range attachments {
+		if attachment.Role == model.EntryAttachmentRoleResumeLatest {
+			resumeContextPath, err = serveragent.ExecutionResumeContextPath(execution.ID)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
+			}
+			break
+		}
+	}
 	runtimeEnv := serveragent.ClaudeRuntimeEnv(s.cfg.RuntimeEnv)
 	if err := serveragent.ValidateClaudeRuntimeEnv(runtimeEnv); err != nil {
 		return nil, fmt.Errorf("build Claude runtime environment: %w", err)
 	}
-	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", RuntimeEnv: runtimeEnv, Files: files}, nil
+	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, Files: files}, nil
 }
 
 func (s *AgentBootstrapService) buildProductFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
@@ -399,7 +412,7 @@ func (s *AgentBootstrapService) authorizeBootstrapObject(ctx context.Context, ta
 	return nil
 }
 
-func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, task *model.Task, attachments []model.EntryAttachment, credentialDeadline time.Time) ([]BootstrapFile, error) {
+func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, executionID string, task *model.Task, attachments []model.EntryAttachment, credentialDeadline time.Time) ([]BootstrapFile, error) {
 	files := make([]BootstrapFile, 0, len(attachments)+2)
 	type indexEntry struct {
 		Index       int    `json:"index"`
@@ -415,7 +428,11 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, task *
 			if strings.TrimSpace(attachment.Text) == "" {
 				return nil, fmt.Errorf("%w: resume latest attachment requires text", ErrAgentBootstrapConflict)
 			}
-			files = append(files, BootstrapFile{Path: ".anban-creator/resume/latest.md", Text: attachment.Text, Mode: 0644})
+			resumePath, err := serveragent.ExecutionResumeContextPath(executionID)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
+			}
+			files = append(files, BootstrapFile{Path: resumePath, Text: attachment.Text, Mode: 0644})
 			continue
 		}
 		name := bootstrapAttachmentName(i+1, attachment.FileName)
@@ -427,7 +444,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, task *
 				return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 			}
 			name = canonicalName
-			rel, err = serveragent.ResumeAttachmentWorkspacePath(name)
+			rel, err = serveragent.ExecutionResumeAttachmentPath(executionID, name)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 			}

@@ -151,12 +151,18 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		if err != nil {
 			return fmt.Errorf("allocate task execution attempt: %w", err)
 		}
+		parentExecutionID, resumeSessionID, err := resumeExecutionLineage(ctx, txRepo, task)
+		if err != nil {
+			return err
+		}
 		execution = &model.TaskExecution{
-			ID:      uuid.NewString(),
-			TaskID:  task.ID,
-			Attempt: attempt,
-			Target:  "kubernetes",
-			Status:  model.TaskExecutionCreated,
+			ID:                uuid.NewString(),
+			TaskID:            task.ID,
+			Attempt:           attempt,
+			ParentExecutionID: parentExecutionID,
+			ResumeSessionID:   resumeSessionID,
+			Target:            "kubernetes",
+			Status:            model.TaskExecutionCreated,
 		}
 		if err := txRepo.TaskExecutions().Create(ctx, execution); err != nil {
 			return fmt.Errorf("create task execution: %w", err)
@@ -175,6 +181,40 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		return nil, false, err
 	}
 	return execution, created, nil
+}
+
+func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (string, string, error) {
+	if task == nil || task.CurrentExecutionID == nil || !taskHasResumeInput(task) {
+		return "", "", nil
+	}
+	parentID := strings.TrimSpace(*task.CurrentExecutionID)
+	if parentID == "" {
+		return "", "", nil
+	}
+	parent, err := repo.TaskExecutions().FindByID(ctx, parentID)
+	if err != nil {
+		return "", "", fmt.Errorf("load resume parent execution: %w", err)
+	}
+	if parent.TaskID != task.ID || !isTerminalExecution(parent.Status) {
+		return "", "", fmt.Errorf("resume parent execution %s is not a terminal attempt of task %s", parent.ID, task.ID)
+	}
+	if len(parent.Result) == 0 {
+		return parent.ID, "", nil
+	}
+	var result agent.ExecutionResult
+	if err := json.Unmarshal(parent.Result, &result); err != nil {
+		return "", "", fmt.Errorf("decode resume parent execution result: %w", err)
+	}
+	return parent.ID, strings.TrimSpace(result.SessionID), nil
+}
+
+func taskHasResumeInput(task *model.Task) bool {
+	for _, attachment := range task.InputAttachments.Data() {
+		if attachment.Role == model.EntryAttachmentRoleResumeLatest {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *TaskService) failDispatch(ctx context.Context, task *model.Task, execution *model.TaskExecution, token string, dispatchErr error) error {

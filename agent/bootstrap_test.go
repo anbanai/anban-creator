@@ -213,10 +213,18 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		{"empty agent flag", func(r *BootstrapResponse) { r.AgentFlag = "" }},
 		{"wrong agent flag", func(r *BootstrapResponse) { r.AgentFlag = "anban:seednote" }},
 		{"wrong auto memory", func(r *BootstrapResponse) { r.AutoMemoryDirectory = ".claude/other" }},
+		{"invalid resume session", func(r *BootstrapResponse) {
+			r.ResumeSessionID = " invalid-session"
+			r.ResumeContextPath = ".anban-creator/resume/executions/execution-1/latest.md"
+		}},
+		{"resume session without context", func(r *BootstrapResponse) { r.ResumeSessionID = "bba21f1d-70b8-4157-917b-f9802c2b1740" }},
+		{"foreign resume context", func(r *BootstrapResponse) { r.ResumeContextPath = ".anban-creator/resume/executions/other/latest.md" }},
 		{"long model", func(r *BootstrapResponse) { r.Model = strings.Repeat("m", maxBootstrapModelBytes+1) }},
 		{"unknown runtime environment", func(r *BootstrapResponse) { r.RuntimeEnv = map[string]string{"PATH": "/tmp/bin"} }},
 		{"empty runtime environment value", func(r *BootstrapResponse) { r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": ""} }},
-		{"oversized runtime environment value", func(r *BootstrapResponse) { r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)} }},
+		{"oversized runtime environment value", func(r *BootstrapResponse) {
+			r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)}
+		}},
 		{"too many files", func(r *BootstrapResponse) { r.Files = make([]BootstrapFile, maxBootstrapFiles+1) }},
 	}
 	for _, tc := range tests {

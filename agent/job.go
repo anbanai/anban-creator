@@ -67,6 +67,8 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		Model:               response.Model,
 		AgentFlag:           response.AgentFlag,
 		AutoMemoryDirectory: response.AutoMemoryDirectory,
+		ResumeSessionID:     response.ResumeSessionID,
+		ResumeContextPath:   response.ResumeContextPath,
 		MaxTurns:            response.MaxTurns,
 		ArtifactUploadMode:  ArtifactUploadDirect,
 	}

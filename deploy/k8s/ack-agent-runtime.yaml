@@ -96,4 +96,4 @@ roleRef:
   name: creator-agent-runner
 
 # The server does not mount NAS. One-shot Agent Jobs mount a project-scoped
-# NAS-backed PVC for private memory and publish result artifacts directly to OSS.
+# memory PVC and a task-scoped workspace PVC, then publish result artifacts to OSS.

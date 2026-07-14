@@ -798,6 +798,22 @@ func TestAppendResumeContextToPrompt(t *testing.T) {
 	}
 }
 
+func TestAppendResumeContextFileToPromptUsesExecutionScopedInput(t *testing.T) {
+	workDir := t.TempDir()
+	relativePath := ".anban-creator/resume/executions/execution-2/latest.md"
+	fullPath := filepath.Join(workDir, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte("continue"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := AppendResumeContextFileToPrompt("base", workDir, relativePath)
+	if !strings.Contains(got, "`"+relativePath+"`") {
+		t.Fatalf("prompt = %q, want execution-scoped resume path", got)
+	}
+}
+
 func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 	cases := []struct {
 		name       string

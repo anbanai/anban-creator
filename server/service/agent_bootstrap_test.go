@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +93,8 @@ func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
 		{Role: model.EntryAttachmentRoleResumeFile, URL: "https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/resume/run/attachments/resume.pdf", FileName: "resume.pdf"},
 	})
 	task.SetEcommerce(model.EcommerceConfig{ProductPhotos: []string{"https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/inputs/product.png"}})
-	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline)
+	const resumeSessionID = "bba21f1d-70b8-4157-917b-f9802c2b1740"
+	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1", ResumeSessionID: resumeSessionID}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +104,9 @@ func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
 	}
 	if claims.ExpiresAt == nil || claims.ExpiresAt.Time.After(jobDeadline) {
 		t.Fatalf("token expiry %v exceeds Job deadline %v", claims.ExpiresAt, jobDeadline)
+	}
+	if response.ResumeSessionID != resumeSessionID {
+		t.Fatalf("resume session = %q, want %q", response.ResumeSessionID, resumeSessionID)
 	}
 	if len(store.signedTTLs) != 4 {
 		t.Fatalf("signed TTLs = %v, want reference, attachment, resume, product", store.signedTTLs)
@@ -173,7 +178,8 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionStarting, Namespace: "anban", JobName: "job-1"}); err != nil {
+	resumeSessionID := uuid.NewString()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, ResumeSessionID: resumeSessionID, Target: "kubernetes", Status: model.TaskExecutionStarting, Namespace: "anban", JobName: "job-1"}); err != nil {
 		t.Fatal(err)
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
@@ -188,7 +194,8 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.MaxTurns != 12 {
+	resumeContextPath, _ := serveragent.ExecutionResumeContextPath(executionID)
+	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
 	if first.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "bootstrap-secret" || first.RuntimeEnv["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || len(first.RuntimeEnv) != 2 {
@@ -201,12 +208,13 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 	for _, file := range first.Files {
 		paths[file.Path] = file
 	}
-	for _, path := range []string{".anban-creator/reference.png", ".anban-creator/input-attachments/01-brief.txt", ".anban-creator/input-attachments/02-input.png", ".anban-creator/input-attachments/index.json", ".anban-creator/resume/latest.md", ".anban-creator/resume/attachments/foo.pdf"} {
+	resumeAttachmentPath, _ := serveragent.ExecutionResumeAttachmentPath(executionID, "foo.pdf")
+	for _, path := range []string{".anban-creator/reference.png", ".anban-creator/input-attachments/01-brief.txt", ".anban-creator/input-attachments/02-input.png", ".anban-creator/input-attachments/index.json", resumeContextPath, resumeAttachmentPath} {
 		if _, ok := paths[path]; !ok {
 			t.Fatalf("missing bootstrap path %q in %#v", path, first.Files)
 		}
 	}
-	if _, exists := paths[".anban-creator/resume/attachments/04-foo.pdf"]; exists {
+	if _, exists := paths[path.Join(path.Dir(resumeAttachmentPath), "04-foo.pdf")]; exists {
 		t.Fatal("bootstrap renamed persisted resume attachment")
 	}
 	if paths[".anban-creator/reference.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/02-input.png"].DownloadURL == "" {

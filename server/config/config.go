@@ -1145,8 +1145,9 @@ type KubernetesConfig struct {
 	ServerCASecret       string `yaml:"server_ca_secret"`
 	ExecutionTokenSecret string `yaml:"execution_token_secret"`
 
-	MemoryStorageClass      string                              `yaml:"memory_storage_class"`
-	MemorySize              string                              `yaml:"memory_size"`
+	NASStorageClass         string                              `yaml:"nas_storage_class"`
+	ProjectMemorySize       string                              `yaml:"project_memory_size"`
+	TaskWorkspaceSize       string                              `yaml:"task_workspace_size"`
 	ActiveDeadlineSeconds   int64                               `yaml:"active_deadline_seconds"`
 	HeartbeatTimeoutSeconds int64                               `yaml:"heartbeat_timeout_seconds"`
 	CompletionGraceSeconds  int                                 `yaml:"completion_grace_seconds"`
@@ -1675,8 +1676,11 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.ServerCASecret == "" {
 		c.Claude.Kubernetes.ServerCASecret = "anban-server-tls"
 	}
-	if c.Claude.Kubernetes.MemorySize == "" {
-		c.Claude.Kubernetes.MemorySize = "1Gi"
+	if c.Claude.Kubernetes.ProjectMemorySize == "" {
+		c.Claude.Kubernetes.ProjectMemorySize = "1Gi"
+	}
+	if c.Claude.Kubernetes.TaskWorkspaceSize == "" {
+		c.Claude.Kubernetes.TaskWorkspaceSize = "10Gi"
 	}
 	if c.Claude.Kubernetes.ActiveDeadlineSeconds == 0 {
 		c.Claude.Kubernetes.ActiveDeadlineSeconds = 3600
@@ -2193,14 +2197,20 @@ func (c *Config) Validate() error {
 		if len(c.Claude.Kubernetes.ExecutionTokenSecret) < 32 {
 			errs = append(errs, "claude.kubernetes.execution_token_secret must be at least 32 bytes")
 		}
-		if strings.TrimSpace(c.Claude.Kubernetes.MemoryStorageClass) == "" {
-			errs = append(errs, "claude.kubernetes.memory_storage_class is required")
+		if strings.TrimSpace(c.Claude.Kubernetes.NASStorageClass) == "" {
+			errs = append(errs, "claude.kubernetes.nas_storage_class is required")
 		}
-		memorySize, err := resource.ParseQuantity(strings.TrimSpace(c.Claude.Kubernetes.MemorySize))
+		memorySize, err := resource.ParseQuantity(strings.TrimSpace(c.Claude.Kubernetes.ProjectMemorySize))
 		if err != nil {
-			errs = append(errs, "claude.kubernetes.memory_size must be a valid Kubernetes quantity")
+			errs = append(errs, "claude.kubernetes.project_memory_size must be a valid Kubernetes quantity")
 		} else if memorySize.Sign() <= 0 {
-			errs = append(errs, "claude.kubernetes.memory_size must be positive")
+			errs = append(errs, "claude.kubernetes.project_memory_size must be positive")
+		}
+		workspaceSize, err := resource.ParseQuantity(strings.TrimSpace(c.Claude.Kubernetes.TaskWorkspaceSize))
+		if err != nil {
+			errs = append(errs, "claude.kubernetes.task_workspace_size must be a valid Kubernetes quantity")
+		} else if workspaceSize.Sign() <= 0 {
+			errs = append(errs, "claude.kubernetes.task_workspace_size must be positive")
 		}
 		if c.Claude.Kubernetes.ActiveDeadlineSeconds <= 0 {
 			errs = append(errs, "claude.kubernetes.active_deadline_seconds must be positive")

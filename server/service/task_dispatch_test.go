@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"sync"
@@ -171,6 +172,32 @@ func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterJobAccepted(t *testing
 	}
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("duplicate dispatch calls = %d", dispatcher.callCount())
+	}
+}
+
+func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	ctx := context.Background()
+	const sessionID = "bba21f1d-70b8-4157-917b-f9802c2b1740"
+	result, err := json.Marshal(&agent.ExecutionResult{Success: false, Error: "max turns", SessionID: sessionID, RemoteArtifacts: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := &model.TaskExecution{ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed, Result: result}
+	if err := repo.TaskExecutions().Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	task.CurrentExecutionID = &parent.ID
+	task.SetInputAttachments([]model.EntryAttachment{{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue"}})
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	current := mustCurrentExecution(t, repo, task.ID)
+	if current.Attempt != 2 || current.ParentExecutionID != parent.ID || current.ResumeSessionID != sessionID {
+		t.Fatalf("resumed execution = %#v", current)
 	}
 }
 

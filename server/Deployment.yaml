@@ -54,8 +54,12 @@ spec:
               value: creator-agent-runner
             - name: ANBAN_AGENT_SERVER_CA_SECRET
               value: anban-server-tls
-            - name: ANBAN_AGENT_MEMORY_STORAGE_CLASS
+            - name: ANBAN_AGENT_NAS_STORAGE_CLASS
               value: nas-sc-creator
+            - name: ANBAN_AGENT_PROJECT_MEMORY_SIZE
+              value: 1Gi
+            - name: ANBAN_AGENT_TASK_WORKSPACE_SIZE
+              value: 10Gi
             - name: ANBAN_AGENT_EXECUTION_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:

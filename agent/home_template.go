@@ -25,9 +25,9 @@ func materializeHomeTemplateFromEnvironment() error {
 }
 
 // materializeHomeTemplate seeds only missing runtime-home entries. The template
-// is immutable image content and the destination is a private Job emptyDir, so
-// rejecting every observed symlink plus using exclusive file creation closes
-// the relevant path-redirection boundary without overwriting runtime state.
+// is immutable image content and the destination is a task-private persistent
+// runtime home, so rejecting every observed symlink plus using exclusive file
+// creation closes the path-redirection boundary without overwriting sessions.
 func materializeHomeTemplate(templateRoot, homeRoot string) error {
 	templateRoot, err := filepath.Abs(filepath.Clean(templateRoot))
 	if err != nil {

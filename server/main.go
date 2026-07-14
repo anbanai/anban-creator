@@ -350,6 +350,11 @@ func main() {
 				RuntimeEnv:              cfg.Claude.Env,
 			}, *log)
 			taskSvc.SetKubernetesDispatcher(kubeDispatcher)
+			workspaceLifecycle, ok := kubeDispatcher.(service.TaskWorkspaceLifecycle)
+			if !ok {
+				log.Fatal().Msg("Kubernetes dispatcher does not manage task workspaces")
+			}
+			taskSvc.SetTaskWorkspaceLifecycle(workspaceLifecycle)
 			projectSvc.SetProjectMemoryLifecycle(kubeDispatcher)
 			kubeReconciler = agent.NewKubernetesReconciler(kubeDispatcher, taskSvc, agent.KubernetesReconcilerConfig{
 				PreStartRetryLimit: cfg.Claude.Kubernetes.PreStartRetryLimit,

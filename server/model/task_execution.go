@@ -11,6 +11,8 @@ type TaskExecution struct {
 	ID                 string         `gorm:"type:char(36);primaryKey" json:"id"`
 	TaskID             string         `gorm:"type:char(36);uniqueIndex:idx_task_attempt,priority:1;index;not null" json:"task_id"`
 	Attempt            int            `gorm:"uniqueIndex:idx_task_attempt,priority:2;not null" json:"attempt"`
+	ParentExecutionID  string         `gorm:"type:char(36);index" json:"parent_execution_id,omitempty"`
+	ResumeSessionID    string         `gorm:"type:varchar(128)" json:"resume_session_id,omitempty"`
 	Target             string         `gorm:"type:varchar(20);not null" json:"target"`
 	Status             string         `gorm:"type:varchar(20);index;not null" json:"status"`
 	DispatchClaimToken string         `gorm:"type:char(36);index" json:"-"`

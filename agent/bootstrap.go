@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
@@ -107,7 +108,7 @@ func bootstrapJobWithPolicy(ctx context.Context, cfg JobConfig, policy bootstrap
 	if err := validateBootstrapIdentity(cfg.ExecutionID, &envelope.Data); err != nil {
 		return nil, err
 	}
-	if err := validateBootstrapRuntime(&envelope.Data); err != nil {
+	if err := validateBootstrapRuntime(cfg.ExecutionID, &envelope.Data); err != nil {
 		return &envelope.Data, err
 	}
 	if err := materializeBootstrap(ctx, cfg.Workspace, envelope.Data.Files, bootstrapDownloadClient()); err != nil {
@@ -271,7 +272,7 @@ func validateBootstrapResponse(executionID string, response *BootstrapResponse) 
 	if err := validateBootstrapIdentity(executionID, response); err != nil {
 		return err
 	}
-	return validateBootstrapRuntime(response)
+	return validateBootstrapRuntime(executionID, response)
 }
 
 func validateBootstrapIdentity(executionID string, response *BootstrapResponse) error {
@@ -321,7 +322,7 @@ func compactExecutionToken(token string) bool {
 	return true
 }
 
-func validateBootstrapRuntime(response *BootstrapResponse) error {
+func validateBootstrapRuntime(executionID string, response *BootstrapResponse) error {
 	if response == nil {
 		return fmt.Errorf("bootstrap response is missing")
 	}
@@ -340,6 +341,25 @@ func validateBootstrapRuntime(response *BootstrapResponse) error {
 	}
 	if response.AutoMemoryDirectory != ".claude/memory" {
 		return fmt.Errorf("bootstrap auto memory directory is invalid")
+	}
+	if response.ResumeSessionID != "" {
+		if strings.TrimSpace(response.ResumeSessionID) != response.ResumeSessionID || len(response.ResumeSessionID) > 128 {
+			return fmt.Errorf("bootstrap resume session ID is invalid")
+		}
+		for _, r := range response.ResumeSessionID {
+			if unicode.IsControl(r) || unicode.IsSpace(r) {
+				return fmt.Errorf("bootstrap resume session ID is invalid")
+			}
+		}
+	}
+	if response.ResumeContextPath != "" {
+		expected, err := serveragent.ExecutionResumeContextPath(executionID)
+		if err != nil || response.ResumeContextPath != expected {
+			return fmt.Errorf("bootstrap resume context path is invalid")
+		}
+	}
+	if response.ResumeSessionID != "" && response.ResumeContextPath == "" {
+		return fmt.Errorf("bootstrap resume session requires resume context")
 	}
 	if strings.TrimSpace(response.Model) != response.Model || len(response.Model) > maxBootstrapModelBytes {
 		return fmt.Errorf("bootstrap model is invalid")

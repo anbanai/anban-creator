@@ -94,6 +94,11 @@ type TaskService struct {
 	maxTurnsOverrides map[string]int
 	memoryMgr         *projectmemory.ProjectMemoryManager
 	nasResumeEnabled  bool
+	taskWorkspace     TaskWorkspaceLifecycle
+}
+
+type TaskWorkspaceLifecycle interface {
+	DeleteTaskWorkspace(context.Context, *model.Task) error
 }
 
 // NewTaskService creates a new TaskService.
@@ -153,6 +158,10 @@ func (s *TaskService) Repository() repository.Repository {
 
 func (s *TaskService) SetProjectMemoryManager(memoryMgr *projectmemory.ProjectMemoryManager) {
 	s.memoryMgr = memoryMgr
+}
+
+func (s *TaskService) SetTaskWorkspaceLifecycle(workspace TaskWorkspaceLifecycle) {
+	s.taskWorkspace = workspace
 }
 
 func (s *TaskService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
@@ -1645,6 +1654,11 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 			s.logger.Error().Err(cancelErr).Str("task_id", id).Msg("failed to cancel task before delete")
 		}
 	}
+	if s.taskWorkspace != nil {
+		if err := s.taskWorkspace.DeleteTaskWorkspace(ctx, task); err != nil {
+			return fmt.Errorf("delete task workspace: %w", err)
+		}
+	}
 
 	files, err := s.repo.TaskFiles().FindByTaskID(ctx, id)
 	if err != nil {
@@ -1666,7 +1680,6 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 	if err := s.repo.Tasks().Delete(ctx, id); err != nil {
 		return fmt.Errorf("delete task: %w", err)
 	}
-
 	s.deregisterCancel(id)
 	return nil
 }

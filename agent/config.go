@@ -29,6 +29,8 @@ type Config struct {
 	ArticleWithContentImages bool
 	ArtifactUploadMode       string
 	BootstrapPrompt          string
+	ResumeSessionID          string
+	ResumeContextPath        string
 	RuntimeEnv               map[string]string
 }
 
@@ -114,6 +116,9 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 }
 
 func (c *Config) UserPrompt() string {
+	if strings.TrimSpace(c.ResumeContextPath) != "" {
+		return serveragent.AppendResumeContextFileToPrompt(c.BootstrapPrompt, c.Workspace, c.ResumeContextPath)
+	}
 	if strings.TrimSpace(c.BootstrapPrompt) != "" {
 		return serveragent.AppendResumeContextToPrompt(c.BootstrapPrompt, c.Workspace)
 	}

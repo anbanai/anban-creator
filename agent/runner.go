@@ -192,6 +192,9 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 		return nil, err
 	}
 	sdkOpts = append(sdkOpts, stopHook)
+	if r.cfg.ResumeSessionID != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithResume(r.cfg.ResumeSessionID))
+	}
 	for _, key := range serveragent.ClaudeRuntimeEnvKeys() {
 		if value, ok := r.cfg.RuntimeEnv[key]; ok {
 			sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))

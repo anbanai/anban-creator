@@ -418,9 +418,10 @@ claude:
     server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-server-tls}"
     # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
     execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
-    # 项目记忆 PVC 使用的 RWX 存储类与容量。
-    memory_storage_class: "${ANBAN_AGENT_MEMORY_STORAGE_CLASS:-nas-sc-creator}"
-    memory_size: "${ANBAN_AGENT_MEMORY_SIZE:-1Gi}"
+    # 项目记忆与任务工作区 PVC 使用的 RWX NAS 存储类及各自容量。
+    nas_storage_class: "${ANBAN_AGENT_NAS_STORAGE_CLASS:-nas-sc-creator}"
+    project_memory_size: "${ANBAN_AGENT_PROJECT_MEMORY_SIZE:-1Gi}"
+    task_workspace_size: "${ANBAN_AGENT_TASK_WORKSPACE_SIZE:-10Gi}"
     # Job 执行截止时间与 agent 上报完成后的退出宽限期，单位秒。
     active_deadline_seconds: 3600
     # Agent 每 30 秒上报心跳；连续 3 分钟不可达后由 Kubernetes Reconciler 终止。

@@ -48,6 +48,19 @@ func TestRunnerOptionsLeaveLocalPluginUnsetWithoutEnvironment(t *testing.T) {
 	}
 }
 
+func TestRunnerOptionsResumeExactBootstrapSession(t *testing.T) {
+	const sessionID = "bba21f1d-70b8-4157-917b-f9802c2b1740"
+	runner := NewRunner(&Config{Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10, ResumeSessionID: sessionID}, nil, nil)
+	opts, err := runner.buildSDKOptions(context.Background())
+	if err != nil {
+		t.Fatalf("buildSDKOptions: %v", err)
+	}
+	got := claudecode.NewOptions(opts...)
+	if got.Resume == nil || *got.Resume != sessionID {
+		t.Fatalf("resume = %#v, want %q", got.Resume, sessionID)
+	}
+}
+
 func TestRunnerOptionsInjectBootstrapClaudeEnvironmentWithoutOverridingExecutionIdentity(t *testing.T) {
 	runner := NewRunner(&Config{
 		Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10,

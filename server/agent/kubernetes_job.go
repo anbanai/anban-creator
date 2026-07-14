@@ -16,22 +16,23 @@ import (
 )
 
 const (
-	kubernetesAgentUID               int64 = 1000
-	kubernetesAgentGID               int64 = 1000
-	kubernetesAgentContainerName           = "creator-agent"
-	kubernetesMemoryMountName              = "memory"
-	kubernetesTokenVolumeName              = "workload-token"
-	kubernetesTmpVolumeName                = "tmp"
-	kubernetesHomeVolumeName               = "home"
-	kubernetesServerCAVolumeName           = "server-ca"
-	kubernetesServerCAMountPath            = "/var/run/secrets/anban-server-ca"
-	kubernetesServerCAFile                 = kubernetesServerCAMountPath + "/ca.crt"
-	kubernetesMemoryMountPath              = "/workspace/.claude/memory"
-	kubernetesTokenMountPath               = "/var/run/secrets/anban"
-	kubernetesTokenFile                    = kubernetesTokenMountPath + "/token"
-	kubernetesTokenAudience                = "anban-server"
-	kubernetesObjectConfigHashLabel        = "anban.ai/config-hash"
-	kubernetesFinalizationTimeoutEnv       = "ANBAN_JOB_FINALIZATION_TIMEOUT"
+	kubernetesAgentUID                   int64 = 1000
+	kubernetesAgentGID                   int64 = 1000
+	kubernetesAgentContainerName               = "creator-agent"
+	kubernetesWorkspaceInitContainerName       = "workspace-init"
+	kubernetesMemoryMountName                  = "memory"
+	kubernetesTokenVolumeName                  = "workload-token"
+	kubernetesTmpVolumeName                    = "tmp"
+	kubernetesServerCAVolumeName               = "server-ca"
+	kubernetesServerCAMountPath                = "/var/run/secrets/anban-server-ca"
+	kubernetesServerCAFile                     = kubernetesServerCAMountPath + "/ca.crt"
+	kubernetesMemoryMountPath                  = "/workspace/.claude/memory"
+	kubernetesRuntimeHomePath                  = "/workspace/" + DockerRuntimeHomeDirName
+	kubernetesTokenMountPath                   = "/var/run/secrets/anban"
+	kubernetesTokenFile                        = kubernetesTokenMountPath + "/token"
+	kubernetesTokenAudience                    = "anban-server"
+	kubernetesObjectConfigHashLabel            = "anban.ai/config-hash"
+	kubernetesFinalizationTimeoutEnv           = "ANBAN_JOB_FINALIZATION_TIMEOUT"
 )
 
 type kubernetesJobConfig struct {
@@ -45,8 +46,12 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	ttl := cfg.TTLSecondsAfterFinished
 	automountToken := false
 	runAsNonRoot := true
+	runAsRoot := false
 	runAsUser := kubernetesAgentUID
 	runAsGroup := kubernetesAgentGID
+	rootUser := int64(0)
+	rootGroup := int64(0)
+	fsGroupChangePolicy := corev1.FSGroupChangeOnRootMismatch
 	readOnlyRoot := true
 	allowPrivilegeEscalation := false
 	tokenExpiration := projectedTokenExpiration(activeDeadline)
@@ -72,18 +77,49 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 					AutomountServiceAccountToken:  &automountToken,
 					TerminationGracePeriodSeconds: int64Ptr(int64(cfg.CompletionGraceSeconds)),
 					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot:   &runAsNonRoot,
-						RunAsUser:      &runAsUser,
-						RunAsGroup:     &runAsGroup,
-						FSGroup:        &runAsGroup,
-						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+						RunAsNonRoot:        &runAsNonRoot,
+						RunAsUser:           &runAsUser,
+						RunAsGroup:          &runAsGroup,
+						FSGroup:             &runAsGroup,
+						FSGroupChangePolicy: &fsGroupChangePolicy,
+						SeccompProfile:      &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
+					InitContainers: []corev1.Container{{
+						Name:            kubernetesWorkspaceInitContainerName,
+						Image:           cfg.AgentImage,
+						ImagePullPolicy: corev1.PullAlways,
+						Command:         []string{"/bin/sh", "-c"},
+						Args: []string{
+							"chown 1000:1000 /workspace && chmod 0770 /workspace && " +
+								"install -d -m 0700 -o 1000 -g 1000 " + kubernetesRuntimeHomePath + " && " +
+								"install -d -m 0770 -o 1000 -g 1000 " + kubernetesMemoryMountPath,
+						},
+						SecurityContext: &corev1.SecurityContext{
+							RunAsNonRoot:             &runAsRoot,
+							RunAsUser:                &rootUser,
+							RunAsGroup:               &rootGroup,
+							ReadOnlyRootFilesystem:   &readOnlyRoot,
+							AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+							Capabilities: &corev1.Capabilities{
+								Drop: []corev1.Capability{"ALL"},
+								Add:  []corev1.Capability{"CHOWN", "FOWNER", "DAC_OVERRIDE"},
+							},
+						},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("16Mi")},
+							Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("64Mi")},
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{Name: kubernetesWorkspaceMountName, MountPath: "/workspace"},
+							{Name: kubernetesMemoryMountName, MountPath: kubernetesMemoryMountPath},
+						},
+					}},
 					Containers: []corev1.Container{{
 						Name:            kubernetesAgentContainerName,
 						Image:           cfg.AgentImage,
 						ImagePullPolicy: corev1.PullAlways,
 						Env: []corev1.EnvVar{
-							{Name: "HOME", Value: ContainerHomePath},
+							{Name: "HOME", Value: kubernetesRuntimeHomePath},
 							{Name: "SSL_CERT_FILE", Value: kubernetesServerCAFile},
 							{Name: kubernetesFinalizationTimeoutEnv, Value: strconv.FormatInt(kubernetesFinalizationTimeoutSeconds(cfg.CompletionGraceSeconds, cfg.ActiveDeadlineSeconds), 10) + "s"},
 						},
@@ -111,16 +147,14 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 							{Name: kubernetesWorkspaceMountName, MountPath: "/workspace"},
 							{Name: kubernetesMemoryMountName, MountPath: kubernetesMemoryMountPath},
 							{Name: kubernetesTmpVolumeName, MountPath: "/tmp"},
-							{Name: kubernetesHomeVolumeName, MountPath: "/home/node"},
 							{Name: kubernetesTokenVolumeName, MountPath: kubernetesTokenMountPath, ReadOnly: true},
 							{Name: kubernetesServerCAVolumeName, MountPath: kubernetesServerCAMountPath, ReadOnly: true},
 						},
 					}},
 					Volumes: []corev1.Volume{
-						{Name: kubernetesWorkspaceMountName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+						{Name: kubernetesWorkspaceMountName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: kubernetesTaskWorkspacePVCName(taskID(task))}}},
 						{Name: kubernetesMemoryMountName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: kubernetesProjectMemoryPVCName(projectID(task))}}},
 						{Name: kubernetesTmpVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-						{Name: kubernetesHomeVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 						{Name: kubernetesTokenVolumeName, VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
 							DefaultMode: int32Ptr(0440),
 							Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
@@ -178,8 +212,8 @@ func kubernetesFinalizationTimeoutSeconds(grace int, activeDeadline int64) int64
 }
 
 func buildProjectMemoryPVC(cfg kubernetesJobConfig, projectID string) *corev1.PersistentVolumeClaim {
-	storageClass := cfg.MemoryStorageClass
-	quantity := resource.MustParse(cfg.MemorySize)
+	storageClass := cfg.NASStorageClass
+	quantity := resource.MustParse(cfg.ProjectMemorySize)
 	return &corev1.PersistentVolumeClaim{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
 		ObjectMeta: metav1.ObjectMeta{
@@ -190,6 +224,28 @@ func buildProjectMemoryPVC(cfg kubernetesJobConfig, projectID string) *corev1.Pe
 				"app.kubernetes.io/component": "project-memory",
 				kubernetesProjectIDLabel:      kubernetesLabelValue(projectID),
 			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+			StorageClassName: &storageClass,
+			Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
+				corev1.ResourceStorage: quantity,
+			}},
+		},
+	}
+}
+
+func buildTaskWorkspacePVC(cfg kubernetesJobConfig, task *model.Task) *corev1.PersistentVolumeClaim {
+	storageClass := cfg.NASStorageClass
+	quantity := resource.MustParse(cfg.TaskWorkspaceSize)
+	labels := kubernetesAgentLabels(task)
+	labels["app.kubernetes.io/component"] = "task-workspace"
+	return &corev1.PersistentVolumeClaim{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kubernetesTaskWorkspacePVCName(taskID(task)),
+			Namespace: cfg.Namespace,
+			Labels:    labels,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
@@ -239,6 +295,13 @@ func projectID(task *model.Task) string {
 		return ""
 	}
 	return task.ProjectID
+}
+
+func taskID(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	return task.ID
 }
 
 func taskType(task *model.Task) string {

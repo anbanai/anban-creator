@@ -187,3 +187,35 @@ func ResumeAttachmentWorkspacePath(name string) (string, error) {
 	}
 	return path.Join(resumeRootRelativePath, rel), nil
 }
+
+func ExecutionResumeContextPath(executionID string) (string, error) {
+	root, err := executionResumeRoot(executionID)
+	if err != nil {
+		return "", err
+	}
+	return path.Join(root, "latest.md"), nil
+}
+
+func ExecutionResumeAttachmentPath(executionID, name string) (string, error) {
+	root, err := executionResumeRoot(executionID)
+	if err != nil {
+		return "", err
+	}
+	name, err = CanonicalResumeAttachmentFilename(name)
+	if err != nil {
+		return "", err
+	}
+	return path.Join(root, "attachments", name), nil
+}
+
+func executionResumeRoot(executionID string) (string, error) {
+	if executionID == "" || strings.TrimSpace(executionID) != executionID || len(executionID) > 128 || path.Base(executionID) != executionID {
+		return "", fmt.Errorf("invalid resume execution ID %q", executionID)
+	}
+	for _, r := range executionID {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return "", fmt.Errorf("invalid resume execution ID %q", executionID)
+		}
+	}
+	return path.Join(resumeRootRelativePath, "executions", executionID), nil
+}

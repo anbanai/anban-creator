@@ -90,27 +90,12 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 		return nil, NewPermanentDispatchError(fmt.Errorf("execution task identity mismatch: execution has %q, task has %q", execution.TaskID, task.ID))
 	}
 
-	desiredPVC := buildProjectMemoryPVC(d.config, task.ProjectID)
-	pvcs := d.kube.CoreV1().PersistentVolumeClaims(d.config.Namespace)
-	existingPVC, err := pvcs.Get(ctx, desiredPVC.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		existingPVC, err = pvcs.Create(ctx, desiredPVC, metav1.CreateOptions{})
-		if err != nil && !apierrors.IsAlreadyExists(err) {
-			return nil, fmt.Errorf("create project memory PVC %q: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, true))
-		}
-		if apierrors.IsAlreadyExists(err) {
-			existingPVC, err = pvcs.Get(ctx, desiredPVC.Name, metav1.GetOptions{})
-			if err != nil {
-				return nil, fmt.Errorf("get project memory PVC %q after create conflict: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, false))
-			}
-		}
-	} else if err != nil {
-		return nil, fmt.Errorf("get project memory PVC %q: %w", desiredPVC.Name, classifyKubernetesDispatchAPIError(err, false))
+	allowPVCCreation := execution.ParentExecutionID == ""
+	if err := d.ensurePVC(ctx, buildProjectMemoryPVC(d.config, task.ProjectID), "project memory", task.ProjectID, allowPVCCreation); err != nil {
+		return nil, err
 	}
-	if existingPVC != nil {
-		if err := verifyPVC(existingPVC, desiredPVC, task.ProjectID); err != nil {
-			return nil, NewPermanentDispatchError(err)
-		}
+	if err := d.ensurePVC(ctx, buildTaskWorkspacePVC(d.config, task), "task workspace", task.ID, allowPVCCreation); err != nil {
+		return nil, err
 	}
 
 	desiredJob := buildKubernetesJob(d.config, execution, task)
@@ -136,6 +121,34 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 		}
 	}
 	return &KubernetesRuntimeIdentity{Namespace: desiredJob.Namespace, JobName: desiredJob.Name}, nil
+}
+
+func (d *kubernetesJobDispatcher) ensurePVC(ctx context.Context, desired *corev1.PersistentVolumeClaim, kind, identity string, allowCreation bool) error {
+	pvcs := d.kube.CoreV1().PersistentVolumeClaims(d.config.Namespace)
+	existing, err := pvcs.Get(ctx, desired.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		if !allowCreation {
+			return NewPermanentDispatchError(fmt.Errorf("%s PVC %q is missing; the original execution state cannot be resumed", kind, desired.Name))
+		}
+		existing, err = pvcs.Create(ctx, desired, metav1.CreateOptions{})
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create %s PVC %q: %w", kind, desired.Name, classifyKubernetesDispatchAPIError(err, true))
+		}
+		if apierrors.IsAlreadyExists(err) {
+			existing, err = pvcs.Get(ctx, desired.Name, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("get %s PVC %q after create conflict: %w", kind, desired.Name, classifyKubernetesDispatchAPIError(err, false))
+			}
+		}
+	} else if err != nil {
+		return fmt.Errorf("get %s PVC %q: %w", kind, desired.Name, classifyKubernetesDispatchAPIError(err, false))
+	}
+	if existing != nil {
+		if err := verifyPVC(existing, desired, kind, identity); err != nil {
+			return NewPermanentDispatchError(err)
+		}
+	}
+	return nil
 }
 
 func classifyKubernetesDispatchAPIError(err error, create bool) error {
@@ -209,6 +222,32 @@ func (d *kubernetesJobDispatcher) DeleteProjectMemory(ctx context.Context, proje
 	return nil
 }
 
+func (d *kubernetesJobDispatcher) DeleteTaskWorkspace(ctx context.Context, task *model.Task) error {
+	if d == nil || d.kube == nil {
+		return fmt.Errorf("kubernetes dispatcher is not configured")
+	}
+	if task == nil || strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.ProjectID) == "" || strings.TrimSpace(task.UserID) == "" {
+		return fmt.Errorf("task identity is required")
+	}
+	name := kubernetesTaskWorkspacePVCName(task.ID)
+	pvcs := d.kube.CoreV1().PersistentVolumeClaims(d.config.Namespace)
+	pvc, err := pvcs.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get task workspace PVC %q: %w", name, err)
+	}
+	desired := buildTaskWorkspacePVC(d.config, task)
+	if err := verifyRequiredLabels(pvc.Labels, desired.Labels); err != nil {
+		return fmt.Errorf("task workspace PVC %q identity mismatch: %w", name, err)
+	}
+	if err := pvcs.Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pvc.UID}}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete task workspace PVC %q: %w", name, err)
+	}
+	return nil
+}
+
 func (d *kubernetesJobDispatcher) Inspect(ctx context.Context, execution *model.TaskExecution) (*KubernetesExecutionState, error) {
 	if err := d.validate(execution); err != nil {
 		return nil, err
@@ -255,16 +294,16 @@ func (d *kubernetesJobDispatcher) validate(execution *model.TaskExecution) error
 	return nil
 }
 
-func verifyPVC(existing, desired *corev1.PersistentVolumeClaim, projectID string) error {
+func verifyPVC(existing, desired *corev1.PersistentVolumeClaim, kind, identity string) error {
 	if err := verifyRequiredLabels(existing.Labels, desired.Labels); err != nil {
-		return fmt.Errorf("project memory PVC %q identity mismatch for project %q: %w", existing.Name, projectID, err)
+		return fmt.Errorf("%s PVC %q identity mismatch for %q: %w", kind, existing.Name, identity, err)
 	}
 	if existing.Spec.StorageClassName == nil || desired.Spec.StorageClassName == nil || *existing.Spec.StorageClassName != *desired.Spec.StorageClassName ||
 		!containsAccessMode(existing.Spec.AccessModes, corev1.ReadWriteMany) {
-		return fmt.Errorf("project memory PVC %q configuration mismatch", existing.Name)
+		return fmt.Errorf("%s PVC %q configuration mismatch", kind, existing.Name)
 	}
 	if existing.Spec.Resources.Requests.Storage().Cmp(*desired.Spec.Resources.Requests.Storage()) < 0 {
-		return fmt.Errorf("project memory PVC %q is smaller than required; expand it to at least %s", existing.Name, desired.Spec.Resources.Requests.Storage().String())
+		return fmt.Errorf("%s PVC %q is smaller than required; expand it to at least %s", kind, existing.Name, desired.Spec.Resources.Requests.Storage().String())
 	}
 	return nil
 }
