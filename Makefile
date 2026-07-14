@@ -11,7 +11,7 @@ STUDIO_IMAGE := anban-creator-studio:latest
 SERVER_CONFIG := server/config.yaml
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
-        server-build server-run server-dev server-test git-sync-setup \
+        server-build server-run server-dev server-test git-sync-setup agent-reach-update \
         agent-build-native plugin-binaries \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
@@ -56,6 +56,11 @@ deps:
 # Configure repository-local pull/push behavior for managed submodules.
 git-sync-setup:
 	@scripts/setup-git-sync.sh
+
+# Fast-forward the pinned third-party Agent-Reach source to upstream main.
+# Rebuild the Agent image after committing the updated submodule gitlink.
+agent-reach-update:
+	@scripts/update-agent-reach.sh
 
 # Run all CI checks (format, vet, test, lint)
 ci: fmt vet test lint
@@ -191,6 +196,7 @@ help:
 	@echo "  make fmt           - Format code"
 	@echo "  make lint          - Lint code (requires golangci-lint)"
 	@echo "  make deps          - Download and tidy dependencies"
+	@echo "  make agent-reach-update - Pull Agent-Reach main and update its gitlink"
 	@echo "  make clean         - Remove build artifacts"
 	@echo "  make distclean     - Remove build artifacts + dependencies"
 	@echo ""

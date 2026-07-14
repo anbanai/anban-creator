@@ -13,6 +13,8 @@ const (
 	ContainerRuntimeUser          = "1000:1000"
 	ContainerHomePath             = "/home/node"
 	DockerRuntimeHomeDirName      = ".anban-runtime-home"
+	ContainerAgentReachVenvPath   = "/opt/agent-reach-venv"
+	ContainerRuntimePath          = ContainerAgentReachVenvPath + "/bin:/usr/local/bin:/usr/bin:/bin"
 	MontageSubmoduleEnvName       = "ANBAN_MONTAGE_SUBMODULE_PATH"
 	ContainerMontageSubmodulePath = "/app/third_party/OpenMontage"
 	OrphanedContainerNameFilter   = "^/" + EphemeralContainerNamePrefix

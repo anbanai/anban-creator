@@ -182,12 +182,23 @@ func TestAgentDockerfileUsesOpenHandsAgentRuntime(t *testing.T) {
 	body := readTextFile(t, path)
 	for _, want := range []string{
 		"FROM ghcr.io/openhands/agent-server:latest-python",
-		"apt-get install -y --no-install-recommends ca-certificates curl git jq fontconfig fonts-noto-cjk python3",
+		"apt-get install -y --no-install-recommends ca-certificates curl gh git jq fontconfig fonts-noto-cjk python3 python3-venv",
+		"https://deb.nodesource.com/setup_22.x",
 		"if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then",
 		"apt-get install -y --no-install-recommends ffmpeg",
-		"npm install -g @anthropic-ai/claude-code",
+		"ARG MCPORTER_VERSION=0.9.0",
+		`npm install -g @anthropic-ai/claude-code "mcporter@${MCPORTER_VERSION}"`,
+		"mcporter --version",
+		"gh --version",
 		"COPY claudecode/",
 		"COPY third_party/OpenMontage/ /app/third_party/OpenMontage/",
+		"COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/",
+		"ENV AGENT_REACH_VENV=/opt/agent-reach-venv",
+		`python3 -m venv "$AGENT_REACH_VENV"`,
+		`--constraint /app/third_party/Agent-Reach/constraints.txt`,
+		`/app/third_party/Agent-Reach`,
+		`"$AGENT_REACH_VENV/bin/agent-reach" --version`,
+		`ENV PATH="${AGENT_REACH_VENV}/bin:${PATH}"`,
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 		"ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage",
 		"npx -y skills@latest add heygen-com/hyperframes",
@@ -228,9 +239,12 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"/usr/local/bin/anban",
 		"COPY claudecode/",
 		"COPY third_party/OpenMontage/",
+		"COPY third_party/Agent-Reach/",
+		"AGENT_REACH_VENV",
 		"CLAUDE_PLUGIN_ROOT",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
 		"npm install",
+		"mcporter",
 		"npx -y skills",
 		"claude plugin",
 	} {
@@ -254,6 +268,45 @@ func TestOpenHandsAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
 	beforeApt := body[from : from+apt]
 	if !strings.Contains(beforeApt, "USER root") {
 		t.Fatalf("%s must switch to USER root before apt-get update because the OpenHands base image may default to a non-root user", path)
+	}
+}
+
+func TestAgentReachIsBuildInstalledAndRuntimeReadOnly(t *testing.T) {
+	root := repositoryRoot(t)
+	body := readTextFile(t, filepath.Join(root, "Dockerfile.agent"))
+	for _, want := range []string{
+		`python3 -m venv "$AGENT_REACH_VENV"`,
+		`"$AGENT_REACH_VENV/bin/pip" install`,
+		`--constraint /app/third_party/Agent-Reach/constraints.txt`,
+		`"$AGENT_REACH_VENV/bin/agent-reach" --version`,
+		`"$AGENT_REACH_VENV/bin/agent-reach" doctor --json`,
+		`{"status", "active_backend", "message"}`,
+		`chown -R root:root /app/third_party/Agent-Reach "$AGENT_REACH_VENV"`,
+		`chmod -R a=rX /app/third_party/Agent-Reach "$AGENT_REACH_VENV"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Dockerfile.agent missing Agent-Reach build contract %q", want)
+		}
+	}
+	installAt := strings.Index(body, `python3 -m venv "$AGENT_REACH_VENV"`)
+	runtimeUserAt := strings.Index(body, "USER 1000:1000")
+	if installAt < 0 || runtimeUserAt < installAt {
+		t.Fatalf("Agent-Reach must be installed before switching to runtime user: install=%d user=%d", installAt, runtimeUserAt)
+	}
+	if ContainerRuntimePath != "/opt/agent-reach-venv/bin:/usr/local/bin:/usr/bin:/bin" {
+		t.Fatalf("ContainerRuntimePath = %q, want Agent-Reach venv first", ContainerRuntimePath)
+	}
+}
+
+func TestAgentReachSubmodulePathIsDeclared(t *testing.T) {
+	gitmodules := readTextFile(t, filepath.Join(repositoryRoot(t), ".gitmodules"))
+	want := "[submodule \"third_party/Agent-Reach\"]\n" +
+		"\tpath = third_party/Agent-Reach\n" +
+		"\turl = https://github.com/Panniantong/Agent-Reach.git\n" +
+		"\tbranch = main\n" +
+		"\tshallow = true\n"
+	if !strings.Contains(gitmodules, want) {
+		t.Fatalf(".gitmodules missing exact Agent-Reach submodule contract:\n%s", want)
 	}
 }
 
@@ -327,6 +380,8 @@ func TestDockerRuntimeAgentImageSnapshotsInstalledHomeState(t *testing.T) {
 	body := readTextFile(t, filepath.Join(repositoryRoot(t), "Dockerfile.agent"))
 	for _, want := range []string{
 		"ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template",
+		`printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"`,
+		`install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"`,
 		`for skill in music-to-video slideshow remotion-best-practices; do`,
 		`test -f "$HOME/.claude/skills/$skill/SKILL.md"`,
 		`cp -a "$HOME/.claude/skills/$skill/." "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill/"`,

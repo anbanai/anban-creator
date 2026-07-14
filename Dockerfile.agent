@@ -14,9 +14,12 @@ USER root
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl git jq fontconfig fonts-noto-cjk python3 tini; \
-    if ! command -v npm >/dev/null 2>&1; then \
-      apt-get install -y --no-install-recommends nodejs npm; \
+    apt-get install -y --no-install-recommends ca-certificates curl gh git jq fontconfig fonts-noto-cjk python3 python3-venv tini; \
+    if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1 || ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 20 || (major === 20 && minor >= 11) ? 0 : 1)'; then \
+      curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource-setup.sh; \
+      bash /tmp/nodesource-setup.sh; \
+      apt-get install -y --no-install-recommends nodejs; \
+      rm -f /tmp/nodesource-setup.sh; \
     fi; \
     if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then \
       apt-get install -y --no-install-recommends ffmpeg; \
@@ -26,11 +29,29 @@ RUN set -eux; \
     install -d -m 0755 -o 1000 -g 1000 /home/node; \
     rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @anthropic-ai/claude-code
+ARG MCPORTER_VERSION=0.9.0
+RUN npm install -g @anthropic-ai/claude-code "mcporter@${MCPORTER_VERSION}" && \
+    mcporter --version && \
+    gh --version
 
 COPY --from=builder /out/anban /usr/local/bin/anban
 COPY claudecode/   /anbanai/
 COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
+COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/
+
+ENV AGENT_REACH_VENV=/opt/agent-reach-venv
+
+RUN set -eux; \
+    python3 -m venv "$AGENT_REACH_VENV"; \
+    "$AGENT_REACH_VENV/bin/pip" install \
+      --no-cache-dir \
+      --constraint /app/third_party/Agent-Reach/constraints.txt \
+      /app/third_party/Agent-Reach; \
+    "$AGENT_REACH_VENV/bin/agent-reach" --version; \
+    "$AGENT_REACH_VENV/bin/agent-reach" doctor --json | \
+      "$AGENT_REACH_VENV/bin/python" -c 'import json, sys; data = json.load(sys.stdin); xhs = data["xiaohongshu"]; assert {"status", "active_backend", "message"} <= set(xhs)'; \
+    chown -R root:root /app/third_party/Agent-Reach "$AGENT_REACH_VENV"; \
+    chmod -R a=rX /app/third_party/Agent-Reach "$AGENT_REACH_VENV"
 
 RUN set -eux; \
     if [ -n "$(find /anbanai -type l -print -quit)" ]; then \
@@ -44,9 +65,13 @@ ENV CLAUDE_PLUGIN_ROOT=/anbanai
 ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template
 ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage
 ENV HOME=/home/node
+ENV PATH="${AGENT_REACH_VENV}/bin:${PATH}"
 
 USER 1000:1000
 RUN git config --global http.version HTTP/1.1
+RUN set -eux; \
+    install -d "$HOME/.config/yt-dlp"; \
+    printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"
 
 RUN npx -y skills@latest add heygen-com/hyperframes \
         --agent claude-code \
@@ -67,7 +92,8 @@ RUN claude plugin marketplace add /anbanai && \
 
 USER root
 RUN set -eux; \
-    install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache"; \
+    install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp"; \
+    install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"; \
     for skill in music-to-video slideshow remotion-best-practices; do \
       test -f "$HOME/.claude/skills/$skill/SKILL.md"; \
       install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill"; \

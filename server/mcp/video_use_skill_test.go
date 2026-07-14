@@ -191,7 +191,7 @@ func TestAgentDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 	}
 	body := string(raw)
 	for _, want := range []string{
-		"ca-certificates curl git jq fontconfig fonts-noto-cjk python3",
+		"ca-certificates curl gh git jq fontconfig fonts-noto-cjk python3 python3-venv",
 		"git config --global http.version HTTP/1.1",
 		"npx -y skills@latest add heygen-com/hyperframes",
 		"--skill music-to-video",

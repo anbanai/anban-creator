@@ -169,6 +169,9 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 	if countEnvKey(env, "HOME") != 1 || countEnvKey(env, "PATH") != 1 {
 		t.Fatalf("env = %#v, want exactly one managed HOME and PATH", env)
 	}
+	if !slices.Contains(env, "PATH="+ContainerRuntimePath) {
+		t.Fatalf("env = %#v, want Agent-Reach venv on managed PATH", env)
+	}
 
 }
 

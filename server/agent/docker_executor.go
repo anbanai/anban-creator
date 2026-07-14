@@ -375,7 +375,7 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 }
 
 func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions, runtimeHome string) []string {
-	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + runtimeHome}
+	env := []string{"PATH=" + ContainerRuntimePath, "HOME=" + runtimeHome}
 	for k, v := range e.claudeEnv {
 		if isManagedContainerEnv(k) {
 			continue

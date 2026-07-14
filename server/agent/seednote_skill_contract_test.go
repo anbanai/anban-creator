@@ -455,6 +455,8 @@ func TestSeednoteAgentUsesAgentReachForExternalXHSData(t *testing.T) {
 				"agent-reach",
 				"Agent-Reach",
 				"agent-reach doctor --json",
+				`xiaohongshu.status == "ok"`,
+				"active_backend",
 				"唯一外部数据入口",
 				"backend 顺序和可用性完全由 Agent-Reach 决定",
 				"不生成虚构热门数据",
@@ -478,6 +480,40 @@ func TestSeednoteAgentUsesAgentReachForExternalXHSData(t *testing.T) {
 	}
 }
 
+func TestAgentReachSkillsRequireHealthyBackendInManagedRuntime(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	canonicalPath := filepath.Join(root, "claudecode", "skills", "agent-reach", "SKILL.md")
+	canonicalData, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", canonicalPath, err)
+	}
+	canonical := string(canonicalData)
+	for _, want := range []string{
+		`xiaohongshu.status == "ok"`,
+		"`active_backend` alone never proves usability",
+		"OpenCLI",
+		"xiaohongshu-mcp",
+		"xhs-cli (xiaohongshu-cli)",
+		"runtime packaging fault",
+		"Do not run `pip`, `pipx`, `npm`, `agent-reach install`",
+		"channel_status",
+	} {
+		if !strings.Contains(canonical, want) {
+			t.Fatalf("%s missing managed Agent-Reach contract %q", canonicalPath, want)
+		}
+	}
+	for _, distro := range []string{"codex", "openclaw"} {
+		path := filepath.Join(root, distro, "skills", "agent-reach", "SKILL.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if string(data) != canonical {
+			t.Fatalf("%s must match %s", path, canonicalPath)
+		}
+	}
+}
+
 func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
@@ -496,7 +532,10 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 			for _, want := range []string{
 				"Agent-Reach",
 				"agent-reach doctor --json",
+				`status == "ok"`,
 				"active_backend",
+				"channel_status=ok",
+				"xhs-cli (xiaohongshu-cli)",
 				"data_source=agent-reach",
 				"backend_command_family",
 				"token_source",
