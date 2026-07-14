@@ -360,6 +360,23 @@ func TestBootstrapDownloadSigningAllowsExplicitCloneInputSource(t *testing.T) {
 	}
 }
 
+func TestBootstrapDownloadSigningAllowsUserOwnedChannelReference(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
+	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+	deadline := time.Now().Add(time.Hour)
+	ownedURL := "https://bucket.oss-cn-x.aliyuncs.com/uploads%2Fchannels%2Fuser-1%2Freference.jpg?Expires=1&Signature=redacted"
+
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: ownedURL}, deadline); err != nil {
+		t.Fatalf("user-owned channel reference rejected: %v", err)
+	}
+	otherURL := "https://bucket.oss-cn-x.aliyuncs.com/uploads%2Fchannels%2Fuser-2%2Freference.jpg"
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: otherURL}, deadline); err == nil {
+		t.Fatal("other user's channel reference accepted")
+	}
+}
+
 func TestBootstrapDownloadSigningValidatesFinalizedPendingUpload(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}

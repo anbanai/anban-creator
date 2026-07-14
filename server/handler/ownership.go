@@ -1,6 +1,6 @@
 package handler
 
-import "strings"
+import "github.com/anbanai/anban-creator/server/storage"
 
 // isUserOwnedStorageKey reports whether cleanKey points at a storage object the
 // user is allowed to access.
@@ -15,16 +15,5 @@ import "strings"
 // workspace files. Centralizing the base set + legacy prefix here keeps the
 // ownership rules from drifting across the file/task/project handlers.
 func isUserOwnedStorageKey(userID, cleanKey string, extraPrefixes ...string) bool {
-	prefixes := append([]string{
-		"uploads/projects/" + userID + "/",
-		"uploads/references/" + userID + "/",
-		"uploads/video-references/" + userID + "/",
-		"uploads/channels/" + userID + "/", // legacy channel→project rename prefix
-	}, extraPrefixes...)
-	for _, p := range prefixes {
-		if strings.HasPrefix(cleanKey, p) {
-			return true
-		}
-	}
-	return false
+	return storage.IsUserOwnedKey(userID, cleanKey, extraPrefixes...)
 }
