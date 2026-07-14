@@ -366,6 +366,12 @@ func (s *AgentBootstrapService) authorizeBootstrapObject(ctx context.Context, ta
 	if strings.HasPrefix(key, taskPrefix) || strings.HasPrefix(key, legacyTaskPrefix) {
 		return nil
 	}
+	if inputSourceTaskID := strings.TrimSpace(task.InputSourceTaskID); inputSourceTaskID != "" {
+		sourcePrefix := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", inputSourceTaskID) + "/"
+		if strings.HasPrefix(key, sourcePrefix) {
+			return nil
+		}
+	}
 	pendingPrefix := path.Join("uploads/pending", task.UserID) + "/"
 	if !strings.HasPrefix(key, pendingPrefix) || s.repo == nil {
 		return errors.New("bootstrap storage object is outside task ownership")

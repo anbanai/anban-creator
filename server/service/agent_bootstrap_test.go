@@ -334,6 +334,32 @@ func TestBootstrapDownloadSigningRequiresCanonicalTaskOwnership(t *testing.T) {
 	}
 }
 
+func TestBootstrapDownloadSigningAllowsExplicitCloneInputSource(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
+	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}}
+	task := &model.Task{ID: "clone-task", UserID: "user-1", ProjectID: "project-1", InputSourceTaskID: "source-task"}
+	deadline := time.Now().Add(time.Hour)
+	allowedKey := "uploads/users/user-1/projects/project-1/tasks/source-task/inputs/reference.png"
+	allowedURL := "https://bucket.oss-cn-x.aliyuncs.com/" + allowedKey
+
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: allowedURL}, deadline); err != nil {
+		t.Fatalf("explicit clone input source rejected: %v", err)
+	}
+	for _, key := range []string{
+		"uploads/users/user-1/projects/project-1/tasks/other-task/inputs/reference.png",
+		"uploads/users/user-1/projects/other-project/tasks/source-task/inputs/reference.png",
+		"uploads/users/other-user/projects/project-1/tasks/source-task/inputs/reference.png",
+	} {
+		if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: "https://bucket.oss-cn-x.aliyuncs.com/" + key}, deadline); err == nil {
+			t.Fatalf("unrelated clone source accepted: %s", key)
+		}
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != allowedKey {
+		t.Fatalf("signed keys = %v, want only explicit source", store.signedKeys)
+	}
+}
+
 func TestBootstrapDownloadSigningValidatesFinalizedPendingUpload(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}

@@ -2478,12 +2478,42 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	if clone.Prompt != src.Prompt || clone.ImageRatio != src.ImageRatio || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode {
 		t.Fatalf("clone config = prompt %q ratio %q goal %q mode %v, want source config", clone.Prompt, clone.ImageRatio, clone.Goal, clone.GoalMode)
 	}
+	if clone.InputSourceTaskID != src.ID {
+		t.Fatalf("clone input source = %q, want %q", clone.InputSourceTaskID, src.ID)
+	}
 	foundSrc, err := repo.Tasks().FindByID(ctx, src.ID)
 	if err != nil {
 		t.Fatalf("find source task: %v", err)
 	}
 	if foundSrc.Status != model.TaskStatusCompleted {
 		t.Fatalf("source status = %q, want completed", foundSrc.Status)
+	}
+}
+
+func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	src := &model.Task{
+		ID:                uuid.NewString(),
+		UserID:            userID,
+		ProjectID:         projectID,
+		Type:              model.PlatformArticle,
+		Status:            model.TaskStatusCompleted,
+		Prompt:            "clone lineage",
+		InputSourceTaskID: "root-task-id",
+	}
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	clone, err := svc.Clone(ctx, src.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clone.InputSourceTaskID != "root-task-id" {
+		t.Fatalf("clone input source = %q, want root-task-id", clone.InputSourceTaskID)
 	}
 }
 

@@ -38,6 +38,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 
 	overrides := src.Overrides.Data()
 	snapshot := src.ProjectSnapshot.Data()
+	inputSourceTaskID := src.InputSourceTaskID
+	if inputSourceTaskID == "" {
+		inputSourceTaskID = src.ID
+	}
 	params := CreateManualParams{
 		UserID:                   src.UserID,
 		ProjectID:                src.ProjectID,
@@ -47,6 +51,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		ImageModelKey:            src.ImageModelKey,
 		SkipRefImage:             &skipRef,
 		ReferenceImageURL:        src.ReferenceImageURL,
+		InputSourceTaskID:        inputSourceTaskID,
 		Overrides:                &overrides,
 		ProjectSnapshot:          &snapshot,
 		Watermark:                &watermark,
