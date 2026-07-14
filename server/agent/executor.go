@@ -838,9 +838,6 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 					}
 				}
 			case *claudecode.ResultMessage:
-				if !pluginInitValidated {
-					return fmt.Errorf("managed plugin readiness failed: Claude Code did not emit system/init")
-				}
 				resultMsg = m
 				if m.IsError {
 					errMsg := ResultMessageError(m, lastToolErrorTool, lastToolError)
@@ -854,6 +851,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 						Msg("agent returned error result")
 					execErr = fmt.Errorf("agent execution failed: %s", errMsg)
 					return execErr
+				}
+				if err := ValidateManagedPluginResult(pluginInitValidated, m); err != nil {
+					return err
 				}
 				// Log successful execution summary.
 				completeEvt := e.logger.Info().
@@ -896,7 +896,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 				return nil
 			}
 		}
-		return nil
+		return ValidateManagedPluginResult(pluginInitValidated, nil)
 	},
 		sdkOpts...,
 	)

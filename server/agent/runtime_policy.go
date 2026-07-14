@@ -79,6 +79,14 @@ func WithManagedMCPAccess(serverURL, apiKey string) claudecode.Option {
 		if !containsString(opts.AllowedTools, "mcp__"+ManagedMCPServerName+"__*") {
 			opts.AllowedTools = append(opts.AllowedTools, "mcp__"+ManagedMCPServerName+"__*")
 		}
+		// The Agent SDK exposes skipMcpDiscovery when the host application owns
+		// a plugin's MCP connection. The current Go SDK does not, so use Claude
+		// Code's strict flag to ignore plugin/user MCP configs
+		// and retain only the execution-token-scoped --mcp-config above.
+		if opts.ExtraArgs == nil {
+			opts.ExtraArgs = make(map[string]*string)
+		}
+		opts.ExtraArgs["strict-mcp-config"] = nil
 	}
 }
 
@@ -105,6 +113,9 @@ func ValidateManagedMCPStatus(status *claudecode.McpStatusResponse, taskType str
 			detail = ": " + strings.TrimSpace(*managed.Error)
 		}
 		return fmt.Errorf("managed MCP readiness failed: server %q status is %q%s", ManagedMCPServerName, managed.Status, detail)
+	}
+	if len(managed.Tools) == 0 {
+		return fmt.Errorf("managed MCP readiness failed: server %q exposed no tools", ManagedMCPServerName)
 	}
 
 	available := make(map[string]bool, len(managed.Tools))
@@ -137,10 +148,38 @@ func ValidateManagedPluginInit(message *claudecode.SystemMessage, taskType strin
 	if !initPluginNames(message.Data["plugins"])["anban"] {
 		return fmt.Errorf("managed plugin readiness failed: plugin %q is not loaded", "anban")
 	}
-	if strings.TrimSpace(taskType) == "seednote" {
-		if !initStringValues(message.Data["skills"])["anban:seednote"] {
-			return fmt.Errorf("managed plugin readiness failed: skill %q is not loaded", "anban:seednote")
+	loadedSkills := initStringValues(message.Data["skills"])
+	for _, skill := range managedRequiredPluginSkills(taskType) {
+		if !loadedSkills[skill] {
+			return fmt.Errorf("managed plugin readiness failed: skill %q is not loaded", skill)
 		}
+	}
+	return nil
+}
+
+func managedRequiredPluginSkills(taskType string) []string {
+	switch strings.TrimSpace(taskType) {
+	case "seednote":
+		return []string{"anban:seednote", "anban:humanizer"}
+	case "article", "ecommerce":
+		return []string{"anban:humanizer"}
+	default:
+		return nil
+	}
+}
+
+// ValidateManagedPluginResult applies the plugin-init gate only to successful
+// Claude Code results. Protocol errors must retain their original diagnostic,
+// while a stream that closes without a result is always invalid.
+func ValidateManagedPluginResult(initValidated bool, message *claudecode.ResultMessage) error {
+	if message == nil {
+		return fmt.Errorf("managed agent stream ended without a result message")
+	}
+	if message.IsError {
+		return nil
+	}
+	if !initValidated {
+		return fmt.Errorf("managed plugin readiness failed: Claude Code did not emit system/init")
 	}
 	return nil
 }
@@ -204,9 +243,13 @@ func managedMCPBoundaryHook() claudecode.Option {
 		if !probesMCP {
 			return claudecode.HookJSONOutput{}, nil
 		}
-		decision := "block"
+		decision := "deny"
 		reason := "Anban MCP must be called through the Claude Code MCP tools injected by the Agent SDK. Do not probe /mcp or build a custom client. If the native tools are unavailable, record the recoverable failure and stop."
-		return claudecode.HookJSONOutput{Decision: &decision, Reason: &reason}, nil
+		return claudecode.HookJSONOutput{HookSpecificOutput: claudecode.PreToolUseHookSpecificOutput{
+			HookEventName:            "PreToolUse",
+			PermissionDecision:       &decision,
+			PermissionDecisionReason: &reason,
+		}}, nil
 	})
 }
 

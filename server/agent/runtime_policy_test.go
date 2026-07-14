@@ -54,7 +54,9 @@ func TestManagedAgentRuntimePolicyUsesExplicitAllowedTools(t *testing.T) {
 }
 
 func TestWithManagedMCPAccessUsesProgrammaticHTTPServer(t *testing.T) {
+	agentName := "anban:seednote"
 	opts := claudecode.NewOptions(
+		claudecode.WithExtraArgs(map[string]*string{"agent": &agentName}),
 		WithManagedAgentRuntimePolicy(),
 		WithManagedMCPAccess("https://server.example.com/", "execution-jwt"),
 	)
@@ -64,6 +66,12 @@ func TestWithManagedMCPAccessUsesProgrammaticHTTPServer(t *testing.T) {
 	}
 	if server.URL != "https://server.example.com/mcp" || server.Headers["Authorization"] != "Bearer execution-jwt" {
 		t.Fatalf("server = %#v", server)
+	}
+	if _, ok := opts.ExtraArgs["strict-mcp-config"]; !ok {
+		t.Fatalf("ExtraArgs = %#v, want strict-mcp-config for application-owned MCP", opts.ExtraArgs)
+	}
+	if opts.ExtraArgs["agent"] == nil || *opts.ExtraArgs["agent"] != agentName {
+		t.Fatalf("ExtraArgs = %#v, managed MCP must preserve the main Agent flag", opts.ExtraArgs)
 	}
 }
 
@@ -80,7 +88,11 @@ func TestManagedAgentRuntimePolicyBlocksAdHocMCPClients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("callback: %v", err)
 	}
-	if result.Decision == nil || *result.Decision != "block" || result.Reason == nil || !strings.Contains(*result.Reason, "Claude Code MCP tools") {
+	if result.Decision != nil || result.Reason != nil {
+		t.Fatalf("result = %#v, PreToolUse must not use deprecated top-level decision fields", result)
+	}
+	specific, ok := result.HookSpecificOutput.(claudecode.PreToolUseHookSpecificOutput)
+	if !ok || specific.HookEventName != "PreToolUse" || specific.PermissionDecision == nil || *specific.PermissionDecision != "deny" || specific.PermissionDecisionReason == nil || !strings.Contains(*specific.PermissionDecisionReason, "Claude Code MCP tools") {
 		t.Fatalf("result = %#v, want ad hoc MCP client block", result)
 	}
 }
@@ -112,20 +124,41 @@ func TestValidateManagedMCPStatusRejectsDisconnectedServer(t *testing.T) {
 	}
 }
 
-func TestValidateManagedPluginInitRequiresAnbanSeednoteSkill(t *testing.T) {
-	message := &claudecode.SystemMessage{
-		Subtype: "init",
-		Data: map[string]any{
-			"plugins": []any{map[string]any{"name": "anban", "path": "/plugins/anban"}},
-			"skills":  []any{"anban:seednote", "anban:seednote-writing"},
-		},
+func TestValidateManagedMCPStatusRejectsConnectedServerWithoutTools(t *testing.T) {
+	status := &claudecode.McpStatusResponse{McpServers: []claudecode.McpServerStatus{{
+		Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusConnected,
+	}}}
+	if err := ValidateManagedMCPStatus(status, "article"); err == nil || !strings.Contains(err.Error(), "exposed no tools") {
+		t.Fatalf("error = %v, want empty tool inventory failure", err)
 	}
-	if err := ValidateManagedPluginInit(message, "seednote"); err != nil {
-		t.Fatalf("ValidateManagedPluginInit: %v", err)
-	}
-	message.Data["skills"] = []any{"anban:seednote-writing"}
-	if err := ValidateManagedPluginInit(message, "seednote"); err == nil || !strings.Contains(err.Error(), "anban:seednote") {
-		t.Fatalf("error = %v, want missing Seednote skill", err)
+}
+
+func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
+	for _, tc := range []struct {
+		taskType string
+		skills   []any
+		missing  string
+	}{
+		{taskType: "seednote", skills: []any{"anban:seednote", "anban:humanizer"}, missing: "anban:seednote"},
+		{taskType: "article", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},
+		{taskType: "ecommerce", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},
+	} {
+		t.Run(tc.taskType, func(t *testing.T) {
+			message := &claudecode.SystemMessage{
+				Subtype: "init",
+				Data: map[string]any{
+					"plugins": []any{map[string]any{"name": "anban", "path": "/plugins/anban"}},
+					"skills":  tc.skills,
+				},
+			}
+			if err := ValidateManagedPluginInit(message, tc.taskType); err != nil {
+				t.Fatalf("ValidateManagedPluginInit: %v", err)
+			}
+			message.Data["skills"] = []any{}
+			if err := ValidateManagedPluginInit(message, tc.taskType); err == nil || !strings.Contains(err.Error(), tc.missing) {
+				t.Fatalf("error = %v, want missing skill %s", err, tc.missing)
+			}
+		})
 	}
 }
 
@@ -135,6 +168,21 @@ func TestValidateManagedPluginInitRequiresAnbanPlugin(t *testing.T) {
 	}}
 	if err := ValidateManagedPluginInit(message, "article"); err == nil || !strings.Contains(err.Error(), "anban") {
 		t.Fatalf("error = %v, want missing plugin", err)
+	}
+}
+
+func TestValidateManagedPluginResultPreservesProtocolErrorsAndFailsClosed(t *testing.T) {
+	if err := ValidateManagedPluginResult(false, &claudecode.ResultMessage{IsError: true}); err != nil {
+		t.Fatalf("protocol error must retain its original diagnostic: %v", err)
+	}
+	if err := ValidateManagedPluginResult(false, &claudecode.ResultMessage{}); err == nil || !strings.Contains(err.Error(), "system/init") {
+		t.Fatalf("successful result without init error = %v", err)
+	}
+	if err := ValidateManagedPluginResult(true, nil); err == nil || !strings.Contains(err.Error(), "without a result message") {
+		t.Fatalf("missing result error = %v", err)
+	}
+	if err := ValidateManagedPluginResult(true, &claudecode.ResultMessage{}); err != nil {
+		t.Fatalf("validated successful result: %v", err)
 	}
 }
 
@@ -162,5 +210,14 @@ func TestManagedAgentExecutorsUseRuntimePolicy(t *testing.T) {
 	}
 	if strings.Contains(localExecutor, "claudecode.WithAgent(agentName") {
 		t.Fatal("local executor must not register the workflow agent as a delegatable subagent")
+	}
+	for _, path := range []string{"executor.go", "../../agent/runner.go"} {
+		body := readRepoFile(t, path)
+		if !strings.Contains(body, "claudecode.WithPermissionMode(claudecode.PermissionModeDefault)") {
+			t.Fatalf("%s must use default permission evaluation with the managed fail-closed callback", path)
+		}
+		if strings.Contains(body, "claudecode.PermissionModeBypassPermissions") {
+			t.Fatalf("%s must not bypass the managed allowlist", path)
+		}
 	}
 }

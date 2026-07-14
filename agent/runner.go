@@ -102,9 +102,6 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 					}
 				}
 			case *claudecode.ResultMessage:
-				if !pluginInitValidated {
-					return errors.New("managed plugin readiness failed: Claude Code did not emit system/init")
-				}
 				result.Success = !m.IsError
 				result.ResultSubtype = m.Subtype
 				result.LogText = resultText
@@ -121,6 +118,9 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 					serveragent.PopulateUsageFields(result, m)
 					return errors.New(result.Error)
 				}
+				if err := serveragent.ValidateManagedPluginResult(pluginInitValidated, m); err != nil {
+					return err
+				}
 				serveragent.PopulateUsageFields(result, m)
 				if toolUseCount == 0 {
 					result.AgentLikelyFailed = true
@@ -128,7 +128,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				return nil
 			}
 		}
-		return nil
+		return serveragent.ValidateManagedPluginResult(pluginInitValidated, nil)
 	}, sdkOpts...)
 	if err != nil {
 		if result.Error == "" {
