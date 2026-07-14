@@ -73,6 +73,9 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.ActiveDeadlineSeconds != 3600 {
 		t.Fatal("active deadline")
 	}
+	if cfg.Claude.Kubernetes.HeartbeatTimeoutSeconds != 180 {
+		t.Fatal("heartbeat timeout")
+	}
 	if cfg.Claude.Kubernetes.CompletionGraceSeconds != 30 {
 		t.Fatal("completion grace")
 	}
@@ -125,6 +128,16 @@ func TestValidateKubernetesResourceProfiles(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateKubernetesHeartbeatTimeout(t *testing.T) {
+	for _, timeout := range []int64{59, 3600} {
+		cfg := baseKubernetesConfigForTest()
+		cfg.Claude.Kubernetes.HeartbeatTimeoutSeconds = timeout
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "heartbeat_timeout_seconds") {
+			t.Fatalf("timeout=%d Validate() error = %v", timeout, err)
+		}
 	}
 }
 

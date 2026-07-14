@@ -438,8 +438,10 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 	// alive by HandleExecution's HeartbeatFunc, so this is a harmless redundant
 	// refresh there. Without it, a long-running local task would be force-failed
 	// by reapStuckTasks (plan_checker.go) before it completes.
-	if err := h.taskSvc.UpdateHeartbeat(c.Context(), req.TaskID); err != nil {
-		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("failed to update task heartbeat")
+	executionID := h.authenticatedExecutionID(c)
+	if err := h.taskSvc.UpdateAgentHeartbeat(c.Context(), req.TaskID, executionID); err != nil {
+		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to update agent heartbeat")
+		return Error(c, fiber.StatusInternalServerError, "failed to persist heartbeat")
 	}
 
 	if req.Message != "" {

@@ -1148,6 +1148,7 @@ type KubernetesConfig struct {
 	MemoryStorageClass      string                              `yaml:"memory_storage_class"`
 	MemorySize              string                              `yaml:"memory_size"`
 	ActiveDeadlineSeconds   int64                               `yaml:"active_deadline_seconds"`
+	HeartbeatTimeoutSeconds int64                               `yaml:"heartbeat_timeout_seconds"`
 	CompletionGraceSeconds  int                                 `yaml:"completion_grace_seconds"`
 	completionGraceSet      bool                                `yaml:"-"`
 	TTLSecondsAfterFinished int32                               `yaml:"ttl_seconds_after_finished"`
@@ -1680,6 +1681,9 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.ActiveDeadlineSeconds == 0 {
 		c.Claude.Kubernetes.ActiveDeadlineSeconds = 3600
 	}
+	if c.Claude.Kubernetes.HeartbeatTimeoutSeconds == 0 {
+		c.Claude.Kubernetes.HeartbeatTimeoutSeconds = 180
+	}
 	if c.Claude.Kubernetes.CompletionGraceSeconds == 0 && !c.Claude.Kubernetes.completionGraceSet {
 		c.Claude.Kubernetes.CompletionGraceSeconds = 30
 	}
@@ -2200,6 +2204,9 @@ func (c *Config) Validate() error {
 		}
 		if c.Claude.Kubernetes.ActiveDeadlineSeconds <= 0 {
 			errs = append(errs, "claude.kubernetes.active_deadline_seconds must be positive")
+		}
+		if c.Claude.Kubernetes.HeartbeatTimeoutSeconds < 60 || c.Claude.Kubernetes.HeartbeatTimeoutSeconds >= c.Claude.Kubernetes.ActiveDeadlineSeconds {
+			errs = append(errs, "claude.kubernetes.heartbeat_timeout_seconds must be at least 60 and less than active_deadline_seconds")
 		}
 		if c.Claude.Kubernetes.TTLSecondsAfterFinished <= 0 {
 			errs = append(errs, "claude.kubernetes.ttl_seconds_after_finished must be positive")

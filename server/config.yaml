@@ -425,6 +425,8 @@ claude:
     memory_size: "${ANBAN_AGENT_MEMORY_SIZE:-1Gi}"
     # Job 执行截止时间与 agent 上报完成后的退出宽限期，单位秒。
     active_deadline_seconds: 3600
+    # Agent 每 30 秒上报心跳；连续 3 分钟不可达后由 Kubernetes Reconciler 终止。
+    heartbeat_timeout_seconds: 180
     completion_grace_seconds: 30
     # 已完成 Job 的自动清理时间，单位秒。
     ttl_seconds_after_finished: 600

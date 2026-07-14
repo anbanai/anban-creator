@@ -194,6 +194,27 @@ func TestKubernetesReconcilerGracesAndItemIsolation(t *testing.T) {
 	}
 }
 
+func TestKubernetesReconcilerUsesExecutionHeartbeat(t *testing.T) {
+	now := time.Now()
+	started := now.Add(-10 * time.Minute)
+	heartbeat := now.Add(-4 * time.Minute)
+	execution := &model.TaskExecution{ID: "stale-heartbeat", Status: model.TaskExecutionRunning, Started: true, StartedAt: &started, LastHeartbeatAt: &heartbeat}
+	dispatcher := &reconcileTestDispatcher{states: map[string]*KubernetesExecutionState{
+		execution.ID: {Phase: kubernetesPhaseRunning},
+	}, errs: map[string]error{}}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	reconciler := NewKubernetesReconciler(dispatcher, service, KubernetesReconcilerConfig{HeartbeatTimeout: 3 * time.Minute}, nil)
+	reconciler.now = func() time.Time { return now }
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if len(service.failures) != 1 || service.failures[0].reason != "heartbeat_timeout" || service.failures[0].status != model.TaskExecutionTimedOut {
+		t.Fatalf("failures = %#v", service.failures)
+	}
+}
+
 func TestKubernetesReconcilerRunStopsWithContext(t *testing.T) {
 	dispatcher := &reconcileTestDispatcher{states: map[string]*KubernetesExecutionState{}, errs: map[string]error{}}
 	service := &reconcileTestService{}

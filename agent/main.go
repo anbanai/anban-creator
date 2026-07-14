@@ -88,7 +88,7 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 	defer stop()
 
 	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
-	heartbeatDone := startHeartbeat(heartbeatCtx, reporter)
+	heartbeatDone := startHeartbeat(heartbeatCtx, reporter, stderr)
 	defer func() {
 		stopHeartbeat()
 		<-heartbeatDone
@@ -190,11 +190,29 @@ func (w finalizationWindow) completionContext() (context.Context, context.Cancel
 	return context.WithCancel(context.Background())
 }
 
-func startHeartbeat(ctx context.Context, reporter *Reporter) <-chan struct{} {
+func startHeartbeat(ctx context.Context, reporter *Reporter, stderr io.Writer) <-chan struct{} {
+	if stderr == nil {
+		stderr = io.Discard
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = reporter.ReportHeartbeat(ctx)
+		failures := 0
+		report := func() {
+			err := reporter.ReportHeartbeat(ctx)
+			if err == nil {
+				if failures > 0 {
+					fmt.Fprintf(stderr, "agent heartbeat restored after %d failure(s)\n", failures)
+				}
+				failures = 0
+				return
+			}
+			failures++
+			if failures == 1 || failures%5 == 0 {
+				fmt.Fprintf(stderr, "agent heartbeat failed (%d consecutive): %v\n", failures, err)
+			}
+		}
+		report()
 		ticker := time.NewTicker(agentHeartbeatInterval)
 		defer ticker.Stop()
 		for {
@@ -202,7 +220,7 @@ func startHeartbeat(ctx context.Context, reporter *Reporter) <-chan struct{} {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = reporter.ReportHeartbeat(ctx)
+				report()
 			}
 		}
 	}()

@@ -435,6 +435,30 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 	return app, repo, task, executionID, token, rawAPIKey, store.fakeAgentArtifactStorage
 }
 
+func TestAgentProgressRefreshesTaskAndExecutionHeartbeats(t *testing.T) {
+	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentApp(t)
+	req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`"}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("heartbeat status = %d, want 200", resp.StatusCode)
+	}
+	foundTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundTask.LastHeartbeatAt == nil || foundExecution.LastHeartbeatAt == nil {
+		t.Fatalf("heartbeats task=%v execution=%v", foundTask.LastHeartbeatAt, foundExecution.LastHeartbeatAt)
+	}
+}
+
 func agentJSONRequest(path, body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

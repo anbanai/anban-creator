@@ -185,3 +185,25 @@ func TestTriggerPlanNowSkipsInactivePlanWithoutRetryableError(t *testing.T) {
 		t.Fatalf("enqueued %d items, want none", len(enqueuer.items))
 	}
 }
+
+func TestStuckTaskReaperSkipsDurableExecution(t *testing.T) {
+	repo, taskSvc, _, logger := setupPlanCheckerTest(t)
+	ctx := context.Background()
+	stale := time.Now().Add(-stuckTaskThreshold - time.Minute)
+	executionID := uuid.NewString()
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformSeednote,
+		Status: model.TaskStatusRunning, StartedAt: &stale, CurrentExecutionID: &executionID,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	reapStuckTasks(ctx, repo, taskSvc, logger)
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.TaskStatusRunning {
+		t.Fatalf("durable execution was reaped: status=%q error=%q", found.Status, found.ErrorMessage)
+	}
+}

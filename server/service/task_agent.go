@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 // ValidateAgentTaskAccess loads a task and verifies that the authenticated agent
@@ -52,6 +54,27 @@ func (s *TaskService) ValidateAgentExecutionAccess(ctx context.Context, userID, 
 func (s *TaskService) UpdateHeartbeat(ctx context.Context, taskID string) error {
 	if err := s.repo.Tasks().UpdateHeartbeat(ctx, taskID); err != nil {
 		return fmt.Errorf("update heartbeat: %w", err)
+	}
+	return nil
+}
+
+// UpdateAgentHeartbeat atomically refreshes both the task-level compatibility
+// heartbeat and the durable execution heartbeat used by KubernetesReconciler.
+func (s *TaskService) UpdateAgentHeartbeat(ctx context.Context, taskID, executionID string) error {
+	if strings.TrimSpace(executionID) == "" {
+		return s.UpdateHeartbeat(ctx, taskID)
+	}
+	now := time.Now()
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.TaskExecutions().UpdateHeartbeat(ctx, executionID, now); err != nil {
+			return fmt.Errorf("update execution heartbeat: %w", err)
+		}
+		if err := tx.Tasks().UpdateHeartbeat(ctx, taskID); err != nil {
+			return fmt.Errorf("update task heartbeat: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("update agent heartbeat: %w", err)
 	}
 	return nil
 }

@@ -353,6 +353,7 @@ func main() {
 			projectSvc.SetProjectMemoryLifecycle(kubeDispatcher)
 			kubeReconciler = agent.NewKubernetesReconciler(kubeDispatcher, taskSvc, agent.KubernetesReconcilerConfig{
 				PreStartRetryLimit: cfg.Claude.Kubernetes.PreStartRetryLimit,
+				HeartbeatTimeout:   time.Duration(cfg.Claude.Kubernetes.HeartbeatTimeoutSeconds) * time.Second,
 			}, log)
 			taskSvc.SetNASResumeEnabled(true)
 			taskSvc.SetProjectConcurrencyCap(1)
