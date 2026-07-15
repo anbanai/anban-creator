@@ -504,6 +504,9 @@ func main() {
 		}
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
+		if store != nil {
+			taskHandler.SetStore(store)
+		}
 		seednoteAnalyticsHandler = buildSeednoteAnalyticsHandler(repo, log)
 		if ilinkBindingSvc != nil {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
@@ -551,6 +554,7 @@ func main() {
 			uploadHandler = handler.NewUploadHandler(store, repo.PendingUploads(), service.DirectUploadConfig{
 				Storage: cfg.Storage,
 			}, log)
+			uploadHandler.SetRepository(repo)
 		}
 		if aiEntrySvc != nil {
 			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo.PendingUploads(), store, log)

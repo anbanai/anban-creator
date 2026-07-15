@@ -22,6 +22,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (
@@ -40,6 +41,7 @@ type TaskHandler struct {
 	taskLogDir   string // task log directory (for GetLog)
 	imagePresets []config.ImageModelPreset
 	repo         repository.Repository
+	store        storage.Provider
 }
 
 // NewTaskHandler creates a new TaskHandler.
@@ -68,6 +70,12 @@ func (h *TaskHandler) SetImagePresets(presets []config.ImageModelPreset) {
 // tier for image-model validation.
 func (h *TaskHandler) SetRepository(repo repository.Repository) {
 	h.repo = repo
+}
+
+// SetStore wires storage ownership checks used by response-only key
+// serialization. It never signs or mutates task model fields.
+func (h *TaskHandler) SetStore(store storage.Provider) {
+	h.store = store
 }
 
 // Request types.
@@ -332,9 +340,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	// Montage is always a single deliverable and Studio expects one task
 	// object even when the request quantity is clamped by the service.
 	if len(tasks) == 1 && (quantity == 1 || req.MontageInput != nil) {
-		return Success(c, taskAPIResponse(tasks[0]))
+		return Success(c, taskAPIResponse(tasks[0], h.store))
 	}
-	return Success(c, taskAPIResponses(tasks))
+	return Success(c, taskAPIResponses(tasks, h.store))
 }
 
 // List handles GET /api/v1/tasks.
@@ -364,7 +372,7 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{
-		"items": taskAPIResponses(tasks),
+		"items": taskAPIResponses(tasks, h.store),
 		"total": total,
 	})
 }
@@ -390,7 +398,7 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	resp := taskAPIResponse(task)
+	resp := taskAPIResponse(task, h.store)
 	if h.repo != nil {
 		if tx, err := h.repo.Credits().FindDeductionByTaskID(c.Context(), task.ID); err == nil && tx != nil && tx.Amount < 0 {
 			charged := -tx.Amount
@@ -511,7 +519,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
 	}
 
-	return Success(c, taskAPIResponse(newTask))
+	return Success(c, taskAPIResponse(newTask, h.store))
 }
 
 // Resume handles POST /api/v1/tasks/:id/resume.
@@ -606,7 +614,7 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		}
 	}
 
-	return Success(c, taskAPIResponse(task))
+	return Success(c, taskAPIResponse(task, h.store))
 }
 
 func formFiles(form *multipart.Form, key string) []*multipart.FileHeader {
