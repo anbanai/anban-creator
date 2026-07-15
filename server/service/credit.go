@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/rs/zerolog"
@@ -26,9 +27,10 @@ var (
 
 // CreditService handles credits/points business logic.
 type CreditService struct {
-	repo   repository.Repository
-	cfg    *config.CreditsConfig
-	logger *zerolog.Logger
+	repo    repository.Repository
+	cfg     *config.CreditsConfig
+	fullCfg *config.Config
+	logger  *zerolog.Logger
 }
 
 // NewCreditService creates a new CreditService.
@@ -42,6 +44,7 @@ func (s *CreditService) SetFullConfig(cfg *config.Config) {
 	if s == nil || cfg == nil {
 		return
 	}
+	s.fullCfg = cfg
 	s.cfg = normalizeCreditsConfig(&cfg.Credits)
 }
 
@@ -888,15 +891,204 @@ func (s *CreditService) RefundAgentRuntimeReserve(ctx context.Context, taskID, d
 	return s.refundAgentRuntimeReserve(ctx, taskID, description, nil)
 }
 
-// SettleAgentRuntime used to reconcile Claude Code runtime cost against an
-// upfront reserve. Runtime cost is now platform-paid, so settlement only clears
-// legacy payment-required locks and never creates user-facing credit
-// transactions.
-func (s *CreditService) SettleAgentRuntime(ctx context.Context, task *model.Task, _ *serveragent.ExecutionResult) error {
+// SettleAgentRuntime charges the actual Claude Code runtime usage in addition
+// to the fixed task service fee. It is idempotent by task ID and may overdraft
+// because the provider cost has already occurred by settlement time.
+func (s *CreditService) SettleAgentRuntime(ctx context.Context, task *model.Task, result *serveragent.ExecutionResult) error {
 	if s == nil || task == nil {
 		return nil
 	}
-	return s.repo.Tasks().UpdateBillingStatus(ctx, task.ID, model.TaskBillingStatusSettled, 0)
+	operationID := agentRuntimeSettlementOperationID(task.ID)
+	if _, err := s.repo.Credits().FindByOperationID(ctx, operationID); err == nil {
+		return s.repo.Tasks().UpdateBillingStatus(ctx, task.ID, model.TaskBillingStatusSettled, 0)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("check runtime settlement: %w", err)
+	}
+	if !agentRuntimeResultHasUsage(result) {
+		if s.logger != nil {
+			s.logger.Warn().Str("task_id", task.ID).Msg("agent runtime result has no billable usage")
+		}
+		return s.repo.Tasks().UpdateBillingStatus(ctx, task.ID, model.TaskBillingStatusSettled, 0)
+	}
+
+	credits, metadata, err := s.calculateAgentRuntimeCredits(ctx, task, result)
+	if err != nil {
+		return err
+	}
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("marshal runtime metadata: %w", err)
+	}
+
+	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		if _, err := txRepo.Credits().FindByOperationID(ctx, operationID); err == nil {
+			return txRepo.Tasks().UpdateBillingStatus(ctx, task.ID, model.TaskBillingStatusSettled, 0)
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("check runtime settlement: %w", err)
+		}
+		newBalance, err := txRepo.Users().AdjustBalance(ctx, task.UserID, -credits)
+		if err != nil {
+			return fmt.Errorf("deduct runtime credits: %w", err)
+		}
+		taskIDCopy, operationIDCopy := task.ID, operationID
+		tx := &model.CreditTransaction{
+			UserID:       task.UserID,
+			Type:         model.CreditTypeAgentRuntime,
+			Amount:       -credits,
+			BalanceAfter: newBalance,
+			TaskID:       &taskIDCopy,
+			OperationID:  &operationIDCopy,
+			Description:  fmt.Sprintf("Claude Code 运行成本扣除积分%d", credits),
+			Metadata:     datatypes.JSON(metadataJSON),
+		}
+		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
+			return fmt.Errorf("create runtime settlement: %w", err)
+		}
+		return txRepo.Tasks().UpdateBillingStatus(ctx, task.ID, model.TaskBillingStatusSettled, 0)
+	})
+}
+
+func agentRuntimeResultHasUsage(result *serveragent.ExecutionResult) bool {
+	if result == nil {
+		return false
+	}
+	if result.TotalCostUSD != nil && *result.TotalCostUSD > 0 {
+		return true
+	}
+	if result.TokenUsage == nil {
+		return false
+	}
+	return result.TokenUsage.InputTokens > 0 ||
+		result.TokenUsage.OutputTokens > 0 ||
+		result.TokenUsage.CacheReadTokens > 0 ||
+		result.TokenUsage.CacheCreationTokens > 0
+}
+
+func (s *CreditService) calculateAgentRuntimeCredits(ctx context.Context, task *model.Task, result *serveragent.ExecutionResult) (int, model.CreditTransactionMetadata, error) {
+	if s.fullCfg == nil {
+		return 0, model.CreditTransactionMetadata{}, fmt.Errorf("agent runtime billing config is not initialized")
+	}
+	user, err := s.repo.Users().FindByID(ctx, task.UserID)
+	if err != nil {
+		return 0, model.CreditTransactionMetadata{}, fmt.Errorf("find user for runtime billing: %w", err)
+	}
+	tier := model.NormalizeTier(string(user.Tier))
+	userMultiplier := 1.0
+	if user.BillingMultiplier != nil && *user.BillingMultiplier > 0 {
+		userMultiplier = *user.BillingMultiplier
+	}
+	provider := "anthropic"
+	modelName := result.Model
+	if modelName == "" {
+		modelName = s.fullCfg.Claude.Model
+	}
+	metadata := model.CreditTransactionMetadata{
+		Provider:      provider,
+		Model:         modelName,
+		SessionID:     result.SessionID,
+		NumTurns:      result.NumTurns,
+		DurationAPIMs: result.DurationAPIMs,
+		TotalCostUSD:  result.TotalCostUSD,
+		BillingSource: "claude_code_result",
+	}
+	if result.TokenUsage != nil {
+		metadata.InputTokens = int64(result.TokenUsage.InputTokens)
+		metadata.OutputTokens = int64(result.TokenUsage.OutputTokens)
+		metadata.CachedInputTokens = int64(result.TokenUsage.CacheReadTokens)
+		metadata.CacheReadInputTokens = int64(result.TokenUsage.CacheReadTokens)
+		metadata.CacheCreationInputTokens = int64(result.TokenUsage.CacheCreationTokens)
+		metadata.TotalTokens = int64(result.TokenUsage.InputTokens + result.TokenUsage.OutputTokens + result.TokenUsage.CacheReadTokens + result.TokenUsage.CacheCreationTokens)
+	}
+	if result.TotalCostUSD != nil && *result.TotalCostUSD > 0 {
+		baseCredits, finalCredits, tierMultiplier, priceSnapshot, err := s.calculateUSDRunCredits(*result.TotalCostUSD, string(tier), userMultiplier)
+		if err != nil {
+			return 0, model.CreditTransactionMetadata{}, err
+		}
+		metadata.BaseCredits = baseCredits
+		metadata.FinalCredits = finalCredits
+		metadata.TierMultiplier = tierMultiplier
+		metadata.UserMultiplier = userMultiplier
+		metadata.PriceSnapshot = priceSnapshot
+		return finalCredits, metadata, nil
+	}
+
+	usage := config.TokenUsage{
+		InputTokens:              int64(result.TokenUsage.InputTokens),
+		OutputTokens:             int64(result.TokenUsage.OutputTokens),
+		CacheReadInputTokens:     int64(result.TokenUsage.CacheReadTokens),
+		CacheCreationInputTokens: int64(result.TokenUsage.CacheCreationTokens),
+		TotalTokens:              metadata.TotalTokens,
+	}
+	cost, err := s.fullCfg.CalculateTokenModelCredits(provider, modelName, usage, string(tier), userMultiplier)
+	if err != nil {
+		provider = "claude"
+		cost, err = s.fullCfg.CalculateTokenModelCredits(provider, modelName, usage, string(tier), userMultiplier)
+		if err != nil {
+			return 0, model.CreditTransactionMetadata{}, err
+		}
+	}
+	metadata.Provider = provider
+	metadata.BaseCredits = cost.BaseCredits
+	metadata.FinalCredits = cost.FinalCredits
+	metadata.TierMultiplier = cost.TierMultiplier
+	metadata.UserMultiplier = cost.UserMultiplier
+	metadata.PriceSnapshot = priceSnapshotMap(cost.PriceSnapshot)
+	return cost.FinalCredits, metadata, nil
+}
+
+func (s *CreditService) calculateUSDRunCredits(costUSD float64, tier string, userMultiplier float64) (int, int, float64, map[string]any, error) {
+	if s.fullCfg == nil {
+		return 0, 0, 1, nil, fmt.Errorf("agent runtime billing config is not initialized")
+	}
+	rate, ok := s.fullCfg.ModelPrices.CurrencyRates["USD"]
+	if !ok || rate.ToCNY.Float64() <= 0 {
+		return 0, 0, 1, nil, fmt.Errorf("currency rate not configured for USD")
+	}
+	creditsPerCNY := s.fullCfg.Billing.CreditsPerCNY
+	if creditsPerCNY <= 0 {
+		creditsPerCNY = 1000
+	}
+	minimumCharge := s.fullCfg.Billing.MinimumChargeCredits
+	if minimumCharge <= 0 {
+		minimumCharge = 1
+	}
+	tierMultiplier := s.fullCfg.Billing.DefaultUserMultiplier
+	if tierMultiplier <= 0 {
+		tierMultiplier = 1
+	}
+	if multiplier, ok := s.fullCfg.Billing.TierMultipliers[tier]; ok && multiplier > 0 {
+		tierMultiplier = multiplier
+	}
+	if userMultiplier <= 0 {
+		userMultiplier = 1
+	}
+	baseCredits := int(math.Ceil(costUSD * rate.ToCNY.Float64() * float64(creditsPerCNY)))
+	if costUSD > 0 && baseCredits < minimumCharge {
+		baseCredits = minimumCharge
+	}
+	finalCredits := int(math.Ceil(float64(baseCredits) * tierMultiplier * userMultiplier))
+	if costUSD > 0 && finalCredits < minimumCharge {
+		finalCredits = minimumCharge
+	}
+	return baseCredits, finalCredits, tierMultiplier, map[string]any{
+		"provider":        "anthropic",
+		"currency":        "USD",
+		"currency_to_cny": rate.ToCNY.Float64(),
+		"credits_per_cny": creditsPerCNY,
+		"total_cost_usd":  costUSD,
+	}, nil
+}
+
+func priceSnapshotMap(snapshot config.PriceSnapshot) map[string]any {
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func (s *CreditService) settlePaymentRequiredBestEffort(ctx context.Context, userID string) {
