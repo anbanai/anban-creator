@@ -270,6 +270,26 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	}
 }
 
+func TestArtifactUploaderUploadsFailureArtifactsForUnsuccessfulResult(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/failure-state.json", `{"stage":"quality-gate"}`)
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
+	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, _ string, _ string) (string, error) {
+		return "etag-failure", nil
+	}
+
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
+		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
+	}
+	if len(reporter.prepared) != 1 || reporter.prepared[0].RelativePath != "output/failure-state.json" {
+		t.Fatalf("prepared = %#v, want failure-state.json", reporter.prepared)
+	}
+	if len(reporter.manifest.Files) != 1 || reporter.manifest.Files[0].RelativePath != "output/failure-state.json" {
+		t.Fatalf("manifest = %#v, want failure-state.json", reporter.manifest)
+	}
+}
+
 func TestJobArtifactUploaderDoesNotFallbackOutsideOutput(t *testing.T) {
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "content.md", "internal draft")

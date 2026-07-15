@@ -3545,6 +3545,80 @@ func TestTaskService_GetFiles(t *testing.T) {
 	}
 }
 
+func TestTaskService_GetVisibleFilesIncludesCollectedAfterPublished(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	taskID := uuid.NewString()
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	published, err := svc.GetFiles(ctx, taskID)
+	if err != nil || len(published) != 1 || published[0].State != model.TaskFileStatePublished {
+		t.Fatalf("published files = %#v, err=%v", published, err)
+	}
+	visible, err := svc.GetVisibleFiles(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetVisibleFiles: %v", err)
+	}
+	if len(visible) != 2 || visible[0].State != model.TaskFileStatePublished || visible[1].State != model.TaskFileStateCollected {
+		t.Fatalf("visible files = %#v", visible)
+	}
+}
+
+func TestTaskServiceCollectedFileIsDownloadableButExcludedFromZip(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.store = store
+	ctx := context.Background()
+	taskID := uuid.NewString()
+	publishedUpload, err := store.Upload(ctx, "tasks/"+taskID+"/content.md", strings.NewReader("published"), "text/markdown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	collectedUpload, err := store.Upload(ctx, "tasks/"+taskID+"/failure-state.json", strings.NewReader("failure"), "application/json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	collectedID := uuid.NewString()
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", OSSKey: publishedUpload.Key, FileSize: publishedUpload.Size, StorageProvider: store.Name()},
+		{ID: collectedID, TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json", OSSKey: collectedUpload.Key, FileSize: collectedUpload.Size, StorageProvider: store.Name()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.VerifyFileBelongsToTask(ctx, taskID, collectedID); err != nil {
+		t.Fatalf("VerifyFileBelongsToTask: %v", err)
+	}
+	stream, file, err := svc.GetFileStream(ctx, collectedID)
+	if err != nil {
+		t.Fatalf("GetFileStream: %v", err)
+	}
+	data, readErr := io.ReadAll(stream)
+	stream.Close()
+	if readErr != nil || string(data) != "failure" || file.State != model.TaskFileStateCollected {
+		t.Fatalf("downloaded collected file=%#v data=%q err=%v", file, data, readErr)
+	}
+
+	buf, _, err := svc.DownloadZip(ctx, taskID)
+	if err != nil {
+		t.Fatalf("DownloadZip: %v", err)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reader.File) != 1 || reader.File[0].Name != "content.md" {
+		t.Fatalf("zip files = %#v, want only content.md", reader.File)
+	}
+}
+
 func TestTaskService_SetPublishedCreatesSeednoteTracking(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	trackingSvc := &fakePublishedTrackingService{}

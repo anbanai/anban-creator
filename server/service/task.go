@@ -1311,6 +1311,22 @@ func (s *TaskService) GetFiles(ctx context.Context, taskID string) ([]*model.Tas
 	return files, nil
 }
 
+// GetVisibleFiles returns successful delivery files followed by retained files
+// from failed attempts. Delivery and workflow code must continue using GetFiles.
+func (s *TaskService) GetVisibleFiles(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
+	published, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("get published task files: %w", err)
+	}
+	collected, err := s.repo.TaskFiles().FindCollectedByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("get collected task files: %w", err)
+	}
+	files := append(published, collected...)
+	s.EnrichFilesWithURLs(ctx, files)
+	return files, nil
+}
+
 func (s *TaskService) RebuildWorkflowStatus(ctx context.Context, taskID string) error {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {

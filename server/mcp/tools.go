@@ -882,7 +882,7 @@ func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult("task_id is required"), nil
 	}
 
-	files, err := svcs.TaskSvc.GetFiles(context.Background(), taskID)
+	files, err := svcs.TaskSvc.GetVisibleFiles(context.Background(), taskID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("get task files: %v", err)), nil
 	}

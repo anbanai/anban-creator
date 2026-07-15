@@ -115,8 +115,45 @@ func TestCompleteCloudExecutionRejectsSuccessWithoutManifest(t *testing.T) {
 	}
 	foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
 	foundExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
-	if foundTask.Status != model.TaskStatusFailed || foundExecution.Status != model.TaskExecutionFailed || foundExecution.ManifestStatus != model.TaskExecutionManifestDiscarded {
+	if foundTask.Status != model.TaskStatusFailed || foundExecution.Status != model.TaskExecutionFailed || foundExecution.ManifestStatus != model.TaskExecutionManifestCollected {
 		t.Fatalf("task=%s execution=%s manifest=%s", foundTask.Status, foundExecution.Status, foundExecution.ManifestStatus)
+	}
+}
+
+func TestCompleteCloudExecutionCollectsArtifactsWhenValidationFails(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	task.Type = model.PlatformSeednote
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().DeleteByTaskID(context.Background(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	failureFile := &model.TaskFile{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID,
+		State: model.TaskFileStatePending, Role: model.FileRoleOther,
+		FilePath: "output/failure-state.json", FileName: "failure-state.json", FileSize: 96,
+	}
+	if err := repo.TaskFiles().Create(context.Background(), failureFile); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatal(err)
+	}
+	foundExecution, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := repo.TaskFiles().FindByExecutionID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundExecution.Status != model.TaskExecutionFailed || foundExecution.ManifestStatus != model.TaskExecutionManifestCollected {
+		t.Fatalf("execution status=%s manifest=%s", foundExecution.Status, foundExecution.ManifestStatus)
+	}
+	if len(files) != 1 || files[0].State != model.TaskFileStateCollected || files[0].FileName != "failure-state.json" {
+		t.Fatalf("collected files = %#v", files)
 	}
 }
 

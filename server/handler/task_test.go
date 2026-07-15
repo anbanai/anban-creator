@@ -259,6 +259,47 @@ func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
 	}
 }
 
+func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, taskID := uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "visiblefiles"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusFailed}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
+	app := fiber.New()
+	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.GetFiles(c)
+	})
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Data []model.TaskFile `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Data) != 2 || body.Data[0].State != model.TaskFileStatePublished || body.Data[1].State != model.TaskFileStateCollected {
+		t.Fatalf("files = %#v", body.Data)
+	}
+}
+
 func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)

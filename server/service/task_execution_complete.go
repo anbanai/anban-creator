@@ -210,7 +210,7 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 			if execution.Status == model.TaskExecutionSucceeded {
 				return s.repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, execution.ID)
 			}
-			return s.repo.TaskFiles().DiscardCurrentExecution(ctx, task.ID, execution.ID)
+			return s.repo.TaskFiles().CollectCurrentExecution(ctx, task.ID, execution.ID)
 		}, nil
 	case model.TaskExecutionFinalizationArtifacts:
 		return model.TaskExecutionFinalizationResult, func(ctx context.Context) error {

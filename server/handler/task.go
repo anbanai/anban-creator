@@ -933,7 +933,7 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	files, err := h.service.GetFiles(c.Context(), id)
+	files, err := h.service.GetVisibleFiles(c.Context(), id)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("get task files failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to get task files")

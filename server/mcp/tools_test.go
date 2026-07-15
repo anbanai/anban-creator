@@ -27,7 +27,7 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.Template{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Template{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := repository.New(db)
@@ -48,6 +48,31 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 		svcs = old
 	}
 	return taskSvc, projectSvc, repo, cleanup
+}
+
+func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	taskID := uuid.NewString()
+	if err := repo.TaskFiles().BatchCreate(context.Background(), []*model.TaskFile{
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := taskFilesHandler(context.Background(), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"task_id":"` + taskID + `"}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := decodeMCPMap(t, result)
+	files, ok := data["files"].([]any)
+	if !ok || len(files) != 2 {
+		t.Fatalf("files = %#v", data["files"])
+	}
+	states := []any{files[0].(map[string]any)["state"], files[1].(map[string]any)["state"]}
+	if states[0] != model.TaskFileStatePublished || states[1] != model.TaskFileStateCollected {
+		t.Fatalf("states = %#v", states)
+	}
 }
 
 func decodeMCPMap(t *testing.T, result *mcp.CallToolResult) map[string]any {

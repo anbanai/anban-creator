@@ -443,7 +443,7 @@ func validateTaskFileRelativePath(filePath string) error {
 
 func (r *taskFileRepository) FindByID(ctx context.Context, id string) (*model.TaskFile, error) {
 	var file model.TaskFile
-	if err := r.db.WithContext(ctx).Where("id = ? AND state = ?", id, model.TaskFileStatePublished).First(&file).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("id = ? AND state IN ?", id, []string{model.TaskFileStatePublished, model.TaskFileStateCollected}).First(&file).Error; err != nil {
 		return nil, err
 	}
 	return &file, nil
@@ -477,7 +477,7 @@ func (r *taskFileRepository) DeleteByTaskID(ctx context.Context, taskID string) 
 
 func (r *taskFileRepository) ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error) {
 	var count int64
-	if err := r.db.WithContext(ctx).Model(&model.TaskFile{}).Where("id = ? AND task_id = ? AND state = ?", fileID, taskID, model.TaskFileStatePublished).Count(&count).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&model.TaskFile{}).Where("id = ? AND task_id = ? AND state IN ?", fileID, taskID, []string{model.TaskFileStatePublished, model.TaskFileStateCollected}).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil
