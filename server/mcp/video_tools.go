@@ -363,7 +363,11 @@ func materializeOwnedVideoInputReferences(ctx context.Context, task *model.Task,
 			fallbackFileName    string
 			fallbackContentType string
 		)
-		if attachment, ok := verifiedTaskAttachmentForKey(task, ref.URL, ref.Type); ok {
+		attachment, ok, attachmentErr := verifiedTaskAttachmentForKey(task, ref.URL, ref.Type)
+		if attachmentErr != nil {
+			return fmt.Errorf("materialize video reference %s: %w", contractReferenceLabel(*ref), attachmentErr)
+		}
+		if ok {
 			var err error
 			data, err = storage.ReadObject(ctx, svcs.Store, attachment.Key, 50<<20)
 			if err != nil {
@@ -374,6 +378,9 @@ func materializeOwnedVideoInputReferences(ctx context.Context, task *model.Task,
 		} else {
 			if !svcs.Store.IsOwnedURL(ref.URL) {
 				continue
+			}
+			if err := validateOwnedRuntimeVideoReference(task, ref.URL); err != nil {
+				return fmt.Errorf("materialize video reference %s: %w", contractReferenceLabel(*ref), err)
 			}
 			source, err := service.ResolveMediaSourceBytes(ctx, svcs.Store, nil, service.MediaSourceRequest{
 				RawURL:      ref.URL,
@@ -624,8 +631,15 @@ func normalizeVideoInputContractReference(ctx context.Context, task *model.Task,
 	}
 	required := isRequiredVideoInputReference(refType, urlValue, asset.Text)
 	if required && refType != service.VideoReferenceText {
+		if err := validateOwnedRuntimeVideoReference(task, urlValue); err != nil {
+			return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is not usable: %w", videoInputReferenceLabel(asset), err)
+		}
 		if err := service.ValidatePublicHTTPSURLForVideoReference(urlValue); err != nil {
-			if _, ok := verifiedTaskAttachmentForKey(task, urlValue, refType); !ok {
+			_, ok, attachmentErr := verifiedTaskAttachmentForKey(task, urlValue, refType)
+			if attachmentErr != nil {
+				return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is not usable: %w", videoInputReferenceLabel(asset), attachmentErr)
+			}
+			if !ok {
 				return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is not usable: %w", videoInputReferenceLabel(asset), err)
 			}
 		}
@@ -650,25 +664,48 @@ func normalizeVideoInputContractReference(ctx context.Context, task *model.Task,
 	}, nil
 }
 
-func verifiedTaskAttachmentForKey(task *model.Task, key, refType string) (model.EntryAttachment, bool) {
+func validateOwnedRuntimeVideoReference(task *model.Task, rawURL string) error {
+	if task == nil || svcs == nil || svcs.Store == nil || !svcs.Store.IsOwnedURL(rawURL) {
+		return nil
+	}
+	key, ok := storage.StorageKeyFromURL(rawURL)
+	if !ok {
+		return storage.ErrInvalidRuntimeStorageKey
+	}
+	parsed, err := storage.ParseRuntimeStorageKey(key)
+	if err != nil {
+		return err
+	}
+	return parsed.ValidateFinalizedUploadIdentity(task.UserID, "")
+}
+
+func verifiedTaskAttachmentForKey(task *model.Task, key, refType string) (model.EntryAttachment, bool, error) {
 	key = strings.TrimSpace(key)
 	if task == nil || key == "" || strings.Contains(key, "://") || strings.HasPrefix(key, "/") {
-		return model.EntryAttachment{}, false
+		return model.EntryAttachment{}, false, nil
 	}
-	clean := filepath.ToSlash(filepath.Clean(key))
-	if clean != key || clean == "." || strings.HasPrefix(clean, "../") {
-		return model.EntryAttachment{}, false
+	parsed, err := storage.ParseRuntimeStorageKey(key)
+	if err != nil {
+		return model.EntryAttachment{}, false, err
 	}
 	for _, attachment := range task.InputAttachments.Data() {
-		if strings.TrimSpace(attachment.UploadID) == "" || strings.TrimSpace(attachment.Key) != key {
+		if strings.TrimSpace(attachment.Key) != parsed.Key {
 			continue
 		}
 		if videoReferenceTypeForAttachment(attachment) != refType {
 			continue
 		}
-		return attachment, true
+		if parsed.FinalizedUpload != nil {
+			if strings.TrimSpace(attachment.UploadID) == "" {
+				return model.EntryAttachment{}, false, storage.ErrFinalizedUploadIdentityMismatch
+			}
+			if err := parsed.ValidateFinalizedUploadIdentity(task.UserID, attachment.UploadID); err != nil {
+				return model.EntryAttachment{}, false, err
+			}
+		}
+		return attachment, true, nil
 	}
-	return model.EntryAttachment{}, false
+	return model.EntryAttachment{}, false, nil
 }
 
 func videoReferenceTypeForAttachment(attachment model.EntryAttachment) string {
