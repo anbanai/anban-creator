@@ -5,7 +5,58 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestImageGenerationTimeoutDefaults(t *testing.T) {
+	cfg := Config{ModelRoutes: ModelRoutesConfig{ImageGeneration: ImageGenerationRoutesConfig{
+		Designer: map[string]ImageGenerationRouteConfig{"seedream": {}},
+	}}}
+	cfg.applyDefaults()
+	if cfg.MCP.ToolTimeouts.GenerateImage != 10*time.Minute {
+		t.Fatalf("generate_image timeout = %s, want 10m", cfg.MCP.ToolTimeouts.GenerateImage)
+	}
+	if cfg.ModelRoutes.ImageGeneration.Cover.Timeout != 5*time.Minute ||
+		cfg.ModelRoutes.ImageGeneration.Content.Timeout != 5*time.Minute ||
+		cfg.ModelRoutes.ImageGeneration.Designer["seedream"].Timeout != 5*time.Minute {
+		t.Fatalf("image route timeouts = %s/%s/%s, want 5m/5m/5m",
+			cfg.ModelRoutes.ImageGeneration.Cover.Timeout,
+			cfg.ModelRoutes.ImageGeneration.Content.Timeout,
+			cfg.ModelRoutes.ImageGeneration.Designer["seedream"].Timeout)
+	}
+}
+
+func TestImageGenerationRouteTimeoutReachesRuntimeConfig(t *testing.T) {
+	cfg := Config{
+		ModelProviders: map[string]ModelProviderConfig{
+			"volcengine_ark": {BaseURL: "https://ark.example.com", APIKey: "key"},
+		},
+		ModelRoutes: ModelRoutesConfig{
+			ImageGeneration: ImageGenerationRoutesConfig{
+				Cover: ImageGenerationRouteConfig{
+					Provider: "volcengine_ark", Model: "seedream", Timeout: 2 * time.Minute,
+				},
+			},
+		},
+	}
+	if err := cfg.deriveModelRouteRuntimeConfig(); err != nil {
+		t.Fatalf("deriveModelRouteRuntimeConfig() error = %v", err)
+	}
+	if cfg.ImageAPI.Cover == nil || cfg.ImageAPI.Cover.TimeoutSec != 120 {
+		t.Fatalf("cover runtime config = %#v, want timeout_sec 120", cfg.ImageAPI.Cover)
+	}
+}
+
+func TestValidateRejectsImageTimeoutOutsideOperationBudget(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.MCP.ToolTimeouts.GenerateImage = 5 * time.Minute
+	cfg.ModelRoutes.ImageGeneration.Cover = ImageGenerationRouteConfig{
+		Provider: "volcengine_ark", Model: "seedream", Timeout: 5 * time.Minute,
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "mcp.tool_timeouts.generate_image") {
+		t.Fatalf("Validate() error = %v, want timeout relationship error", err)
+	}
+}
 
 func TestSemanticModelConfigRejectsDeprecatedVision(t *testing.T) {
 	dir := t.TempDir()
@@ -236,6 +287,9 @@ claude:
 	preset := cfg.ImagePresets[0]
 	if preset.QualityRank != 200 || !preset.Capabilities.SupportsReference || preset.Capabilities.MaxReferenceImages != 16 {
 		t.Fatalf("derived image preset capabilities = %#v", preset)
+	}
+	if preset.Timeout != 5*time.Minute {
+		t.Fatalf("derived image preset timeout = %s, want 5m", preset.Timeout)
 	}
 	designerRoute := cfg.ModelRoutes.ImageGeneration.Designer["gpt_image_2"]
 	if designerRoute.Capabilities.DefaultSize != "auto" {
