@@ -39,13 +39,17 @@ describe('video generation UX contracts', () => {
     }
   })
 
-  it('task detail shows video results through generated file preview', () => {
+  it('task detail shows video results through preview and audit configuration', () => {
     const source = pageSource('TaskDetailPage.tsx')
     const previewSource = readFileSync(join(here, '../components/FilePreview.tsx'), 'utf8')
+    const detailsSource = readFileSync(join(here, '../components/tasks/TaskDetailsSheet.tsx'), 'utf8')
+    const configurationSource = readFileSync(join(here, '../components/tasks/VideoTaskConfigurationDetails.tsx'), 'utf8')
 
     expect(source).toContain('renderPreviewDetails')
-    expect(source).toContain('用户输入')
-    expect(source).toContain('Agent 解析结果')
+    expect(source).toContain('TaskDetailsSheet')
+    expect(detailsSource).toContain('TaskConfigurationDetails')
+    expect(configurationSource).toContain('用户输入')
+    expect(configurationSource).toContain('Agent 解析结果')
     expect(source).toContain('creative_type')
     expect(source).toContain('subject_profile')
     expect(source).toContain('参考素材')
