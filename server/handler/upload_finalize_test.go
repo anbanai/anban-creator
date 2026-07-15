@@ -15,8 +15,31 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
+
+func TestRewriteFinalizedUploadURLsCoversCurrentConsumers(t *testing.T) {
+	const (
+		pending = "https://cdn.example.com/uploads/pending/user-1/upload-1/input.mp4"
+		final   = "https://cdn.example.com/uploads/finalized/user-1/upload-1/input.mp4"
+	)
+	rewrites := map[string]string{pending: final}
+	values := []string{pending, "https://external.example.com/image.png"}
+	cfg := &model.VideoTaskConfig{References: []model.VideoReferenceAsset{{URL: pending}}}
+	input := &model.VideoInput{References: []model.VideoReferenceAsset{{URL: pending}}}
+	montage := &model.MontageInput{SourceAssets: []model.MontageAsset{{URL: pending}}}
+
+	if got := rewriteFinalizedUploadURL(pending, rewrites); got != final {
+		t.Fatalf("scalar rewrite = %q", got)
+	}
+	rewriteFinalizedUploadURLSlice(values, rewrites)
+	rewriteFinalizedVideoReferenceURLs(rewrites, cfg, input, nil, nil)
+	rewriteFinalizedMontageAssetURLs(montage, rewrites)
+	if values[0] != final || values[1] != "https://external.example.com/image.png" || cfg.References[0].URL != final || input.References[0].URL != final || montage.SourceAssets[0].URL != final {
+		t.Fatalf("rewritten values: values=%#v cfg=%#v input=%#v montage=%#v", values, cfg, input, montage)
+	}
+}
 
 func TestRespondPendingUploadFinalizeErrorClassifiesAndRedacts(t *testing.T) {
 	const secret = "uploads/pending/user-1/upload-1/object.png at oss-secret.example.com"
@@ -69,50 +92,28 @@ func TestFinalizePendingURLCallersUseSharedResponder(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse %s: %v", fileName, err)
 			}
-			calls := 0
+			finalizeCalls := 0
+			responderCalls := 0
 			ast.Inspect(file, func(node ast.Node) bool {
-				ifStmt, ok := node.(*ast.IfStmt)
-				if !ok || !ifInitializesCall(ifStmt, "finalizePendingURLs") {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
 					return true
 				}
-				calls++
-				if !ifReturnsCall(ifStmt, "respondPendingUploadFinalizeError") {
-					t.Errorf("finalizePendingURLs call at %s is not wired to shared responder", fileName)
+				ident, ok := call.Fun.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				switch ident.Name {
+				case "finalizePendingURLs":
+					finalizeCalls++
+				case "respondPendingUploadFinalizeError":
+					responderCalls++
 				}
 				return true
 			})
-			if calls != wantCalls {
-				t.Fatalf("finalizePendingURLs calls = %d, want %d", calls, wantCalls)
+			if finalizeCalls != wantCalls || responderCalls != wantCalls {
+				t.Fatalf("calls finalize=%d responder=%d, want %d of each", finalizeCalls, responderCalls, wantCalls)
 			}
 		})
 	}
-}
-
-func ifInitializesCall(ifStmt *ast.IfStmt, name string) bool {
-	assign, ok := ifStmt.Init.(*ast.AssignStmt)
-	if !ok || len(assign.Rhs) != 1 {
-		return false
-	}
-	call, ok := assign.Rhs[0].(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	ident, ok := call.Fun.(*ast.Ident)
-	return ok && ident.Name == name
-}
-
-func ifReturnsCall(ifStmt *ast.IfStmt, name string) bool {
-	if len(ifStmt.Body.List) != 1 {
-		return false
-	}
-	ret, ok := ifStmt.Body.List[0].(*ast.ReturnStmt)
-	if !ok || len(ret.Results) != 1 {
-		return false
-	}
-	call, ok := ret.Results[0].(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	ident, ok := call.Fun.(*ast.Ident)
-	return ok && ident.Name == name
 }

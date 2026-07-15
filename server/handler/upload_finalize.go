@@ -13,12 +13,25 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-func finalizePendingURLs(ctx context.Context, store storage.Provider, repo service.PendingUploadRepository, userID, purpose string, urls []string) error {
+func finalizePendingURLs(ctx context.Context, store storage.Provider, repo service.PendingUploadRepository, userID, purpose string, urls []string) (map[string]string, error) {
 	if repo == nil || len(urls) == 0 {
-		return nil
+		return map[string]string{}, nil
 	}
-	statStore, _ := store.(storage.ObjectStatProvider)
-	return service.FinalizePendingUploadURLs(ctx, statStore, repo, userID, purpose, urls, time.Now())
+	finalStore, _ := store.(service.DirectUploadFinalizationStorage)
+	return service.FinalizePendingUploadURLs(ctx, finalStore, repo, userID, purpose, urls, time.Now())
+}
+
+func rewriteFinalizedUploadURL(value string, rewrites map[string]string) string {
+	if final := rewrites[value]; final != "" {
+		return final
+	}
+	return value
+}
+
+func rewriteFinalizedUploadURLSlice(values []string, rewrites map[string]string) {
+	for i := range values {
+		values[i] = rewriteFinalizedUploadURL(values[i], rewrites)
+	}
 }
 
 func respondPendingUploadFinalizeError(c fiber.Ctx, logger *zerolog.Logger, err error) error {

@@ -59,6 +59,20 @@ func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func seedPendingHandlerUpload(t *testing.T, repo repository.Repository, userID, uploadID, purpose, filename, contentType string) string {
+	t.Helper()
+	key := "uploads/pending/" + userID + "/" + uploadID + "/" + filename
+	publicURL := "https://cdn.example.com/" + key
+	if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
+		ID: uploadID, UserID: userID, Purpose: purpose, Key: key, PublicURL: publicURL,
+		FileName: filename, ContentType: contentType, Size: 1,
+		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("seed pending upload %s: %v", uploadID, err)
+	}
+	return publicURL
+}
+
 func postJSON(t *testing.T, app *fiber.App, path, body string) *http.Response {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -686,6 +700,109 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	}
 }
 
+func TestCreateTaskPersistsFinalReferenceAndEcommercePhotoURLs(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "finalecomref"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformEcommerce, Name: "Ecommerce", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	refID, photoID := uuid.NewString(), uuid.NewString()
+	refURL := seedPendingHandlerUpload(t, repo, userID, refID, service.DirectUploadPurposeTaskReference, "reference.png", "image/png")
+	photoURL := seedPendingHandlerUpload(t, repo, userID, photoID, service.DirectUploadPurposeEcommercePhoto, "product.png", "image/png")
+	store := pendingUploadStatStore(repo.PendingUploads())
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","reference_image_url":"`+refURL+`","product_photos":["`+photoURL+`"],"selected_modules":{"main_images":1}}`)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
+	}
+	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte("uploads/finalized/")) {
+		t.Fatalf("task response contains non-final upload URL: %s", body)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("persisted tasks = %#v, %v", tasks, err)
+	}
+	wantRef := "/api/v1/files/uploads/finalized/" + userID + "/" + refID + "/reference.png"
+	wantPhoto := "/api/v1/files/uploads/finalized/" + userID + "/" + photoID + "/product.png"
+	photos := tasks[0].Ecommerce.Data().ProductPhotos
+	if tasks[0].ReferenceImageURL != wantRef || len(photos) != 1 || photos[0] != wantPhoto {
+		t.Fatalf("persisted reference/photos = %q/%#v", tasks[0].ReferenceImageURL, photos)
+	}
+	for id, wantKey := range map[string]string{
+		refID:   "uploads/finalized/" + userID + "/" + refID + "/reference.png",
+		photoID: "uploads/finalized/" + userID + "/" + photoID + "/product.png",
+	} {
+		upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, id)
+		if err != nil || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != wantKey {
+			t.Fatalf("finalized upload %s = %#v, %v", id, upload, err)
+		}
+	}
+}
+
+func TestCreateVideoTaskPersistsFinalReferenceURL(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, projectID, uploadID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "finalvideoref"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoCreator, Name: "Video", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	refURL := seedPendingHandlerUpload(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
+	store := pendingUploadStatStore(repo.PendingUploads())
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","video_creator_input":{"brief":"生成产品视频","references":[{"type":"video_url","url":"`+refURL+`"}]}}`)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
+	}
+	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte("uploads/finalized/")) {
+		t.Fatalf("video task response contains non-final reference: %s", body)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("persisted tasks = %#v, %v", tasks, err)
+	}
+	references := tasks[0].VideoInput.Data().References
+	wantURL := "/api/v1/files/uploads/finalized/" + userID + "/" + uploadID + "/reference.mp4"
+	if len(references) != 1 || references[0].URL != wantURL {
+		t.Fatalf("persisted video references = %#v", references)
+	}
+	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	if err != nil || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/reference.mp4" {
+		t.Fatalf("finalized video upload = %#v, %v", upload, err)
+	}
+}
+
 func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -748,12 +865,19 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if bytes.Contains(responseBody, []byte("uploads/pending/")) || !bytes.Contains(responseBody, []byte("uploads/finalized/")) {
+		t.Fatalf("task persisted non-final montage URL: %s", responseBody)
+	}
 	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
 	if err != nil {
 		t.Fatalf("find pending upload: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("upload status = %q, want finalized", upload.Status)
+	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/clip.mp4" {
+		t.Fatalf("upload identity = %#v", upload)
 	}
 }
 

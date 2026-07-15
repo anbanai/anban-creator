@@ -36,19 +36,6 @@ func (r *pendingUploadRepository) FindPendingUploadByID(ctx context.Context, id 
 	return &upload, nil
 }
 
-func (r *pendingUploadRepository) FinalizePendingUploads(ctx context.Context, ids []string, finalizedAt time.Time) (int64, error) {
-	if len(ids) == 0 {
-		return 0, nil
-	}
-	result := r.db.WithContext(ctx).Model(&model.PendingUpload{}).
-		Where("id IN ? AND status = ? AND expires_at > ?", ids, model.PendingUploadStatusPending, finalizedAt).
-		Updates(map[string]any{
-			"status":       model.PendingUploadStatusFinalized,
-			"finalized_at": finalizedAt,
-		})
-	return result.RowsAffected, result.Error
-}
-
 func (r *pendingUploadRepository) FinalizePendingUploadClaims(ctx context.Context, claims []model.PendingUploadClaim, finalizedAt time.Time) error {
 	if len(claims) == 0 {
 		return nil

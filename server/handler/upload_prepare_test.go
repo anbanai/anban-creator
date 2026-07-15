@@ -56,9 +56,6 @@ func (r *handlerPendingUploadRepo) CreatePendingUpload(_ context.Context, upload
 func (r *handlerPendingUploadRepo) FindPendingUploadByID(context.Context, string) (*model.PendingUpload, error) {
 	return nil, service.ErrPendingUploadNotFound
 }
-func (r *handlerPendingUploadRepo) FinalizePendingUploads(context.Context, []string, time.Time) (int64, error) {
-	return 0, nil
-}
 func (r *handlerPendingUploadRepo) FinalizePendingUploadClaims(context.Context, []model.PendingUploadClaim, time.Time) error {
 	return nil
 }

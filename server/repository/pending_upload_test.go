@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,12 +24,12 @@ func TestPendingUploadRepositoryClaimsFinalizationAndExpirationAtomically(t *tes
 		}
 	}
 
-	claimed, err := repo.PendingUploads().FinalizePendingUploads(ctx, []string{"fresh", "expired", "finalized"}, now)
-	if err != nil {
-		t.Fatalf("finalize: %v", err)
+	freshClaim := model.PendingUploadClaim{
+		UploadID: "fresh", UserID: "user-1", Key: "uploads/pending/user-1/fresh/a.png",
+		FinalizedKey: "uploads/finalized/user-1/fresh/a.png", AllowedPurposes: []string{"attachment"},
 	}
-	if claimed != 1 {
-		t.Fatalf("finalized claims = %d, want 1", claimed)
+	if err := repo.PendingUploads().FinalizePendingUploadClaims(ctx, []model.PendingUploadClaim{freshClaim}, now); err != nil {
+		t.Fatalf("finalize fresh: %v", err)
 	}
 
 	expirationClaimed, err := repo.PendingUploads().ClaimPendingUploadExpiration(ctx, "expired", "claim-1", now, now.Add(-5*time.Minute))
@@ -38,8 +39,12 @@ func TestPendingUploadRepositoryClaimsFinalizationAndExpirationAtomically(t *tes
 	if !expirationClaimed {
 		t.Fatal("expired pending upload was not claimed")
 	}
-	if claimed, err := repo.PendingUploads().FinalizePendingUploads(ctx, []string{"expired"}, now); err != nil || claimed != 0 {
-		t.Fatalf("finalize expiration winner = %d, %v; want 0, nil", claimed, err)
+	expiredClaim := model.PendingUploadClaim{
+		UploadID: "expired", UserID: "user-1", Key: "uploads/pending/user-1/expired/a.png",
+		FinalizedKey: "uploads/finalized/user-1/expired/a.png", AllowedPurposes: []string{"attachment"},
+	}
+	if err := repo.PendingUploads().FinalizePendingUploadClaims(ctx, []model.PendingUploadClaim{expiredClaim}, now); err == nil {
+		t.Fatal("finalization won after expiration claim")
 	}
 	if claimed, err := repo.PendingUploads().ClaimPendingUploadExpiration(ctx, "fresh", "claim-2", now, now.Add(-5*time.Minute)); err != nil || claimed {
 		t.Fatalf("expiration claimed finalized row = %v, %v", claimed, err)
@@ -111,6 +116,56 @@ func TestPendingUploadRepositoryFinalizesVerifiedSetAllOrNoneAndReusesFinalized(
 	claims[1].FinalizedKey = "uploads/finalized/user-1/second/other.png"
 	if err := repo.PendingUploads().FinalizePendingUploadClaims(ctx, claims, now.Add(2*time.Minute)); err == nil {
 		t.Fatal("reused finalized row with a different final key")
+	}
+}
+
+func TestPendingUploadRepositoryConcurrentExactClaimsConverge(t *testing.T) {
+	db := setupTestDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 15, 11, 15, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID: "concurrent", UserID: "user-1", Purpose: "ai_entry_attachment",
+		Key: "uploads/pending/user-1/concurrent/input.png", PublicURL: "https://cdn/concurrent",
+		Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour),
+	}
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, upload); err != nil {
+		t.Fatal(err)
+	}
+	claim := model.PendingUploadClaim{
+		UploadID: upload.ID, UserID: upload.UserID, Key: upload.Key,
+		FinalizedKey: "uploads/finalized/user-1/concurrent/input.png", AllowedPurposes: []string{upload.Purpose},
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(offset int) {
+			defer wg.Done()
+			<-start
+			errs <- repo.PendingUploads().FinalizePendingUploadClaims(ctx, []model.PendingUploadClaim{claim}, now.Add(time.Duration(offset)*time.Second))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent exact claim: %v", err)
+		}
+	}
+	found, err := repo.PendingUploads().FindPendingUploadByID(ctx, upload.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.PendingUploadStatusFinalized || found.FinalizedKey != claim.FinalizedKey || found.Key != claim.Key {
+		t.Fatalf("finalized identity = %#v", found)
 	}
 }
 

@@ -290,13 +290,18 @@ func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
+	responseBody := decodeBody(t, resp)
+	responseJSON, _ := json.Marshal(responseBody)
+	if bytes.Contains(responseJSON, []byte("uploads/pending/")) || !bytes.Contains(responseJSON, []byte("uploads/finalized/")) {
+		t.Fatalf("template persisted non-final thumbnail: %s", responseJSON)
+	}
 
 	upload, err := repo.PendingUploads().FindPendingUploadByID(t.Context(), uploadID)
 	if err != nil {
 		t.Fatalf("find pending upload: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("pending upload status = %q, want finalized", upload.Status)
+	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/thumb.png" {
+		t.Fatalf("pending upload identity = %#v", upload)
 	}
 }
 

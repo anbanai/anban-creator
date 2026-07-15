@@ -427,27 +427,24 @@ func (s *AgentBootstrapService) authorizeBootstrapObject(ctx context.Context, ta
 			return nil
 		}
 	}
-	pendingPrefix := path.Join("uploads/pending", task.UserID) + "/"
-	if !strings.HasPrefix(key, pendingPrefix) || s.repo == nil {
+	finalizedPrefix := path.Join("uploads/finalized", task.UserID) + "/"
+	if !strings.HasPrefix(key, finalizedPrefix) || s.repo == nil {
 		return errors.New("bootstrap storage object is outside task ownership")
 	}
 	id := strings.TrimSpace(source.UploadID)
-	urlID := pendingUploadIDFromURL(rawURL)
+	urlID := directUploadIDFromURLWithNamespace(rawURL, "finalized")
 	if id == "" {
 		id = urlID
 	}
 	if id == "" || (urlID != "" && urlID != id) {
-		return errors.New("bootstrap pending upload identity mismatch")
+		return errors.New("bootstrap finalized upload identity mismatch")
 	}
 	upload, err := s.repo.PendingUploads().FindPendingUploadByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("%w: pending upload ownership lookup: %v", ErrAgentBootstrapUnavailable, err)
+		return fmt.Errorf("%w: finalized upload ownership lookup: %v", ErrAgentBootstrapUnavailable, err)
 	}
-	if upload.UserID != task.UserID || upload.Status != model.PendingUploadStatusFinalized || !directUploadPurposeAllowed(upload.Purpose, source.AllowedPurposes) || upload.Key != key {
-		return errors.New("bootstrap pending upload ownership mismatch")
-	}
-	if rawURL != "" && !pendingUploadURLMatches(rawURL, upload) {
-		return errors.New("bootstrap pending upload ownership mismatch")
+	if upload.UserID != task.UserID || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey == "" || !directUploadPurposeAllowed(upload.Purpose, source.AllowedPurposes) || upload.FinalizedKey != key {
+		return errors.New("bootstrap finalized upload ownership mismatch")
 	}
 	return nil
 }

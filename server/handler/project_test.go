@@ -201,14 +201,19 @@ func TestProjectHandler_CreateFinalizesPendingAvatarAndReference(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
+	responseBody := decodeBody(t, resp)
+	responseJSON, _ := json.Marshal(responseBody)
+	if strings.Contains(string(responseJSON), "uploads/pending/") || !strings.Contains(string(responseJSON), "uploads/finalized/") {
+		t.Fatalf("project persisted non-final URLs: %s", responseJSON)
+	}
 
 	for _, id := range []string{avatarID, refID} {
 		upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, id)
 		if err != nil {
 			t.Fatalf("find pending upload %s: %v", id, err)
 		}
-		if upload.Status != model.PendingUploadStatusFinalized {
-			t.Fatalf("upload %s status = %q, want finalized", id, upload.Status)
+		if upload.Status != model.PendingUploadStatusFinalized || !strings.HasPrefix(upload.FinalizedKey, "uploads/finalized/"+userID+"/"+id+"/") {
+			t.Fatalf("upload %s identity = %#v", id, upload)
 		}
 	}
 }
@@ -252,13 +257,18 @@ func TestProjectHandler_UpdateFinalizesPendingAvatar(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
+	responseBody := decodeBody(t, resp)
+	responseJSON, _ := json.Marshal(responseBody)
+	if strings.Contains(string(responseJSON), "uploads/pending/") || !strings.Contains(string(responseJSON), "uploads/finalized/") {
+		t.Fatalf("updated project persisted non-final URL: %s", responseJSON)
+	}
 
 	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
 	if err != nil {
 		t.Fatalf("find pending upload: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("pending upload status = %q, want finalized", upload.Status)
+	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/avatar.png" {
+		t.Fatalf("pending upload identity = %#v", upload)
 	}
 }
 

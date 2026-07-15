@@ -226,12 +226,19 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if strings.Contains(string(responseBody), "uploads/pending/") || !strings.Contains(string(responseBody), "uploads/finalized/") {
+		t.Fatalf("plan persisted non-final montage URL: %s", responseBody)
+	}
 	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
 	if err != nil {
 		t.Fatalf("find pending upload: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("upload status = %q, want finalized", upload.Status)
+	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/clip.mp4" {
+		t.Fatalf("upload identity = %#v", upload)
 	}
 }
 
@@ -426,6 +433,60 @@ func TestPlanHandler_VideoCreatorSplitInputContract(t *testing.T) {
 	if editorUpdateResp.StatusCode != fiber.StatusBadRequest {
 		raw, _ := io.ReadAll(editorUpdateResp.Body)
 		t.Fatalf("editor update status = %d, want 400 body=%s", editorUpdateResp.StatusCode, raw)
+	}
+}
+
+func TestCreateVideoPlanPersistsFinalReferenceURL(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, projectID, uploadID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "planvideoref"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoCreator, Name: "Video", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	refURL := seedPendingHandlerUpload(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
+	store := pendingUploadStatStore(repo.PendingUploads())
+	logger := zerolog.New(io.Discard)
+	h := NewPlanHandler(service.NewPlanService(repo, &logger), &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	app := fiber.New()
+	app.Post("/plans", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/plans", `{"project_id":"`+projectID+`","cron_expr":"0 9 * * *","video_creator_input":{"brief":"每日生成产品视频","references":[{"type":"video_url","url":"`+refURL+`"}]}}`)
+	defer resp.Body.Close()
+	data := decodeEnvelopeRawData(t, resp)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d data=%s", resp.StatusCode, mustMarshalTaskJSON(t, data))
+	}
+	encoded := mustMarshalTaskJSON(t, data)
+	if strings.Contains(string(encoded), "uploads/pending/") || !strings.Contains(string(encoded), "uploads/finalized/") {
+		t.Fatalf("video plan response contains non-final reference: %s", encoded)
+	}
+	var response struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(encoded, &response); err != nil || response.ID == "" {
+		t.Fatalf("decode plan identity: %#v, %v", response, err)
+	}
+	plan, err := repo.Plans().FindByID(ctx, response.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := plan.VideoInput.Data().References
+	wantURL := "/api/v1/files/uploads/finalized/" + userID + "/" + uploadID + "/reference.mp4"
+	if len(references) != 1 || references[0].URL != wantURL {
+		t.Fatalf("persisted plan references = %#v", references)
+	}
+	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	if err != nil || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/reference.mp4" {
+		t.Fatalf("finalized plan upload = %#v, %v", upload, err)
 	}
 }
 

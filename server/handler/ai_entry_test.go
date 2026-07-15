@@ -53,19 +53,6 @@ func (r *aiEntryPendingRepo) FindPendingUploadByID(_ context.Context, id string)
 	return nil, service.ErrPendingUploadNotFound
 }
 
-func (r *aiEntryPendingRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) (int64, error) {
-	if r.finalizeErr != nil {
-		return 0, r.finalizeErr
-	}
-	r.finalizedIDs = append(r.finalizedIDs, ids...)
-	for _, id := range ids {
-		if r.upload != nil && r.upload.ID == id {
-			r.upload.Status = model.PendingUploadStatusFinalized
-		}
-	}
-	return int64(len(ids)), nil
-}
-
 func (r *aiEntryPendingRepo) FinalizePendingUploadClaims(_ context.Context, claims []model.PendingUploadClaim, _ time.Time) error {
 	if r.finalizeErr != nil {
 		return r.finalizeErr
@@ -232,7 +219,7 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 	if len(pending.finalizedIDs) != 1 || pending.finalizedIDs[0] != "upload-1" {
 		t.Fatalf("finalized IDs = %#v, want upload-1", pending.finalizedIDs)
 	}
-	if got := submitter.req.Attachments[0]; got.UploadID != "upload-1" || got.Key != pending.upload.Key || got.URL != "" ||
+	if got := submitter.req.Attachments[0]; got.UploadID != "upload-1" || got.Key != "uploads/finalized/user-1/upload-1/ref.png" || got.URL != "" ||
 		got.FileName != pending.upload.FileName || got.ContentType != pending.upload.ContentType || got.Size != pending.upload.Size {
 		t.Fatalf("verified storage metadata not persisted: %#v", got)
 	}

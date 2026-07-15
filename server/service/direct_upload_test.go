@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,8 +21,32 @@ type fakeDirectUploadStore struct {
 	expires     int
 	deleted     []string
 	deleteErr   error
+	deleteErrs  map[string]error
 	objects     map[string]*storage.ObjectInfo
 	statErr     error
+	promoteHook func(sourceKey, finalKey string)
+	promoted    []string
+}
+
+func (s *fakeDirectUploadStore) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) error {
+	if s.promoteHook != nil {
+		s.promoteHook(sourceKey, finalKey)
+	}
+	if s.objects[finalKey] != nil {
+		return storage.ErrObjectAlreadyExists
+	}
+	source := s.objects[sourceKey]
+	if source == nil {
+		return storage.ErrObjectNotFound
+	}
+	if source.ETag != expectedETag {
+		return storage.ErrPromotionPreconditionFailed
+	}
+	copy := *source
+	copy.Key = finalKey
+	s.objects[finalKey] = &copy
+	s.promoted = append(s.promoted, sourceKey+"->"+finalKey)
+	return nil
 }
 
 func (s *fakeDirectUploadStore) Name() string { return s.name }
@@ -37,6 +62,9 @@ func (s *fakeDirectUploadStore) DownloadURL(_ context.Context, key string, expir
 }
 func (s *fakeDirectUploadStore) Delete(_ context.Context, key string) error {
 	s.deleted = append(s.deleted, key)
+	if err := s.deleteErrs[key]; err != nil {
+		return err
+	}
 	return s.deleteErr
 }
 func (s *fakeDirectUploadStore) StatObject(_ context.Context, key string) (*storage.ObjectInfo, error) {
@@ -101,7 +129,7 @@ func matchingDirectUploadStore(uploads ...*model.PendingUpload) *fakeDirectUploa
 		if upload == nil {
 			continue
 		}
-		store.objects[upload.Key] = &storage.ObjectInfo{Key: upload.Key, Size: upload.Size, ContentType: upload.ContentType}
+		store.objects[upload.Key] = &storage.ObjectInfo{Key: upload.Key, Size: upload.Size, ContentType: upload.ContentType, ETag: "etag-" + upload.ID}
 	}
 	return store
 }
@@ -110,6 +138,18 @@ type fakePendingUploadRepo struct {
 	created   *model.PendingUpload
 	uploads   map[string]*model.PendingUpload
 	finalized []string
+	claimErr  error
+}
+
+type lockedPendingUploadRepo struct {
+	*fakePendingUploadRepo
+	mu sync.Mutex
+}
+
+func (r *lockedPendingUploadRepo) FinalizePendingUploadClaims(ctx context.Context, claims []model.PendingUploadClaim, finalizedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fakePendingUploadRepo.FinalizePendingUploadClaims(ctx, claims, finalizedAt)
 }
 
 func (r *fakePendingUploadRepo) CreatePendingUpload(_ context.Context, upload *model.PendingUpload) error {
@@ -130,24 +170,16 @@ func (r *fakePendingUploadRepo) FindPendingUploadByID(_ context.Context, id stri
 	return &cp, nil
 }
 
-func (r *fakePendingUploadRepo) FinalizePendingUploads(_ context.Context, ids []string, finalizedAt time.Time) (int64, error) {
-	var claimed int64
-	for _, id := range ids {
-		upload := r.uploads[id]
-		if upload == nil || upload.Status != model.PendingUploadStatusPending || !upload.ExpiresAt.After(finalizedAt) {
-			continue
-		}
-		upload.Status = model.PendingUploadStatusFinalized
-		r.finalized = append(r.finalized, id)
-		claimed++
-	}
-	return claimed, nil
-}
-
 func (r *fakePendingUploadRepo) FinalizePendingUploadClaims(_ context.Context, claims []model.PendingUploadClaim, finalizedAt time.Time) error {
+	if r.claimErr != nil {
+		return r.claimErr
+	}
 	for _, claim := range claims {
 		upload := r.uploads[claim.UploadID]
-		if upload == nil || upload.UserID != claim.UserID || upload.Key != claim.Key || !directUploadPurposeAllowed(upload.Purpose, claim.AllowedPurposes) {
+		if upload == nil || upload.UserID != claim.UserID || upload.Key != claim.Key || claim.FinalizedKey == "" || !directUploadPurposeAllowed(upload.Purpose, claim.AllowedPurposes) {
+			return model.ErrPendingUploadClaimRejected
+		}
+		if upload.Status == model.PendingUploadStatusFinalized && upload.FinalizedKey != claim.FinalizedKey {
 			return model.ErrPendingUploadClaimRejected
 		}
 		if upload.Status != model.PendingUploadStatusFinalized && (upload.Status != model.PendingUploadStatusPending || !upload.ExpiresAt.After(finalizedAt)) {
@@ -158,10 +190,119 @@ func (r *fakePendingUploadRepo) FinalizePendingUploadClaims(_ context.Context, c
 		upload := r.uploads[claim.UploadID]
 		if upload.Status == model.PendingUploadStatusPending {
 			upload.Status = model.PendingUploadStatusFinalized
+			upload.FinalizedKey = claim.FinalizedKey
 			r.finalized = append(r.finalized, upload.ID)
 		}
 	}
 	return nil
+}
+
+func TestFinalizeVerifiedDirectUploadsPromotesAndPersistsFinalKey(t *testing.T) {
+	now := time.Date(2026, 7, 15, 13, 0, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID: "upload-1", UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment,
+		Key: "uploads/pending/user-1/upload-1/input.png", FileName: "input.png", ContentType: "image/png", Size: 1,
+		Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour),
+	}
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
+	verified, err := VerifyDirectUploadAttachment(context.Background(), repo, upload.UserID, []string{upload.Purpose}, upload.ID, upload.Key, now)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	wantFinal := "uploads/finalized/user-1/upload-1/input.png"
+	if verified.Key != wantFinal {
+		t.Fatalf("verified key = %q, want final key %q", verified.Key, wantFinal)
+	}
+	store := matchingDirectUploadStore(upload)
+	if err := FinalizeVerifiedDirectUploads(context.Background(), store, repo, []*VerifiedDirectUpload{verified}, now); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if upload.Key != "uploads/pending/user-1/upload-1/input.png" || upload.FinalizedKey != wantFinal || upload.Status != model.PendingUploadStatusFinalized {
+		t.Fatalf("persisted upload identity = %#v", upload)
+	}
+	if store.objects[wantFinal] == nil || len(store.promoted) != 1 {
+		t.Fatalf("promotion state = objects=%#v promoted=%#v", store.objects, store.promoted)
+	}
+}
+
+func TestFinalizeVerifiedDirectUploadsRejectsSourceReplacementAfterStat(t *testing.T) {
+	now := time.Date(2026, 7, 15, 13, 10, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID: "upload-race", UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment,
+		Key: "uploads/pending/user-1/upload-race/input.png", FileName: "input.png", ContentType: "image/png", Size: 1,
+		Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour),
+	}
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
+	verified, err := VerifyDirectUploadAttachment(context.Background(), repo, upload.UserID, []string{upload.Purpose}, upload.ID, upload.Key, now)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	store := matchingDirectUploadStore(upload)
+	store.promoteHook = func(sourceKey, _ string) {
+		store.objects[sourceKey].ETag = "attacker-etag"
+	}
+	err = FinalizeVerifiedDirectUploads(context.Background(), store, repo, []*VerifiedDirectUpload{verified}, now)
+	if !errors.Is(err, ErrPendingUploadObjectInvalid) {
+		t.Fatalf("finalize error = %v, want validation rejection", err)
+	}
+	if upload.Status != model.PendingUploadStatusPending || upload.FinalizedKey != "" || len(repo.finalized) != 0 {
+		t.Fatalf("source race claimed upload: %#v finalized=%#v", upload, repo.finalized)
+	}
+}
+
+func TestFinalizeVerifiedDirectUploadsReusesOrphanAfterClaimFailure(t *testing.T) {
+	now := time.Date(2026, 7, 15, 13, 20, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID: "upload-orphan", UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment,
+		Key: "uploads/pending/user-1/upload-orphan/input.png", FileName: "input.png", ContentType: "image/png", Size: 1,
+		Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour),
+	}
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}, claimErr: errors.New("database unavailable")}
+	verified, err := VerifyDirectUploadAttachment(context.Background(), repo, upload.UserID, []string{upload.Purpose}, upload.ID, upload.Key, now)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	store := matchingDirectUploadStore(upload)
+	if err := FinalizeVerifiedDirectUploads(context.Background(), store, repo, []*VerifiedDirectUpload{verified}, now); err == nil {
+		t.Fatal("claim failure was ignored")
+	}
+	if store.objects[verified.Key] == nil || upload.Status != model.PendingUploadStatusPending {
+		t.Fatalf("orphan state = final=%#v upload=%#v", store.objects[verified.Key], upload)
+	}
+	delete(store.objects, upload.Key)
+	repo.claimErr = nil
+	if err := FinalizeVerifiedDirectUploads(context.Background(), store, repo, []*VerifiedDirectUpload{verified}, now.Add(time.Second)); err != nil {
+		t.Fatalf("retry orphan: %v", err)
+	}
+	if upload.FinalizedKey != verified.Key || upload.Status != model.PendingUploadStatusFinalized {
+		t.Fatalf("retried upload = %#v", upload)
+	}
+}
+
+func TestVerifyDirectUploadAttachmentReusesOnlyFinalizedIdentity(t *testing.T) {
+	now := time.Date(2026, 7, 15, 13, 30, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID: "upload-final", UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment,
+		Key: "uploads/pending/user-1/upload-final/input.png", FinalizedKey: "uploads/finalized/user-1/upload-final/input.png",
+		FileName: "input.png", ContentType: "image/png", Size: 1,
+		Status: model.PendingUploadStatusFinalized, ExpiresAt: now.Add(-time.Hour),
+	}
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
+	for _, asserted := range []string{upload.Key, upload.FinalizedKey} {
+		verified, err := VerifyDirectUploadAttachment(context.Background(), repo, upload.UserID, []string{upload.Purpose}, upload.ID, asserted, now)
+		if err != nil || verified.Key != upload.FinalizedKey {
+			t.Fatalf("asserted %q -> %#v, %v", asserted, verified, err)
+		}
+	}
+	for _, asserted := range []string{"uploads/finalized/user-2/upload-final/input.png", "other"} {
+		if _, err := VerifyDirectUploadAttachment(context.Background(), repo, upload.UserID, []string{upload.Purpose}, upload.ID, asserted, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
+			t.Fatalf("asserted %q error = %v, want access denied", asserted, err)
+		}
+	}
+	upload.FinalizedKey = ""
+	if _, err := VerifyDirectUploadAttachment(context.Background(), repo, upload.UserID, []string{upload.Purpose}, upload.ID, upload.Key, now); !errors.Is(err, ErrPendingUploadNotPending) {
+		t.Fatalf("legacy finalized error = %v, want not pending", err)
+	}
 }
 
 func (r *fakePendingUploadRepo) FindPendingUploadsForCleanup(_ context.Context, before, staleBefore time.Time, limit int) ([]*model.PendingUpload, error) {
@@ -218,18 +359,24 @@ func (r *fakePendingUploadRepo) ReopenPendingUploadExpiration(_ context.Context,
 func TestPrepareDirectUploadCreatesPendingScopedSTSSession(t *testing.T) {
 	store := &fakeDirectUploadStore{name: "oss"}
 	repo := &fakePendingUploadRepo{}
+	var policyResource []string
 	issuer := StaticUploadCredentialIssuer(func(_ context.Context, req UploadCredentialRequest) (*UploadCredential, error) {
-		if !strings.Contains(req.Policy, "uploads/pending/user-1/") {
-			t.Fatalf("policy = %s, want user pending prefix", req.Policy)
+		if strings.Contains(req.Policy, "uploads/finalized/") {
+			t.Fatalf("policy granted finalized namespace: %s", req.Policy)
 		}
 		var policy struct {
 			Statement []struct {
-				Action []string `json:"Action"`
+				Action   []string `json:"Action"`
+				Resource []string `json:"Resource"`
 			} `json:"Statement"`
 		}
 		if err := json.Unmarshal([]byte(req.Policy), &policy); err != nil {
 			t.Fatalf("policy is not JSON: %v", err)
 		}
+		if len(policy.Statement) != 1 {
+			t.Fatalf("policy statements = %#v, want one exact-key grant", policy.Statement)
+		}
+		policyResource = append([]string(nil), policy.Statement[0].Resource...)
 		actions := strings.Join(policy.Statement[0].Action, ",")
 		for _, want := range []string{"oss:PutObject", "oss:InitiateMultipartUpload", "oss:UploadPart", "oss:CompleteMultipartUpload", "oss:AbortMultipartUpload", "oss:ListParts"} {
 			if !strings.Contains(actions, want) {
@@ -267,6 +414,10 @@ func TestPrepareDirectUploadCreatesPendingScopedSTSSession(t *testing.T) {
 	}
 	if result.UploadID == "" || result.Key == "" || result.PublicURL == "" {
 		t.Fatalf("missing direct upload fields: %#v", result)
+	}
+	wantResource := "acs:oss:*:*:anban-test/" + result.Key
+	if len(policyResource) != 1 || policyResource[0] != wantResource {
+		t.Fatalf("STS resource = %#v, want exact source ARN %q", policyResource, wantResource)
 	}
 	if !strings.HasPrefix(result.Key, "uploads/pending/user-1/") || !strings.HasSuffix(result.Key, ".mp4") {
 		t.Fatalf("key = %q, want user pending mp4 key", result.Key)
@@ -424,7 +575,7 @@ func TestResolveDirectUploadAttachment(t *testing.T) {
 	)
 	want := VerifiedDirectUpload{
 		UploadID:    uploadID,
-		Key:         key,
+		Key:         "uploads/finalized/user-1/upload-1/product.png",
 		FileName:    "repository-product.png",
 		ContentType: "image/png",
 		Size:        2048,
@@ -456,7 +607,7 @@ func TestResolveDirectUploadAttachment(t *testing.T) {
 			name: "reuses matching finalized upload after pending expiry",
 			upload: &model.PendingUpload{
 				ID: uploadID, UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment,
-				Key: key, FileName: want.FileName, ContentType: want.ContentType, Size: want.Size,
+				Key: key, FinalizedKey: want.Key, FileName: want.FileName, ContentType: want.ContentType, Size: want.Size,
 				Status: model.PendingUploadStatusFinalized, ExpiresAt: now.Add(-time.Hour),
 			},
 			lookupID: uploadID, userID: "user-1", purposes: []string{DirectUploadPurposeAIEntryAttachment},
@@ -619,7 +770,7 @@ func TestFinalizeVerifiedDirectUploadsValidatesNormalizedObjectContentType(t *te
 				t.Fatalf("verify: %v", err)
 			}
 			store := &fakeDirectUploadStore{objects: map[string]*storage.ObjectInfo{
-				upload.Key: {Key: upload.Key, Size: upload.Size, ContentType: tt.actualType},
+				upload.Key: {Key: upload.Key, Size: upload.Size, ContentType: tt.actualType, ETag: "etag-upload-mime"},
 			}}
 			err = FinalizeVerifiedDirectUploads(context.Background(), store, repo, []*VerifiedDirectUpload{verified}, now)
 			if tt.wantErr && !errors.Is(err, ErrPendingUploadObjectInvalid) {
@@ -670,8 +821,7 @@ func TestFinalizeVerifiedDirectUploadsValidatesEveryObjectBeforeClaimingAny(t *t
 	}
 }
 
-func TestFinalizeVerifiedDirectUploadsReusesConcurrentlyFinalizedIdentity(t *testing.T) {
-	repo := openBootstrapTestRepository(t)
+func TestFinalizeVerifiedDirectUploadsConcurrentlyConvergesOnImmutableIdentity(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 15, 11, 0, 0, 0, time.UTC)
 	upload := &model.PendingUpload{
@@ -679,23 +829,48 @@ func TestFinalizeVerifiedDirectUploadsReusesConcurrentlyFinalizedIdentity(t *tes
 		Key: "uploads/pending/user-1/upload-1/input.png", PublicURL: "https://cdn/upload-1", FileName: "input.png", ContentType: "image/png", Size: 1,
 		Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour),
 	}
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, upload); err != nil {
-		t.Fatalf("create upload: %v", err)
-	}
-	first, err := VerifyDirectUploadAttachment(ctx, repo.PendingUploads(), upload.UserID, []string{upload.Purpose}, upload.ID, upload.Key, now)
+	baseRepo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
+	repo := &lockedPendingUploadRepo{fakePendingUploadRepo: baseRepo}
+	first, err := VerifyDirectUploadAttachment(ctx, repo, upload.UserID, []string{upload.Purpose}, upload.ID, upload.Key, now)
 	if err != nil {
 		t.Fatalf("first verify: %v", err)
 	}
-	second, err := VerifyDirectUploadAttachment(ctx, repo.PendingUploads(), upload.UserID, []string{upload.Purpose}, upload.ID, upload.Key, now)
+	second, err := VerifyDirectUploadAttachment(ctx, repo, upload.UserID, []string{upload.Purpose}, upload.ID, upload.Key, now)
 	if err != nil {
 		t.Fatalf("second verify: %v", err)
 	}
-	store := matchingDirectUploadStore(upload)
-	if err := FinalizeVerifiedDirectUploads(ctx, store, repo.PendingUploads(), []*VerifiedDirectUpload{first}, now); err != nil {
-		t.Fatalf("first finalize: %v", err)
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("new local store: %v", err)
 	}
-	if err := FinalizeVerifiedDirectUploads(ctx, store, repo.PendingUploads(), []*VerifiedDirectUpload{second}, now.Add(time.Second)); err != nil {
-		t.Fatalf("concurrent finalized reuse: %v", err)
+	if _, err := store.Upload(ctx, upload.Key, strings.NewReader("x"), upload.ContentType); err != nil {
+		t.Fatalf("upload source: %v", err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i, verified := range []*VerifiedDirectUpload{first, second} {
+		wg.Add(1)
+		go func(offset int, item *VerifiedDirectUpload) {
+			defer wg.Done()
+			<-start
+			errs <- FinalizeVerifiedDirectUploads(ctx, store, repo, []*VerifiedDirectUpload{item}, now.Add(time.Duration(offset)*time.Second))
+		}(i, verified)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent finalize: %v", err)
+		}
+	}
+	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != first.Key || second.Key != first.Key {
+		t.Fatalf("concurrent final identity = upload %#v first=%q second=%q", upload, first.Key, second.Key)
+	}
+	data, err := store.Read(ctx, first.Key)
+	if err != nil || string(data) != "x" {
+		t.Fatalf("final object = %q, %v", data, err)
 	}
 }
 
@@ -718,6 +893,7 @@ func TestFinalizePendingUploadURLsRejectsCrossUserAndExpired(t *testing.T) {
 			ID:        "other",
 			UserID:    "user-2",
 			Purpose:   DirectUploadPurposeVideoReference,
+			Key:       "uploads/pending/user-2/other/ref.mp4",
 			PublicURL: "https://cdn.example.com/uploads/pending/user-2/other/ref.mp4",
 			Status:    model.PendingUploadStatusPending,
 			ExpiresAt: now.Add(time.Minute),
@@ -726,23 +902,26 @@ func TestFinalizePendingUploadURLsRejectsCrossUserAndExpired(t *testing.T) {
 			ID:        "expired",
 			UserID:    "user-1",
 			Purpose:   DirectUploadPurposeVideoReference,
+			Key:       "uploads/pending/user-1/expired/ref.mp4",
 			PublicURL: "https://cdn.example.com/uploads/pending/user-1/expired/ref.mp4",
 			Status:    model.PendingUploadStatusPending,
 			ExpiresAt: now.Add(-time.Minute),
 		},
 		"wrong-purpose": {
 			ID: "wrong-purpose", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
+			Key:       "uploads/pending/user-1/wrong-purpose/ref.mp4",
 			PublicURL: "https://cdn.example.com/uploads/pending/user-1/wrong-purpose/ref.mp4",
 			Status:    model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Minute),
 		},
 		"finalized": {
 			ID: "finalized", UserID: "user-1", Purpose: DirectUploadPurposeVideoReference,
+			Key:       "uploads/pending/user-1/finalized/ref.mp4",
 			PublicURL: "https://cdn.example.com/uploads/pending/user-1/finalized/ref.mp4",
 			Status:    model.PendingUploadStatusFinalized, ExpiresAt: now.Add(time.Minute),
 		},
 	}}
 	store := matchingDirectUploadStore(repo.uploads["ok"])
-	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
+	if _, err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
 		"https://cdn.example.com/uploads/pending/user-1/ok/ref.mp4?x=1",
 	}, now); err != nil {
 		t.Fatalf("FinalizePendingUploadURLs ok: %v", err)
@@ -750,30 +929,69 @@ func TestFinalizePendingUploadURLsRejectsCrossUserAndExpired(t *testing.T) {
 	if len(repo.finalized) != 1 || repo.finalized[0] != "ok" {
 		t.Fatalf("finalized = %v, want [ok]", repo.finalized)
 	}
-	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
+	if _, err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
 		"https://cdn.example.com/uploads/pending/user-2/other/ref.mp4",
 	}, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
 		t.Fatalf("cross-user error = %v, want ErrPendingUploadAccessDenied", err)
 	}
-	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
+	if _, err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
 		"https://cdn.example.com/uploads/pending/user-1/expired/ref.mp4",
 	}, now); !errors.Is(err, ErrPendingUploadExpired) {
 		t.Fatalf("expired error = %v, want ErrPendingUploadExpired", err)
 	}
-	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
+	if _, err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
 		"https://cdn.example.com/uploads/pending/user-1/wrong-purpose/ref.mp4",
 	}, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
 		t.Fatalf("wrong-purpose error = %v, want ErrPendingUploadAccessDenied", err)
 	}
-	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
+	if _, err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
 		"https://cdn.example.com/uploads/pending/user-1/finalized/ref.mp4",
 	}, now); !errors.Is(err, ErrPendingUploadNotPending) {
 		t.Fatalf("finalized error = %v, want ErrPendingUploadNotPending", err)
 	}
-	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
+	if _, err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
 		"https://cdn.example.com/uploads/pending/user-1/unknown/ref.mp4",
 	}, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
 		t.Fatalf("unknown error = %v, want ErrPendingUploadAccessDenied", err)
+	}
+}
+
+func TestFinalizePendingUploadURLsDoesNotRequireStoreWithoutDirectUploads(t *testing.T) {
+	rewrites, err := FinalizePendingUploadURLs(context.Background(), nil, &fakePendingUploadRepo{}, "user-1", DirectUploadPurposeVideoReference, []string{"", "https://external.example.com/video.mp4"}, time.Now())
+	if err != nil {
+		t.Fatalf("ordinary URLs required direct-upload store: %v", err)
+	}
+	if len(rewrites) != 0 {
+		t.Fatalf("ordinary URL rewrites = %#v", rewrites)
+	}
+}
+
+func TestFinalizePendingUploadURLsPromotesAndReturnsFinalURLs(t *testing.T) {
+	now := time.Date(2026, 7, 15, 14, 0, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID: "legacy-url", UserID: "user-1", Purpose: DirectUploadPurposeVideoReference,
+		Key:       "uploads/pending/user-1/legacy-url/ref.mp4",
+		PublicURL: "https://cdn.example.com/uploads/pending/user-1/legacy-url/ref.mp4",
+		FileName:  "ref.mp4", ContentType: "video/mp4", Size: 1,
+		Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour),
+	}
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
+	store := matchingDirectUploadStore(upload)
+	rewrites, err := FinalizePendingUploadURLs(context.Background(), store, repo, upload.UserID, upload.Purpose, []string{upload.PublicURL, "https://external.example.com/image.png"}, now)
+	if err != nil {
+		t.Fatalf("finalize URLs: %v", err)
+	}
+	wantFinalKey := "uploads/finalized/user-1/legacy-url/ref.mp4"
+	wantFinalURL := store.GetURL(wantFinalKey)
+	if rewrites[upload.PublicURL] != wantFinalURL || rewrites["https://external.example.com/image.png"] != "" {
+		t.Fatalf("rewrites = %#v, want pending URL -> %q only", rewrites, wantFinalURL)
+	}
+	if upload.Key != "uploads/pending/user-1/legacy-url/ref.mp4" || upload.FinalizedKey != wantFinalKey || upload.Status != model.PendingUploadStatusFinalized {
+		t.Fatalf("persisted upload = %#v", upload)
+	}
+	rewrites, err = FinalizePendingUploadURLs(context.Background(), store, repo, upload.UserID, upload.Purpose, []string{wantFinalURL}, now.Add(time.Second))
+	if err != nil || rewrites[wantFinalURL] != wantFinalURL || len(store.promoted) != 1 {
+		t.Fatalf("finalized retry rewrites=%#v promoted=%#v err=%v", rewrites, store.promoted, err)
 	}
 }
 
@@ -796,7 +1014,7 @@ func TestFinalizePendingUploadURLsRejectsMismatchedPendingURL(t *testing.T) {
 		"https://cdn.example.com/uploads/pending/user-1/ok/other.mp4",
 	}
 	for _, raw := range cases {
-		if err := FinalizePendingUploadURLs(context.Background(), matchingDirectUploadStore(repo.uploads["ok"]), repo, "user-1", DirectUploadPurposeVideoReference, []string{raw}, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
+		if _, err := FinalizePendingUploadURLs(context.Background(), matchingDirectUploadStore(repo.uploads["ok"]), repo, "user-1", DirectUploadPurposeVideoReference, []string{raw}, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
 			t.Fatalf("FinalizePendingUploadURLs(%q) error = %v, want ErrPendingUploadAccessDenied", raw, err)
 		}
 	}
@@ -897,15 +1115,16 @@ func TestValidatePendingUploadURLRejectsUnauthorizedAndInvalid(t *testing.T) {
 func TestCleanupExpiredPendingUploadsReopensClaimWhenDeleteFails(t *testing.T) {
 	now := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
 	upload := &model.PendingUpload{
-		ID: "expired", Key: "uploads/pending/user-1/expired/input.png",
+		ID: "expired", UserID: "user-1", Key: "uploads/pending/user-1/expired/input.png",
 		Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(-time.Minute),
 	}
 	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
-	store := &fakeDirectUploadStore{name: "oss", deleteErr: errors.New("delete failed")}
+	finalKey := "uploads/finalized/user-1/expired/input.png"
+	store := &fakeDirectUploadStore{name: "oss", deleteErrs: map[string]error{finalKey: errors.New("delete final failed")}}
 
 	cleaned, err := CleanupExpiredPendingUploads(context.Background(), store, repo, now, 100)
-	if err == nil || err.Error() != "delete failed" {
-		t.Fatalf("cleanup error = %v, want delete failed", err)
+	if err == nil || !strings.Contains(err.Error(), "delete final failed") {
+		t.Fatalf("cleanup error = %v, want final delete failure", err)
 	}
 	if cleaned != 0 {
 		t.Fatalf("cleaned = %d, want 0", cleaned)
@@ -913,8 +1132,11 @@ func TestCleanupExpiredPendingUploadsReopensClaimWhenDeleteFails(t *testing.T) {
 	if upload.Status != model.PendingUploadStatusPending || upload.ExpiredAt != nil {
 		t.Fatalf("failed delete left upload claimed: %#v", upload)
 	}
+	if len(store.deleted) != 2 || store.deleted[0] != upload.Key || store.deleted[1] != finalKey {
+		t.Fatalf("first cleanup deleted keys = %#v", store.deleted)
+	}
 
-	store.deleteErr = nil
+	delete(store.deleteErrs, finalKey)
 	cleaned, err = CleanupExpiredPendingUploads(context.Background(), store, repo, now, 100)
 	if err != nil {
 		t.Fatalf("retry cleanup: %v", err)
@@ -922,13 +1144,16 @@ func TestCleanupExpiredPendingUploadsReopensClaimWhenDeleteFails(t *testing.T) {
 	if cleaned != 1 || upload.Status != model.PendingUploadStatusExpired {
 		t.Fatalf("retry cleanup = %d, upload %#v", cleaned, upload)
 	}
+	if len(store.deleted) != 4 || store.deleted[2] != upload.Key || store.deleted[3] != finalKey {
+		t.Fatalf("retry cleanup deleted keys = %#v", store.deleted)
+	}
 }
 
 func TestCleanupExpiredPendingUploadsRecoversAbandonedClaim(t *testing.T) {
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	staleClaim := now.Add(-10 * time.Minute)
 	upload := &model.PendingUpload{
-		ID: "abandoned", Key: "uploads/pending/user-1/abandoned/input.png",
+		ID: "abandoned", UserID: "user-1", Key: "uploads/pending/user-1/abandoned/input.png",
 		Status: model.PendingUploadStatusExpiring, ExpiresAt: now.Add(-time.Hour), CleanupClaimID: "stale-claim", CleanupClaimedAt: &staleClaim,
 	}
 	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
@@ -941,7 +1166,7 @@ func TestCleanupExpiredPendingUploadsRecoversAbandonedClaim(t *testing.T) {
 	if cleaned != 1 || upload.Status != model.PendingUploadStatusExpired || upload.CleanupClaimedAt != nil {
 		t.Fatalf("cleanup = %d, upload %#v", cleaned, upload)
 	}
-	if len(store.deleted) != 1 || store.deleted[0] != upload.Key {
+	if len(store.deleted) != 2 || store.deleted[0] != upload.Key || store.deleted[1] != "uploads/finalized/user-1/abandoned/input.png" {
 		t.Fatalf("deleted keys = %#v", store.deleted)
 	}
 }

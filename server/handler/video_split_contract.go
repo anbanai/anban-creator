@@ -67,6 +67,34 @@ func montageSourceAssetURLs(input *model.MontageInput) []string {
 	return urls
 }
 
+func rewriteFinalizedVideoReferenceURLs(rewrites map[string]string, creatorCfg *model.VideoTaskConfig, creatorInput *model.VideoInput, editorCfg *model.VideoTaskConfig, editorInput *model.VideoInput) {
+	for _, cfg := range []*model.VideoTaskConfig{creatorCfg, editorCfg} {
+		if cfg == nil {
+			continue
+		}
+		for i := range cfg.References {
+			cfg.References[i].URL = rewriteFinalizedUploadURL(cfg.References[i].URL, rewrites)
+		}
+	}
+	for _, input := range []*model.VideoInput{creatorInput, editorInput} {
+		if input == nil {
+			continue
+		}
+		for i := range input.References {
+			input.References[i].URL = rewriteFinalizedUploadURL(input.References[i].URL, rewrites)
+		}
+	}
+}
+
+func rewriteFinalizedMontageAssetURLs(input *model.MontageInput, rewrites map[string]string) {
+	if input == nil {
+		return
+	}
+	for i := range input.SourceAssets {
+		input.SourceAssets[i].URL = rewriteFinalizedUploadURL(input.SourceAssets[i].URL, rewrites)
+	}
+}
+
 func validateMontageSourceAssetURLs(input *model.MontageInput) error {
 	for _, url := range montageSourceAssetURLs(input) {
 		if !validReferenceImageURL(url) {

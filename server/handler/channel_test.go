@@ -42,6 +42,7 @@ type fakeStorageProvider struct {
 	statRepo service.PendingUploadRepository
 	statErr  error
 	statInfo *storage.ObjectInfo
+	objects  map[string]*storage.ObjectInfo
 }
 
 var _ storage.Provider = (*fakeStorageProvider)(nil)
@@ -97,15 +98,39 @@ func (f *fakeStorageProvider) StatObject(ctx context.Context, key string) (*stor
 		info := *f.statInfo
 		return &info, nil
 	}
+	if info := f.objects[key]; info != nil {
+		copy := *info
+		return &copy, nil
+	}
 	parts := strings.Split(strings.Trim(key, "/"), "/")
 	if f.statRepo == nil || len(parts) < 4 || parts[0] != "uploads" || parts[1] != "pending" {
-		return nil, fmt.Errorf("object metadata not found")
+		return nil, storage.ErrObjectNotFound
 	}
 	upload, err := f.statRepo.FindPendingUploadByID(ctx, parts[3])
 	if err != nil || upload.Key != key {
-		return nil, fmt.Errorf("object metadata not found")
+		return nil, storage.ErrObjectNotFound
 	}
-	return &storage.ObjectInfo{Key: key, Size: upload.Size, ContentType: upload.ContentType}, nil
+	return &storage.ObjectInfo{Key: key, Size: upload.Size, ContentType: upload.ContentType, ETag: "etag-" + upload.ID}, nil
+}
+
+func (f *fakeStorageProvider) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) error {
+	if f.objects[finalKey] != nil {
+		return storage.ErrObjectAlreadyExists
+	}
+	info, err := f.StatObject(ctx, sourceKey)
+	if err != nil {
+		return err
+	}
+	if info.ETag != expectedETag {
+		return storage.ErrPromotionPreconditionFailed
+	}
+	if f.objects == nil {
+		f.objects = map[string]*storage.ObjectInfo{}
+	}
+	copy := *info
+	copy.Key = finalKey
+	f.objects[finalKey] = &copy
+	return nil
 }
 
 func pendingUploadStatStore(repo service.PendingUploadRepository) *fakeStorageProvider {
@@ -145,11 +170,6 @@ func (r *fakeProjectPendingUploadRepo) FindPendingUploadByID(_ context.Context, 
 	}
 	cp := *r.uploads[id]
 	return &cp, nil
-}
-
-func (r *fakeProjectPendingUploadRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) (int64, error) {
-	r.finalized = append(r.finalized, ids...)
-	return int64(len(ids)), nil
 }
 
 func (r *fakeProjectPendingUploadRepo) FinalizePendingUploadClaims(_ context.Context, claims []model.PendingUploadClaim, _ time.Time) error {

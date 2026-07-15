@@ -63,7 +63,7 @@ func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	if got[0].ContentType != "image/png" {
 		t.Fatalf("content type = %q", got[0].ContentType)
 	}
-	if got[0].Size != 2048 || got[0].UploadID != "upload-1" || got[0].Key != key {
+	if got[0].Size != 2048 || got[0].UploadID != "upload-1" || got[0].Key != "uploads/finalized/user-1/upload-1/product.png" {
 		t.Fatalf("repository storage metadata not persisted: %#v", got[0])
 	}
 	if got[0].Instruction != "保持包装和 Logo" {

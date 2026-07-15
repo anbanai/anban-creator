@@ -114,8 +114,8 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, pendi
 		}
 		normalized[i] = a
 	}
-	statStore, _ := store.(storage.ObjectStatProvider)
-	if err := service.FinalizeVerifiedDirectUploads(ctx, statStore, pending, verifiedUploads, now); err != nil {
+	finalStore, _ := store.(service.DirectUploadFinalizationStorage)
+	if err := service.FinalizeVerifiedDirectUploads(ctx, finalStore, pending, verifiedUploads, now); err != nil {
 		return nil, inputAttachmentServiceError(err)
 	}
 	return normalized, nil
