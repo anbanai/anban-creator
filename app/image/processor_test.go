@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -167,6 +168,29 @@ type rawMetadataProvider struct {
 	result *GenerateResult
 }
 
+type blockingContextProvider struct{}
+
+func (blockingContextProvider) Name() string { return "blocking" }
+func (blockingContextProvider) Capabilities() *ProviderCapabilities {
+	return &ProviderCapabilities{}
+}
+func (blockingContextProvider) Generate(ctx context.Context, _ string, _ *GenerateOptions) (*GenerateResult, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestProcessorGenerateRawPropagatesCancellation(t *testing.T) {
+	p := newTestProcessor(&config.ImageAPI{Provider: "test", Key: "test-key"})
+	p.provider = blockingContextProvider{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := p.GenerateRaw(ctx, "prompt")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
 func (p rawMetadataProvider) Name() string {
 	return "metadata-provider"
 }
@@ -192,7 +216,7 @@ func TestProcessor_GenerateRawIncludesProviderMetadata(t *testing.T) {
 		},
 	}
 
-	got, err := p.GenerateRaw("春日饮茶")
+	got, err := p.GenerateRaw(context.Background(), "春日饮茶")
 	if err != nil {
 		t.Fatalf("GenerateRaw() error = %v", err)
 	}

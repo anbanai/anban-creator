@@ -243,7 +243,7 @@ type GenerateRawResult struct {
 
 // GenerateRaw 调用 AI provider 生成图片，返回原始 URL 或 data URL。
 // 不下载、不压缩、不写磁盘（本地临时文件会被读取并转为 data URL 后清理）。
-func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
+func (p *Processor) GenerateRaw(ctx context.Context, prompt string) (*GenerateRawResult, error) {
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
@@ -251,7 +251,6 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
 	}
 
-	ctx := context.Background()
 	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark}
 	finalPrompt := p.buildPrompt(prompt)
 	result, err := p.provider.Generate(ctx, finalPrompt, genOpts)
@@ -288,7 +287,7 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 
 // GenerateRawWithSize 调用 AI provider 生成指定尺寸的图片，返回原始 URL 或 data URL。
 // size 为空时使用默认尺寸。
-func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult, error) {
+func (p *Processor) GenerateRawWithSize(ctx context.Context, prompt, size string) (*GenerateRawResult, error) {
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
@@ -307,7 +306,6 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 		}
 	}
 
-	ctx := context.Background()
 	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark}
 	finalPrompt := p.buildPrompt(prompt)
 	result, err := activeProvider.Generate(ctx, finalPrompt, genOpts)
