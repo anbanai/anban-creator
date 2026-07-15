@@ -18,6 +18,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (
@@ -274,6 +275,9 @@ func FinalizePendingUploadURLs(ctx context.Context, repo PendingUploadRepository
 	for _, raw := range urls {
 		id := pendingUploadIDFromURL(raw)
 		if id == "" {
+			if key, ok := pendingUploadKeyFromURL(raw); ok && strings.HasPrefix(key, "uploads/pending/") {
+				return ErrPendingUploadInvalidURL
+			}
 			continue
 		}
 		if _, ok := seen[id]; ok {
@@ -379,24 +383,28 @@ func CleanupExpiredPendingUploads(ctx context.Context, store directUploadStorage
 	return cleaned, nil
 }
 
+func pendingUploadKeyFromURL(raw string) (string, bool) {
+	key, ok := storage.StorageKeyFromURL(strings.TrimSpace(raw))
+	if !ok {
+		return "", false
+	}
+	key = strings.TrimPrefix(key, "/")
+	if path.Clean(key) != key {
+		return "", false
+	}
+	return key, true
+}
+
 func pendingUploadIDFromURL(raw string) string {
-	if raw == "" {
+	key, ok := pendingUploadKeyFromURL(raw)
+	if !ok {
 		return ""
 	}
-	cut := strings.SplitN(raw, "?", 2)[0]
-	parts := strings.Split(cut, "/uploads/pending/")
-	if len(parts) < 2 {
-		if strings.HasPrefix(cut, "uploads/pending/") {
-			parts = []string{"", strings.TrimPrefix(cut, "uploads/pending/")}
-		} else {
-			return ""
-		}
-	}
-	segments := strings.Split(strings.Trim(parts[1], "/"), "/")
-	if len(segments) < 2 {
+	segments := strings.Split(key, "/")
+	if len(segments) < 5 || segments[0] != "uploads" || segments[1] != "pending" || segments[2] == "" || segments[3] == "" {
 		return ""
 	}
-	return segments[1]
+	return segments[3]
 }
 
 func pendingUploadURLMatches(raw string, upload *model.PendingUpload) bool {
@@ -420,8 +428,8 @@ func pendingUploadURLMatches(raw string, upload *model.PendingUpload) bool {
 	if !strings.EqualFold(candidateURL.Host, publicURL.Host) {
 		return false
 	}
-	candidatePath := strings.TrimPrefix(candidateURL.EscapedPath(), "/")
-	publicPath := strings.TrimPrefix(publicURL.EscapedPath(), "/")
+	candidatePath := strings.TrimPrefix(candidateURL.Path, "/")
+	publicPath := strings.TrimPrefix(publicURL.Path, "/")
 	return candidatePath == publicPath && candidatePath == key
 }
 
