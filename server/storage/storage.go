@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 )
 
@@ -20,6 +22,47 @@ type ObjectInfo struct {
 	MimeType    string
 	ContentType string
 	ETag        string
+}
+
+var (
+	ErrObjectStatUnsupported  = errors.New("storage object metadata is unavailable")
+	ErrBoundedReadUnsupported = errors.New("bounded storage reads are unavailable")
+	ErrObjectExceedsMaxSize   = errors.New("storage object is too large")
+)
+
+// ObjectStatProvider fetches object metadata without reading the object body.
+type ObjectStatProvider interface {
+	StatObject(ctx context.Context, key string) (*ObjectInfo, error)
+}
+
+// BoundedObjectReader reads at most maxBytes of an object and reports oversized
+// objects without first buffering the complete body.
+type BoundedObjectReader interface {
+	ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error)
+}
+
+// ReadObject requires an explicitly bounded reader. Security-sensitive callers
+// must not fall back to Provider.Read because some remote implementations buffer
+// the entire object before returning.
+func ReadObject(ctx context.Context, provider Provider, key string, maxBytes int64) ([]byte, error) {
+	if provider == nil {
+		return nil, fmt.Errorf("storage provider is unavailable")
+	}
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("maximum object size must be positive")
+	}
+	reader, ok := provider.(BoundedObjectReader)
+	if !ok {
+		return nil, ErrBoundedReadUnsupported
+	}
+	data, err := reader.ReadObject(ctx, key, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: size=%d max=%d", ErrObjectExceedsMaxSize, len(data), maxBytes)
+	}
+	return data, nil
 }
 
 // Provider is the interface for file storage backends.

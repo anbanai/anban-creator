@@ -14,6 +14,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (
@@ -52,7 +53,7 @@ func inputAttachmentValidationErrorf(format string, args ...any) error {
 }
 
 func inputAttachmentServiceError(err error) error {
-	if errors.Is(err, service.ErrPendingUploadAccessDenied) || errors.Is(err, service.ErrPendingUploadExpired) || errors.Is(err, service.ErrPendingUploadNotPending) {
+	if errors.Is(err, service.ErrPendingUploadAccessDenied) || errors.Is(err, service.ErrPendingUploadExpired) || errors.Is(err, service.ErrPendingUploadNotPending) || errors.Is(err, service.ErrPendingUploadObjectInvalid) {
 		return &inputAttachmentValidationError{err: err}
 	}
 	return err
@@ -68,7 +69,7 @@ func respondInputAttachmentError(c fiber.Ctx, logger *zerolog.Logger, err error)
 	return Error(c, fiber.StatusInternalServerError, "failed to validate attachments")
 }
 
-func validateInputAttachments(ctx context.Context, pending service.PendingUploadRepository, userID string, attachments []model.EntryAttachment, options InputAttachmentValidationOptions) ([]model.EntryAttachment, error) {
+func validateInputAttachments(ctx context.Context, store storage.Provider, pending service.PendingUploadRepository, userID string, attachments []model.EntryAttachment, options InputAttachmentValidationOptions) ([]model.EntryAttachment, error) {
 	if options.MaxCount > 0 && len(attachments) > options.MaxCount {
 		return nil, inputAttachmentValidationErrorf("at most %d attachments are allowed", options.MaxCount)
 	}
@@ -113,7 +114,8 @@ func validateInputAttachments(ctx context.Context, pending service.PendingUpload
 		}
 		normalized[i] = a
 	}
-	if err := service.FinalizeVerifiedDirectUploads(ctx, pending, verifiedUploads, now); err != nil {
+	statStore, _ := store.(storage.ObjectStatProvider)
+	if err := service.FinalizeVerifiedDirectUploads(ctx, statStore, pending, verifiedUploads, now); err != nil {
 		return nil, inputAttachmentServiceError(err)
 	}
 	return normalized, nil

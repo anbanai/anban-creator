@@ -202,6 +202,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	planSvc := service.NewPlanService(repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
 	h.SetRepository(repo)
+	h.SetStore(pendingUploadStatStore(repo.PendingUploads()))
 	app := fiber.New()
 	app.Post("/plans", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)

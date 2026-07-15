@@ -6,13 +6,15 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
-func finalizePendingURLs(ctx context.Context, repo service.PendingUploadRepository, userID, purpose string, urls []string) error {
+func finalizePendingURLs(ctx context.Context, store storage.Provider, repo service.PendingUploadRepository, userID, purpose string, urls []string) error {
 	if repo == nil || len(urls) == 0 {
 		return nil
 	}
-	return service.FinalizePendingUploadURLs(ctx, repo, userID, purpose, urls, time.Now())
+	statStore, _ := store.(storage.ObjectStatProvider)
+	return service.FinalizePendingUploadURLs(ctx, statStore, repo, userID, purpose, urls, time.Now())
 }
 
 func videoReferenceURLs(cfg *model.VideoTaskConfig) []string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,6 +134,41 @@ func (p *LocalProvider) Read(_ context.Context, key string) ([]byte, error) {
 	data, err := os.ReadFile(destPath)
 	if err != nil {
 		return nil, fmt.Errorf("read file %s: %w", destPath, err)
+	}
+	return data, nil
+}
+
+// StatObject returns local file metadata without reading its contents.
+func (p *LocalProvider) StatObject(_ context.Context, key string) (*ObjectInfo, error) {
+	destPath, err := p.safePath(key)
+	if err != nil {
+		return nil, fmt.Errorf("invalid key: %w", err)
+	}
+	info, err := os.Stat(destPath)
+	if err != nil {
+		return nil, fmt.Errorf("stat file %s: %w", destPath, err)
+	}
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(destPath)))
+	return &ObjectInfo{Key: key, Size: info.Size(), MimeType: contentType, ContentType: contentType}, nil
+}
+
+// ReadObject reads a local object with a hard memory bound.
+func (p *LocalProvider) ReadObject(_ context.Context, key string, maxBytes int64) ([]byte, error) {
+	destPath, err := p.safePath(key)
+	if err != nil {
+		return nil, fmt.Errorf("invalid key: %w", err)
+	}
+	file, err := os.Open(destPath)
+	if err != nil {
+		return nil, fmt.Errorf("open file %s: %w", destPath, err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read file %s: %w", destPath, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: key=%s size>%d", ErrObjectExceedsMaxSize, key, maxBytes)
 	}
 	return data, nil
 }

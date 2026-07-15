@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,6 +39,9 @@ type fakeVideoReferenceStorage struct {
 	files             map[string][]byte
 	uploadContentType string
 	downloadURL       string
+	rejectUnbounded   bool
+	boundedReadLimits []int64
+	actualSize        int64
 }
 
 func TestVideoGenerationSchemaDoesNotExposeModelSelection(t *testing.T) {
@@ -205,6 +209,20 @@ func (f *fakeVideoReferenceStorage) GetURL(key string) string {
 	return strings.TrimRight(prefix, "/") + "/" + strings.TrimLeft(key, "/")
 }
 func (f *fakeVideoReferenceStorage) Read(_ context.Context, key string) ([]byte, error) {
+	if f.rejectUnbounded {
+		return nil, errors.New("unbounded storage read invoked")
+	}
+	data, ok := f.files[key]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return append([]byte(nil), data...), nil
+}
+func (f *fakeVideoReferenceStorage) ReadObject(_ context.Context, key string, maxBytes int64) ([]byte, error) {
+	f.boundedReadLimits = append(f.boundedReadLimits, maxBytes)
+	if f.actualSize > maxBytes {
+		return nil, fmt.Errorf("object too large: size=%d max=%d", f.actualSize, maxBytes)
+	}
 	data, ok := f.files[key]
 	if !ok {
 		return nil, errors.New("not found")
@@ -1597,6 +1615,39 @@ func TestPrepareVideoGenerationInputsMaterializesVerifiedKeyFirstVideo(t *testin
 				t.Fatalf("persisted signed/transformed reference: %#v", refs)
 			}
 		})
+	}
+}
+
+func TestPrepareVideoGenerationInputsRejectsOversizedActualKeyObjectWithBoundedRead(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	key := "uploads/pending/user-1/video-upload/source.mp4"
+	store := &fakeVideoReferenceStorage{
+		ownedPrefix: "https://oss.example.com/", rejectUnbounded: true, actualSize: (50 << 20) + 1,
+		files: map[string][]byte{key: []byte("declared-small")},
+	}
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformVideoCreator, Status: model.TaskStatusRunning, Prompt: "参考视频生成内容"}
+	task.SetInputAttachments([]model.EntryAttachment{{
+		Type: "video", UploadID: "video-upload", Key: key, FileName: "source.mp4", ContentType: "video/mp4", Size: 1,
+	}})
+	task.SetVideoInput(model.VideoInput{Brief: task.Prompt, References: []model.VideoReferenceAsset{{
+		Type: service.VideoReferenceVideo, URL: key, FileName: "source.mp4", MimeType: "video/mp4", FileSize: 1, InputDurationSeconds: 12,
+	}}})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":` + strconv.Quote(projectID) + `,"task_id":` + strconv.Quote(task.ID) + `}`)}}
+	result, err := prepareVideoGenerationInputsHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("prepareVideoGenerationInputsHandler: %v", err)
+	}
+	if !result.IsError || !strings.Contains(callToolText(result), "too large") {
+		t.Fatalf("prepare result = %s, want actual object size rejection", callToolText(result))
+	}
+	if len(store.boundedReadLimits) != 1 || store.boundedReadLimits[0] != 50<<20 {
+		t.Fatalf("bounded read limits = %#v, want [50MB]", store.boundedReadLimits)
 	}
 }
 

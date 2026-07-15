@@ -31,6 +31,26 @@ type fakeStore struct {
 	ownedPred func(string) bool
 }
 
+type boundedOnlyStore struct {
+	*fakeStore
+	actualSize   int64
+	boundedCalls []int64
+	unbounded    bool
+}
+
+func (f *boundedOnlyStore) Read(context.Context, string) ([]byte, error) {
+	f.unbounded = true
+	return nil, errors.New("unbounded storage read invoked")
+}
+
+func (f *boundedOnlyStore) ReadObject(_ context.Context, _ string, maxBytes int64) ([]byte, error) {
+	f.boundedCalls = append(f.boundedCalls, maxBytes)
+	if f.actualSize > maxBytes {
+		return nil, fmt.Errorf("object too large: size=%d max=%d", f.actualSize, maxBytes)
+	}
+	return []byte("bounded"), nil
+}
+
 var _ storage.Provider = (*fakeStore)(nil)
 
 func (f *fakeStore) Name() string { return "fake" }
@@ -50,6 +70,16 @@ func (f *fakeStore) Read(_ context.Context, key string) ([]byte, error) {
 		return data, nil
 	}
 	return nil, fmt.Errorf("not found: %s", key)
+}
+func (f *fakeStore) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	data, err := f.Read(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: size=%d max=%d", storage.ErrObjectExceedsMaxSize, len(data), maxBytes)
+	}
+	return data, nil
 }
 func (f *fakeStore) Delete(context.Context, string) error { return nil }
 func (f *fakeStore) UploadURL(context.Context, string, string, int) (string, error) {
@@ -182,6 +212,58 @@ func TestDownloadKeyFirstSourcesReadStorageForSharedExecutors(t *testing.T) {
 			t.Fatalf("attachment = %q, %v", got, err)
 		}
 	})
+}
+
+func TestKeyFirstMaterializationUsesBoundedStorageReads(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxBytes int64
+		wantErr  bool
+		run      func(context.Context, storage.Provider, string) error
+	}{
+		{
+			name: "reference image", maxBytes: maxReferenceImageBytes, wantErr: true,
+			run: func(ctx context.Context, store storage.Provider, workDir string) error {
+				return DownloadReferenceImage(ctx, store, noopLogger(), workDir, "uploads/pending/user-1/reference/image.png")
+			},
+		},
+		{
+			name: "product image", maxBytes: maxReferenceImageBytes,
+			run: func(ctx context.Context, store storage.Provider, workDir string) error {
+				if got := DownloadProductImages(ctx, store, noopLogger(), workDir, []string{"uploads/pending/user-1/product/image.png"}); got != 0 {
+					return fmt.Errorf("materialized %d oversized product images", got)
+				}
+				return nil
+			},
+		},
+		{
+			name: "input attachment", maxBytes: maxInputAttachmentBytes,
+			run: func(ctx context.Context, store storage.Provider, workDir string) error {
+				if got := DownloadInputAttachments(ctx, store, noopLogger(), workDir, []model.EntryAttachment{{
+					Type: "document", UploadID: "attachment", Key: "uploads/pending/user-1/attachment/brief.pdf",
+					FileName: "brief.pdf", ContentType: "application/pdf", Size: 1,
+				}}); got != 0 {
+					return fmt.Errorf("materialized %d oversized attachments", got)
+				}
+				return nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &boundedOnlyStore{fakeStore: &fakeStore{}, actualSize: tt.maxBytes + 1}
+			err := tt.run(context.Background(), store, t.TempDir())
+			if tt.wantErr && (err == nil || !strings.Contains(err.Error(), "too large")) {
+				t.Fatalf("error = %v, want oversized object rejection", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatal(err)
+			}
+			if store.unbounded || len(store.boundedCalls) != 1 || store.boundedCalls[0] != tt.maxBytes {
+				t.Fatalf("read boundary: unbounded=%v bounded=%#v, want only max=%d", store.unbounded, store.boundedCalls, tt.maxBytes)
+			}
+		})
+	}
 }
 
 func TestDownloadReferenceImage_LocalRelativePathReadsStore(t *testing.T) {

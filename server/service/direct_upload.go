@@ -18,6 +18,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (
@@ -35,11 +36,12 @@ const (
 )
 
 var (
-	ErrPendingUploadNotFound     = model.ErrPendingUploadNotFound
-	ErrPendingUploadInvalidURL   = errors.New("pending upload URL is invalid")
-	ErrPendingUploadAccessDenied = errors.New("pending upload access denied")
-	ErrPendingUploadNotPending   = errors.New("pending upload is not pending")
-	ErrPendingUploadExpired      = errors.New("pending upload has expired")
+	ErrPendingUploadNotFound      = model.ErrPendingUploadNotFound
+	ErrPendingUploadInvalidURL    = errors.New("pending upload URL is invalid")
+	ErrPendingUploadAccessDenied  = errors.New("pending upload access denied")
+	ErrPendingUploadNotPending    = errors.New("pending upload is not pending")
+	ErrPendingUploadExpired       = errors.New("pending upload has expired")
+	ErrPendingUploadObjectInvalid = errors.New("pending upload object metadata is invalid")
 )
 
 type directUploadStorage interface {
@@ -92,6 +94,7 @@ type VerifiedDirectUpload struct {
 	FileName    string
 	ContentType string
 	Size        int64
+	Purpose     string
 	claim       *model.PendingUploadClaim
 }
 
@@ -278,11 +281,12 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 	}, nil
 }
 
-func FinalizePendingUploadURLs(ctx context.Context, repo PendingUploadRepository, userID, purpose string, urls []string, now time.Time) error {
+func FinalizePendingUploadURLs(ctx context.Context, store storage.ObjectStatProvider, repo PendingUploadRepository, userID, purpose string, urls []string, now time.Time) error {
 	if repo == nil || len(urls) == 0 {
 		return nil
 	}
 	ids := make([]string, 0, len(urls))
+	uploads := make([]*model.PendingUpload, 0, len(urls))
 	seen := map[string]struct{}{}
 	for _, raw := range urls {
 		id := pendingUploadIDFromURL(raw)
@@ -313,9 +317,15 @@ func FinalizePendingUploadURLs(ctx context.Context, repo PendingUploadRepository
 		}
 		seen[id] = struct{}{}
 		ids = append(ids, id)
+		uploads = append(uploads, upload)
 	}
 	if len(ids) == 0 {
 		return nil
+	}
+	for _, upload := range uploads {
+		if err := validateDirectUploadObject(ctx, store, upload); err != nil {
+			return err
+		}
 	}
 	claimed, err := repo.FinalizePendingUploads(ctx, ids, now)
 	if err != nil {
@@ -363,12 +373,12 @@ func ValidatePendingUploadURL(ctx context.Context, repo PendingUploadRepository,
 	return upload.Key, nil
 }
 
-func ResolveDirectUploadAttachment(ctx context.Context, repo PendingUploadRepository, userID string, allowedPurposes []string, uploadID, assertedKey string, now time.Time) (*VerifiedDirectUpload, error) {
+func ResolveDirectUploadAttachment(ctx context.Context, store storage.ObjectStatProvider, repo PendingUploadRepository, userID string, allowedPurposes []string, uploadID, assertedKey string, now time.Time) (*VerifiedDirectUpload, error) {
 	verified, err := VerifyDirectUploadAttachment(ctx, repo, userID, allowedPurposes, uploadID, assertedKey, now)
 	if err != nil {
 		return nil, err
 	}
-	if err := FinalizeVerifiedDirectUploads(ctx, repo, []*VerifiedDirectUpload{verified}, now); err != nil {
+	if err := FinalizeVerifiedDirectUploads(ctx, store, repo, []*VerifiedDirectUpload{verified}, now); err != nil {
 		return nil, err
 	}
 	verified.claim = nil
@@ -407,6 +417,7 @@ func VerifyDirectUploadAttachment(ctx context.Context, repo PendingUploadReposit
 		FileName:    upload.FileName,
 		ContentType: upload.ContentType,
 		Size:        upload.Size,
+		Purpose:     upload.Purpose,
 		claim: &model.PendingUploadClaim{
 			UploadID:        upload.ID,
 			UserID:          upload.UserID,
@@ -416,7 +427,7 @@ func VerifyDirectUploadAttachment(ctx context.Context, repo PendingUploadReposit
 	}, nil
 }
 
-func FinalizeVerifiedDirectUploads(ctx context.Context, repo PendingUploadRepository, uploads []*VerifiedDirectUpload, now time.Time) error {
+func FinalizeVerifiedDirectUploads(ctx context.Context, store storage.ObjectStatProvider, repo PendingUploadRepository, uploads []*VerifiedDirectUpload, now time.Time) error {
 	claims := make([]model.PendingUploadClaim, 0, len(uploads))
 	seen := make(map[string]struct{}, len(uploads))
 	for _, upload := range uploads {
@@ -427,6 +438,12 @@ func FinalizeVerifiedDirectUploads(ctx context.Context, repo PendingUploadReposi
 			continue
 		}
 		seen[upload.claim.UploadID] = struct{}{}
+		if err := validateDirectUploadObject(ctx, store, &model.PendingUpload{
+			ID: upload.UploadID, UserID: upload.claim.UserID, Purpose: upload.Purpose, Key: upload.Key,
+			FileName: upload.FileName, ContentType: upload.ContentType, Size: upload.Size,
+		}); err != nil {
+			return err
+		}
 		claims = append(claims, *upload.claim)
 	}
 	if len(claims) == 0 {
@@ -442,6 +459,55 @@ func FinalizeVerifiedDirectUploads(ctx context.Context, repo PendingUploadReposi
 		return err
 	}
 	return nil
+}
+
+func validateDirectUploadObject(ctx context.Context, store storage.ObjectStatProvider, upload *model.PendingUpload) error {
+	if store == nil {
+		return fmt.Errorf("%w: %v", ErrPendingUploadObjectInvalid, storage.ErrObjectStatUnsupported)
+	}
+	if upload == nil || strings.TrimSpace(upload.Key) == "" {
+		return fmt.Errorf("%w: object key is required", ErrPendingUploadObjectInvalid)
+	}
+	info, err := store.StatObject(ctx, upload.Key)
+	if err != nil {
+		return fmt.Errorf("%w: stat %s: %v", ErrPendingUploadObjectInvalid, upload.Key, err)
+	}
+	if info == nil {
+		return fmt.Errorf("%w: stat %s returned no metadata", ErrPendingUploadObjectInvalid, upload.Key)
+	}
+	if info.Size != upload.Size {
+		return fmt.Errorf("%w: %s size mismatch: prepared=%d storage=%d", ErrPendingUploadObjectInvalid, upload.Key, upload.Size, info.Size)
+	}
+	policy, ok := directUploadPolicies[upload.Purpose]
+	if !ok {
+		return fmt.Errorf("%w: unsupported upload purpose %q", ErrPendingUploadObjectInvalid, upload.Purpose)
+	}
+	ext := strings.ToLower(filepath.Ext(upload.FileName))
+	maxSize := policy.maxSize
+	if policy.maxSizeFor != nil {
+		maxSize = policy.maxSizeFor(upload.ContentType, ext)
+	}
+	if maxSize <= 0 || info.Size > maxSize {
+		return fmt.Errorf("%w: %s exceeds the allowed object size", ErrPendingUploadObjectInvalid, upload.Key)
+	}
+	expectedType := normalizeDirectUploadContentType(upload.ContentType)
+	actualType := normalizeDirectUploadContentType(firstNonEmptyString(info.ContentType, info.MimeType))
+	if expectedType == "" || actualType == "" || expectedType != actualType {
+		return fmt.Errorf("%w: %s content type mismatch: prepared=%q storage=%q", ErrPendingUploadObjectInvalid, upload.Key, upload.ContentType, firstNonEmptyString(info.ContentType, info.MimeType))
+	}
+	return nil
+}
+
+func normalizeDirectUploadContentType(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err == nil {
+		return strings.ToLower(strings.TrimSpace(mediaType))
+	}
+	return strings.ToLower(strings.TrimSpace(strings.SplitN(value, ";", 2)[0]))
 }
 
 func directUploadPurposeAllowed(purpose string, allowed []string) bool {
@@ -610,6 +676,9 @@ func (i *aliyunUploadCredentialIssuer) IssueUploadCredential(_ context.Context, 
 }
 
 func directUploadPolicyJSON(bucket, key string) string {
+	// RAM scopes PUT and multipart actions to the exact object key. The current
+	// OSS STS/PUT flow has no reliably enforceable content-length condition, so
+	// finalization HEAD checks and bounded reads remain the authoritative limits.
 	policy := map[string]any{
 		"Version": "1",
 		"Statement": []map[string]any{{

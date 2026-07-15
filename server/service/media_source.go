@@ -111,12 +111,12 @@ func ResolveMediaSourceBytes(ctx context.Context, store storage.Provider, log *z
 		if store == nil {
 			return nil, fmt.Errorf("storage provider is not available")
 		}
-		data, err := store.Read(ctx, resolved.Key)
+		if req.MaxBytes <= 0 {
+			return nil, fmt.Errorf("owned media source requires a positive max size")
+		}
+		data, err := storage.ReadObject(ctx, store, resolved.Key, req.MaxBytes)
 		if err != nil {
 			return nil, fmt.Errorf("read media object: %w", err)
-		}
-		if req.MaxBytes > 0 && int64(len(data)) > req.MaxBytes {
-			return nil, fmt.Errorf("media source exceeds max size %d bytes", req.MaxBytes)
 		}
 		resolved.Bytes = data
 		return resolved, nil

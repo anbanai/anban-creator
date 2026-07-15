@@ -42,6 +42,7 @@ func setupTemplateHandlerTest(t *testing.T) (*fiber.App, repository.Repository) 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	svc := service.NewTemplateService(repo, &logger)
 	h := NewTemplateHandler(svc, &logger)
+	h.SetStore(pendingUploadStatStore(repo.PendingUploads()))
 	h.SetPendingUploadRepository(repo.PendingUploads())
 
 	app := fiber.New()

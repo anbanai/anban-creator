@@ -553,7 +553,7 @@ func main() {
 			}, log)
 		}
 		if aiEntrySvc != nil {
-			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo.PendingUploads(), log)
+			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo.PendingUploads(), store, log)
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)

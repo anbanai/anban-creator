@@ -156,6 +156,14 @@ func (s *TaskService) Repository() repository.Repository {
 	return s.repo
 }
 
+// Storage returns the configured provider for handler-level upload verification.
+func (s *TaskService) Storage() storage.Provider {
+	if s == nil {
+		return nil
+	}
+	return s.store
+}
+
 func (s *TaskService) SetProjectMemoryManager(memoryMgr *projectmemory.ProjectMemoryManager) {
 	s.memoryMgr = memoryMgr
 }

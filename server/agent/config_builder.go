@@ -295,15 +295,15 @@ func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger 
 
 	if store != nil && store.IsOwnedURL(imageURL) {
 		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
-			data, err := store.Read(ctx, key)
+			data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes)
 			if err == nil {
-				if int64(len(data)) > maxReferenceImageBytes {
-					return fmt.Errorf("download: file too large (%d bytes)", len(data))
-				}
 				if err := os.WriteFile(destPath, data, 0o644); err != nil {
 					return fmt.Errorf("write file: %w", err)
 				}
 				return nil
+			}
+			if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
+				return fmt.Errorf("download: %w", err)
 			}
 			if logger != nil {
 				logger.Warn().Err(err).
@@ -610,7 +610,7 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 
 func fetchResumeAttachmentBytes(ctx context.Context, store storage.Provider, attachment model.EntryAttachment) ([]byte, error) {
 	if store != nil && strings.TrimSpace(attachment.Key) != "" {
-		data, err := store.Read(ctx, strings.TrimSpace(attachment.Key))
+		data, err := storage.ReadObject(ctx, store, strings.TrimSpace(attachment.Key), maxInputAttachmentBytes)
 		if err == nil {
 			return data, nil
 		}
@@ -628,11 +628,10 @@ func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL st
 	rawURL = strings.TrimSpace(rawURL)
 	if store != nil && store.IsOwnedURL(rawURL) {
 		if key, ok := storage.StorageKeyFromURL(rawURL); ok {
-			if data, err := store.Read(ctx, key); err == nil {
-				if int64(len(data)) > maxInputAttachmentBytes {
-					return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
-				}
+			if data, err := storage.ReadObject(ctx, store, key, maxInputAttachmentBytes); err == nil {
 				return data, nil
+			} else if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
+				return nil, fmt.Errorf("download: %w", err)
 			}
 		}
 	}
@@ -774,11 +773,10 @@ func fetchImageBytes(ctx context.Context, store storage.Provider, imageURL strin
 	}
 	if store != nil && store.IsOwnedURL(imageURL) {
 		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
-			if data, err := store.Read(ctx, key); err == nil {
-				if int64(len(data)) > maxReferenceImageBytes {
-					return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
-				}
+			if data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes); err == nil {
 				return data, nil
+			} else if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
+				return nil, fmt.Errorf("download: %w", err)
 			}
 		}
 	}
@@ -816,12 +814,9 @@ func explicitStorageObjectKey(raw string) (string, bool) {
 }
 
 func readStorageObject(ctx context.Context, store storage.Provider, key string, maxBytes int64) ([]byte, error) {
-	data, err := store.Read(ctx, key)
+	data, err := storage.ReadObject(ctx, store, key, maxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read storage object: %w", err)
-	}
-	if int64(len(data)) > maxBytes {
-		return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
 	}
 	return data, nil
 }

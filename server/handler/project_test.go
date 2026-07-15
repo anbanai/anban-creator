@@ -68,6 +68,7 @@ func setupProjectDeleteHandlerTest(t *testing.T) (*fiber.App, repository.Reposit
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	projectSvc := service.NewProjectService(repo, &logger)
 	h := NewProjectHandler(projectSvc, &logger)
+	h.SetStore(pendingUploadStatStore(repo.PendingUploads()))
 	h.SetPendingUploadRepository(repo.PendingUploads())
 
 	app := fiber.New()

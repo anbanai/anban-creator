@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -10,6 +11,13 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
+
+func TestInputAttachmentServiceErrorClassifiesObjectMetadataMismatch(t *testing.T) {
+	err := inputAttachmentServiceError(service.ErrPendingUploadObjectInvalid)
+	if !errors.Is(err, errInputAttachmentValidation) {
+		t.Fatalf("error = %v, want input attachment validation error", err)
+	}
+}
 
 func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	const key = "uploads/pending/user-1/upload-1/product.png"
@@ -26,7 +34,7 @@ func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}}
 
-	got, err := validateInputAttachments(context.Background(), pending, "user-1", []model.EntryAttachment{{
+	got, err := validateInputAttachments(context.Background(), pendingUploadStatStore(pending), pending, "user-1", []model.EntryAttachment{{
 		Type:        " image ",
 		URL:         " https://attacker.example/forged.exe?signature=secret ",
 		FileName:    " forged.exe ",
@@ -74,7 +82,7 @@ func TestValidateInputAttachmentsDoesNotFinalizeBeforeWholeCollectionValidates(t
 		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
 	}}
 
-	_, err := validateInputAttachments(context.Background(), pending, "user-1", []model.EntryAttachment{
+	_, err := validateInputAttachments(context.Background(), nil, pending, "user-1", []model.EntryAttachment{
 		{UploadID: "upload-1", Key: key, Instruction: "use the product"},
 		{Type: "image", URL: "https://attacker.example/invalid.png", FileName: "invalid.png", ContentType: "image/png"},
 	}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: allAgentAttachmentTypes})
@@ -91,7 +99,7 @@ func TestValidateInputAttachmentsDoesNotFinalizeBeforeWholeCollectionValidates(t
 
 func TestValidateInputAttachmentsAcceptsInstructionAt1000CodePoints(t *testing.T) {
 	instruction := strings.Repeat("图", 1000)
-	got, err := validateInputAttachments(context.Background(), nil, "user-1", []model.EntryAttachment{{
+	got, err := validateInputAttachments(context.Background(), nil, nil, "user-1", []model.EntryAttachment{{
 		Type:        "image",
 		URL:         "/api/v1/files/product.png",
 		FileName:    "product.png",
@@ -108,7 +116,7 @@ func TestValidateInputAttachmentsAcceptsInstructionAt1000CodePoints(t *testing.T
 }
 
 func TestValidateInputAttachmentsRejectsInstructionOver1000CodePoints(t *testing.T) {
-	_, err := validateInputAttachments(context.Background(), nil, "user-1", []model.EntryAttachment{{
+	_, err := validateInputAttachments(context.Background(), nil, nil, "user-1", []model.EntryAttachment{{
 		Type:        "image",
 		URL:         "/api/v1/files/product.png",
 		FileName:    "product.png",
@@ -130,13 +138,13 @@ func TestValidateInputAttachmentsRejectsCountAndDisallowedType(t *testing.T) {
 			ContentType: "image/png",
 		}
 	}
-	_, err := validateInputAttachments(context.Background(), nil, "user-1", images,
+	_, err := validateInputAttachments(context.Background(), nil, nil, "user-1", images,
 		InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: map[string]bool{"image": true}})
 	if err == nil || err.Error() != "at most 16 attachments are allowed" {
 		t.Fatalf("count error = %v", err)
 	}
 
-	_, err = validateInputAttachments(context.Background(), nil, "user-1", []model.EntryAttachment{{
+	_, err = validateInputAttachments(context.Background(), nil, nil, "user-1", []model.EntryAttachment{{
 		Type: "video", URL: "/api/v1/files/demo.mp4", ContentType: "video/mp4",
 	}}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: map[string]bool{"image": true}})
 	if err == nil || err.Error() != "attachment type video is not allowed" {
@@ -168,7 +176,7 @@ func TestValidateInputAttachmentsRejectsInvalidMetadataAndURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := validateInputAttachments(context.Background(), nil, "user-1", []model.EntryAttachment{tt.attachment},
+			_, err := validateInputAttachments(context.Background(), nil, nil, "user-1", []model.EntryAttachment{tt.attachment},
 				InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: map[string]bool{"image": true}})
 			if err == nil || err.Error() != tt.wantErr {
 				t.Fatalf("error = %v, want %q", err, tt.wantErr)

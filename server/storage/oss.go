@@ -171,6 +171,19 @@ func (p *OSSProvider) GetURL(key string) string {
 // Read downloads an object from OSS by key and returns its content.
 // Transient server errors (5xx) are retried up to 3 times with exponential backoff.
 func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
+	return p.readObject(ctx, key, 0)
+}
+
+// ReadObject downloads an OSS object while retaining at most maxBytes+1 bytes,
+// allowing callers to reject oversized objects without unbounded allocation.
+func (p *OSSProvider) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("maximum object size must be positive")
+	}
+	return p.readObject(ctx, key, maxBytes)
+}
+
+func (p *OSSProvider) readObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
 	signedURL, err := p.DownloadURL(ctx, key, 3600)
 	if err != nil {
 		return nil, fmt.Errorf("get signed URL for %s: %w", key, err)
@@ -202,7 +215,11 @@ func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
 			continue
 		}
 
-		data, err := io.ReadAll(resp.Body)
+		reader := io.Reader(resp.Body)
+		if maxBytes > 0 {
+			reader = io.LimitReader(resp.Body, maxBytes+1)
+		}
+		data, err := io.ReadAll(reader)
 		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read %s from OSS: %w", key, err)
@@ -210,6 +227,9 @@ func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
 
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("download %s from OSS: unexpected status %d", key, resp.StatusCode)
+		}
+		if maxBytes > 0 && int64(len(data)) > maxBytes {
+			return nil, fmt.Errorf("%w: key=%s size>%d", ErrObjectExceedsMaxSize, key, maxBytes)
 		}
 		return data, nil
 	}

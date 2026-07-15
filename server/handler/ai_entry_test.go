@@ -96,7 +96,7 @@ func (r *aiEntryPendingRepo) ReopenPendingUploadExpiration(context.Context, stri
 
 func TestAIEntryHandlerSubmitRequiresAuth(t *testing.T) {
 	logger := zerolog.New(io.Discard)
-	h := NewAIEntryHandler(&fakeAIEntrySubmitter{}, nil, &logger)
+	h := NewAIEntryHandler(&fakeAIEntrySubmitter{}, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", h.Submit)
 
@@ -121,7 +121,7 @@ func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 			Message: "已创建任务",
 		},
 	}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	userID := uuid.NewString()
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
@@ -199,7 +199,7 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 		Status:      model.PendingUploadStatusPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}}
-	h := NewAIEntryHandler(submitter, pending, &logger)
+	h := NewAIEntryHandler(submitter, pending, pendingUploadStatStore(pending), &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -240,7 +240,7 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 func TestAIEntryHandlerSubmitRejectsInvalidAttachmentURL(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())
@@ -270,7 +270,7 @@ func TestAIEntryHandlerSubmitRedactsAttachmentRepositoryErrors(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
 	pending := &aiEntryPendingRepo{findErr: errors.New("database password secret")}
-	h := NewAIEntryHandler(submitter, pending, &logger)
+	h := NewAIEntryHandler(submitter, pending, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", "user-1")
@@ -309,7 +309,7 @@ func TestAIEntryHandlerSubmitRedactsAttachmentRepositoryErrors(t *testing.T) {
 func TestAIEntryHandlerSubmitRejectsExternalAttachmentURL(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())
@@ -338,7 +338,7 @@ func TestAIEntryHandlerSubmitRejectsExternalAttachmentURL(t *testing.T) {
 func TestAIEntryHandlerSubmitRejectsExternalPendingLookingAttachmentURLWithoutPendingRepo(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())
@@ -367,7 +367,7 @@ func TestAIEntryHandlerSubmitRejectsExternalPendingLookingAttachmentURLWithoutPe
 func TestAIEntryHandlerSubmitRejectsMalformedPendingAttachmentURL(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, &aiEntryPendingRepo{}, &logger)
+	h := NewAIEntryHandler(submitter, &aiEntryPendingRepo{}, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())
@@ -396,7 +396,7 @@ func TestAIEntryHandlerSubmitRejectsMalformedPendingAttachmentURL(t *testing.T) 
 func TestAIEntryHandlerSubmitRejectsUnsupportedAttachmentMetadata(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())

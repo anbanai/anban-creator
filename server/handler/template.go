@@ -172,7 +172,7 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 	if req.Visibility != "public" && req.Visibility != "private" {
 		req.Visibility = "public"
 	}
-	if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.ThumbnailURL}); err != nil {
+	if err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.ThumbnailURL}); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -250,7 +250,7 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 		patch.Visibility = nil
 	}
 	if req.ThumbnailURL != nil {
-		if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{*req.ThumbnailURL}); err != nil {
+		if err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{*req.ThumbnailURL}); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 	}

@@ -23,6 +23,7 @@ import (
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 func registerVideoTools(server *mcp.Server) {
@@ -364,12 +365,9 @@ func materializeOwnedVideoInputReferences(ctx context.Context, task *model.Task,
 		)
 		if attachment, ok := verifiedTaskAttachmentForKey(task, ref.URL, ref.Type); ok {
 			var err error
-			data, err = svcs.Store.Read(ctx, attachment.Key)
+			data, err = storage.ReadObject(ctx, svcs.Store, attachment.Key, 50<<20)
 			if err != nil {
 				return fmt.Errorf("materialize verified key-first reference %s: %w", contractReferenceLabel(*ref), err)
-			}
-			if len(data) > 50<<20 {
-				return fmt.Errorf("materialize verified key-first reference %s: file exceeds 50 MB", contractReferenceLabel(*ref))
 			}
 			fallbackFileName = attachment.FileName
 			fallbackContentType = attachment.ContentType

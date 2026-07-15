@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -37,6 +38,16 @@ func (s *fakeMediaSourceStore) Read(_ context.Context, key string) ([]byte, erro
 		return nil, s.readErr
 	}
 	return append([]byte(nil), s.readData...), nil
+}
+func (s *fakeMediaSourceStore) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	data, err := s.Read(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("object too large")
+	}
+	return data, nil
 }
 func (s *fakeMediaSourceStore) Delete(context.Context, string) error { return nil }
 func (s *fakeMediaSourceStore) DownloadURL(_ context.Context, key string, _ int) (string, error) {

@@ -37,8 +37,9 @@ func (f *fakeProjectLLM) CompleteWithImage(_ context.Context, systemPrompt, user
 }
 
 type fakeStorageProvider struct {
-	data map[string][]byte
-	read []string
+	data     map[string][]byte
+	read     []string
+	statRepo service.PendingUploadRepository
 }
 
 var _ storage.Provider = (*fakeStorageProvider)(nil)
@@ -73,6 +74,33 @@ func (f *fakeStorageProvider) Read(_ context.Context, key string) ([]byte, error
 		return data, nil
 	}
 	return nil, fmt.Errorf("not found")
+}
+
+func (f *fakeStorageProvider) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	data, err := f.Read(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, storage.ErrObjectExceedsMaxSize
+	}
+	return data, nil
+}
+
+func (f *fakeStorageProvider) StatObject(ctx context.Context, key string) (*storage.ObjectInfo, error) {
+	parts := strings.Split(strings.Trim(key, "/"), "/")
+	if f.statRepo == nil || len(parts) < 4 || parts[0] != "uploads" || parts[1] != "pending" {
+		return nil, fmt.Errorf("object metadata not found")
+	}
+	upload, err := f.statRepo.FindPendingUploadByID(ctx, parts[3])
+	if err != nil || upload.Key != key {
+		return nil, fmt.Errorf("object metadata not found")
+	}
+	return &storage.ObjectInfo{Key: key, Size: upload.Size, ContentType: upload.ContentType}, nil
+}
+
+func pendingUploadStatStore(repo service.PendingUploadRepository) *fakeStorageProvider {
+	return &fakeStorageProvider{statRepo: repo}
 }
 
 func (f *fakeStorageProvider) Delete(context.Context, string) error { return nil }
