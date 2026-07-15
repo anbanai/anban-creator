@@ -20,7 +20,7 @@ func newTestProcessor(apiCfg *config.ImageAPI) *Processor {
 
 func TestProcessor_GenerateOnly_NoAPIKey(t *testing.T) {
 	p := newTestProcessor(&config.ImageAPI{})
-	_, err := p.GenerateOnly("春天的茶园", "output.png")
+	_, err := p.GenerateOnly(context.Background(), "春天的茶园", "output.png")
 	if err == nil {
 		t.Fatal("expected error when API key is missing, got nil")
 	}
@@ -30,7 +30,7 @@ func TestProcessor_GenerateOnly_NoProvider(t *testing.T) {
 	// API key is set but provider is nil (creation failed silently)
 	p := newTestProcessor(&config.ImageAPI{Key: "test-key"})
 	// provider is nil by default in newTestProcessor
-	_, err := p.GenerateOnly("春天的茶园", "output.png")
+	_, err := p.GenerateOnly(context.Background(), "春天的茶园", "output.png")
 	if err == nil {
 		t.Fatal("expected error when provider is nil, got nil")
 	}
@@ -38,7 +38,7 @@ func TestProcessor_GenerateOnly_NoProvider(t *testing.T) {
 
 func TestProcessor_GenerateOnlyWithSize_NoAPIKey(t *testing.T) {
 	p := newTestProcessor(&config.ImageAPI{})
-	_, err := p.GenerateOnlyWithSize("春天的茶园", "16:9", "output.png")
+	_, err := p.GenerateOnlyWithSize(context.Background(), "春天的茶园", "16:9", "output.png")
 	if err == nil {
 		t.Fatal("expected error when API key is missing, got nil")
 	}
@@ -186,6 +186,18 @@ func TestProcessorGenerateRawPropagatesCancellation(t *testing.T) {
 	cancel()
 
 	_, err := p.GenerateRaw(ctx, "prompt")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestProcessorGenerateOnlyPropagatesCancellation(t *testing.T) {
+	p := newTestProcessor(&config.ImageAPI{Provider: "test", Key: "test-key"})
+	p.provider = blockingContextProvider{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := p.GenerateOnly(ctx, "prompt", "")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}
