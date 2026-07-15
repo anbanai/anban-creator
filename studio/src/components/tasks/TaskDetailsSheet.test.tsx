@@ -52,7 +52,7 @@ const articleTask: Task = {
     url: 'https://cdn.example.com/summer-reference.png',
     instruction: '保留柔和自然光',
   }],
-  result: { files: null, output: '' },
+  result: null,
   published: false,
   published_at: null,
   created_at: '2026-07-15T01:02:03.000Z',

@@ -110,7 +110,7 @@ vi.mock('@/lib/api', async () => {
             progress: 0,
             plan_id: null,
             project_id: 'project-1',
-            result: { files: null, output: '' },
+            result: null,
             published: false,
             published_at: null,
             created_at: '2026-07-07T00:00:00.000Z',

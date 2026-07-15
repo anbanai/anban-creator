@@ -31,7 +31,6 @@ export type {
   TaskStatus,
   ExecutionTarget,
   Task,
-  TaskResult,
   TaskFile,
   ReferenceUsageSummaryData,
   CreateTaskRequest,

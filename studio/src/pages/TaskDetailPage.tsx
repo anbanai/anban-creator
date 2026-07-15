@@ -3,7 +3,6 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Streamdown } from 'streamdown'
 import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban, Upload, X, Info } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
@@ -98,6 +97,7 @@ export default function TaskDetailPage() {
   const [showResumeDialog, setShowResumeDialog] = useState(false)
   const [showCreditDialog, setShowCreditDialog] = useState(false)
   const [showTaskDetails, setShowTaskDetails] = useState(false)
+  const [returnToTaskDetailsAfterCredits, setReturnToTaskDetailsAfterCredits] = useState(false)
   const [resumePrompt, setResumePrompt] = useState('')
   const [resumeFiles, setResumeFiles] = useState<ResumeFileInput[]>([])
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
@@ -472,11 +472,14 @@ export default function TaskDetailPage() {
   const videoCreativeType = videoCreativeTypeLabel(videoResolvedConfig?.creative_type)
   const videoPurpose = videoPurposeLabel(videoResolvedConfig?.purpose)
   const videoSubjectProfile = videoResolvedConfig?.subject_profile?.trim() || '—'
+  const hasVideoProductionResult = Boolean(
+    videoProduction
+    && Object.values(videoProduction.artifacts).some((artifact) => artifact.status === 'available'),
+  )
   const showPendingResultDestination = (task.status === 'pending' || task.status === 'running')
     && publishedFiles.length === 0
     && collectedFiles.length === 0
-    && !task.result?.output
-    && !videoProduction
+    && !hasVideoProductionResult
   const renderVideoPreviewDetails = (file: TaskFile) => {
     if (!isVideoTaskFile(file)) return null
     return (
@@ -895,6 +898,7 @@ export default function TaskDetailPage() {
         netConsumedCredits={netConsumedCredits}
         showCreditDetails={showCreditDetails}
         onOpenCreditDetails={() => {
+          setReturnToTaskDetailsAfterCredits(true)
           setShowTaskDetails(false)
           setShowCreditDialog(true)
         }}
@@ -914,7 +918,16 @@ export default function TaskDetailPage() {
       />
 
       {showCreditDetails && (
-        <Dialog open={showCreditDialog} onOpenChange={setShowCreditDialog}>
+        <Dialog
+          open={showCreditDialog}
+          onOpenChange={(open) => {
+            setShowCreditDialog(open)
+            if (!open && returnToTaskDetailsAfterCredits) {
+              setReturnToTaskDetailsAfterCredits(false)
+              setShowTaskDetails(true)
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle>积分明细</DialogTitle>
@@ -984,11 +997,7 @@ export default function TaskDetailPage() {
         </Dialog>
       )}
 
-      {task.type === 'seednote' && task.published && (
-        <SeednoteAnalyticsPanel taskId={task.id} />
-      )}
-
-      {isVideoCreator(task.type) && videoProduction && (
+      {isVideoCreator(task.type) && hasVideoProductionResult && videoProduction && (
         <Card size="sm" className="border-border/70">
           <CardContent>
             <VideoProductionPanel
@@ -1111,18 +1120,8 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {/* Result output for completed tasks */}
-      {task.status === 'completed' && task.result?.output && (
-        <Card>
-          <div className="border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold text-foreground">执行结果</h2>
-          </div>
-          <div className="max-h-64 overflow-y-auto bg-background/50 px-4 py-3 prose prose-sm max-w-none dark:prose-invert">
-            <Streamdown mode="static">
-              {task.result.output}
-            </Streamdown>
-          </div>
-        </Card>
+      {task.type === 'seednote' && task.published && (
+        <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
       <Button

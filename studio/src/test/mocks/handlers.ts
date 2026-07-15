@@ -79,7 +79,7 @@ export const mockTasks: PaginatedResponse<Task> = {
       progress: 100,
       plan_id: null,
       project_id: 'ch-1',
-      result: { files: null, output: '测试输出' },
+      result: null,
       published: false,
       published_at: null,
       created_at: '2025-01-15T10:00:00Z',

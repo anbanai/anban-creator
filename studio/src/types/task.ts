@@ -68,7 +68,7 @@ export interface Task {
   error_message?: string
   plan_id?: string | null
   project_id: string
-  result: TaskResult
+  result?: string | null
   published: boolean
   published_at: string | null
   // Publish-approval gate state (Batch 4A). Empty unless the owning project has
@@ -150,11 +150,6 @@ export interface ReferenceUsageSummaryData {
   }>
   warnings?: string[]
   model_fallback_reason?: string
-}
-
-export interface TaskResult {
-  files: TaskFile[] | null
-  output: string
 }
 
 // Bulk operation per-task outcome (mirrors server handler.bulkTaskResult).
