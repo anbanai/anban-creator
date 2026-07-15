@@ -152,7 +152,7 @@ func (p *OSSProvider) StatObject(_ context.Context, key string) (*ObjectInfo, er
 	}
 	size, _ := strconv.ParseInt(meta.Get("Content-Length"), 10, 64)
 	contentType := meta.Get("Content-Type")
-	etag := strings.Trim(meta.Get("ETag"), `"`)
+	etag := strings.TrimSpace(meta.Get("ETag"))
 	return &ObjectInfo{
 		Key:         key,
 		Size:        size,
@@ -160,6 +160,27 @@ func (p *OSSProvider) StatObject(_ context.Context, key string) (*ObjectInfo, er
 		ContentType: contentType,
 		ETag:        etag,
 	}, nil
+}
+
+// PromoteObject conditionally copies an OSS object into an immutable final key.
+func (p *OSSProvider) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) error {
+	_, err := p.bucket.CopyObject(sourceKey, finalKey,
+		oss.CopySourceIfMatch(expectedETag),
+		oss.ForbidOverWrite(true),
+	)
+	if err == nil {
+		return nil
+	}
+	var serviceErr oss.ServiceError
+	if errors.As(err, &serviceErr) {
+		switch {
+		case serviceErr.StatusCode == http.StatusPreconditionFailed || serviceErr.Code == "PreconditionFailed":
+			return fmt.Errorf("%w: %s", ErrPromotionPreconditionFailed, sourceKey)
+		case serviceErr.StatusCode == http.StatusConflict || serviceErr.Code == "FileAlreadyExists" || serviceErr.Code == "ObjectAlreadyExists":
+			return fmt.Errorf("%w: %s", ErrObjectAlreadyExists, finalKey)
+		}
+	}
+	return fmt.Errorf("oss promote object %s to %s: %w", sourceKey, finalKey, err)
 }
 
 // GetURL returns the public URL for the given key.

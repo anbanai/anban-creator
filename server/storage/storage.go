@@ -25,10 +25,12 @@ type ObjectInfo struct {
 }
 
 var (
-	ErrObjectNotFound         = errors.New("storage object not found")
-	ErrObjectStatUnsupported  = errors.New("storage object metadata is unavailable")
-	ErrBoundedReadUnsupported = errors.New("bounded storage reads are unavailable")
-	ErrObjectExceedsMaxSize   = errors.New("storage object is too large")
+	ErrObjectNotFound              = errors.New("storage object not found")
+	ErrObjectStatUnsupported       = errors.New("storage object metadata is unavailable")
+	ErrBoundedReadUnsupported      = errors.New("bounded storage reads are unavailable")
+	ErrObjectExceedsMaxSize        = errors.New("storage object is too large")
+	ErrPromotionPreconditionFailed = errors.New("storage promotion source changed")
+	ErrObjectAlreadyExists         = errors.New("storage object already exists")
 )
 
 // ObjectStatProvider fetches object metadata without reading the object body.
@@ -40,6 +42,12 @@ type ObjectStatProvider interface {
 // objects without first buffering the complete body.
 type BoundedObjectReader interface {
 	ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error)
+}
+
+// ConditionalObjectPromoter copies a verified source object to an immutable
+// destination only when the source still has the expected ETag.
+type ConditionalObjectPromoter interface {
+	PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) error
 }
 
 // ReadObject requires an explicitly bounded reader. Security-sensitive callers
