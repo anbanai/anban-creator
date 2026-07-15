@@ -60,17 +60,26 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 	}
 }
 
-func TestMomentsDeliveryHooksAreRegistered(t *testing.T) {
+func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 	root := repositoryRoot(t)
-	claudeHooks := readRepoFile(t, filepath.Join(root, "claudecode", "hooks", "hooks.json"))
-	for _, want := range []string{
-		`"matcher": "anban:moments"`,
-		`agent_name=\"moments\"`,
-		"material-analysis.md",
-		"quality-review.md",
-	} {
-		if !strings.Contains(claudeHooks, want) {
-			t.Fatalf("claudecode hooks missing moments delivery term %q", want)
+	claudeAgent := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "moments.md"))
+	if err := validateClaudeAgentFeedbackContract(
+		claudeAgent,
+		"moments",
+		"最终摘要包含：",
+		nil,
+	); err != nil {
+		t.Fatalf("claudecode moments agent must own delivery validation and feedback: %v", err)
+	}
+	finalSummaryAt := strings.Index(claudeAgent, "最终摘要包含：")
+	feedbackAt := strings.Index(claudeAgent, "submit_agent_feedback(")
+	if finalSummaryAt < 0 || feedbackAt <= finalSummaryAt {
+		t.Fatal("claudecode moments final summary must precede feedback")
+	}
+	finalSummary := claudeAgent[finalSummaryAt:feedbackAt]
+	for _, want := range []string{"成果目录", "质量复盘状态", "证据不足", "人工复核点"} {
+		if !strings.Contains(finalSummary, want) {
+			t.Fatalf("claudecode moments delivery validation missing %q", want)
 		}
 	}
 

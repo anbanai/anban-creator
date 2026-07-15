@@ -243,12 +243,12 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "finalize_task_title",
-		Description: "Record the hook-selected final content title for a task. Hooks call this before final delivery so future tasks can deduplicate by canonical title.",
+		Description: "Record the Agent-selected final content title before title-dependent artifacts are generated, so future tasks can deduplicate by canonical title.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"task_id": map[string]any{"type": "string", "description": "Task ID"},
-				"title":   map[string]any{"type": "string", "description": "Final content title selected by the completion hook"},
+				"title":   map[string]any{"type": "string", "description": "Final content title selected by the owning Agent"},
 			},
 			"required": []any{"task_id", "title"},
 		},

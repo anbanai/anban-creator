@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -120,6 +122,118 @@ func TestTemplateService_Create_InitializesEmptyTags(t *testing.T) {
 	}
 	if len(created.Tags) != 0 {
 		t.Errorf("len(Tags) = %d, want 0", len(created.Tags))
+	}
+}
+
+func TestTemplateServiceSaveGlobalConcurrentReturnsCanonicalTemplate(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "templates.db") + "?_busy_timeout=10000&_journal_mode=WAL"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Template{}); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(8)
+	t.Cleanup(func() { sqlDB.Close() })
+
+	svc := NewTemplateService(repository.New(db), nil)
+	const submissions = 12
+	type outcome struct {
+		id      string
+		created bool
+		err     error
+	}
+	outcomes := make(chan outcome, submissions)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < submissions; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			name := "通勤咖啡"
+			category := "生活方式"
+			style := "暖色晨光，干净排版"
+			tags := []string{"咖啡", "通勤"}
+			if i%2 == 1 {
+				name = " 通勤咖啡 "
+				category += " "
+				style += "\n"
+				tags = []string{"通勤", "咖啡", "咖啡"}
+			}
+			tmpl, created, err := svc.SaveGlobal(context.Background(), &model.Template{
+				Type: "seednote", Name: name, Category: category, VisualStyle: style, Tags: tags,
+			})
+			if err != nil {
+				outcomes <- outcome{err: err}
+				return
+			}
+			outcomes <- outcome{id: tmpl.ID, created: created}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(outcomes)
+
+	var canonicalID string
+	createdCount := 0
+	for outcome := range outcomes {
+		if outcome.err != nil {
+			t.Fatalf("concurrent SaveGlobal: %v", outcome.err)
+		}
+		if canonicalID == "" {
+			canonicalID = outcome.id
+		}
+		if outcome.id != canonicalID {
+			t.Fatalf("template ID = %s, want canonical %s", outcome.id, canonicalID)
+		}
+		if outcome.created {
+			createdCount++
+		}
+	}
+	if createdCount != 1 {
+		t.Fatalf("created responses = %d, want exactly 1", createdCount)
+	}
+	var count int64
+	if err := db.Model(&model.Template{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("template row count = %d, want 1", count)
+	}
+}
+
+func TestTemplateServiceSaveGlobalCreatedDoesNotDependOnRowsAffected(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Template{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Callback().Create().After("gorm:create").Register("test:zero_rows_affected", func(tx *gorm.DB) {
+		tx.RowsAffected = 0
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewTemplateService(repository.New(db), nil)
+	tmpl, created, err := svc.SaveGlobal(context.Background(), &model.Template{
+		Type: "seednote", Name: "晨间咖啡", Category: "生活方式", VisualStyle: "自然晨光", Tags: []string{"咖啡"},
+	})
+	if err != nil {
+		t.Fatalf("SaveGlobal: %v", err)
+	}
+	if !created {
+		t.Fatal("successful deterministic-ID insert was reported as existing when RowsAffected was zero")
+	}
+	if tmpl.ID == "" {
+		t.Fatal("created template has no canonical ID")
 	}
 }
 

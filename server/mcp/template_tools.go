@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -95,7 +94,6 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	}
 
 	template := model.Template{
-		ID:          uuid.New().String(),
 		Type:        tmplType,
 		Name:        name,
 		Category:    category,
@@ -104,17 +102,21 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		IsActive:    true,
 	}
 
-	created, err := svcs.TemplateSvc.Create(ctx, &template, "")
+	created, wasCreated, err := svcs.TemplateSvc.SaveGlobal(ctx, &template)
 	if err != nil {
 		return errorResult(fmt.Sprintf("save template: %v", err)), nil
+	}
+	status := "existing"
+	if wasCreated {
+		status = "created"
 	}
 
 	return textResult(map[string]any{
 		"id":      created.ID,
 		"name":    created.Name,
 		"type":    created.Type,
-		"status":  "created",
-		"message": fmt.Sprintf("Template '%s' saved successfully.", created.Name),
+		"status":  status,
+		"message": fmt.Sprintf("Template '%s' is available.", created.Name),
 	})
 }
 

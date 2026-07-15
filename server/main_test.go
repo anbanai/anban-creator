@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
+
+	"gorm.io/gorm"
 )
 
 func TestMainUsesAsyncSidecarMonitors(t *testing.T) {
@@ -29,5 +32,43 @@ func TestMainUsesAsyncSidecarMonitors(t *testing.T) {
 		if !strings.Contains(src, want) {
 			t.Fatalf("main.go missing async sidecar wiring %q", want)
 		}
+	}
+}
+
+func TestMigrateModelsReturnsMigrationFailure(t *testing.T) {
+	want := errors.New("migration failed")
+	called := false
+	err := migrateModels(&gorm.DB{}, func(*gorm.DB) error {
+		called = true
+		return want
+	})
+	if !called {
+		t.Fatal("migration function was not called")
+	}
+	if !errors.Is(err, want) {
+		t.Fatalf("migrateModels error = %v, want %v", err, want)
+	}
+}
+
+func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
+	raw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	src := string(raw)
+	start := strings.Index(src, "// 6. Auto-migrate models.")
+	end := strings.Index(src, "// 6.1 One-time backfill")
+	if start < 0 || end <= start {
+		t.Fatal("main.go migration startup section is missing")
+	}
+	section := src[start:end]
+	if !strings.Contains(section, "migrateModels(mysqlDB, model.AutoMigrate)") {
+		t.Fatal("main.go must route model migration through the tested startup helper")
+	}
+	if !strings.Contains(section, `log.Fatal().Err(err).Msg("failed to auto-migrate models")`) {
+		t.Fatal("model migration errors must terminate startup")
+	}
+	if strings.Contains(section, "log.Error()") {
+		t.Fatal("model migration errors must not log and continue startup")
 	}
 }

@@ -3,6 +3,7 @@ package mcp
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -174,15 +175,14 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		}
 	}
 
-	hooksPath := filepath.Join(root, "claudecode", "hooks", "hooks.json")
-	hooksRaw, err := os.ReadFile(hooksPath)
-	if err != nil {
-		t.Fatalf("claudecode hooks missing: %v", err)
+	qualityAt := strings.Index(body, "## 质量闸门")
+	reportAt := strings.Index(body, "## 最终报告格式")
+	feedbackPattern := regexp.MustCompile(`(?s)submit_agent_feedback\s*\([^)]*?agent_name\s*=\s*"live-slicer"\s*[,)]`)
+	feedbackCalls := feedbackPattern.FindAllStringIndex(body, -1)
+	if qualityAt < 0 || reportAt <= qualityAt || len(feedbackCalls) != 1 || feedbackCalls[0][0] <= reportAt {
+		t.Fatalf("claudecode live-slicer agent must validate quality, report delivery, then submit exactly one owned feedback call")
 	}
-	hooks := string(hooksRaw)
 	for _, want := range []string{
-		`"matcher": "anban:live-slicer"`,
-		"output/live-slice/",
 		"clip-manifest.json",
 		"clip_results.json",
 		"subject-clip-plan.json",
@@ -193,8 +193,8 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		"需人工复核片段",
 		"segments.json",
 	} {
-		if !strings.Contains(hooks, want) {
-			t.Fatalf("claudecode hooks missing %q", want)
+		if !strings.Contains(body[qualityAt:], want) {
+			t.Fatalf("claudecode live-slicer final validation/report missing %q", want)
 		}
 	}
 

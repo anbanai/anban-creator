@@ -13,6 +13,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := MigrateTaskArtifactCollectionSchema(db); err != nil {
 		return err
 	}
+	if err := MigrateAgentFeedbackIdempotencySchema(db); err != nil {
+		return err
+	}
 	err := db.AutoMigrate(
 		&User{},
 		&LoginSession{},

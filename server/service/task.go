@@ -1112,7 +1112,7 @@ var artifactTaskTitles = map[string]struct{}{
 	"违禁词合规检查报告": {},
 }
 
-// FinalizeTitle records the hook-reported final title as the canonical task title.
+// FinalizeTitle records the owning Agent's final title as the canonical task title.
 func (s *TaskService) FinalizeTitle(ctx context.Context, userID, taskID, title string) (string, error) {
 	cleaned := cleanFinalTitle(title)
 	if cleaned == "" {

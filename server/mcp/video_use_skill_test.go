@@ -234,7 +234,7 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 		"video-input-contract.json",
 		"generated visual anchors can supplement user media but cannot replace it",
 		"compose_video_segments",
-		`submit_agent_feedback(agent_name="videocreator"`,
+		`submit_agent_feedback(task_id=$TASK_ID, agent_name="videocreator"`,
 	} {
 		if !strings.Contains(creator, want) {
 			t.Fatalf("videocreator agent missing %q", want)
@@ -279,7 +279,7 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 		"preview.mp4",
 		"final.mp4",
 		"普通素材剪辑不得调用",
-		`submit_agent_feedback(agent_name="videoeditor"`,
+		`submit_agent_feedback(task_id=$TASK_ID, agent_name="videoeditor"`,
 	} {
 		if !strings.Contains(editor, want) {
 			t.Fatalf("videoeditor agent missing %q", want)

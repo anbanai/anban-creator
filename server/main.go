@@ -93,8 +93,8 @@ func main() {
 
 	// 6. Auto-migrate models.
 	if mysqlDB != nil {
-		if err := model.AutoMigrate(mysqlDB); err != nil {
-			log.Error().Err(err).Msg("failed to auto-migrate models")
+		if err := migrateModels(mysqlDB, model.AutoMigrate); err != nil {
+			log.Fatal().Err(err).Msg("failed to auto-migrate models")
 		} else {
 			log.Info().Msg("database migration completed")
 		}
@@ -914,6 +914,13 @@ func main() {
 		log.Warn().Msg("graceful shutdown timed out after 60s, forcing exit")
 		os.Exit(1)
 	}
+}
+
+func migrateModels(db *gorm.DB, migrate func(*gorm.DB) error) error {
+	if db == nil {
+		return nil
+	}
+	return migrate(db)
 }
 
 func createTaskLogDir(dir string, log *zerolog.Logger) {

@@ -2,14 +2,438 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
+	agents := []string{
+		"designer",
+		"ecommerce",
+		"live-slicer",
+		"moments",
+		"montage",
+		"seednote",
+		"videocreator",
+		"videoeditor",
+		"wechatarticle",
+	}
+
+	for _, name := range agents {
+		t.Run(name, func(t *testing.T) {
+			body := readRepoFile(t, filepath.Join("../../claudecode/agents", name+".md"))
+			calls, ownedCalls := claudeAgentFeedbackCallCounts(body, name)
+			if calls != 1 {
+				t.Errorf("%s agent has %d submit_agent_feedback call expressions, want exactly one", name, calls)
+			}
+			if ownedCalls != 1 {
+				t.Errorf("%s agent has %d submit_agent_feedback calls with the expected agent_name, want exactly one", name, ownedCalls)
+			}
+		})
+	}
+}
+
+func TestClaudeAgentFeedbackCallsMatchMCPSchema(t *testing.T) {
+	agents := []string{
+		"designer", "ecommerce", "live-slicer", "moments", "montage",
+		"seednote", "videocreator", "videoeditor", "wechatarticle",
+	}
+	allowedArgs := map[string]bool{
+		"task_id": true, "agent_name": true, "scores": true,
+		"errors": true, "optimizations": true, "summary": true,
+	}
+
+	for _, name := range agents {
+		t.Run(name, func(t *testing.T) {
+			body := readRepoFile(t, filepath.Join("../../claudecode/agents", name+".md"))
+			calls, err := documentedToolCalls(body, "submit_agent_feedback")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(calls) != 1 {
+				t.Fatalf("%s agent has %d feedback calls, want exactly one", name, len(calls))
+			}
+			call := calls[0]
+			if strings.Contains(call, "...") {
+				t.Fatal("feedback call must not contain literal ellipsis")
+			}
+			args, err := documentedCallArgs(call)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for arg := range args {
+				if !allowedArgs[arg] {
+					t.Errorf("feedback call contains unsupported argument %q", arg)
+				}
+			}
+			taskID := strings.TrimSpace(args["task_id"])
+			if taskID != "$TASK_ID" {
+				quotedTaskID, ok := documentedStringValue(taskID)
+				if !ok || strings.TrimSpace(quotedTaskID) == "" {
+					t.Errorf("task_id = %q, want $TASK_ID or a non-empty quoted string", args["task_id"])
+				}
+			}
+			agentName, ok := documentedStringValue(args["agent_name"])
+			if !ok || agentName != name {
+				t.Errorf("agent_name = %q, want quoted exact value %q", args["agent_name"], name)
+			}
+			scores, ok := documentedStringValue(args["scores"])
+			if !ok || !json.Valid([]byte(scores)) {
+				t.Errorf("scores = %q, want a quoted valid JSON object", args["scores"])
+			} else {
+				var dimensions map[string]float64
+				if err := json.Unmarshal([]byte(scores), &dimensions); err != nil {
+					t.Errorf("scores must decode as a numeric JSON object: %v", err)
+				}
+				for _, dimension := range []string{"quality", "completeness", "efficiency"} {
+					if _, exists := dimensions[dimension]; !exists {
+						t.Errorf("scores missing %q", dimension)
+					}
+				}
+			}
+			for _, field := range []string{"errors", "optimizations", "summary"} {
+				if _, ok := documentedStringValue(args[field]); !ok {
+					t.Errorf("%s = %q, want a string value", field, args[field])
+				}
+			}
+		})
+	}
+
+	schemaSource := readRepoFile(t, "../../server/mcp/agent_feedback_tools.go")
+	for _, name := range agents {
+		if !strings.Contains(schemaSource, name) {
+			t.Errorf("submit_agent_feedback agent_name description missing %q", name)
+		}
+	}
+}
+
+func TestDocumentedToolCallParserHandlesNestedValues(t *testing.T) {
+	body := "tool-list: submit_agent_feedback\n" +
+		"submit_agent_feedback \n(\n" +
+		"  task_id=$TASK_ID,\n" +
+		"  agent_name=\"designer\",\n" +
+		"  scores='{\"quality\":8,\"completeness\":9,\"efficiency\":7}',\n" +
+		"  summary=\"checked (including commas, parentheses)\"\n" +
+		")"
+	calls, err := documentedToolCalls(body, "submit_agent_feedback")
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("calls = %#v, err = %v", calls, err)
+	}
+	args, err := documentedCallArgs(calls[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := documentedStringValue(args["summary"]); got != "checked (including commas, parentheses)" {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
+func documentedToolCalls(body, tool string) ([]string, error) {
+	var calls []string
+	for searchAt := 0; searchAt < len(body); {
+		relativeAt := strings.Index(body[searchAt:], tool)
+		if relativeAt < 0 {
+			break
+		}
+		start := searchAt + relativeAt
+		afterName := start + len(tool)
+		if (start > 0 && isDocumentedIdentifierByte(body[start-1])) || (afterName < len(body) && isDocumentedIdentifierByte(body[afterName])) {
+			searchAt = afterName
+			continue
+		}
+		openAt := afterName
+		for openAt < len(body) && (body[openAt] == ' ' || body[openAt] == '\t' || body[openAt] == '\r' || body[openAt] == '\n') {
+			openAt++
+		}
+		if openAt >= len(body) || body[openAt] != '(' {
+			searchAt = afterName
+			continue
+		}
+		end, err := balancedCallEnd(body, openAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse %s call at byte %d: %w", tool, start, err)
+		}
+		calls = append(calls, body[start:end])
+		searchAt = end
+	}
+	return calls, nil
+}
+
+func isDocumentedIdentifierByte(char byte) bool {
+	return char == '_' || char == '-' || char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9'
+}
+
+func balancedCallEnd(body string, openAt int) (int, error) {
+	depth := 0
+	var quote byte
+	escaped := false
+	for i := openAt; i < len(body); i++ {
+		char := body[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if char == '\\' {
+				escaped = true
+				continue
+			}
+			if char == quote {
+				quote = 0
+			}
+			continue
+		}
+		if char == '\'' || char == '"' {
+			quote = char
+			continue
+		}
+		switch char {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i + 1, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("unterminated call")
+}
+
+func documentedCallArgs(call string) (map[string]string, error) {
+	openAt := strings.Index(call, "(")
+	if openAt < 0 || !strings.HasSuffix(strings.TrimSpace(call), ")") {
+		return nil, fmt.Errorf("invalid documented call %q", call)
+	}
+	body := strings.TrimSpace(call)[openAt+1 : len(strings.TrimSpace(call))-1]
+	parts, err := splitDocumentedTopLevel(body, ',')
+	if err != nil {
+		return nil, err
+	}
+	args := make(map[string]string, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		assignment, err := splitDocumentedTopLevel(part, '=')
+		if err != nil || len(assignment) != 2 {
+			return nil, fmt.Errorf("invalid documented argument %q", part)
+		}
+		name := strings.TrimSpace(assignment[0])
+		if _, duplicate := args[name]; duplicate {
+			return nil, fmt.Errorf("duplicate documented argument %q", name)
+		}
+		args[name] = strings.TrimSpace(assignment[1])
+	}
+	return args, nil
+}
+
+func splitDocumentedTopLevel(value string, separator byte) ([]string, error) {
+	var parts []string
+	start := 0
+	depth := 0
+	var quote byte
+	escaped := false
+	for i := 0; i < len(value); i++ {
+		char := value[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if char == '\\' {
+				escaped = true
+				continue
+			}
+			if char == quote {
+				quote = 0
+			}
+			continue
+		}
+		if char == '\'' || char == '"' {
+			quote = char
+			continue
+		}
+		switch char {
+		case '(', '{', '[':
+			depth++
+		case ')', '}', ']':
+			depth--
+		case separator:
+			if depth == 0 {
+				parts = append(parts, value[start:i])
+				start = i + 1
+			}
+		}
+		if depth < 0 {
+			return nil, fmt.Errorf("unbalanced documented value %q", value)
+		}
+	}
+	if quote != 0 || depth != 0 {
+		return nil, fmt.Errorf("unbalanced documented value %q", value)
+	}
+	return append(parts, value[start:]), nil
+}
+
+func documentedStringValue(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if len(value) < 2 || value[0] != value[len(value)-1] || (value[0] != '\'' && value[0] != '"') {
+		return "", false
+	}
+	if value[0] == '\'' {
+		return value[1 : len(value)-1], true
+	}
+	decoded, err := strconv.Unquote(value)
+	return decoded, err == nil
+}
+
+func TestClaudeAgentFinalFeedbackMatching(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantCalls int
+		wantOwned int
+	}{
+		{
+			name:      "exact multiline owner",
+			body:      "submit_agent_feedback(\n  task_id=$TASK_ID,\n  agent_name = \"designer\",\n  summary=\"done\"\n)",
+			wantCalls: 1,
+			wantOwned: 1,
+		},
+		{
+			name:      "owner suffix is not exact",
+			body:      `submit_agent_feedback(task_id=$TASK_ID, agent_name="designer-extra", summary="done")`,
+			wantCalls: 1,
+			wantOwned: 0,
+		},
+		{
+			name:      "extra mismatched call is still counted",
+			body:      "submit_agent_feedback(agent_name=\"designer\")\nsubmit_agent_feedback(agent_name=\"other\")",
+			wantCalls: 2,
+			wantOwned: 1,
+		},
+		{
+			name:      "tool list mention is ignored",
+			body:      "tools: submit_agent_feedback\nsubmit_agent_feedback(agent_name='designer')",
+			wantCalls: 1,
+			wantOwned: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls, ownedCalls := claudeAgentFeedbackCallCounts(tt.body, "designer")
+			if calls != tt.wantCalls || ownedCalls != tt.wantOwned {
+				t.Fatalf("call counts = (%d, %d), want (%d, %d)", calls, ownedCalls, tt.wantCalls, tt.wantOwned)
+			}
+		})
+	}
+}
+
+func TestClaudeAgentFeedbackFollowsDeliveryReport(t *testing.T) {
+	tests := []struct {
+		name         string
+		anchor       string
+		summaryTerms []string
+	}{
+		{
+			name:         "wechatarticle",
+			anchor:       "**产出**：`$DIR/draft.json`",
+			summaryTerms: []string{"所选模板", "草稿状态", "Vision 校验通过率"},
+		},
+		{
+			name:         "designer",
+			anchor:       "进度报告格式：",
+			summaryTerms: []string{"图片总数", "一致性状态", "人工复核数量"},
+		},
+		{
+			name:         "live-slicer",
+			anchor:       "若流程中断，报告要包含：",
+			summaryTerms: []string{"成功/失败切片数", "输出目录", "可恢复 warning"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := readRepoFile(t, filepath.Join("../../claudecode/agents", tt.name+".md"))
+			if err := validateClaudeAgentFeedbackContract(body, tt.name, tt.anchor, tt.summaryTerms); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestClaudeAgentFeedbackContractRejectsMutations(t *testing.T) {
+	const valid = "FINAL REPORT\nsubmit_agent_feedback(agent_name=\"designer\", summary=\"image count, consistency, manual review\")"
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "feedback before report",
+			body: "submit_agent_feedback(agent_name=\"designer\", summary=\"image count, consistency, manual review\")\nFINAL REPORT",
+		},
+		{
+			name: "missing summary field",
+			body: strings.Replace(valid, "manual review", "review", 1),
+		},
+	}
+
+	if err := validateClaudeAgentFeedbackContract(valid, "designer", "FINAL REPORT", []string{"image count", "consistency", "manual review"}); err != nil {
+		t.Fatalf("valid fixture rejected: %v", err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateClaudeAgentFeedbackContract(tt.body, "designer", "FINAL REPORT", []string{"image count", "consistency", "manual review"}); err == nil {
+				t.Fatal("mutated feedback contract unexpectedly passed")
+			}
+		})
+	}
+}
+
+func claudeAgentFeedbackCallCounts(body, name string) (int, int) {
+	callPattern := regexp.MustCompile(`submit_agent_feedback\s*\(`)
+	quotedName := regexp.QuoteMeta(name)
+	ownedCallPattern := regexp.MustCompile(fmt.Sprintf(
+		`(?s)submit_agent_feedback\s*\([^)]*?\bagent_name\s*=\s*(?:"%s"|'%s')\s*(?:,|\))`,
+		quotedName,
+		quotedName,
+	))
+	return len(callPattern.FindAllStringIndex(body, -1)), len(ownedCallPattern.FindAllStringIndex(body, -1))
+}
+
+func validateClaudeAgentFeedbackContract(body, name, anchor string, summaryTerms []string) error {
+	calls, ownedCalls := claudeAgentFeedbackCallCounts(body, name)
+	if calls != 1 || ownedCalls != 1 {
+		return fmt.Errorf("%s feedback call counts = (%d total, %d owned), want (1, 1)", name, calls, ownedCalls)
+	}
+	anchorAt := strings.Index(body, anchor)
+	if anchorAt < 0 {
+		return fmt.Errorf("%s agent missing delivery anchor %q", name, anchor)
+	}
+	callAt := regexp.MustCompile(`submit_agent_feedback\s*\(`).FindStringIndex(body)
+	if callAt == nil || callAt[0] <= anchorAt {
+		return fmt.Errorf("%s feedback must occur after delivery anchor %q", name, anchor)
+	}
+	callEnd := strings.Index(body[callAt[0]:], ")")
+	if callEnd < 0 {
+		return fmt.Errorf("%s feedback call is not terminated", name)
+	}
+	call := body[callAt[0] : callAt[0]+callEnd+1]
+	for _, term := range summaryTerms {
+		if !strings.Contains(call, term) {
+			return fmt.Errorf("%s feedback summary missing %q", name, term)
+		}
+	}
+	return nil
+}
 
 var (
 	claudeCodePluginNameRE    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
