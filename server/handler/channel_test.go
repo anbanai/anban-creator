@@ -40,6 +40,8 @@ type fakeStorageProvider struct {
 	data     map[string][]byte
 	read     []string
 	statRepo service.PendingUploadRepository
+	statErr  error
+	statInfo *storage.ObjectInfo
 }
 
 var _ storage.Provider = (*fakeStorageProvider)(nil)
@@ -88,6 +90,13 @@ func (f *fakeStorageProvider) ReadObject(ctx context.Context, key string, maxByt
 }
 
 func (f *fakeStorageProvider) StatObject(ctx context.Context, key string) (*storage.ObjectInfo, error) {
+	if f.statErr != nil {
+		return nil, f.statErr
+	}
+	if f.statInfo != nil {
+		info := *f.statInfo
+		return &info, nil
+	}
 	parts := strings.Split(strings.Trim(key, "/"), "/")
 	if f.statRepo == nil || len(parts) < 4 || parts[0] != "uploads" || parts[1] != "pending" {
 		return nil, fmt.Errorf("object metadata not found")

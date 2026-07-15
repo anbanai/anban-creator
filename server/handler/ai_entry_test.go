@@ -17,6 +17,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type fakeAIEntrySubmitter struct {
@@ -303,6 +304,64 @@ func TestAIEntryHandlerSubmitRedactsAttachmentRepositoryErrors(t *testing.T) {
 	}
 	if submitter.req.UserID != "" {
 		t.Fatalf("submitter called after repository error: %#v", submitter.req)
+	}
+}
+
+func TestAIEntryHandlerSubmitClassifiesStorageStatErrors(t *testing.T) {
+	const backendDetail = "OSS endpoint secret: request timed out"
+	tests := []struct {
+		name       string
+		statErr    error
+		statInfo   *storage.ObjectInfo
+		wantStatus int
+	}{
+		{name: "not found is bad request", statErr: storage.ErrObjectNotFound, wantStatus: fiber.StatusBadRequest},
+		{name: "backend failure is redacted internal error", statErr: errors.New(backendDetail), wantStatus: fiber.StatusInternalServerError},
+		{name: "metadata mismatch is bad request", statInfo: &storage.ObjectInfo{Size: 124, ContentType: "image/png"}, wantStatus: fiber.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := zerolog.New(io.Discard)
+			submitter := &fakeAIEntrySubmitter{}
+			pending := &aiEntryPendingRepo{upload: &model.PendingUpload{
+				ID: "upload-1", UserID: "user-1", Purpose: service.DirectUploadPurposeAIEntryAttachment,
+				Key: "uploads/pending/user-1/upload-1/ref.png", FileName: "ref.png", ContentType: "image/png", Size: 123,
+				Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+			}}
+			store := pendingUploadStatStore(pending)
+			store.statErr = tt.statErr
+			store.statInfo = tt.statInfo
+			h := NewAIEntryHandler(submitter, pending, store, &logger)
+			app := fiber.New()
+			app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+				c.Locals("user_id", "user-1")
+				return h.Submit(c)
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
+				"project_id":"project-1",
+				"text":"write",
+				"attachments":[{"type":"image","upload_id":"upload-1","key":"uploads/pending/user-1/upload-1/ref.png"}]
+			}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response: %v", err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, body = %s; want %d", resp.StatusCode, body, tt.wantStatus)
+			}
+			if strings.Contains(string(body), backendDetail) {
+				t.Fatalf("response leaked storage backend detail: %s", body)
+			}
+			if submitter.req.UserID != "" {
+				t.Fatalf("submitter called after storage error: %#v", submitter.req)
+			}
+		})
 	}
 }
 

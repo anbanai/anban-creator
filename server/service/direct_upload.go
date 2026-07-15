@@ -463,14 +463,17 @@ func FinalizeVerifiedDirectUploads(ctx context.Context, store storage.ObjectStat
 
 func validateDirectUploadObject(ctx context.Context, store storage.ObjectStatProvider, upload *model.PendingUpload) error {
 	if store == nil {
-		return fmt.Errorf("%w: %v", ErrPendingUploadObjectInvalid, storage.ErrObjectStatUnsupported)
+		return storage.ErrObjectStatUnsupported
 	}
 	if upload == nil || strings.TrimSpace(upload.Key) == "" {
 		return fmt.Errorf("%w: object key is required", ErrPendingUploadObjectInvalid)
 	}
 	info, err := store.StatObject(ctx, upload.Key)
 	if err != nil {
-		return fmt.Errorf("%w: stat %s: %v", ErrPendingUploadObjectInvalid, upload.Key, err)
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return fmt.Errorf("%w: object %s not found", ErrPendingUploadObjectInvalid, upload.Key)
+		}
+		return fmt.Errorf("stat pending upload object %s: %w", upload.Key, err)
 	}
 	if info == nil {
 		return fmt.Errorf("%w: stat %s returned no metadata", ErrPendingUploadObjectInvalid, upload.Key)

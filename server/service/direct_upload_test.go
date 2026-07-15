@@ -21,6 +21,7 @@ type fakeDirectUploadStore struct {
 	deleted     []string
 	deleteErr   error
 	objects     map[string]*storage.ObjectInfo
+	statErr     error
 }
 
 func (s *fakeDirectUploadStore) Name() string { return s.name }
@@ -39,12 +40,55 @@ func (s *fakeDirectUploadStore) Delete(_ context.Context, key string) error {
 	return s.deleteErr
 }
 func (s *fakeDirectUploadStore) StatObject(_ context.Context, key string) (*storage.ObjectInfo, error) {
+	if s.statErr != nil {
+		return nil, s.statErr
+	}
 	info := s.objects[key]
 	if info == nil {
-		return nil, errors.New("object not found")
+		return nil, storage.ErrObjectNotFound
 	}
 	copy := *info
 	return &copy, nil
+}
+
+func TestValidateDirectUploadObjectClassifiesStatFailures(t *testing.T) {
+	upload := &model.PendingUpload{
+		Purpose: DirectUploadPurposeAIEntryAttachment,
+		Key:     "uploads/pending/user-1/upload-1/input.png", FileName: "input.png", ContentType: "image/png", Size: 1,
+	}
+	tests := []struct {
+		name               string
+		store              *fakeDirectUploadStore
+		wantObjectInvalid  bool
+		wantInfrastructure error
+	}{
+		{
+			name:              "not found is validation",
+			store:             &fakeDirectUploadStore{statErr: storage.ErrObjectNotFound},
+			wantObjectInvalid: true,
+		},
+		{
+			name:               "timeout remains infrastructure error",
+			store:              &fakeDirectUploadStore{statErr: context.DeadlineExceeded},
+			wantInfrastructure: context.DeadlineExceeded,
+		},
+		{
+			name:              "metadata mismatch is validation",
+			store:             &fakeDirectUploadStore{objects: map[string]*storage.ObjectInfo{upload.Key: {Key: upload.Key, Size: 2, ContentType: upload.ContentType}}},
+			wantObjectInvalid: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDirectUploadObject(context.Background(), tt.store, upload)
+			if got := errors.Is(err, ErrPendingUploadObjectInvalid); got != tt.wantObjectInvalid {
+				t.Fatalf("errors.Is(ErrPendingUploadObjectInvalid) = %v, error = %v", got, err)
+			}
+			if tt.wantInfrastructure != nil && !errors.Is(err, tt.wantInfrastructure) {
+				t.Fatalf("error = %v, want wrapped infrastructure error %v", err, tt.wantInfrastructure)
+			}
+		})
+	}
 }
 
 func finalizeVerifiedDirectUploadsWithStore(ctx context.Context, store *fakeDirectUploadStore, repo PendingUploadRepository, uploads []*VerifiedDirectUpload, now time.Time) error {

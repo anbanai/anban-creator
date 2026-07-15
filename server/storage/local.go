@@ -146,6 +146,9 @@ func (p *LocalProvider) StatObject(_ context.Context, key string) (*ObjectInfo, 
 	}
 	info, err := os.Stat(destPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrObjectNotFound, key)
+		}
 		return nil, fmt.Errorf("stat file %s: %w", destPath, err)
 	}
 	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(destPath)))

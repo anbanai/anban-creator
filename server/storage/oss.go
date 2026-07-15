@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -143,6 +144,10 @@ func (p *OSSProvider) UploadURL(_ context.Context, key string, contentType strin
 func (p *OSSProvider) StatObject(_ context.Context, key string) (*ObjectInfo, error) {
 	meta, err := p.bucket.GetObjectDetailedMeta(key)
 	if err != nil {
+		var serviceErr oss.ServiceError
+		if errors.As(err, &serviceErr) && (serviceErr.StatusCode == http.StatusNotFound || serviceErr.Code == "NoSuchKey") {
+			return nil, fmt.Errorf("%w: %s", ErrObjectNotFound, key)
+		}
 		return nil, fmt.Errorf("oss stat object %s: %w", key, err)
 	}
 	size, _ := strconv.ParseInt(meta.Get("Content-Length"), 10, 64)

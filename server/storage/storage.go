@@ -25,6 +25,7 @@ type ObjectInfo struct {
 }
 
 var (
+	ErrObjectNotFound         = errors.New("storage object not found")
 	ErrObjectStatUnsupported  = errors.New("storage object metadata is unavailable")
 	ErrBoundedReadUnsupported = errors.New("bounded storage reads are unavailable")
 	ErrObjectExceedsMaxSize   = errors.New("storage object is too large")
