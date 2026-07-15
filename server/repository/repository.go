@@ -170,6 +170,7 @@ type TaskFileRepository interface {
 	FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error)
 	FindByID(ctx context.Context, id string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
+	FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)
 	FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error)
@@ -177,6 +178,7 @@ type TaskFileRepository interface {
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
 	PublishCurrentExecution(ctx context.Context, taskID, executionID string) error
+	CollectCurrentExecution(ctx context.Context, taskID, executionID string) error
 	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
 	UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error)
 	ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error

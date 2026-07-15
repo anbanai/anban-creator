@@ -325,6 +325,87 @@ func TestTaskFileRepositoryDiscardExecutionHidesPendingRows(t *testing.T) {
 	}
 }
 
+func TestTaskFileRepositoryCollectsFailedExecutionWithoutReplacingPublishedSet(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e2")
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{TaskID: "t1", ExecutionID: "e2", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := repo.TaskExecutions().Transition(ctx, "e2", []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{})
+	if err != nil || !changed {
+		t.Fatalf("mark execution failed: changed=%v err=%v", changed, err)
+	}
+	if err := repo.TaskFiles().CollectCurrentExecution(ctx, "t1", "e2"); err != nil {
+		t.Fatalf("collect failed execution: %v", err)
+	}
+	published, err := repo.TaskFiles().FindByTaskID(ctx, "t1")
+	if err != nil || len(published) != 1 || published[0].ExecutionID != "e1" {
+		t.Fatalf("published files = %#v, err=%v", published, err)
+	}
+	failedFiles, err := repo.TaskFiles().FindByExecutionID(ctx, "e2")
+	if err != nil || len(failedFiles) != 1 || failedFiles[0].State != "collected" {
+		t.Fatalf("failed execution files = %#v, err=%v", failedFiles, err)
+	}
+	execution, err := repo.TaskExecutions().FindByID(ctx, "e2")
+	if err != nil || execution.ManifestStatus != "collected" {
+		t.Fatalf("execution = %#v, err=%v", execution, err)
+	}
+}
+
+func TestTaskFileRepositoryCollectCurrentExecutionIsIdempotent(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+		Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := repo.TaskExecutions().Transition(ctx, "e1", []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{})
+	if err != nil || !changed {
+		t.Fatalf("mark execution failed: changed=%v err=%v", changed, err)
+	}
+	for range 2 {
+		if err := repo.TaskFiles().CollectCurrentExecution(ctx, "t1", "e1"); err != nil {
+			t.Fatalf("collect failed execution: %v", err)
+		}
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 || rows[0].State != "collected" {
+		t.Fatalf("collected rows = %#v, err=%v", rows, err)
+	}
+}
+
+func TestTaskFileRepositoryCollectRejectsStaleExecution(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e2")
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: "e1", TaskID: "t1", Attempt: 2, Target: "kubernetes",
+		Status: model.TaskExecutionFailed, Started: true, ManifestStatus: model.TaskExecutionManifestPending,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+		Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().CollectCurrentExecution(ctx, "t1", "e1"); !errors.Is(err, ErrTaskFileExecutionNotCurrent) {
+		t.Fatalf("collect stale execution error = %v", err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 || rows[0].State != model.TaskFileStatePending {
+		t.Fatalf("stale rows changed = %#v, err=%v", rows, err)
+	}
+}
+
 func TestTaskFileRepositoryReplacePendingExecutionRollsBackOnFailure(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()

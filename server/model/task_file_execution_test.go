@@ -14,6 +14,29 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+type legacyTaskFileCollectionState struct {
+	ID          string `gorm:"primaryKey"`
+	TaskID      string
+	ExecutionID string
+	State       string `gorm:"check:chk_task_file_state,state IN ('pending','published','superseded')"`
+	Role        string
+	FilePath    string
+	FileName    string
+}
+
+func (legacyTaskFileCollectionState) TableName() string { return "task_files" }
+
+type legacyTaskExecutionCollectionState struct {
+	ID             string `gorm:"primaryKey"`
+	TaskID         string
+	Attempt        int
+	Target         string
+	Status         string
+	ManifestStatus string `gorm:"check:chk_task_execution_manifest_status,manifest_status IN ('','pending','published','discarded','rejected')"`
+}
+
+func (legacyTaskExecutionCollectionState) TableName() string { return "task_executions" }
+
 func TestTaskFileExecutionScopedUniqueIndexMigration(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -131,5 +154,34 @@ func TestTaskFileDefaultsToPublishedForLegacyWriters(t *testing.T) {
 	invalid := &TaskFile{ID: "f2", TaskID: "t1", State: "invalid", Role: FileRoleOther, FilePath: "b.md", FileName: "b.md"}
 	if err := db.Create(invalid).Error; err == nil {
 		t.Fatal("invalid task file state unexpectedly persisted")
+	}
+}
+
+func TestTaskArtifactCollectionStateMigrationReplacesLegacyConstraints(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&legacyTaskFileCollectionState{}, &legacyTaskExecutionCollectionState{}); err != nil {
+		t.Fatalf("create legacy artifact schema: %v", err)
+	}
+	if err := MigrateTaskArtifactCollectionSchema(db); err != nil {
+		t.Fatalf("migrate artifact collection states: %v", err)
+	}
+	if err := db.AutoMigrate(&TaskFile{}, &TaskExecution{}); err != nil {
+		t.Fatalf("auto migrate current artifact schema: %v", err)
+	}
+	if err := db.Create(&TaskExecution{
+		ID: "e-collected", TaskID: "t-collected", Attempt: 1, Target: "kubernetes",
+		Status: TaskExecutionFailed, ManifestStatus: "collected",
+	}).Error; err != nil {
+		t.Fatalf("create collected execution: %v", err)
+	}
+	if err := db.Create(&TaskFile{
+		ID: "f-collected", TaskID: "t-collected", ExecutionID: "e-collected",
+		State: "collected", Role: FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
+	}).Error; err != nil {
+		t.Fatalf("create collected task file: %v", err)
 	}
 }

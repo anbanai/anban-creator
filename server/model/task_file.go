@@ -7,7 +7,7 @@ type TaskFile struct {
 	ID              string    `gorm:"type:char(36);primaryKey" json:"id"`
 	TaskID          string    `gorm:"type:char(36);uniqueIndex:idx_task_file_execution_path,priority:1;not null" json:"task_id"`
 	ExecutionID     string    `gorm:"type:char(36);uniqueIndex:idx_task_file_execution_path,priority:2;index;not null;default:''" json:"execution_id,omitempty"`
-	State           string    `gorm:"type:varchar(20);index;not null;default:published;check:chk_task_file_state,state IN ('pending','published','superseded')" json:"state"`
+	State           string    `gorm:"type:varchar(20);index;not null;default:published;check:chk_task_file_state,state IN ('pending','published','collected','superseded')" json:"state"`
 	Role            string    `gorm:"type:varchar(20);not null" json:"role"`
 	FilePath        string    `gorm:"type:varchar(500);uniqueIndex:idx_task_file_execution_path,priority:3" json:"-"`
 	FileName        string    `gorm:"type:varchar(255);not null" json:"file_name"`
@@ -26,6 +26,7 @@ type TaskFile struct {
 const (
 	TaskFileStatePending    = "pending"
 	TaskFileStatePublished  = "published"
+	TaskFileStateCollected  = "collected"
 	TaskFileStateSuperseded = "superseded"
 )
 

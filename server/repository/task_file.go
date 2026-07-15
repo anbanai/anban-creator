@@ -90,6 +90,14 @@ func (r *taskFileRepository) FindByTaskID(ctx context.Context, taskID string) ([
 	return files, nil
 }
 
+func (r *taskFileRepository) FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
+	var files []*model.TaskFile
+	if err := r.db.WithContext(ctx).Where("task_id = ? AND state = ?", taskID, model.TaskFileStateCollected).Find(&files).Error; err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
 func (r *taskFileRepository) FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error) {
 	var files []*model.TaskFile
 	if err := r.db.WithContext(ctx).Where("execution_id = ?", executionID).Find(&files).Error; err != nil {
@@ -140,6 +148,44 @@ func (r *taskFileRepository) PublishCurrentExecution(ctx context.Context, taskID
 			return fmt.Errorf("%w: published %d of %d rows", ErrTaskFileManifestState, result.RowsAffected, pending)
 		}
 		statusResult := tx.Model(&model.TaskExecution{}).Where("id = ? AND manifest_status = ?", executionID, model.TaskExecutionManifestPending).Update("manifest_status", model.TaskExecutionManifestPublished)
+		if statusResult.Error != nil {
+			return statusResult.Error
+		}
+		if statusResult.RowsAffected != 1 {
+			return ErrTaskFileManifestState
+		}
+		return nil
+	})
+}
+
+// CollectCurrentExecution retains a terminal failed attempt's artifacts for
+// diagnosis without replacing the successful published set.
+func (r *taskFileRepository) CollectCurrentExecution(ctx context.Context, taskID, executionID string) error {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
+		return ErrTaskFileExecutionNotCurrent
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		_, execution, err := lockCurrentArtifactExecution(tx, taskID, executionID)
+		if err != nil {
+			return err
+		}
+		if execution.ManifestStatus == model.TaskExecutionManifestCollected {
+			return nil
+		}
+		if !isCollectableArtifactExecution(execution) {
+			return ErrTaskFileTaskNotRunning
+		}
+		if execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending {
+			return ErrTaskFileManifestState
+		}
+		if err := tx.Model(&model.TaskFile{}).
+			Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).
+			Update("state", model.TaskFileStateCollected).Error; err != nil {
+			return err
+		}
+		statusResult := tx.Model(&model.TaskExecution{}).
+			Where("id = ? AND manifest_status = ?", executionID, execution.ManifestStatus).
+			Update("manifest_status", model.TaskExecutionManifestCollected)
 		if statusResult.Error != nil {
 			return statusResult.Error
 		}
@@ -341,6 +387,15 @@ func requireDiscardableArtifactExecution(task *model.Task, execution *model.Task
 	return ErrTaskFileTaskNotRunning
 }
 
+func isCollectableArtifactExecution(execution *model.TaskExecution) bool {
+	switch execution.Status {
+	case model.TaskExecutionFailed, model.TaskExecutionCancelled, model.TaskExecutionTimedOut:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *taskFileRepository) BatchCreate(ctx context.Context, files []*model.TaskFile) error {
 	if len(files) == 0 {
 		return nil
@@ -367,7 +422,7 @@ func validateTaskFileMutation(file *model.TaskFile) error {
 		file.State = model.TaskFileStatePublished
 	}
 	switch file.State {
-	case model.TaskFileStatePending, model.TaskFileStatePublished, model.TaskFileStateSuperseded:
+	case model.TaskFileStatePending, model.TaskFileStatePublished, model.TaskFileStateCollected, model.TaskFileStateSuperseded:
 	default:
 		return fmt.Errorf("invalid task file state %q", file.State)
 	}
