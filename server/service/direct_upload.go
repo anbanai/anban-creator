@@ -82,6 +82,14 @@ type DirectUploadPrepareResult struct {
 	MaxSize            int64             `json:"max_size"`
 }
 
+type VerifiedDirectUpload struct {
+	UploadID    string
+	Key         string
+	FileName    string
+	ContentType string
+	Size        int64
+}
+
 type UploadCredentialRequest struct {
 	RoleArn     string
 	SessionName string
@@ -341,6 +349,44 @@ func ValidatePendingUploadURL(ctx context.Context, repo PendingUploadRepository,
 		return "", ErrPendingUploadAccessDenied
 	}
 	return upload.Key, nil
+}
+
+func ResolveDirectUploadAttachment(ctx context.Context, repo PendingUploadRepository, userID string, allowedPurposes []string, uploadID, assertedKey string, now time.Time) (*VerifiedDirectUpload, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("pending upload repository is not available")
+	}
+	if userID == "" || uploadID == "" || assertedKey == "" {
+		return nil, ErrPendingUploadAccessDenied
+	}
+	upload, err := repo.FindPendingUploadByID(ctx, uploadID)
+	if err != nil {
+		if errors.Is(err, ErrPendingUploadNotFound) {
+			return nil, ErrPendingUploadAccessDenied
+		}
+		return nil, err
+	}
+	if upload.UserID != userID || upload.Key != assertedKey || !directUploadPurposeAllowed(upload.Purpose, allowedPurposes) {
+		return nil, ErrPendingUploadAccessDenied
+	}
+	switch upload.Status {
+	case model.PendingUploadStatusPending:
+		if !upload.ExpiresAt.After(now) {
+			return nil, ErrPendingUploadExpired
+		}
+		if err := repo.FinalizePendingUploads(ctx, []string{upload.ID}, now); err != nil {
+			return nil, err
+		}
+	case model.PendingUploadStatusFinalized:
+	default:
+		return nil, ErrPendingUploadNotPending
+	}
+	return &VerifiedDirectUpload{
+		UploadID:    upload.ID,
+		Key:         upload.Key,
+		FileName:    upload.FileName,
+		ContentType: upload.ContentType,
+		Size:        upload.Size,
+	}, nil
 }
 
 func directUploadPurposeAllowed(purpose string, allowed []string) bool {

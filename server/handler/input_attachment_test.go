@@ -12,28 +12,30 @@ import (
 )
 
 func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
-	const publicURL = "https://cdn.test/uploads/pending/user-1/upload-1/product.png"
+	const key = "uploads/pending/user-1/upload-1/product.png"
 	pending := &aiEntryPendingRepo{upload: &model.PendingUpload{
 		ID:          "upload-1",
 		UserID:      "user-1",
 		Purpose:     service.DirectUploadPurposeAIEntryAttachment,
-		Key:         "uploads/pending/user-1/upload-1/product.png",
-		PublicURL:   publicURL,
-		FileName:    "product.png",
+		Key:         key,
+		PublicURL:   "https://cdn.test/" + key,
+		FileName:    "repository-product.png",
 		ContentType: "image/png",
+		Size:        2048,
 		Status:      model.PendingUploadStatusPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}}
 
 	got, err := validateInputAttachments(context.Background(), pending, "user-1", []model.EntryAttachment{{
 		Type:        " image ",
-		URL:         " " + publicURL + " ",
-		FileName:    " product.png ",
-		ContentType: " image/png ",
-		UploadID:    " attacker-upload ",
-		Key:         " uploads/pending/victim/attacker-upload/secret.png ",
+		URL:         " https://attacker.example/forged.exe?signature=secret ",
+		FileName:    " forged.exe ",
+		ContentType: " application/x-msdownload ",
+		Size:        49 * 1024 * 1024,
+		UploadID:    " upload-1 ",
+		Key:         " " + key + " ",
 		Instruction: "  保持包装和 Logo  ",
-	}}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: map[string]bool{"image": true}})
+	}}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: allAgentAttachmentTypes})
 
 	if err != nil {
 		t.Fatalf("validate attachments: %v", err)
@@ -44,17 +46,17 @@ func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	if got[0].Type != "image" {
 		t.Fatalf("type = %q, want image", got[0].Type)
 	}
-	if got[0].URL != publicURL {
-		t.Fatalf("url = %q, want %q", got[0].URL, publicURL)
+	if got[0].URL != "" {
+		t.Fatalf("url = %q, want empty key-first URL", got[0].URL)
 	}
-	if got[0].FileName != "product.png" {
+	if got[0].FileName != "repository-product.png" {
 		t.Fatalf("file name = %q", got[0].FileName)
 	}
 	if got[0].ContentType != "image/png" {
 		t.Fatalf("content type = %q", got[0].ContentType)
 	}
-	if got[0].UploadID != "" || got[0].Key != "" {
-		t.Fatalf("client storage authority persisted: %#v", got[0])
+	if got[0].Size != 2048 || got[0].UploadID != "upload-1" || got[0].Key != key {
+		t.Fatalf("repository storage metadata not persisted: %#v", got[0])
 	}
 	if got[0].Instruction != "保持包装和 Logo" {
 		t.Fatalf("instruction = %q", got[0].Instruction)

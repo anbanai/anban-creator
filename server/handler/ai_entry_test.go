@@ -177,12 +177,12 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 		"text":"写文章",
 		"attachments":[{
 			"type":"image",
-			"url":"https://cdn.example.com/uploads/pending/user-1/upload-1/ref.png",
-			"key":"uploads/pending/victim/other/secret.png",
-			"upload_id":"other",
-			"file_name":"ref.png",
-			"content_type":"image/png",
-			"size":123
+			"url":"https://attacker.example/forged.exe",
+			"key":"uploads/pending/user-1/upload-1/ref.png",
+			"upload_id":"upload-1",
+			"file_name":"forged.exe",
+			"content_type":"application/x-msdownload",
+			"size":999999
 		}]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -196,8 +196,9 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 	if len(pending.finalizedIDs) != 1 || pending.finalizedIDs[0] != "upload-1" {
 		t.Fatalf("finalized IDs = %#v, want upload-1", pending.finalizedIDs)
 	}
-	if got := submitter.req.Attachments[0]; got.Key != "" || got.UploadID != "" {
-		t.Fatalf("client storage authority persisted: %#v", got)
+	if got := submitter.req.Attachments[0]; got.UploadID != "upload-1" || got.Key != pending.upload.Key || got.URL != "" ||
+		got.FileName != pending.upload.FileName || got.ContentType != pending.upload.ContentType || got.Size != pending.upload.Size {
+		t.Fatalf("verified storage metadata not persisted: %#v", got)
 	}
 }
 

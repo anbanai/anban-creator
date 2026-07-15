@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -270,6 +271,137 @@ func TestPrepareDirectUploadRejectsInvalidPurposeSizeAndMIME(t *testing.T) {
 		if _, err := PrepareDirectUpload(context.Background(), store, repo, cfg, tc); err == nil {
 			t.Fatalf("PrepareDirectUpload(%+v) succeeded, want error", tc)
 		}
+	}
+}
+
+func TestResolveDirectUploadAttachment(t *testing.T) {
+	now := time.Date(2026, 7, 15, 9, 0, 0, 0, time.UTC)
+	const (
+		uploadID = "upload-1"
+		key      = "uploads/pending/user-1/upload-1/product.png"
+	)
+	want := VerifiedDirectUpload{
+		UploadID:    uploadID,
+		Key:         key,
+		FileName:    "repository-product.png",
+		ContentType: "image/png",
+		Size:        2048,
+	}
+
+	tests := []struct {
+		name          string
+		upload        *model.PendingUpload
+		lookupID      string
+		userID        string
+		purposes      []string
+		assertedKey   string
+		want          *VerifiedDirectUpload
+		wantErr       error
+		wantFinalized bool
+	}{
+		{
+			name: "finalizes matching pending upload and returns repository metadata",
+			upload: &model.PendingUpload{
+				ID: uploadID, UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment,
+				Key: key, FileName: want.FileName, ContentType: want.ContentType, Size: want.Size,
+				Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Minute),
+			},
+			lookupID: uploadID, userID: "user-1", purposes: []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment},
+			assertedKey: key, want: &want, wantFinalized: true,
+		},
+		{
+			name: "reuses matching finalized upload after pending expiry",
+			upload: &model.PendingUpload{
+				ID: uploadID, UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment,
+				Key: key, FileName: want.FileName, ContentType: want.ContentType, Size: want.Size,
+				Status: model.PendingUploadStatusFinalized, ExpiresAt: now.Add(-time.Hour),
+			},
+			lookupID: uploadID, userID: "user-1", purposes: []string{DirectUploadPurposeAIEntryAttachment},
+			assertedKey: key, want: &want,
+		},
+		{
+			name: "rejects cross user",
+			upload: &model.PendingUpload{
+				ID: uploadID, UserID: "user-2", Purpose: DirectUploadPurposeAIEntryAttachment, Key: key,
+				Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Minute),
+			},
+			lookupID: uploadID, userID: "user-1", purposes: []string{DirectUploadPurposeAIEntryAttachment}, assertedKey: key,
+			wantErr: ErrPendingUploadAccessDenied,
+		},
+		{
+			name: "rejects wrong purpose",
+			upload: &model.PendingUpload{
+				ID: uploadID, UserID: "user-1", Purpose: DirectUploadPurposeProjectReference, Key: key,
+				Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Minute),
+			},
+			lookupID: uploadID, userID: "user-1", purposes: []string{DirectUploadPurposeAIEntryAttachment}, assertedKey: key,
+			wantErr: ErrPendingUploadAccessDenied,
+		},
+		{
+			name: "rejects mismatched asserted key",
+			upload: &model.PendingUpload{
+				ID: uploadID, UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment, Key: key,
+				Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Minute),
+			},
+			lookupID: uploadID, userID: "user-1", purposes: []string{DirectUploadPurposeAIEntryAttachment}, assertedKey: key + ".forged",
+			wantErr: ErrPendingUploadAccessDenied,
+		},
+		{
+			name: "rejects expired pending upload",
+			upload: &model.PendingUpload{
+				ID: uploadID, UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment, Key: key,
+				Status: model.PendingUploadStatusPending, ExpiresAt: now,
+			},
+			lookupID: uploadID, userID: "user-1", purposes: []string{DirectUploadPurposeAIEntryAttachment}, assertedKey: key,
+			wantErr: ErrPendingUploadExpired,
+		},
+		{
+			name: "rejects unknown upload id",
+			upload: &model.PendingUpload{
+				ID: uploadID, UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment, Key: key,
+				Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Minute),
+			},
+			lookupID: "unknown", userID: "user-1", purposes: []string{DirectUploadPurposeAIEntryAttachment}, assertedKey: key,
+			wantErr: ErrPendingUploadAccessDenied,
+		},
+		{
+			name: "rejects invalid status",
+			upload: &model.PendingUpload{
+				ID: uploadID, UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment, Key: key,
+				Status: model.PendingUploadStatusExpired, ExpiresAt: now.Add(time.Minute),
+			},
+			lookupID: uploadID, userID: "user-1", purposes: []string{DirectUploadPurposeAIEntryAttachment}, assertedKey: key,
+			wantErr: ErrPendingUploadNotPending,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{tt.upload.ID: tt.upload}}
+			got, err := ResolveDirectUploadAttachment(context.Background(), repo, tt.userID, tt.purposes, tt.lookupID, tt.assertedKey, now)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr != nil {
+				if got != nil {
+					t.Fatalf("result = %#v, want nil", got)
+				}
+				if len(repo.finalized) != 0 {
+					t.Fatalf("finalized = %#v, want none", repo.finalized)
+				}
+				return
+			}
+			if got == nil || *got != *tt.want {
+				t.Fatalf("result = %#v, want %#v", got, tt.want)
+			}
+			if tt.wantFinalized {
+				if len(repo.finalized) != 1 || repo.finalized[0] != uploadID {
+					t.Fatalf("finalized = %#v, want [%s]", repo.finalized, uploadID)
+				}
+			} else if len(repo.finalized) != 0 {
+				t.Fatalf("finalized = %#v, want none", repo.finalized)
+			}
+		})
 	}
 }
 

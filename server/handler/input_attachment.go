@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -22,16 +23,42 @@ type InputAttachmentValidationOptions struct {
 	AllowedTypes map[string]bool
 }
 
+var allAgentAttachmentTypes = map[string]bool{
+	"image":    true,
+	"audio":    true,
+	"video":    true,
+	"document": true,
+	"text":     true,
+}
+
 func validateInputAttachments(ctx context.Context, pending service.PendingUploadRepository, userID string, attachments []model.EntryAttachment, options InputAttachmentValidationOptions) ([]model.EntryAttachment, error) {
 	if options.MaxCount > 0 && len(attachments) > options.MaxCount {
 		return nil, fmt.Errorf("at most %d attachments are allowed", options.MaxCount)
 	}
 	normalized := make([]model.EntryAttachment, len(attachments))
-	urls := make([]string, 0, len(attachments))
 	for i, raw := range attachments {
 		a := normalizeHandlerEntryAttachment(raw)
 		if utf8.RuneCountInString(a.Instruction) > inputAttachmentInstructionMaxRunes {
 			return nil, fmt.Errorf("attachment instruction must not exceed %d characters", inputAttachmentInstructionMaxRunes)
+		}
+		if (a.UploadID == "") != (a.Key == "") {
+			return nil, fmt.Errorf("attachment %d: storage attachment requires upload_id and key", i+1)
+		}
+		if a.UploadID != "" {
+			verified, err := service.ResolveDirectUploadAttachment(ctx, pending, userID, []string{
+				service.DirectUploadPurposeAIEntryAttachment,
+			}, a.UploadID, a.Key, time.Now())
+			if err != nil {
+				return nil, fmt.Errorf("attachment %d: %w", i+1, err)
+			}
+			a = model.EntryAttachment{
+				UploadID:    verified.UploadID,
+				Key:         verified.Key,
+				FileName:    verified.FileName,
+				ContentType: verified.ContentType,
+				Size:        verified.Size,
+				Instruction: a.Instruction,
+			}
 		}
 		if err := validateHandlerEntryAttachment(&a); err != nil {
 			return nil, fmt.Errorf("attachment %d: %w", i+1, err)
@@ -40,17 +67,11 @@ func validateInputAttachments(ctx context.Context, pending service.PendingUpload
 			return nil, fmt.Errorf("attachment type %s is not allowed", a.Type)
 		}
 		if a.URL != "" {
-			if !validAIEntryAttachmentURL(a.URL, pending != nil) {
+			if !validAIEntryAttachmentURL(a.URL, false) {
 				return nil, fmt.Errorf("attachment URLs must be internal file URLs or registered pending-upload URLs")
 			}
-			urls = append(urls, a.URL)
 		}
 		normalized[i] = a
-	}
-	if pending != nil {
-		if err := finalizePendingURLs(ctx, pending, userID, service.DirectUploadPurposeAIEntryAttachment, urls); err != nil {
-			return nil, err
-		}
 	}
 	return normalized, nil
 }
@@ -62,10 +83,8 @@ func normalizeHandlerEntryAttachment(a model.EntryAttachment) model.EntryAttachm
 	a.FileName = strings.TrimSpace(a.FileName)
 	a.ContentType = strings.TrimSpace(a.ContentType)
 	a.Role = strings.TrimSpace(a.Role)
-	// The URL is checked against server-side upload records below. Client-provided
-	// storage identifiers must not cross the handler boundary as authority.
-	a.UploadID = ""
-	a.Key = ""
+	a.UploadID = strings.TrimSpace(a.UploadID)
+	a.Key = strings.TrimSpace(a.Key)
 	a.Instruction = strings.TrimSpace(a.Instruction)
 	return a
 }
@@ -79,10 +98,10 @@ func validateHandlerEntryAttachment(a *model.EntryAttachment) error {
 		return fmt.Errorf("unsupported attachment type")
 	}
 	a.Type = typ
-	if typ != "text" && a.URL == "" {
+	if typ != "text" && a.URL == "" && a.Key == "" {
 		return fmt.Errorf("attachment url is required")
 	}
-	if typ == "text" && a.URL == "" && a.Text == "" {
+	if typ == "text" && a.URL == "" && a.Text == "" && a.Key == "" {
 		return fmt.Errorf("text attachment requires text or url")
 	}
 	limit := aiEntryMediaAttachmentMaxBytes
