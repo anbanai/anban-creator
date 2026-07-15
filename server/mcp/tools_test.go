@@ -53,14 +53,16 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
-	taskID := uuid.NewString()
+	userID := uuid.NewString()
+	project := createAccountInfoProject(t, repo, userID, "")
+	task := createAccountInfoTask(t, repo, userID, project.ID, "")
 	if err := repo.TaskFiles().BatchCreate(context.Background(), []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := taskFilesHandler(context.Background(), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"task_id":"` + taskID + `"}`)}})
+	result, err := taskFilesHandler(withMCPUserID(context.Background(), userID), taskToolRequest(t, task.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +74,32 @@ func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
 	states := []any{files[0].(map[string]any)["state"], files[1].(map[string]any)["state"]}
 	if states[0] != model.TaskFileStatePublished || states[1] != model.TaskFileStateCollected {
 		t.Fatalf("states = %#v", states)
+	}
+}
+
+func TestListTaskFilesRejectsForeignTask(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ownerID, intruderID := uuid.NewString(), uuid.NewString()
+	project := createAccountInfoProject(t, repo, ownerID, "")
+	task := createAccountInfoTask(t, repo, ownerID, project.ID, "")
+	if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateCollected,
+		Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := taskFilesHandler(withMCPUserID(context.Background(), intruderID), taskToolRequest(t, task.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || !result.IsError {
+		t.Fatalf("foreign list result = %#v, want tool error", result)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if strings.Contains(text, "failure-state.json") {
+		t.Fatalf("foreign list leaked collected file: %s", text)
 	}
 }
 

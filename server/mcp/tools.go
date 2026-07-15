@@ -876,10 +876,14 @@ func titleFinalizeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 }
 
 func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
 		return errorResult("task_id is required"), nil
+	}
+	if _, err := svcs.TaskSvc.ValidateAgentTaskAccess(context.Background(), taskID, userID); err != nil {
+		return errorResult("task not found"), nil
 	}
 
 	files, err := svcs.TaskSvc.GetVisibleFiles(context.Background(), taskID)
