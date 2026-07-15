@@ -217,7 +217,10 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
 
   return (
     <Sheet open={props.open} onOpenChange={props.onOpenChange}>
-      <SheetContent side="right" className="w-full gap-0 overflow-hidden p-0 sm:max-w-xl">
+      <SheetContent
+        side="right"
+        className="gap-0 overflow-hidden p-0 data-[side=right]:w-full sm:max-w-xl"
+      >
         <SheetHeader className="shrink-0 border-b border-border px-4 py-3 pr-12">
           <SheetTitle>任务详情</SheetTitle>
           <SheetDescription className="sr-only">任务概览、配置、参考素材和执行日志</SheetDescription>

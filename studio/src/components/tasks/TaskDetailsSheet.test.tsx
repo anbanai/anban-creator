@@ -86,6 +86,14 @@ function createSheetProps(overrides: Partial<TaskDetailsSheetProps> = {}): TaskD
 }
 
 describe('TaskDetailsSheet', () => {
+  it('overrides the base side width so the sheet fills mobile viewports', () => {
+    render(<TaskDetailsSheet {...createSheetProps()} />)
+
+    const sheet = screen.getByRole('dialog', { name: '任务详情' })
+    expect(sheet).toHaveClass('data-[side=right]:w-full', 'sm:max-w-xl')
+    expect(sheet).not.toHaveClass('data-[side=right]:w-3/4')
+  })
+
   it('opens on Overview with semantic task values and credit details action', () => {
     const props = createSheetProps()
 

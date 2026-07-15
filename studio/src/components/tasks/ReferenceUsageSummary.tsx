@@ -14,6 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 interface ReferenceUsageSummaryProps {
   task: Task
@@ -115,7 +116,7 @@ export function isReferenceUsageSummaryData(value: unknown): value is ReferenceU
 function SummaryLoading({ compact }: { compact: boolean }) {
   if (compact) {
     return (
-      <div role="status" aria-live="polite" aria-atomic="true" className="space-y-3">
+      <div role="status" aria-live="polite" aria-atomic="true" className="flex flex-col gap-3">
         <span className="sr-only">正在读取参考素材使用摘要</span>
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-24 w-full" />
@@ -198,14 +199,14 @@ function SnapshotFallback({
 
   if (compact) {
     return (
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <p className="text-xs leading-5 text-muted-foreground">
           {parseFailed
             ? '素材使用结论无法解析，仅展示任务输入。'
             : '未生成素材使用结论，仅展示任务输入。'}
         </p>
         {attachments.length > 0 ? (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             {attachments.map((attachment, index) => (
               <SnapshotAttachment
                 key={`${attachment.upload_id || attachment.url || attachment.file_name || index}-${index}`}
@@ -275,7 +276,7 @@ function SummaryContent({
   return (
     <>
         {(summary.model_fallback_reason || summary.warnings?.length) && (
-          <div className={compact ? 'grid gap-2' : 'grid gap-2 lg:grid-cols-2'}>
+          <div className={cn('grid gap-2', !compact && 'lg:grid-cols-2')}>
             {summary.model_fallback_reason && (
               <Alert className="border-sky-500/25 bg-sky-500/5">
                 <Info />
@@ -297,7 +298,7 @@ function SummaryContent({
           </div>
         )}
 
-        <div className={compact ? 'grid min-w-0 gap-4' : 'grid min-w-0 gap-4 xl:grid-cols-2'}>
+        <div className={cn('grid min-w-0 gap-4', !compact && 'xl:grid-cols-2')}>
           <section aria-labelledby="reference-input-decisions" className="min-w-0 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <h3 id="reference-input-decisions" className="text-sm font-semibold text-foreground">
@@ -435,7 +436,7 @@ function ValidSummary({
 }) {
   if (compact) {
     return (
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <SummaryContent summary={summary} compact />
       </div>
     )
