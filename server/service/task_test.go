@@ -2749,6 +2749,159 @@ func TestTaskServiceClonePreservesFrozenTaskTypeAndConfigs(t *testing.T) {
 	})
 }
 
+func TestTaskServiceClonePreservesFrozenVideoConfig(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.SetVideoDefaults(model.VideoDefaults{ModelKey: "current-project-model", Resolution: "1080p", Duration: 10})
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	src := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: model.PlatformVideoCreator, Status: model.TaskStatusCompleted, Prompt: "source video prompt",
+	}
+	src.SetVideoInput(model.VideoInput{
+		Brief:           "frozen video brief",
+		References:      []model.VideoReferenceAsset{{Type: "image", URL: "/api/v1/files/frozen-reference.png", MustKeep: []string{"logo"}}},
+		HardConstraints: model.VideoHardConstraints{Ratio: "9:16", Duration: 5},
+	})
+	src.SetVideoConfig(model.VideoTaskConfig{
+		ScenarioKey: "frozen-scenario", ModelKey: "frozen-video-model", Model: "provider-model-v1",
+		Resolution: "720p", Ratio: "9:16", Duration: 5, EstimatedCredits: 4321,
+		DeliveryTargets: []string{"mp4"},
+		PricingBreakdown: &model.VideoPricingBreakdown{
+			CNY: 4.321, CreditMultiplier: 1000, CreditsPerCNY: 1000, Resolution: "720p", Ratio: "9:16", ModelKey: "frozen-video-model",
+		},
+	})
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(clone.VideoInput.Data(), src.VideoInput.Data()) {
+		t.Fatalf("clone video input = %#v, want %#v", clone.VideoInput.Data(), src.VideoInput.Data())
+	}
+	if !reflect.DeepEqual(clone.VideoConfig.Data(), src.VideoConfig.Data()) {
+		t.Fatalf("clone video config = %#v, want frozen source %#v", clone.VideoConfig.Data(), src.VideoConfig.Data())
+	}
+}
+
+func TestTaskServiceCloneNormalizesExecutionTargetAndResetsEphemeralState(t *testing.T) {
+	tests := []struct {
+		name           string
+		sourceTarget   string
+		wantTarget     string
+		wantEnqueued   int
+		wantClaimLimit bool
+	}{
+		{name: "cloud remains cloud", sourceTarget: model.ExecutionTargetCloud, wantTarget: model.ExecutionTargetCloud, wantEnqueued: 1},
+		{name: "local remains schedulable local", sourceTarget: model.ExecutionTargetLocal, wantTarget: model.ExecutionTargetLocal, wantClaimLimit: true},
+		{name: "claimed local becomes schedulable local", sourceTarget: model.ExecutionTargetLocalClaimed, wantTarget: model.ExecutionTargetLocal, wantClaimLimit: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskTestDB(t)
+			t.Cleanup(func() {
+				sqlDB, _ := db.DB()
+				if sqlDB != nil {
+					sqlDB.Close()
+				}
+			})
+			repo := repository.New(db)
+			logger := zerolog.New(io.Discard)
+			enqueuer := &mockEnqueuer{}
+			svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			oldDeadline := time.Now().Add(-time.Hour).Round(time.Second)
+			completedAt := time.Now().Add(-time.Minute)
+			executionID := uuid.NewString()
+			src := &model.Task{
+				ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+				Type: model.PlatformArticle, Status: model.TaskStatusCompleted, Prompt: "clone execution path",
+				ExecutionTarget: tt.sourceTarget, LocalClaimDeadline: &oldDeadline,
+				CurrentExecutionID: &executionID, CompletedAt: &completedAt, Progress: 100,
+				ErrorMessage: "old terminal state", ExecutorInfo: datatypes.NewJSONType(model.ExecutorMeta{Hostname: "old-desktop", ClaimedAt: "old-claim"}),
+			}
+			if err := repo.Tasks().Create(ctx, src); err != nil {
+				t.Fatal(err)
+			}
+
+			clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if clone.ExecutionTarget != tt.wantTarget {
+				t.Fatalf("execution target = %q, want %q", clone.ExecutionTarget, tt.wantTarget)
+			}
+			if len(enqueuer.enqueued) != tt.wantEnqueued {
+				t.Fatalf("enqueued = %d, want %d for target %q", len(enqueuer.enqueued), tt.wantEnqueued, tt.wantTarget)
+			}
+			if tt.wantClaimLimit {
+				if clone.LocalClaimDeadline == nil || !clone.LocalClaimDeadline.After(time.Now()) || clone.LocalClaimDeadline.Equal(oldDeadline) {
+					t.Fatalf("local claim deadline = %v, want fresh future deadline", clone.LocalClaimDeadline)
+				}
+			} else if clone.LocalClaimDeadline != nil {
+				t.Fatalf("cloud clone inherited claim deadline %v", clone.LocalClaimDeadline)
+			}
+			if clone.Status != model.TaskStatusPending || clone.CurrentExecutionID != nil || clone.StartedAt != nil || clone.CompletedAt != nil || clone.Progress != 0 || clone.ErrorMessage != "" || clone.ExecutorInfo.Data() != (model.ExecutorMeta{}) {
+				t.Fatalf("clone inherited ephemeral execution state: %#v", clone)
+			}
+		})
+	}
+}
+
+func TestTaskServiceCloneRejectsUnknownExecutionTarget(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	enqueuer := &mockEnqueuer{}
+	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	src := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: model.PlatformArticle, Status: model.TaskStatusCompleted, Prompt: "unknown target",
+		ExecutionTarget: "stale_local_state",
+	}
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	if err == nil || !strings.Contains(err.Error(), "unsupported source execution target") {
+		t.Fatalf("Clone result=%#v error=%v, want unknown execution target rejection", clone, err)
+	}
+	if len(enqueuer.enqueued) != 0 {
+		t.Fatalf("unknown target clone enqueued %d tasks", len(enqueuer.enqueued))
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != src.ID {
+		t.Fatalf("unknown target clone persisted a task: %#v", tasks)
+	}
+}
+
 func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {

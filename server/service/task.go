@@ -461,6 +461,9 @@ type CreateManualParams struct {
 	// videoeditor tasks. They are rejected for creator projects and vice versa.
 	VideoEditorConfig *model.VideoTaskConfig
 	VideoEditorInput  *model.VideoInput
+	// FrozenVideoConfig is clone-only resolved video state. Ordinary creation
+	// leaves it nil so the agent can resolve a fresh execution configuration.
+	FrozenVideoConfig *model.VideoTaskConfig
 	// MontageInput carries the Montage-specific creation contract.
 	// It is independent from video creator/editor payloads and is only valid
 	// for montage projects.
@@ -720,6 +723,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 				task.SetVideoInput(videoInputFromTaskConfig(taskPrompt, videoCfg))
 			} else if model.IsVideoCreatorPlatform(taskType) && strings.TrimSpace(taskPrompt) != "" {
 				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
+			}
+			if p.FrozenVideoConfig != nil {
+				task.SetVideoConfig(*p.FrozenVideoConfig)
 			}
 		}
 		if model.IsMontagePlatform(taskType) && p.MontageInput != nil {

@@ -51,6 +51,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	if cloneParams.Prompt != nil {
 		prompt = *cloneParams.Prompt
 	}
+	executionTarget, err := cloneExecutionTarget(src.ExecutionTarget)
+	if err != nil {
+		return nil, err
+	}
 	params := CreateManualParams{
 		UserID:                   src.UserID,
 		ProjectID:                src.ProjectID,
@@ -72,7 +76,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		HasTailImage:             &hasTail,
 		ArticleWithCover:         articleCover,
 		ArticleWithContentImages: articleContent,
-		ExecutionTarget:          src.ExecutionTarget,
+		ExecutionTarget:          executionTarget,
 	}
 
 	// Preserve the e-commerce package config (module selection, product photos,
@@ -88,11 +92,15 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	}
 	if model.IsVideoCreatorPlatform(src.Type) {
 		input := src.VideoInput.Data()
+		config := src.VideoConfig.Data()
 		params.VideoCreatorInput = &input
+		params.FrozenVideoConfig = &config
 	}
 	if model.IsVideoEditorPlatform(src.Type) {
 		input := src.VideoInput.Data()
+		config := src.VideoConfig.Data()
 		params.VideoEditorInput = &input
+		params.FrozenVideoConfig = &config
 	}
 	if model.IsMontagePlatform(src.Type) {
 		input := src.MontageInput.Data()
@@ -112,6 +120,17 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
 	return tasks[0], nil
+}
+
+func cloneExecutionTarget(source string) (string, error) {
+	switch source {
+	case model.ExecutionTargetLocal, model.ExecutionTargetLocalClaimed:
+		return model.ExecutionTargetLocal, nil
+	case model.ExecutionTargetCloud:
+		return model.ExecutionTargetCloud, nil
+	default:
+		return "", fmt.Errorf("unsupported source execution target %q", source)
+	}
 }
 
 func cloneOriginalInputAttachments(attachments []model.EntryAttachment) []model.EntryAttachment {
