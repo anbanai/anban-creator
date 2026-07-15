@@ -127,8 +127,11 @@ export default function TaskDetailPage() {
   const { data: files } = useQuery({
     queryKey: ['task-files', id],
     queryFn: () => api.tasks.files(id!),
-    enabled: !!id && task?.status === 'completed',
+    enabled: !!id && !!task && ['completed', 'failed', 'cancelled'].includes(task.status),
   })
+
+  const publishedFiles = files?.filter((file) => file.state !== 'collected') ?? []
+  const collectedFiles = files?.filter((file) => file.state === 'collected') ?? []
 
   // Resolve project info for the task
   const { data: projectDetail } = useQuery({
@@ -1277,14 +1280,14 @@ export default function TaskDetailPage() {
           </Card>
         )}
       >
-        <ReferenceUsageSummary task={task} files={files ?? []} />
+        <ReferenceUsageSummary task={task} files={publishedFiles} />
       </ErrorBoundary>
 
       {/* Files (top priority - most useful content) */}
-      {files && files.length > 0 && (
+      {publishedFiles.length > 0 && (
         <Card>
           <div className="border-b border-border px-4 py-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">生成文件 ({files.length})</h2>
+            <h2 className="text-sm font-semibold text-foreground">生成文件 ({publishedFiles.length})</h2>
             <Button
               size="sm"
               onClick={async () => {
@@ -1310,7 +1313,7 @@ export default function TaskDetailPage() {
           <div className="p-4 space-y-4">
             {task.type === 'ecommerce' ? (
               <EcommerceFilesGallery
-                files={files}
+                files={publishedFiles}
                 taskId={task.id}
                 accessLocked={billingLocked}
                 lockedMessage={lockedDeliveryMessage}
@@ -1319,7 +1322,7 @@ export default function TaskDetailPage() {
               <>
                 {/* Image files in compact grid */}
                 {(() => {
-                  const imageFiles = files.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
+                  const imageFiles = publishedFiles.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
                   if (imageFiles.length === 0) return null
                   return (
                     <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
@@ -1336,7 +1339,7 @@ export default function TaskDetailPage() {
                 })()}
                 {/* Non-image files share the same full-width preview rows. */}
                 {(() => {
-                  const nonImageFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/'))
+                  const nonImageFiles = publishedFiles.filter((f: TaskFile) => !f.mime_type?.startsWith('image/'))
                   if (nonImageFiles.length === 0) return null
                   return (
                     <div className="space-y-2">
@@ -1353,6 +1356,28 @@ export default function TaskDetailPage() {
                 })()}
               </>
             )}
+          </div>
+        </Card>
+      )}
+
+      {collectedFiles.length > 0 && (
+        <Card>
+          <div className="flex items-start gap-3 border-b border-border px-4 py-3">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">失败执行文件 ({collectedFiles.length})</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">诊断与阶段性产物，不包含在成功交付 ZIP 中。</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 p-4">
+            <FilePreviewGallery
+              files={collectedFiles}
+              taskId={task.id}
+              taskType={task.type}
+              renderPreviewDetails={renderVideoPreviewDetails}
+              accessLocked={billingLocked}
+              lockedMessage={lockedDeliveryMessage}
+            />
           </div>
         </Card>
       )}

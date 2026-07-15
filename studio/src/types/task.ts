@@ -179,6 +179,8 @@ export interface BulkTasksResponse {
 export interface TaskFile {
   id: string
   task_id: string
+  execution_id?: string
+  state?: 'published' | 'collected'
   role: string
   file_name: string
   mime_type: string

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TaskDetailPage from './TaskDetailPage'
 import { render } from '@/test/test-utils'
 import { mockProjectDetail, mockTasks } from '@/test/mocks/handlers'
-import type { Task } from '@/types'
+import type { Task, TaskFile } from '@/types'
 import { api } from '@/lib/api'
 
 const mockNavigate = vi.fn()
@@ -223,6 +223,52 @@ describe('TaskDetailPage', () => {
     expect(filesHeading).toBeInTheDocument()
     expect(summaryFallback.compareDocumentPosition(filesHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeInTheDocument()
+  })
+
+  it('separates collected failure artifacts from generated files', async () => {
+    mockTask(taskWith({
+      status: 'failed',
+      result: { files: null, output: '' },
+    }))
+    const now = '2026-07-15T03:00:00Z'
+    const files: TaskFile[] = [
+      {
+        id: 'published-1',
+        task_id: 'task-1',
+        execution_id: 'execution-success',
+        state: 'published',
+        role: 'content',
+        file_name: 'content.md',
+        mime_type: 'text/markdown',
+        file_size: 128,
+        url: '/content.md',
+        created_at: now,
+      },
+      {
+        id: 'collected-1',
+        task_id: 'task-1',
+        execution_id: 'execution-failed',
+        state: 'collected',
+        role: 'other',
+        file_name: 'failure-state.json',
+        mime_type: 'application/json',
+        file_size: 96,
+        url: '/failure-state.json',
+        created_at: now,
+      },
+    ]
+    vi.mocked(api.tasks.files).mockResolvedValue(files)
+
+    render(<TaskDetailPage />)
+
+    const generatedHeading = await screen.findByText('生成文件 (1)')
+    const failedHeading = await screen.findByText('失败执行文件 (1)')
+    const generatedSection = generatedHeading.closest('[data-slot="card"]') as HTMLElement
+    const failedSection = failedHeading.closest('[data-slot="card"]') as HTMLElement
+    expect(within(generatedSection).getByText('content.md')).toBeInTheDocument()
+    expect(within(generatedSection).queryByText('failure-state.json')).not.toBeInTheDocument()
+    expect(within(failedSection).getByText('failure-state.json')).toBeInTheDocument()
+    expect(within(failedSection).queryByText('content.md')).not.toBeInTheDocument()
   })
 
   it('disables delivery controls for payment-required tasks', async () => {
