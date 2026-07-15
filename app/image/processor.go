@@ -243,7 +243,7 @@ type GenerateRawResult struct {
 
 // GenerateRaw 调用 AI provider 生成图片，返回原始 URL 或 data URL。
 // 不下载、不压缩、不写磁盘（本地临时文件会被读取并转为 data URL 后清理）。
-func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
+func (p *Processor) GenerateRaw(ctx context.Context, prompt string) (*GenerateRawResult, error) {
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
@@ -251,7 +251,6 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
 	}
 
-	ctx := context.Background()
 	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark}
 	finalPrompt := p.buildPrompt(prompt)
 	result, err := p.provider.Generate(ctx, finalPrompt, genOpts)
@@ -288,7 +287,7 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 
 // GenerateRawWithSize 调用 AI provider 生成指定尺寸的图片，返回原始 URL 或 data URL。
 // size 为空时使用默认尺寸。
-func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult, error) {
+func (p *Processor) GenerateRawWithSize(ctx context.Context, prompt, size string) (*GenerateRawResult, error) {
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
@@ -307,7 +306,6 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 		}
 	}
 
-	ctx := context.Background()
 	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark}
 	finalPrompt := p.buildPrompt(prompt)
 	result, err := activeProvider.Generate(ctx, finalPrompt, genOpts)
@@ -446,7 +444,7 @@ func (p *Processor) processRawResult(result *GenerateResult, outputPath string) 
 // generateOnly 生成图片到本地，不上传到微信。
 // outputPath 非空时复制到目标路径并清理所有临时文件；
 // outputPath 为空时返回临时文件路径（调用方负责清理）。
-func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnlyResult, error) {
+func (p *Processor) generateOnly(ctx context.Context, prompt, size, outputPath string) (*GenerateOnlyResult, error) {
 	// 验证配置
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
@@ -470,7 +468,6 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 	}
 
 	// 调用图片生成 API
-	ctx := context.Background()
 	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark}
 	result, err := activeProvider.Generate(ctx, p.buildPrompt(prompt), genOpts)
 	if err != nil {
@@ -488,22 +485,22 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 }
 
 // GenerateOnly AI 生成图片到本地文件，不上传到微信
-func (p *Processor) GenerateOnly(prompt, outputPath string) (*GenerateOnlyResult, error) {
+func (p *Processor) GenerateOnly(ctx context.Context, prompt, outputPath string) (*GenerateOnlyResult, error) {
 	p.log.Debug().Str("prompt", prompt).Msg("generating image via AI")
-	return p.generateOnly(prompt, "", outputPath)
+	return p.generateOnly(ctx, prompt, "", outputPath)
 }
 
 // GenerateOnlyWithSize AI 生成指定尺寸的图片到本地文件，不上传到微信
-func (p *Processor) GenerateOnlyWithSize(prompt, size, outputPath string) (*GenerateOnlyResult, error) {
+func (p *Processor) GenerateOnlyWithSize(ctx context.Context, prompt, size, outputPath string) (*GenerateOnlyResult, error) {
 	p.log.Debug().Str("prompt", prompt).Str("size", size).Msg("generating image via AI with size")
-	return p.generateOnly(prompt, size, outputPath)
+	return p.generateOnly(ctx, prompt, size, outputPath)
 }
 
 // GenerateAndUpload AI 生成图片并上传
-func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, error) {
+func (p *Processor) GenerateAndUpload(ctx context.Context, prompt string) (*GenerateAndUploadResult, error) {
 	p.log.Debug().Str("prompt", prompt).Msg("generating image via AI")
 
-	onlyResult, err := p.generateOnly(prompt, "", "")
+	onlyResult, err := p.generateOnly(ctx, prompt, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -524,10 +521,10 @@ func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, 
 }
 
 // GenerateAndUploadWithSize AI 生成指定尺寸的图片并上传
-func (p *Processor) GenerateAndUploadWithSize(prompt string, size string) (*GenerateAndUploadResult, error) {
+func (p *Processor) GenerateAndUploadWithSize(ctx context.Context, prompt string, size string) (*GenerateAndUploadResult, error) {
 	p.log.Debug().Str("prompt", prompt).Str("size", size).Msg("generating image via AI with size")
 
-	onlyResult, err := p.generateOnly(prompt, size, "")
+	onlyResult, err := p.generateOnly(ctx, prompt, size, "")
 	if err != nil {
 		return nil, err
 	}

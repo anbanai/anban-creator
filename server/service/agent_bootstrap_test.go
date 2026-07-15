@@ -412,6 +412,25 @@ func TestBootstrapDownloadSigningValidatesFinalizedPendingUpload(t *testing.T) {
 	if len(store.signedKeys) != 1 {
 		t.Fatalf("rejected upload reached signer: %v", store.signedKeys)
 	}
+	encodedKey := "uploads/pending/user-1/upload-encoded/reference.png"
+	encodedPublicURL := "https://bucket.oss-cn-x.aliyuncs.com/" + encodedKey
+	if err := repo.PendingUploads().CreatePendingUpload(context.Background(), &model.PendingUpload{
+		ID:        "upload-encoded",
+		UserID:    task.UserID,
+		Purpose:   DirectUploadPurposeTaskReference,
+		Key:       encodedKey,
+		PublicURL: encodedPublicURL,
+		Status:    model.PendingUploadStatusFinalized,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	encodedURL := "https://bucket.oss-cn-x.aliyuncs.com/uploads%2Fpending%2Fuser-1%2Fupload-encoded%2Freference.png?Expires=1&Signature=redacted"
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{
+		URL: encodedURL, AllowedPurposes: []string{DirectUploadPurposeTaskReference},
+	}, deadline); err != nil {
+		t.Fatalf("encoded finalized pending input rejected: %v", err)
+	}
 
 	attacks := []struct {
 		name   string

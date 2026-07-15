@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TaskDetailPage from './TaskDetailPage'
 import { render } from '@/test/test-utils'
@@ -8,11 +8,20 @@ import { api } from '@/lib/api'
 
 const mockNavigate = vi.fn()
 
-const mockReferenceUsageSummary = vi.hoisted(() => vi.fn(({ task }: { task: { title?: string } }) => {
+const mockReferenceUsageSummary = vi.hoisted(() => vi.fn(({ task }: {
+  task: { title?: string; input_attachments?: Array<{ file_name?: string }> }
+}) => {
   if (task.title === '触发摘要组件失败') {
     throw new Error('summary render failed')
   }
-  return null
+  return (
+    <div>
+      <p>未生成素材使用结论，仅展示任务输入。</p>
+      {task.input_attachments?.map((attachment) => (
+        <p key={attachment.file_name}>{attachment.file_name}</p>
+      ))}
+    </div>
+  )
 }))
 
 vi.mock('@/components/tasks/ReferenceUsageSummary', () => ({
@@ -82,6 +91,14 @@ function taskWith(overrides: Partial<Task>): Task {
   }
 }
 
+async function openTaskDetails(tab?: '概览' | '配置' | '素材' | '日志') {
+  fireEvent.click(await screen.findByRole('button', { name: /更多详情/ }))
+  expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
+  if (tab) {
+    fireEvent.click(screen.getByRole('tab', { name: tab }))
+  }
+}
+
 describe('TaskDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -108,7 +125,7 @@ describe('TaskDetailPage', () => {
       progress: 42,
       progress_log: '准备素材\nUsing tool: Read',
       latest_progress: { stage: 'writing', title: '正在写作正文', percent: 42 },
-      result: { files: null, output: '' },
+      result: null,
       completed_at: '',
     }))
 
@@ -120,6 +137,99 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('Using tool: Read')).not.toBeInTheDocument()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '任务结果' })).toBeInTheDocument()
+    expect(screen.getByText('结果生成后将在这里显示')).toBeInTheDocument()
+    expect(screen.queryByText('任务配置')).not.toBeInTheDocument()
+    expect(screen.queryByText('执行日志')).not.toBeInTheDocument()
+    expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
+  })
+
+  it('keeps the pending result destination when video production has only missing artifacts', async () => {
+    mockTask(taskWith({
+      type: 'videocreator',
+      status: 'pending',
+      progress: 0,
+      video_creator_config: {
+        scenario_key: 'live_selling',
+        production_mode: 'guided',
+      },
+      result: null,
+      completed_at: '',
+    }))
+    let resolveProduction!: (value: Awaited<ReturnType<typeof api.tasks.videoProduction>>) => void
+    vi.mocked(api.tasks.videoProduction).mockImplementation(() => new Promise((resolve) => {
+      resolveProduction = resolve
+    }))
+    const missingProduction: Awaited<ReturnType<typeof api.tasks.videoProduction>> = {
+      task_id: 'task-1',
+      scenario_key: 'live_selling',
+      production_mode: 'guided',
+      artifacts: {
+        'creative-brief.md': { status: 'missing', file_name: 'creative-brief.md' },
+        'quality-review.md': { status: 'missing', file_name: 'quality-review.md' },
+        'delivery-manifest.json': { status: 'missing', file_name: 'delivery-manifest.json' },
+      },
+      retake_actions: ['keep', 're_roll'],
+      next_actions: ['continue_editing'],
+    }
+
+    render(<TaskDetailPage />)
+
+    await waitFor(() => expect(api.tasks.videoProduction).toHaveBeenCalledWith('task-1'))
+    await act(async () => {
+      resolveProduction(missingProduction)
+    })
+    expect(screen.getByRole('heading', { name: '任务结果' })).toBeInTheDocument()
+    expect(screen.getByText('结果生成后将在这里显示')).toBeInTheDocument()
+    expect(screen.queryByText('制作状态')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Re-roll' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '继续剪辑' })).not.toBeInTheDocument()
+  })
+
+  it('opens configuration, materials, and raw Markdown logs from More details', async () => {
+    const writeText = vi.fn()
+    Object.assign(navigator, { clipboard: { writeText } })
+    mockTask(taskWith({
+      status: 'pending',
+      progress: 42,
+      progress_log: '## 阶段日志\n- 已完成选题',
+      latest_progress: { stage: 'writing', title: '正在写作正文', percent: 42 },
+      input_attachments: [{ type: 'image', file_name: 'brief-reference.png' }],
+      project_snapshot: {
+        project_name: '创建时项目快照',
+        platform: 'article',
+        visual_style: '明亮纪实摄影',
+        image_ratio: '3:2',
+        author: '安班编辑部',
+        writer: '真诚叙事',
+        theme: '简约留白',
+      },
+      result: null,
+      completed_at: '',
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('正在写作正文')).toBeInTheDocument()
+    expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '阶段日志' })).not.toBeInTheDocument()
+    expect(screen.queryByText('创建时项目快照')).not.toBeInTheDocument()
+
+    await openTaskDetails('素材')
+    expect(screen.getByText('未生成素材使用结论，仅展示任务输入。')).toBeInTheDocument()
+    expect(screen.getByText('brief-reference.png')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+    expect(screen.getByRole('heading', { name: '阶段日志' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '复制日志' }))
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('## 阶段日志\n- 已完成选题')
+    })
+
+    fireEvent.click(screen.getByRole('tab', { name: '配置' }))
+    expect(screen.getByText('创建时项目快照')).toBeInTheDocument()
+    expect(screen.getByText('明亮纪实摄影')).toBeInTheDocument()
+    expect(screen.getByText('3:2')).toBeInTheDocument()
   })
 
   it('hides the progress card after completion', async () => {
@@ -127,7 +237,7 @@ describe('TaskDetailPage', () => {
       status: 'completed',
       progress: 100,
       progress_log: '[100%] 任务完成',
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -135,6 +245,7 @@ describe('TaskDetailPage', () => {
     await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument())
     expect(screen.queryByText('进度')).not.toBeInTheDocument()
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
+    expect(screen.queryByText('结果生成后将在这里显示')).not.toBeInTheDocument()
   })
 
   it('shows review summary without terminal workflow stage grid', async () => {
@@ -156,7 +267,7 @@ describe('TaskDetailPage', () => {
           strengths: ['结构完整'],
         },
       },
-      result: { files: null, output: '' },
+      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([{
       id: 'file-1',
@@ -172,10 +283,10 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const review = await screen.findByText('发布前检查')
-    const parameters = await screen.findByText('任务配置')
     const files = await screen.findByText('生成文件 (1)')
-    expect(review.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const moreDetails = await screen.findByRole('button', { name: /更多详情/ })
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(files.compareDocumentPosition(moreDetails) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
     expect(screen.queryByText('03-draft.md')).not.toBeInTheDocument()
@@ -189,7 +300,7 @@ describe('TaskDetailPage', () => {
       status: 'completed',
       progress: 100,
       input_attachments: [{ type: 'image', file_name: 'front.png' }],
-      result: { files: null, output: '' },
+      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([
       {
@@ -217,18 +328,21 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByText('已完成')).toBeInTheDocument()
-    const summaryFallback = await screen.findByText('参考素材摘要暂时无法显示')
     const filesHeading = await screen.findByText('生成文件 (2)')
-    expect(summaryFallback).toBeInTheDocument()
     expect(filesHeading).toBeInTheDocument()
-    expect(summaryFallback.compareDocumentPosition(filesHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByText('参考素材摘要暂时无法显示')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeInTheDocument()
+
+    await openTaskDetails('素材')
+    expect(await screen.findByText('参考素材摘要暂时无法显示')).toBeInTheDocument()
+    expect(screen.getByText('已完成')).toBeInTheDocument()
+    expect(screen.getByText('生成文件 (2)')).toBeInTheDocument()
   })
 
   it('separates collected failure artifacts from generated files', async () => {
     mockTask(taskWith({
       status: 'failed',
-      result: { files: null, output: '' },
+      result: null,
     }))
     const now = '2026-07-15T03:00:00Z'
     const files: TaskFile[] = [
@@ -271,12 +385,40 @@ describe('TaskDetailPage', () => {
     expect(within(failedSection).queryByText('content.md')).not.toBeInTheDocument()
   })
 
+  it('places published Seednote analytics after generated deliverables', async () => {
+    mockTask(taskWith({
+      type: 'seednote',
+      status: 'completed',
+      published: true,
+      result: null,
+    }))
+    vi.mocked(api.tasks.files).mockResolvedValue([{
+      id: 'seednote-output',
+      task_id: 'task-1',
+      state: 'published',
+      role: 'content',
+      file_name: 'content.md',
+      mime_type: 'text/markdown',
+      file_size: 128,
+      url: '/content.md',
+      created_at: '2026-07-15T03:00:00Z',
+    }])
+
+    render(<TaskDetailPage />)
+
+    const generatedHeading = await screen.findByText('生成文件 (1)')
+    const analyticsHeading = await screen.findByText('种草笔记数据')
+    const moreDetails = screen.getByRole('button', { name: /更多详情/ })
+    expect(generatedHeading.compareDocumentPosition(analyticsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(analyticsHeading.compareDocumentPosition(moreDetails) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('disables delivery controls for payment-required tasks', async () => {
     mockTask(taskWith({
       status: 'completed',
       billing_status: 'payment_required',
       billing_shortfall_credits: 3200,
-      result: { files: null, output: '' },
+      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([
       {
@@ -307,7 +449,7 @@ describe('TaskDetailPage', () => {
       id: 'task-1',
       status: 'completed',
       progress: 100,
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -327,7 +469,7 @@ describe('TaskDetailPage', () => {
       id: 'task-1',
       status: 'completed',
       published: true,
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -344,7 +486,7 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -381,7 +523,7 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -416,7 +558,7 @@ describe('TaskDetailPage', () => {
       status: 'running',
       progress: 42,
       latest_progress: { stage: 'writing', title: '正在写作正文', percent: 42 },
-      result: { files: null, output: '' },
+      result: null,
       completed_at: '',
     }))
 
@@ -432,7 +574,7 @@ describe('TaskDetailPage', () => {
       status: 'pending',
       progress: 0,
       latest_progress: undefined,
-      result: { files: null, output: '' },
+      result: null,
       completed_at: '',
     }))
 
@@ -446,7 +588,7 @@ describe('TaskDetailPage', () => {
   it('keeps recovery actions in the header for cancelled tasks', async () => {
     mockTask(taskWith({
       status: 'cancelled',
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -463,7 +605,7 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       status: 'failed',
       error_message: '模型超时',
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -482,7 +624,7 @@ describe('TaskDetailPage', () => {
   it('does not invent an interruption reason or preserved workspace when failure details are absent', async () => {
     mockTask(taskWith({
       status: 'failed',
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -537,7 +679,7 @@ describe('TaskDetailPage', () => {
         },
       ],
       total_cost_usd: 1.23,
-      result: { files: null, output: '' },
+      result: null,
       project_snapshot: {
         project_name: '快照项目',
         platform: 'article',
@@ -552,28 +694,33 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('任务配置')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /更多详情/ })).toBeInTheDocument()
     expect(screen.queryByText('项目快照')).not.toBeInTheDocument()
+    expect(screen.queryByText('任务配置')).not.toBeInTheDocument()
+
+    await openTaskDetails('配置')
+    expect(screen.getByText('项目快照')).toBeInTheDocument()
     expect(screen.getByText('快照项目')).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: '参考图' })).not.toBeInTheDocument()
     expect(screen.queryByText('参考图')).not.toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
-    const parameterDetails = screen.getByText('任务配置').closest('details') as HTMLDetailsElement
-    expect(parameterDetails).toBeTruthy()
-    expect(parameterDetails.open).toBe(false)
-    fireEvent.click(within(parameterDetails).getByText('任务配置'))
-    expect(parameterDetails.open).toBe(true)
-    expect(within(parameterDetails).getByText('视觉风格')).toBeInTheDocument()
-    expect(within(parameterDetails).getByText('图片比例')).toBeInTheDocument()
-    expect(within(parameterDetails).getByText('图片模型')).toBeInTheDocument()
+    expect(screen.getByText('视觉风格')).toBeInTheDocument()
+    expect(screen.getByText('图片比例')).toBeInTheDocument()
+    expect(screen.getByText('图片模型')).toBeInTheDocument()
     expect(screen.getByText('安般')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '概览' }))
     expect(screen.getByText('积分消耗')).toBeInTheDocument()
     expect(screen.queryByText('操作消耗')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '明细' }))
-    const creditDialog = await screen.findByRole('dialog')
+    fireEvent.click(screen.getByRole('button', { name: '查看明细' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: '任务详情' })).not.toBeInTheDocument()
+    })
+    const creditDialogTitle = await screen.findByRole('heading', { name: '积分明细' })
+    const creditDialog = creditDialogTitle.closest('[data-slot="dialog-content"]') as HTMLElement
     expect(within(creditDialog).getByText('积分明细')).toBeInTheDocument()
     expect(within(creditDialog).getAllByText('积分消耗').length).toBeGreaterThan(0)
     expect(within(creditDialog).getByText('操作消耗')).toBeInTheDocument()
@@ -586,6 +733,10 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('AI 生图扣除积分80')).toBeInTheDocument()
     expect(screen.queryByText('执行成本')).not.toBeInTheDocument()
     expect(screen.queryByText('$1.23')).not.toBeInTheDocument()
+
+    fireEvent.click(within(creditDialog).getByRole('button', { name: 'Close' }))
+    expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('shows generated video files in the files list and opens the video result in a dialog', async () => {
@@ -614,7 +765,7 @@ describe('TaskDetailPage', () => {
         estimated_credits: 7440,
         references: [{ type: 'video_url', url: 'https://cdn.example.com/ref.mp4', reference_role: 'rhythm', input_duration_seconds: 60 }],
       },
-      result: { files: null, output: '' },
+      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([
       {
@@ -641,15 +792,17 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('用户输入')).toBeInTheDocument()
-    expect(screen.getByText('Agent 解析结果')).toBeInTheDocument()
+    await openTaskDetails('配置')
+    expect(screen.getByRole('heading', { name: '用户输入' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Agent 解析结果' })).toBeInTheDocument()
     expect(screen.getAllByText('做一条办公室个人 IP 种草视频').length).toBeGreaterThan(0)
     expect(screen.getByText('个人 IP')).toBeInTheDocument()
     expect(screen.getByText('种草')).toBeInTheDocument()
     expect(screen.getByText('30 岁效率博主，黑色衬衫，语速快但亲和')).toBeInTheDocument()
     expect(screen.getByText('想提升工作效率的职场新人')).toBeInTheDocument()
     expect(screen.getByText('用一个可复制的方法把会议记录变成行动清单')).toBeInTheDocument()
-    expect(screen.getByText(/rhythm · https:\/\/cdn\.example\.com\/ref\.mp4/)).toBeInTheDocument()
+    expect(screen.getByText(/节奏参考 · https:\/\/cdn\.example\.com\/ref\.mp4/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(await screen.findByText('生成文件 (2)')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '视频结果' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /预览 final\.mp4/ }))
@@ -672,14 +825,15 @@ describe('TaskDetailPage', () => {
         hard_constraints: { ratio: '9:16' },
       },
       video_creator_config: {},
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('用户输入')).toBeInTheDocument()
-    expect(screen.getByText(/不要卡通化/)).toBeInTheDocument()
-    expect(screen.getByText('9:16')).toBeInTheDocument()
+    await openTaskDetails('配置')
+    expect(screen.getByRole('heading', { name: '用户输入' })).toBeInTheDocument()
+    expect(screen.getAllByText(/不要卡通化/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('9:16').length).toBeGreaterThan(0)
     expect(screen.queryByText('Agent 解析结果')).not.toBeInTheDocument()
     expect(screen.queryByText('视频模型')).not.toBeInTheDocument()
     expect(screen.queryByText('人物 / 主体')).not.toBeInTheDocument()
@@ -703,7 +857,7 @@ describe('TaskDetailPage', () => {
         ratio: '9:16',
         duration: 16,
       },
-      result: { files: null, output: '' },
+      result: null,
     }))
     vi.mocked(api.tasks.videoProduction).mockResolvedValue({
       task_id: 'task-1',
@@ -753,7 +907,7 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
-      result: { files: null, output: '' },
+      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -777,13 +931,14 @@ describe('TaskDetailPage', () => {
       status: 'running',
       progress: 10,
       progress_log: '## 阶段日志\n- 已完成选题\n```txt\nraw block\n```',
-      result: { files: null, output: '' },
+      result: null,
       completed_at: '',
     }))
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('heading', { name: '阶段日志' })).toBeInTheDocument()
+    await openTaskDetails('日志')
+    expect(screen.getByRole('heading', { name: '阶段日志' })).toBeInTheDocument()
     expect(screen.getByText('已完成选题')).toBeInTheDocument()
 
     screen.getByRole('button', { name: /复制/ }).click()

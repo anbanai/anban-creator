@@ -14,10 +14,12 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 interface ReferenceUsageSummaryProps {
   task: Task
   files: TaskFile[]
+  variant?: 'card' | 'compact'
 }
 
 const inputStatusMeta: Record<
@@ -111,7 +113,17 @@ export function isReferenceUsageSummaryData(value: unknown): value is ReferenceU
   })
 }
 
-function SummaryLoading() {
+function SummaryLoading({ compact }: { compact: boolean }) {
+  if (compact) {
+    return (
+      <div role="status" aria-live="polite" aria-atomic="true" className="flex flex-col gap-3">
+        <span className="sr-only">正在读取参考素材使用摘要</span>
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-24 w-full" />
+      </div>
+    )
+  }
+
   return (
     <Card aria-label="正在读取参考素材使用摘要">
       <CardHeader>
@@ -169,9 +181,11 @@ function SnapshotAttachment({ attachment, index }: { attachment: InputAttachment
 function SnapshotFallback({
   task,
   parseFailed,
+  compact,
 }: {
   task: Task
   parseFailed: boolean
+  compact: boolean
 }) {
   const originLabel = task.plan_id ? '计划快照' : '首次输入'
   const warning = parseFailed
@@ -182,6 +196,31 @@ function SnapshotFallback({
       ? '未找到参考使用摘要，以下仅展示计划快照。'
       : '未找到参考使用摘要，以下仅展示首次输入快照。'
   const attachments = task.input_attachments ?? []
+
+  if (compact) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-xs leading-5 text-muted-foreground">
+          {parseFailed
+            ? '素材使用结论无法解析，仅展示任务输入。'
+            : '未生成素材使用结论，仅展示任务输入。'}
+        </p>
+        {attachments.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {attachments.map((attachment, index) => (
+              <SnapshotAttachment
+                key={`${attachment.upload_id || attachment.url || attachment.file_name || index}-${index}`}
+                attachment={attachment}
+                index={index}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="py-3 text-center text-xs text-muted-foreground">没有参考素材。</p>
+        )}
+      </div>
+    )
+  }
 
   return (
     <Card>
@@ -227,31 +266,17 @@ function SnapshotFallback({
   )
 }
 
-function ValidSummary({ summary }: { summary: ReferenceUsageSummaryData }) {
+function SummaryContent({
+  summary,
+  compact,
+}: {
+  summary: ReferenceUsageSummaryData
+  compact: boolean
+}) {
   return (
-    <Card>
-      <CardHeader className="border-b border-border/70">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Images className="size-4 text-primary" />
-              参考素材使用
-            </CardTitle>
-            <CardDescription className="mt-1">Agent 自动选择的输入依据、逐图用途与生成核验结果。</CardDescription>
-          </div>
-          <Badge
-            variant="secondary"
-            className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-          >
-            <ShieldCheck data-icon="inline-start" />
-            已生成决策摘要
-          </Badge>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-4">
+    <>
         {(summary.model_fallback_reason || summary.warnings?.length) && (
-          <div className="grid gap-2 lg:grid-cols-2">
+          <div className={cn('grid gap-2', !compact && 'lg:grid-cols-2')}>
             {summary.model_fallback_reason && (
               <Alert className="border-sky-500/25 bg-sky-500/5">
                 <Info />
@@ -273,7 +298,7 @@ function ValidSummary({ summary }: { summary: ReferenceUsageSummaryData }) {
           </div>
         )}
 
-        <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        <div className={cn('grid min-w-0 gap-4', !compact && 'xl:grid-cols-2')}>
           <section aria-labelledby="reference-input-decisions" className="min-w-0 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <h3 id="reference-input-decisions" className="text-sm font-semibold text-foreground">
@@ -398,12 +423,59 @@ function ValidSummary({ summary }: { summary: ReferenceUsageSummaryData }) {
             )}
           </section>
         </div>
+    </>
+  )
+}
+
+function ValidSummary({
+  summary,
+  compact,
+}: {
+  summary: ReferenceUsageSummaryData
+  compact: boolean
+}) {
+  if (compact) {
+    return (
+      <div className="flex flex-col gap-4">
+        <SummaryContent summary={summary} compact />
+      </div>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader className="border-b border-border/70">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Images className="size-4 text-primary" />
+              参考素材使用
+            </CardTitle>
+            <CardDescription className="mt-1">Agent 自动选择的输入依据、逐图用途与生成核验结果。</CardDescription>
+          </div>
+          <Badge
+            variant="secondary"
+            className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          >
+            <ShieldCheck data-icon="inline-start" />
+            已生成决策摘要
+          </Badge>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        <SummaryContent summary={summary} compact={false} />
       </CardContent>
     </Card>
   )
 }
 
-export function ReferenceUsageSummary({ task, files }: ReferenceUsageSummaryProps) {
+export function ReferenceUsageSummary({
+  task,
+  files,
+  variant = 'card',
+}: ReferenceUsageSummaryProps) {
+  const compact = variant === 'compact'
   const summaryFile = useMemo(
     () => files.find((file) => file.file_name === 'reference-usage-summary.json'),
     [files],
@@ -450,14 +522,19 @@ export function ReferenceUsageSummary({ task, files }: ReferenceUsageSummaryProp
   }, [task.id, summaryFile?.id])
 
   if (!summaryFile) {
-    if (!(task.input_attachments?.length)) return null
-    return <SnapshotFallback task={task} parseFailed={false} />
+    if (!(task.input_attachments?.length)) {
+      if (compact) {
+        return <p className="py-3 text-center text-xs text-muted-foreground">没有参考素材。</p>
+      }
+      return null
+    }
+    return <SnapshotFallback task={task} parseFailed={false} compact={compact} />
   }
 
   const isCurrent = loaded?.taskId === task.id && loaded.fileId === summaryFile.id
-  if (!isCurrent) return <SummaryLoading />
-  if (loaded.summary) return <ValidSummary summary={loaded.summary} />
-  return <SnapshotFallback task={task} parseFailed={loaded.parseFailed} />
+  if (!isCurrent) return <SummaryLoading compact={compact} />
+  if (loaded.summary) return <ValidSummary summary={loaded.summary} compact={compact} />
+  return <SnapshotFallback task={task} parseFailed={loaded.parseFailed} compact={compact} />
 }
 
 export default ReferenceUsageSummary

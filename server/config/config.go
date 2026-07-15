@@ -89,6 +89,7 @@ type ImageModelPreset struct {
 	Model         string                       `yaml:"model"`          // concrete model id
 	Endpoint      string                       `yaml:"endpoint"`
 	APIKey        string                       `yaml:"api_key"`
+	Timeout       time.Duration                `yaml:"timeout"`
 	MinTier       string                       `yaml:"min_tier"` // free / pro / enterprise
 	QualityRank   int                          `yaml:"quality_rank"`
 	Capabilities  DesignerProviderCapabilities `yaml:"capabilities"`
@@ -195,7 +196,12 @@ type WeChatConfig struct {
 
 // MCPConfig holds Model Context Protocol endpoint configuration.
 type MCPConfig struct {
-	APIKey string `yaml:"api_key"` // API key for MCP endpoint authentication
+	APIKey       string                `yaml:"api_key"` // API key for MCP endpoint authentication
+	ToolTimeouts MCPToolTimeoutsConfig `yaml:"tool_timeouts"`
+}
+
+type MCPToolTimeoutsConfig struct {
+	GenerateImage time.Duration `yaml:"generate_image"`
 }
 
 const DefaultVideoAPIBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
@@ -420,6 +426,7 @@ type VideoUnderstandingRouteConfig struct {
 type ImageGenerationRouteConfig struct {
 	Provider       string                       `yaml:"provider"`
 	Model          string                       `yaml:"model"`
+	Timeout        time.Duration                `yaml:"timeout"`
 	Alias          string                       `yaml:"alias"`
 	Enabled        bool                         `yaml:"enabled"`
 	QualityRank    int                          `yaml:"quality_rank" json:"quality_rank"`
@@ -1494,6 +1501,21 @@ func (c *Config) applyDefaults() {
 	if c.VideoAPI.CreditMultiplier == 0 {
 		c.VideoAPI.CreditMultiplier = 1000
 	}
+	if c.MCP.ToolTimeouts.GenerateImage == 0 {
+		c.MCP.ToolTimeouts.GenerateImage = 10 * time.Minute
+	}
+	if c.ModelRoutes.ImageGeneration.Cover.Timeout == 0 {
+		c.ModelRoutes.ImageGeneration.Cover.Timeout = 5 * time.Minute
+	}
+	if c.ModelRoutes.ImageGeneration.Content.Timeout == 0 {
+		c.ModelRoutes.ImageGeneration.Content.Timeout = 5 * time.Minute
+	}
+	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+		if route.Timeout == 0 {
+			route.Timeout = 5 * time.Minute
+			c.ModelRoutes.ImageGeneration.Designer[key] = route
+		}
+	}
 	c.Montage.ApplyDefaults()
 	if c.ModelPrices.CurrencyRates == nil {
 		c.ModelPrices.CurrencyRates = map[string]CurrencyRate{}
@@ -1831,6 +1853,7 @@ func (c *Config) resolveImagePresetRoutes() error {
 		preset.Model = route.Model
 		preset.Endpoint = provider.BaseURL
 		preset.APIKey = provider.APIKey
+		preset.Timeout = route.Timeout
 		preset.QualityRank = route.QualityRank
 		preset.Capabilities = route.Capabilities
 	}
@@ -1918,6 +1941,7 @@ func (c *Config) imageAPIFromRoute(routeName string, route ImageGenerationRouteC
 		BaseURL:        p.BaseURL,
 		Provider:       providerKind(route.Provider),
 		Model:          route.Model,
+		TimeoutSec:     int(route.Timeout / time.Second),
 		ResponseFormat: route.ResponseFormat,
 	}
 	if price, ok := c.ModelPrices.ImageGeneration[route.Provider+"/"+route.Model]; ok {
@@ -2147,6 +2171,35 @@ func (c *Config) Validate() error {
 		}
 		if err := validateDesignerProviderCapabilities("model_routes.image_generation.designer."+key+".capabilities", route.Capabilities); err != nil {
 			errs = append(errs, err.Error())
+		}
+	}
+
+	imageRoutes := []struct {
+		name  string
+		route ImageGenerationRouteConfig
+	}{
+		{name: "model_routes.image_generation.cover", route: c.ModelRoutes.ImageGeneration.Cover},
+		{name: "model_routes.image_generation.content", route: c.ModelRoutes.ImageGeneration.Content},
+	}
+	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+		imageRoutes = append(imageRoutes, struct {
+			name  string
+			route ImageGenerationRouteConfig
+		}{name: "model_routes.image_generation.designer." + key, route: route})
+	}
+	for _, candidate := range imageRoutes {
+		if strings.TrimSpace(candidate.route.Provider) == "" && strings.TrimSpace(candidate.route.Model) == "" {
+			continue
+		}
+		if candidate.route.Timeout <= 0 {
+			errs = append(errs, candidate.name+".timeout must be positive")
+			continue
+		}
+		minimumOperationTimeout := candidate.route.Timeout + c.ModelRoutes.ImageUnderstanding.Timeout
+		if c.MCP.ToolTimeouts.GenerateImage <= minimumOperationTimeout {
+			errs = append(errs, fmt.Sprintf(
+				"mcp.tool_timeouts.generate_image (%s) must be greater than %s.timeout (%s) plus model_routes.image_understanding.timeout (%s)",
+				c.MCP.ToolTimeouts.GenerateImage, candidate.name, candidate.route.Timeout, c.ModelRoutes.ImageUnderstanding.Timeout))
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -696,6 +697,9 @@ func presetToImageAPIConfig(p *config.ImageModelPreset, base *config.Config) *co
 		dst.Model = p.Model
 		dst.BaseURL = p.Endpoint
 		dst.Key = p.APIKey
+		if p.Timeout > 0 {
+			dst.TimeoutSec = int(p.Timeout / time.Second)
+		}
 	}
 
 	return &config.ImageAPIConfig{

@@ -431,7 +431,7 @@ func isTransientImageError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	var netErr net.Error
@@ -452,9 +452,13 @@ func isTransientImageError(err error) bool {
 // cancelled task returns promptly. On success the result is returned as-is.
 func (s *ImageService) generateWithRetry(
 	ctx context.Context,
-	gen func() (*image.GenerateRawResult, error),
+	attemptTimeout time.Duration,
+	gen func(context.Context) (*image.GenerateRawResult, error),
 	imageType string,
 ) (*image.GenerateRawResult, error) {
+	if attemptTimeout <= 0 {
+		attemptTimeout = 5 * time.Minute
+	}
 	maxAttempts := defaultImageRetryMaxAttempts
 	backoffs := defaultImageRetryBackoffs
 	if cfg := s.imageRetry; cfg != nil {
@@ -484,6 +488,9 @@ func (s *ImageService) generateWithRetry(
 			// an under-sized backoffs slice doesn't index out of range. A
 			// client/task cancellation short-circuits the wait immediately.
 			wait := backoffs[min(attempt, len(backoffs)-1)]
+			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= wait+attemptTimeout {
+				return nil, fmt.Errorf("generate image: insufficient operation budget for retry: %w", err)
+			}
 			if wait > 0 {
 				select {
 				case <-time.After(wait):
@@ -493,9 +500,18 @@ func (s *ImageService) generateWithRetry(
 			}
 		}
 
-		result, err = gen()
+		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+		result, err = gen(attemptCtx)
+		attemptErr := attemptCtx.Err()
+		cancel()
 		if err == nil {
 			return result, nil
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if attemptErr != nil {
+			err = fmt.Errorf("provider attempt %d timed out after %s: %w", attempt+1, attemptTimeout, attemptErr)
 		}
 		if !isTransientImageError(err) {
 			return nil, fmt.Errorf("generate image: %w", err)
@@ -508,6 +524,21 @@ func (s *ImageService) generateWithRetry(
 			Msg("image gen transient error, retrying same provider")
 	}
 	return nil, fmt.Errorf("generate image (failed after %d attempts): %w", maxAttempts, err)
+}
+
+func providerAttemptTimeout(resolved *ResolvedImageModel, imageType string) time.Duration {
+	const fallback = 5 * time.Minute
+	if resolved == nil || resolved.Config == nil {
+		return fallback
+	}
+	apiCfg := resolved.Config.Content
+	if imageType == "cover" {
+		apiCfg = resolved.Config.Cover
+	}
+	if apiCfg == nil || apiCfg.TimeoutSec <= 0 {
+		return fallback
+	}
+	return time.Duration(apiCfg.TimeoutSec) * time.Second
 }
 
 // GenerateImage generates a single image using the project's image provider.
@@ -540,11 +571,11 @@ func (s *ImageService) GenerateImage(
 	// Generate with same-provider backoff retry: the closure always calls the ONE
 	// processor built above (same provider/model/ref/watermark), so a retry never
 	// changes the visual result — it only rides out transient 5xx/429/network blips.
-	rawResult, err := s.generateWithRetry(ctx, func() (*image.GenerateRawResult, error) {
+	rawResult, err := s.generateWithRetry(ctx, providerAttemptTimeout(resolved, imageType), func(attemptCtx context.Context) (*image.GenerateRawResult, error) {
 		if size != "" {
-			return processor.GenerateRawWithSize(prompt, size)
+			return processor.GenerateRawWithSize(attemptCtx, prompt, size)
 		}
-		return processor.GenerateRaw(prompt)
+		return processor.GenerateRaw(attemptCtx, prompt)
 	}, imageType)
 	if err != nil {
 		return nil, err

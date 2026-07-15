@@ -504,6 +504,9 @@ func main() {
 		}
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
+		if store != nil {
+			taskHandler.SetStore(store)
+		}
 		seednoteAnalyticsHandler = buildSeednoteAnalyticsHandler(repo, log)
 		if ilinkBindingSvc != nil {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
@@ -679,6 +682,7 @@ func main() {
 			ImageModelResolver:    modelConfigSvc,
 			ImageGenerator:        imageSvc,
 			ImageGenerationBiller: mcp.NewImageGenerationBiller(),
+			GenerateImageTimeout:  cfg.MCP.ToolTimeouts.GenerateImage,
 			VideoSvc:              videoSvc,
 			AudioASRSvc:           audioASRSvc,
 			WritingSvc:            writingSvc,

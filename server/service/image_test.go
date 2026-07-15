@@ -450,7 +450,7 @@ func Test_isTransientImageError(t *testing.T) {
 		{"unauthorized", &appimage.GenerateError{Code: "unauthorized"}, false},
 		{"payment_required", &appimage.GenerateError{Code: "payment_required"}, false},
 		{"context_deadline", context.DeadlineExceeded, true},
-		{"context_canceled", context.Canceled, true},
+		{"context_canceled", context.Canceled, false},
 		{"net_timeout", timeoutNetErr{}, true},
 		{"plain_error", fmt.Errorf("something else"), false},
 	}
@@ -460,6 +460,19 @@ func Test_isTransientImageError(t *testing.T) {
 				t.Fatalf("isTransientImageError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestProviderAttemptTimeoutUsesResolvedImageType(t *testing.T) {
+	resolved := &ResolvedImageModel{Config: &srvconfig.ImageAPIConfig{
+		Cover:   &appconfig.ImageAPI{TimeoutSec: 120},
+		Content: &appconfig.ImageAPI{TimeoutSec: 180},
+	}}
+	if got := providerAttemptTimeout(resolved, "cover"); got != 2*time.Minute {
+		t.Fatalf("cover attempt timeout = %s, want 2m", got)
+	}
+	if got := providerAttemptTimeout(resolved, "content"); got != 3*time.Minute {
+		t.Fatalf("content attempt timeout = %s, want 3m", got)
 	}
 }
 
@@ -476,7 +489,7 @@ func TestGenerateWithRetry_TransientRetrySucceeds(t *testing.T) {
 		},
 	}
 	calls := 0
-	gen := func() (*appimage.GenerateRawResult, error) {
+	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
 		calls++
 		if calls == 1 {
 			return nil, &appimage.GenerateError{Code: "server_error", Message: "503"}
@@ -484,7 +497,7 @@ func TestGenerateWithRetry_TransientRetrySucceeds(t *testing.T) {
 		return &appimage.GenerateRawResult{URL: "x", Provider: "openai", Model: "gpt-image-2"}, nil
 	}
 
-	got, err := svc.generateWithRetry(context.Background(), gen, "cover")
+	got, err := svc.generateWithRetry(context.Background(), 5*time.Minute, gen, "cover")
 	if err != nil {
 		t.Fatalf("generateWithRetry error = %v, want nil", err)
 	}
@@ -510,12 +523,12 @@ func TestGenerateWithRetry_ExhaustsAttemptsOnPersistentTransient(t *testing.T) {
 	}
 	calls := 0
 	last := &appimage.GenerateError{Code: "server_error", Message: "503"}
-	gen := func() (*appimage.GenerateRawResult, error) {
+	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
 		calls++
 		return nil, last
 	}
 
-	_, err := svc.generateWithRetry(context.Background(), gen, "cover")
+	_, err := svc.generateWithRetry(context.Background(), 5*time.Minute, gen, "cover")
 	if err == nil {
 		t.Fatal("generateWithRetry error = nil, want error")
 	}
@@ -544,12 +557,12 @@ func TestGenerateWithRetry_NonRetryableFailFast(t *testing.T) {
 	}
 	calls := 0
 	refused := &appimage.GenerateError{Code: "safety_blocked", Message: "violation"}
-	gen := func() (*appimage.GenerateRawResult, error) {
+	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
 		calls++
 		return nil, refused
 	}
 
-	_, err := svc.generateWithRetry(context.Background(), gen, "cover")
+	_, err := svc.generateWithRetry(context.Background(), 5*time.Minute, gen, "cover")
 	if err == nil {
 		t.Fatal("generateWithRetry error = nil, want error")
 	}
@@ -577,7 +590,7 @@ func TestGenerateWithRetry_ContextCancelAbortsBackoff(t *testing.T) {
 		},
 	}
 	calls := 0
-	gen := func() (*appimage.GenerateRawResult, error) {
+	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
 		calls++
 		return nil, &appimage.GenerateError{Code: "server_error", Message: "503"}
 	}
@@ -586,7 +599,7 @@ func TestGenerateWithRetry_ContextCancelAbortsBackoff(t *testing.T) {
 	time.AfterFunc(5*time.Millisecond, cancel)
 
 	start := time.Now()
-	_, err := svc.generateWithRetry(ctx, gen, "cover")
+	_, err := svc.generateWithRetry(ctx, 5*time.Minute, gen, "cover")
 	elapsed := time.Since(start)
 
 	if !errors.Is(err, context.Canceled) {
@@ -610,14 +623,14 @@ func TestGenerateWithRetry_PreCancelledContextNoAttempt(t *testing.T) {
 		imageRetry: &imageRetryConfig{MaxAttempts: 3, Backoffs: []time.Duration{0, 0, 0}},
 	}
 	calls := 0
-	gen := func() (*appimage.GenerateRawResult, error) {
+	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
 		calls++
 		return &appimage.GenerateRawResult{}, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := svc.generateWithRetry(ctx, gen, "cover")
+	_, err := svc.generateWithRetry(ctx, 5*time.Minute, gen, "cover")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
@@ -642,14 +655,14 @@ func TestGenerateWithRetry_DefaultsWhenRetryConfigNil(t *testing.T) {
 	logger := zerolog.Nop()
 	svc := &ImageService{logger: &logger} // imageRetry nil → defaults
 	calls := 0
-	gen := func() (*appimage.GenerateRawResult, error) {
+	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
 		calls++
 		if calls == 1 {
 			return nil, &appimage.GenerateError{Code: "rate_limit"}
 		}
 		return &appimage.GenerateRawResult{Provider: "volcengine"}, nil
 	}
-	got, err := svc.generateWithRetry(context.Background(), gen, "content")
+	got, err := svc.generateWithRetry(context.Background(), 5*time.Minute, gen, "content")
 	if err != nil {
 		t.Fatalf("generateWithRetry error = %v, want nil", err)
 	}
@@ -658,5 +671,42 @@ func TestGenerateWithRetry_DefaultsWhenRetryConfigNil(t *testing.T) {
 	}
 	if got.Provider != "volcengine" {
 		t.Fatalf("result.Provider = %q, want volcengine", got.Provider)
+	}
+}
+
+func TestGenerateWithRetryBoundsProviderAttempt(t *testing.T) {
+	logger := zerolog.Nop()
+	svc := &ImageService{logger: &logger, imageRetry: &imageRetryConfig{
+		MaxAttempts: 1,
+		Backoffs:    []time.Duration{0},
+	}}
+	started := time.Now()
+	_, err := svc.generateWithRetry(context.Background(), 20*time.Millisecond, func(ctx context.Context) (*appimage.GenerateRawResult, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}, "cover")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+		t.Fatalf("provider attempt returned after %s, want bounded near 20ms", elapsed)
+	}
+}
+
+func TestGenerateWithRetryDoesNotStartAttemptWithoutBudget(t *testing.T) {
+	logger := zerolog.Nop()
+	svc := &ImageService{logger: &logger, imageRetry: &imageRetryConfig{
+		MaxAttempts: 3,
+		Backoffs:    []time.Duration{0, 10 * time.Millisecond},
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	calls := 0
+	_, _ = svc.generateWithRetry(ctx, 20*time.Millisecond, func(context.Context) (*appimage.GenerateRawResult, error) {
+		calls++
+		return nil, &appimage.GenerateError{Code: "network_error", Message: "temporary"}
+	}, "cover")
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
 	}
 }

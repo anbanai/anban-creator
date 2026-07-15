@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -347,6 +348,54 @@ func TestFinalizePendingUploadURLsRejectsMismatchedPendingURL(t *testing.T) {
 	}
 	if len(repo.finalized) != 0 {
 		t.Fatalf("finalized = %v, want no finalized uploads", repo.finalized)
+	}
+}
+
+func TestFinalizePendingUploadURLsAcceptsEncodedOSSPath(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID:        "upload-1",
+		UserID:    "user-1",
+		Purpose:   DirectUploadPurposeTaskReference,
+		Key:       "uploads/pending/user-1/upload-1/ref.png",
+		PublicURL: "https://cdn.example.com/uploads/pending/user-1/upload-1/ref.png",
+		Status:    model.PendingUploadStatusPending,
+		ExpiresAt: now.Add(time.Minute),
+	}
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
+	raw := "https://cdn.example.com/uploads%2Fpending%2Fuser-1%2Fupload-1%2Fref.png?Expires=1&Signature=redacted"
+
+	if err := FinalizePendingUploadURLs(context.Background(), repo, upload.UserID, upload.Purpose, []string{raw}, now); err != nil {
+		t.Fatalf("FinalizePendingUploadURLs() error = %v", err)
+	}
+	if len(repo.finalized) != 1 || repo.finalized[0] != "upload-1" {
+		t.Fatalf("finalized = %v, want [upload-1]", repo.finalized)
+	}
+}
+
+func TestFinalizePendingUploadURLsRejectsMalformedPendingKey(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	raw := "https://cdn.example.com/uploads%2Fpending%2Fuser-1"
+	err := FinalizePendingUploadURLs(context.Background(), &fakePendingUploadRepo{}, "user-1", DirectUploadPurposeTaskReference, []string{raw}, now)
+	if !errors.Is(err, ErrPendingUploadInvalidURL) {
+		t.Fatalf("error = %v, want ErrPendingUploadInvalidURL", err)
+	}
+}
+
+func TestFinalizePendingUploadURLsIgnoresExternalPendingLikePaths(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	repo := &fakePendingUploadRepo{}
+	for _, raw := range []string{
+		"https://external.example.com/uploads%2Fpending%2Fuser-1",
+		"https://external.example.com/uploads/pending/user-1/external-id/ref.png",
+	} {
+		err := FinalizePendingUploadURLs(
+			context.Background(), repo, "user-1", DirectUploadPurposeTaskReference,
+			[]string{raw}, now, func(string) bool { return false },
+		)
+		if err != nil {
+			t.Fatalf("FinalizePendingUploadURLs(%q) error = %v, want external URL ignored", raw, err)
+		}
 	}
 }
 

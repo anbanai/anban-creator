@@ -22,6 +22,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (
@@ -40,6 +41,7 @@ type TaskHandler struct {
 	taskLogDir   string // task log directory (for GetLog)
 	imagePresets []config.ImageModelPreset
 	repo         repository.Repository
+	store        storage.Provider
 }
 
 // NewTaskHandler creates a new TaskHandler.
@@ -68,6 +70,10 @@ func (h *TaskHandler) SetImagePresets(presets []config.ImageModelPreset) {
 // tier for image-model validation.
 func (h *TaskHandler) SetRepository(repo repository.Repository) {
 	h.repo = repo
+}
+
+func (h *TaskHandler) SetStore(store storage.Provider) {
+	h.store = store
 }
 
 // Request types.
@@ -252,17 +258,17 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		}
 	}
 	if h.repo != nil {
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL}); err != nil {
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL}, h.store); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos); err != nil {
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos, h.store); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)); err != nil {
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput), h.store); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput)); err != nil {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput), h.store); err != nil {
 				return Error(c, fiber.StatusBadRequest, err.Error())
 			}
 		}

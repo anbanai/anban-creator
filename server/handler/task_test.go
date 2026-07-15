@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -825,6 +826,93 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	}
 	if upload.Status != model.PendingUploadStatusPending {
 		t.Fatalf("upload status = %q, want pending", upload.Status)
+	}
+}
+
+func TestCreateTaskRejectsMalformedPendingReferenceWithoutCreatingTask(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "badpending",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformSeednote,
+		Name: "Seednote", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+	body := fmt.Sprintf(`{
+		"project_id": %q,
+		"prompt": "test",
+		"reference_image_url": %q
+	}`, projectID, "https://cdn.example.com/uploads%2Fpending%2F"+userID)
+	resp := postJSON(t, app, "/tasks", body)
+	defer resp.Body.Close()
+	responseBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusBadRequest || !bytes.Contains(responseBody, []byte("pending upload URL is invalid")) {
+		t.Fatalf("status/body = %d/%s", resp.StatusCode, responseBody)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 0 {
+		t.Fatalf("tasks/error = %d/%v, want 0/nil", len(tasks), err)
+	}
+}
+
+func TestCreateTaskAllowsExternalPendingLikeReferencePath(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "externalpending",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformSeednote,
+		Name: "Seednote", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(&fakeStorageProvider{})
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+	body := fmt.Sprintf(`{
+		"project_id": %q,
+		"prompt": "test",
+		"reference_image_url": %q
+	}`, projectID, "https://external.example.com/uploads/pending/user-1/external-id/ref.png")
+	resp := postJSON(t, app, "/tasks", body)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 200", resp.StatusCode, responseBody)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("tasks/error = %d/%v, want 1/nil", len(tasks), err)
 	}
 }
 
