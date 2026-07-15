@@ -1534,6 +1534,7 @@ func TestPrepareVideoGenerationInputsMaterializesVerifiedKeyFirstVideo(t *testin
 			key := "uploads/pending/user-1/video-upload/source.mp4"
 			store := &fakeVideoReferenceStorage{
 				ownedPrefix: "https://oss.example.com/",
+				url:         "https://private.example.com/runtime.mp4?Signature=temporary",
 				files:       map[string][]byte{key: []byte("fake-key-first-mp4")},
 			}
 			ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
@@ -1577,6 +1578,15 @@ func TestPrepareVideoGenerationInputsMaterializesVerifiedKeyFirstVideo(t *testin
 			}
 			if !foundInput {
 				t.Fatalf("key-first task file not materialized: %#v", files)
+			}
+			contractText := readMCPTaskFileText(t, ctx, repo, task.ID, "video-input-contract.json")
+			if !strings.Contains(contractText, key) || !strings.Contains(contractText, `"task_file_id"`) {
+				t.Fatalf("contract lost verified key/task file identity: %s", contractText)
+			}
+			for _, forbidden := range []string{"signature=", "Signature=", "download.example.com"} {
+				if strings.Contains(contractText, forbidden) {
+					t.Fatalf("contract persisted temporary signed URL fragment %q: %s", forbidden, contractText)
+				}
 			}
 			persisted, err := repo.Tasks().FindByID(ctx, task.ID)
 			if err != nil {

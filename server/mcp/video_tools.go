@@ -286,6 +286,7 @@ type videoInputContractReference struct {
 	FileSize             int64    `json:"file_size,omitempty"`
 	InputDurationSeconds float64  `json:"input_duration_seconds,omitempty"`
 	Required             bool     `json:"required"`
+	RuntimeURL           string   `json:"-"`
 }
 
 func prepareVideoGenerationInputsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -321,12 +322,13 @@ func prepareVideoGenerationInputsHandler(ctx context.Context, req *mcp.CallToolR
 		return errorResult("register video-input-contract.json: " + err.Error()), nil
 	}
 	svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
+	normalizedReferences := runtimeVideoInputReferences(contract.References)
 	resp := map[string]any{
 		"video_creator_input_contract":       contract,
 		"video_creator_input_contract_file":  "video-input-contract.json",
 		"video_creator_input_contract_id":    tf.ID,
 		"video_creator_input_contract_asset": tf,
-		"normalized_references":              contract.References,
+		"normalized_references":              normalizedReferences,
 		"required_reference_roles":           contract.RequiredReferenceRoles,
 		"inferred_mode":                      contract.InferredMode,
 		"target_duration_seconds":            contract.TargetDurationSeconds,
@@ -334,6 +336,16 @@ func prepareVideoGenerationInputsHandler(ctx context.Context, req *mcp.CallToolR
 		"video_understanding_files":          contract.VideoUnderstandingFiles,
 	}
 	return textResult(resp)
+}
+
+func runtimeVideoInputReferences(references []videoInputContractReference) []videoInputContractReference {
+	result := append([]videoInputContractReference(nil), references...)
+	for i := range result {
+		if runtimeURL := strings.TrimSpace(result[i].RuntimeURL); runtimeURL != "" {
+			result[i].URL = runtimeURL
+		}
+	}
+	return result
 }
 
 func materializeOwnedVideoInputReferences(ctx context.Context, task *model.Task, contract *videoInputContract) error {
@@ -386,7 +398,7 @@ func materializeOwnedVideoInputReferences(ctx context.Context, task *model.Task,
 		svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
 		ref.TaskFileID = tf.ID
 		if strings.TrimSpace(tf.URL) != "" {
-			ref.URL = tf.URL
+			ref.RuntimeURL = tf.URL
 		}
 		ref.FileName = tf.FileName
 		ref.MimeType = tf.MimeType
@@ -479,7 +491,11 @@ func analyzeRequiredVideoReferencesDuringPrepare(ctx context.Context, task *mode
 }
 
 func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, ref videoInputContractReference, fileName, inferredMode string) (videoUnderstandingContractFile, error) {
-	if err := service.ValidatePublicHTTPSURLForVideoReference(ref.URL); err != nil {
+	runtimeURL := strings.TrimSpace(ref.RuntimeURL)
+	if runtimeURL == "" {
+		runtimeURL = ref.URL
+	}
+	if err := service.ValidatePublicHTTPSURLForVideoReference(runtimeURL); err != nil {
 		return videoUnderstandingContractFile{}, err
 	}
 	userID := getUserID(ctx)
@@ -495,7 +511,7 @@ func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, re
 		purposeHint = ref.ReferenceRole
 	}
 	prompt := buildVideoUnderstandingPrompt(ref.ReferenceRole, purposeHint, "Extract the full reference timeline, surface facts, deep intent, business intent, latent subtext, joke or reversal structure, visual beats, camera, action, expression, rhythm, must_keep, must_keep_meaning, can_change, can_adapt_meaning, must_not_change, and must_not_break_meaning for reference-timeline.json and shot-plan.md.")
-	analysis, err := svcs.WritingSvc.AnalyzeVideoURLDetailed(ctx, userID, ref.URL, prompt)
+	analysis, err := svcs.WritingSvc.AnalyzeVideoURLDetailed(ctx, userID, runtimeURL, prompt)
 	if err != nil {
 		return videoUnderstandingContractFile{}, fmt.Errorf("analyze video reference during preparation: %w", err)
 	}
