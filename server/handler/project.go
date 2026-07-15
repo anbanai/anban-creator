@@ -311,7 +311,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
 	if err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL}); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		return respondPendingUploadFinalizeError(c, h.logger, err)
 	}
 
 	created, err := h.service.Create(c.Context(), userID, ch)
@@ -412,7 +412,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
 	if err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL}); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		return respondPendingUploadFinalizeError(c, h.logger, err)
 	}
 
 	updated, err := h.service.Update(c.Context(), userID, projectID, ch)

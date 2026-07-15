@@ -173,7 +173,7 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 		req.Visibility = "public"
 	}
 	if err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.ThumbnailURL}); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		return respondPendingUploadFinalizeError(c, h.logger, err)
 	}
 
 	tmpl := &model.Template{
@@ -251,7 +251,7 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 	}
 	if req.ThumbnailURL != nil {
 		if err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{*req.ThumbnailURL}); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+			return respondPendingUploadFinalizeError(c, h.logger, err)
 		}
 	}
 

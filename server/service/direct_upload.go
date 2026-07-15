@@ -298,22 +298,25 @@ func FinalizePendingUploadURLs(ctx context.Context, store storage.ObjectStatProv
 		}
 		upload, err := repo.FindPendingUploadByID(ctx, id)
 		if err != nil {
+			if errors.Is(err, ErrPendingUploadNotFound) {
+				return fmt.Errorf("%w: pending upload not found", ErrPendingUploadAccessDenied)
+			}
 			return err
 		}
 		if upload.UserID != userID {
-			return fmt.Errorf("pending upload %s does not belong to current user", id)
+			return fmt.Errorf("%w: pending upload %s does not belong to current user", ErrPendingUploadAccessDenied, id)
 		}
 		if upload.Purpose != purpose {
-			return fmt.Errorf("pending upload %s has purpose %s, want %s", id, upload.Purpose, purpose)
+			return fmt.Errorf("%w: pending upload %s has purpose %s, want %s", ErrPendingUploadAccessDenied, id, upload.Purpose, purpose)
 		}
 		if upload.Status != model.PendingUploadStatusPending {
-			return fmt.Errorf("pending upload %s is not pending", id)
+			return fmt.Errorf("%w: pending upload %s", ErrPendingUploadNotPending, id)
 		}
 		if !upload.ExpiresAt.After(now) {
-			return fmt.Errorf("pending upload %s has expired", id)
+			return fmt.Errorf("%w: pending upload %s", ErrPendingUploadExpired, id)
 		}
 		if !pendingUploadURLMatches(raw, upload) {
-			return fmt.Errorf("pending upload %s URL does not match the prepared object", id)
+			return fmt.Errorf("%w: pending upload %s URL does not match the prepared object", ErrPendingUploadAccessDenied, id)
 		}
 		seen[id] = struct{}{}
 		ids = append(ids, id)

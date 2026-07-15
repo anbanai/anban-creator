@@ -730,6 +730,16 @@ func TestFinalizePendingUploadURLsRejectsCrossUserAndExpired(t *testing.T) {
 			Status:    model.PendingUploadStatusPending,
 			ExpiresAt: now.Add(-time.Minute),
 		},
+		"wrong-purpose": {
+			ID: "wrong-purpose", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
+			PublicURL: "https://cdn.example.com/uploads/pending/user-1/wrong-purpose/ref.mp4",
+			Status:    model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Minute),
+		},
+		"finalized": {
+			ID: "finalized", UserID: "user-1", Purpose: DirectUploadPurposeVideoReference,
+			PublicURL: "https://cdn.example.com/uploads/pending/user-1/finalized/ref.mp4",
+			Status:    model.PendingUploadStatusFinalized, ExpiresAt: now.Add(time.Minute),
+		},
 	}}
 	store := matchingDirectUploadStore(repo.uploads["ok"])
 	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
@@ -742,13 +752,28 @@ func TestFinalizePendingUploadURLsRejectsCrossUserAndExpired(t *testing.T) {
 	}
 	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
 		"https://cdn.example.com/uploads/pending/user-2/other/ref.mp4",
-	}, now); err == nil {
-		t.Fatal("cross-user pending upload finalized, want error")
+	}, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
+		t.Fatalf("cross-user error = %v, want ErrPendingUploadAccessDenied", err)
 	}
 	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
 		"https://cdn.example.com/uploads/pending/user-1/expired/ref.mp4",
-	}, now); err == nil {
-		t.Fatal("expired pending upload finalized, want error")
+	}, now); !errors.Is(err, ErrPendingUploadExpired) {
+		t.Fatalf("expired error = %v, want ErrPendingUploadExpired", err)
+	}
+	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
+		"https://cdn.example.com/uploads/pending/user-1/wrong-purpose/ref.mp4",
+	}, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
+		t.Fatalf("wrong-purpose error = %v, want ErrPendingUploadAccessDenied", err)
+	}
+	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
+		"https://cdn.example.com/uploads/pending/user-1/finalized/ref.mp4",
+	}, now); !errors.Is(err, ErrPendingUploadNotPending) {
+		t.Fatalf("finalized error = %v, want ErrPendingUploadNotPending", err)
+	}
+	if err := FinalizePendingUploadURLs(context.Background(), store, repo, "user-1", DirectUploadPurposeVideoReference, []string{
+		"https://cdn.example.com/uploads/pending/user-1/unknown/ref.mp4",
+	}, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
+		t.Fatalf("unknown error = %v, want ErrPendingUploadAccessDenied", err)
 	}
 }
 
@@ -771,8 +796,8 @@ func TestFinalizePendingUploadURLsRejectsMismatchedPendingURL(t *testing.T) {
 		"https://cdn.example.com/uploads/pending/user-1/ok/other.mp4",
 	}
 	for _, raw := range cases {
-		if err := FinalizePendingUploadURLs(context.Background(), matchingDirectUploadStore(repo.uploads["ok"]), repo, "user-1", DirectUploadPurposeVideoReference, []string{raw}, now); err == nil {
-			t.Fatalf("FinalizePendingUploadURLs(%q) succeeded, want mismatch error", raw)
+		if err := FinalizePendingUploadURLs(context.Background(), matchingDirectUploadStore(repo.uploads["ok"]), repo, "user-1", DirectUploadPurposeVideoReference, []string{raw}, now); !errors.Is(err, ErrPendingUploadAccessDenied) {
+			t.Fatalf("FinalizePendingUploadURLs(%q) error = %v, want ErrPendingUploadAccessDenied", raw, err)
 		}
 	}
 	if len(repo.finalized) != 0 {
