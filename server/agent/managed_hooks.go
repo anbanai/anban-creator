@@ -13,18 +13,30 @@ import (
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
+type managedStopGate struct {
+	agentType string
+	script    string
+}
+
+var managedStopGates = map[string]managedStopGate{
+	"seednote":     {agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
+	"videocreator": {agentType: "anban:videocreator", script: "videocreator-quality-gate.sh"},
+	"videoeditor":  {agentType: "anban:videoeditor", script: "videoeditor-quality-gate.sh"},
+}
+
 // ManagedTaskStopHook returns a task-specific SDK Stop hook for sessions that
 // run a plugin agent as the main --agent. Plugin-level SubagentStop hooks do not
 // cover that lifecycle, while plugin agent frontmatter cannot declare hooks.
 func ManagedTaskStopHook(taskType, workspace, pluginRoot string) (claudecode.Option, error) {
-	if strings.TrimSpace(taskType) != "seednote" {
+	gate, ok := managedStopGates[strings.TrimSpace(taskType)]
+	if !ok {
 		return func(*claudecode.Options) {}, nil
 	}
 	pluginRoot = strings.TrimSpace(pluginRoot)
 	if pluginRoot == "" {
-		return nil, fmt.Errorf("seednote managed Stop hook requires plugin root")
+		return nil, fmt.Errorf("%s managed Stop hook requires plugin root", gate.agentType)
 	}
-	script := filepath.Join(pluginRoot, "hooks", "seednote-quality-gate.sh")
+	script := filepath.Join(pluginRoot, "hooks", gate.script)
 
 	return claudecode.WithHook(claudecode.HookEventStop, "", func(
 		ctx context.Context,
@@ -37,7 +49,7 @@ func ManagedTaskStopHook(taskType, workspace, pluginRoot string) (claudecode.Opt
 			return claudecode.HookJSONOutput{}, nil
 		}
 		payload, err := json.Marshal(map[string]any{
-			"agent_type":           "anban:seednote",
+			"agent_type":           gate.agentType,
 			"managed_main_session": true,
 			"stop_hook_active":     stop.StopHookActive,
 		})
@@ -51,7 +63,7 @@ func ManagedTaskStopHook(taskType, workspace, pluginRoot string) (claudecode.Opt
 		output, err := cmd.Output()
 		if err != nil {
 			decision := "block"
-			reason := "Seednote completion gate could not run: " + err.Error()
+			reason := gate.agentType + " completion gate could not run: " + err.Error()
 			return claudecode.HookJSONOutput{Decision: &decision, Reason: &reason}, nil
 		}
 		if len(bytes.TrimSpace(output)) == 0 {
@@ -60,7 +72,7 @@ func ManagedTaskStopHook(taskType, workspace, pluginRoot string) (claudecode.Opt
 		var result claudecode.HookJSONOutput
 		if err := json.Unmarshal(output, &result); err != nil {
 			decision := "block"
-			reason := "Seednote completion gate returned invalid output: " + err.Error()
+			reason := gate.agentType + " completion gate returned invalid output: " + err.Error()
 			return claudecode.HookJSONOutput{Decision: &decision, Reason: &reason}, nil
 		}
 		return result, nil

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,39 +14,60 @@ import (
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
-func TestManagedTaskStopHookRunsSeednoteGateForMainAgent(t *testing.T) {
-	workspace := t.TempDir()
-	pluginRoot := t.TempDir()
-	hooksDir := filepath.Join(pluginRoot, "hooks")
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := filepath.Join(hooksDir, "seednote-quality-gate.sh")
-	body := "#!/bin/sh\ninput=$(cat)\ncase \"$input\" in *'managed_main_session'*) printf '%s' '{\"decision\":\"block\",\"reason\":\"gate-ran\"}' ;; *) exit 2 ;; esac\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
+func TestManagedTaskStopHookRunsTaskGateForMainAgent(t *testing.T) {
+	tests := []struct {
+		name      string
+		taskType  string
+		agentType string
+		script    string
+	}{
+		{name: "seednote", taskType: "seednote", agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
+		{name: "videocreator", taskType: "videocreator", agentType: "anban:videocreator", script: "videocreator-quality-gate.sh"},
+		{name: "videoeditor", taskType: "videoeditor", agentType: "anban:videoeditor", script: "videoeditor-quality-gate.sh"},
 	}
 
-	option, err := ManagedTaskStopHook("seednote", workspace, pluginRoot)
-	if err != nil {
-		t.Fatalf("ManagedTaskStopHook: %v", err)
-	}
-	opts := claudecode.NewOptions(option)
-	hooks, ok := opts.Hooks.(map[claudecode.HookEvent][]claudecode.HookMatcher)
-	if !ok || len(hooks[claudecode.HookEventStop]) != 1 {
-		t.Fatalf("hooks = %#v", opts.Hooks)
-	}
-	callback := hooks[claudecode.HookEventStop][0].Hooks[0]
-	result, err := callback(context.Background(), &claudecode.StopHookInput{}, nil, claudecode.HookContext{})
-	if err != nil {
-		t.Fatalf("callback: %v", err)
-	}
-	if result.Decision == nil || *result.Decision != "block" || result.Reason == nil || *result.Reason != "gate-ran" {
-		t.Fatalf("result = %#v", result)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			pluginRoot := t.TempDir()
+			hooksDir := filepath.Join(pluginRoot, "hooks")
+			if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			script := filepath.Join(hooksDir, tt.script)
+			body := fmt.Sprintf(`#!/bin/sh
+input=$(cat)
+case "$input" in
+  *'"agent_type":"%s"'*'"managed_main_session":true'*) printf '%%s' '{"decision":"block","reason":"gate-ran"}' ;;
+  *) exit 2 ;;
+esac
+`, tt.agentType)
+			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			option, err := ManagedTaskStopHook(tt.taskType, workspace, pluginRoot)
+			if err != nil {
+				t.Fatalf("ManagedTaskStopHook: %v", err)
+			}
+			opts := claudecode.NewOptions(option)
+			hooks, ok := opts.Hooks.(map[claudecode.HookEvent][]claudecode.HookMatcher)
+			if !ok || len(hooks[claudecode.HookEventStop]) != 1 {
+				t.Fatalf("hooks = %#v", opts.Hooks)
+			}
+			callback := hooks[claudecode.HookEventStop][0].Hooks[0]
+			result, err := callback(context.Background(), &claudecode.StopHookInput{}, nil, claudecode.HookContext{})
+			if err != nil {
+				t.Fatalf("callback: %v", err)
+			}
+			if result.Decision == nil || *result.Decision != "block" || result.Reason == nil || *result.Reason != "gate-ran" {
+				t.Fatalf("result = %#v", result)
+			}
+		})
 	}
 }
 
-func TestManagedTaskStopHookSkipsOtherTaskTypes(t *testing.T) {
+func TestManagedTaskStopHookSkipsTaskTypesWithoutGate(t *testing.T) {
 	option, err := ManagedTaskStopHook("article", t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("ManagedTaskStopHook: %v", err)
