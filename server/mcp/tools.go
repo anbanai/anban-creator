@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -74,6 +75,7 @@ type Services struct {
 	ImageModelResolver    ImageModelResolver
 	ImageGenerator        ImageGenerator
 	ImageGenerationBiller ImageGenerationBiller
+	GenerateImageTimeout  time.Duration
 	VideoSvc              *service.VideoService
 	AudioASRSvc           *service.AudioASRService
 	VideoASRSvc           *service.VideoASRService

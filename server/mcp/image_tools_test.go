@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
@@ -71,17 +73,21 @@ func (f *fakeImageGenerationBiller) PrepareImageGeneration(
 }
 
 type fakeImageGenerator struct {
-	result    *service.ImageResult
-	err       error
-	calls     int
-	imageType string
-	refPath   string
-	refPaths  []string
-	resolved  *service.ResolvedImageModel
+	result          *service.ImageResult
+	err             error
+	calls           int
+	imageType       string
+	refPath         string
+	refPaths        []string
+	resolved        *service.ResolvedImageModel
+	waitForContext  bool
+	returnAfterWait bool
+	started         chan struct{}
+	ctxErr          error
 }
 
 func (f *fakeImageGenerator) GenerateImage(
-	_ context.Context,
+	ctx context.Context,
 	_, _, _, imageType, _, refPath string,
 	refPaths []string,
 	_, _ string,
@@ -93,7 +99,129 @@ func (f *fakeImageGenerator) GenerateImage(
 	f.refPath = refPath
 	f.refPaths = append([]string(nil), refPaths...)
 	f.resolved = resolved
+	if f.started != nil {
+		close(f.started)
+	}
+	if f.waitForContext {
+		<-ctx.Done()
+		f.ctxErr = ctx.Err()
+		if f.returnAfterWait {
+			return f.result, f.err
+		}
+		return nil, ctx.Err()
+	}
 	return f.result, f.err
+}
+
+func setupTimedGenerateImageHandlerTest(t *testing.T) (context.Context, string, *mcp.CallToolRequest, *fakeImageModelResolver, *service.TaskService) {
+	t.Helper()
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	userID := "user-image-timeout"
+	projectID := "project-image-timeout"
+	taskID := "task-image-timeout"
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID: taskID, UserID: userID, ProjectID: projectID,
+		Type: model.PlatformSeednote, Status: model.TaskStatusRunning,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &fakeImageModelResolver{resolved: &service.ResolvedImageModel{
+		Provider: "volcengine", Model: "seedream", SelectionReason: "preferred",
+	}}
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(fmt.Sprintf(`{
+		"project_id": %q,
+		"task_id": %q,
+		"prompt": "cover",
+		"output_path": "output/cover.png",
+		"image_type": "cover"
+	}`, projectID, taskID))}}
+	return ctx, userID, request, resolver,
+		service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+}
+
+func TestGenerateImageHandlerReturnsOperationTimeout(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+	ctx, userID, request, resolver, taskSvc := setupTimedGenerateImageHandlerTest(t)
+	generator := &fakeImageGenerator{waitForContext: true}
+	svcs = &Services{
+		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
+		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
+		ImageGenerator: generator, GenerateImageTimeout: 20 * time.Millisecond,
+	}
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
+	if err != nil || !res.IsError || !strings.Contains(callToolText(res), `"code":"operation_timeout"`) {
+		t.Fatalf("result/error = %#v/%v text=%s", res, err, callToolText(res))
+	}
+	if !errors.Is(generator.ctxErr, context.DeadlineExceeded) {
+		t.Fatalf("generator context error = %v", generator.ctxErr)
+	}
+}
+
+func TestGenerateImageHandlerClassifiesCallerCancellation(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+	_, userID, request, resolver, taskSvc := setupTimedGenerateImageHandlerTest(t)
+	started := make(chan struct{})
+	generator := &fakeImageGenerator{waitForContext: true, started: started}
+	svcs = &Services{
+		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
+		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
+		ImageGenerator: generator, GenerateImageTimeout: time.Minute,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
+	if err != nil || !res.IsError || !strings.Contains(callToolText(res), `"code":"request_cancelled"`) {
+		t.Fatalf("result/error = %#v/%v text=%s", res, err, callToolText(res))
+	}
+}
+
+func TestGenerateImageHandlerRejectsLateProviderSuccess(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+	ctx, userID, request, resolver, taskSvc := setupTimedGenerateImageHandlerTest(t)
+	generator := &fakeImageGenerator{
+		waitForContext:  true,
+		returnAfterWait: true,
+		result:          &service.ImageResult{DownloadURL: "https://example.com/late.png"},
+	}
+	svcs = &Services{
+		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
+		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
+		ImageGenerator: generator, GenerateImageTimeout: 20 * time.Millisecond,
+	}
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
+	if err != nil || !res.IsError || !strings.Contains(callToolText(res), `"code":"operation_timeout"`) {
+		t.Fatalf("result/error = %#v/%v text=%s", res, err, callToolText(res))
+	}
+}
+
+func TestGenerateImageHandlerReturnsProviderTimeout(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+	ctx, userID, request, resolver, taskSvc := setupTimedGenerateImageHandlerTest(t)
+	generator := &fakeImageGenerator{err: context.DeadlineExceeded}
+	svcs = &Services{
+		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
+		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
+		ImageGenerator: generator, GenerateImageTimeout: time.Minute,
+	}
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
+	if err != nil || !res.IsError || !strings.Contains(callToolText(res), `"code":"provider_timeout"`) {
+		t.Fatalf("result/error = %#v/%v text=%s", res, err, callToolText(res))
+	}
 }
 
 func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {

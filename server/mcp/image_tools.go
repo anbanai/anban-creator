@@ -108,6 +108,22 @@ func registerImageTools(server *mcp.Server) {
 }
 
 func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if req == nil || req.Params == nil {
+		return errorResult("generate_image request parameters are required"), nil
+	}
+	parentCtx := ctx
+	operationTimeout := 10 * time.Minute
+	if svcs != nil && svcs.GenerateImageTimeout > 0 {
+		operationTimeout = svcs.GenerateImageTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
+	stopHeartbeat := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "generate_image", longTextHeartbeatInterval)
+	defer stopHeartbeat()
+	if err := ctx.Err(); err != nil {
+		return imageFailureResult(classifyImageToolFailure(parentCtx, ctx, err, "preflight", "", "", operationTimeout, false)), nil
+	}
+
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	if _, ok := args["image_model_key"]; ok {
@@ -159,6 +175,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		return errorResult("task service not available"), nil
 	}
 	t, err := svcs.TaskSvc.GetByID(ctx, taskID)
+	if timeoutResult := imageContextFailureResult(parentCtx, ctx, "preflight", "", "", operationTimeout, false); timeoutResult != nil {
+		return timeoutResult, nil
+	}
 	if err != nil || t == nil {
 		return errorResult("task not found"), nil
 	}
@@ -176,6 +195,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	outputPathForService, outputPathResolved := resolveTaskWorkspacePath(taskID, outputPath)
 	refPathForService, refCleanup, err := resolveTaskWorkspaceReadablePath(ctx, taskID, refPath)
 	if err != nil {
+		if timeoutResult := imageContextFailureResult(parentCtx, ctx, "preflight", "", "", operationTimeout, false); timeoutResult != nil {
+			return timeoutResult, nil
+		}
 		return errorResult(fmt.Sprintf("resolve ref_image_path: %v", err)), nil
 	}
 	if refCleanup != nil {
@@ -183,6 +205,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	}
 	refPathsForService, refPathsCleanup, err := resolveTaskWorkspaceReadablePaths(ctx, taskID, refPaths)
 	if err != nil {
+		if timeoutResult := imageContextFailureResult(parentCtx, ctx, "preflight", "", "", operationTimeout, false); timeoutResult != nil {
+			return timeoutResult, nil
+		}
 		return errorResult(fmt.Sprintf("resolve ref_image_paths: %v", err)), nil
 	}
 	if refPathsCleanup != nil {
@@ -228,6 +253,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		imageType,
 		referenceCount,
 	)
+	if timeoutResult := imageContextFailureResult(parentCtx, ctx, "resolve", "", "", operationTimeout, false); timeoutResult != nil {
+		return timeoutResult, nil
+	}
 	if err != nil {
 		var limitErr *service.ImageReferenceLimitError
 		if errors.As(err, &limitErr) {
@@ -271,6 +299,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 
 	billingDecision, err := svcs.ImageGenerationBiller.PrepareImageGeneration(ctx, userID, taskID, imageType, resolved)
 	if err != nil {
+		if timeoutResult := imageContextFailureResult(parentCtx, ctx, "deduct", resolved.Provider, resolved.Model, operationTimeout, false); timeoutResult != nil {
+			return timeoutResult, nil
+		}
 		if mcpLog != nil {
 			// billingError below also logs the err with tool name; this entry
 			// adds task_id/project_id/stage so concurrent-task greps can land.
@@ -300,6 +331,11 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 
 	result, err := svcs.ImageGenerator.GenerateImage(ctx, userID, projectID, prompt, imageType, outputPathForService, refPathForService, refPathsForService, taskID, size, resolved, watermark)
 	if err != nil {
+		failureTimeout := operationTimeout
+		if providerTimeout := imageProviderAttemptTimeout(resolved, imageType); providerTimeout > 0 && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			failureTimeout = providerTimeout
+		}
+		failure := classifyImageToolFailure(parentCtx, ctx, err, "generate", resolved.Provider, resolved.Model, failureTimeout, false)
 		if mcpLog != nil {
 			mcpLog.Warn().
 				Str("tool", "generate_image").
@@ -312,11 +348,20 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				Str("model_source", resolved.Source).
 				Str("selection_reason", resolved.SelectionReason).
 				Str("failure_reason", categorizeImageGenFailure(err, refPathForService)).
+				Str("failure_code", failure.Code).
+				Int64("timeout_ms", failure.TimeoutMS).
+				Bool("durable_task_file", failure.Durable).
 				Bool("ref_image_mode", refPathForService != "").
 				Err(err).
 				Msg("MCP generate_image failed")
 		}
+		if isImageTimeoutFailure(failure.Code) {
+			return imageFailureResult(failure), nil
+		}
 		return billingError("generate image", err), nil
+	}
+	if timeoutResult := imageContextFailureResult(parentCtx, ctx, "generate", resolved.Provider, resolved.Model, operationTimeout, false); timeoutResult != nil {
+		return timeoutResult, nil
 	}
 	if result == nil {
 		return billingError("generate image", fmt.Errorf("image generator returned no result")), nil
@@ -345,8 +390,12 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	// workspace. For server-local temp files, registration is the durability
 	// boundary; returning success would hand the agent a logical file_path that
 	// disappears when this handler cleans up the temp file.
+	durableTaskFile := false
 	if taskID != "" && result.FilePath != "" && svcs.TaskSvc != nil {
 		if url, tfErr := registerGeneratedImageTaskFile(ctx, svcs.TaskSvc, taskID, userID, result); tfErr != nil {
+			if timeoutResult := imageContextFailureResult(parentCtx, ctx, "register", resolved.Provider, resolved.Model, operationTimeout, false); timeoutResult != nil {
+				return timeoutResult, nil
+			}
 			if mcpLog != nil {
 				mcpLog.Warn().
 					Str("tool", "generate_image").
@@ -360,10 +409,16 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			if errResult := generatedImageRegistrationErrorResult(result, tfErr); errResult != nil {
 				return errResult, nil
 			}
-		} else if url != "" {
-			result.DownloadURL = url
+		} else {
+			durableTaskFile = true
+			if url != "" {
+				result.DownloadURL = url
+			}
 		}
 		sanitizeTaskImageDownloadURL(result)
+	}
+	if timeoutResult := imageContextFailureResult(parentCtx, ctx, "register", resolved.Provider, resolved.Model, operationTimeout, durableTaskFile); timeoutResult != nil {
+		return timeoutResult, nil
 	}
 
 	// Settle usage-based billing only after the generated bytes cross the task-file
@@ -385,8 +440,14 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			ReferenceImageCount:    referenceCount,
 		}
 		if _, err := maybeDeductImageGenerationUsage(ctx, userID, taskID, billingDecision.DynamicRoute, billingDecision.DynamicProvider, billingDecision.DynamicModel, usage); err != nil {
+			if timeoutResult := imageContextFailureResult(parentCtx, ctx, "settle", resolved.Provider, resolved.Model, operationTimeout, durableTaskFile); timeoutResult != nil {
+				return timeoutResult, nil
+			}
 			return billingError("generate image", err), nil
 		}
+	}
+	if timeoutResult := imageContextFailureResult(parentCtx, ctx, "settle", resolved.Provider, resolved.Model, operationTimeout, durableTaskFile); timeoutResult != nil {
+		return timeoutResult, nil
 	}
 
 	if mcpLog != nil {
@@ -427,6 +488,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	if verifyWithVision {
 		verification, vErr := runImageVerification(ctx, userID, taskID, result, verificationPrompt)
 		if vErr != nil {
+			if timeoutResult := imageContextFailureResult(parentCtx, ctx, "verify", resolved.Provider, resolved.Model, operationTimeout, durableTaskFile); timeoutResult != nil {
+				return timeoutResult, nil
+			}
 			// Verification failed for operational reasons (vision API down,
 			// file unreadable, etc.). Surface as a soft failure: return the
 			// image with an error note rather than dropping the generation.
@@ -456,6 +520,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				Msg("MCP generate_image vision verification completed")
 		}
 	}
+	if timeoutResult := imageContextFailureResult(parentCtx, ctx, "verify", resolved.Provider, resolved.Model, operationTimeout, durableTaskFile); timeoutResult != nil {
+		return timeoutResult, nil
+	}
 
 	// upload_to_cdn: make image upload atomic with generation. Each image
 	// becomes durable on the project's CDN the instant it is generated,
@@ -467,6 +534,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	if shouldUploadAfterVerification(uploadToCDN, verifyWithVision, result.Verification) {
 		uploaded, upErr := svcs.ImageSvc.UploadImage(ctx, userID, projectID, result.SavedFilePath())
 		if upErr != nil {
+			if timeoutResult := imageContextFailureResult(parentCtx, ctx, "upload", resolved.Provider, resolved.Model, operationTimeout, durableTaskFile); timeoutResult != nil {
+				return timeoutResult, nil
+			}
 			result.UploadError = upErr.Error()
 			if mcpLog != nil {
 				mcpLog.Warn().
@@ -502,8 +572,85 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				Msg("MCP generate_image skipped CDN upload (vision verification did not pass)")
 		}
 	}
+	if timeoutResult := imageContextFailureResult(parentCtx, ctx, "upload", resolved.Provider, resolved.Model, operationTimeout, durableTaskFile); timeoutResult != nil {
+		return timeoutResult, nil
+	}
 
 	return textResult(result)
+}
+
+type imageToolFailure struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Stage     string `json:"stage"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
+	TimeoutMS int64  `json:"timeout_ms,omitempty"`
+	Durable   bool   `json:"durable_task_file"`
+}
+
+func imageFailureResult(failure imageToolFailure) *mcp.CallToolResult {
+	payload, err := json.Marshal(failure)
+	if err != nil {
+		return errorResult(failure.Message)
+	}
+	return errorResult(string(payload))
+}
+
+func classifyImageToolFailure(parentCtx, operationCtx context.Context, err error, stage, provider, model string, timeout time.Duration, durable bool) imageToolFailure {
+	code := categorizeImageGenFailure(err, "")
+	switch {
+	case errors.Is(parentCtx.Err(), context.Canceled):
+		code = "request_cancelled"
+	case errors.Is(operationCtx.Err(), context.DeadlineExceeded):
+		code = "operation_timeout"
+	case errors.Is(err, context.DeadlineExceeded):
+		code = "provider_timeout"
+	}
+	message := "image generation failed"
+	switch code {
+	case "request_cancelled":
+		message = "generate_image request was cancelled"
+	case "operation_timeout":
+		message = fmt.Sprintf("generate_image exceeded the server operation timeout of %s", timeout)
+	case "provider_timeout":
+		message = "image provider attempt exceeded its server timeout"
+	case "":
+		if err != nil {
+			message = err.Error()
+		}
+	}
+	return imageToolFailure{
+		Code: code, Message: message, Stage: stage,
+		Provider: provider, Model: model,
+		TimeoutMS: timeout.Milliseconds(), Durable: durable,
+	}
+}
+
+func isImageTimeoutFailure(code string) bool {
+	return code == "provider_timeout" || code == "operation_timeout" || code == "request_cancelled"
+}
+
+func imageContextFailureResult(parentCtx, operationCtx context.Context, stage, provider, model string, timeout time.Duration, durable bool) *mcp.CallToolResult {
+	err := operationCtx.Err()
+	if err == nil {
+		return nil
+	}
+	return imageFailureResult(classifyImageToolFailure(parentCtx, operationCtx, err, stage, provider, model, timeout, durable))
+}
+
+func imageProviderAttemptTimeout(resolved *service.ResolvedImageModel, imageType string) time.Duration {
+	if resolved == nil || resolved.Config == nil {
+		return 0
+	}
+	apiCfg := resolved.Config.Content
+	if imageType == "cover" {
+		apiCfg = resolved.Config.Cover
+	}
+	if apiCfg == nil || apiCfg.TimeoutSec <= 0 {
+		return 0
+	}
+	return time.Duration(apiCfg.TimeoutSec) * time.Second
 }
 
 // categorizeImageGenFailure classifies a generate-stage error into an actionable

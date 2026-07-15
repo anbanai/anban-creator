@@ -679,6 +679,7 @@ func main() {
 			ImageModelResolver:    modelConfigSvc,
 			ImageGenerator:        imageSvc,
 			ImageGenerationBiller: mcp.NewImageGenerationBiller(),
+			GenerateImageTimeout:  cfg.MCP.ToolTimeouts.GenerateImage,
 			VideoSvc:              videoSvc,
 			AudioASRSvc:           audioASRSvc,
 			WritingSvc:            writingSvc,

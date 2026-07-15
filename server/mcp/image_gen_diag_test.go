@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 )
 
 // timeoutNetErr is a net.Error that reports Timeout()=true, so we can exercise
@@ -44,5 +45,15 @@ func TestCategorizeImageGenFailure(t *testing.T) {
 				t.Fatalf("categorizeImageGenFailure(%v, %q) = %q, want %q", tc.err, tc.refPath, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestClassifyImageToolFailureProviderTimeout(t *testing.T) {
+	parentCtx := context.Background()
+	operationCtx, cancel := context.WithTimeout(parentCtx, time.Minute)
+	defer cancel()
+	failure := classifyImageToolFailure(parentCtx, operationCtx, context.DeadlineExceeded, "generate", "volcengine", "seedream", time.Minute, false)
+	if failure.Code != "provider_timeout" {
+		t.Fatalf("failure code = %q, want provider_timeout", failure.Code)
 	}
 }
