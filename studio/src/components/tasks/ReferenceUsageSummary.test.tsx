@@ -178,17 +178,22 @@ describe('ReferenceUsageSummary', () => {
     expect(container.querySelector('[data-slot="card"]')).not.toBeInTheDocument()
     expect(container.querySelector('.xl\\:grid-cols-2')).not.toBeInTheDocument()
     expect(screen.getByText('#1 · front.png')).toBeInTheDocument()
+    expect(screen.getByText('说明：保持 Logo')).toBeInTheDocument()
     expect(screen.getByText('已使用')).toBeInTheDocument()
     expect(screen.getByText('正面图是产品身份和包装文字的主要证据')).toBeInTheDocument()
+    expect(screen.getByText('分析 1 次')).toBeInTheDocument()
     expect(screen.getByText('包装侧面的批次号不清晰')).toBeInTheDocument()
     expect(screen.getByText('输出图片使用情况')).toBeInTheDocument()
+    expect(screen.getByText('cover.png')).toBeInTheDocument()
     expect(screen.getByText('保持产品身份、包装和 Logo')).toBeInTheDocument()
+    expect(screen.getByText('生成 2 次')).toBeInTheDocument()
     expect(screen.getByText('核验通过')).toBeInTheDocument()
     expect(screen.getByText('产品与文字核验通过')).toBeInTheDocument()
     expect(screen.getByText('openai / gpt-image-2')).toBeInTheDocument()
     expect(screen.getByText('reference_compatible_fallback')).toBeInTheDocument()
     expect(screen.getByText('首选模型参考图上限不足')).toBeInTheDocument()
     expect(screen.getByText('未使用侧面图，因为与正面包装版本冲突')).toBeInTheDocument()
+    expect(screen.getAllByText('1 张')).toHaveLength(2)
   })
 
   it('renders compact loading skeletons without a card or header', () => {
@@ -200,7 +205,11 @@ describe('ReferenceUsageSummary', () => {
       <ReferenceUsageSummary task={seednoteTask} files={[summaryTaskFile]} variant="compact" />,
     )
 
-    expect(screen.getByLabelText('正在读取参考素材使用摘要')).toBeInTheDocument()
+    const status = screen.getByRole('status')
+
+    expect(status).toHaveAttribute('aria-live', 'polite')
+    expect(status).toHaveAttribute('aria-atomic', 'true')
+    expect(status).toHaveTextContent('正在读取参考素材使用摘要')
     expect(screen.queryByText('参考素材使用')).not.toBeInTheDocument()
     expect(container.querySelector('[data-slot="card"]')).not.toBeInTheDocument()
   })

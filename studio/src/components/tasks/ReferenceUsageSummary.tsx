@@ -115,7 +115,8 @@ export function isReferenceUsageSummaryData(value: unknown): value is ReferenceU
 function SummaryLoading({ compact }: { compact: boolean }) {
   if (compact) {
     return (
-      <div aria-label="正在读取参考素材使用摘要" className="space-y-3">
+      <div role="status" aria-live="polite" aria-atomic="true" className="space-y-3">
+        <span className="sr-only">正在读取参考素材使用摘要</span>
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-24 w-full" />
       </div>
