@@ -76,8 +76,8 @@ func TestPendingUploadRepositoryFinalizesVerifiedSetAllOrNoneAndReusesFinalized(
 	}
 
 	claims := []model.PendingUploadClaim{
-		{UploadID: "first", UserID: "user-1", Key: "uploads/pending/user-1/first/input.png", AllowedPurposes: []string{"ai_entry_attachment"}},
-		{UploadID: "second", UserID: "user-1", Key: "uploads/pending/user-1/second/forged.png", AllowedPurposes: []string{"ai_entry_attachment"}},
+		{UploadID: "first", UserID: "user-1", Key: "uploads/pending/user-1/first/input.png", FinalizedKey: "uploads/finalized/user-1/first/input.png", AllowedPurposes: []string{"ai_entry_attachment"}},
+		{UploadID: "second", UserID: "user-1", Key: "uploads/pending/user-1/second/forged.png", FinalizedKey: "uploads/finalized/user-1/second/input.png", AllowedPurposes: []string{"ai_entry_attachment"}},
 	}
 	if err := repo.PendingUploads().FinalizePendingUploadClaims(ctx, claims, now); err == nil {
 		t.Fatal("partially mismatched verified set finalized")
@@ -98,6 +98,40 @@ func TestPendingUploadRepositoryFinalizesVerifiedSetAllOrNoneAndReusesFinalized(
 	}
 	if err := repo.PendingUploads().FinalizePendingUploadClaims(ctx, claims, now.Add(time.Minute)); err != nil {
 		t.Fatalf("reuse exact finalized set: %v", err)
+	}
+	for _, claim := range claims {
+		found, err := repo.PendingUploads().FindPendingUploadByID(ctx, claim.UploadID)
+		if err != nil {
+			t.Fatalf("find finalized %s: %v", claim.UploadID, err)
+		}
+		if found.Key != claim.Key || found.FinalizedKey != claim.FinalizedKey || found.Status != model.PendingUploadStatusFinalized {
+			t.Fatalf("finalized identity = %#v, want source=%q final=%q", found, claim.Key, claim.FinalizedKey)
+		}
+	}
+	claims[1].FinalizedKey = "uploads/finalized/user-1/second/other.png"
+	if err := repo.PendingUploads().FinalizePendingUploadClaims(ctx, claims, now.Add(2*time.Minute)); err == nil {
+		t.Fatal("reused finalized row with a different final key")
+	}
+}
+
+func TestPendingUploadRepositoryRejectsLegacyFinalizedRowWithoutFinalKey(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	now := time.Date(2026, 7, 15, 11, 30, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID: "legacy", UserID: "user-1", Purpose: "ai_entry_attachment",
+		Key: "uploads/pending/user-1/legacy/input.png", PublicURL: "https://cdn/legacy",
+		Status: model.PendingUploadStatusFinalized, ExpiresAt: now.Add(time.Hour),
+	}
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, upload); err != nil {
+		t.Fatalf("create legacy row: %v", err)
+	}
+	claim := model.PendingUploadClaim{
+		UploadID: upload.ID, UserID: upload.UserID, Key: upload.Key,
+		FinalizedKey: "uploads/finalized/user-1/legacy/input.png", AllowedPurposes: []string{upload.Purpose},
+	}
+	if err := repo.PendingUploads().FinalizePendingUploadClaims(ctx, []model.PendingUploadClaim{claim}, now); err == nil {
+		t.Fatal("legacy finalized row without FinalizedKey was reused")
 	}
 }
 
@@ -129,7 +163,7 @@ func TestPendingUploadRepositoryReclaimsAbandonedCleanupLease(t *testing.T) {
 	if completed, err := repo.PendingUploads().CompletePendingUploadExpiration(ctx, upload.ID, "old-claim", now); err != nil || completed {
 		t.Fatalf("old lease completed reclaimed upload = %v, %v", completed, err)
 	}
-	claim := model.PendingUploadClaim{UploadID: upload.ID, UserID: upload.UserID, Key: upload.Key, AllowedPurposes: []string{upload.Purpose}}
+	claim := model.PendingUploadClaim{UploadID: upload.ID, UserID: upload.UserID, Key: upload.Key, FinalizedKey: "uploads/finalized/user-1/abandoned/input.png", AllowedPurposes: []string{upload.Purpose}}
 	if err := repo.PendingUploads().FinalizePendingUploadClaims(ctx, []model.PendingUploadClaim{claim}, now); err == nil {
 		t.Fatal("finalization won while cleanup lease was active")
 	}

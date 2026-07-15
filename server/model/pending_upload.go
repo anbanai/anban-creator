@@ -21,6 +21,7 @@ type PendingUploadClaim struct {
 	UploadID        string
 	UserID          string
 	Key             string
+	FinalizedKey    string
 	AllowedPurposes []string
 }
 
@@ -31,6 +32,7 @@ type PendingUpload struct {
 	UserID           string     `gorm:"type:char(36);index;not null" json:"user_id"`
 	Purpose          string     `gorm:"type:varchar(50);index;not null" json:"purpose"`
 	Key              string     `gorm:"type:varchar(500);uniqueIndex;not null" json:"key"`
+	FinalizedKey     string     `gorm:"type:varchar(500);index" json:"finalized_key,omitempty"`
 	PublicURL        string     `gorm:"type:varchar(800);not null" json:"public_url"`
 	FileName         string     `gorm:"type:varchar(255);not null" json:"file_name"`
 	ContentType      string     `gorm:"type:varchar(120)" json:"content_type"`

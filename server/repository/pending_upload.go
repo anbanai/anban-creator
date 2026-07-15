@@ -70,14 +70,17 @@ func (r *pendingUploadRepository) FinalizePendingUploadClaims(ctx context.Contex
 			}
 			switch upload.Status {
 			case model.PendingUploadStatusFinalized:
+				if upload.FinalizedKey == "" || upload.FinalizedKey != claim.FinalizedKey {
+					return model.ErrPendingUploadClaimRejected
+				}
 				continue
 			case model.PendingUploadStatusPending:
-				if !upload.ExpiresAt.After(finalizedAt) {
+				if upload.FinalizedKey != "" || !upload.ExpiresAt.After(finalizedAt) {
 					return model.ErrPendingUploadClaimRejected
 				}
 				result := tx.Model(&model.PendingUpload{}).
-					Where("id = ? AND status = ? AND expires_at > ?", upload.ID, model.PendingUploadStatusPending, finalizedAt).
-					Updates(map[string]any{"status": model.PendingUploadStatusFinalized, "finalized_at": finalizedAt})
+					Where("id = ? AND status = ? AND finalized_key = ? AND expires_at > ?", upload.ID, model.PendingUploadStatusPending, "", finalizedAt).
+					Updates(map[string]any{"status": model.PendingUploadStatusFinalized, "finalized_at": finalizedAt, "finalized_key": claim.FinalizedKey})
 				if result.Error != nil {
 					return result.Error
 				}
@@ -86,7 +89,7 @@ func (r *pendingUploadRepository) FinalizePendingUploadClaims(ctx context.Contex
 					if err := tx.Where("id = ?", upload.ID).First(&current).Error; err != nil {
 						return err
 					}
-					if current.Status != model.PendingUploadStatusFinalized || !pendingUploadMatchesClaim(&current, claim) {
+					if current.Status != model.PendingUploadStatusFinalized || current.FinalizedKey != claim.FinalizedKey || !pendingUploadMatchesClaim(&current, claim) {
 						return model.ErrPendingUploadClaimRejected
 					}
 				}
@@ -99,7 +102,7 @@ func (r *pendingUploadRepository) FinalizePendingUploadClaims(ctx context.Contex
 }
 
 func pendingUploadMatchesClaim(upload *model.PendingUpload, claim model.PendingUploadClaim) bool {
-	if upload == nil || upload.ID != claim.UploadID || upload.UserID != claim.UserID || upload.Key != claim.Key {
+	if upload == nil || upload.ID != claim.UploadID || upload.UserID != claim.UserID || upload.Key != claim.Key || claim.FinalizedKey == "" {
 		return false
 	}
 	for _, purpose := range claim.AllowedPurposes {
