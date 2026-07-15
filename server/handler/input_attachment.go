@@ -2,11 +2,15 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
@@ -31,25 +35,60 @@ var allAgentAttachmentTypes = map[string]bool{
 	"text":     true,
 }
 
+var errInputAttachmentValidation = errors.New("input attachment validation failed")
+
+type inputAttachmentValidationError struct {
+	err error
+}
+
+func (e *inputAttachmentValidationError) Error() string { return e.err.Error() }
+func (e *inputAttachmentValidationError) Unwrap() error { return e.err }
+func (e *inputAttachmentValidationError) Is(target error) bool {
+	return target == errInputAttachmentValidation
+}
+
+func inputAttachmentValidationErrorf(format string, args ...any) error {
+	return &inputAttachmentValidationError{err: fmt.Errorf(format, args...)}
+}
+
+func inputAttachmentServiceError(err error) error {
+	if errors.Is(err, service.ErrPendingUploadAccessDenied) || errors.Is(err, service.ErrPendingUploadExpired) || errors.Is(err, service.ErrPendingUploadNotPending) {
+		return &inputAttachmentValidationError{err: err}
+	}
+	return err
+}
+
+func respondInputAttachmentError(c fiber.Ctx, logger *zerolog.Logger, err error) error {
+	if errors.Is(err, errInputAttachmentValidation) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	if logger != nil {
+		logger.Error().Err(err).Msg("input attachment validation failed")
+	}
+	return Error(c, fiber.StatusInternalServerError, "failed to validate attachments")
+}
+
 func validateInputAttachments(ctx context.Context, pending service.PendingUploadRepository, userID string, attachments []model.EntryAttachment, options InputAttachmentValidationOptions) ([]model.EntryAttachment, error) {
 	if options.MaxCount > 0 && len(attachments) > options.MaxCount {
-		return nil, fmt.Errorf("at most %d attachments are allowed", options.MaxCount)
+		return nil, inputAttachmentValidationErrorf("at most %d attachments are allowed", options.MaxCount)
 	}
+	now := time.Now()
 	normalized := make([]model.EntryAttachment, len(attachments))
+	verifiedUploads := make([]*service.VerifiedDirectUpload, 0, len(attachments))
 	for i, raw := range attachments {
 		a := normalizeHandlerEntryAttachment(raw)
 		if utf8.RuneCountInString(a.Instruction) > inputAttachmentInstructionMaxRunes {
-			return nil, fmt.Errorf("attachment instruction must not exceed %d characters", inputAttachmentInstructionMaxRunes)
+			return nil, inputAttachmentValidationErrorf("attachment instruction must not exceed %d characters", inputAttachmentInstructionMaxRunes)
 		}
 		if (a.UploadID == "") != (a.Key == "") {
-			return nil, fmt.Errorf("attachment %d: storage attachment requires upload_id and key", i+1)
+			return nil, inputAttachmentValidationErrorf("attachment %d: storage attachment requires upload_id and key", i+1)
 		}
 		if a.UploadID != "" {
-			verified, err := service.ResolveDirectUploadAttachment(ctx, pending, userID, []string{
+			verified, err := service.VerifyDirectUploadAttachment(ctx, pending, userID, []string{
 				service.DirectUploadPurposeAIEntryAttachment,
-			}, a.UploadID, a.Key, time.Now())
+			}, a.UploadID, a.Key, now)
 			if err != nil {
-				return nil, fmt.Errorf("attachment %d: %w", i+1, err)
+				return nil, inputAttachmentServiceError(fmt.Errorf("attachment %d: %w", i+1, err))
 			}
 			a = model.EntryAttachment{
 				UploadID:    verified.UploadID,
@@ -59,19 +98,23 @@ func validateInputAttachments(ctx context.Context, pending service.PendingUpload
 				Size:        verified.Size,
 				Instruction: a.Instruction,
 			}
+			verifiedUploads = append(verifiedUploads, verified)
 		}
 		if err := validateHandlerEntryAttachment(&a); err != nil {
-			return nil, fmt.Errorf("attachment %d: %w", i+1, err)
+			return nil, &inputAttachmentValidationError{err: fmt.Errorf("attachment %d: %w", i+1, err)}
 		}
 		if len(options.AllowedTypes) > 0 && !options.AllowedTypes[a.Type] {
-			return nil, fmt.Errorf("attachment type %s is not allowed", a.Type)
+			return nil, inputAttachmentValidationErrorf("attachment type %s is not allowed", a.Type)
 		}
 		if a.URL != "" {
 			if !validAIEntryAttachmentURL(a.URL, false) {
-				return nil, fmt.Errorf("attachment URLs must be internal file URLs or registered pending-upload URLs")
+				return nil, inputAttachmentValidationErrorf("attachment URLs must be internal file URLs or registered pending-upload URLs")
 			}
 		}
 		normalized[i] = a
+	}
+	if err := service.FinalizeVerifiedDirectUploads(ctx, pending, verifiedUploads, now); err != nil {
+		return nil, inputAttachmentServiceError(err)
 	}
 	return normalized, nil
 }

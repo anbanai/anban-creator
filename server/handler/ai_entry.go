@@ -47,10 +47,10 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "text must not exceed 5120 characters")
 	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), h.pending, userID, req.Attachments, InputAttachmentValidationOptions{
-		AllowedTypes: map[string]bool{"image": true, "audio": true, "video": true, "document": true, "text": true},
+		AllowedTypes: allAgentAttachmentTypes,
 	})
 	if err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		return respondInputAttachmentError(c, h.logger, err)
 	}
 	req.Attachments = validatedAttachments
 	if h.submitter == nil {

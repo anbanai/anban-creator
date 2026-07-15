@@ -66,6 +66,29 @@ func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	}
 }
 
+func TestValidateInputAttachmentsDoesNotFinalizeBeforeWholeCollectionValidates(t *testing.T) {
+	const key = "uploads/pending/user-1/upload-1/product.png"
+	pending := &aiEntryPendingRepo{upload: &model.PendingUpload{
+		ID: "upload-1", UserID: "user-1", Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		Key: key, FileName: "product.png", ContentType: "image/png", Size: 2048,
+		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}}
+
+	_, err := validateInputAttachments(context.Background(), pending, "user-1", []model.EntryAttachment{
+		{UploadID: "upload-1", Key: key, Instruction: "use the product"},
+		{Type: "image", URL: "https://attacker.example/invalid.png", FileName: "invalid.png", ContentType: "image/png"},
+	}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: allAgentAttachmentTypes})
+	if err == nil {
+		t.Fatal("invalid later attachment was accepted")
+	}
+	if len(pending.finalizedIDs) != 0 {
+		t.Fatalf("finalized before collection validation completed: %#v", pending.finalizedIDs)
+	}
+	if pending.upload.Status != model.PendingUploadStatusPending {
+		t.Fatalf("first upload status = %q, want pending", pending.upload.Status)
+	}
+}
+
 func TestValidateInputAttachmentsAcceptsInstructionAt1000CodePoints(t *testing.T) {
 	instruction := strings.Repeat("图", 1000)
 	got, err := validateInputAttachments(context.Background(), nil, "user-1", []model.EntryAttachment{{

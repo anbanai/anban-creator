@@ -18,6 +18,7 @@ type fakeDirectUploadStore struct {
 	contentType string
 	expires     int
 	deleted     []string
+	deleteErr   error
 }
 
 func (s *fakeDirectUploadStore) Name() string { return s.name }
@@ -33,7 +34,7 @@ func (s *fakeDirectUploadStore) DownloadURL(_ context.Context, key string, expir
 }
 func (s *fakeDirectUploadStore) Delete(_ context.Context, key string) error {
 	s.deleted = append(s.deleted, key)
-	return nil
+	return s.deleteErr
 }
 
 type fakePendingUploadRepo struct {
@@ -60,17 +61,51 @@ func (r *fakePendingUploadRepo) FindPendingUploadByID(_ context.Context, id stri
 	return &cp, nil
 }
 
-func (r *fakePendingUploadRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) error {
-	r.finalized = append(r.finalized, ids...)
-	return nil
+func (r *fakePendingUploadRepo) FinalizePendingUploads(_ context.Context, ids []string, finalizedAt time.Time) (int64, error) {
+	var claimed int64
+	for _, id := range ids {
+		upload := r.uploads[id]
+		if upload == nil || upload.Status != model.PendingUploadStatusPending || !upload.ExpiresAt.After(finalizedAt) {
+			continue
+		}
+		upload.Status = model.PendingUploadStatusFinalized
+		r.finalized = append(r.finalized, id)
+		claimed++
+	}
+	return claimed, nil
 }
 
-func (r *fakePendingUploadRepo) FindExpiredPendingUploads(_ context.Context, _ time.Time, _ int) ([]*model.PendingUpload, error) {
-	return nil, nil
+func (r *fakePendingUploadRepo) FindExpiredPendingUploads(_ context.Context, before time.Time, limit int) ([]*model.PendingUpload, error) {
+	uploads := make([]*model.PendingUpload, 0)
+	for _, upload := range r.uploads {
+		if upload.Status == model.PendingUploadStatusPending && !upload.ExpiresAt.After(before) {
+			uploads = append(uploads, upload)
+			if len(uploads) == limit {
+				break
+			}
+		}
+	}
+	return uploads, nil
 }
 
-func (r *fakePendingUploadRepo) MarkPendingUploadExpired(_ context.Context, id string, _ time.Time) error {
-	return nil
+func (r *fakePendingUploadRepo) ClaimPendingUploadExpiration(_ context.Context, id string, expiredAt time.Time) (bool, error) {
+	upload := r.uploads[id]
+	if upload == nil || upload.Status != model.PendingUploadStatusPending || upload.ExpiresAt.After(expiredAt) {
+		return false, nil
+	}
+	upload.Status = model.PendingUploadStatusExpired
+	upload.ExpiredAt = &expiredAt
+	return true, nil
+}
+
+func (r *fakePendingUploadRepo) ReopenPendingUploadExpiration(_ context.Context, id string) (bool, error) {
+	upload := r.uploads[id]
+	if upload == nil || upload.Status != model.PendingUploadStatusExpired {
+		return false, nil
+	}
+	upload.Status = model.PendingUploadStatusPending
+	upload.ExpiredAt = nil
+	return true, nil
 }
 
 func TestPrepareDirectUploadCreatesPendingScopedSTSSession(t *testing.T) {
@@ -405,6 +440,29 @@ func TestResolveDirectUploadAttachment(t *testing.T) {
 	}
 }
 
+func TestFinalizeVerifiedDirectUploadsRejectsLostPendingClaim(t *testing.T) {
+	now := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID: "upload-1", UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment,
+		Key:    "uploads/pending/user-1/upload-1/input.png",
+		Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour),
+	}
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
+	verified, err := VerifyDirectUploadAttachment(context.Background(), repo, upload.UserID, []string{upload.Purpose}, upload.ID, upload.Key, now)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	upload.Status = model.PendingUploadStatusExpired
+
+	err = FinalizeVerifiedDirectUploads(context.Background(), repo, []*VerifiedDirectUpload{verified}, now)
+	if !errors.Is(err, ErrPendingUploadNotPending) {
+		t.Fatalf("finalize error = %v, want lost-claim validation error", err)
+	}
+	if len(repo.finalized) != 0 {
+		t.Fatalf("lost claim finalized IDs = %#v", repo.finalized)
+	}
+}
+
 func TestFinalizePendingUploadURLsRejectsCrossUserAndExpired(t *testing.T) {
 	now := time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC)
 	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{
@@ -568,5 +626,35 @@ func TestValidatePendingUploadURLRejectsUnauthorizedAndInvalid(t *testing.T) {
 	}
 	if len(repo.finalized) != 0 {
 		t.Fatalf("ValidatePendingUploadURL finalized uploads = %v, want none", repo.finalized)
+	}
+}
+
+func TestCleanupExpiredPendingUploadsReopensClaimWhenDeleteFails(t *testing.T) {
+	now := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	upload := &model.PendingUpload{
+		ID: "expired", Key: "uploads/pending/user-1/expired/input.png",
+		Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(-time.Minute),
+	}
+	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{upload.ID: upload}}
+	store := &fakeDirectUploadStore{name: "oss", deleteErr: errors.New("delete failed")}
+
+	cleaned, err := CleanupExpiredPendingUploads(context.Background(), store, repo, now, 100)
+	if err == nil || err.Error() != "delete failed" {
+		t.Fatalf("cleanup error = %v, want delete failed", err)
+	}
+	if cleaned != 0 {
+		t.Fatalf("cleaned = %d, want 0", cleaned)
+	}
+	if upload.Status != model.PendingUploadStatusPending || upload.ExpiredAt != nil {
+		t.Fatalf("failed delete left upload claimed: %#v", upload)
+	}
+
+	store.deleteErr = nil
+	cleaned, err = CleanupExpiredPendingUploads(context.Background(), store, repo, now, 100)
+	if err != nil {
+		t.Fatalf("retry cleanup: %v", err)
+	}
+	if cleaned != 1 || upload.Status != model.PendingUploadStatusExpired {
+		t.Fatalf("retry cleanup = %d, upload %#v", cleaned, upload)
 	}
 }

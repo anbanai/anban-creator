@@ -110,17 +110,20 @@ func (r *fakeProjectPendingUploadRepo) FindPendingUploadByID(_ context.Context, 
 	return &cp, nil
 }
 
-func (r *fakeProjectPendingUploadRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) error {
+func (r *fakeProjectPendingUploadRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) (int64, error) {
 	r.finalized = append(r.finalized, ids...)
-	return nil
+	return int64(len(ids)), nil
 }
 
 func (r *fakeProjectPendingUploadRepo) FindExpiredPendingUploads(context.Context, time.Time, int) ([]*model.PendingUpload, error) {
 	return nil, nil
 }
 
-func (r *fakeProjectPendingUploadRepo) MarkPendingUploadExpired(context.Context, string, time.Time) error {
-	return nil
+func (r *fakeProjectPendingUploadRepo) ClaimPendingUploadExpiration(context.Context, string, time.Time) (bool, error) {
+	return false, nil
+}
+func (r *fakeProjectPendingUploadRepo) ReopenPendingUploadExpiration(context.Context, string) (bool, error) {
+	return false, nil
 }
 
 func TestProjectFetchProfileAIAnalysisMergesFields(t *testing.T) {

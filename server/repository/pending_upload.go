@@ -34,16 +34,17 @@ func (r *pendingUploadRepository) FindPendingUploadByID(ctx context.Context, id 
 	return &upload, nil
 }
 
-func (r *pendingUploadRepository) FinalizePendingUploads(ctx context.Context, ids []string, finalizedAt time.Time) error {
+func (r *pendingUploadRepository) FinalizePendingUploads(ctx context.Context, ids []string, finalizedAt time.Time) (int64, error) {
 	if len(ids) == 0 {
-		return nil
+		return 0, nil
 	}
-	return r.db.WithContext(ctx).Model(&model.PendingUpload{}).
-		Where("id IN ? AND status = ?", ids, model.PendingUploadStatusPending).
+	result := r.db.WithContext(ctx).Model(&model.PendingUpload{}).
+		Where("id IN ? AND status = ? AND expires_at > ?", ids, model.PendingUploadStatusPending, finalizedAt).
 		Updates(map[string]any{
 			"status":       model.PendingUploadStatusFinalized,
 			"finalized_at": finalizedAt,
-		}).Error
+		})
+	return result.RowsAffected, result.Error
 }
 
 func (r *pendingUploadRepository) FindExpiredPendingUploads(ctx context.Context, before time.Time, limit int) ([]*model.PendingUpload, error) {
@@ -56,11 +57,22 @@ func (r *pendingUploadRepository) FindExpiredPendingUploads(ctx context.Context,
 	return uploads, err
 }
 
-func (r *pendingUploadRepository) MarkPendingUploadExpired(ctx context.Context, id string, expiredAt time.Time) error {
-	return r.db.WithContext(ctx).Model(&model.PendingUpload{}).
-		Where("id = ? AND status = ?", id, model.PendingUploadStatusPending).
+func (r *pendingUploadRepository) ClaimPendingUploadExpiration(ctx context.Context, id string, expiredAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.PendingUpload{}).
+		Where("id = ? AND status = ? AND expires_at <= ?", id, model.PendingUploadStatusPending, expiredAt).
 		Updates(map[string]any{
 			"status":     model.PendingUploadStatusExpired,
 			"expired_at": expiredAt,
-		}).Error
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *pendingUploadRepository) ReopenPendingUploadExpiration(ctx context.Context, id string) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.PendingUpload{}).
+		Where("id = ? AND status = ?", id, model.PendingUploadStatusExpired).
+		Updates(map[string]any{
+			"status":     model.PendingUploadStatusPending,
+			"expired_at": nil,
+		})
+	return result.RowsAffected == 1, result.Error
 }

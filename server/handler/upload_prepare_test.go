@@ -56,14 +56,17 @@ func (r *handlerPendingUploadRepo) CreatePendingUpload(_ context.Context, upload
 func (r *handlerPendingUploadRepo) FindPendingUploadByID(context.Context, string) (*model.PendingUpload, error) {
 	return nil, service.ErrPendingUploadNotFound
 }
-func (r *handlerPendingUploadRepo) FinalizePendingUploads(context.Context, []string, time.Time) error {
-	return nil
+func (r *handlerPendingUploadRepo) FinalizePendingUploads(context.Context, []string, time.Time) (int64, error) {
+	return 0, nil
 }
 func (r *handlerPendingUploadRepo) FindExpiredPendingUploads(context.Context, time.Time, int) ([]*model.PendingUpload, error) {
 	return nil, nil
 }
-func (r *handlerPendingUploadRepo) MarkPendingUploadExpired(context.Context, string, time.Time) error {
-	return nil
+func (r *handlerPendingUploadRepo) ClaimPendingUploadExpiration(context.Context, string, time.Time) (bool, error) {
+	return false, nil
+}
+func (r *handlerPendingUploadRepo) ReopenPendingUploadExpiration(context.Context, string) (bool, error) {
+	return false, nil
 }
 
 func TestUploadPrepareReturnsDirectUploadCredentials(t *testing.T) {

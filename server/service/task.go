@@ -782,7 +782,7 @@ func hasVideoEditorSourceVideo(input *model.VideoInput, attachments []model.Entr
 		}
 	}
 	for _, attachment := range attachments {
-		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && strings.TrimSpace(attachment.URL) != "" {
+		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && entryAttachmentStorageSource(attachment) != "" {
 			return true
 		}
 	}

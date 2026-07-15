@@ -167,10 +167,21 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 		t.Fatal(err)
 	}
 	taskPrefix := fmt.Sprintf("uploads/users/%s/projects/%s/tasks/%s", userID, projectID, taskID)
+	keyFirstUploadID := uuid.NewString()
+	keyFirstKey := fmt.Sprintf("uploads/pending/%s/%s/key-first.png", userID, keyFirstUploadID)
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+		ID: keyFirstUploadID, UserID: userID, Purpose: DirectUploadPurposeAIEntryAttachment,
+		Key: keyFirstKey, PublicURL: "https://bucket.oss-cn-x.aliyuncs.com/" + keyFirstKey,
+		FileName: "key-first.png", ContentType: "image/png", Size: 321,
+		Status: model.PendingUploadStatusFinalized, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning, Prompt: "topic", ReferenceImageURL: "https://bucket.oss-cn-x.aliyuncs.com/" + taskPrefix + "/inputs/reference.png"}
 	task.SetInputAttachments([]model.EntryAttachment{
 		{Type: "text", Text: "brief", FileName: "brief.txt"},
 		{Type: "image", URL: "https://bucket.oss-cn-x.aliyuncs.com/" + taskPrefix + "/inputs/input.png", FileName: "input.png"},
+		{Type: "image", UploadID: keyFirstUploadID, Key: keyFirstKey, FileName: "key-first.png", ContentType: "image/png", Size: 321},
 		{Role: model.EntryAttachmentRoleResumeLatest, Text: "read attachments/foo.pdf"},
 		{Role: model.EntryAttachmentRoleResumeFile, URL: "https://bucket.oss-cn-x.aliyuncs.com/" + taskPrefix + "/resume/run/attachments/foo.pdf", Key: taskPrefix + "/resume/run/attachments/foo.pdf", FileName: "foo.pdf"},
 	})
@@ -209,15 +220,15 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 		paths[file.Path] = file
 	}
 	resumeAttachmentPath, _ := serveragent.ExecutionResumeAttachmentPath(executionID, "foo.pdf")
-	for _, path := range []string{".anban-creator/reference.png", ".anban-creator/input-attachments/01-brief.txt", ".anban-creator/input-attachments/02-input.png", ".anban-creator/input-attachments/index.json", resumeContextPath, resumeAttachmentPath} {
+	for _, path := range []string{".anban-creator/reference.png", ".anban-creator/input-attachments/01-brief.txt", ".anban-creator/input-attachments/02-input.png", ".anban-creator/input-attachments/03-key-first.png", ".anban-creator/input-attachments/index.json", resumeContextPath, resumeAttachmentPath} {
 		if _, ok := paths[path]; !ok {
 			t.Fatalf("missing bootstrap path %q in %#v", path, first.Files)
 		}
 	}
-	if _, exists := paths[path.Join(path.Dir(resumeAttachmentPath), "04-foo.pdf")]; exists {
+	if _, exists := paths[path.Join(path.Dir(resumeAttachmentPath), "05-foo.pdf")]; exists {
 		t.Fatal("bootstrap renamed persisted resume attachment")
 	}
-	if paths[".anban-creator/reference.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/02-input.png"].DownloadURL == "" {
+	if paths[".anban-creator/reference.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/02-input.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/03-key-first.png"].DownloadURL == "" {
 		t.Fatal("private objects were not signed")
 	}
 	if !strings.Contains(paths[".anban-creator/settings.json"].Text, `"seednote"`) {
@@ -317,6 +328,68 @@ func TestBuildEcommerceProductBootstrapFiles(t *testing.T) {
 	}
 }
 
+func TestBuildEcommerceProductBootstrapFilesFromKeyFirstAttachment(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
+	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformEcommerce}
+	key := "uploads/pending/user-1/product-upload/product.png"
+	attachment := model.EntryAttachment{Type: "image", UploadID: "product-upload", Key: key, FileName: "product.png", ContentType: "image/png"}
+	task.SetInputAttachments([]model.EntryAttachment{attachment})
+	task.SetEcommerce(model.EcommerceConfig{ProductPhotos: []string{key}})
+	if err := repo.PendingUploads().CreatePendingUpload(context.Background(), &model.PendingUpload{
+		ID: attachment.UploadID, UserID: task.UserID, Purpose: DirectUploadPurposeAIEntryAttachment,
+		Key: key, PublicURL: "https://bucket.oss-cn-x.aliyuncs.com/" + key,
+		Status: model.PendingUploadStatusFinalized, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := svc.buildProductFiles(context.Background(), task, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("build product files: %v", err)
+	}
+	if len(files) != 2 || files[0].DownloadURL == "" || len(store.signedKeys) != 1 || store.signedKeys[0] != key {
+		t.Fatalf("product files = %#v, signed keys = %#v", files, store.signedKeys)
+	}
+}
+
+func TestBuildResponseSignsKeyFirstReferenceImage(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: 10 * time.Minute, SignedURLTTL: 60}, zerolog.Nop())
+	svc.now = func() time.Time { return now }
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "write", Status: model.TaskStatusRunning}
+	key := "uploads/pending/user-1/reference-upload/reference.png"
+	attachment := model.EntryAttachment{Type: "image", UploadID: "reference-upload", Key: key, FileName: "reference.png", ContentType: "image/png"}
+	task.ReferenceImageURL = key
+	task.SetInputAttachments([]model.EntryAttachment{attachment})
+	if err := repo.PendingUploads().CreatePendingUpload(context.Background(), &model.PendingUpload{
+		ID: attachment.UploadID, UserID: task.UserID, Purpose: DirectUploadPurposeAIEntryAttachment,
+		Key: key, PublicURL: "https://bucket.oss-cn-x.aliyuncs.com/" + key,
+		Status: model.PendingUploadStatusFinalized, ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("build response: %v", err)
+	}
+	paths := map[string]BootstrapFile{}
+	for _, file := range response.Files {
+		paths[file.Path] = file
+	}
+	if paths[".anban-creator/reference.png"].DownloadURL == "" || len(store.signedKeys) != 2 {
+		t.Fatalf("files = %#v, signed keys = %#v", response.Files, store.signedKeys)
+	}
+}
+
 func TestBootstrapDownloadSigningRequiresCanonicalTaskOwnership(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
@@ -335,6 +408,7 @@ func TestBootstrapDownloadSigningRequiresCanonicalTaskOwnership(t *testing.T) {
 
 	attacks := []bootstrapDownloadSource{
 		{URL: goodURL, AssertedKey: "uploads/users/victim/projects/victim-project/tasks/victim-task/secret.png"},
+		{AssertedKey: goodKey, UploadID: "fabricated-upload", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}},
 		{URL: "https://bucket.oss-cn-x.aliyuncs.com/uploads/users/user-2/projects/project-2/tasks/task-2/secret.png", AssertedKey: "uploads/users/user-2/projects/project-2/tasks/task-2/secret.png"},
 		{URL: "https://bucket.oss-cn-x.aliyuncs.com/uploads/users/user-1/projects/project-2/tasks/task-2/secret.png", AssertedKey: "uploads/users/user-1/projects/project-2/tasks/task-2/secret.png"},
 		{URL: "https://external.example.com/uploads/users/user-1/projects/project-1/tasks/task-1/secret.png"},
@@ -406,10 +480,13 @@ func TestBootstrapDownloadSigningValidatesFinalizedPendingUpload(t *testing.T) {
 	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: url, AssertedKey: key, UploadID: "upload-1", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}, deadline); err != nil {
 		t.Fatalf("finalized pending input rejected: %v", err)
 	}
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{AssertedKey: key, UploadID: "upload-1", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}, deadline); err != nil {
+		t.Fatalf("key-only finalized pending input rejected: %v", err)
+	}
 	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: url, AssertedKey: key, UploadID: "other", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}, deadline); err == nil {
 		t.Fatal("mismatched upload id accepted")
 	}
-	if len(store.signedKeys) != 1 {
+	if len(store.signedKeys) != 2 {
 		t.Fatalf("rejected upload reached signer: %v", store.signedKeys)
 	}
 
@@ -418,7 +495,7 @@ func TestBootstrapDownloadSigningValidatesFinalizedPendingUpload(t *testing.T) {
 		upload *model.PendingUpload
 		source bootstrapDownloadSource
 	}{
-		{name: "guessed key without URL", source: bootstrapDownloadSource{AssertedKey: key, UploadID: "upload-1", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}},
+		{name: "guessed key without upload id", source: bootstrapDownloadSource{AssertedKey: key, AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}},
 		{name: "other tenant URL", upload: &model.PendingUpload{ID: "victim-upload", UserID: "victim", Purpose: DirectUploadPurposeAIEntryAttachment, Key: "uploads/pending/victim/victim-upload/secret.png", PublicURL: "https://bucket.oss-cn-x.aliyuncs.com/uploads/pending/victim/victim-upload/secret.png", Status: model.PendingUploadStatusFinalized, ExpiresAt: time.Now().Add(time.Hour)}, source: bootstrapDownloadSource{URL: "https://bucket.oss-cn-x.aliyuncs.com/uploads/pending/victim/victim-upload/secret.png", AssertedKey: "uploads/pending/victim/victim-upload/secret.png", UploadID: "victim-upload", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}},
 		{name: "wrong purpose", upload: &model.PendingUpload{ID: "wrong-purpose", UserID: task.UserID, Purpose: DirectUploadPurposeVideoReference, Key: "uploads/pending/user-1/wrong-purpose/video.mp4", PublicURL: "https://bucket.oss-cn-x.aliyuncs.com/uploads/pending/user-1/wrong-purpose/video.mp4", Status: model.PendingUploadStatusFinalized, ExpiresAt: time.Now().Add(time.Hour)}, source: bootstrapDownloadSource{URL: "https://bucket.oss-cn-x.aliyuncs.com/uploads/pending/user-1/wrong-purpose/video.mp4", UploadID: "wrong-purpose", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}},
 		{name: "not finalized", upload: &model.PendingUpload{ID: "still-pending", UserID: task.UserID, Purpose: DirectUploadPurposeAIEntryAttachment, Key: "uploads/pending/user-1/still-pending/input.png", PublicURL: "https://bucket.oss-cn-x.aliyuncs.com/uploads/pending/user-1/still-pending/input.png", Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour)}, source: bootstrapDownloadSource{URL: "https://bucket.oss-cn-x.aliyuncs.com/uploads/pending/user-1/still-pending/input.png", UploadID: "still-pending", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}},

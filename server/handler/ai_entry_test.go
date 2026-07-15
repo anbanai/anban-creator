@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -32,6 +33,8 @@ func (f *fakeAIEntrySubmitter) Submit(_ context.Context, req service.AIEntrySubm
 type aiEntryPendingRepo struct {
 	upload       *model.PendingUpload
 	finalizedIDs []string
+	findErr      error
+	finalizeErr  error
 }
 
 func (r *aiEntryPendingRepo) CreatePendingUpload(context.Context, *model.PendingUpload) error {
@@ -39,6 +42,9 @@ func (r *aiEntryPendingRepo) CreatePendingUpload(context.Context, *model.Pending
 }
 
 func (r *aiEntryPendingRepo) FindPendingUploadByID(_ context.Context, id string) (*model.PendingUpload, error) {
+	if r.findErr != nil {
+		return nil, r.findErr
+	}
 	if r.upload != nil && r.upload.ID == id {
 		cp := *r.upload
 		return &cp, nil
@@ -46,17 +52,29 @@ func (r *aiEntryPendingRepo) FindPendingUploadByID(_ context.Context, id string)
 	return nil, service.ErrPendingUploadNotFound
 }
 
-func (r *aiEntryPendingRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) error {
+func (r *aiEntryPendingRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) (int64, error) {
+	if r.finalizeErr != nil {
+		return 0, r.finalizeErr
+	}
 	r.finalizedIDs = append(r.finalizedIDs, ids...)
-	return nil
+	for _, id := range ids {
+		if r.upload != nil && r.upload.ID == id {
+			r.upload.Status = model.PendingUploadStatusFinalized
+		}
+	}
+	return int64(len(ids)), nil
 }
 
 func (r *aiEntryPendingRepo) FindExpiredPendingUploads(context.Context, time.Time, int) ([]*model.PendingUpload, error) {
 	return nil, nil
 }
 
-func (r *aiEntryPendingRepo) MarkPendingUploadExpired(context.Context, string, time.Time) error {
-	return nil
+func (r *aiEntryPendingRepo) ClaimPendingUploadExpiration(context.Context, string, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *aiEntryPendingRepo) ReopenPendingUploadExpiration(context.Context, string) (bool, error) {
+	return false, nil
 }
 
 func TestAIEntryHandlerSubmitRequiresAuth(t *testing.T) {
@@ -228,6 +246,46 @@ func TestAIEntryHandlerSubmitRejectsInvalidAttachmentURL(t *testing.T) {
 	}
 	if submitter.req.UserID != "" {
 		t.Fatalf("submitter should not be called, got %#v", submitter.req)
+	}
+}
+
+func TestAIEntryHandlerSubmitRedactsAttachmentRepositoryErrors(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	submitter := &fakeAIEntrySubmitter{}
+	pending := &aiEntryPendingRepo{findErr: errors.New("database password secret")}
+	h := NewAIEntryHandler(submitter, pending, &logger)
+	app := fiber.New()
+	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.Submit(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
+		"project_id":"project-1",
+		"text":"写文章",
+		"attachments":[{
+			"type":"image",
+			"upload_id":"upload-1",
+			"key":"uploads/pending/user-1/upload-1/ref.png"
+		}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s; want 500", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "database password secret") {
+		t.Fatalf("response leaked repository error: %s", body)
+	}
+	if submitter.req.UserID != "" {
+		t.Fatalf("submitter called after repository error: %#v", submitter.req)
 	}
 }
 

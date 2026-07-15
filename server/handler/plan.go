@@ -164,7 +164,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		AllowedTypes: map[string]bool{"image": true},
 	})
 	if err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		return respondInputAttachmentError(c, h.logger, err)
 	}
 	req.InputAttachments = validatedAttachments
 	if h.repo != nil {
@@ -341,7 +341,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 			AllowedTypes: map[string]bool{"image": true},
 		})
 		if err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+			return respondInputAttachmentError(c, h.logger, err)
 		}
 		req.InputAttachments = &validatedAttachments
 	}
