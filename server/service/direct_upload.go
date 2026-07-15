@@ -266,16 +266,25 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 	}, nil
 }
 
-func FinalizePendingUploadURLs(ctx context.Context, repo PendingUploadRepository, userID, purpose string, urls []string, now time.Time) error {
+func FinalizePendingUploadURLs(ctx context.Context, repo PendingUploadRepository, userID, purpose string, urls []string, now time.Time, ownedURLChecks ...func(string) bool) error {
 	if repo == nil || len(urls) == 0 {
 		return nil
+	}
+	var isOwnedURL func(string) bool
+	if len(ownedURLChecks) > 0 {
+		isOwnedURL = ownedURLChecks[0]
 	}
 	ids := make([]string, 0, len(urls))
 	seen := map[string]struct{}{}
 	for _, raw := range urls {
+		key, hasCanonicalKey := pendingUploadKeyFromURL(raw)
+		isPendingKey := hasCanonicalKey && strings.HasPrefix(key, "uploads/pending/")
+		if isPendingKey && isOwnedURL != nil && !isOwnedURL(raw) {
+			continue
+		}
 		id := pendingUploadIDFromURL(raw)
 		if id == "" {
-			if key, ok := pendingUploadKeyFromURL(raw); ok && strings.HasPrefix(key, "uploads/pending/") {
+			if isPendingKey {
 				return ErrPendingUploadInvalidURL
 			}
 			continue

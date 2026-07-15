@@ -382,6 +382,23 @@ func TestFinalizePendingUploadURLsRejectsMalformedPendingKey(t *testing.T) {
 	}
 }
 
+func TestFinalizePendingUploadURLsIgnoresExternalPendingLikePaths(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	repo := &fakePendingUploadRepo{}
+	for _, raw := range []string{
+		"https://external.example.com/uploads%2Fpending%2Fuser-1",
+		"https://external.example.com/uploads/pending/user-1/external-id/ref.png",
+	} {
+		err := FinalizePendingUploadURLs(
+			context.Background(), repo, "user-1", DirectUploadPurposeTaskReference,
+			[]string{raw}, now, func(string) bool { return false },
+		)
+		if err != nil {
+			t.Fatalf("FinalizePendingUploadURLs(%q) error = %v, want external URL ignored", raw, err)
+		}
+	}
+}
+
 func TestValidatePendingUploadURLReturnsKeyWithoutFinalizing(t *testing.T) {
 	now := time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC)
 	repo := &fakePendingUploadRepo{uploads: map[string]*model.PendingUpload{
