@@ -407,14 +407,19 @@ func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID            string
-	ProjectID         string
-	Prompt            string
-	Quantity          int
-	ImageRatio        string
-	ImageModelKey     string
-	SkipRefImage      *bool
-	ReferenceImageURL string
+	UserID    string
+	ProjectID string
+	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
+	// keep billing and runtime configuration anchored to the source task instead
+	// of re-deriving them from a project or server policy that changed later.
+	FrozenTaskType       string
+	PreserveFrozenConfig bool
+	Prompt               string
+	Quantity             int
+	ImageRatio           string
+	ImageModelKey        string
+	SkipRefImage         *bool
+	ReferenceImageURL    string
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
@@ -506,6 +511,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	taskType := project.Platform
+	if p.FrozenTaskType != "" {
+		taskType = p.FrozenTaskType
+	}
 	videoCfg, videoInput, err := p.videoPayloadForTask(taskType)
 	if err != nil {
 		return nil, err
@@ -520,7 +528,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	// stay per-task. Done before validation so selected modules are available to
 	// the agent; modules shape later MCP usage, not the creation-time base fee.
 	effectiveImageModelKey := p.ImageModelKey
-	if taskType == model.PlatformEcommerce {
+	if taskType == model.PlatformEcommerce && !p.PreserveFrozenConfig {
 		projEc := project.EcommerceDefaults.Data()
 		if p.Ecommerce == nil {
 			p.Ecommerce = &model.EcommerceConfig{}
@@ -546,17 +554,19 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
-		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
-			Config:          s.montageCfg,
-			TaskType:        taskType,
-			LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
-			CloudAvailable:  s.montageCloudAvailable(),
-			AssetsCloudSafe: true,
-		})
-		if err != nil {
-			return nil, err
+		if !p.PreserveFrozenConfig {
+			target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+				Config:          s.montageCfg,
+				TaskType:        taskType,
+				LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
+				CloudAvailable:  s.montageCloudAvailable(),
+				AssetsCloudSafe: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			p.ExecutionTarget = target
 		}
-		p.ExecutionTarget = target
 	}
 	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(videoInput, p.InputAttachments) {
 		return nil, fmt.Errorf("videoeditor task requires at least one source video")
@@ -633,7 +643,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		// to the agent's auto-research path. The generation skill respects an
 		// already-set topic, so it will not re-claim during execution.
 		taskPrompt := p.Prompt
-		if taskPrompt == "" && s.topicPoolSvc != nil &&
+		if taskPrompt == "" && !p.PreserveFrozenConfig && s.topicPoolSvc != nil &&
 			(taskType == model.PlatformArticle || taskType == model.PlatformSeednote || taskType == model.PlatformMoments) {
 			claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, p.UserID, p.ProjectID, taskID)
 			if claimErr != nil {

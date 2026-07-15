@@ -1021,6 +1021,81 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	}
 }
 
+func TestCloneTaskAcceptsFinalInputSnapshot(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "clone-snapshot@example.com", Password: "hashed", InviteCode: "clonesnapshot", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.NewString()
+	source := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, Prompt: "source prompt"}
+	source.SetInputAttachments([]model.EntryAttachment{{Role: "brief", Text: "source attachment"}, {Role: model.EntryAttachmentRoleResumeLatest, Text: "old resume"}})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	uploadID := "clone-upload"
+	pendingKey := "uploads/pending/" + userID + "/" + uploadID + "/reference.png"
+	finalKey := "uploads/finalized/" + userID + "/" + uploadID + "/reference.png"
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		Key: pendingKey, FileName: "reference.png", ContentType: "image/png", Size: 123,
+		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create pending upload: %v", err)
+	}
+	store := pendingUploadStatStore(repo.PendingUploads())
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	app := fiber.New()
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Clone(c)
+	})
+
+	resp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
+		"prompt":"  edited prompt  ",
+		"input_attachments":[{
+			"type":"image","upload_id":"`+uploadID+`","key":"`+pendingKey+`",
+			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999,
+			"url":"https://attacker.example/secret","instruction":"  keep logo  "
+		}]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, body)
+	}
+	var envelope struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data.Prompt != "edited prompt" {
+		t.Fatalf("prompt = %q", envelope.Data.Prompt)
+	}
+	got := envelope.Data.InputAttachments.Data()
+	if len(got) != 1 || got[0].UploadID != uploadID || got[0].Key != finalKey || got[0].URL != "" || got[0].FileName != "reference.png" || got[0].ContentType != "image/png" || got[0].Size != 123 || got[0].Instruction != "keep logo" {
+		t.Fatalf("clone attachments = %#v, want exact verified final snapshot", got)
+	}
+	found, err := repo.Tasks().FindByID(ctx, envelope.Data.ID)
+	if err != nil {
+		t.Fatalf("find clone: %v", err)
+	}
+	if stored := found.InputAttachments.Data(); len(stored) != 1 || stored[0].Key != finalKey || stored[0].URL != "" {
+		t.Fatalf("stored clone attachments = %#v", stored)
+	}
+}
+
 func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)

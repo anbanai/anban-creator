@@ -14,7 +14,12 @@ import (
 // Completed, failed, and cancelled tasks may be cloned. The cloned task carries
 // the original's project snapshot verbatim so it uses the same frozen config as
 // the source run.
-func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, error) {
+type CloneTaskParams struct {
+	Prompt           *string
+	InputAttachments *[]model.EntryAttachment
+}
+
+func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) (*model.Task, error) {
 	src, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("find task: %w", err)
@@ -42,10 +47,16 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 	if inputSourceTaskID == "" {
 		inputSourceTaskID = src.ID
 	}
+	prompt := src.Prompt
+	if cloneParams.Prompt != nil {
+		prompt = *cloneParams.Prompt
+	}
 	params := CreateManualParams{
 		UserID:                   src.UserID,
 		ProjectID:                src.ProjectID,
-		Prompt:                   src.Prompt,
+		FrozenTaskType:           src.Type,
+		PreserveFrozenConfig:     true,
+		Prompt:                   prompt,
 		Quantity:                 1,
 		ImageRatio:               src.ImageRatio,
 		ImageModelKey:            src.ImageModelKey,
@@ -61,6 +72,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		HasTailImage:             &hasTail,
 		ArticleWithCover:         articleCover,
 		ArticleWithContentImages: articleContent,
+		ExecutionTarget:          src.ExecutionTarget,
 	}
 
 	// Preserve the e-commerce package config (module selection, product photos,
@@ -69,7 +81,9 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		ec := src.Ecommerce.Data()
 		params.Ecommerce = &ec
 	}
-	if attachments := cloneOriginalInputAttachments(src.InputAttachments.Data()); len(attachments) > 0 {
+	if cloneParams.InputAttachments != nil {
+		params.InputAttachments = cloneEntryAttachments(*cloneParams.InputAttachments)
+	} else if attachments := cloneOriginalInputAttachments(src.InputAttachments.Data()); len(attachments) > 0 {
 		params.InputAttachments = attachments
 	}
 	if model.IsVideoCreatorPlatform(src.Type) {

@@ -39,6 +39,9 @@ func (f *fakeProjectLLM) CompleteWithImage(_ context.Context, systemPrompt, user
 type fakeStorageProvider struct {
 	data     map[string][]byte
 	read     []string
+	uploaded []string
+	readErr  error
+	readMax  []int64
 	statRepo service.PendingUploadRepository
 	statErr  error
 	statInfo *storage.ObjectInfo
@@ -58,6 +61,7 @@ func (f *fakeStorageProvider) Upload(_ context.Context, key string, reader io.Re
 		f.data = map[string][]byte{}
 	}
 	f.data[key] = data
+	f.uploaded = append(f.uploaded, key)
 	return &storage.UploadResult{Key: key, URL: f.GetURL(key), Size: int64(len(data)), MimeType: contentType}, nil
 }
 
@@ -73,6 +77,9 @@ func (f *fakeStorageProvider) GetURL(key string) string { return "/api/v1/files/
 
 func (f *fakeStorageProvider) Read(_ context.Context, key string) ([]byte, error) {
 	f.read = append(f.read, key)
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
 	if data, ok := f.data[key]; ok {
 		return data, nil
 	}
@@ -80,6 +87,7 @@ func (f *fakeStorageProvider) Read(_ context.Context, key string) ([]byte, error
 }
 
 func (f *fakeStorageProvider) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	f.readMax = append(f.readMax, maxBytes)
 	data, err := f.Read(ctx, key)
 	if err != nil {
 		return nil, err
@@ -130,6 +138,12 @@ func (f *fakeStorageProvider) PromoteObject(ctx context.Context, sourceKey, fina
 	copy := *info
 	copy.Key = finalKey
 	f.objects[finalKey] = &copy
+	if data, ok := f.data[sourceKey]; ok {
+		if f.data == nil {
+			f.data = map[string][]byte{}
+		}
+		f.data[finalKey] = append([]byte(nil), data...)
+	}
 	return nil
 }
 

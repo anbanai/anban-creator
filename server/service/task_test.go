@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -150,6 +151,8 @@ type resumeTestStorage struct {
 	deleted      []string
 	uploadCount  int
 	failUploadAt int
+	returnedKey  string
+	returnedURL  string
 }
 
 func (s *resumeTestStorage) Name() string { return "resume-test" }
@@ -167,7 +170,15 @@ func (s *resumeTestStorage) Upload(_ context.Context, key string, reader io.Read
 		s.files = map[string][]byte{}
 	}
 	s.files[key] = data
-	return &storage.UploadResult{Key: key, URL: "https://storage.test/" + key, Size: int64(len(data)), MimeType: contentType}, nil
+	resultKey := key
+	if s.returnedKey != "" {
+		resultKey = s.returnedKey
+	}
+	resultURL := "https://storage.test/" + key
+	if s.returnedURL != "" {
+		resultURL = s.returnedURL
+	}
+	return &storage.UploadResult{Key: resultKey, URL: resultURL, Size: int64(len(data)), MimeType: contentType}, nil
 }
 
 func (s *resumeTestStorage) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {
@@ -2470,7 +2481,7 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID)
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatalf("Clone completed task: %v", err)
 	}
@@ -2502,6 +2513,95 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCloneAppliesInputOverrides(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	articleCover := false
+	articleContent := false
+	src := &model.Task{
+		ID:                       uuid.NewString(),
+		UserID:                   userID,
+		ProjectID:                projectID,
+		Type:                     model.PlatformArticle,
+		Status:                   model.TaskStatusCompleted,
+		Prompt:                   "source prompt",
+		ImageRatio:               "16:9",
+		ImageModelKey:            "frozen-image-model",
+		SkipReferenceImage:       true,
+		ReferenceImageURL:        "/api/v1/files/frozen-reference.png",
+		Watermark:                true,
+		HasContentImage:          false,
+		HasTailImage:             true,
+		ExecutionTarget:          model.ExecutionTargetLocal,
+		Goal:                     "frozen goal",
+		GoalMode:                 true,
+		ArticleWithCover:         &articleCover,
+		ArticleWithContentImages: &articleContent,
+	}
+	src.SetProjectSnapshot(model.ProjectSnapshot{ProjectName: "frozen project", Platform: model.PlatformArticle, Instructions: "frozen instructions"})
+	src.SetOverrides(model.StyleOverrides{VisualStyle: "frozen style"})
+	src.SetInputAttachments([]model.EntryAttachment{
+		{Role: "brief", Text: "original input", FileName: "brief.txt"},
+		{Role: model.EntryAttachmentRoleResumeLatest, Text: "old resume", FileName: "latest.md"},
+		{Role: model.EntryAttachmentRoleResumeFile, Key: "resume/old.pdf", FileName: "old.pdf"},
+	})
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+
+	overridePrompt := "edited final prompt"
+	overrideAttachments := []model.EntryAttachment{{
+		Type: "image", UploadID: "upload-final", Key: "uploads/finalized/" + userID + "/upload-final/reference.png",
+		FileName: "reference.png", ContentType: "image/png", Size: 321, Instruction: "keep logo",
+	}}
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{Prompt: &overridePrompt, InputAttachments: &overrideAttachments})
+	if err != nil {
+		t.Fatalf("Clone with overrides: %v", err)
+	}
+	if clone.Prompt != overridePrompt {
+		t.Fatalf("prompt = %q, want %q", clone.Prompt, overridePrompt)
+	}
+	if got := clone.InputAttachments.Data(); !reflect.DeepEqual(got, overrideAttachments) {
+		t.Fatalf("attachments = %#v, want exact override %#v", got, overrideAttachments)
+	}
+	if clone.InputSourceTaskID != src.ID {
+		t.Fatalf("input source = %q, want %q", clone.InputSourceTaskID, src.ID)
+	}
+	if clone.Type != src.Type || clone.ImageRatio != src.ImageRatio || clone.ImageModelKey != src.ImageModelKey || clone.ExecutionTarget != src.ExecutionTarget {
+		t.Fatalf("frozen scalar config changed: clone=%#v source=%#v", clone, src)
+	}
+	if !reflect.DeepEqual(clone.ProjectSnapshot.Data(), src.ProjectSnapshot.Data()) ||
+		!reflect.DeepEqual(clone.Overrides.Data(), src.Overrides.Data()) {
+		t.Fatalf("frozen structured config changed: snapshot=%#v overrides=%#v", clone.ProjectSnapshot.Data(), clone.Overrides.Data())
+	}
+	if clone.SkipReferenceImage != src.SkipReferenceImage || clone.ReferenceImageURL != src.ReferenceImageURL || clone.Watermark != src.Watermark || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode || clone.HasContentImage != src.HasContentImage || clone.HasTailImage != src.HasTailImage || *clone.ArticleWithCover || *clone.ArticleWithContentImages {
+		t.Fatalf("frozen image/goal config changed: clone=%#v source=%#v", clone, src)
+	}
+
+	inherited, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	if err != nil {
+		t.Fatalf("Clone omitted inputs: %v", err)
+	}
+	if inherited.Prompt != src.Prompt {
+		t.Fatalf("omitted prompt = %q, want inherited %q", inherited.Prompt, src.Prompt)
+	}
+	if got := inherited.InputAttachments.Data(); len(got) != 1 || got[0].Role != "brief" {
+		t.Fatalf("omitted attachments = %#v, want only non-resume source inputs", got)
+	}
+
+	emptyPrompt := ""
+	emptyAttachments := []model.EntryAttachment{}
+	cleared, err := svc.Clone(ctx, src.ID, CloneTaskParams{Prompt: &emptyPrompt, InputAttachments: &emptyAttachments})
+	if err != nil {
+		t.Fatalf("Clone empty inputs: %v", err)
+	}
+	if cleared.Prompt != "" || len(cleared.InputAttachments.Data()) != 0 {
+		t.Fatalf("explicit empty inputs were not preserved: prompt=%q attachments=%#v", cleared.Prompt, cleared.InputAttachments.Data())
+	}
+}
+
 func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -2520,7 +2620,7 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID)
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2554,7 +2654,7 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID)
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatalf("Clone montage task: %v", err)
 	}
@@ -2565,6 +2665,88 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 	if got.Preferences.AspectRatio != "1:1" || got.Preferences.DurationSeconds != 20 {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
+}
+
+func TestTaskServiceClonePreservesFrozenTaskTypeAndConfigs(t *testing.T) {
+	t.Run("task type ignores current project platform", func(t *testing.T) {
+		svc, repo := setupTaskServiceWithEnqueuer(t)
+		ctx := context.Background()
+		userID := uuid.NewString()
+		projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+		src := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, Prompt: "frozen article"}
+		if err := repo.Tasks().Create(ctx, src); err != nil {
+			t.Fatal(err)
+		}
+		project, err := repo.Projects().FindByID(ctx, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		project.Platform = model.PlatformSeednote
+		if err := repo.Projects().Update(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+
+		clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if clone.Type != model.PlatformArticle {
+			t.Fatalf("clone type = %q, want frozen source type %q", clone.Type, model.PlatformArticle)
+		}
+	})
+
+	t.Run("ecommerce does not merge current project defaults", func(t *testing.T) {
+		svc, repo := setupTaskServiceWithEnqueuer(t)
+		ctx := context.Background()
+		userID := uuid.NewString()
+		projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
+		project, err := repo.Projects().FindByID(ctx, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		project.SetEcommerceDefaults(model.EcommerceProjectDefaults{BrandBrief: "new project default", ImageModelKey: "new-project-model"})
+		if err := repo.Projects().Update(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+		src := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformEcommerce, Status: model.TaskStatusCompleted, Prompt: "frozen ecommerce", ImageModelKey: ""}
+		src.SetEcommerce(model.EcommerceConfig{SelectedModules: map[string]int{"main_images": 2}, SellingPoints: "source selling points"})
+		if err := repo.Tasks().Create(ctx, src); err != nil {
+			t.Fatal(err)
+		}
+
+		clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(clone.Ecommerce.Data(), src.Ecommerce.Data()) || clone.ImageModelKey != src.ImageModelKey {
+			t.Fatalf("clone ecommerce/model changed: clone=%#v model=%q source=%#v model=%q", clone.Ecommerce.Data(), clone.ImageModelKey, src.Ecommerce.Data(), src.ImageModelKey)
+		}
+	})
+
+	t.Run("montage preserves source execution target", func(t *testing.T) {
+		svc, repo := setupTaskServiceWithEnqueuer(t)
+		ctx := context.Background()
+		userID := uuid.NewString()
+		projectID := createTestProject(t, repo, userID, model.PlatformMontage)
+		src := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted, Prompt: "frozen montage", ExecutionTarget: model.ExecutionTargetLocal}
+		src.SetMontageInput(model.MontageInput{Brief: "frozen montage", PipelineKey: "default"})
+		if err := repo.Tasks().Create(ctx, src); err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.MontageConfig{Enabled: true}
+		cfg.ApplyDefaults()
+		cfg.DefaultExecutionTarget = model.ExecutionTargetCloud
+		cfg.ExecutionTargets = []string{model.ExecutionTargetCloud}
+		svc.SetMontageConfig(cfg)
+
+		clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if clone.ExecutionTarget != model.ExecutionTargetLocal || clone.LocalClaimDeadline == nil {
+			t.Fatalf("clone execution target = %q deadline=%v, want frozen local billing path", clone.ExecutionTarget, clone.LocalClaimDeadline)
+		}
+	})
 }
 
 func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
@@ -2657,6 +2839,41 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	}
 	if len(resumeFiles) != 2 || resumeFiles[0].FileName != "客户_反馈.txt" || resumeFiles[1].FileName != "客户_反馈_2.txt" || string(store.files[resumeFiles[0].Key]) != "feedback" || string(store.files[resumeFiles[1].Key]) != "feedback-2" {
 		t.Fatalf("resume files = %#v", resumeFiles)
+	}
+}
+
+func TestTaskServiceResumePersistsObjectKey(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	store := &resumeTestStorage{
+		files:       map[string][]byte{},
+		returnedKey: "https://signed.example.com/not-an-object-identity?token=secret",
+		returnedURL: "https://signed.example.com/resume.txt?token=secret",
+	}
+	svc := NewTaskService(nil, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+
+	attachments, _, err := svc.persistResumeInputs(context.Background(), task, "continue", []ResumeTaskFile{{
+		OriginalName: "notes.txt", Reader: strings.NewReader("resume bytes"), Size: int64(len("resume bytes")),
+	}})
+	if err != nil {
+		t.Fatalf("persistResumeInputs: %v", err)
+	}
+	if len(attachments) != 2 {
+		t.Fatalf("attachments = %#v, want latest and file", attachments)
+	}
+	file := attachments[1]
+	if file.Role != model.EntryAttachmentRoleResumeFile {
+		t.Fatalf("role = %q, want resume_file", file.Role)
+	}
+	wantPrefix := "uploads/users/user-1/projects/project-1/tasks/task-1/resume/"
+	if !strings.HasPrefix(file.Key, wantPrefix) || !strings.HasSuffix(file.Key, "/attachments/notes.txt") {
+		t.Fatalf("key = %q, want deterministic resume object key", file.Key)
+	}
+	if file.URL != "" {
+		t.Fatalf("url = %q, want no signed/public URL persisted", file.URL)
+	}
+	if string(store.files[file.Key]) != "resume bytes" {
+		t.Fatalf("stored bytes missing under stable key %q", file.Key)
 	}
 }
 

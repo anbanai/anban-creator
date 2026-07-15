@@ -6,8 +6,10 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 )
@@ -20,6 +22,8 @@ var validImageMIMETypes = map[string]bool{
 	"image/webp": true,
 	"image/bmp":  true,
 }
+
+const maxDesignerReferenceBytes int64 = 10 * 1024 * 1024
 
 func isValidImageMIME(ct string) bool {
 	ct = strings.ToLower(strings.SplitN(ct, ";", 2)[0])
@@ -35,12 +39,19 @@ func truncate(s string, maxRunes int) string {
 }
 
 type DesignerHandler struct {
-	svc    *service.DesignerService
-	logger *zerolog.Logger
+	svc     *service.DesignerService
+	pending service.PendingUploadRepository
+	store   storage.Provider
+	logger  *zerolog.Logger
 }
 
 func NewDesignerHandler(svc *service.DesignerService, logger *zerolog.Logger) *DesignerHandler {
 	return &DesignerHandler{svc: svc, logger: logger}
+}
+
+func (h *DesignerHandler) SetDirectUploadDependencies(pending service.PendingUploadRepository, store storage.Provider) {
+	h.pending = pending
+	h.store = store
 }
 
 // GetProviders handles GET /api/v1/designer/providers
@@ -133,6 +144,69 @@ func (h *DesignerHandler) UploadReference(c fiber.Ctx) error {
 		"filename": file.Filename,
 		"size":     len(data),
 	})
+}
+
+type registerDesignerReferenceRequest struct {
+	UploadID string `json:"upload_id"`
+	Key      string `json:"key"`
+}
+
+// RegisterReference handles POST /api/v1/designer/register-reference.
+func (h *DesignerHandler) RegisterReference(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req registerDesignerReferenceRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	req.UploadID = strings.TrimSpace(req.UploadID)
+	req.Key = strings.TrimSpace(req.Key)
+	if req.UploadID == "" || req.Key == "" {
+		return Error(c, fiber.StatusBadRequest, "upload_id and key are required")
+	}
+
+	finalStore, _ := h.store.(service.DirectUploadFinalizationStorage)
+	verified, err := service.ResolveDirectUploadAttachment(c.Context(), finalStore, h.pending, userID, []string{
+		service.DirectUploadPurposeDesignerReference,
+	}, req.UploadID, req.Key, time.Now())
+	if err != nil {
+		return h.respondRegisterReferenceError(c, err)
+	}
+	data, err := storage.ReadObject(c.Context(), h.store, verified.Key, maxDesignerReferenceBytes)
+	if err != nil {
+		return h.respondRegisterReferenceError(c, err)
+	}
+	fileID, err := h.svc.RegisterReferenceFile(c.Context(), userID, verified.FileName, data)
+	if err != nil {
+		return h.respondRegisterReferenceError(c, err)
+	}
+	return Success(c, fiber.Map{
+		"file_id":  fileID,
+		"filename": verified.FileName,
+		"size":     verified.Size,
+	})
+}
+
+func (h *DesignerHandler) respondRegisterReferenceError(c fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, service.ErrPendingUploadAccessDenied):
+		return Forbidden(c, "pending upload access denied")
+	case errors.Is(err, service.ErrPendingUploadExpired):
+		return Error(c, fiber.StatusBadRequest, "pending upload has expired")
+	case errors.Is(err, service.ErrPendingUploadNotPending):
+		return Error(c, fiber.StatusBadRequest, "pending upload is not reusable")
+	case errors.Is(err, service.ErrPendingUploadObjectInvalid):
+		return Error(c, fiber.StatusBadRequest, "pending upload object is invalid")
+	case errors.Is(err, storage.ErrObjectExceedsMaxSize):
+		return Error(c, fiber.StatusBadRequest, "file too large (max 10MB)")
+	default:
+		if h.logger != nil {
+			h.logger.Error().Err(err).Msg("designer register reference failed")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to register reference")
+	}
 }
 
 // UploadReferenceFromURL handles POST /api/v1/designer/upload-reference-from-url

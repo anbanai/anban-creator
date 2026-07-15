@@ -275,6 +275,7 @@ func NewRouter(svc *Services) *fiber.App {
 		designer := apiV1.Group("/designer")
 		designer.Get("/providers", svc.DesignerHandler.GetProviders)
 		designer.Post("/generate", svc.DesignerHandler.Generate)
+		designer.Post("/register-reference", svc.DesignerHandler.RegisterReference)
 		designer.Post("/upload-reference", svc.DesignerHandler.UploadReference)
 		designer.Post("/upload-reference-from-url", svc.DesignerHandler.UploadReferenceFromURL)
 		designer.Get("/history", svc.DesignerHandler.GetHistory)

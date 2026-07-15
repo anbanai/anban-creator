@@ -635,6 +635,7 @@ func main() {
 		if mysqlDB != nil && imageSvc != nil {
 			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, cfg, store, log)
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
+			designerHandler.SetDirectUploadDependencies(repo.PendingUploads(), store)
 		}
 		if repo != nil {
 			if writingLLMClient != nil || imageUnderstandingClient != nil || videoUnderstandingClient != nil {

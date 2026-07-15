@@ -861,13 +861,19 @@ func isLocalFilePath(url string) bool {
 }
 
 func (s *DesignerService) UploadReference(ctx context.Context, userID string, filename string, data []byte) (string, error) {
-	return s.registerReferenceFile(ctx, userID, filename, data)
+	return s.registerReferenceFile(ctx, userID, filename, data, true)
+}
+
+// RegisterReferenceFile makes an already-persisted direct upload available to
+// image providers without copying the bytes to another storage object.
+func (s *DesignerService) RegisterReferenceFile(ctx context.Context, userID, filename string, data []byte) (string, error) {
+	return s.registerReferenceFile(ctx, userID, filename, data, false)
 }
 
 // registerReferenceFile saves the bytes to a temp file with the canonical
 // "anban-creator_ref_{fileID}_{filename}" naming (which resolveFilePath globs
-// against), mirrors them to remote storage when configured, and returns the fileID.
-func (s *DesignerService) registerReferenceFile(ctx context.Context, userID, filename string, data []byte) (string, error) {
+// against), optionally mirrors them to remote storage, and returns the fileID.
+func (s *DesignerService) registerReferenceFile(ctx context.Context, userID, filename string, data []byte, persist bool) (string, error) {
 	fileID := uuid.New().String()
 
 	// Always save locally so providers can read file paths
@@ -877,7 +883,7 @@ func (s *DesignerService) registerReferenceFile(ctx context.Context, userID, fil
 	}
 
 	// Optionally persist to remote storage
-	if s.storage != nil {
+	if persist && s.storage != nil {
 		ext := strings.ToLower(filepath.Ext(filename))
 		contentType := "image/png"
 		switch ext {
@@ -953,7 +959,7 @@ func (s *DesignerService) UploadReferenceFromURL(ctx context.Context, userID, ra
 	if ext == "" {
 		ext = ".png"
 	}
-	return s.registerReferenceFile(ctx, userID, "source"+ext, data)
+	return s.registerReferenceFile(ctx, userID, "source"+ext, data, true)
 }
 
 func (s *DesignerService) GetHistory(ctx context.Context, userID, projectID string, page, pageSize int) ([]model.ImageGeneration, int64, error) {

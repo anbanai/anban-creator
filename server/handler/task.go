@@ -125,6 +125,11 @@ type createTaskRequest struct {
 	ExecutionTarget string `json:"execution_target,omitempty"`
 }
 
+type cloneTaskRequest struct {
+	Prompt           *string                  `json:"prompt"`
+	InputAttachments *[]model.EntryAttachment `json:"input_attachments"`
+}
+
 type bulkDownloadTaskFilesRequest struct {
 	TaskIDs []string `json:"task_ids"`
 }
@@ -504,7 +509,36 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 
-	newTask, err := h.service.Clone(c.Context(), id)
+	var req cloneTaskRequest
+	if len(c.Body()) > 0 {
+		if err := c.Bind().Body(&req); err != nil {
+			return Error(c, fiber.StatusBadRequest, "invalid request body")
+		}
+	}
+	params := service.CloneTaskParams{}
+	if req.Prompt != nil {
+		prompt := strings.TrimSpace(*req.Prompt)
+		if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
+			return Error(c, fiber.StatusBadRequest, "prompt must not exceed 5120 characters")
+		}
+		params.Prompt = &prompt
+	}
+	if req.InputAttachments != nil {
+		var pending service.PendingUploadRepository
+		if h.repo != nil {
+			pending = h.repo.PendingUploads()
+		}
+		attachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
+			MaxCount:     16,
+			AllowedTypes: allAgentAttachmentTypes,
+		})
+		if err != nil {
+			return respondInputAttachmentError(c, h.logger, err)
+		}
+		params.InputAttachments = &attachments
+	}
+
+	newTask, err := h.service.Clone(c.Context(), id, params)
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", id).Msg("clone task failed")
 		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) {
@@ -834,7 +868,7 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "image_model_unavailable"})
 			continue
 		}
-		newTask, err := h.service.Clone(c.Context(), id)
+		newTask, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{})
 		if err != nil {
 			if errors.Is(err, service.ErrInsufficientCredits) {
 				results = append(results, bulkTaskResult{ID: id, Reason: "insufficient_credits"})
