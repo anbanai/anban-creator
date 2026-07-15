@@ -140,12 +140,10 @@ func TestVideoSkillsDoNotGateExecutionOnCreditBalance(t *testing.T) {
 func TestSplitVideoHookQualityGatesAreRegistered(t *testing.T) {
 	text := readRepoFile(t, "../../claudecode/hooks/hooks.json")
 	for _, want := range []string{
-		`"matcher": "anban:videocreator"`,
-		`"matcher": "anban:videoeditor"`,
+		`"matcher": "^anban:videocreator$"`,
+		`"matcher": "^anban:videoeditor$"`,
 		"videocreator-quality-gate.sh",
 		"videoeditor-quality-gate.sh",
-		`agent_name=\"videocreator\"`,
-		`agent_name=\"videoeditor\"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("claudecode hooks missing %q", want)

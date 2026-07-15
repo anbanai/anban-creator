@@ -256,8 +256,64 @@ func TestClaudeCodeSubagentHooksUsePluginScopedMatchers(t *testing.T) {
 	}
 
 	for _, group := range cfg.Hooks["SubagentStop"] {
-		if !strings.HasPrefix(group.Matcher, "anban:") {
-			t.Fatalf("SubagentStop matcher %q must use the Claude Code plugin-scoped agent name, e.g. anban:seednote", group.Matcher)
+		if !strings.HasPrefix(group.Matcher, "^anban:") || !strings.HasSuffix(group.Matcher, "$") {
+			t.Fatalf("SubagentStop matcher %q must be an anchored Claude Code plugin-scoped agent name, e.g. ^anban:seednote$", group.Matcher)
+		}
+	}
+}
+
+func TestClaudeCodeCompletionHooksUseSupportedRoles(t *testing.T) {
+	var cfg struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string `json:"type"`
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	raw := readRepoFile(t, "../../claudecode/hooks/hooks.json")
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("hooks.json must be valid JSON: %v", err)
+	}
+
+	if _, exists := cfg.Hooks["TaskCompleted"]; exists {
+		t.Fatal("hooks.json must not register TaskCompleted hooks")
+	}
+
+	expected := map[string]string{
+		"^anban:seednote$":     "${CLAUDE_PLUGIN_ROOT}/hooks/seednote-quality-gate.sh",
+		"^anban:videocreator$": "${CLAUDE_PLUGIN_ROOT}/hooks/videocreator-quality-gate.sh",
+		"^anban:videoeditor$":  "${CLAUDE_PLUGIN_ROOT}/hooks/videoeditor-quality-gate.sh",
+	}
+	groups := cfg.Hooks["SubagentStop"]
+	if len(groups) != len(expected) {
+		t.Fatalf("SubagentStop has %d groups, want exactly %d", len(groups), len(expected))
+	}
+	seen := make(map[string]bool, len(groups))
+	for _, group := range groups {
+		command, ok := expected[group.Matcher]
+		if !ok {
+			t.Fatalf("SubagentStop has unsupported matcher %q", group.Matcher)
+		}
+		if seen[group.Matcher] {
+			t.Fatalf("SubagentStop matcher %q is registered more than once", group.Matcher)
+		}
+		seen[group.Matcher] = true
+		if len(group.Hooks) != 1 {
+			t.Fatalf("SubagentStop matcher %q has %d hooks, want exactly one command hook", group.Matcher, len(group.Hooks))
+		}
+		hook := group.Hooks[0]
+		if hook.Type != "command" {
+			t.Fatalf("SubagentStop matcher %q hook type = %q, want command", group.Matcher, hook.Type)
+		}
+		if hook.Command != command {
+			t.Fatalf("SubagentStop matcher %q command = %q, want %q", group.Matcher, hook.Command, command)
+		}
+	}
+	for matcher := range expected {
+		if !seen[matcher] {
+			t.Fatalf("SubagentStop missing matcher %q", matcher)
 		}
 	}
 }
