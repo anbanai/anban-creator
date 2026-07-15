@@ -70,12 +70,15 @@ function TaskOverviewDetails({
   showCreditDetails,
   onOpenCreditDetails,
 }: TaskOverviewDetailsProps) {
+  const projectName = task.project_snapshot
+    ? task.project_snapshot.project_name || '—'
+    : project?.name || '—'
   const rows = [
     ['创建时间', formatFullDateTimeCN(task.created_at)],
     ['开始时间', formatFullDateTimeCN(task.started_at)],
     ['完成时间', formatFullDateTimeCN(task.completed_at)],
     ['来源', task.plan_id ? '计划任务' : '手动创建'],
-    ['项目', task.project_snapshot?.project_name || project?.name || '—'],
+    ['项目', projectName],
   ]
 
   return (
@@ -127,6 +130,11 @@ function TaskLogDetails({
   onReconnectLogs,
   logContainerRef,
 }: TaskLogDetailsProps) {
+  useEffect(() => {
+    if (!autoScrollLogs || !logContainerRef.current) return
+    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
+  }, [autoScrollLogs, logContainerRef, logs])
+
   return (
     <div className="flex min-h-full flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
@@ -160,9 +168,14 @@ function TaskLogDetails({
         <Alert variant="destructive">
           <AlertTriangle />
           <AlertTitle>日志连接中断</AlertTitle>
-          <AlertDescription className="flex items-center justify-between gap-3">
-            <span>{sseError}</span>
-            <Button size="xs" variant="ghost" onClick={onReconnectLogs}>
+          <AlertDescription className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="min-w-0 break-words">{sseError}</span>
+            <Button
+              size="xs"
+              variant="ghost"
+              className="shrink-0 self-start sm:self-auto"
+              onClick={onReconnectLogs}
+            >
               <RefreshCw data-icon="inline-start" />
               重新连接
             </Button>

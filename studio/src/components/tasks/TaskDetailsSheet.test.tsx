@@ -1,6 +1,6 @@
 import { createRef } from 'react'
-import { fireEvent, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/test-utils'
 import type { Project, Task } from '@/types'
 import { TaskConfigurationDetails } from './TaskConfigurationDetails'
@@ -60,6 +60,10 @@ const articleTask: Task = {
   completed_at: '2026-07-15T01:08:09.000Z',
 }
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 function createSheetProps(overrides: Partial<TaskDetailsSheetProps> = {}): TaskDetailsSheetProps {
   return {
     open: true,
@@ -112,6 +116,75 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('简约留白')).toBeInTheDocument()
   })
 
+  it('does not fill a present partial snapshot from the mutable current project', () => {
+    const changedProject: Project = {
+      ...project,
+      name: '后来修改的项目名',
+      visual_style: '后来修改的视觉风格',
+      image_ratio: '1:1',
+      author: '后来修改的作者',
+      writer: '后来修改的写作风格',
+      theme: '后来修改的排版',
+      ecommerce_defaults: { image_model_key: 'later-image-model' },
+    }
+    const partialSnapshotTask: Task = {
+      ...articleTask,
+      image_model_key: undefined,
+      project_snapshot: { platform: 'article' },
+    }
+    render(
+      <TaskDetailsSheet
+        {...createSheetProps({ task: partialSnapshotTask, project: changedProject })}
+      />,
+    )
+
+    expect(screen.queryByText('后来修改的项目名')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '配置' }))
+
+    for (const currentValue of [
+      '后来修改的项目名',
+      '后来修改的视觉风格',
+      '1:1',
+      'later-image-model',
+      '后来修改的作者',
+      '后来修改的写作风格',
+      '后来修改的排版',
+    ]) {
+      expect(screen.queryByText(currentValue)).not.toBeInTheDocument()
+    }
+  })
+
+  it('uses current project values only for a legacy task without a snapshot', () => {
+    const legacyProject: Project = {
+      ...project,
+      name: '旧任务当前项目',
+      visual_style: '旧任务视觉风格',
+      image_ratio: '4:3',
+      author: '旧任务作者',
+      writer: '旧任务写作风格',
+      theme: '旧任务排版',
+      ecommerce_defaults: { image_model_key: 'legacy-image-model' },
+    }
+    const legacyTask: Task = {
+      ...articleTask,
+      image_model_key: undefined,
+      project_snapshot: undefined,
+    }
+    render(
+      <TaskDetailsSheet {...createSheetProps({ task: legacyTask, project: legacyProject })} />,
+    )
+
+    expect(screen.getByText('旧任务当前项目')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '配置' }))
+    expect(screen.getByText('旧任务当前项目')).toBeInTheDocument()
+    expect(screen.getByText('旧任务视觉风格')).toBeInTheDocument()
+    expect(screen.getByText('4:3')).toBeInTheDocument()
+    expect(screen.getByText('legacy-image-model')).toBeInTheDocument()
+    expect(screen.getByText('旧任务作者')).toBeInTheDocument()
+    expect(screen.getByText('旧任务写作风格')).toBeInTheDocument()
+    expect(screen.getByText('旧任务排版')).toBeInTheDocument()
+  })
+
   it('shows the compact task input fallback on Materials', () => {
     render(<TaskDetailsSheet {...createSheetProps()} />)
 
@@ -139,6 +212,37 @@ describe('TaskDetailsSheet', () => {
     expect(props.onToggleAutoScroll).toHaveBeenCalledTimes(1)
     expect(props.onCopyLogs).toHaveBeenCalledTimes(1)
     expect(props.onReconnectLogs).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('实时连接已中断')).toHaveClass('min-w-0', 'break-words')
+    expect(screen.getByRole('button', { name: '重新连接' })).toHaveClass('shrink-0')
+  })
+
+  it('scrolls existing logs to the bottom when Logs mounts from an inactive tab', () => {
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(640)
+    const props = createSheetProps()
+    render(<TaskDetailsSheet {...props} />)
+
+    expect(props.logContainerRef.current).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+
+    expect(props.logContainerRef.current?.scrollTop).toBe(640)
+  })
+
+  it('scrolls existing logs to the bottom when the controlled sheet reopens', async () => {
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(720)
+    const props = createSheetProps()
+    const { rerender } = render(<TaskDetailsSheet {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+    const firstLogContainer = props.logContainerRef.current
+    expect(firstLogContainer?.scrollTop).toBe(720)
+
+    rerender(<TaskDetailsSheet {...props} open={false} />)
+    await waitFor(() => expect(props.logContainerRef.current).toBeNull())
+
+    rerender(<TaskDetailsSheet {...props} open />)
+    await waitFor(() => {
+      expect(props.logContainerRef.current).not.toBe(firstLogContainer)
+      expect(props.logContainerRef.current?.scrollTop).toBe(720)
+    })
   })
 
   it('disables copying while waiting for the first log entry', () => {
@@ -192,6 +296,8 @@ describe('TaskConfigurationDetails', () => {
         hard_constraints: { ratio: '9:16', duration: 15, watermark: false },
       },
       video_creator_config: {
+        scenario_key: 'office_story',
+        production_mode: 'sequence',
         creative_type: 'personal_ip',
         purpose: 'planting',
         subject_profile: '30 岁效率博主，黑色衬衫',
@@ -201,7 +307,26 @@ describe('TaskConfigurationDetails', () => {
         resolution: '720p',
         ratio: '9:16',
         duration: 15,
+        target_duration_source: 'ai_planned',
+        target_duration_reason: '按口播节奏拆分为两个连续片段',
+        segment_min_duration_seconds: 3,
+        segment_max_duration_seconds: 8,
+        watermark: false,
+        preflight: true,
+        retake_budget: 2,
+        delivery_targets: ['final_video', 'quality_review'],
         estimated_credits: 7440,
+        segments: [{
+          index: 1,
+          start_second: 0,
+          end_second: 8,
+          duration: 8,
+          prompt: '办公室开场并展示行动清单',
+          model_key: 'seedance-2.0-mini',
+          resolution: '720p',
+          ratio: '9:16',
+          estimated_credits: 3600,
+        }],
         references: [{
           type: 'video_url',
           url: 'https://cdn.example.com/ref.mp4',
@@ -230,7 +355,85 @@ describe('TaskConfigurationDetails', () => {
     expect(screen.getByText('把会议记录变成行动清单')).toBeInTheDocument()
     expect(screen.getByText('7,600')).toBeInTheDocument()
     expect(screen.getByText('7,550')).toBeInTheDocument()
+    expect(screen.getByText('office_story')).toBeInTheDocument()
+    expect(screen.getByText('sequence')).toBeInTheDocument()
+    expect(screen.getByText('ai_planned')).toBeInTheDocument()
+    expect(screen.getByText('按口播节奏拆分为两个连续片段')).toBeInTheDocument()
+    expect(screen.getByText('3s')).toBeInTheDocument()
+    expect(screen.getByText('8s')).toBeInTheDocument()
+    expect(screen.getByText('final_video、quality_review')).toBeInTheDocument()
+    expect(screen.getByText('#1 · 0–8s · 时长 8s')).toBeInTheDocument()
+    expect(screen.getByText('办公室开场并展示行动清单')).toBeInTheDocument()
+    expect(screen.getByText(/豆包 Seedance 2\.0 Mini（轻量） · 720p · 9:16 · 3,600 积分/)).toBeInTheDocument()
     expect(screen.getByText('节奏参考 · https://cdn.example.com/ref.mp4')).toBeInTheDocument()
     expect(screen.getByText('输入时长 60s')).toBeInTheDocument()
+  })
+
+  it('shows video editor audit config when omitted fields are false or zero', () => {
+    const editorTask: Task = {
+      ...articleTask,
+      id: 'video-editor-task',
+      type: 'videoeditor',
+      project_snapshot: { platform: 'videoeditor' },
+      video_editor_config: {
+        production_mode: 'guided',
+        target_duration_seconds: 0,
+        segment_min_duration_seconds: 0,
+        segment_max_duration_seconds: 0,
+        watermark: false,
+        preflight: false,
+        retake_budget: 0,
+        delivery_targets: ['final_video'],
+      },
+    }
+
+    render(<TaskConfigurationDetails task={editorTask} project={project} />)
+
+    expect(screen.getByRole('heading', { name: 'Agent 解析结果' })).toBeInTheDocument()
+    expect(screen.getByText('guided')).toBeInTheDocument()
+    expect(screen.getByText('final_video')).toBeInTheDocument()
+    expect(screen.getByText('规格').parentElement).toHaveTextContent('0s')
+    expect(screen.getByText('最短分段').parentElement).toHaveTextContent('0s')
+    expect(screen.getByText('最长分段').parentElement).toHaveTextContent('0s')
+    expect(screen.getByText('返修预算').parentElement).toHaveTextContent('0')
+    expect(screen.getByText('水印').parentElement).toHaveTextContent('关闭')
+    expect(screen.getByText('预检').parentElement).toHaveTextContent('关闭')
+  })
+
+  it('keeps ecommerce task overrides but does not leak current project defaults into a snapshot', () => {
+    const ecommerceProject: Project = {
+      ...project,
+      platform: 'ecommerce',
+      ecommerce_defaults: {
+        target_platform: '后来修改的平台',
+        default_selected_modules: { current_module: 9 },
+        brand_brief: '后来修改的品牌简述',
+        image_model_key: 'later-ecommerce-model',
+      },
+    }
+    const ecommerceTask: Task = {
+      ...articleTask,
+      id: 'ecommerce-task',
+      type: 'ecommerce',
+      image_model_key: undefined,
+      project_snapshot: {
+        project_name: '电商创建快照',
+        platform: 'ecommerce',
+        ecommerce_defaults: {},
+      },
+      ecommerce: {
+        target_platform: 'Amazon',
+        selected_modules: { hero: 2 },
+      },
+    }
+
+    render(<TaskConfigurationDetails task={ecommerceTask} project={ecommerceProject} />)
+
+    expect(screen.getByText('Amazon')).toBeInTheDocument()
+    expect(screen.getByText('hero x2')).toBeInTheDocument()
+    expect(screen.queryByText('后来修改的平台')).not.toBeInTheDocument()
+    expect(screen.queryByText('current_module x9')).not.toBeInTheDocument()
+    expect(screen.queryByText('后来修改的品牌简述')).not.toBeInTheDocument()
+    expect(screen.queryByText('later-ecommerce-model')).not.toBeInTheDocument()
   })
 })
