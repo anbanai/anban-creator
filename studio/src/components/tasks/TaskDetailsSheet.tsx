@@ -70,8 +70,9 @@ function TaskOverviewDetails({
   showCreditDetails,
   onOpenCreditDetails,
 }: TaskOverviewDetailsProps) {
-  const projectName = task.project_snapshot
-    ? task.project_snapshot.project_name || '—'
+  const hasSnapshot = Boolean(task.project_snapshot?.platform)
+  const projectName = hasSnapshot
+    ? task.project_snapshot?.project_name || '—'
     : project?.name || '—'
   const rows = [
     ['创建时间', formatFullDateTimeCN(task.created_at)],

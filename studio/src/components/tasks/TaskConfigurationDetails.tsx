@@ -9,7 +9,14 @@ import {
 } from '@/lib/video-display'
 import { isVideoCreator, isVideoEditor, isVideoPlatform } from '@/lib/video-platforms'
 import { cn } from '@/lib/utils'
-import type { Project, Task, VideoInput, VideoReferenceAsset, VideoTaskConfig } from '@/types'
+import type {
+  Project,
+  Task,
+  VideoInput,
+  VideoPricingBreakdown,
+  VideoReferenceAsset,
+  VideoTaskConfig,
+} from '@/types'
 
 export interface TaskConfigurationDetailsProps {
   task: Task
@@ -28,7 +35,12 @@ interface VideoSnapshotProps {
   config?: VideoTaskConfig
 }
 
+interface SnapshotDetailsProps extends TaskConfigurationDetailsProps {
+  hasSnapshot: boolean
+}
+
 type VideoSegment = NonNullable<VideoTaskConfig['segments']>[number]
+type VideoPricingSegment = NonNullable<VideoPricingBreakdown['segments']>[number]
 
 function Detail({ label, value, wide = false }: DetailProps) {
   return (
@@ -39,14 +51,17 @@ function Detail({ label, value, wide = false }: DetailProps) {
   )
 }
 
-function ArticleSnapshot({ task, project }: TaskConfigurationDetailsProps) {
+function ArticleSnapshot({ task, project, hasSnapshot }: SnapshotDetailsProps) {
   const snapshot = task.project_snapshot
-  const author = task.overrides?.author
-    || (snapshot ? snapshot.author || '—' : project?.author || '—')
-  const writer = task.overrides?.writer
-    || (snapshot ? snapshot.writer || '默认' : project?.writer || '默认')
-  const theme = task.overrides?.theme
-    || (snapshot ? snapshot.theme || '默认' : project?.theme || '默认')
+  const author = hasSnapshot
+    ? snapshot?.author || '—'
+    : task.overrides?.author || project?.author || '—'
+  const writer = hasSnapshot
+    ? snapshot?.writer || '默认'
+    : task.overrides?.writer || project?.writer || '默认'
+  const theme = hasSnapshot
+    ? snapshot?.theme || '默认'
+    : task.overrides?.theme || project?.theme || '默认'
 
   return (
     <section aria-labelledby="article-task-snapshot" className="flex flex-col gap-3">
@@ -60,9 +75,9 @@ function ArticleSnapshot({ task, project }: TaskConfigurationDetailsProps) {
   )
 }
 
-function EcommerceSnapshot({ task, project }: TaskConfigurationDetailsProps) {
+function EcommerceSnapshot({ task, project, hasSnapshot }: SnapshotDetailsProps) {
   const snapshot = task.project_snapshot
-  const defaults = snapshot ? snapshot.ecommerce_defaults : project?.ecommerce_defaults
+  const defaults = hasSnapshot ? snapshot?.ecommerce_defaults : project?.ecommerce_defaults
   const selectedModules = task.ecommerce?.selected_modules || defaults?.default_selected_modules
   const modules = Object.entries(selectedModules || {})
     .map(([key, quantity]) => `${key} x${quantity}`)
@@ -104,8 +119,45 @@ function VideoReferenceList({
               {videoReferenceRoleLabel(reference.reference_role)} · {reference.file_name || reference.text || reference.url || '—'}
             </p>
             {typeof reference.input_duration_seconds === 'number' ? (
-              <p className="text-muted-foreground">输入时长 {reference.input_duration_seconds}s</p>
+              <p className="text-muted-foreground">
+                输入时长 {reference.input_duration_seconds}s
+              </p>
             ) : null}
+            <dl className="grid gap-x-3 gap-y-2 pt-1 sm:grid-cols-2">
+              <Detail label="参考角色" value={videoReferenceRoleLabel(reference.reference_role)} />
+              <Detail label="参考类型" value={reference.type} />
+              {reference.file_name !== undefined ? (
+                <Detail label="文件名" value={reference.file_name || '—'} />
+              ) : null}
+              {reference.url !== undefined ? (
+                <Detail label="URL" value={reference.url || '—'} wide />
+              ) : null}
+              {reference.text !== undefined ? (
+                <Detail label="文本" value={reference.text || '—'} wide />
+              ) : null}
+              {reference.task_file_id !== undefined ? (
+                <Detail label="任务文件 ID" value={reference.task_file_id || '—'} />
+              ) : null}
+              {reference.mime_type !== undefined ? (
+                <Detail label="MIME" value={reference.mime_type || '—'} />
+              ) : null}
+              {typeof reference.file_size === 'number' ? (
+                <Detail label="文件大小" value={`${reference.file_size.toLocaleString()} bytes`} />
+              ) : null}
+              {reference.must_keep !== undefined ? (
+                <Detail label="必须保留" value={reference.must_keep.join('、') || '—'} wide />
+              ) : null}
+              {reference.can_change !== undefined ? (
+                <Detail label="允许变化" value={reference.can_change.join('、') || '—'} wide />
+              ) : null}
+              {reference.must_not_transfer !== undefined ? (
+                <Detail
+                  label="禁止迁移"
+                  value={reference.must_not_transfer.join('、') || '—'}
+                  wide
+                />
+              ) : null}
+            </dl>
           </div>
         </Fragment>
       ))}
@@ -161,16 +213,85 @@ function VideoSegmentList({ segments }: { segments: VideoSegment[] }) {
   )
 }
 
+function VideoPricingSegmentDetails({ segment }: { segment: VideoPricingSegment }) {
+  return (
+    <p className="py-2 text-xs text-foreground">
+      #{segment.index} · {segment.seconds}s · {segment.cny.toLocaleString()} CNY · {segment.credits.toLocaleString()} 积分
+    </p>
+  )
+}
+
+function VideoPricingDetails({ pricing }: { pricing?: VideoPricingBreakdown }) {
+  if (!pricing) return null
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs font-medium text-foreground">计价明细</p>
+      <dl className="grid gap-3 sm:grid-cols-2">
+        <Detail label="计价金额" value={`${pricing.cny.toLocaleString()} CNY`} />
+        <Detail label="每元积分" value={pricing.credits_per_cny.toLocaleString()} />
+        <Detail
+          label="积分倍率"
+          value={typeof pricing.credit_multiplier === 'number'
+            ? pricing.credit_multiplier.toLocaleString()
+            : '—'}
+        />
+        <Detail
+          label="档位倍率"
+          value={typeof pricing.tier_multiplier === 'number'
+            ? pricing.tier_multiplier.toLocaleString()
+            : '—'}
+        />
+        <Detail
+          label="用户倍率"
+          value={typeof pricing.user_multiplier === 'number'
+            ? pricing.user_multiplier.toLocaleString()
+            : '—'}
+        />
+        <Detail label="输入视频" value={configuredBoolean(pricing.input_video)} />
+        <Detail
+          label="计价输入时长"
+          value={typeof pricing.input_seconds === 'number' ? `${pricing.input_seconds}s` : '—'}
+        />
+        <Detail label="计价输出时长" value={`${pricing.output_seconds}s`} />
+        <Detail
+          label="计价分段数"
+          value={typeof pricing.segment_count === 'number'
+            ? pricing.segment_count.toLocaleString()
+            : '—'}
+        />
+      </dl>
+      {pricing.segments && pricing.segments.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">计价分段</p>
+          <div className="flex flex-col border-y border-border">
+            {pricing.segments.map((segment, index) => (
+              <Fragment key={`${segment.index}-${segment.seconds}-${index}`}>
+                {index > 0 ? <Separator /> : null}
+                <VideoPricingSegmentDetails segment={segment} />
+              </Fragment>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function VideoSnapshot({ task, input, config }: VideoSnapshotProps) {
   const references = input?.references ?? []
   const constraints = input?.hard_constraints
   const resolvedReferences = config?.references ?? []
+  const pricing = config?.pricing_breakdown
+  const resolvedModel = config?.model_key || config?.model || pricing?.model_key
+  const resolvedResolution = config?.resolution || pricing?.resolution || '—'
+  const resolvedRatio = config?.ratio || pricing?.ratio || '—'
   const resolvedDuration = config?.target_duration_seconds
-    ?? config?.pricing_breakdown?.output_seconds
     ?? config?.duration
+    ?? pricing?.output_seconds
   const resolvedSpec = [
-    config?.resolution || '—',
-    config?.ratio || '—',
+    resolvedResolution,
+    resolvedRatio,
     typeof resolvedDuration === 'number' ? `${resolvedDuration}s` : '—',
   ].join(' · ')
 
@@ -213,7 +334,7 @@ function VideoSnapshot({ task, input, config }: VideoSnapshotProps) {
             <dl className="grid gap-3 sm:grid-cols-2">
               <Detail
                 label="视频模型"
-                value={videoModelDisplayName(config?.model_key || config?.model) || '—'}
+                value={videoModelDisplayName(resolvedModel) || '—'}
               />
               <Detail label="规格" value={resolvedSpec} />
               <Detail label="创意类型" value={videoCreativeTypeLabel(config?.creative_type)} />
@@ -266,6 +387,7 @@ function VideoSnapshot({ task, input, config }: VideoSnapshotProps) {
               />
             </dl>
             <VideoSegmentList segments={config?.segments ?? []} />
+            <VideoPricingDetails pricing={pricing} />
             <div className="flex flex-col gap-2">
               <p className="text-xs text-muted-foreground">执行参考素材</p>
               <VideoReferenceList emptyLabel="未解析参考素材" references={resolvedReferences} />
@@ -279,16 +401,18 @@ function VideoSnapshot({ task, input, config }: VideoSnapshotProps) {
 
 export function TaskConfigurationDetails({ task, project }: TaskConfigurationDetailsProps) {
   const snapshot = task.project_snapshot
-  const projectName = snapshot ? snapshot.project_name || '—' : project?.name || '—'
-  const visualStyle = task.overrides?.visual_style
-    || (snapshot ? snapshot.visual_style || '—' : project?.visual_style || '—')
+  const hasSnapshot = Boolean(snapshot?.platform)
+  const projectName = hasSnapshot ? snapshot?.project_name || '—' : project?.name || '—'
+  const visualStyle = hasSnapshot
+    ? snapshot?.visual_style || '—'
+    : task.overrides?.visual_style || project?.visual_style || '—'
   const imageRatio = task.image_ratio
-    || (snapshot ? snapshot.image_ratio || '—' : project?.image_ratio || '—')
+    || (hasSnapshot ? snapshot?.image_ratio || '—' : project?.image_ratio || '—')
   const imageModel = task.image_model_key
-    || (snapshot
-      ? snapshot.ecommerce_defaults?.image_model_key || '—'
+    || (hasSnapshot
+      ? snapshot?.ecommerce_defaults?.image_model_key || '—'
       : project?.ecommerce_defaults?.image_model_key || '—')
-  const platform = snapshot ? snapshot.platform || task.type : project?.platform || task.type
+  const platform = hasSnapshot ? snapshot?.platform || task.type : project?.platform || task.type
   const videoInput = isVideoCreator(task.type)
     ? task.video_creator_input
     : isVideoEditor(task.type)
@@ -316,13 +440,13 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
       {task.type === 'article' ? (
         <>
           <Separator />
-          <ArticleSnapshot task={task} project={project} />
+          <ArticleSnapshot task={task} project={project} hasSnapshot={hasSnapshot} />
         </>
       ) : null}
       {task.type === 'ecommerce' ? (
         <>
           <Separator />
-          <EcommerceSnapshot task={task} project={project} />
+          <EcommerceSnapshot task={task} project={project} hasSnapshot={hasSnapshot} />
         </>
       ) : null}
       {isVideoPlatform(task.type) ? (

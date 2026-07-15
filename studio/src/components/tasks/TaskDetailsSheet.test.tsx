@@ -185,6 +185,76 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('旧任务排版')).toBeInTheDocument()
   })
 
+  it('treats an empty snapshot object as legacy override plus current project data', () => {
+    const legacyProject: Project = {
+      ...project,
+      name: '空快照当前项目',
+      visual_style: '当前项目视觉不应覆盖',
+      image_ratio: '5:4',
+      author: '当前项目作者不应覆盖',
+      writer: '当前项目写作不应覆盖',
+      theme: '当前项目排版不应覆盖',
+      ecommerce_defaults: { image_model_key: 'empty-snapshot-image-model' },
+    }
+    const legacyTask: Task = {
+      ...articleTask,
+      image_model_key: undefined,
+      project_snapshot: {},
+      overrides: {
+        visual_style: '旧任务覆盖视觉',
+        author: '旧任务覆盖作者',
+        writer: '旧任务覆盖写作',
+        theme: '旧任务覆盖排版',
+      },
+    }
+    render(
+      <TaskDetailsSheet {...createSheetProps({ task: legacyTask, project: legacyProject })} />,
+    )
+
+    expect(screen.getByText('空快照当前项目')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '配置' }))
+    expect(screen.getByText('空快照当前项目')).toBeInTheDocument()
+    expect(screen.getByText('旧任务覆盖视觉')).toBeInTheDocument()
+    expect(screen.getByText('旧任务覆盖作者')).toBeInTheDocument()
+    expect(screen.getByText('旧任务覆盖写作')).toBeInTheDocument()
+    expect(screen.getByText('旧任务覆盖排版')).toBeInTheDocument()
+    expect(screen.getByText('5:4')).toBeInTheDocument()
+    expect(screen.getByText('empty-snapshot-image-model')).toBeInTheDocument()
+    expect(screen.queryByText('当前项目视觉不应覆盖')).not.toBeInTheDocument()
+  })
+
+  it('ignores conflicting legacy style overrides when the snapshot platform is valid', () => {
+    const snapshotTask: Task = {
+      ...articleTask,
+      project_snapshot: {
+        project_name: '冻结项目',
+        platform: 'article',
+        visual_style: '冻结视觉',
+        image_ratio: '3:2',
+        author: '冻结作者',
+        writer: '冻结写作',
+        theme: '冻结排版',
+      },
+      overrides: {
+        visual_style: '冲突旧视觉',
+        author: '冲突旧作者',
+        writer: '冲突旧写作',
+        theme: '冲突旧排版',
+      },
+    }
+
+    render(<TaskConfigurationDetails task={snapshotTask} project={project} />)
+
+    expect(screen.getByText('冻结视觉')).toBeInTheDocument()
+    expect(screen.getByText('冻结作者')).toBeInTheDocument()
+    expect(screen.getByText('冻结写作')).toBeInTheDocument()
+    expect(screen.getByText('冻结排版')).toBeInTheDocument()
+    expect(screen.queryByText('冲突旧视觉')).not.toBeInTheDocument()
+    expect(screen.queryByText('冲突旧作者')).not.toBeInTheDocument()
+    expect(screen.queryByText('冲突旧写作')).not.toBeInTheDocument()
+    expect(screen.queryByText('冲突旧排版')).not.toBeInTheDocument()
+  })
+
   it('shows the compact task input fallback on Materials', () => {
     render(<TaskDetailsSheet {...createSheetProps()} />)
 
@@ -398,6 +468,84 @@ describe('TaskConfigurationDetails', () => {
     expect(screen.getByText('返修预算').parentElement).toHaveTextContent('0')
     expect(screen.getByText('水印').parentElement).toHaveTextContent('关闭')
     expect(screen.getByText('预检').parentElement).toHaveTextContent('关闭')
+  })
+
+  it('renders authoritative pricing and complete resolved reference audit data', () => {
+    const pricedVideoTask: Task = {
+      ...articleTask,
+      id: 'priced-video-task',
+      type: 'videocreator',
+      image_model_key: undefined,
+      project_snapshot: { platform: 'videocreator' },
+      video_creator_config: {
+        pricing_breakdown: {
+          cny: 0,
+          credits_per_cny: 100,
+          credit_multiplier: 0,
+          tier_multiplier: 1.25,
+          user_multiplier: 0.8,
+          input_video: false,
+          input_seconds: 0,
+          output_seconds: 12,
+          segment_count: 2,
+          resolution: '1080p',
+          ratio: '16:9',
+          model_key: 'seedance-2.0-fast',
+          segments: [
+            { index: 1, seconds: 0, cny: 0, credits: 0 },
+            { index: 2, seconds: 12, cny: 2.5, credits: 250 },
+          ],
+        },
+        references: [
+          {
+            type: 'video_url',
+            url: 'https://cdn.example.com/source.mp4',
+            task_file_id: 'task-file-42',
+            reference_role: 'full remake reference',
+            must_keep: ['产品 Logo', '人物身份'],
+            can_change: ['背景环境'],
+            must_not_transfer: ['平台水印'],
+            file_name: 'source.mp4',
+            mime_type: 'video/mp4',
+            file_size: 1048576,
+            input_duration_seconds: 0,
+          },
+          {
+            type: 'text',
+            text: '只复刻节奏，不复刻人物',
+            reference_role: 'rhythm',
+          },
+        ],
+      },
+    }
+
+    render(<TaskConfigurationDetails task={pricedVideoTask} project={project} />)
+
+    expect(screen.getByText('豆包 Seedance 2.0 Fast（快速）')).toBeInTheDocument()
+    expect(screen.getByText('1080p · 16:9 · 12s')).toBeInTheDocument()
+    expect(screen.getByText('计价金额').parentElement).toHaveTextContent('0 CNY')
+    expect(screen.getByText('每元积分').parentElement).toHaveTextContent('100')
+    expect(screen.getByText('积分倍率').parentElement).toHaveTextContent('0')
+    expect(screen.getByText('档位倍率').parentElement).toHaveTextContent('1.25')
+    expect(screen.getByText('用户倍率').parentElement).toHaveTextContent('0.8')
+    expect(screen.getByText('输入视频').parentElement).toHaveTextContent('关闭')
+    expect(screen.getByText('计价输入时长').parentElement).toHaveTextContent('0s')
+    expect(screen.getByText('计价输出时长').parentElement).toHaveTextContent('12s')
+    expect(screen.getByText('计价分段数').parentElement).toHaveTextContent('2')
+    expect(screen.getByText('#1 · 0s · 0 CNY · 0 积分')).toBeInTheDocument()
+    expect(screen.getByText('#2 · 12s · 2.5 CNY · 250 积分')).toBeInTheDocument()
+
+    expect(screen.getByText('完整复刻参考')).toBeInTheDocument()
+    expect(screen.getByText('source.mp4')).toBeInTheDocument()
+    expect(screen.getByText('https://cdn.example.com/source.mp4')).toBeInTheDocument()
+    expect(screen.getByText('task-file-42')).toBeInTheDocument()
+    expect(screen.getByText('video/mp4')).toBeInTheDocument()
+    expect(screen.getByText('1,048,576 bytes')).toBeInTheDocument()
+    expect(screen.getByText('输入时长 0s')).toBeInTheDocument()
+    expect(screen.getByText('产品 Logo、人物身份')).toBeInTheDocument()
+    expect(screen.getByText('背景环境')).toBeInTheDocument()
+    expect(screen.getByText('平台水印')).toBeInTheDocument()
+    expect(screen.getByText('只复刻节奏，不复刻人物')).toBeInTheDocument()
   })
 
   it('keeps ecommerce task overrides but does not leak current project defaults into a snapshot', () => {
