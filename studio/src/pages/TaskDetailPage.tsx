@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Streamdown } from 'streamdown'
-import { AlertTriangle, ArrowLeft, ChevronDown, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban, Upload, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban, Upload, X, Info } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -21,12 +21,12 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
-import ReferenceUsageSummary from '@/components/tasks/ReferenceUsageSummary'
-import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
+import { TaskDetailsSheet } from '@/components/tasks/TaskDetailsSheet'
 import { VideoProductionPanel } from '@/components/video/VideoProductionPanel'
+import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
@@ -35,7 +35,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
-import { isVideoCreator, isVideoEditor, isVideoPlatform } from '@/lib/video-platforms'
+import { isVideoCreator, isVideoEditor } from '@/lib/video-platforms'
 import { formatCreditDescription } from '@/lib/credit-display'
 import { taskFailureMessage } from '@/lib/studio-ux'
 
@@ -97,6 +97,7 @@ export default function TaskDetailPage() {
   const [showProjectDialog, setShowProjectDialog] = useState(false)
   const [showResumeDialog, setShowResumeDialog] = useState(false)
   const [showCreditDialog, setShowCreditDialog] = useState(false)
+  const [showTaskDetails, setShowTaskDetails] = useState(false)
   const [resumePrompt, setResumePrompt] = useState('')
   const [resumeFiles, setResumeFiles] = useState<ResumeFileInput[]>([])
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
@@ -149,9 +150,6 @@ export default function TaskDetailPage() {
     .filter(Boolean) ?? [])
     .slice(-MAX_PERSISTED_LOGS)
   const displayLogs = sseLogs.length > 0 ? sseLogs : persistedLogs
-  // 行尾两空格 + \n 是 Markdown 的硬换行语法（<br>），避免单 \n 被 marked 当作 soft break 塌缩成空格。
-  const logMarkdown = displayLogs.join('  \n')
-  const showLogs = displayLogs.length > 0 || Boolean(sseError) || task?.status === 'running'
   // progressValue takes the MAX of live SSE and persisted task.progress to
   // guarantee a monotonic bar. task.progress is the server-side high-water
   // mark (UpdateProgressColumn has a monotonic guard); latest_progress.percent
@@ -400,11 +398,6 @@ export default function TaskDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task?.status])
 
-  useEffect(() => {
-    if (!autoScrollLogs || !logContainerRef.current) return
-    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
-  }, [displayLogs, autoScrollLogs])
-
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -460,29 +453,14 @@ export default function TaskDetailPage() {
   const failureMessage = taskFailureMessage(task)
   const currentTask = task
   const snapshot = task.project_snapshot
-  const showProjectParameters = Boolean(snapshot?.platform || project)
-  const projectParameterName = snapshot?.project_name || project?.name || '—'
-  const projectParameterVisualStyle = snapshot?.visual_style || project?.visual_style || '—'
-  const projectParameterImageRatio = snapshot?.image_ratio || project?.image_ratio || task.image_ratio || '—'
-  const projectParameterImageModel = task.image_model_key || snapshot?.ecommerce_defaults?.image_model_key || project?.ecommerce_defaults?.image_model_key || '—'
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
-  const videoUserInput = isVideoCreator(task.type)
-    ? task.video_creator_input
-    : isVideoEditor(task.type)
-      ? task.video_editor_input
-      : undefined
   const videoResolvedConfig = isVideoCreator(task.type)
     ? task.video_creator_config
     : isVideoEditor(task.type)
       ? task.video_editor_config
       : undefined
-  const videoWorkflowLabel = isVideoEditor(task.type) ? '视频剪辑后期' : 'AI 视频生成'
-  const videoUserBrief = videoUserInput?.brief?.trim() || task.prompt || ''
-  const videoUserReferences = videoUserInput?.references ?? []
-  const videoHardConstraints = videoUserInput?.hard_constraints
-  const showVideoUserInput = isVideoPlatform(task.type) && Boolean(videoUserBrief || videoUserReferences.length > 0 || videoHardConstraints?.ratio || videoHardConstraints?.duration || typeof videoHardConstraints?.watermark === 'boolean')
   const videoTargetDuration = videoResolvedConfig?.target_duration_seconds || videoResolvedConfig?.pricing_breakdown?.output_seconds || videoResolvedConfig?.duration
   const videoSegmentCount = videoResolvedConfig?.segments?.length || videoResolvedConfig?.pricing_breakdown?.segment_count || 0
   const videoSpecSummary = [
@@ -491,30 +469,14 @@ export default function TaskDetailPage() {
     videoTargetDuration ? `目标 ${videoTargetDuration}s` : '目标 —',
     videoSegmentCount > 0 ? `${videoSegmentCount} 段` : null,
   ].filter(Boolean).join(' · ')
-  const videoInputReferences = videoResolvedConfig?.references ?? []
-  const hasVideoResolvedConfig = isVideoPlatform(task.type) && Boolean(
-    videoResolvedConfig && (
-      videoResolvedConfig.model_key ||
-      videoResolvedConfig.model ||
-      videoResolvedConfig.resolution ||
-      videoResolvedConfig.ratio ||
-      videoResolvedConfig.duration ||
-      videoResolvedConfig.estimated_credits ||
-      videoResolvedConfig.pricing_breakdown ||
-      videoResolvedConfig.segments?.length ||
-      videoResolvedConfig.creative_type ||
-      videoResolvedConfig.purpose ||
-      videoResolvedConfig.subject_profile ||
-      videoResolvedConfig.audience ||
-      videoResolvedConfig.single_message ||
-      videoResolvedConfig.references?.length
-    ),
-  )
   const videoCreativeType = videoCreativeTypeLabel(videoResolvedConfig?.creative_type)
   const videoPurpose = videoPurposeLabel(videoResolvedConfig?.purpose)
   const videoSubjectProfile = videoResolvedConfig?.subject_profile?.trim() || '—'
-  const videoAudience = videoResolvedConfig?.audience?.trim() || '—'
-  const videoSingleMessage = videoResolvedConfig?.single_message?.trim() || '—'
+  const showPendingResultDestination = (task.status === 'pending' || task.status === 'running')
+    && publishedFiles.length === 0
+    && collectedFiles.length === 0
+    && !task.result?.output
+    && !videoProduction
   const renderVideoPreviewDetails = (file: TaskFile) => {
     if (!isVideoTaskFile(file)) return null
     return (
@@ -924,44 +886,32 @@ export default function TaskDetailPage() {
         <WorkflowReviewSummary workflow={task.workflow_status} />
       )}
 
-      <details className="group rounded-lg border border-border bg-card">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
-          <span>任务信息</span>
-          <span className="flex min-w-0 items-center gap-2 text-xs font-normal text-muted-foreground">
-            <span className="hidden truncate sm:inline">{formatFullDateTimeCN(task.created_at)} · {task.plan_id ? '计划任务' : '手动创建'}</span>
-            <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
-          </span>
-        </summary>
-        <div className="grid gap-4 border-t border-border px-4 py-4 sm:grid-cols-2 lg:grid-cols-5">
-          <div>
-            <p className="text-xs text-muted-foreground">创建时间</p>
-            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.created_at)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">开始时间</p>
-            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.started_at)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">完成时间</p>
-            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.completed_at)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">来源</p>
-            <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
-          </div>
-          {showCreditDetails && (
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs text-muted-foreground">积分消耗</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{netConsumedCredits.toLocaleString()}</p>
-              </div>
-              <Button size="sm" variant="ghost" onClick={() => setShowCreditDialog(true)}>
-                明细
-              </Button>
-            </div>
-          )}
-        </div>
-      </details>
+      <TaskDetailsSheet
+        open={showTaskDetails}
+        onOpenChange={setShowTaskDetails}
+        task={task}
+        project={project}
+        files={publishedFiles}
+        netConsumedCredits={netConsumedCredits}
+        showCreditDetails={showCreditDetails}
+        onOpenCreditDetails={() => {
+          setShowTaskDetails(false)
+          setShowCreditDialog(true)
+        }}
+        logs={displayLogs}
+        sseError={sseError}
+        autoScrollLogs={autoScrollLogs}
+        onToggleAutoScroll={() => setAutoScrollLogs((previous) => !previous)}
+        onCopyLogs={() => {
+          navigator.clipboard.writeText(displayLogs.join('\n'))
+          toast.success('已复制执行日志')
+        }}
+        onReconnectLogs={() => {
+          setSseError(null)
+          connectSSE(0)
+        }}
+        logContainerRef={logContainerRef}
+      />
 
       {showCreditDetails && (
         <Dialog open={showCreditDialog} onOpenChange={setShowCreditDialog}>
@@ -1038,219 +988,6 @@ export default function TaskDetailPage() {
         <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
-      {showProjectParameters && (
-        <details className="group rounded-lg border border-border bg-card">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
-            <div className="min-w-0">
-              <span className="text-sm font-medium text-foreground">任务配置</span>
-              <span className="ml-2 text-xs text-muted-foreground">{projectParameterName}</span>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Badge variant="outline" className="hidden sm:inline-flex">
-                {contentTypeLabel[snapshot?.platform || project?.platform || task.type] || snapshot?.platform || project?.platform || task.type}
-              </Badge>
-              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
-            </div>
-          </summary>
-          <div className="space-y-4 border-t border-border px-4 py-4">
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">视觉风格</p>
-              <p className="mt-1 rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
-                {projectParameterVisualStyle}
-              </p>
-            </div>
-            <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-muted-foreground">图片比例</p>
-                <p className="mt-1 text-sm text-foreground">{projectParameterImageRatio}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">图片模型</p>
-                <p className="mt-1 break-all text-sm text-foreground">{projectParameterImageModel}</p>
-              </div>
-            </div>
-            {task.type === 'article' && snapshot && (
-              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
-                <div>
-                  <p className="text-xs text-muted-foreground">署名</p>
-                  <p className="mt-1 text-sm text-foreground">{snapshot.author || project?.author || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">写作风格</p>
-                  <p className="mt-1 text-sm text-foreground">{snapshot.writer || project?.writer || '默认'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">排版</p>
-                  <p className="mt-1 text-sm text-foreground">{snapshot.theme || project?.theme || '默认'}</p>
-                </div>
-              </div>
-            )}
-            {task.type === 'ecommerce' && (snapshot?.ecommerce_defaults || project?.ecommerce_defaults) && (
-              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div>
-                  <p className="text-xs text-muted-foreground">目标平台</p>
-                  <p className="mt-1 text-sm text-foreground">{snapshot?.ecommerce_defaults?.target_platform || project?.ecommerce_defaults?.target_platform || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">默认模块</p>
-                  <p className="mt-1 text-sm text-foreground">
-                    {(snapshot?.ecommerce_defaults?.default_selected_modules || project?.ecommerce_defaults?.default_selected_modules)
-                      ? Object.entries(snapshot?.ecommerce_defaults?.default_selected_modules || project?.ecommerce_defaults?.default_selected_modules || {}).map(([k, v]) => `${k} x${v}`).join('、')
-                      : '—'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">品牌 brief</p>
-                  <p className="mt-1 line-clamp-3 text-sm text-foreground">{snapshot?.ecommerce_defaults?.brand_brief || project?.ecommerce_defaults?.brand_brief || '—'}</p>
-                </div>
-              </div>
-            )}
-            {isVideoCreator(task.type) && videoResolvedConfig && (
-              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">视频模型</p>
-                  <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(videoResolvedConfig.model_key || videoResolvedConfig.model) || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">规格</p>
-                  <p className="mt-1 text-sm text-foreground">{videoSpecSummary}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">估算积分</p>
-                  <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || videoResolvedConfig.estimated_credits || 0).toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">积分消耗</p>
-                  <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || 0).toLocaleString()}</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </details>
-      )}
-
-      {showVideoUserInput && (
-        <Card size="sm" className="border-border/70">
-          <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground">{videoWorkflowLabel}</p>
-              <h2 className="mt-1 text-base font-semibold text-foreground">用户输入</h2>
-            </div>
-          </div>
-          <CardContent className="space-y-4">
-            <div>
-              <p className="text-xs text-muted-foreground">创作要求</p>
-              <p className="mt-1 whitespace-pre-wrap rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
-                {videoUserBrief || '—'}
-              </p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div>
-                <p className="text-xs text-muted-foreground">比例硬约束</p>
-                <p className="mt-1 text-sm text-foreground">{videoHardConstraints?.ratio || '由 Agent 判断'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">时长硬约束</p>
-                <p className="mt-1 text-sm text-foreground">{videoHardConstraints?.duration ? `${videoHardConstraints.duration}s` : '由 Agent 判断'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">水印硬约束</p>
-                <p className="mt-1 text-sm text-foreground">{typeof videoHardConstraints?.watermark === 'boolean' ? (videoHardConstraints.watermark ? '加水印' : '不加水印') : '由 Agent 判断'}</p>
-              </div>
-            </div>
-            <div className="border-t border-border pt-4">
-              <p className="text-xs text-muted-foreground">参考素材</p>
-              {videoUserReferences.length > 0 ? (
-                <div className="mt-2 divide-y divide-border rounded-md border border-border">
-                  {videoUserReferences.map((ref, index) => (
-                    <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-3 py-2 text-xs">
-                      <p className="truncate text-foreground">{ref.reference_role || '由 Agent 判断'} · {ref.file_name || ref.text || ref.url || '—'}</p>
-                      {ref.input_duration_seconds ? (
-                        <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {hasVideoResolvedConfig && (
-        <Card size="sm" className="border-border/70">
-          <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground">{videoWorkflowLabel}</p>
-              <h2 className="mt-1 text-base font-semibold text-foreground">Agent 解析结果</h2>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {videoResolvedConfig?.creative_type && <Badge variant="outline">{videoCreativeType}</Badge>}
-              {videoResolvedConfig?.purpose && <Badge variant="outline">{videoPurpose}</Badge>}
-            </div>
-          </div>
-          <CardContent className="space-y-4">
-            {(videoResolvedConfig?.subject_profile || videoResolvedConfig?.audience || videoResolvedConfig?.single_message) && (
-              <div className="grid gap-3 sm:grid-cols-3">
-                {videoResolvedConfig?.subject_profile && (
-                  <div>
-                    <p className="text-xs text-muted-foreground">人物 / 主体</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSubjectProfile}</p>
-                  </div>
-                )}
-                {videoResolvedConfig?.audience && (
-                  <div>
-                    <p className="text-xs text-muted-foreground">目标受众</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoAudience}</p>
-                  </div>
-                )}
-                {videoResolvedConfig?.single_message && (
-                  <div>
-                    <p className="text-xs text-muted-foreground">核心信息</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSingleMessage}</p>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <p className="text-xs text-muted-foreground">视频模型</p>
-                <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(videoResolvedConfig?.model_key || videoResolvedConfig?.model) || '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">规格</p>
-                <p className="mt-1 text-sm text-foreground">{videoSpecSummary}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">估算积分</p>
-                <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || videoResolvedConfig?.estimated_credits || 0).toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">积分消耗</p>
-                <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}</p>
-              </div>
-            </div>
-            {videoInputReferences.length > 0 && (
-              <div className="border-t border-border pt-4">
-                <p className="text-xs text-muted-foreground">执行参考素材</p>
-                <div className="mt-2 divide-y divide-border rounded-md border border-border">
-                  {videoInputReferences.map((ref, index) => (
-                    <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-3 py-2 text-xs">
-                      <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
-                      {ref.input_duration_seconds ? (
-                        <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {isVideoCreator(task.type) && videoProduction && (
         <Card size="sm" className="border-border/70">
           <CardContent>
@@ -1264,24 +1001,16 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      <ErrorBoundary
-        key={`reference-usage-${task.id}`}
-        fallback={(
-          <Card className="border-amber-500/30">
-            <CardContent className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">参考素材摘要暂时无法显示</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  任务状态与生成文件不受影响，可稍后刷新页面重试。
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      >
-        <ReferenceUsageSummary task={task} files={publishedFiles} />
-      </ErrorBoundary>
+      {showPendingResultDestination && (
+        <section aria-labelledby="task-result-heading" className="border-y border-border py-4">
+          <h2 id="task-result-heading" className="px-4 text-sm font-semibold text-foreground">任务结果</h2>
+          <Empty className="min-h-24 rounded-none border-0 p-4">
+            <EmptyHeader>
+              <EmptyTitle>结果生成后将在这里显示</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        </section>
+      )}
 
       {/* Files (top priority - most useful content) */}
       {publishedFiles.length > 0 && (
@@ -1382,65 +1111,6 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {/* Live Output / SSE Logs */}
-      {showLogs && (
-        <details className="group rounded-lg border border-border bg-card" open={task.status === 'running'}>
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
-            <span>执行日志 <span className="ml-1 text-xs font-normal text-muted-foreground">{displayLogs.length} 条</span></span>
-            <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="border-t border-border">
-            <div className="flex items-center justify-end gap-2 px-4 py-2">
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setAutoScrollLogs((prev) => !prev)}
-              >
-                {autoScrollLogs ? '跟随输出' : '暂停跟随'}
-              </Button>
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  navigator.clipboard.writeText(displayLogs.join('\n'))
-                  toast.success('已复制执行日志')
-                }}
-                disabled={displayLogs.length === 0}
-              >
-                <Copy className="h-3.5 w-3.5" />
-                复制
-              </Button>
-            </div>
-          <div ref={logContainerRef} className="max-h-96 overflow-y-auto bg-background/50 px-4 py-3">
-            {sseError && (
-              <div className="mb-2 flex items-center gap-2">
-                <p className="text-xs text-amber-400">{sseError}</p>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 gap-1 px-2 text-xs text-amber-400 hover:text-amber-300"
-                  onClick={() => {
-                    setSseError(null)
-                    connectSSE(0)
-                  }}
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  重新连接
-                </Button>
-              </div>
-            )}
-            {displayLogs.length === 0 ? (
-              <p className="text-xs text-muted-foreground">等待输出中...</p>
-            ) : (
-              <Streamdown mode="streaming" className="prose prose-sm max-w-none dark:prose-invert">
-                {logMarkdown}
-              </Streamdown>
-            )}
-          </div>
-          </div>
-        </details>
-      )}
-
       {/* Result output for completed tasks */}
       {task.status === 'completed' && task.result?.output && (
         <Card>
@@ -1454,6 +1124,19 @@ export default function TaskDetailPage() {
           </div>
         </Card>
       )}
+
+      <Button
+        variant="ghost"
+        size="lg"
+        className="w-full justify-start"
+        onClick={() => setShowTaskDetails(true)}
+      >
+        <Info data-icon="inline-start" />
+        更多详情
+        <span className="ml-auto hidden text-xs font-normal text-muted-foreground sm:inline">
+          概览 · 配置 · 素材 · 日志
+        </span>
+      </Button>
 
       <Dialog open={showResumeDialog} onOpenChange={setShowResumeDialog}>
         <DialogContent className="sm:max-w-2xl">
