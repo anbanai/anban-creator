@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/rs/zerolog"
@@ -27,10 +28,11 @@ var (
 
 // CreditService handles credits/points business logic.
 type CreditService struct {
-	repo    repository.Repository
-	cfg     *config.CreditsConfig
-	fullCfg *config.Config
-	logger  *zerolog.Logger
+	repo                   repository.Repository
+	cfg                    *config.CreditsConfig
+	fullCfg                *config.Config
+	logger                 *zerolog.Logger
+	runtimeSettlementLocks [64]sync.Mutex
 }
 
 // NewCreditService creates a new CreditService.
@@ -898,6 +900,10 @@ func (s *CreditService) SettleAgentRuntime(ctx context.Context, task *model.Task
 	if s == nil || task == nil {
 		return nil
 	}
+	settlementLock := s.runtimeSettlementLock(task.ID)
+	settlementLock.Lock()
+	defer settlementLock.Unlock()
+
 	operationID := agentRuntimeSettlementOperationID(task.ID)
 	if _, err := s.repo.Credits().FindByOperationID(ctx, operationID); err == nil {
 		return s.repo.Tasks().UpdateBillingStatus(ctx, task.ID, model.TaskBillingStatusSettled, 0)
@@ -921,6 +927,9 @@ func (s *CreditService) SettleAgentRuntime(ctx context.Context, task *model.Task
 	}
 
 	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		if _, err := txRepo.Users().LockByID(ctx, task.UserID); err != nil {
+			return fmt.Errorf("lock user for runtime settlement: %w", err)
+		}
 		if _, err := txRepo.Credits().FindByOperationID(ctx, operationID); err == nil {
 			return txRepo.Tasks().UpdateBillingStatus(ctx, task.ID, model.TaskBillingStatusSettled, 0)
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -946,6 +955,15 @@ func (s *CreditService) SettleAgentRuntime(ctx context.Context, task *model.Task
 		}
 		return txRepo.Tasks().UpdateBillingStatus(ctx, task.ID, model.TaskBillingStatusSettled, 0)
 	})
+}
+
+func (s *CreditService) runtimeSettlementLock(taskID string) *sync.Mutex {
+	var hash uint32 = 2166136261
+	for i := 0; i < len(taskID); i++ {
+		hash ^= uint32(taskID[i])
+		hash *= 16777619
+	}
+	return &s.runtimeSettlementLocks[hash%uint32(len(s.runtimeSettlementLocks))]
 }
 
 func agentRuntimeResultHasUsage(result *serveragent.ExecutionResult) bool {

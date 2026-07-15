@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
@@ -294,6 +295,52 @@ func TestSettleAgentRuntimeIsIdempotent(t *testing.T) {
 	}
 	if len(txs) != 2 {
 		t.Fatalf("transactions = %d, want fixed fee plus one runtime charge: %#v", len(txs), txs)
+	}
+}
+
+func TestSettleAgentRuntimeConcurrentCallsChargeOnce(t *testing.T) {
+	ctx := context.Background()
+	svc, fixture := newRuntimeBillingCreditService(t, 10_000)
+	taskID := "task-runtime-concurrent-idempotent"
+	task := seedRuntimeBillingTask(t, fixture.repo, fixture.userID, taskID)
+	if _, err := svc.DeductForTaskCreation(ctx, fixture.userID, model.PlatformArticle, taskID); err != nil {
+		t.Fatalf("deduct task creation: %v", err)
+	}
+	totalCostUSD := 1.00
+	result := &serveragent.ExecutionResult{Model: "claude-test", TotalCostUSD: &totalCostUSD}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- svc.SettleAgentRuntime(ctx, task, result)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent settlement: %v", err)
+		}
+	}
+
+	user, err := fixture.repo.Users().FindByID(ctx, fixture.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.CreditsBalance != -1200 {
+		t.Fatalf("balance = %d, want one fixed and one runtime charge", user.CreditsBalance)
+	}
+	txs, err := fixture.repo.Credits().FindByTaskIDAndUserID(ctx, taskID, fixture.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txs) != 2 {
+		t.Fatalf("transactions = %d, want fixed fee plus one runtime charge", len(txs))
 	}
 }
 

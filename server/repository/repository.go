@@ -40,6 +40,7 @@ type Repository interface {
 // UserRepository provides access to the users table.
 type UserRepository interface {
 	FindByID(ctx context.Context, id string) (*model.User, error)
+	LockByID(ctx context.Context, id string) (*model.User, error)
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByOpenID(ctx context.Context, openID string) (*model.User, error)
 	FindByInviteCode(ctx context.Context, code string) (*model.User, error)
