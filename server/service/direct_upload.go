@@ -31,6 +31,7 @@ const (
 	DirectUploadPurposeTaskArtifact      = "task_artifact"
 
 	defaultDirectUploadTTLSeconds = 15 * 60
+	pendingUploadCleanupLease     = 5 * time.Minute
 )
 
 var (
@@ -53,9 +54,11 @@ type PendingUploadRepository interface {
 	CreatePendingUpload(ctx context.Context, upload *model.PendingUpload) error
 	FindPendingUploadByID(ctx context.Context, id string) (*model.PendingUpload, error)
 	FinalizePendingUploads(ctx context.Context, ids []string, finalizedAt time.Time) (int64, error)
-	FindExpiredPendingUploads(ctx context.Context, before time.Time, limit int) ([]*model.PendingUpload, error)
-	ClaimPendingUploadExpiration(ctx context.Context, id string, expiredAt time.Time) (bool, error)
-	ReopenPendingUploadExpiration(ctx context.Context, id string) (bool, error)
+	FinalizePendingUploadClaims(ctx context.Context, claims []model.PendingUploadClaim, finalizedAt time.Time) error
+	FindPendingUploadsForCleanup(ctx context.Context, expiredBefore, claimStaleBefore time.Time, limit int) ([]*model.PendingUpload, error)
+	ClaimPendingUploadExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error)
+	CompletePendingUploadExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error)
+	ReopenPendingUploadExpiration(ctx context.Context, id, claimID string) (bool, error)
 }
 
 type DirectUploadPrepareRequest struct {
@@ -89,7 +92,7 @@ type VerifiedDirectUpload struct {
 	FileName    string
 	ContentType string
 	Size        int64
-	pending     bool
+	claim       *model.PendingUploadClaim
 }
 
 type UploadCredentialRequest struct {
@@ -368,7 +371,7 @@ func ResolveDirectUploadAttachment(ctx context.Context, repo PendingUploadReposi
 	if err := FinalizeVerifiedDirectUploads(ctx, repo, []*VerifiedDirectUpload{verified}, now); err != nil {
 		return nil, err
 	}
-	verified.pending = false
+	verified.claim = nil
 	return verified, nil
 }
 
@@ -404,35 +407,39 @@ func VerifyDirectUploadAttachment(ctx context.Context, repo PendingUploadReposit
 		FileName:    upload.FileName,
 		ContentType: upload.ContentType,
 		Size:        upload.Size,
-		pending:     upload.Status == model.PendingUploadStatusPending,
+		claim: &model.PendingUploadClaim{
+			UploadID:        upload.ID,
+			UserID:          upload.UserID,
+			Key:             upload.Key,
+			AllowedPurposes: append([]string(nil), allowedPurposes...),
+		},
 	}, nil
 }
 
 func FinalizeVerifiedDirectUploads(ctx context.Context, repo PendingUploadRepository, uploads []*VerifiedDirectUpload, now time.Time) error {
-	ids := make([]string, 0, len(uploads))
+	claims := make([]model.PendingUploadClaim, 0, len(uploads))
 	seen := make(map[string]struct{}, len(uploads))
 	for _, upload := range uploads {
-		if upload == nil || !upload.pending {
+		if upload == nil || upload.claim == nil || upload.claim.UploadID == "" {
 			continue
 		}
-		if _, ok := seen[upload.UploadID]; ok {
+		if _, ok := seen[upload.claim.UploadID]; ok {
 			continue
 		}
-		seen[upload.UploadID] = struct{}{}
-		ids = append(ids, upload.UploadID)
+		seen[upload.claim.UploadID] = struct{}{}
+		claims = append(claims, *upload.claim)
 	}
-	if len(ids) == 0 {
+	if len(claims) == 0 {
 		return nil
 	}
 	if repo == nil {
 		return fmt.Errorf("pending upload repository is not available")
 	}
-	claimed, err := repo.FinalizePendingUploads(ctx, ids, now)
-	if err != nil {
+	if err := repo.FinalizePendingUploadClaims(ctx, claims, now); err != nil {
+		if errors.Is(err, model.ErrPendingUploadClaimRejected) {
+			return ErrPendingUploadNotPending
+		}
 		return err
-	}
-	if claimed != int64(len(ids)) {
-		return ErrPendingUploadNotPending
 	}
 	return nil
 }
@@ -453,7 +460,8 @@ func CleanupExpiredPendingUploads(ctx context.Context, store directUploadStorage
 	if limit <= 0 {
 		limit = 100
 	}
-	uploads, err := repo.FindExpiredPendingUploads(ctx, before, limit)
+	claimStaleBefore := before.Add(-pendingUploadCleanupLease)
+	uploads, err := repo.FindPendingUploadsForCleanup(ctx, before, claimStaleBefore, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -462,7 +470,8 @@ func CleanupExpiredPendingUploads(ctx context.Context, store directUploadStorage
 		if upload == nil {
 			continue
 		}
-		claimed, err := repo.ClaimPendingUploadExpiration(ctx, upload.ID, before)
+		claimID := uuid.NewString()
+		claimed, err := repo.ClaimPendingUploadExpiration(ctx, upload.ID, claimID, before, claimStaleBefore)
 		if err != nil {
 			return cleaned, err
 		}
@@ -470,7 +479,7 @@ func CleanupExpiredPendingUploads(ctx context.Context, store directUploadStorage
 			continue
 		}
 		if err := store.Delete(ctx, upload.Key); err != nil {
-			reopened, reopenErr := repo.ReopenPendingUploadExpiration(ctx, upload.ID)
+			reopened, reopenErr := repo.ReopenPendingUploadExpiration(ctx, upload.ID, claimID)
 			if reopenErr != nil {
 				return cleaned, fmt.Errorf("delete expired pending upload: %w; reopen cleanup claim: %v", err, reopenErr)
 			}
@@ -478,6 +487,13 @@ func CleanupExpiredPendingUploads(ctx context.Context, store directUploadStorage
 				return cleaned, fmt.Errorf("delete expired pending upload: %w; cleanup claim was not reopened", err)
 			}
 			return cleaned, err
+		}
+		completed, err := repo.CompletePendingUploadExpiration(ctx, upload.ID, claimID, before)
+		if err != nil {
+			return cleaned, err
+		}
+		if !completed {
+			return cleaned, fmt.Errorf("pending upload cleanup lease was lost before completion")
 		}
 		cleaned++
 	}

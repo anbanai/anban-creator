@@ -115,14 +115,24 @@ func (r *fakeProjectPendingUploadRepo) FinalizePendingUploads(_ context.Context,
 	return int64(len(ids)), nil
 }
 
-func (r *fakeProjectPendingUploadRepo) FindExpiredPendingUploads(context.Context, time.Time, int) ([]*model.PendingUpload, error) {
+func (r *fakeProjectPendingUploadRepo) FinalizePendingUploadClaims(_ context.Context, claims []model.PendingUploadClaim, _ time.Time) error {
+	for _, claim := range claims {
+		r.finalized = append(r.finalized, claim.UploadID)
+	}
+	return nil
+}
+
+func (r *fakeProjectPendingUploadRepo) FindPendingUploadsForCleanup(context.Context, time.Time, time.Time, int) ([]*model.PendingUpload, error) {
 	return nil, nil
 }
 
-func (r *fakeProjectPendingUploadRepo) ClaimPendingUploadExpiration(context.Context, string, time.Time) (bool, error) {
+func (r *fakeProjectPendingUploadRepo) ClaimPendingUploadExpiration(context.Context, string, string, time.Time, time.Time) (bool, error) {
 	return false, nil
 }
-func (r *fakeProjectPendingUploadRepo) ReopenPendingUploadExpiration(context.Context, string) (bool, error) {
+func (r *fakeProjectPendingUploadRepo) CompletePendingUploadExpiration(context.Context, string, string, time.Time) (bool, error) {
+	return false, nil
+}
+func (r *fakeProjectPendingUploadRepo) ReopenPendingUploadExpiration(context.Context, string, string) (bool, error) {
 	return false, nil
 }
 

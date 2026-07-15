@@ -133,6 +133,57 @@ func TestDownloadReferenceImage_OwnedStoreReadHitsDisk(t *testing.T) {
 	}
 }
 
+func TestDownloadKeyFirstSourcesReadStorageForSharedExecutors(t *testing.T) {
+	t.Run("reference image", func(t *testing.T) {
+		workDir := t.TempDir()
+		key := "uploads/pending/user-1/reference/reference.png"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("reference-bytes")}}
+
+		if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, key); err != nil {
+			t.Fatalf("DownloadReferenceImage: %v", err)
+		}
+		got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
+		if err != nil || string(got) != "reference-bytes" {
+			t.Fatalf("reference = %q, %v", got, err)
+		}
+		if len(store.readKeys) != 1 || store.readKeys[0] != key {
+			t.Fatalf("read keys = %#v", store.readKeys)
+		}
+	})
+
+	t.Run("product image", func(t *testing.T) {
+		workDir := t.TempDir()
+		key := "uploads/pending/user-1/product/product.webp"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("product-bytes")}}
+
+		if count := DownloadProductImages(context.Background(), store, noopLogger(), workDir, []string{key}); count != 1 {
+			t.Fatalf("DownloadProductImages count = %d, want 1", count)
+		}
+		got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "products", "product_01.webp"))
+		if err != nil || string(got) != "product-bytes" {
+			t.Fatalf("product = %q, %v", got, err)
+		}
+	})
+
+	t.Run("input attachment", func(t *testing.T) {
+		workDir := t.TempDir()
+		key := "uploads/pending/user-1/attachment/brief.pdf"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("attachment-bytes")}}
+		attachments := []model.EntryAttachment{{
+			Type: "document", UploadID: "attachment", Key: key,
+			FileName: "brief.pdf", ContentType: "application/pdf", Size: 16,
+		}}
+
+		if count := DownloadInputAttachments(context.Background(), store, noopLogger(), workDir, attachments); count != 1 {
+			t.Fatalf("DownloadInputAttachments count = %d, want 1", count)
+		}
+		got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "input-attachments", "attachment_01_brief.pdf"))
+		if err != nil || string(got) != "attachment-bytes" {
+			t.Fatalf("attachment = %q, %v", got, err)
+		}
+	})
+}
+
 func TestDownloadReferenceImage_LocalRelativePathReadsStore(t *testing.T) {
 	// Regression test for C1: local storage returns relative URLs like
 	// /api/v1/files/<key>. The HTTP path cannot fetch those (unsupported

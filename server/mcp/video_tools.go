@@ -345,20 +345,41 @@ func materializeOwnedVideoInputReferences(ctx context.Context, task *model.Task,
 		if !ref.Required || ref.Type == service.VideoReferenceText || strings.TrimSpace(ref.TaskFileID) != "" || strings.TrimSpace(ref.URL) == "" {
 			continue
 		}
-		if !svcs.Store.IsOwnedURL(ref.URL) {
-			continue
+		var (
+			data                []byte
+			fallbackFileName    string
+			fallbackContentType string
+		)
+		if attachment, ok := verifiedTaskAttachmentForKey(task, ref.URL, ref.Type); ok {
+			var err error
+			data, err = svcs.Store.Read(ctx, attachment.Key)
+			if err != nil {
+				return fmt.Errorf("materialize verified key-first reference %s: %w", contractReferenceLabel(*ref), err)
+			}
+			if len(data) > 50<<20 {
+				return fmt.Errorf("materialize verified key-first reference %s: file exceeds 50 MB", contractReferenceLabel(*ref))
+			}
+			fallbackFileName = attachment.FileName
+			fallbackContentType = attachment.ContentType
+		} else {
+			if !svcs.Store.IsOwnedURL(ref.URL) {
+				continue
+			}
+			source, err := service.ResolveMediaSourceBytes(ctx, svcs.Store, nil, service.MediaSourceRequest{
+				RawURL:      ref.URL,
+				MaxBytes:    50 << 20,
+				ContentType: ref.MimeType,
+			})
+			if err != nil {
+				return fmt.Errorf("materialize video_creator_input.references %s: %w", contractReferenceLabel(*ref), err)
+			}
+			data = source.Bytes
+			fallbackFileName = source.Filename
+			fallbackContentType = source.ContentType
 		}
-		source, err := service.ResolveMediaSourceBytes(ctx, svcs.Store, nil, service.MediaSourceRequest{
-			RawURL:      ref.URL,
-			MaxBytes:    50 << 20,
-			ContentType: ref.MimeType,
-		})
-		if err != nil {
-			return fmt.Errorf("materialize video_creator_input.references %s: %w", contractReferenceLabel(*ref), err)
-		}
-		fileName := videoInputContractFileName(*ref, source.Filename)
-		mimeType := videoInputContractMimeType(*ref, source.ContentType)
-		tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, task.ID, getUserID(ctx), filepath.ToSlash(filepath.Join("video-inputs", fileName)), bytes.NewReader(source.Bytes), mimeType, int64(len(source.Bytes)))
+		fileName := videoInputContractFileName(*ref, fallbackFileName)
+		mimeType := videoInputContractMimeType(*ref, fallbackContentType)
+		tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, task.ID, getUserID(ctx), filepath.ToSlash(filepath.Join("video-inputs", fileName)), bytes.NewReader(data), mimeType, int64(len(data)))
 		if err != nil {
 			return fmt.Errorf("register video_creator_input.references %s as task file: %w", contractReferenceLabel(*ref), err)
 		}
@@ -590,7 +611,9 @@ func normalizeVideoInputContractReference(ctx context.Context, task *model.Task,
 	required := isRequiredVideoInputReference(refType, urlValue, asset.Text)
 	if required && refType != service.VideoReferenceText {
 		if err := service.ValidatePublicHTTPSURLForVideoReference(urlValue); err != nil {
-			return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is not usable: %w", videoInputReferenceLabel(asset), err)
+			if _, ok := verifiedTaskAttachmentForKey(task, urlValue, refType); !ok {
+				return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is not usable: %w", videoInputReferenceLabel(asset), err)
+			}
 		}
 	}
 	if refType == service.VideoReferenceVideo && duration <= 0 {
@@ -611,6 +634,56 @@ func normalizeVideoInputContractReference(ctx context.Context, task *model.Task,
 		InputDurationSeconds: duration,
 		Required:             required,
 	}, nil
+}
+
+func verifiedTaskAttachmentForKey(task *model.Task, key, refType string) (model.EntryAttachment, bool) {
+	key = strings.TrimSpace(key)
+	if task == nil || key == "" || strings.Contains(key, "://") || strings.HasPrefix(key, "/") {
+		return model.EntryAttachment{}, false
+	}
+	clean := filepath.ToSlash(filepath.Clean(key))
+	if clean != key || clean == "." || strings.HasPrefix(clean, "../") {
+		return model.EntryAttachment{}, false
+	}
+	for _, attachment := range task.InputAttachments.Data() {
+		if strings.TrimSpace(attachment.UploadID) == "" || strings.TrimSpace(attachment.Key) != key {
+			continue
+		}
+		if videoReferenceTypeForAttachment(attachment) != refType {
+			continue
+		}
+		return attachment, true
+	}
+	return model.EntryAttachment{}, false
+}
+
+func videoReferenceTypeForAttachment(attachment model.EntryAttachment) string {
+	attachmentType := strings.ToLower(strings.TrimSpace(attachment.Type))
+	if attachmentType == "" {
+		contentType := strings.ToLower(strings.TrimSpace(attachment.ContentType))
+		switch {
+		case strings.HasPrefix(contentType, "image/"):
+			attachmentType = "image"
+		case strings.HasPrefix(contentType, "audio/"):
+			attachmentType = "audio"
+		case strings.HasPrefix(contentType, "video/"):
+			attachmentType = "video"
+		case strings.HasPrefix(contentType, "text/"):
+			attachmentType = "text"
+		}
+	}
+	switch attachmentType {
+	case "image":
+		return service.VideoReferenceImage
+	case "audio":
+		return service.VideoReferenceAudio
+	case "video":
+		return service.VideoReferenceVideo
+	case "text":
+		return service.VideoReferenceText
+	default:
+		return ""
+	}
 }
 
 func inferVideoReferenceType(urlValue, textValue string) string {

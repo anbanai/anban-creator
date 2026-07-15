@@ -1526,6 +1526,70 @@ func TestPrepareVideoGenerationInputsMaterializesOwnedStudioReferences(t *testin
 	}
 }
 
+func TestPrepareVideoGenerationInputsMaterializesVerifiedKeyFirstVideo(t *testing.T) {
+	for _, platform := range []string{model.PlatformVideoCreator, model.PlatformVideoEditor} {
+		t.Run(platform, func(t *testing.T) {
+			old := svcs
+			t.Cleanup(func() { svcs = old })
+			key := "uploads/pending/user-1/video-upload/source.mp4"
+			store := &fakeVideoReferenceStorage{
+				ownedPrefix: "https://oss.example.com/",
+				files:       map[string][]byte{key: []byte("fake-key-first-mp4")},
+			}
+			ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+			task := &model.Task{
+				ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+				Type: platform, Status: model.TaskStatusRunning, Prompt: "参考视频生成内容",
+			}
+			task.SetInputAttachments([]model.EntryAttachment{{
+				Type: "video", UploadID: "video-upload", Key: key,
+				FileName: "source.mp4", ContentType: "video/mp4", Size: int64(len(store.files[key])),
+			}})
+			task.SetVideoInput(model.VideoInput{Brief: task.Prompt, References: []model.VideoReferenceAsset{{
+				Type: service.VideoReferenceVideo, URL: key, FileName: "source.mp4",
+				MimeType: "video/mp4", FileSize: int64(len(store.files[key])), InputDurationSeconds: 12,
+			}}})
+			if err := repo.Tasks().Create(ctx, task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			installFakeVideoUnderstanding(t, repo, nil)
+
+			req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+				"project_id":` + strconv.Quote(projectID) + `,
+				"task_id":` + strconv.Quote(task.ID) + `
+			}`)}}
+			result, err := prepareVideoGenerationInputsHandler(ctx, req)
+			if err != nil {
+				t.Fatalf("prepareVideoGenerationInputsHandler: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("prepare error: %s", callToolText(result))
+			}
+			files, err := repo.TaskFiles().FindByTaskID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("find task files: %v", err)
+			}
+			foundInput := false
+			for _, file := range files {
+				if file != nil && file.FilePath == "video-inputs/source.mp4" {
+					foundInput = true
+				}
+			}
+			if !foundInput {
+				t.Fatalf("key-first task file not materialized: %#v", files)
+			}
+			persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("find task: %v", err)
+			}
+			refs := persisted.VideoInput.Data().References
+			if len(refs) != 1 || refs[0].URL != key {
+				t.Fatalf("persisted signed/transformed reference: %#v", refs)
+			}
+		})
+	}
+}
+
 func TestPrepareVideoGenerationInputsAnalyzesStrictRemakeVideoReference(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })

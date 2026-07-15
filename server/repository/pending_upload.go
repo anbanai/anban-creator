@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -47,32 +49,110 @@ func (r *pendingUploadRepository) FinalizePendingUploads(ctx context.Context, id
 	return result.RowsAffected, result.Error
 }
 
-func (r *pendingUploadRepository) FindExpiredPendingUploads(ctx context.Context, before time.Time, limit int) ([]*model.PendingUpload, error) {
+func (r *pendingUploadRepository) FinalizePendingUploadClaims(ctx context.Context, claims []model.PendingUploadClaim, finalizedAt time.Time) error {
+	if len(claims) == 0 {
+		return nil
+	}
+	ordered := append([]model.PendingUploadClaim(nil), claims...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].UploadID < ordered[j].UploadID })
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, claim := range ordered {
+			var upload model.PendingUpload
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", claim.UploadID).First(&upload).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.ErrPendingUploadClaimRejected
+			}
+			if err != nil {
+				return err
+			}
+			if !pendingUploadMatchesClaim(&upload, claim) {
+				return model.ErrPendingUploadClaimRejected
+			}
+			switch upload.Status {
+			case model.PendingUploadStatusFinalized:
+				continue
+			case model.PendingUploadStatusPending:
+				if !upload.ExpiresAt.After(finalizedAt) {
+					return model.ErrPendingUploadClaimRejected
+				}
+				result := tx.Model(&model.PendingUpload{}).
+					Where("id = ? AND status = ? AND expires_at > ?", upload.ID, model.PendingUploadStatusPending, finalizedAt).
+					Updates(map[string]any{"status": model.PendingUploadStatusFinalized, "finalized_at": finalizedAt})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected != 1 {
+					var current model.PendingUpload
+					if err := tx.Where("id = ?", upload.ID).First(&current).Error; err != nil {
+						return err
+					}
+					if current.Status != model.PendingUploadStatusFinalized || !pendingUploadMatchesClaim(&current, claim) {
+						return model.ErrPendingUploadClaimRejected
+					}
+				}
+			default:
+				return model.ErrPendingUploadClaimRejected
+			}
+		}
+		return nil
+	})
+}
+
+func pendingUploadMatchesClaim(upload *model.PendingUpload, claim model.PendingUploadClaim) bool {
+	if upload == nil || upload.ID != claim.UploadID || upload.UserID != claim.UserID || upload.Key != claim.Key {
+		return false
+	}
+	for _, purpose := range claim.AllowedPurposes {
+		if upload.Purpose == purpose {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *pendingUploadRepository) FindPendingUploadsForCleanup(ctx context.Context, expiredBefore, claimStaleBefore time.Time, limit int) ([]*model.PendingUpload, error) {
 	var uploads []*model.PendingUpload
 	err := r.db.WithContext(ctx).
-		Where("status = ? AND expires_at <= ?", model.PendingUploadStatusPending, before).
+		Where("(status = ? AND expires_at <= ?) OR (status = ? AND cleanup_claimed_at <= ?)",
+			model.PendingUploadStatusPending, expiredBefore,
+			model.PendingUploadStatusExpiring, claimStaleBefore).
 		Order("expires_at ASC").
 		Limit(limit).
 		Find(&uploads).Error
 	return uploads, err
 }
 
-func (r *pendingUploadRepository) ClaimPendingUploadExpiration(ctx context.Context, id string, expiredAt time.Time) (bool, error) {
+func (r *pendingUploadRepository) ClaimPendingUploadExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&model.PendingUpload{}).
-		Where("id = ? AND status = ? AND expires_at <= ?", id, model.PendingUploadStatusPending, expiredAt).
+		Where("id = ? AND ((status = ? AND expires_at <= ?) OR (status = ? AND cleanup_claimed_at <= ?))",
+			id, model.PendingUploadStatusPending, claimedAt, model.PendingUploadStatusExpiring, claimStaleBefore).
 		Updates(map[string]any{
-			"status":     model.PendingUploadStatusExpired,
-			"expired_at": expiredAt,
+			"cleanup_claim_id":   claimID,
+			"status":             model.PendingUploadStatusExpiring,
+			"cleanup_claimed_at": claimedAt,
 		})
 	return result.RowsAffected == 1, result.Error
 }
 
-func (r *pendingUploadRepository) ReopenPendingUploadExpiration(ctx context.Context, id string) (bool, error) {
+func (r *pendingUploadRepository) CompletePendingUploadExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&model.PendingUpload{}).
-		Where("id = ? AND status = ?", id, model.PendingUploadStatusExpired).
+		Where("id = ? AND status = ? AND cleanup_claim_id = ?", id, model.PendingUploadStatusExpiring, claimID).
 		Updates(map[string]any{
-			"status":     model.PendingUploadStatusPending,
-			"expired_at": nil,
+			"status":             model.PendingUploadStatusExpired,
+			"expired_at":         expiredAt,
+			"cleanup_claim_id":   "",
+			"cleanup_claimed_at": nil,
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *pendingUploadRepository) ReopenPendingUploadExpiration(ctx context.Context, id, claimID string) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.PendingUpload{}).
+		Where("id = ? AND status = ? AND cleanup_claim_id = ?", id, model.PendingUploadStatusExpiring, claimID).
+		Updates(map[string]any{
+			"status":             model.PendingUploadStatusPending,
+			"cleanup_claim_id":   "",
+			"cleanup_claimed_at": nil,
 		})
 	return result.RowsAffected == 1, result.Error
 }

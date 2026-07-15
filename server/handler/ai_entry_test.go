@@ -65,15 +65,32 @@ func (r *aiEntryPendingRepo) FinalizePendingUploads(_ context.Context, ids []str
 	return int64(len(ids)), nil
 }
 
-func (r *aiEntryPendingRepo) FindExpiredPendingUploads(context.Context, time.Time, int) ([]*model.PendingUpload, error) {
+func (r *aiEntryPendingRepo) FinalizePendingUploadClaims(_ context.Context, claims []model.PendingUploadClaim, _ time.Time) error {
+	if r.finalizeErr != nil {
+		return r.finalizeErr
+	}
+	for _, claim := range claims {
+		r.finalizedIDs = append(r.finalizedIDs, claim.UploadID)
+		if r.upload != nil && r.upload.ID == claim.UploadID {
+			r.upload.Status = model.PendingUploadStatusFinalized
+		}
+	}
+	return nil
+}
+
+func (r *aiEntryPendingRepo) FindPendingUploadsForCleanup(context.Context, time.Time, time.Time, int) ([]*model.PendingUpload, error) {
 	return nil, nil
 }
 
-func (r *aiEntryPendingRepo) ClaimPendingUploadExpiration(context.Context, string, time.Time) (bool, error) {
+func (r *aiEntryPendingRepo) ClaimPendingUploadExpiration(context.Context, string, string, time.Time, time.Time) (bool, error) {
 	return false, nil
 }
 
-func (r *aiEntryPendingRepo) ReopenPendingUploadExpiration(context.Context, string) (bool, error) {
+func (r *aiEntryPendingRepo) CompletePendingUploadExpiration(context.Context, string, string, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *aiEntryPendingRepo) ReopenPendingUploadExpiration(context.Context, string, string) (bool, error) {
 	return false, nil
 }
 

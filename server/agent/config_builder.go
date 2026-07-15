@@ -41,6 +41,7 @@ type MaterializedInputAttachment struct {
 	Path            string `json:"path,omitempty"`
 	Instruction     string `json:"instruction,omitempty"`
 	UploadID        string `json:"upload_id,omitempty"`
+	Key             string `json:"key,omitempty"`
 }
 
 type MaterializedInputAttachmentError struct {
@@ -50,6 +51,7 @@ type MaterializedInputAttachmentError struct {
 	FileName        string `json:"file_name,omitempty"`
 	Instruction     string `json:"instruction,omitempty"`
 	UploadID        string `json:"upload_id,omitempty"`
+	Key             string `json:"key,omitempty"`
 	Error           string `json:"error"`
 }
 
@@ -277,6 +279,19 @@ func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger 
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	destPath := filepath.Join(destDir, "reference.png")
+	if key, ok := explicitStorageObjectKey(imageURL); ok {
+		if store == nil {
+			return fmt.Errorf("storage provider is required for object key %q", key)
+		}
+		data, err := readStorageObject(ctx, store, key, maxReferenceImageBytes)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(destPath, data, 0o644); err != nil {
+			return fmt.Errorf("write file: %w", err)
+		}
+		return nil
+	}
 
 	if store != nil && store.IsOwnedURL(imageURL) {
 		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
@@ -408,7 +423,16 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 		path := filepath.Join(destDir, name)
 		var data []byte
 		var err error
-		if strings.TrimSpace(attachment.URL) != "" {
+		if rawKey := strings.TrimSpace(attachment.Key); rawKey != "" {
+			key, validKey := explicitStorageObjectKey(rawKey)
+			if !validKey {
+				err = fmt.Errorf("attachment storage key is invalid")
+			} else if store == nil {
+				err = fmt.Errorf("storage provider is required for attachment key")
+			} else {
+				data, err = readStorageObject(ctx, store, key, maxInputAttachmentBytes)
+			}
+		} else if strings.TrimSpace(attachment.URL) != "" {
 			data, err = fetchAttachmentBytes(ctx, store, attachment.URL)
 		} else if strings.TrimSpace(attachment.Text) != "" {
 			data = []byte(strings.TrimSpace(attachment.Text))
@@ -423,6 +447,7 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 				FileName:        attachment.FileName,
 				Instruction:     attachment.Instruction,
 				UploadID:        attachment.UploadID,
+				Key:             attachment.Key,
 				Error:           err.Error(),
 			})
 			if logger != nil {
@@ -438,6 +463,7 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 				FileName:        attachment.FileName,
 				Instruction:     attachment.Instruction,
 				UploadID:        attachment.UploadID,
+				Key:             attachment.Key,
 				Error:           err.Error(),
 			})
 			if logger != nil {
@@ -457,6 +483,7 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 			Path:            relPath,
 			Instruction:     attachment.Instruction,
 			UploadID:        attachment.UploadID,
+			Key:             attachment.Key,
 		})
 	}
 
@@ -634,12 +661,13 @@ func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL st
 
 func inputAttachmentFilename(index int, attachment model.EntryAttachment) string {
 	base := sanitizeAttachmentFilename(attachment.FileName)
+	source := firstNonEmptyAttachmentSource(attachment.URL, attachment.Key)
 	if base == "" {
-		base = sanitizeAttachmentFilename(filenameFromURLPath(attachment.URL))
+		base = sanitizeAttachmentFilename(filenameFromURLPath(source))
 	}
 	ext := strings.ToLower(filepath.Ext(base))
 	if ext == "" {
-		ext = inputAttachmentExt(attachment.ContentType, attachment.URL)
+		ext = inputAttachmentExt(attachment.ContentType, source)
 	}
 	if base == "" {
 		base = "attachment" + ext
@@ -647,6 +675,15 @@ func inputAttachmentFilename(index int, attachment model.EntryAttachment) string
 		base += ext
 	}
 	return fmt.Sprintf("attachment_%02d_%s", index, base)
+}
+
+func firstNonEmptyAttachmentSource(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func sanitizeAttachmentFilename(raw string) string {
@@ -729,6 +766,12 @@ func inputAttachmentExt(contentType, rawURL string) string {
 // inside DownloadReferenceImage, extracted here so the multi-file product-photo
 // flow can reuse it without touching the well-tested reference-image path.
 func fetchImageBytes(ctx context.Context, store storage.Provider, imageURL string) ([]byte, error) {
+	if key, ok := explicitStorageObjectKey(imageURL); ok {
+		if store == nil {
+			return nil, fmt.Errorf("storage provider is required for object key %q", key)
+		}
+		return readStorageObject(ctx, store, key, maxReferenceImageBytes)
+	}
 	if store != nil && store.IsOwnedURL(imageURL) {
 		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
 			if data, err := store.Read(ctx, key); err == nil {
@@ -753,6 +796,34 @@ func fetchImageBytes(ctx context.Context, store storage.Provider, imageURL strin
 		return nil, fmt.Errorf("download: HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, maxReferenceImageBytes))
+}
+
+func explicitStorageObjectKey(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.Contains(raw, "://") || strings.HasPrefix(raw, "/") {
+		return "", false
+	}
+	key, ok := storage.StorageKeyFromURL(raw)
+	if !ok {
+		return "", false
+	}
+	key = filepath.ToSlash(strings.TrimPrefix(key, "/"))
+	clean := filepath.ToSlash(filepath.Clean(key))
+	if clean != key || clean == "." || strings.HasPrefix(clean, "../") {
+		return "", false
+	}
+	return key, true
+}
+
+func readStorageObject(ctx context.Context, store storage.Provider, key string, maxBytes int64) ([]byte, error) {
+	data, err := store.Read(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("read storage object: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
+	}
+	return data, nil
 }
 
 // imageExtFromURL infers a lowercase image extension from the URL path, defaulting
