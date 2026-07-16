@@ -291,7 +291,9 @@ describe('Designer shared prompt composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
 
     await waitFor(() => expect(uploadToOSS).toHaveBeenCalledWith(expect.objectContaining({
-      purpose: 'designer_reference', file: expect.objectContaining({ name: 'mask.png' }),
+      purpose: 'designer_reference',
+      file: expect.objectContaining({ name: 'mask.png' }),
+      signal: expect.any(AbortSignal),
     })))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
       project_id: 'default', reference_file_ids: ['source-1'], mask_file_id: 'registered:upload:mask.png',
@@ -394,6 +396,82 @@ describe('Designer shared prompt composer', () => {
     expect(designerApi.generate).toHaveBeenCalledTimes(2)
   })
 
+  it('serializes polling and emits one terminal success notification', async () => {
+    const firstPoll = deferred<ImageGeneration>()
+    const completed = {
+      id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '串行轮询',
+      provider: 'openai', model: 'gpt-image-2', n: 1, status: 'completed' as const,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      results: [{ id: 1, generation_id: 'generation-1', image_url: 'https://example.com/final.png', index: 0 }],
+    }
+    vi.mocked(designerApi.getGeneration)
+      .mockReturnValueOnce(firstPoll.promise)
+      .mockResolvedValue(completed)
+    render(<DesignerPage />)
+    await screen.findByLabelText('Designer prompt')
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '串行轮询' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+
+    expect(designerApi.getGeneration).toHaveBeenCalledTimes(1)
+    expect(toast.success).not.toHaveBeenCalled()
+
+    firstPoll.resolve({ ...completed, status: 'generating', results: undefined })
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+    expect(designerApi.getGeneration).toHaveBeenCalledTimes(2)
+    expect(toast.success).toHaveBeenCalledTimes(1)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(designerApi.getGeneration).toHaveBeenCalledTimes(2)
+    expect(toast.success).toHaveBeenCalledTimes(1)
+  })
+
+  it('finalizes a failed generation exactly once', async () => {
+    vi.mocked(designerApi.getGeneration).mockResolvedValue({
+      id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '失败轮询',
+      provider: 'openai', model: 'gpt-image-2', n: 1, status: 'failed', error: '生成失败',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    })
+    render(<DesignerPage />)
+    await screen.findByLabelText('Designer prompt')
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '失败轮询' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+
+    expect(designerApi.getGeneration).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(designerApi.getGeneration).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledTimes(1)
+  })
+
+  it('finalizes polling timeout exactly once', async () => {
+    vi.mocked(designerApi.getGeneration).mockResolvedValue({
+      id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '超时轮询',
+      provider: 'openai', model: 'gpt-image-2', n: 1, status: 'generating',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    })
+    render(<DesignerPage />)
+    await screen.findByLabelText('Designer prompt')
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '超时轮询' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(360_000) })
+
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith('生成超时，请稍后在历史记录中查看结果')
+    const pollCount = vi.mocked(designerApi.getGeneration).mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(designerApi.getGeneration).toHaveBeenCalledTimes(pollCount)
+    expect(toast.error).toHaveBeenCalledTimes(1)
+  })
+
   it('shows one visible aggregated warning for rejected attachments', async () => {
     render(<DesignerPage />)
     await addFiles([image('duplicate.png')])
@@ -438,5 +516,31 @@ describe('Designer shared prompt composer', () => {
     mask.resolve(new File(['mask'], 'mask.png', { type: 'image/png' }))
     await act(async () => {})
     expect(designerApi.uploadReferenceFromUrl).not.toHaveBeenCalled()
+  })
+
+  it('aborts the edit mask OSS upload when generation is canceled', async () => {
+    const maskUpload = deferred<ReturnType<typeof uploadResult>>()
+    let uploadSignal: AbortSignal | undefined
+    vi.mocked(uploadToOSS).mockImplementationOnce(({ signal }) => {
+      uploadSignal = signal
+      return maskUpload.promise
+    })
+    vi.mocked(designerApi.uploadReferenceFromUrl).mockResolvedValue({
+      file_id: 'source-1', filename: 'source', size: 0,
+    })
+    render(<DesignerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '测试编辑' }))
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '取消上传' } })
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    await waitFor(() => expect(uploadToOSS).toHaveBeenCalledTimes(1))
+    expect(uploadSignal?.aborted).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
+    expect(uploadSignal?.aborted).toBe(true)
+    maskUpload.resolve(uploadResult(new File(['mask'], 'mask.png', { type: 'image/png' })))
+    await act(async () => {})
+
+    expect(designerApi.registerReference).not.toHaveBeenCalled()
+    expect(designerApi.generate).not.toHaveBeenCalled()
   })
 })

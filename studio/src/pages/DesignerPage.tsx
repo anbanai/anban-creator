@@ -108,7 +108,7 @@ export default function DesignerPage() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [editingImage, setEditingImage] = useState<GenerateImage | null>(null)
   const maskEditorRef = useRef<InlineMaskEditorHandle>(null)
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const abortedRef = useRef(false)
   const generationAttemptRef = useRef(0)
   const generationAbortRef = useRef<AbortController | null>(null)
@@ -212,25 +212,43 @@ export default function DesignerPage() {
     abortedRef.current = true
     generationAbortRef.current?.abort()
     generationAbortRef.current = null
-    if (pollingRef.current) clearInterval(pollingRef.current)
+    if (pollingRef.current) clearTimeout(pollingRef.current)
   }, [])
 
   const stopPolling = useCallback(() => {
     if (!pollingRef.current) return
-    clearInterval(pollingRef.current)
+    clearTimeout(pollingRef.current)
     pollingRef.current = null
   }, [])
+
+  const finalizeGenerationAttempt = useCallback((attempt: GenerationAttempt) => {
+    if (!isGenerationAttemptActive(attempt)) return false
+    generationAttemptRef.current += 1
+    abortedRef.current = true
+    if (generationAbortRef.current?.signal === attempt.signal) {
+      generationAbortRef.current.abort()
+      generationAbortRef.current = null
+    }
+    stopPolling()
+    return true
+  }, [isGenerationAttemptActive, stopPolling])
 
   const startPolling = useCallback((generationID: string, attempt: GenerationAttempt) => {
     if (!isGenerationAttemptActive(attempt)) return
     stopPolling()
     let pollCount = 0
     let consecutiveErrors = 0
-    pollingRef.current = setInterval(async () => {
+
+    const scheduleNext = () => {
+      if (!isGenerationAttemptActive(attempt)) return
+      pollingRef.current = setTimeout(() => { void poll() }, POLL_INTERVAL)
+    }
+
+    const poll = async () => {
       if (!isGenerationAttemptActive(attempt)) return
       pollCount += 1
       if (pollCount >= MAX_POLLS) {
-        stopPolling()
+        if (!finalizeGenerationAttempt(attempt)) return
         setIsGenerating(false)
         clearActiveGeneration()
         toast.error('生成超时，请稍后在历史记录中查看结果')
@@ -244,7 +262,7 @@ export default function DesignerPage() {
         if (!isGenerationAttemptActive(attempt)) return
         consecutiveErrors = 0
         if (generation.status === 'completed') {
-          stopPolling()
+          if (!finalizeGenerationAttempt(attempt)) return
           setIsGenerating(false)
           setCurrentGeneration(generation)
           setCurrentImages(resultsToImages(generation.results))
@@ -252,23 +270,29 @@ export default function DesignerPage() {
           toast.success('图片生成成功')
           void queryClient.invalidateQueries({ queryKey: ['designer', 'history'] })
         } else if (generation.status === 'failed') {
-          stopPolling()
+          if (!finalizeGenerationAttempt(attempt)) return
           setIsGenerating(false)
           clearActiveGeneration()
           toast.error(sanitizeUserFacingErrorMessage(generation.error, '图片生成失败，请稍后重试'))
+        } else {
+          scheduleNext()
         }
       } catch {
         if (!isGenerationAttemptActive(attempt)) return
         consecutiveErrors += 1
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-          stopPolling()
+          if (!finalizeGenerationAttempt(attempt)) return
           setIsGenerating(false)
           clearActiveGeneration()
           toast.error('查询生成状态失败')
+        } else {
+          scheduleNext()
         }
       }
-    }, POLL_INTERVAL)
-  }, [isGenerationAttemptActive, queryClient, stopPolling])
+    }
+
+    scheduleNext()
+  }, [finalizeGenerationAttempt, isGenerationAttemptActive, queryClient, stopPolling])
 
   useEffect(() => {
     const active = loadActiveGeneration()
@@ -280,11 +304,13 @@ export default function DesignerPage() {
     ).then((generation) => {
       if (!isGenerationAttemptActive(attempt)) return
       if (generation.status === 'completed') {
+        if (!finalizeGenerationAttempt(attempt)) return
         setCurrentGeneration(generation)
         setCurrentImages(resultsToImages(generation.results))
         setSelectedGenerationId(active.generationId)
         clearActiveGeneration()
       } else if (generation.status === 'failed') {
+        if (!finalizeGenerationAttempt(attempt)) return
         toast.error(sanitizeUserFacingErrorMessage(generation.error, '图片生成失败，请稍后重试'))
         clearActiveGeneration()
       } else {
@@ -295,7 +321,7 @@ export default function DesignerPage() {
     }).catch(() => {
       if (isGenerationAttemptActive(attempt)) clearActiveGeneration()
     })
-  }, [isGenerationAttemptActive, startGenerationAttempt, startPolling])
+  }, [finalizeGenerationAttempt, isGenerationAttemptActive, startGenerationAttempt, startPolling])
 
   const beginGeneration = useCallback((generationID: string, attempt: GenerationAttempt) => {
     if (!isGenerationAttemptActive(attempt)) return
@@ -381,7 +407,11 @@ export default function DesignerPage() {
       const [source, maskUpload] = await awaitGenerationAttempt(
         Promise.all([
           designerApi.uploadReferenceFromUrl(sourceImage.url),
-          uploadToOSS({ purpose: 'designer_reference', file: maskFile }),
+          uploadToOSS({
+            purpose: 'designer_reference',
+            file: maskFile,
+            signal: attempt.signal,
+          }),
         ]),
         attempt.signal,
       )
