@@ -1,10 +1,15 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse, VideoProductionResponse } from '@/types'
+import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse, VideoProductionResponse, InputAttachment } from '@/types'
 
 export interface ResumeTaskRequest {
   prompt?: string
   files?: File[]
   fileLabels?: string[]
+}
+
+export interface CloneTaskRequest {
+  prompt: string
+  input_attachments: InputAttachment[]
 }
 
 export const tasksApi = {
@@ -24,8 +29,8 @@ export const tasksApi = {
 
   // Clone a completed/failed/cancelled task into a fresh billed task while
   // preserving the full frozen configuration. Returns the new task.
-  clone: (id: string) =>
-    unwrap<Task>(http.post(`/tasks/${id}/clone`)),
+  clone: (id: string, data: CloneTaskRequest) =>
+    unwrap<Task>(http.post(`/tasks/${id}/clone`, data)),
 
   resume: (id: string, data: ResumeTaskRequest) => {
     const form = new FormData()
