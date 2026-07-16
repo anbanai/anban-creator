@@ -197,13 +197,22 @@ function TaskLogDetails({
   onReconnectLogs,
   logContainerRef,
 }: TaskLogDetailsProps) {
+  const hasLogs = logs.length > 0
+
   useEffect(() => {
     if (!autoScrollLogs || !logContainerRef.current) return
     logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
   }, [autoScrollLogs, logContainerRef, logs])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+    <div
+      className={cn(
+        'flex flex-col gap-3',
+        hasLogs
+          ? 'min-h-0 flex-1 overflow-hidden'
+          : 'min-h-28 flex-none',
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">{logs.length} 条</span>
         <div className="flex items-center gap-1">
@@ -252,10 +261,13 @@ function TaskLogDetails({
 
       <div
         ref={logContainerRef}
-        className="min-h-28 flex-1 overflow-y-auto rounded-md bg-muted/30 p-3"
+        className={cn(
+          'min-h-28 rounded-md bg-muted/30 p-3',
+          hasLogs ? 'flex-1 overflow-y-auto' : 'flex-none',
+        )}
       >
         {logs.length === 0 ? (
-          <Empty className="min-h-28 border-0 p-3">
+          <Empty className="min-h-28 flex-none border-0 p-3">
             <EmptyHeader>
               <EmptyMedia variant="icon"><ScrollText /></EmptyMedia>
               <EmptyTitle>等待输出中...</EmptyTitle>
@@ -274,6 +286,7 @@ function TaskLogDetails({
 
 export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
   const logMarkdown = props.logs.join('  \n')
+  const hasLogs = props.logs.length > 0
   const hasSnapshot = Boolean(props.task.project_snapshot?.platform)
   const projectName = hasSnapshot
     ? props.task.project_snapshot?.project_name || '未设置项目'
@@ -356,12 +369,25 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
               </ErrorBoundary>
             </TaskDetailsSection>
           </TabsContent>
-          <TabsContent value="logs" className="flex min-h-0 flex-col overflow-hidden p-4">
+          <TabsContent
+            value="logs"
+            className={cn(
+              'flex flex-col p-4',
+              hasLogs
+                ? 'min-h-0 flex-1 overflow-hidden'
+                : 'min-h-28 flex-none',
+            )}
+          >
             <TaskDetailsSection
               label="执行动态"
               title="执行动态"
               icon={ScrollText}
-              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+              className={cn(
+                'flex flex-col',
+                hasLogs
+                  ? 'min-h-0 flex-1 overflow-hidden'
+                  : 'min-h-28 flex-none',
+              )}
             >
               <TaskLogDetails
                 logs={props.logs}

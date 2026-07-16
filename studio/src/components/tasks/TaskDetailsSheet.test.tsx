@@ -170,17 +170,27 @@ describe('TaskDetailsSheet', () => {
     render(<ControlledTaskDetailsSheet {...props} />)
     fireEvent.click(screen.getByRole('tab', { name: '日志' }))
 
+    const logPanel = screen.getByRole('tabpanel', { name: '日志' })
     const logRegion = screen.getByRole('region', { name: '执行动态' })
+    const logDetails = props.logContainerRef.current?.parentElement
     const emptyState = screen.getByText('等待输出中...').closest('[data-slot="empty"]')
 
-    expect(logRegion).toHaveClass('rounded-lg', 'border')
+    expect(logPanel).toHaveClass('flex', 'min-h-28', 'flex-none', 'flex-col')
+    expect(logPanel).not.toHaveClass('min-h-0', 'flex-1', 'overflow-hidden')
+    expect(logRegion).toHaveClass('rounded-lg', 'border', 'min-h-28', 'flex-none')
+    expect(logRegion).not.toHaveClass('min-h-0', 'flex-1', 'overflow-hidden')
+    expect(logDetails).toHaveClass('flex', 'min-h-28', 'flex-none', 'flex-col')
+    expect(logDetails).not.toHaveClass('min-h-0', 'flex-1', 'overflow-hidden')
     expect(props.logContainerRef.current).toHaveClass(
       'min-h-28',
+      'flex-none',
       'rounded-md',
       'bg-muted/30',
       'p-3',
     )
-    expect(emptyState).toHaveClass('min-h-28', 'border-0', 'p-3')
+    expect(props.logContainerRef.current).not.toHaveClass('flex-1', 'overflow-y-auto')
+    expect(emptyState).toHaveClass('min-h-28', 'flex-none', 'border-0', 'p-3')
+    expect(emptyState).not.toHaveClass('flex-1')
     expect(screen.getByRole('button', { name: '复制日志' })).toBeDisabled()
   })
 
