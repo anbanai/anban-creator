@@ -71,10 +71,50 @@ interface ResumeFileInput {
 }
 
 const MAX_SSE_LOGS = 500
+const TERMINAL_SSE_EVENTS = new Set(['done', 'completed', 'failed', 'cancelled'])
 
 function appendLog(prev: string[], entry: string): string[] {
   const next = [...prev, entry]
   return next.length > MAX_SSE_LOGS ? next.slice(-MAX_SSE_LOGS) : next
+}
+
+function splitLogLines(log: string): string[] {
+  return log
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+}
+
+function appendPollingReplay(prev: string[], replay: string): string[] {
+  const currentLines = prev.flatMap(splitLogLines).slice(-MAX_SSE_LOGS)
+  const replayLines = splitLogLines(replay).slice(-MAX_SSE_LOGS)
+  if (replayLines.length === 0) return prev
+
+  let sharedPrefix = 0
+  while (
+    sharedPrefix < currentLines.length &&
+    sharedPrefix < replayLines.length &&
+    currentLines[sharedPrefix] === replayLines[sharedPrefix]
+  ) {
+    sharedPrefix += 1
+  }
+  if (sharedPrefix > 0) {
+    const newLines = replayLines.slice(sharedPrefix)
+    if (newLines.length === 0) return prev
+    return [...prev, ...newLines].slice(-MAX_SSE_LOGS)
+  }
+
+  const maxOverlap = Math.min(currentLines.length, replayLines.length)
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const currentStart = currentLines.length - overlap
+    if (replayLines.slice(0, overlap).every((line, index) => line === currentLines[currentStart + index])) {
+      const newLines = replayLines.slice(overlap)
+      if (newLines.length === 0) return prev
+      return [...prev, ...newLines].slice(-MAX_SSE_LOGS)
+    }
+  }
+
+  return [...prev, ...replayLines].slice(-MAX_SSE_LOGS)
 }
 
 export default function TaskDetailPage() {
@@ -151,9 +191,8 @@ export default function TaskDetailPage() {
 
   const MAX_PERSISTED_LOGS = 500
   const persistedLogs = (task?.progress_log
-    ?.split('\n')
-    .map((line) => line.trimEnd())
-    .filter(Boolean) ?? [])
+    ? splitLogLines(task.progress_log)
+    : [])
     .slice(-MAX_PERSISTED_LOGS)
   // Lifecycle changes seed from this snapshot; polling updates must not duplicate live entries.
   persistedLogsRef.current = persistedLogs
@@ -290,8 +329,12 @@ export default function TaskDetailPage() {
     },
   })
 
-  const handleSSEEvent = useCallback((taskId: string, event: SSEEvent) => {
-    if (activeSseTaskRef.current !== taskId) return
+  const handleSSEEvent = useCallback((
+    taskId: string,
+    event: SSEEvent,
+    reconcileProgressReplay = false,
+  ): boolean => {
+    if (activeSseTaskRef.current !== taskId) return false
 
     const parsed = typeof event.data === 'string'
       ? (() => { try { return JSON.parse(event.data) } catch { return event.data } })()
@@ -300,7 +343,10 @@ export default function TaskDetailPage() {
     switch (event.event) {
       case 'progress': {
         if (typeof parsed === 'string') {
-          setSseLogs((prev) => appendLog(prev, parsed))
+          setSseLogs((prev) => reconcileProgressReplay
+            ? appendPollingReplay(prev, parsed)
+            : appendLog(prev, parsed))
+          return true
         } else {
           const data = parsed as {
             stage?: string
@@ -333,6 +379,8 @@ export default function TaskDetailPage() {
         }
         break
       }
+      case 'timeout':
+        break
       case 'output': {
         const data = typeof parsed === 'string' ? parsed : (parsed as { text?: string }).text || ''
         if (data) {
@@ -364,10 +412,12 @@ export default function TaskDetailPage() {
         }
       }
     }
+    return false
   }, [queryClient])
 
   const connectSSE = useCallback(async (taskId: string) => {
     let retries = 0
+    let consecutiveTimeouts = 0
     while (activeSseTaskRef.current === taskId) {
       const currentToken = tokenRef.current
       if (!currentToken) return
@@ -376,11 +426,36 @@ export default function TaskDetailPage() {
       abortRef.current = controller
 
       try {
+        let sawTimeout = false
+        let reconcileNextStringProgress = true
         for await (const event of streamTaskProgress(taskId, currentToken, controller.signal)) {
           if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
-          handleSSEEvent(taskId, event)
+          const handledStringProgress = handleSSEEvent(
+            taskId,
+            event,
+            reconcileNextStringProgress,
+          )
+          if (handledStringProgress) reconcileNextStringProgress = false
+          if (TERMINAL_SSE_EVENTS.has(event.event)) return
+          if (event.event === 'timeout') {
+            sawTimeout = true
+          } else {
+            consecutiveTimeouts = 0
+          }
         }
-        return
+        if (sawTimeout) {
+          retries = 0
+          consecutiveTimeouts += 1
+          if (consecutiveTimeouts > 1) {
+            await new Promise((resolve) => setTimeout(
+              resolve,
+              Math.min(2000 * (consecutiveTimeouts - 1), 6000),
+            ))
+            if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
+          }
+          continue
+        }
+        throw new Error('SSE connection closed unexpectedly')
       } catch (err) {
         if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
         if (err instanceof DOMException && err.name === 'AbortError') return

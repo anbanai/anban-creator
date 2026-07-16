@@ -130,6 +130,10 @@ function waitForAbort(signal: AbortSignal) {
   return new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
 }
 
+function textOccurrences(container: HTMLElement, text: string) {
+  return Math.max(0, (container.textContent?.split(text).length ?? 1) - 1)
+}
+
 async function openTaskDetails(tab?: '概览' | '配置' | '素材' | '日志') {
   fireEvent.click(await screen.findByRole('button', { name: '更多详情' }))
   expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
@@ -143,7 +147,9 @@ describe('TaskDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     routeState.taskId = 'task-1'
-    mockStreamTaskProgress.mockImplementation(async function* () {})
+    mockStreamTaskProgress.mockImplementation(async function* (_taskId, _token, signal) {
+      if (signal) await waitForAbort(signal)
+    })
     vi.mocked(api.tasks.files).mockResolvedValue([])
     vi.mocked(api.tasks.videoProduction).mockResolvedValue({
       task_id: 'task-1',
@@ -417,6 +423,119 @@ describe('TaskDetailPage', () => {
       fireEvent.click(screen.getByRole('tab', { name: '日志' }))
       expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('C 等待日志')
       expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reconciles the first polling replay with persisted log lines', async () => {
+    mockStreamTaskProgress.mockImplementation(async function* (_taskId, _token, signal) {
+      if (!signal) return
+      yield {
+        event: 'progress',
+        data: JSON.stringify('第一条持久化日志\n第二条持久化日志\n第三条新增日志'),
+      }
+      await waitForAbort(signal)
+    })
+    const task = taskWith({
+      id: 'task-1',
+      status: 'running',
+      progress_log: '第一条持久化日志\n第二条持久化日志',
+      result: null,
+      completed_at: '',
+    })
+
+    renderWithCachedTasks(task)
+
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('3 条 · 实时')
+    })
+    fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+    const logSection = await screen.findByRole('region', { name: '执行动态' })
+    expect(textOccurrences(logSection, '第一条持久化日志')).toBe(1)
+    expect(textOccurrences(logSection, '第二条持久化日志')).toBe(1)
+    expect(textOccurrences(logSection, '第三条新增日志')).toBe(1)
+  })
+
+  it('rotates a timed-out stream and deduplicates the reconnect replay', async () => {
+    mockStreamTaskProgress.mockImplementation(async function* (_taskId, _token, signal) {
+      if (!signal) return
+      if (mockStreamTaskProgress.mock.calls.length === 1) {
+        yield { event: 'timeout', data: '{}' }
+        return
+      }
+      yield {
+        event: 'progress',
+        data: JSON.stringify('第一条持久化日志\n第二条持久化日志'),
+      }
+      await waitForAbort(signal)
+    })
+    const task = taskWith({
+      id: 'task-1',
+      status: 'running',
+      progress_log: '第一条持久化日志\n第二条持久化日志',
+      result: null,
+      completed_at: '',
+    })
+
+    renderWithCachedTasks(task)
+
+    await waitFor(() => expect(mockStreamTaskProgress).toHaveBeenCalledTimes(2))
+    const context = screen.getByRole('region', { name: '任务上下文' })
+    expect(context).toHaveTextContent('2 条 · 实时')
+    expect(context).not.toHaveTextContent('连接中断')
+
+    fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+    const logSection = await screen.findByRole('region', { name: '执行动态' })
+    expect(textOccurrences(logSection, '第一条持久化日志')).toBe(1)
+    expect(textOccurrences(logSection, '第二条持久化日志')).toBe(1)
+  })
+
+  it('does not reconnect after a terminal event and clean EOF', async () => {
+    mockStreamTaskProgress.mockImplementation(async function* () {
+      yield { event: 'completed', data: JSON.stringify({ status: 'completed' }) }
+    })
+    const task = taskWith({
+      id: 'task-1',
+      status: 'running',
+      result: null,
+      completed_at: '',
+    })
+    vi.mocked(api.tasks.get).mockResolvedValue(task)
+
+    renderWithCachedTasks(task)
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(mockStreamTaskProgress).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('任务完成')
+  })
+
+  it('retries unexpected clean EOF and exposes reconnect after the retry budget', async () => {
+    vi.useFakeTimers()
+    try {
+      mockStreamTaskProgress.mockImplementation(async function* () {})
+      const task = taskWith({
+        id: 'task-1',
+        status: 'running',
+        progress_log: '已有持久化日志',
+        result: null,
+        completed_at: '',
+      })
+      vi.mocked(api.tasks.get).mockResolvedValue(task)
+
+      renderWithCachedTasks(task)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(12_001)
+      })
+      expect(mockStreamTaskProgress).toHaveBeenCalledTimes(4)
+      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('连接中断')
+
+      fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+      expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }
