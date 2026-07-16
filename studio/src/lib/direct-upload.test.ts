@@ -5,6 +5,7 @@ import { directUploadResultToInputAttachment, uploadToOSS } from '@/lib/direct-u
 const putMock = vi.fn()
 const multipartUploadMock = vi.fn()
 const cancelMock = vi.fn()
+const abortMultipartUploadMock = vi.fn()
 
 let xhrAutoComplete = true
 const xhrInstances: FakeXMLHttpRequest[] = []
@@ -42,6 +43,7 @@ vi.mock('ali-oss', () => ({
     put: putMock,
     multipartUpload: multipartUploadMock,
     cancel: cancelMock,
+    abortMultipartUpload: abortMultipartUploadMock,
     }
   }),
 }))
@@ -56,6 +58,16 @@ function fileOf(size: number, type = 'image/png', name = 'asset.png') {
   const file = new File(['x'], name, { type })
   Object.defineProperty(file, 'size', { value: size })
   return file
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 describe('uploadToOSS', () => {
@@ -301,11 +313,13 @@ describe('uploadToOSS', () => {
 
   it('cancels the remote multipart upload by checkpoint when abort follows progress', async () => {
     const controller = new AbortController()
+    const cleanup = deferred<void>()
     let rejectUpload!: (reason?: unknown) => void
     multipartUploadMock.mockImplementationOnce(() => new Promise((_, reject) => {
       rejectUpload = reject
     }))
     cancelMock.mockImplementation(() => rejectUpload(new Error('cancelled by SDK')))
+    abortMultipartUploadMock.mockReturnValueOnce(cleanup.promise)
     const promise = uploadToOSS({
       purpose: 'video_reference',
       file: fileOf(12 * 1024 * 1024, 'video/mp4'),
@@ -319,22 +333,32 @@ describe('uploadToOSS', () => {
     controller.abort()
     progress(0.5, checkpoint)
 
-    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    let settled = false
+    void promise.then(() => { settled = true }, () => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
     expect(cancelMock).toHaveBeenCalledOnce()
-    expect(cancelMock).toHaveBeenCalledWith({
-      name: 'uploads/pending/user/up-1/asset.png',
-      uploadId: 'multipart-upload-1',
-    })
+    expect(cancelMock.mock.calls[0]).toEqual([])
+    expect(abortMultipartUploadMock).toHaveBeenCalledOnce()
+    expect(abortMultipartUploadMock).toHaveBeenCalledWith(
+      'uploads/pending/user/up-1/asset.png',
+      'multipart-upload-1',
+    )
+
+    cleanup.resolve()
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
     expect(http.post).toHaveBeenCalledTimes(1)
   })
 
   it('cancels the queue before a checkpoint and aborts the remote upload when it arrives', async () => {
     const controller = new AbortController()
+    const cleanup = deferred<void>()
     let rejectUpload!: (reason?: unknown) => void
     multipartUploadMock.mockImplementationOnce(() => new Promise((_, reject) => {
       rejectUpload = reject
     }))
     cancelMock.mockImplementation(() => rejectUpload(new Error('cancelled by SDK')))
+    abortMultipartUploadMock.mockReturnValueOnce(cleanup.promise)
     const promise = uploadToOSS({
       purpose: 'video_reference',
       file: fileOf(12 * 1024 * 1024, 'video/mp4'),
@@ -344,17 +368,27 @@ describe('uploadToOSS', () => {
     const progress = multipartUploadMock.mock.calls[0][2].progress
 
     controller.abort()
+    expect(cancelMock).toHaveBeenCalledOnce()
+    expect(cancelMock.mock.calls[0]).toEqual([])
+    expect(abortMultipartUploadMock).not.toHaveBeenCalled()
+
     const checkpoint = { uploadId: 'multipart-upload-late' }
     progress(0.1, checkpoint)
     progress(0.2, checkpoint)
 
+    let settled = false
+    void promise.then(() => { settled = true }, () => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(cancelMock).toHaveBeenCalledOnce()
+    expect(abortMultipartUploadMock).toHaveBeenCalledOnce()
+    expect(abortMultipartUploadMock).toHaveBeenCalledWith(
+      'uploads/pending/user/up-1/asset.png',
+      'multipart-upload-late',
+    )
+
+    cleanup.reject(new Error('remote cleanup failed'))
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
-    expect(cancelMock).toHaveBeenCalledTimes(2)
-    expect(cancelMock.mock.calls[0]).toEqual([])
-    expect(cancelMock).toHaveBeenNthCalledWith(2, {
-      name: 'uploads/pending/user/up-1/asset.png',
-      uploadId: 'multipart-upload-late',
-    })
     expect(http.post).toHaveBeenCalledTimes(1)
   })
 })

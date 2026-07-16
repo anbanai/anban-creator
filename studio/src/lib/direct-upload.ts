@@ -121,35 +121,56 @@ async function uploadMultipart(
   })
   let latestUploadId = ''
   let queueCancelled = false
-  let remoteUploadCancelled = false
-  const cancel = () => {
-    if (latestUploadId) {
-      if (remoteUploadCancelled) return
-      remoteUploadCancelled = true
-      client.cancel({ name: prepared.key, uploadId: latestUploadId })
-      return
+  let remoteAbortPromise: Promise<void> | null = null
+  let markRemoteAbortStarted!: () => void
+  const remoteAbortStarted = new Promise<void>((resolve) => {
+    markRemoteAbortStarted = resolve
+  })
+  const abortRemoteUpload = () => {
+    if (!latestUploadId || remoteAbortPromise) return
+    try {
+      remoteAbortPromise = client.abortMultipartUpload(prepared.key, latestUploadId)
+        .then(() => undefined, () => undefined)
+    } catch {
+      remoteAbortPromise = Promise.resolve()
     }
-    if (queueCancelled) return
-    queueCancelled = true
-    client.cancel()
+    markRemoteAbortStarted()
+  }
+  const cancel = () => {
+    if (!queueCancelled) {
+      queueCancelled = true
+      client.cancel()
+    }
+    abortRemoteUpload()
   }
   signal?.addEventListener('abort', cancel, { once: true })
+  let uploadFailed = false
+  let uploadFailure: unknown
   try {
     await client.multipartUpload(prepared.key, file, {
       headers: { 'Content-Type': contentType },
       progress: (p: number, checkpoint) => {
         if (checkpoint?.uploadId) latestUploadId = checkpoint.uploadId
         if (signal?.aborted) {
-          cancel()
+          abortRemoteUpload()
           return
         }
         onProgress?.(Math.min(99, Math.max(1, Math.round(p * 100))))
       },
     })
+  } catch (error) {
+    uploadFailed = true
+    uploadFailure = error
   } finally {
     signal?.removeEventListener('abort', cancel)
   }
-  throwIfUploadAborted(signal)
+  if (signal?.aborted) {
+    abortRemoteUpload()
+    if (!remoteAbortPromise) await remoteAbortStarted
+    await remoteAbortPromise
+    throw uploadAbortError()
+  }
+  if (uploadFailed) throw uploadFailure
 }
 
 function uploadSignedPut(
