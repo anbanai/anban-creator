@@ -977,6 +977,81 @@ func TestTaskService_CreateManualVideoEditorRequiresSourceVideo(t *testing.T) {
 	}
 }
 
+func TestTaskService_CreateManualVideoEditorPromotesPromptVideoAttachmentToInputReference(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+	key := "uploads/finalized/" + userID + "/video-upload/source.mp4"
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "为源视频加字幕并剪成短视频",
+		InputAttachments: []model.EntryAttachment{{
+			Type: "video", UploadID: "video-upload", Key: key,
+			FileName: "source.mp4", ContentType: "video/mp4", Size: 1234,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	input := found.VideoInput.Data()
+	if input.Brief != "为源视频加字幕并剪成短视频" || len(input.References) != 1 {
+		t.Fatalf("video input = %#v, want prompt brief and one promoted reference", input)
+	}
+	ref := input.References[0]
+	if ref.Type != VideoReferenceVideo || ref.URL != key || ref.FileName != "source.mp4" || ref.MimeType != "video/mp4" || ref.FileSize != 1234 {
+		t.Fatalf("promoted reference = %#v", ref)
+	}
+	if strings.Contains(strings.ToLower(ref.URL), "signature=") {
+		t.Fatalf("promoted reference persisted signed URL: %#v", ref)
+	}
+}
+
+func TestTaskService_CreateManualVideoInputKeepsStructuredOrderAndDeduplicatesPromptAttachments(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+	key := "uploads/finalized/" + userID + "/video-upload/source.mp4"
+	structured := []model.VideoReferenceAsset{
+		{Type: VideoReferenceImage, URL: "https://cdn.example.com/board.png", ReferenceRole: "storyboard"},
+		{Type: VideoReferenceVideo, URL: key, FileName: "source.mp4", InputDurationSeconds: 12},
+	}
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "按分镜剪辑",
+		VideoEditorInput: &model.VideoInput{
+			Brief:      "结构化 brief",
+			References: structured,
+		},
+		InputAttachments: []model.EntryAttachment{
+			{Type: "video", UploadID: "video-upload", Key: key, FileName: "source.mp4", ContentType: "video/mp4"},
+			{Type: "audio", UploadID: "audio-upload", Key: "uploads/finalized/" + userID + "/audio-upload/music.mp3", FileName: "music.mp3", ContentType: "audio/mpeg"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	input := tasks[0].VideoInput.Data()
+	if input.Brief != "结构化 brief" || len(input.References) != 3 {
+		t.Fatalf("video input = %#v, want two structured refs plus unique audio ref", input)
+	}
+	if !reflect.DeepEqual(input.References[:2], structured) {
+		t.Fatalf("structured reference order changed: %#v", input.References)
+	}
+	if input.References[2].Type != VideoReferenceAudio || input.References[2].FileName != "music.mp3" {
+		t.Fatalf("appended attachment reference = %#v", input.References[2])
+	}
+}
+
 func TestTaskService_CreateManualVideoTaskOnlyRequiresBaseFeeBalance(t *testing.T) {
 	repoForCredits := setupCreditTestRepo(t)
 	creditSvc := newPricedCreditService(repoForCredits)

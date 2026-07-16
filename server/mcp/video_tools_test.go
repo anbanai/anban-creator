@@ -1620,6 +1620,63 @@ func TestPrepareVideoGenerationInputsMaterializesVerifiedKeyFirstVideo(t *testin
 	}
 }
 
+func TestPrepareVideoGenerationInputsConsumesPromptOnlyKeyFirstVideoEditorAttachment(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	userID := "user-1"
+	key := "uploads/finalized/" + userID + "/video-upload/source.mp4"
+	store := &fakeVideoReferenceStorage{
+		ownedPrefix: "https://oss.example.com/",
+		files:       map[string][]byte{key: makeTinyMP4(t, "1.2")},
+	}
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.UserID = userID
+	project.Platform = model.PlatformVideoEditor
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	ctx = withMCPUserID(ctx, userID)
+	tasks, err := svcs.TaskSvc.CreateManual(ctx, service.CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "给源视频加字幕",
+		InputAttachments: []model.EntryAttachment{{
+			Type: "video", UploadID: "video-upload", Key: key,
+			FileName: "source.mp4", ContentType: "video/mp4", Size: int64(len(store.files[key])),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if refs := tasks[0].VideoInput.Data().References; len(refs) != 1 || refs[0].URL != key {
+		t.Fatalf("persisted prompt video references = %#v", refs)
+	}
+	installFakeVideoUnderstanding(t, repo, nil)
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(tasks[0].ID) + `
+	}`)}}
+	result, err := prepareVideoGenerationInputsHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("prepareVideoGenerationInputsHandler: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("prepare error: %s", callToolText(result))
+	}
+	contractText := readMCPTaskFileText(t, ctx, repo, tasks[0].ID, "video-input-contract.json")
+	if !strings.Contains(contractText, key) || !strings.Contains(contractText, `"input_duration_seconds"`) || !strings.Contains(contractText, `"task_file_id"`) {
+		t.Fatalf("prepared contract did not consume prompt video attachment: %s", contractText)
+	}
+	if strings.Contains(strings.ToLower(contractText), "signature=") {
+		t.Fatalf("prepared contract persisted signed URL: %s", contractText)
+	}
+}
+
 func TestPrepareVideoGenerationInputsRejectsPendingKeyFirstVideo(t *testing.T) {
 	for _, platform := range []string{model.PlatformVideoCreator, model.PlatformVideoEditor} {
 		t.Run(platform, func(t *testing.T) {

@@ -1122,6 +1122,77 @@ func TestCloneTaskAcceptsFinalInputSnapshot(t *testing.T) {
 	}
 }
 
+func TestCreateVideoEditorPromotesVerifiedPromptVideoToPersistedInputReference(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "prompt-video@example.com", Password: "hashed", InviteCode: "promptvideo", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoEditor, Name: "Video Editor", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	uploadID := "video-upload"
+	pendingKey := "uploads/pending/" + userID + "/" + uploadID + "/source.mp4"
+	finalKey := "uploads/finalized/" + userID + "/" + uploadID + "/source.mp4"
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		Key: pendingKey, FileName: "source.mp4", ContentType: "video/mp4", Size: 321,
+		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create pending upload: %v", err)
+	}
+	store := pendingUploadStatStore(repo.PendingUploads())
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{
+		"project_id":"`+projectID+`",
+		"prompt":"给源视频加字幕",
+		"quantity":1,
+		"input_attachments":[{
+			"type":"video","upload_id":"`+uploadID+`","key":"`+pendingKey+`",
+			"file_name":"forged.mov","content_type":"video/quicktime","size":999
+		}]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, body)
+	}
+	var envelope struct {
+		Data struct {
+			ID               string           `json:"id"`
+			VideoEditorInput model.VideoInput `json:"video_editor_input"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	refs := envelope.Data.VideoEditorInput.References
+	if len(refs) != 1 || refs[0].Type != service.VideoReferenceVideo || refs[0].URL != finalKey || refs[0].FileName != "source.mp4" || refs[0].MimeType != "video/mp4" || refs[0].FileSize != 321 {
+		t.Fatalf("response video input references = %#v", refs)
+	}
+	found, err := repo.Tasks().FindByID(ctx, envelope.Data.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	stored := found.VideoInput.Data().References
+	if len(stored) != 1 || stored[0].URL != finalKey || strings.Contains(strings.ToLower(stored[0].URL), "signature=") {
+		t.Fatalf("stored video input references = %#v", stored)
+	}
+}
+
 func TestCloneTaskRejectsEmptyMontageBriefBeforeSideEffects(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)

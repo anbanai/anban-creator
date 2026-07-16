@@ -521,6 +521,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
+	if model.IsVideoPlatform(taskType) {
+		videoInput = videoInputWithAttachmentReferences(p.Prompt, videoInput, p.InputAttachments)
+	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
 		return nil, fmt.Errorf("%w: montage_input can only be set on montage tasks", ErrMontageInput)
 	}
@@ -811,6 +814,65 @@ func hasVideoEditorSourceVideo(input *model.VideoInput, attachments []model.Entr
 		}
 	}
 	return false
+}
+
+func videoInputWithAttachmentReferences(prompt string, input *model.VideoInput, attachments []model.EntryAttachment) *model.VideoInput {
+	attachmentRefs := videoReferencesFromEntryAttachments(attachments)
+	if input == nil && len(attachmentRefs) == 0 {
+		return nil
+	}
+	result := model.VideoInput{Brief: strings.TrimSpace(prompt)}
+	if input != nil {
+		result = *input
+		if strings.TrimSpace(result.Brief) == "" {
+			result.Brief = strings.TrimSpace(prompt)
+		}
+		result.References = cloneVideoReferenceAssets(input.References)
+	}
+	seen := make(map[string]struct{}, len(result.References)+len(attachmentRefs))
+	for _, ref := range result.References {
+		seen[videoReferenceAssetIdentity(ref)] = struct{}{}
+	}
+	for _, ref := range attachmentRefs {
+		identity := videoReferenceAssetIdentity(ref)
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		result.References = append(result.References, ref)
+	}
+	return &result
+}
+
+func cloneVideoReferenceAssets(references []model.VideoReferenceAsset) []model.VideoReferenceAsset {
+	cloned := make([]model.VideoReferenceAsset, len(references))
+	for i, ref := range references {
+		cloned[i] = ref
+		cloned[i].MustKeep = append([]string(nil), ref.MustKeep...)
+		cloned[i].CanChange = append([]string(nil), ref.CanChange...)
+		cloned[i].MustNotTransfer = append([]string(nil), ref.MustNotTransfer...)
+	}
+	return cloned
+}
+
+func videoReferenceAssetIdentity(ref model.VideoReferenceAsset) string {
+	typ := strings.ToLower(strings.TrimSpace(ref.Type))
+	switch typ {
+	case "image":
+		typ = VideoReferenceImage
+	case "audio":
+		typ = VideoReferenceAudio
+	case "video":
+		typ = VideoReferenceVideo
+	case "text":
+		typ = VideoReferenceText
+	}
+	return strings.Join([]string{
+		typ,
+		strings.TrimSpace(ref.URL),
+		strings.TrimSpace(ref.TaskFileID),
+		strings.TrimSpace(ref.Text),
+	}, "\x00")
 }
 
 func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) VideoGenerationRequest {

@@ -396,6 +396,18 @@ func materializeOwnedVideoInputReferences(ctx context.Context, task *model.Task,
 		}
 		fileName := videoInputContractFileName(*ref, fallbackFileName)
 		mimeType := videoInputContractMimeType(*ref, fallbackContentType)
+		if ref.Type == service.VideoReferenceVideo && ref.InputDurationSeconds <= 0 {
+			duration, err := probeVideoDurationFromReader(ctx, bytes.NewReader(data), fileName)
+			if err != nil {
+				return fmt.Errorf("measure video_creator_input.references %s: %w", contractReferenceLabel(*ref), err)
+			}
+			ref.InputDurationSeconds = duration
+			if contract.TargetDurationSeconds == 0 {
+				contract.TargetDurationSeconds = int64(math.Round(duration))
+				contract.TargetDurationSource = service.VideoDurationSourceReferenceVideo
+				contract.TargetDurationReason = "matched measured reference video duration"
+			}
+		}
 		tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, task.ID, getUserID(ctx), filepath.ToSlash(filepath.Join("video-inputs", fileName)), bytes.NewReader(data), mimeType, int64(len(data)))
 		if err != nil {
 			return fmt.Errorf("register video_creator_input.references %s as task file: %w", contractReferenceLabel(*ref), err)
@@ -630,6 +642,7 @@ func normalizeVideoInputContractReference(ctx context.Context, task *model.Task,
 		role = inferVideoInputReferenceRole(promptContext, refType, strict)
 	}
 	required := isRequiredVideoInputReference(refType, urlValue, asset.Text)
+	verifiedKeyFirst := false
 	if required && refType != service.VideoReferenceText {
 		if err := validateOwnedRuntimeVideoReference(task, urlValue); err != nil {
 			return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is not usable: %w", videoInputReferenceLabel(asset), err)
@@ -642,9 +655,10 @@ func normalizeVideoInputContractReference(ctx context.Context, task *model.Task,
 			if !ok {
 				return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is not usable: %w", videoInputReferenceLabel(asset), err)
 			}
+			verifiedKeyFirst = true
 		}
 	}
-	if refType == service.VideoReferenceVideo && duration <= 0 {
+	if refType == service.VideoReferenceVideo && duration <= 0 && !verifiedKeyFirst {
 		return videoInputContractReference{}, fmt.Errorf("video_creator_input.references %s is a video reference but has no measured input_duration_seconds; upload/register it before generation", videoInputReferenceLabel(asset))
 	}
 	return videoInputContractReference{
