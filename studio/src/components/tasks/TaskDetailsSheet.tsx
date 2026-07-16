@@ -1,10 +1,11 @@
-import { useEffect, useState, type RefObject } from 'react'
+import { useEffect, type RefObject } from 'react'
 import { AlertTriangle, Copy, Pause, Play, ReceiptText, RefreshCw, ScrollText } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import ReferenceUsageSummary from '@/components/tasks/ReferenceUsageSummary'
 import { TaskConfigurationDetails } from '@/components/tasks/TaskConfigurationDetails'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Empty,
@@ -21,7 +22,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { formatFullDateTimeCN } from '@/lib/labels'
+import { formatFullDateTimeCN, statusBadgeVariant, taskStatusLabel } from '@/lib/labels'
 import type { Project, Task, TaskFile } from '@/types'
 
 export type TaskDetailsTab = 'overview' | 'configuration' | 'materials' | 'logs'
@@ -29,6 +30,8 @@ export type TaskDetailsTab = 'overview' | 'configuration' | 'materials' | 'logs'
 export interface TaskDetailsSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  selectedTab: TaskDetailsTab
+  onTabChange: (tab: TaskDetailsTab) => void
   task: Task
   project?: Project
   files: TaskFile[]
@@ -207,37 +210,64 @@ function TaskLogDetails({
 }
 
 export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
-  const [tab, setTab] = useState<TaskDetailsTab>('overview')
-
-  useEffect(() => {
-    setTab('overview')
-  }, [props.task.id])
-
   const logMarkdown = props.logs.join('  \n')
+  const hasSnapshot = Boolean(props.task.project_snapshot?.platform)
+  const projectName = hasSnapshot
+    ? props.task.project_snapshot?.project_name || '未设置项目'
+    : props.project?.name || '未设置项目'
+  const taskTitle = props.task.title || props.task.topic || props.task.prompt
 
   return (
     <Sheet open={props.open} onOpenChange={props.onOpenChange}>
       <SheetContent
         side="right"
-        className="gap-0 overflow-hidden p-0 data-[side=right]:w-full sm:max-w-xl"
+        className="gap-0 overflow-hidden p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl"
       >
         <SheetHeader className="shrink-0 border-b border-border px-4 py-3 pr-12">
           <SheetTitle>任务详情</SheetTitle>
-          <SheetDescription className="sr-only">任务概览、配置、参考素材和执行日志</SheetDescription>
+          <SheetDescription className="truncate text-xs" title={taskTitle}>
+            {taskTitle}
+          </SheetDescription>
+          <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+            <Badge variant={statusBadgeVariant(props.task.status)}>
+              {taskStatusLabel[props.task.status] || props.task.status}
+            </Badge>
+            <span className="min-w-0 truncate" title={projectName}>{projectName}</span>
+          </div>
         </SheetHeader>
         <Tabs
-          value={tab}
-          onValueChange={(value) => setTab(value as TaskDetailsTab)}
+          value={props.selectedTab}
+          onValueChange={(value) => props.onTabChange(value as TaskDetailsTab)}
           className="min-h-0 flex-1 gap-0 overflow-hidden"
         >
           <TabsList
             variant="line"
             className="w-full shrink-0 justify-start overflow-x-auto border-b border-border px-4 py-2"
           >
-            <TabsTrigger value="overview">概览</TabsTrigger>
-            <TabsTrigger value="configuration">配置</TabsTrigger>
-            <TabsTrigger value="materials">素材</TabsTrigger>
-            <TabsTrigger value="logs">日志</TabsTrigger>
+            <TabsTrigger
+              value="overview"
+              className="data-active:text-primary data-active:after:bg-primary"
+            >
+              概览
+            </TabsTrigger>
+            <TabsTrigger
+              value="configuration"
+              className="data-active:text-primary data-active:after:bg-primary"
+            >
+              配置
+            </TabsTrigger>
+            <TabsTrigger
+              value="materials"
+              className="data-active:text-primary data-active:after:bg-primary"
+            >
+              素材
+            </TabsTrigger>
+            <TabsTrigger
+              value="logs"
+              className="data-active:text-primary data-active:after:bg-primary"
+            >
+              日志
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="overview" className="min-h-0 overflow-y-auto p-4">
             <TaskOverviewDetails

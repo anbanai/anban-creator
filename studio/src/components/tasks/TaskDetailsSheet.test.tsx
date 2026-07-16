@@ -1,5 +1,5 @@
-import { createRef } from 'react'
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { createRef, useEffect, useState } from 'react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/test-utils'
 import type { Project, Task } from '@/types'
@@ -68,6 +68,8 @@ function createSheetProps(overrides: Partial<TaskDetailsSheetProps> = {}): TaskD
   return {
     open: true,
     onOpenChange: vi.fn(),
+    selectedTab: 'overview',
+    onTabChange: vi.fn(),
     task: articleTask,
     project,
     files: [],
@@ -85,24 +87,57 @@ function createSheetProps(overrides: Partial<TaskDetailsSheetProps> = {}): TaskD
   }
 }
 
+function ControlledTaskDetailsSheet(props: TaskDetailsSheetProps) {
+  const [selectedTab, setSelectedTab] = useState(props.selectedTab)
+
+  useEffect(() => {
+    setSelectedTab(props.selectedTab)
+  }, [props.selectedTab, props.task.id])
+
+  return (
+    <TaskDetailsSheet
+      {...props}
+      selectedTab={selectedTab}
+      onTabChange={(tab) => {
+        props.onTabChange(tab)
+        setSelectedTab(tab)
+      }}
+    />
+  )
+}
+
 describe('TaskDetailsSheet', () => {
   it('overrides the base side width so the sheet fills mobile viewports', () => {
     render(<TaskDetailsSheet {...createSheetProps()} />)
 
     const sheet = screen.getByRole('dialog', { name: '任务详情' })
-    expect(sheet).toHaveClass('data-[side=right]:w-full', 'sm:max-w-xl')
-    expect(sheet).not.toHaveClass('data-[side=right]:w-3/4')
+    expect(sheet).toHaveClass(
+      'data-[side=right]:w-full',
+      'data-[side=right]:sm:max-w-xl',
+    )
+    expect(sheet).not.toHaveClass(
+      'data-[side=right]:w-3/4',
+      'data-[side=right]:sm:max-w-sm',
+    )
+  })
+
+  it('shows compact task context in the header', () => {
+    render(<TaskDetailsSheet {...createSheetProps({ selectedTab: 'logs' })} />)
+
+    expect(screen.getByText('夏日选题')).toBeInTheDocument()
+    expect(screen.getByText('创建时项目名称')).toBeInTheDocument()
+    expect(screen.getByText('已完成')).toBeInTheDocument()
   })
 
   it('opens on Overview with semantic task values and credit details action', () => {
     const props = createSheetProps()
 
-    render(<TaskDetailsSheet {...props} />)
+    render(<ControlledTaskDetailsSheet {...props} />)
 
     expect(screen.getByRole('heading', { name: '任务详情' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('手动创建')).toBeInTheDocument()
-    expect(screen.getByText('创建时项目名称')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('创建时项目名称')).toBeInTheDocument()
     expect(screen.getByText('188')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '查看明细' }))
@@ -110,11 +145,11 @@ describe('TaskDetailsSheet', () => {
   })
 
   it('shows the immutable article snapshot on Configuration', () => {
-    render(<TaskDetailsSheet {...createSheetProps()} />)
+    render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
 
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
 
-    expect(screen.getByText('创建时项目名称')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('创建时项目名称')).toBeInTheDocument()
     expect(screen.getByText('公众号文章')).toBeInTheDocument()
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
     expect(screen.getByText('3:2')).toBeInTheDocument()
@@ -141,7 +176,7 @@ describe('TaskDetailsSheet', () => {
       project_snapshot: { platform: 'article' },
     }
     render(
-      <TaskDetailsSheet
+      <ControlledTaskDetailsSheet
         {...createSheetProps({ task: partialSnapshotTask, project: changedProject })}
       />,
     )
@@ -179,12 +214,14 @@ describe('TaskDetailsSheet', () => {
       project_snapshot: undefined,
     }
     render(
-      <TaskDetailsSheet {...createSheetProps({ task: legacyTask, project: legacyProject })} />,
+      <ControlledTaskDetailsSheet
+        {...createSheetProps({ task: legacyTask, project: legacyProject })}
+      />,
     )
 
-    expect(screen.getByText('旧任务当前项目')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('旧任务当前项目')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
-    expect(screen.getByText('旧任务当前项目')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('旧任务当前项目')).toBeInTheDocument()
     expect(screen.getByText('旧任务视觉风格')).toBeInTheDocument()
     expect(screen.getByText('4:3')).toBeInTheDocument()
     expect(screen.getByText('legacy-image-model')).toBeInTheDocument()
@@ -216,12 +253,14 @@ describe('TaskDetailsSheet', () => {
       },
     }
     render(
-      <TaskDetailsSheet {...createSheetProps({ task: legacyTask, project: legacyProject })} />,
+      <ControlledTaskDetailsSheet
+        {...createSheetProps({ task: legacyTask, project: legacyProject })}
+      />,
     )
 
-    expect(screen.getByText('空快照当前项目')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('空快照当前项目')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
-    expect(screen.getByText('空快照当前项目')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('空快照当前项目')).toBeInTheDocument()
     expect(screen.getByText('旧任务覆盖视觉')).toBeInTheDocument()
     expect(screen.getByText('旧任务覆盖作者')).toBeInTheDocument()
     expect(screen.getByText('旧任务覆盖写作')).toBeInTheDocument()
@@ -264,7 +303,7 @@ describe('TaskDetailsSheet', () => {
   })
 
   it('shows the compact task input fallback on Materials', () => {
-    render(<TaskDetailsSheet {...createSheetProps()} />)
+    render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
 
     fireEvent.click(screen.getByRole('tab', { name: '素材' }))
 
@@ -275,7 +314,7 @@ describe('TaskDetailsSheet', () => {
 
   it('renders Markdown logs and wires follow, copy, and reconnect actions', () => {
     const props = createSheetProps({ sseError: '实时连接已中断' })
-    render(<TaskDetailsSheet {...props} />)
+    render(<ControlledTaskDetailsSheet {...props} />)
 
     fireEvent.click(screen.getByRole('tab', { name: '日志' }))
 
@@ -297,7 +336,7 @@ describe('TaskDetailsSheet', () => {
   it('scrolls existing logs to the bottom when Logs mounts from an inactive tab', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(640)
     const props = createSheetProps()
-    render(<TaskDetailsSheet {...props} />)
+    render(<ControlledTaskDetailsSheet {...props} />)
 
     expect(props.logContainerRef.current).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: '日志' }))
@@ -308,15 +347,15 @@ describe('TaskDetailsSheet', () => {
   it('scrolls existing logs to the bottom when the controlled sheet reopens', async () => {
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(720)
     const props = createSheetProps()
-    const { rerender } = render(<TaskDetailsSheet {...props} />)
+    const { rerender } = render(<ControlledTaskDetailsSheet {...props} />)
     fireEvent.click(screen.getByRole('tab', { name: '日志' }))
     const firstLogContainer = props.logContainerRef.current
     expect(firstLogContainer?.scrollTop).toBe(720)
 
-    rerender(<TaskDetailsSheet {...props} open={false} />)
+    rerender(<ControlledTaskDetailsSheet {...props} open={false} />)
     await waitFor(() => expect(props.logContainerRef.current).toBeNull())
 
-    rerender(<TaskDetailsSheet {...props} open />)
+    rerender(<ControlledTaskDetailsSheet {...props} open />)
     await waitFor(() => {
       expect(props.logContainerRef.current).not.toBe(firstLogContainer)
       expect(props.logContainerRef.current?.scrollTop).toBe(720)
@@ -324,7 +363,7 @@ describe('TaskDetailsSheet', () => {
   })
 
   it('disables copying while waiting for the first log entry', () => {
-    render(<TaskDetailsSheet {...createSheetProps({ logs: [] })} />)
+    render(<ControlledTaskDetailsSheet {...createSheetProps({ logs: [] })} />)
 
     fireEvent.click(screen.getByRole('tab', { name: '日志' }))
 
@@ -332,21 +371,33 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByRole('button', { name: '复制日志' })).toBeDisabled()
   })
 
-  it('resets to Overview when a different task is rendered', () => {
-    const props = createSheetProps()
-    const { rerender } = render(<TaskDetailsSheet {...props} />)
-    fireEvent.click(screen.getByRole('tab', { name: '日志' }))
-    expect(screen.getByRole('tab', { name: '日志' })).toHaveAttribute('aria-selected', 'true')
-
-    rerender(
-      <TaskDetailsSheet
-        {...props}
-        task={{ ...articleTask, id: 'task-2', title: '另一个任务' }}
+  it('renders the supplied tab and delegates tab changes to its owner', () => {
+    const onTabChange = vi.fn()
+    render(
+      <ControlledTaskDetailsSheet
+        {...createSheetProps({ selectedTab: 'logs', onTabChange })}
       />,
     )
 
-    expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('手动创建')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '日志' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('heading', { name: '阶段日志' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '配置' }))
+
+    expect(onTabChange).toHaveBeenCalledWith('configuration')
+    expect(screen.getByRole('tab', { name: '配置' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
+  })
+
+  it('uses warm semantic styling for active tabs', () => {
+    render(<TaskDetailsSheet {...createSheetProps()} />)
+
+    for (const name of ['概览', '配置', '素材', '日志']) {
+      expect(screen.getByRole('tab', { name })).toHaveClass(
+        'data-active:text-primary',
+        'data-active:after:bg-primary',
+      )
+    }
   })
 })
 
