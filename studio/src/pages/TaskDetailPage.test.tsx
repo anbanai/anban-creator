@@ -1,13 +1,18 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render as renderWithoutProviders, screen, waitFor, within } from '@testing-library/react'
+import type { PropsWithChildren } from 'react'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { BrowserRouter } from 'react-router-dom'
+import { ThemeProvider } from 'next-themes'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TaskDetailPage from './TaskDetailPage'
-import { render } from '@/test/test-utils'
+import { createTestQueryClient, render } from '@/test/test-utils'
 import { mockProjectDetail, mockTasks } from '@/test/mocks/handlers'
 import type { Task, TaskFile } from '@/types'
 import { api } from '@/lib/api'
 
 const mockNavigate = vi.fn()
 const routeState = vi.hoisted(() => ({ taskId: 'task-1' }))
+const mockStreamTaskProgress = vi.hoisted(() => vi.fn<typeof import('@/lib/sse').streamTaskProgress>())
 
 const mockReferenceUsageSummary = vi.hoisted(() => vi.fn(({ task }: {
   task: { title?: string; input_attachments?: Array<{ file_name?: string }> }
@@ -42,6 +47,14 @@ vi.mock('react-router-dom', async () => {
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ token: 'test-token' }),
 }))
+
+vi.mock('@/lib/sse', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/sse')>('@/lib/sse')
+  return {
+    ...actual,
+    streamTaskProgress: mockStreamTaskProgress,
+  }
+})
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -92,6 +105,31 @@ function taskWith(overrides: Partial<Task>): Task {
   }
 }
 
+function renderWithCachedTasks(...tasks: Task[]) {
+  const queryClient = createTestQueryClient()
+  queryClient.setQueryDefaults(['task'], { gcTime: Infinity, staleTime: Infinity })
+  tasks.forEach((task) => queryClient.setQueryData(['task', task.id], task))
+
+  function CachedTaskProviders({ children }: PropsWithChildren) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            {children}
+          </ThemeProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    )
+  }
+
+  return renderWithoutProviders(<TaskDetailPage />, { wrapper: CachedTaskProviders })
+}
+
+function waitForAbort(signal: AbortSignal) {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+}
+
 async function openTaskDetails(tab?: '概览' | '配置' | '素材' | '日志') {
   fireEvent.click(await screen.findByRole('button', { name: '更多详情' }))
   expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
@@ -105,6 +143,7 @@ describe('TaskDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     routeState.taskId = 'task-1'
+    mockStreamTaskProgress.mockImplementation(async function* () {})
     vi.mocked(api.tasks.files).mockResolvedValue([])
     vi.mocked(api.tasks.videoProduction).mockResolvedValue({
       task_id: 'task-1',
@@ -220,6 +259,167 @@ describe('TaskDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
     })
+  })
+
+  it('drops running task SSE state when switching directly to a cached completed task', async () => {
+    const streamSignals = new Map<string, AbortSignal>()
+    mockStreamTaskProgress.mockImplementation(async function* (taskId, _token, signal) {
+      if (!signal) return
+      streamSignals.set(taskId, signal)
+      if (taskId !== 'task-1') return
+      yield { event: 'output', data: 'A 实时日志' }
+      await waitForAbort(signal)
+      yield { event: 'output', data: 'A 终止后的迟到日志' }
+    })
+    const taskA = taskWith({
+      id: 'task-1',
+      status: 'running',
+      progress_log: 'A 持久化日志',
+      result: null,
+      completed_at: '',
+    })
+    const taskB = taskWith({
+      id: 'task-2',
+      title: '已完成任务 B',
+      status: 'completed',
+      progress_log: 'B 持久化日志',
+      result: null,
+    })
+    const view = renderWithCachedTasks(taskA, taskB)
+
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('A 实时日志')
+    })
+
+    routeState.taskId = 'task-2'
+    view.rerender(<TaskDetailPage />)
+
+    await waitFor(() => {
+      const context = screen.getByRole('region', { name: '任务上下文' })
+      expect(context).toHaveTextContent('B 持久化日志')
+      expect(context).not.toHaveTextContent('A 实时日志')
+      expect(context).not.toHaveTextContent('A 终止后的迟到日志')
+    })
+    expect(streamSignals.get('task-1')).toHaveProperty('aborted', true)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+    const logSection = await screen.findByRole('region', { name: '执行动态' })
+    expect(logSection).toHaveTextContent('B 持久化日志')
+    expect(logSection).not.toHaveTextContent('A 实时日志')
+    expect(logSection).not.toHaveTextContent('A 终止后的迟到日志')
+    expect(within(logSection).queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
+  })
+
+  it('restarts SSE and ignores late events when switching directly between cached running tasks', async () => {
+    const streamSignals = new Map<string, AbortSignal>()
+    mockStreamTaskProgress.mockImplementation(async function* (taskId, _token, signal) {
+      if (!signal) return
+      streamSignals.set(taskId, signal)
+      yield { event: 'output', data: `${taskId} 实时日志` }
+      await waitForAbort(signal)
+      if (taskId === 'task-1') {
+        yield { event: 'output', data: 'task-1 终止后的迟到日志' }
+      }
+    })
+    const taskA = taskWith({
+      id: 'task-1',
+      status: 'running',
+      progress_log: 'task-1 持久化日志',
+      result: null,
+      completed_at: '',
+    })
+    const taskB = taskWith({
+      id: 'task-2',
+      title: '运行任务 B',
+      status: 'running',
+      progress_log: 'task-2 持久化日志',
+      result: null,
+      completed_at: '',
+    })
+    const view = renderWithCachedTasks(taskA, taskB)
+
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('task-1 实时日志')
+    })
+
+    routeState.taskId = 'task-2'
+    view.rerender(<TaskDetailPage />)
+
+    await waitFor(() => {
+      expect(streamSignals.get('task-1')).toHaveProperty('aborted', true)
+      expect(mockStreamTaskProgress).toHaveBeenCalledWith('task-2', 'test-token', expect.anything())
+    })
+    await waitFor(() => {
+      const context = screen.getByRole('region', { name: '任务上下文' })
+      expect(context).toHaveTextContent('task-2 实时日志')
+      expect(context).not.toHaveTextContent('task-1 实时日志')
+      expect(context).not.toHaveTextContent('task-1 终止后的迟到日志')
+    })
+  })
+
+  it('shows reconnect only for the active running task and clears it for terminal or pending tasks', async () => {
+    vi.useFakeTimers()
+    try {
+      mockStreamTaskProgress.mockImplementation(async function* () {
+        throw new Error('SSE unavailable')
+      })
+      const taskA = taskWith({
+        id: 'task-1',
+        status: 'running',
+        progress_log: 'A 持久化日志',
+        result: null,
+        completed_at: '',
+      })
+      const taskB = taskWith({
+        id: 'task-2',
+        title: '已完成任务 B',
+        status: 'completed',
+        progress_log: 'B 终态日志',
+        result: null,
+      })
+      const taskC = taskWith({
+        id: 'task-3',
+        title: '等待任务 C',
+        status: 'pending',
+        progress_log: 'C 等待日志',
+        result: null,
+        completed_at: '',
+      })
+      vi.mocked(api.tasks.get).mockResolvedValue(taskA)
+      const view = renderWithCachedTasks(taskA, taskB, taskC)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(12_001)
+      })
+      expect(mockStreamTaskProgress).toHaveBeenCalledTimes(4)
+      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('连接中断')
+
+      fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+      expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument()
+
+      vi.useRealTimers()
+      routeState.taskId = 'task-2'
+      view.rerender(<TaskDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
+        expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
+      })
+      fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+      expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('B 终态日志')
+      expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
+
+      routeState.taskId = 'task-3'
+      view.rerender(<TaskDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
+        expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
+      })
+      fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+      expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('C 等待日志')
+      expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps the pending result destination when video production has only missing artifacts', async () => {

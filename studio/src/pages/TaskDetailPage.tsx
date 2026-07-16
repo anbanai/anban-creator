@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ChangeEvent } from 'react'
+import { useState, useEffect, useRef, useCallback, type ChangeEvent } from 'react'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -70,6 +70,13 @@ interface ResumeFileInput {
   label: string
 }
 
+const MAX_SSE_LOGS = 500
+
+function appendLog(prev: string[], entry: string): string[] {
+  const next = [...prev, entry]
+  return next.length > MAX_SSE_LOGS ? next.slice(-MAX_SSE_LOGS) : next
+}
+
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -86,6 +93,7 @@ export default function TaskDetailPage() {
 
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
+  const [sseTaskId, setSseTaskId] = useState<string | null>(null)
   const [liveProgress, setLiveProgress] = useState<{
     percent: number
     stage: string | null
@@ -104,17 +112,13 @@ export default function TaskDetailPage() {
   const [resumeFiles, setResumeFiles] = useState<ResumeFileInput[]>([])
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
+  const activeSseTaskRef = useRef<string | null>(null)
+  const persistedLogsRef = useRef<string[]>([])
   const logContainerRef = useRef<HTMLDivElement | null>(null)
   const resumeFileInputRef = useRef<HTMLInputElement | null>(null)
   const { submit, isSubmitting } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
-
-  const MAX_SSE_LOGS = 500
-  function appendLog(prev: string[], entry: string): string[] {
-    const next = [...prev, entry]
-    return next.length > MAX_SSE_LOGS ? next.slice(-MAX_SSE_LOGS) : next
-  }
 
   const { data: task, isLoading, isError, refetch } = useQuery({
     queryKey: ['task', id],
@@ -151,14 +155,19 @@ export default function TaskDetailPage() {
     .map((line) => line.trimEnd())
     .filter(Boolean) ?? [])
     .slice(-MAX_PERSISTED_LOGS)
-  const displayLogs = sseLogs.length > 0 ? sseLogs : persistedLogs
+  // Lifecycle changes seed from this snapshot; polling updates must not duplicate live entries.
+  persistedLogsRef.current = persistedLogs
+  const isCurrentSseTask = Boolean(task?.id && sseTaskId === task.id)
+  const displayLogs = isCurrentSseTask && sseLogs.length > 0 ? sseLogs : persistedLogs
+  const currentSseError = isCurrentSseTask && task?.status === 'running' ? sseError : null
+  const currentLiveProgress = isCurrentSseTask && task?.status === 'running' ? liveProgress : null
   // progressValue takes the MAX of live SSE and persisted task.progress to
   // guarantee a monotonic bar. task.progress is the server-side high-water
   // mark (UpdateProgressColumn has a monotonic guard); latest_progress.percent
   // is last-writer-wins and can be lower under out-of-order stage emissions,
   // so it must NOT be the sole source — Math.max keeps the bar from regressing.
   const progressValue = Math.max(0, Math.min(100, Math.max(
-    liveProgress?.percent ?? 0,
+    currentLiveProgress?.percent ?? 0,
     task?.progress ?? 0,
   )))
   // Prefer live SSE > server-persisted latest_progress > generic fallback.
@@ -166,9 +175,9 @@ export default function TaskDetailPage() {
   // structured JSON with "Using tool: ..." noise and would leak into the card.
   const fallbackTitle = task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...'
   const persistedProgress = task?.latest_progress
-  const progressTitle = liveProgress?.title ?? persistedProgress?.title ?? fallbackTitle
-  const progressDescription = liveProgress?.description ?? persistedProgress?.description ?? null
-  const progressStage = liveProgress?.stage ?? persistedProgress?.stage ?? null
+  const progressTitle = currentLiveProgress?.title ?? persistedProgress?.title ?? fallbackTitle
+  const progressDescription = currentLiveProgress?.description ?? persistedProgress?.description ?? null
+  const progressStage = currentLiveProgress?.stage ?? persistedProgress?.stage ?? null
   const isRunning = task?.status === 'running'
   const creditTransactions = task?.credit_transactions ?? []
   const creditSummary = task?.credits_summary
@@ -281,36 +290,9 @@ export default function TaskDetailPage() {
     },
   })
 
-  const connectSSE = async (retries = 0) => {
-    if (!id) return
-    const currentToken = tokenRef.current
-    if (!currentToken) return
+  const handleSSEEvent = useCallback((taskId: string, event: SSEEvent) => {
+    if (activeSseTaskRef.current !== taskId) return
 
-    // Abort any existing connection
-    if (abortRef.current) {
-      abortRef.current.abort()
-    }
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    try {
-      for await (const event of streamTaskProgress(id, currentToken, controller.signal)) {
-        handleSSEEvent(event)
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      if (retries < 3 && !controller.signal.aborted) {
-        setSseLogs((prev) => appendLog(prev, `连接断开，正在重试 (${retries + 1}/3)...`))
-        await new Promise((r) => setTimeout(r, 2000 * (retries + 1)))
-        if (controller.signal.aborted) return
-        return connectSSE(retries + 1)
-      }
-      setSseError('连接断开，正在刷新任务状态...')
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-    }
-  }
-
-  function handleSSEEvent(event: SSEEvent) {
     const parsed = typeof event.data === 'string'
       ? (() => { try { return JSON.parse(event.data) } catch { return event.data } })()
       : event.data
@@ -367,8 +349,8 @@ export default function TaskDetailPage() {
       case 'completed':
       case 'failed':
       case 'cancelled': {
-        queryClient.invalidateQueries({ queryKey: ['task', id] })
-        queryClient.invalidateQueries({ queryKey: ['task-files', id] })
+        queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+        queryClient.invalidateQueries({ queryKey: ['task-files', taskId] })
         const statusText = event.event === 'completed' ? '任务完成'
           : event.event === 'failed' ? '任务失败'
             : event.event === 'cancelled' ? '任务取消' : '任务完成'
@@ -382,23 +364,57 @@ export default function TaskDetailPage() {
         }
       }
     }
-  }
+  }, [queryClient])
 
-  // Connect SSE only when task status transitions to "running"
-  useEffect(() => {
-    if (task?.status === 'running') {
-      setSseLogs(persistedLogs)
-      setSseError(null)
-      setLiveProgress(null)
-      connectSSE()
-    }
-    return () => {
-      if (abortRef.current) {
-        abortRef.current.abort()
+  const connectSSE = useCallback(async (taskId: string) => {
+    let retries = 0
+    while (activeSseTaskRef.current === taskId) {
+      const currentToken = tokenRef.current
+      if (!currentToken) return
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      try {
+        for await (const event of streamTaskProgress(taskId, currentToken, controller.signal)) {
+          if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
+          handleSSEEvent(taskId, event)
+        }
+        return
+      } catch (err) {
+        if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        if (retries >= 3) {
+          setSseError('连接断开，正在刷新任务状态...')
+          queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+          return
+        }
+        retries += 1
+        setSseLogs((prev) => appendLog(prev, `连接断开，正在重试 (${retries}/3)...`))
+        await new Promise((resolve) => setTimeout(resolve, 2000 * retries))
+        if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.status])
+  }, [handleSSEEvent, queryClient])
+
+  useEffect(() => {
+    const taskId = task?.id ?? null
+    abortRef.current?.abort()
+    abortRef.current = null
+    activeSseTaskRef.current = task?.status === 'running' ? taskId : null
+    setSseTaskId(taskId)
+    setSseLogs(task?.status === 'running' ? persistedLogsRef.current : [])
+    setSseError(null)
+    setLiveProgress(null)
+
+    if (taskId && task?.status === 'running') void connectSSE(taskId)
+
+    return () => {
+      if (activeSseTaskRef.current === taskId) activeSseTaskRef.current = null
+      abortRef.current?.abort()
+      abortRef.current = null
+    }
+  }, [connectSSE, task?.id, task?.status])
 
   useEffect(() => {
     setTaskDetailsTab('overview')
@@ -916,7 +932,7 @@ export default function TaskDetailPage() {
           setShowCreditDialog(true)
         }}
         logs={displayLogs}
-        sseError={sseError}
+        sseError={currentSseError}
         autoScrollLogs={autoScrollLogs}
         onToggleAutoScroll={() => setAutoScrollLogs((previous) => !previous)}
         onCopyLogs={() => {
@@ -924,8 +940,11 @@ export default function TaskDetailPage() {
           toast.success('已复制执行日志')
         }}
         onReconnectLogs={() => {
+          if (task.status !== 'running') return
+          activeSseTaskRef.current = task.id
+          setSseTaskId(task.id)
           setSseError(null)
-          connectSSE(0)
+          void connectSSE(task.id)
         }}
         logContainerRef={logContainerRef}
       />
@@ -1144,7 +1163,7 @@ export default function TaskDetailPage() {
         logs={displayLogs}
         progressDescription={progressDescription}
         netConsumedCredits={netConsumedCredits}
-        sseError={sseError}
+        sseError={currentSseError}
         onOpenTab={openTaskDetails}
       />
 
