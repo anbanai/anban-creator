@@ -53,8 +53,13 @@ function renderDialog(props: Partial<React.ComponentProps<typeof AttachmentPrevi
 
 describe('AttachmentPreviewDialog', () => {
   beforeEach(() => {
+    vi.unstubAllGlobals()
     vi.clearAllMocks()
     vi.restoreAllMocks()
+    vi.mocked(uploadsApi.resolveDownloadUrl).mockReset()
+    vi.mocked(isDesktop).mockReset()
+    vi.mocked(saveUrlToFile).mockReset()
+    vi.mocked(downloadBlob).mockReset()
     vi.mocked(isDesktop).mockReturnValue(false)
     vi.mocked(saveUrlToFile).mockResolvedValue(false)
     vi.mocked(downloadBlob).mockResolvedValue(undefined)
@@ -183,7 +188,7 @@ describe('AttachmentPreviewDialog', () => {
     if (selector === 'video') expect(media).toHaveAttribute('playsinline')
   })
 
-  it('renders inline text and JSON as inert plain text, with large and unknown remote text fallback', async () => {
+  it('renders inline text and JSON as inert plain text, with declared-large fallback', async () => {
     const inline = '<script>window.bad = true</script>\n# not rendered markdown'
     const sourceAttachment = vi.fn((id: string): InputAttachment | undefined => {
       if (id === 'text') return { type: 'text', text: inline, file_name: 'notes.md', size: inline.length }
@@ -195,7 +200,6 @@ describe('AttachmentPreviewDialog', () => {
       attachment({ id: 'json', type: 'document', fileName: 'data.json', contentType: 'application/json', size: 12, file: new File(['{"ok":true}'], 'data.json', { type: 'application/json' }) }),
       attachment({ id: 'json-mime', type: 'document', fileName: 'payload', contentType: 'Application/JSON; charset=utf-8', size: 13 }),
       attachment({ id: 'large', type: 'text', fileName: 'large.txt', contentType: 'text/plain', size: MAX_TEXT_PREVIEW_BYTES + 1, file: new File(['small'], 'large.txt', { type: 'text/plain' }) }),
-      attachment({ id: 'unknown', type: 'text', fileName: 'unknown.txt', contentType: 'text/plain', size: 0, key: 'tasks/task-1/unknown.txt' }),
     ]
     const onSelectedChange = vi.fn()
     const { rerender } = renderDialog({ attachments: items, selectedId: 'text', sourceAttachment, onSelectedChange })
@@ -211,10 +215,93 @@ describe('AttachmentPreviewDialog', () => {
     expect(await screen.findByTestId('attachment-text-preview')).toHaveTextContent('{"mime":true}')
 
     rerender(<AttachmentPreviewDialog open onOpenChange={vi.fn()} attachments={items} selectedId="large" sourceAttachment={sourceAttachment} />)
-    expect(await screen.findByText('文件过大，无法在线预览')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('文件过大，无法在线预览')
 
-    rerender(<AttachmentPreviewDialog open onOpenChange={vi.fn()} attachments={items} selectedId="unknown" sourceAttachment={sourceAttachment} owner={{ ownerType: 'task', ownerId: 'task-1' }} />)
-    expect(await screen.findByText('无法确认文本大小，暂不在线预览')).toBeInTheDocument()
+  })
+
+  it('enforces the text limit against actual UTF-8 bytes for inline and local files', async () => {
+    const oversizedUtf8 = '界'.repeat(Math.floor(MAX_TEXT_PREVIEW_BYTES / 3) + 1)
+    const oversizedFile = new File(
+      [new Uint8Array(MAX_TEXT_PREVIEW_BYTES + 1)],
+      'oversized.txt',
+      { type: 'text/plain' },
+    )
+    const inline = attachment({
+      id: 'inline-oversized',
+      type: 'text',
+      fileName: 'inline.txt',
+      contentType: 'text/plain',
+      size: 1,
+    })
+    const local = attachment({
+      id: 'local-oversized',
+      type: 'text',
+      file: oversizedFile,
+      fileName: oversizedFile.name,
+      contentType: oversizedFile.type,
+      size: 1,
+    })
+    const sourceAttachment = (id: string): InputAttachment | undefined => id === inline.id
+      ? { type: 'text', text: oversizedUtf8, file_name: inline.fileName, size: 1 }
+      : undefined
+    const { rerender } = renderDialog({ attachments: [inline, local], selectedId: inline.id, sourceAttachment })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('文件过大，无法在线预览')
+    expect(screen.queryByTestId('attachment-text-preview')).not.toBeInTheDocument()
+
+    rerender(
+      <AttachmentPreviewDialog
+        open
+        onOpenChange={vi.fn()}
+        attachments={[inline, local]}
+        selectedId={local.id}
+        sourceAttachment={sourceAttachment}
+      />,
+    )
+    expect(await screen.findByRole('alert')).toHaveTextContent('文件过大，无法在线预览')
+    expect(screen.queryByTestId('attachment-text-preview')).not.toBeInTheDocument()
+  })
+
+  it('streams remote text with a hard cap even when declared size is missing or wrong', async () => {
+    const small = attachment({
+      id: 'remote-small',
+      type: 'text',
+      fileName: 'small.txt',
+      contentType: 'text/plain',
+      size: 0,
+      uploadId: 'upload-small',
+      key: 'pending/small.txt',
+    })
+    const oversized = attachment({
+      id: 'remote-oversized',
+      type: 'text',
+      fileName: 'oversized.txt',
+      contentType: 'text/plain',
+      size: 1,
+      uploadId: 'upload-oversized',
+      key: 'pending/oversized.txt',
+    })
+    const cancel = vi.fn()
+    vi.mocked(uploadsApi.resolveDownloadUrl)
+      .mockResolvedValueOnce({ url: 'https://oss.example.com/small.txt', expires_at: new Date(Date.now() + 120_000).toISOString() })
+      .mockResolvedValueOnce({ url: 'https://oss.example.com/oversized.txt', expires_at: new Date(Date.now() + 120_000).toISOString() })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response('small remote text'))
+      .mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+        start(streamController) {
+          streamController.enqueue(new Uint8Array(MAX_TEXT_PREVIEW_BYTES))
+          streamController.enqueue(new Uint8Array([1]))
+        },
+        cancel,
+      }))))
+    const { rerender } = renderDialog({ attachments: [small, oversized], selectedId: small.id })
+
+    expect(await screen.findByTestId('attachment-text-preview')).toHaveTextContent('small remote text')
+
+    rerender(<AttachmentPreviewDialog open onOpenChange={vi.fn()} attachments={[small, oversized]} selectedId={oversized.id} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('文件过大，无法在线预览')
+    expect(screen.queryByTestId('attachment-text-preview')).not.toBeInTheDocument()
+    expect(cancel).toHaveBeenCalledOnce()
   })
 
   it('refreshes an authenticated remote text request once and aborts it when selection changes', async () => {
@@ -222,8 +309,8 @@ describe('AttachmentPreviewDialog', () => {
       .mockResolvedValueOnce({ url: 'https://oss.example.com/expired.txt', expires_at: new Date(Date.now() + 120_000).toISOString() })
       .mockResolvedValueOnce({ url: 'https://oss.example.com/fresh.txt', expires_at: new Date(Date.now() + 120_000).toISOString() })
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 403 })
-      .mockResolvedValueOnce({ ok: true, status: 200, text: () => Promise.resolve('fresh authorized text') })
+      .mockResolvedValueOnce(new Response(null, { status: 403 }))
+      .mockResolvedValueOnce(new Response('fresh authorized text'))
     vi.stubGlobal('fetch', fetchMock)
     const remote = attachment({
       id: 'remote-text',

@@ -10,6 +10,7 @@ import {
 } from 'react'
 import {
   ArrowUpIcon,
+  EyeIcon,
   FilePenLineIcon,
   LoaderCircleIcon,
   PlusIcon,
@@ -51,6 +52,10 @@ import {
   AttachmentRejectionReason,
   classifyPromptAttachment,
 } from './attachment-admission'
+import {
+  AttachmentPreviewDialog,
+  type AttachmentPreviewOwner,
+} from './AttachmentPreviewDialog'
 import { useAgentPromptDropTarget } from './AgentPromptDropProvider'
 import type { PromptAttachmentsController } from './usePromptAttachments'
 
@@ -106,6 +111,7 @@ export interface AgentPromptInputProps {
   acceptedTypesLabel?: string
   onAttachmentRejected?: (rejections: AttachmentRejection[]) => void
   onSubmitError?: (error: unknown) => void
+  attachmentPreviewOwner?: AttachmentPreviewOwner
 }
 
 function formatFileSize(bytes: number) {
@@ -128,12 +134,14 @@ interface AttachmentRowProps {
   attachment: PromptAttachment
   controller: PromptAttachmentsController
   disabled: boolean
+  onPreview: (trigger: HTMLButtonElement) => void
 }
 
 function AttachmentRow({
   attachment,
   controller,
   disabled,
+  onPreview,
 }: AttachmentRowProps) {
   const failed = attachment.status === 'failed'
   return (
@@ -141,41 +149,50 @@ function AttachmentRow({
       data-slot="agent-prompt-attachment"
       className="flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-border px-2 py-1.5"
     >
-      <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-        <span
-          data-slot="agent-prompt-attachment-name"
-          className="w-full min-w-0 truncate text-sm font-medium"
-        >
-          {attachment.fileName}
-        </span>
-        <span
-          data-slot="agent-prompt-attachment-meta"
-          role={failed ? 'alert' : 'status'}
-          aria-label={`${attachment.fileName} 状态`}
-          aria-live={failed ? undefined : 'polite'}
-          aria-atomic="true"
-          className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
-        >
-          <span className="shrink-0">{formatFileSize(attachment.size)}</span>
-          <span data-slot="agent-prompt-attachment-status" className="shrink-0">
-            <Badge variant={failed ? 'destructive' : 'secondary'}>
-              {STATUS_LABELS[attachment.status]}
-            </Badge>
+      <Button
+        type="button"
+        variant="ghost"
+        aria-label={`预览 ${attachment.fileName}`}
+        onClick={(event) => onPreview(event.currentTarget)}
+        className="h-auto min-w-0 flex-1 justify-start gap-2 p-0 text-left hover:bg-transparent"
+      >
+        <EyeIcon aria-hidden="true" className="text-muted-foreground" />
+        <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+          <span
+            data-slot="agent-prompt-attachment-name"
+            className="w-full min-w-0 truncate text-sm font-medium"
+          >
+            {attachment.fileName}
           </span>
-          {attachment.error ? (
-            <span
-              data-slot="agent-prompt-attachment-error"
-              className="min-w-0 flex-1 truncate"
-              title={attachment.error}
-            >
-              {attachment.error}
+          <span
+            data-slot="agent-prompt-attachment-meta"
+            role={failed ? 'alert' : 'status'}
+            aria-label={`${attachment.fileName} 状态`}
+            aria-live={failed ? undefined : 'polite'}
+            aria-atomic="true"
+            className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+          >
+            <span className="shrink-0">{formatFileSize(attachment.size)}</span>
+            <span data-slot="agent-prompt-attachment-status" className="shrink-0">
+              <Badge variant={failed ? 'destructive' : 'secondary'}>
+                {STATUS_LABELS[attachment.status]}
+              </Badge>
             </span>
+            {attachment.error ? (
+              <span
+                data-slot="agent-prompt-attachment-error"
+                className="min-w-0 flex-1 truncate"
+                title={attachment.error}
+              >
+                {attachment.error}
+              </span>
+            ) : null}
+          </span>
+          {attachment.status === 'uploading' ? (
+            <Progress value={attachment.progress} aria-label={`${attachment.fileName} 上传进度`} className="mt-1 h-1 w-full" />
           ) : null}
         </span>
-        {attachment.status === 'uploading' ? (
-          <Progress value={attachment.progress} aria-label={`${attachment.fileName} 上传进度`} className="mt-1 h-1 w-full" />
-        ) : null}
-      </div>
+      </Button>
 
       <Popover>
         <Tooltip>
@@ -266,13 +283,17 @@ export function AgentPromptInput({
   acceptedTypesLabel,
   onAttachmentRejected,
   onSubmitError,
+  attachmentPreviewOwner,
 }: AgentPromptInputProps) {
   const [locallySubmitting, setLocallySubmitting] = useState(false)
   const [rejectionStatus, setRejectionStatus] = useState('')
   const [submitErrorStatus, setSubmitErrorStatus] = useState('')
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewAttachmentId, setPreviewAttachmentId] = useState<string>()
   const pendingRef = useRef(false)
   const composingRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const allowedTypes = attachmentPolicy.allowedTypes
   const remainingCapacity = Math.max(0, attachmentPolicy.maxCount - value.attachments.length)
   const typesLabel = acceptedTypesLabel ?? allowedTypes.map((type) => TYPE_LABELS[type]).join('、')
@@ -371,6 +392,11 @@ export function AgentPromptInput({
   }
 
   const pickerDisabled = disabled || remainingCapacity === 0
+  const openPreview = useCallback((attachmentId: string, trigger: HTMLButtonElement) => {
+    previewTriggerRef.current = trigger
+    setPreviewAttachmentId(attachmentId)
+    setPreviewOpen(true)
+  }, [])
 
   return (
     <TooltipProvider>
@@ -397,6 +423,7 @@ export function AgentPromptInput({
                     attachment={item}
                     controller={attachmentController}
                     disabled={disabled}
+                    onPreview={(trigger) => openPreview(item.id, trigger)}
                   />
                 ))}
               </div>
@@ -472,6 +499,18 @@ export function AgentPromptInput({
             </div>
           </InputGroupAddon>
         </InputGroup>
+
+        <AttachmentPreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          value={value}
+          selectedId={previewAttachmentId}
+          onSelectedChange={(id) => setPreviewAttachmentId(id)}
+          previewSource={attachmentController.previewSource}
+          sourceAttachment={attachmentController.sourceAttachment}
+          owner={attachmentPreviewOwner}
+          finalFocus={previewTriggerRef}
+        />
 
         <div role="alert" aria-live="polite" aria-atomic="true" className="sr-only">
           {rejectionStatus}

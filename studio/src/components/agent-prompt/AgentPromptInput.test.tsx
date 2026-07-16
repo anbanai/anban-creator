@@ -182,6 +182,46 @@ describe('AgentPromptInput', () => {
     expect(onChange).toHaveBeenCalledWith({ prompt: 'New prompt', attachments: [current] })
   })
 
+  it('opens local and inherited attachment previews without stealing row actions', async () => {
+    const localFile = image('local.png')
+    const local = attachment({
+      id: 'local',
+      file: localFile,
+      fileName: localFile.name,
+      size: localFile.size,
+    })
+    const inherited = attachment({
+      id: 'inherited',
+      type: 'text',
+      fileName: 'brief.txt',
+      contentType: 'text/plain',
+      size: 5,
+    })
+    const remove = vi.fn()
+    const attachmentController = controller({
+      remove,
+      previewSource: vi.fn((id) => id === local.id ? 'blob:local.png' : undefined),
+      sourceAttachment: vi.fn((id: string): InputAttachment | undefined => id === inherited.id
+        ? { type: 'text', text: 'brief', file_name: 'brief.txt', size: 5 }
+        : undefined),
+    })
+    renderPrompt({
+      value: { prompt: '', attachments: [local, inherited] },
+      attachmentController,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '预览 local.png' }))
+    expect(await screen.findByRole('img', { name: 'local.png' })).toHaveAttribute('src', 'blob:local.png')
+    fireEvent.click(screen.getByRole('button', { name: '关闭附件预览' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '预览 brief.txt' }))
+    expect(await screen.findByTestId('attachment-text-preview')).toHaveTextContent('brief')
+    expect(remove).not.toHaveBeenCalled()
+    expect(attachmentController.previewSource).toHaveBeenCalledWith(local.id)
+    expect(attachmentController.sourceAttachment).toHaveBeenCalledWith(inherited.id)
+  })
+
   it('resets the picker, handles file paste, and leaves text-only paste untouched', () => {
     const file = image()
     const addFiles = vi.fn(() => ({ accepted: [{ file, type: 'image' as const }], rejected: [] }))

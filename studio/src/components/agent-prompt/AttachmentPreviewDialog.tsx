@@ -39,6 +39,14 @@ import { ImageViewerStage } from './ImageViewerStage'
 
 export const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024
 const SIGNED_URL_SAFETY_WINDOW_MS = 30_000
+const TEXT_PREVIEW_TOO_LARGE = '文件过大，无法在线预览'
+
+class TextPreviewTooLargeError extends Error {
+  constructor() {
+    super(TEXT_PREVIEW_TOO_LARGE)
+    this.name = 'TextPreviewTooLargeError'
+  }
+}
 
 export interface AttachmentPreviewOwner {
   ownerType: 'task' | 'plan'
@@ -136,6 +144,48 @@ function shouldIgnoreNavigation(target: EventTarget | null) {
 
 function isAuthLikeResponse(response: Response) {
   return response.status === 401 || response.status === 403 || response.status === 410
+}
+
+function readInlineTextWithLimit(text: string) {
+  if (new TextEncoder().encode(text).byteLength > MAX_TEXT_PREVIEW_BYTES) {
+    throw new TextPreviewTooLargeError()
+  }
+  return text
+}
+
+async function readBlobTextWithLimit(blob: Blob) {
+  const bytes = await blob.slice(0, MAX_TEXT_PREVIEW_BYTES + 1).arrayBuffer()
+  if (bytes.byteLength > MAX_TEXT_PREVIEW_BYTES) throw new TextPreviewTooLargeError()
+  return new TextDecoder().decode(bytes)
+}
+
+async function readResponseTextWithLimit(response: Response) {
+  const declaredLength = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_TEXT_PREVIEW_BYTES) {
+    void response.body?.cancel()
+    throw new TextPreviewTooLargeError()
+  }
+  if (!response.body) return readBlobTextWithLimit(await response.blob())
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let totalBytes = 0
+  let text = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      totalBytes += value.byteLength
+      if (totalBytes > MAX_TEXT_PREVIEW_BYTES) {
+        await reader.cancel()
+        throw new TextPreviewTooLargeError()
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+    return text + decoder.decode()
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 function MetadataFallback({ message }: { message: string }) {
@@ -242,18 +292,24 @@ export function AttachmentPreviewDialog({
     setLoading(false)
 
     if (kind === 'fallback') return () => abortController.abort()
-    if (kind === 'text' && textSize > MAX_TEXT_PREVIEW_BYTES) return () => abortController.abort()
-    if (kind === 'text' && !selected.file && inherited?.text !== undefined) {
-      setTextPreview(inherited.text)
+    if (kind === 'text' && textSize > MAX_TEXT_PREVIEW_BYTES) {
+      setError(TEXT_PREVIEW_TOO_LARGE)
       return () => abortController.abort()
     }
-    if (kind === 'text' && !selected.file && textSize <= 0) return () => abortController.abort()
+    if (kind === 'text' && !selected.file && inherited?.text !== undefined) {
+      try {
+        setTextPreview(readInlineTextWithLimit(inherited.text))
+      } catch (cause) {
+        setError(errorMessage(cause, '附件预览加载失败'))
+      }
+      return () => abortController.abort()
+    }
 
     const load = async () => {
       try {
         setLoading(true)
         if (kind === 'text' && selected.file) {
-          const text = await selected.file.text()
+          const text = await readBlobTextWithLimit(selected.file)
           if (active) setTextPreview(text)
           return
         }
@@ -268,7 +324,7 @@ export function AttachmentPreviewDialog({
           for (;;) {
             const response = await fetch(remote.url, { signal: abortController.signal })
             if (response.ok) {
-              const text = await response.text()
+              const text = await readResponseTextWithLimit(response)
               if (active) setTextPreview(text)
               return
             }
@@ -395,10 +451,6 @@ export function AttachmentPreviewDialog({
     renderer = <MetadataFallback message={error} />
   } else if (loading) {
     renderer = <MetadataFallback message="正在加载预览…" />
-  } else if (kind === 'text' && selected.size > MAX_TEXT_PREVIEW_BYTES) {
-    renderer = <MetadataFallback message="文件过大，无法在线预览" />
-  } else if (kind === 'text' && !selected.file && sourceAttachment?.(selected.id)?.text === undefined && selected.size <= 0) {
-    renderer = <MetadataFallback message="无法确认文本大小，暂不在线预览" />
   } else if (kind === 'text' && textPreview !== undefined) {
     renderer = (
       <pre
@@ -468,7 +520,7 @@ export function AttachmentPreviewDialog({
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-auto p-3 sm:p-4">
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">{renderer}</div>
-          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+          {error ? <p role="alert" className="sr-only">{error}</p> : null}
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t pt-3">
             <div className="min-w-0 text-xs text-muted-foreground">
               {selected ? `${selected.size.toLocaleString()} B` : null}
