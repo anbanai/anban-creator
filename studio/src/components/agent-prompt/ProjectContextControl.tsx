@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { LoaderCircleIcon, PlusIcon } from 'lucide-react'
 
@@ -73,6 +74,10 @@ const NO_PROJECT_ITEM: NoProjectItem = {
   name: '不使用项目',
 }
 
+function isProjectContextItemEqual(item: ProjectContextItem, value: ProjectContextItem) {
+  return item.kind === value.kind && item.id === value.id
+}
+
 function projectGroups(
   projects: readonly ProjectContextProject[],
   allowNoProject: boolean,
@@ -101,20 +106,34 @@ function SelectProjectContext({
   disabled = false,
   placeholder = '选择项目...',
 }: ProjectContextSelectProps) {
-  const groups = projectGroups(projects, allowNoProject)
-  const projectItems = groups.flatMap((group) => group.items)
-  const selected = value === null
-    ? (allowNoProject ? NO_PROJECT_ITEM : null)
-    : projectItems.find((item) => item.kind === 'project' && item.id === value) ?? null
+  const groups = useMemo(
+    () => projectGroups(projects, allowNoProject),
+    [allowNoProject, projects],
+  )
+  const projectItems = useMemo(
+    () => groups.flatMap((group) => group.items),
+    [groups],
+  )
+  const selected = useMemo(() => (
+    value === null
+      ? (allowNoProject ? NO_PROJECT_ITEM : null)
+      : projectItems.find((item) => item.kind === 'project' && item.id === value) ?? null
+  ), [allowNoProject, projectItems, value])
   const isDisabled = loading || disabled
 
   return (
-    <div data-slot="project-context-control" data-mode="select" className="min-w-0">
+    <div
+      data-slot="project-context-control"
+      data-mode="select"
+      aria-busy={loading}
+      className="min-w-0"
+    >
       <Combobox
         items={groups}
         value={selected}
         disabled={isDisabled}
         itemToStringValue={(item: ProjectContextItem) => item.name}
+        isItemEqualToValue={isProjectContextItemEqual}
         onValueChange={(item: ProjectContextItem | null) => {
           if (!item || item.kind === 'none') {
             onValueChange(null, undefined)
@@ -176,6 +195,9 @@ function SelectProjectContext({
           ) : null}
         </ComboboxContent>
       </Combobox>
+      <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {loading ? '正在加载项目' : ''}
+      </span>
     </div>
   )
 }

@@ -17,16 +17,32 @@ import {
   type AttachmentAdmissionResult,
 } from './attachment-admission'
 
-export interface UsePromptAttachmentsOptions {
+interface UsePromptAttachmentsBaseOptions {
   adapter: PromptAttachmentAdapter
   policy: AttachmentAdmissionPolicy
-  initialAttachments?: readonly InputAttachment[]
-  onAttachmentsChange?: (attachments: PromptAttachment[]) => void
   upload?: (options: UploadToOSSOptions) => Promise<UploadToOSSResult>
   createId?: () => string
   createObjectURL?: (file: File) => string
   revokeObjectURL?: (url: string) => void
 }
+
+interface ControlledPromptAttachmentsOptions extends UsePromptAttachmentsBaseOptions {
+  /** Parent-owned composer state. Pair with AgentPromptValue.attachments. */
+  attachments: readonly PromptAttachment[]
+  onAttachmentsChange: (attachments: PromptAttachment[]) => void
+  initialAttachments?: never
+}
+
+interface UncontrolledPromptAttachmentsOptions extends UsePromptAttachmentsBaseOptions {
+  attachments?: undefined
+  /** Hydrated once at mount. Use reset() when the task context changes. */
+  initialAttachments?: readonly InputAttachment[]
+  onAttachmentsChange?: (attachments: PromptAttachment[]) => void
+}
+
+export type UsePromptAttachmentsOptions =
+  | ControlledPromptAttachmentsOptions
+  | UncontrolledPromptAttachmentsOptions
 
 export interface PromptAttachmentsController {
   attachments: PromptAttachment[]
@@ -34,6 +50,7 @@ export interface PromptAttachmentsController {
   retry: (id: string) => void
   remove: (id: string) => void
   updateInstruction: (id: string, instruction: string) => void
+  reset: (attachments: readonly InputAttachment[]) => void
   clear: () => void
   uploading: boolean
   hasFailures: boolean
@@ -82,6 +99,7 @@ function serializeUploadedAttachment(attachment: PromptAttachment): InputAttachm
 }
 
 export function usePromptAttachments(options: UsePromptAttachmentsOptions): PromptAttachmentsController {
+  const controlled = options.attachments !== undefined
   const createIdRef = useRef(options.createId ?? defaultCreateId)
   const uploadRef = useRef(options.upload ?? uploadToOSS)
   const adapterRef = useRef(options.adapter)
@@ -94,19 +112,25 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
   const attemptsRef = useRef(new Map<string, number>())
   const activeUploadsRef = useRef(new Map<string, AbortController>())
   const mountedRef = useRef(true)
-  const [attachments, setAttachments] = useState<PromptAttachment[]>(() => (
-    (options.initialAttachments ?? []).map((attachment) => {
+  const controlledRef = useRef(controlled)
+  const [uncontrolledAttachments, setUncontrolledAttachments] = useState<PromptAttachment[]>(() => (
+    (!controlled ? (options.initialAttachments ?? []) : []).map((attachment) => {
       const id = createIdRef.current()
       inheritedSourcesRef.current.set(id, { ...attachment })
       return hydrateAttachment(attachment, id)
     })
   ))
-  const attachmentsRef = useRef(attachments)
+  const renderedAttachments = controlled
+    ? [...options.attachments]
+    : uncontrolledAttachments
+  const attachmentsRef = useRef(renderedAttachments)
 
   uploadRef.current = options.upload ?? uploadToOSS
   adapterRef.current = options.adapter
   policyRef.current = options.policy
   onAttachmentsChangeRef.current = options.onAttachmentsChange
+  controlledRef.current = controlled
+  if (controlled) attachmentsRef.current = renderedAttachments
 
   const updateAttachments = useCallback((
     updater: (current: PromptAttachment[]) => PromptAttachment[],
@@ -115,7 +139,7 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     const next = updater(attachmentsRef.current)
     if (next === attachmentsRef.current) return
     attachmentsRef.current = next
-    setAttachments(() => next)
+    if (!controlledRef.current) setUncontrolledAttachments(() => next)
     onAttachmentsChangeRef.current?.(next)
   }, [])
 
@@ -288,14 +312,23 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     )))
   }, [updateAttachments])
 
-  const clear = useCallback(() => {
-    if (attachmentsRef.current.length === 0) return
+  const reset = useCallback((nextAttachments: readonly InputAttachment[]) => {
     for (const id of [...activeUploadsRef.current.keys()]) cancelUpload(id)
     attemptsRef.current.clear()
     inheritedSourcesRef.current.clear()
-    for (const id of attachmentsRef.current.map((attachment) => attachment.id)) revokePreview(id)
-    updateAttachments(() => [])
+    for (const id of [...previewsRef.current.keys()]) revokePreview(id)
+    const hydrated = nextAttachments.map((attachment) => {
+      const id = createIdRef.current()
+      inheritedSourcesRef.current.set(id, { ...attachment })
+      return hydrateAttachment(attachment, id)
+    })
+    updateAttachments(() => hydrated)
   }, [cancelUpload, revokePreview, updateAttachments])
+
+  const clear = useCallback(() => {
+    if (attachmentsRef.current.length === 0) return
+    reset([])
+  }, [reset])
 
   const toInputAttachments = useCallback(() => attachmentsRef.current.flatMap((attachment) => {
     if (attachment.status !== 'uploaded') return []
@@ -318,14 +351,15 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
   const previewSource = useCallback((id: string) => previewsRef.current.get(id), [])
 
   return {
-    attachments,
+    attachments: renderedAttachments,
     addFiles,
     retry,
     remove,
     updateInstruction,
+    reset,
     clear,
-    uploading: attachments.some((attachment) => attachment.status === 'uploading'),
-    hasFailures: attachments.some((attachment) => attachment.status === 'failed'),
+    uploading: renderedAttachments.some((attachment) => attachment.status === 'uploading'),
+    hasFailures: renderedAttachments.some((attachment) => attachment.status === 'failed'),
     toInputAttachments,
     localFiles,
     previewSource,

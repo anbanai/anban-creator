@@ -1,9 +1,11 @@
-import { createEvent, fireEvent, render, screen, within } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import { createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type {
+  AgentPromptValue,
   AttachmentAdmissionPolicy,
+  InputAttachment,
   PromptAttachment,
 } from '@/types/input-attachment'
 import { AttachmentRejectionReason } from './attachment-admission'
@@ -12,7 +14,10 @@ import {
   AgentPromptInput,
   type AgentPromptInputProps,
 } from './AgentPromptInput'
-import type { PromptAttachmentsController } from './usePromptAttachments'
+import {
+  usePromptAttachments,
+  type PromptAttachmentsController,
+} from './usePromptAttachments'
 
 const policy: AttachmentAdmissionPolicy = {
   allowedTypes: ['image', 'document'],
@@ -54,6 +59,7 @@ function controller(
     retry: vi.fn(),
     remove: vi.fn(),
     updateInstruction: vi.fn(),
+    reset: vi.fn(),
     clear: vi.fn(),
     uploading: false,
     hasFailures: false,
@@ -62,6 +68,47 @@ function controller(
     previewSource: vi.fn(),
     ...overrides,
   }
+}
+
+function ControlledPromptHarness() {
+  const [value, setValue] = useState<AgentPromptValue>({ prompt: '', attachments: [] })
+  const attachmentController = usePromptAttachments({
+    adapter: { mode: 'local' },
+    policy,
+    attachments: value.attachments,
+    onAttachmentsChange: (attachments) => {
+      setValue((current) => ({ ...current, attachments }))
+    },
+    createId: (() => {
+      let id = 0
+      return () => `controlled-${++id}`
+    })(),
+    createObjectURL: (file) => `blob:${file.name}`,
+    revokeObjectURL: vi.fn(),
+  })
+  const replacement: InputAttachment = {
+    type: 'text',
+    text: 'task B',
+    file_name: 'task-b.txt',
+  }
+
+  return (
+    <>
+      <button type="button" onClick={() => attachmentController.reset([replacement])}>
+        Reset task
+      </button>
+      <output data-testid="controlled-attachment-names">
+        {value.attachments.map((item) => item.fileName).join(',')}
+      </output>
+      <AgentPromptInput
+        value={value}
+        onChange={setValue}
+        onSubmit={vi.fn()}
+        attachmentController={attachmentController}
+        attachmentPolicy={policy}
+      />
+    </>
+  )
 }
 
 function Provider({ children }: { children: ReactNode }) {
@@ -84,8 +131,10 @@ describe('AgentPromptInput', () => {
   it('renders the stable section, surface, content order, and toolbar slots', () => {
     const current = attachment()
     renderPrompt({
-      value: { prompt: 'Draft', attachments: [] },
-      attachmentController: controller({ attachments: [current] }),
+      value: { prompt: 'Draft', attachments: [current] },
+      attachmentController: controller({
+        attachments: [attachment({ id: 'controller-only', fileName: 'controller-only.png' })],
+      }),
       contextBar: <span>Project context</span>,
       leadingTools: <button type="button">Leading tool</button>,
       trailingTools: <button type="button">Trailing tool</button>,
@@ -113,14 +162,17 @@ describe('AgentPromptInput', () => {
     expect(footer).toContainElement(screen.getByText('Ready'))
     expect(footer).toContainElement(screen.getByRole('button', { name: 'Trailing tool' }))
     expect(screen.getByPlaceholderText('Ask the agent')).toBe(textarea)
+    expect(screen.queryByText('controller-only.png')).not.toBeInTheDocument()
   })
 
-  it('reports prompt changes with the controller-owned attachments', () => {
+  it('reports prompt changes with the value-owned attachments', () => {
     const current = attachment()
     const onChange = vi.fn()
     renderPrompt({
-      value: { prompt: '', attachments: [] },
-      attachmentController: controller({ attachments: [current] }),
+      value: { prompt: '', attachments: [current] },
+      attachmentController: controller({
+        attachments: [attachment({ id: 'controller-only', fileName: 'controller-only.png' })],
+      }),
       onChange,
     })
 
@@ -173,10 +225,8 @@ describe('AgentPromptInput', () => {
     const file = image()
     const addFiles = vi.fn(() => ({ accepted: [{ file, type: 'image' as const }], rejected: [] }))
     renderPrompt({
-      attachmentController: controller({
-        attachments: [attachment()],
-        addFiles,
-      }),
+      value: { prompt: '', attachments: [attachment()] },
+      attachmentController: controller({ addFiles }),
       acceptedTypesLabel: '图片或文档',
     })
     fireEvent.focus(screen.getByRole('textbox'))
@@ -219,8 +269,10 @@ describe('AgentPromptInput', () => {
     const onSubmit = vi.fn()
     const current = attachment()
     renderPrompt({
-      value: { prompt: 'Submit me', attachments: [] },
-      attachmentController: controller({ attachments: [current] }),
+      value: { prompt: 'Submit me', attachments: [current] },
+      attachmentController: controller({
+        attachments: [attachment({ id: 'controller-only', fileName: 'controller-only.png' })],
+      }),
       onSubmit,
     })
     const textarea = screen.getByRole('textbox')
@@ -235,6 +287,30 @@ describe('AgentPromptInput', () => {
 
     expect(fireEvent.keyDown(textarea, { key: 'Enter' })).toBe(false)
     expect(onSubmit).toHaveBeenCalledWith({ prompt: 'Submit me', attachments: [current] })
+  })
+
+  it.each(['keyboard', 'button'] as const)('contains %s submit errors and allows a successful retry', async (source) => {
+    const error = new Error('submit failed')
+    const onSubmit = vi.fn()
+      .mockRejectedValueOnce(error)
+      .mockResolvedValueOnce(undefined)
+    const onSubmitError = vi.fn()
+    renderPrompt({ onSubmit, onSubmitError, submitLabel: 'Run agent' })
+    const textarea = screen.getByRole('textbox')
+    const button = screen.getByRole('button', { name: 'Run agent' })
+
+    if (source === 'keyboard') fireEvent.keyDown(textarea, { key: 'Enter' })
+    else fireEvent.click(button)
+
+    await waitFor(() => expect(onSubmitError).toHaveBeenCalledWith(error))
+    expect(onSubmitError).toHaveBeenCalledOnce()
+    expect(screen.getByText('提交失败，请重试')).toBeInTheDocument()
+    await waitFor(() => expect(button).toBeEnabled())
+
+    fireEvent.click(button)
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2))
+    expect(onSubmitError).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByText('提交失败，请重试')).not.toBeInTheDocument())
   })
 
   it('guards an asynchronous submit against button and keyboard duplicates', async () => {
@@ -298,8 +374,8 @@ describe('AgentPromptInput', () => {
     const remove = vi.fn()
     const updateInstruction = vi.fn()
     renderPrompt({
+      value: { prompt: '', attachments: [failed] },
       attachmentController: controller({
-        attachments: [failed],
         hasFailures: true,
         retry,
         remove,
@@ -323,5 +399,50 @@ describe('AgentPromptInput', () => {
     expect(input).toHaveAttribute('maxlength', '1000')
     fireEvent.change(input, { target: { value: 'Focus on the subject' } })
     expect(updateInstruction).toHaveBeenCalledWith('attachment-1', 'Focus on the subject')
+  })
+
+  it('keeps long attachment metadata bounded and announces transient and failed states', () => {
+    const longName = `${'very-long-file-name-'.repeat(12)}.png`
+    const longError = 'networkfailure'.repeat(40)
+    const queued = attachment({ id: 'queued', fileName: longName, status: 'queued', progress: 0 })
+    const uploading = attachment({ id: 'uploading', fileName: 'uploading.png', status: 'uploading', progress: 42 })
+    const failed = attachment({ id: 'failed', fileName: 'failed.png', status: 'failed', progress: 0, error: longError })
+    renderPrompt({
+      value: { prompt: '', attachments: [queued, uploading, failed] },
+      attachmentController: controller({ hasFailures: true }),
+    })
+
+    const queuedRow = screen.getByText(longName).closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
+    expect(queuedRow).toHaveClass('min-w-0')
+    expect(queuedRow.querySelector('[data-slot="agent-prompt-attachment-name"]')).toHaveClass('min-w-0', 'truncate')
+    expect(queuedRow.querySelector('[data-slot="agent-prompt-attachment-meta"]')).toHaveClass('w-full', 'min-w-0')
+    expect(within(queuedRow).getByText('1.5 KB')).toHaveClass('shrink-0')
+    expect(within(queuedRow).getByText('等待中').closest('[data-slot="agent-prompt-attachment-status"]')).toHaveClass('shrink-0')
+    expect(within(queuedRow).getByRole('status')).toHaveAttribute('aria-live', 'polite')
+
+    expect(screen.getByRole('status', { name: 'uploading.png 状态' })).toHaveTextContent('上传中')
+    const failureAlert = screen.getByRole('alert', { name: 'failed.png 状态' })
+    expect(failureAlert).toHaveTextContent('失败')
+    expect(failureAlert).toHaveTextContent(longError)
+    expect(failureAlert.querySelector('[data-slot="agent-prompt-attachment-error"]')).toHaveClass('min-w-0', 'flex-1', 'truncate')
+    expect(within(queuedRow).getByRole('button', { name: `删除 ${longName}` })).toHaveAttribute('data-size', 'icon-xs')
+  })
+
+  it('updates parent-owned attachment values through controller mutations and reset', () => {
+    render(<ControlledPromptHarness />, { wrapper: Provider })
+    const file = image('controlled.png')
+
+    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
+    expect(screen.getByTestId('controlled-attachment-names')).toHaveTextContent('controlled.png')
+    const composer = document.querySelector('[data-slot="agent-prompt-input"]') as HTMLElement
+    expect(within(composer).getByText('controlled.png')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 controlled.png' }))
+    expect(screen.getByTestId('controlled-attachment-names')).toBeEmptyDOMElement()
+    expect(screen.queryByText('controlled.png')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset task' }))
+    expect(screen.getByTestId('controlled-attachment-names')).toHaveTextContent('task-b.txt')
+    expect(within(composer).getByText('task-b.txt')).toBeInTheDocument()
   })
 })

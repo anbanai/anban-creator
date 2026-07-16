@@ -45,6 +45,7 @@ export interface PromptAttachment {
 
 export interface AgentPromptValue {
   prompt: string
+  /** Composer source of truth. Pass this array to usePromptAttachments controlled mode. */
   attachments: PromptAttachment[]
 }
 

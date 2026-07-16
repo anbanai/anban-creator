@@ -113,6 +113,33 @@ describe('ProjectContextControl', () => {
     const trigger = screen.getByRole('combobox', { name: '项目上下文' })
     expect(trigger).toBeDisabled()
     expect(trigger).toHaveTextContent('加载项目...')
+    expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载项目')
+  })
+
+  it('keeps object selection stable while projects rerender with the popup open', async () => {
+    const { rerender } = render(
+      <ProjectContextControl
+        mode="select"
+        projects={projects}
+        value="article-1"
+        onValueChange={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
+    expect(await screen.findByRole('option', { name: 'Morning Brief' })).toHaveAttribute('aria-selected', 'true')
+
+    rerender(
+      <ProjectContextControl
+        mode="select"
+        projects={projects.map((project) => ({ ...project }))}
+        value="article-1"
+        onValueChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByPlaceholderText('搜索项目...')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Morning Brief' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('shows the configured placeholder and an empty result', async () => {

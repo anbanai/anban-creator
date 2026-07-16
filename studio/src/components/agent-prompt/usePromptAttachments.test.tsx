@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { UploadToOSSOptions, UploadToOSSResult } from '@/lib/direct-upload'
-import type { InputAttachment } from '@/types/input-attachment'
+import type { InputAttachment, PromptAttachment } from '@/types/input-attachment'
 import { AttachmentRejectionReason } from './attachment-admission'
 import { usePromptAttachments } from './usePromptAttachments'
 
@@ -45,6 +45,21 @@ const policy = {
 
 function StrictModeWrapper({ children }: { children: ReactNode }) {
   return <StrictMode>{children}</StrictMode>
+}
+
+function controlledAttachment(overrides: Partial<PromptAttachment> = {}): PromptAttachment {
+  return {
+    id: 'controlled-1',
+    type: 'document',
+    fileName: 'controlled.pdf',
+    contentType: 'application/pdf',
+    size: 20,
+    status: 'uploaded',
+    progress: 100,
+    uploadId: 'upload-controlled',
+    key: 'tasks/task-1/input/controlled.pdf',
+    ...overrides,
+  }
 }
 
 describe('usePromptAttachments', () => {
@@ -209,6 +224,95 @@ describe('usePromptAttachments', () => {
     act(() => result.current.updateInstruction('attachment-1', 'latest'))
     expect(firstCallback).not.toHaveBeenCalled()
     expect(secondCallback).toHaveBeenCalledOnce()
+  })
+
+  it('uses controlled attachments as render state and sends mutations to the latest callback', () => {
+    const initial = controlledAttachment({ instruction: 'initial' })
+    const firstCallback = vi.fn()
+    const secondCallback = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ attachments, callback }) => usePromptAttachments({
+        adapter: { mode: 'direct' },
+        policy,
+        attachments,
+        onAttachmentsChange: callback,
+      }),
+      { initialProps: { attachments: [initial], callback: firstCallback } },
+    )
+
+    expect(result.current.attachments).toEqual([initial])
+    act(() => result.current.updateInstruction('controlled-1', 'parent update'))
+    const updated = [{ ...initial, instruction: 'parent update' }]
+    expect(firstCallback).toHaveBeenCalledWith(updated)
+    expect(result.current.attachments).toEqual([initial])
+
+    rerender({ attachments: updated, callback: secondCallback })
+    expect(result.current.attachments).toEqual(updated)
+    act(() => result.current.updateInstruction('controlled-1', 'latest callback'))
+    expect(firstCallback).toHaveBeenCalledOnce()
+    expect(secondCallback).toHaveBeenCalledWith([
+      { ...initial, instruction: 'latest callback' },
+    ])
+  })
+
+  it('resets task attachments without preview leaks or stale upload completion', async () => {
+    const pending = deferred<UploadToOSSResult>()
+    const signals: AbortSignal[] = []
+    const upload = vi.fn(({ signal }: UploadToOSSOptions) => {
+      if (signal) signals.push(signal)
+      return pending.promise
+    })
+    const revokeObjectURL = vi.fn()
+    const onAttachmentsChange = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ attachments }) => usePromptAttachments({
+        adapter: { mode: 'direct' },
+        policy,
+        attachments,
+        onAttachmentsChange,
+        upload,
+        createId: idSequence(),
+        createObjectURL: (file) => `blob:${file.name}`,
+        revokeObjectURL,
+      }),
+      { initialProps: { attachments: [] as PromptAttachment[] } },
+    )
+    const taskA = fileOf('task-a.png')
+    act(() => result.current.addFiles([taskA]))
+    expect(signals).toHaveLength(1)
+
+    const taskB: InputAttachment = {
+      type: 'text',
+      text: 'legacy task B context',
+      file_name: 'task-b.txt',
+      content_type: 'text/plain',
+      size: 21,
+      instruction: 'read task B',
+    }
+    act(() => result.current.reset([taskB]))
+    const resetAttachments = onAttachmentsChange.mock.calls[
+      onAttachmentsChange.mock.calls.length - 1
+    ][0] as PromptAttachment[]
+    rerender({ attachments: resetAttachments })
+
+    expect(signals[0].aborted).toBe(true)
+    expect(revokeObjectURL).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:task-a.png')
+    expect(result.current.attachments).toEqual([
+      expect.objectContaining({ fileName: 'task-b.txt', status: 'uploaded' }),
+    ])
+    expect(result.current.toInputAttachments()).toEqual([taskB])
+
+    const callsAfterReset = onAttachmentsChange.mock.calls.length
+    await act(async () => {
+      pending.resolve(uploadResult(taskA))
+      await Promise.resolve()
+    })
+    expect(onAttachmentsChange).toHaveBeenCalledTimes(callsAfterReset)
+    expect(result.current.attachments[0].fileName).toBe('task-b.txt')
+
+    act(() => result.current.clear())
+    expect(onAttachmentsChange).toHaveBeenLastCalledWith([])
   })
 
   it('uploads direct files concurrently while preserving add order and progress', async () => {

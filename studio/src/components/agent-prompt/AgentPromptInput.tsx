@@ -88,7 +88,7 @@ export interface AgentPromptInputProps {
   value: AgentPromptValue
   onChange: (value: AgentPromptValue) => void
   onSubmit: (value: AgentPromptValue) => void | Promise<void>
-  /** Owns attachment admission, upload lifecycle, and the effective attachment array. */
+  /** Operations and upload lifecycle only; value.attachments is the render/submit source. */
   attachmentController: PromptAttachmentsController
   attachmentPolicy: AttachmentAdmissionPolicy
   contextBar?: ReactNode
@@ -105,6 +105,7 @@ export interface AgentPromptInputProps {
   ariaLabel?: string
   acceptedTypesLabel?: string
   onAttachmentRejected?: (rejections: AttachmentRejection[]) => void
+  onSubmitError?: (error: unknown) => void
 }
 
 function formatFileSize(bytes: number) {
@@ -134,19 +135,43 @@ function AttachmentRow({
   controller,
   disabled,
 }: AttachmentRowProps) {
+  const transient = attachment.status === 'queued' || attachment.status === 'uploading'
+  const failed = attachment.status === 'failed'
   return (
     <div
       data-slot="agent-prompt-attachment"
       className="flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-border px-2 py-1.5"
     >
       <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-        <span className="w-full truncate text-sm font-medium">{attachment.fileName}</span>
-        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <span>{formatFileSize(attachment.size)}</span>
-          <Badge variant={attachment.status === 'failed' ? 'destructive' : 'secondary'}>
-            {STATUS_LABELS[attachment.status]}
-          </Badge>
-          {attachment.error ? <span className="truncate">{attachment.error}</span> : null}
+        <span
+          data-slot="agent-prompt-attachment-name"
+          className="w-full min-w-0 truncate text-sm font-medium"
+        >
+          {attachment.fileName}
+        </span>
+        <span
+          data-slot="agent-prompt-attachment-meta"
+          role={failed ? 'alert' : transient ? 'status' : undefined}
+          aria-label={failed || transient ? `${attachment.fileName} 状态` : undefined}
+          aria-live={transient ? 'polite' : undefined}
+          aria-atomic={failed || transient ? 'true' : undefined}
+          className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+        >
+          <span className="shrink-0">{formatFileSize(attachment.size)}</span>
+          <span data-slot="agent-prompt-attachment-status" className="shrink-0">
+            <Badge variant={failed ? 'destructive' : 'secondary'}>
+              {STATUS_LABELS[attachment.status]}
+            </Badge>
+          </span>
+          {attachment.error ? (
+            <span
+              data-slot="agent-prompt-attachment-error"
+              className="min-w-0 flex-1 truncate"
+              title={attachment.error}
+            >
+              {attachment.error}
+            </span>
+          ) : null}
         </span>
         {attachment.status === 'uploading' ? (
           <Progress value={attachment.progress} aria-label={`${attachment.fileName} 上传进度`} className="mt-1 h-1 w-full" />
@@ -241,14 +266,16 @@ export function AgentPromptInput({
   ariaLabel = 'Agent prompt',
   acceptedTypesLabel,
   onAttachmentRejected,
+  onSubmitError,
 }: AgentPromptInputProps) {
   const [locallySubmitting, setLocallySubmitting] = useState(false)
   const [rejectionStatus, setRejectionStatus] = useState('')
+  const [submitErrorStatus, setSubmitErrorStatus] = useState('')
   const pendingRef = useRef(false)
   const composingRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const allowedTypes = attachmentPolicy.allowedTypes
-  const remainingCapacity = Math.max(0, attachmentPolicy.maxCount - attachmentController.attachments.length)
+  const remainingCapacity = Math.max(0, attachmentPolicy.maxCount - value.attachments.length)
   const typesLabel = acceptedTypesLabel ?? allowedTypes.map((type) => TYPE_LABELS[type]).join('、')
   const blocked = disabled
     || submitting
@@ -290,16 +317,24 @@ export function AgentPromptInput({
     if (blocked || pendingRef.current) return
     pendingRef.current = true
     setLocallySubmitting(true)
+    setSubmitErrorStatus('')
     try {
       await onSubmit({
         prompt: value.prompt,
-        attachments: attachmentController.attachments,
+        attachments: value.attachments,
       })
+    } catch (error: unknown) {
+      setSubmitErrorStatus('提交失败，请重试')
+      try {
+        onSubmitError?.(error)
+      } catch {
+        // Error observers must not break the composer's submit lifecycle.
+      }
     } finally {
       pendingRef.current = false
       setLocallySubmitting(false)
     }
-  }, [attachmentController.attachments, blocked, onSubmit, value.prompt])
+  }, [blocked, onSubmit, onSubmitError, value.attachments, value.prompt])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey) return
@@ -355,9 +390,9 @@ export function AgentPromptInput({
           className="min-h-40 h-auto max-h-[min(42rem,calc(100dvh-8rem))] flex-col overflow-hidden"
         >
           <div data-slot="agent-prompt-content" className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
-            {attachmentController.attachments.length > 0 ? (
+            {value.attachments.length > 0 ? (
               <div data-slot="agent-prompt-attachments" className="flex flex-col gap-1.5 px-2.5 pt-2.5">
-                {attachmentController.attachments.map((item) => (
+                {value.attachments.map((item) => (
                   <AttachmentRow
                     key={item.id}
                     attachment={item}
@@ -375,7 +410,7 @@ export function AgentPromptInput({
               disabled={disabled}
               onChange={(event) => onChange({
                 prompt: event.target.value,
-                attachments: attachmentController.attachments,
+                attachments: value.attachments,
               })}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
@@ -442,6 +477,11 @@ export function AgentPromptInput({
         <div role="alert" aria-live="polite" aria-atomic="true" className="sr-only">
           {rejectionStatus}
         </div>
+        {submitErrorStatus ? (
+          <div role="alert" aria-live="assertive" aria-atomic="true" className="sr-only">
+            {submitErrorStatus}
+          </div>
+        ) : null}
       </section>
     </TooltipProvider>
   )
