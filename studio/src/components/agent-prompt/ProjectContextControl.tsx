@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { LoaderCircleIcon, PlusIcon } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   Combobox,
   ComboboxCollection,
@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/combobox'
 import { Separator } from '@/components/ui/separator'
 import { platformLabels } from '@/lib/labels'
+import { cn } from '@/lib/utils'
 
 export interface ProjectContextProject {
   id: string
@@ -183,14 +184,16 @@ function SelectProjectContext({
           {createProjectHref ? (
             <>
               <Separator />
-              <Button
-                variant="ghost"
-                className="m-1 w-[calc(100%-0.5rem)] justify-start"
-                render={<Link to={createProjectHref} />}
+              <Link
+                to={createProjectHref}
+                className={cn(
+                  buttonVariants({ variant: 'ghost' }),
+                  'm-1 w-[calc(100%-0.5rem)] justify-start',
+                )}
               >
                 <PlusIcon data-icon="inline-start" />
                 新建项目
-              </Button>
+              </Link>
             </>
           ) : null}
         </ComboboxContent>

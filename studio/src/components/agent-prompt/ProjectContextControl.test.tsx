@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { render } from '@/test/test-utils'
@@ -60,6 +60,7 @@ describe('ProjectContextControl', () => {
   })
 
   it('shows the no-project value and links to project creation', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     render(
       <ProjectContextControl
         mode="select"
@@ -76,6 +77,12 @@ describe('ProjectContextControl', () => {
     fireEvent.click(trigger)
     const link = await screen.findByRole('link', { name: '新建项目' })
     expect(link).toHaveAttribute('href', '/projects/new')
+    await waitFor(() => {
+      expect(consoleError).not.toHaveBeenCalledWith(
+        expect.stringContaining('expected a native <button>'),
+      )
+    })
+    consoleError.mockRestore()
   })
 
   it('renders readonly project and no-project labels without interactive controls', () => {

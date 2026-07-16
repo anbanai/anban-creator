@@ -161,6 +161,15 @@ describe('Designer shared prompt composer', () => {
     expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
   })
 
+  it('stacks the mobile toolbar above a full-width shrinkable canvas', async () => {
+    render(<DesignerPage />)
+
+    const workspace = await screen.findByTestId('designer-workspace')
+    const canvas = screen.getByTestId('designer-canvas-frame')
+    expect(workspace).toHaveClass('flex-col', 'md:flex-row')
+    expect(canvas.parentElement).toHaveClass('w-full', 'min-w-0', 'md:w-auto')
+  })
+
   it('uploads on selection, then only registers ordered keys before generation', async () => {
     render(<DesignerPage />)
     const first = image('first.png')

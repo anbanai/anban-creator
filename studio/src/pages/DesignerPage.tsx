@@ -493,7 +493,7 @@ export default function DesignerPage() {
   return (
     <div
       data-testid="designer-workspace"
-      className="relative -mx-4 -my-6 flex overflow-hidden bg-background md:-mx-8 md:-my-8"
+      className="relative -mx-4 -my-6 flex flex-col overflow-hidden bg-background md:-mx-8 md:-my-8 md:flex-row"
       style={{ height: '100dvh' }}
     >
       <DesignerToolbar
@@ -506,7 +506,7 @@ export default function DesignerPage() {
         onHistoryToggle={() => setHistoryOpen(true)}
       />
 
-      <div className="relative flex min-h-0 flex-1 flex-col p-3 pl-0">
+      <div className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col p-3 md:w-auto md:pl-0">
         <div
           data-testid="designer-canvas-frame"
           className="relative flex-1 overflow-hidden rounded-2xl border border-border/70 bg-card/35 shadow-inner"
