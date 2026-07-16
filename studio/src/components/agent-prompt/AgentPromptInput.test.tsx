@@ -233,7 +233,7 @@ describe('AgentPromptInput', () => {
     const dataTransfer = dragData([file])
 
     fireEvent.dragEnter(document.body, { dataTransfer })
-    expect(screen.getByRole('status')).toHaveTextContent('还可添加 2 个')
+    expect(screen.getByTestId('agent-prompt-drop-overlay')).toHaveTextContent('还可添加 2 个')
     fireEvent.drop(document.body, { dataTransfer })
 
     expect(addFiles).toHaveBeenCalledOnce()
@@ -426,6 +426,43 @@ describe('AgentPromptInput', () => {
     expect(failureAlert).toHaveTextContent(longError)
     expect(failureAlert.querySelector('[data-slot="agent-prompt-attachment-error"]')).toHaveClass('min-w-0', 'flex-1', 'truncate')
     expect(within(queuedRow).getByRole('button', { name: `删除 ${longName}` })).toHaveAttribute('data-size', 'icon-xs')
+  })
+
+  it('announces the attachment lifecycle through uploaded completion, then uses an alert for failure', () => {
+    const queued = attachment({ id: 'transition', fileName: 'transition.png', status: 'queued', progress: 0 })
+    const { props, rerender } = renderPrompt({
+      value: { prompt: '', attachments: [queued] },
+    })
+
+    const renderState = (next: PromptAttachment) => {
+      rerender(
+        <AgentPromptInput
+          {...props}
+          value={{ prompt: '', attachments: [next] }}
+        />,
+      )
+    }
+    const expectPoliteStatus = (label: string) => {
+      const row = screen.getByText('transition.png').closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
+      const region = within(row).getByRole('status', { name: 'transition.png 状态' })
+      expect(region).toHaveAttribute('aria-live', 'polite')
+      expect(region).toHaveAttribute('aria-atomic', 'true')
+      expect(region).toHaveTextContent(label)
+      expect(within(region).getAllByText(label)).toHaveLength(1)
+      expect(within(row).getAllByRole('status')).toHaveLength(1)
+    }
+
+    expectPoliteStatus('等待中')
+    renderState({ ...queued, status: 'uploading', progress: 45 })
+    expectPoliteStatus('上传中')
+    renderState({ ...queued, status: 'uploaded', progress: 100 })
+    expectPoliteStatus('已上传')
+
+    renderState({ ...queued, status: 'failed', error: 'Upload failed' })
+    const row = screen.getByText('transition.png').closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
+    expect(within(row).queryByRole('status')).not.toBeInTheDocument()
+    expect(within(row).getAllByRole('alert')).toHaveLength(1)
+    expect(within(row).getByRole('alert', { name: 'transition.png 状态' })).toHaveTextContent('失败')
   })
 
   it('updates parent-owned attachment values through controller mutations and reset', () => {

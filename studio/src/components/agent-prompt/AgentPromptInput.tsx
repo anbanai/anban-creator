@@ -135,7 +135,6 @@ function AttachmentRow({
   controller,
   disabled,
 }: AttachmentRowProps) {
-  const transient = attachment.status === 'queued' || attachment.status === 'uploading'
   const failed = attachment.status === 'failed'
   return (
     <div
@@ -151,10 +150,10 @@ function AttachmentRow({
         </span>
         <span
           data-slot="agent-prompt-attachment-meta"
-          role={failed ? 'alert' : transient ? 'status' : undefined}
-          aria-label={failed || transient ? `${attachment.fileName} 状态` : undefined}
-          aria-live={transient ? 'polite' : undefined}
-          aria-atomic={failed || transient ? 'true' : undefined}
+          role={failed ? 'alert' : 'status'}
+          aria-label={`${attachment.fileName} 状态`}
+          aria-live={failed ? undefined : 'polite'}
+          aria-atomic="true"
           className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
         >
           <span className="shrink-0">{formatFileSize(attachment.size)}</span>
