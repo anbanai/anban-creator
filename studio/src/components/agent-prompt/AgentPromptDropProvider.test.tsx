@@ -205,6 +205,57 @@ describe('AgentPromptDropProvider', () => {
     expect(onFiles).toHaveBeenCalledWith([file])
   })
 
+  it('shows the dragged file count, accepted types, and selected target capacity', () => {
+    render(
+      <AgentPromptDropProvider>
+        <TargetHarness
+          name="only"
+          onFiles={vi.fn()}
+          acceptedTypesLabel="图片或文档"
+          remainingCapacity={3}
+        />
+      </AgentPromptDropProvider>,
+    )
+    const files = [image('first.png'), image('second.png')]
+    const status = '释放以添加 2 个文件 · 支持图片或文档 · 还可添加 3 个'
+
+    fireEvent.dragEnter(document.body, { dataTransfer: dragData({ files }) })
+
+    expect(screen.getByTestId('agent-prompt-drop-overlay')).toHaveTextContent(status)
+    expect(screen.getByRole('status')).toHaveTextContent(status)
+  })
+
+  it('refreshes the active overlay and live status when capacity changes', () => {
+    const onFiles = vi.fn()
+    const files = [image('first.png'), image('second.png')]
+    const { rerender } = render(
+      <AgentPromptDropProvider>
+        <TargetHarness
+          name="only"
+          onFiles={onFiles}
+          acceptedTypesLabel="图像"
+          remainingCapacity={3}
+        />
+      </AgentPromptDropProvider>,
+    )
+    fireEvent.dragEnter(document.body, { dataTransfer: dragData({ files }) })
+
+    rerender(
+      <AgentPromptDropProvider>
+        <TargetHarness
+          name="only"
+          onFiles={onFiles}
+          acceptedTypesLabel="图像"
+          remainingCapacity={1}
+        />
+      </AgentPromptDropProvider>,
+    )
+    const status = '释放以添加 2 个文件 · 支持图像 · 还可添加 1 个'
+
+    expect(screen.getByTestId('agent-prompt-drop-overlay')).toHaveTextContent(status)
+    expect(screen.getByRole('status')).toHaveTextContent(status)
+  })
+
   it('does not guess between multiple eligible targets without focus', () => {
     render(
       <AgentPromptDropProvider>

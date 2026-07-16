@@ -39,6 +39,8 @@ interface DropTargetRegistry {
 
 interface OverlayState {
   acceptedTypesLabel: string
+  remainingCapacity: number
+  draggedFileCount: number | null
 }
 
 const OPEN_OVERLAY_SELECTOR = [
@@ -72,6 +74,13 @@ function isPotentiallyAccepted(
   return items.some((item) => options.acceptsItemType?.(item.type) === true)
 }
 
+function draggedFileCount(dataTransfer: DataTransfer) {
+  const files = Array.from(dataTransfer.files ?? [])
+  if (files.length > 0) return files.length
+  const items = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === 'file')
+  return items.length > 0 ? items.length : null
+}
+
 function latestOpenOverlay() {
   const overlays = document.querySelectorAll<HTMLElement>(OPEN_OVERLAY_SELECTOR)
   return overlays.item(overlays.length - 1) || null
@@ -84,11 +93,13 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
   const dragTransferRef = useRef<DataTransfer | null>(null)
   const activeTargetIdRef = useRef<string | null>(null)
   const activeLabelRef = useRef<string | null>(null)
+  const overlayRef = useRef<OverlayState | null>(null)
   const [overlay, setOverlay] = useState<OverlayState | null>(null)
 
   const clearOverlay = useCallback(() => {
     activeTargetIdRef.current = null
     activeLabelRef.current = null
+    overlayRef.current = null
     setOverlay((current) => current === null ? current : null)
   }, [])
 
@@ -122,16 +133,31 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
     return eligible.length === 1 ? eligible[0] : null
   }, [])
 
-  const activateTarget = useCallback((registration: DropTargetRegistration) => {
-    const acceptedTypesLabel = registration.optionsRef.current.acceptedTypesLabel
+  const activateTarget = useCallback((
+    registration: DropTargetRegistration,
+    dataTransfer: DataTransfer,
+  ) => {
+    const options = registration.optionsRef.current
+    const acceptedTypesLabel = options.acceptedTypesLabel
+    const remainingCapacity = options.remainingCapacity
+    const fileCount = draggedFileCount(dataTransfer)
+    const currentOverlay = overlayRef.current
     if (
       activeTargetIdRef.current === registration.id
       && activeLabelRef.current === acceptedTypesLabel
+      && currentOverlay?.remainingCapacity === remainingCapacity
+      && currentOverlay.draggedFileCount === fileCount
     ) return
 
     activeTargetIdRef.current = registration.id
     activeLabelRef.current = acceptedTypesLabel
-    setOverlay({ acceptedTypesLabel })
+    const nextOverlay = {
+      acceptedTypesLabel,
+      remainingCapacity,
+      draggedFileCount: fileCount,
+    }
+    overlayRef.current = nextOverlay
+    setOverlay(nextOverlay)
   }, [])
 
   const register = useCallback((registration: DropTargetRegistration) => {
@@ -161,7 +187,7 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       resetDrag()
       return
     }
-    activateTarget(selected)
+    activateTarget(selected, dataTransfer)
   }, [activateTarget, resetDrag, selectTarget])
 
   const registry = useMemo<DropTargetRegistry>(() => ({
@@ -177,7 +203,7 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       dragTransferRef.current = event.dataTransfer
       const selected = selectTarget(event.dataTransfer)
       if (selected) {
-        activateTarget(selected)
+        activateTarget(selected, event.dataTransfer)
       } else {
         clearOverlay()
       }
@@ -191,7 +217,7 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
         clearOverlay()
         return
       }
-      activateTarget(selected)
+      activateTarget(selected, event.dataTransfer)
       event.preventDefault()
       event.dataTransfer.dropEffect = 'copy'
     }
@@ -238,7 +264,13 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
   }, [activateTarget, clearOverlay, resetDrag, selectTarget])
 
   const overlayStatus = overlay
-    ? `释放以添加${overlay.acceptedTypesLabel}`
+    ? [
+        overlay.draggedFileCount === null
+          ? '释放以添加文件'
+          : `释放以添加 ${overlay.draggedFileCount} 个文件`,
+        `支持${overlay.acceptedTypesLabel}`,
+        `还可添加 ${overlay.remainingCapacity} 个`,
+      ].join(' · ')
     : ''
 
   return (
@@ -252,9 +284,11 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
             className="pointer-events-none fixed inset-0 isolate z-50 flex items-center justify-center p-4"
           >
             <div className="flex min-h-40 w-full max-w-xl items-center justify-center rounded-lg border-2 border-dashed border-primary bg-background/90 px-6 py-10 shadow-lg backdrop-blur-sm">
-              <div className="flex flex-col items-center gap-3 text-center text-foreground">
+              <div className="flex min-w-0 max-w-full flex-col items-center gap-3 text-center text-foreground">
                 <UploadIcon className="size-8 text-primary" />
-                <p className="text-base font-medium">{overlayStatus}</p>
+                <p className="max-w-full break-words text-base font-medium leading-relaxed text-pretty">
+                  {overlayStatus}
+                </p>
               </div>
             </div>
           </div>
