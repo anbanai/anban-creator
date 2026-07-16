@@ -4,12 +4,44 @@ import { directUploadResultToInputAttachment, uploadToOSS } from '@/lib/direct-u
 
 const putMock = vi.fn()
 const multipartUploadMock = vi.fn()
+const cancelMock = vi.fn()
+
+let xhrAutoComplete = true
+const xhrInstances: FakeXMLHttpRequest[] = []
+
+class FakeXMLHttpRequest {
+  status = 0
+  responseText = ''
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  onabort: (() => void) | null = null
+  upload = { onprogress: null as ((event: ProgressEvent) => void) | null }
+  open = vi.fn()
+  setRequestHeader = vi.fn()
+  send = vi.fn(() => {
+    if (xhrAutoComplete) {
+      queueMicrotask(() => this.finish(200))
+    }
+  })
+  abort = vi.fn(() => this.onabort?.())
+
+  constructor() {
+    xhrInstances.push(this)
+  }
+
+  finish(status: number, responseText = '') {
+    this.status = status
+    this.responseText = responseText
+    this.onload?.()
+  }
+}
 
 vi.mock('ali-oss', () => ({
   default: vi.fn(function OSSClient() {
     return {
     put: putMock,
     multipartUpload: multipartUploadMock,
+    cancel: cancelMock,
     }
   }),
 }))
@@ -29,12 +61,16 @@ function fileOf(size: number, type = 'image/png', name = 'asset.png') {
 describe('uploadToOSS', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    xhrInstances.length = 0
+    xhrAutoComplete = true
+    vi.stubGlobal('XMLHttpRequest', FakeXMLHttpRequest)
     vi.mocked(http.post).mockResolvedValue({
       data: {
         data: {
           upload_id: 'up-1',
           key: 'uploads/pending/user/up-1/asset.png',
           public_url: 'https://cdn.example.com/uploads/pending/user/up-1/asset.png',
+          upload_url: 'https://oss-upload.example.com/uploads/pending/user/up-1/asset.png?signature=put',
           region: 'oss-cn-hangzhou',
           bucket: 'bucket',
           endpoint: 'oss-cn-hangzhou.aliyuncs.com',
@@ -51,7 +87,7 @@ describe('uploadToOSS', () => {
     multipartUploadMock.mockResolvedValue({})
   })
 
-  it('prepares credentials and uploads small files with ali-oss put', async () => {
+  it('uploads small files through the signed PUT URL', async () => {
     const progress: number[] = []
     const result = await uploadToOSS({
       purpose: 'project_reference',
@@ -65,9 +101,15 @@ describe('uploadToOSS', () => {
       content_type: 'image/png',
       size: 1024,
     })
-    expect(putMock).toHaveBeenCalledWith('uploads/pending/user/up-1/asset.png', expect.any(File), expect.objectContaining({
-      headers: expect.objectContaining({ 'Content-Type': 'image/png' }),
-    }))
+    expect(xhrInstances).toHaveLength(1)
+    expect(xhrInstances[0].open).toHaveBeenCalledWith(
+      'PUT',
+      'https://oss-upload.example.com/uploads/pending/user/up-1/asset.png?signature=put',
+      true,
+    )
+    expect(xhrInstances[0].setRequestHeader).toHaveBeenCalledWith('Content-Type', 'image/png')
+    expect(xhrInstances[0].send).toHaveBeenCalledWith(expect.any(File))
+    expect(putMock).not.toHaveBeenCalled()
     expect(multipartUploadMock).not.toHaveBeenCalled()
     expect(progress[progress.length - 1]).toBe(100)
     expect(result.publicUrl).toBe('https://cdn.example.com/uploads/pending/user/up-1/asset.png')
@@ -109,6 +151,7 @@ describe('uploadToOSS', () => {
           upload_id: 'up-audio',
           key: 'uploads/pending/user/up-audio/sound.m4a',
           public_url: 'https://cdn.example.com/uploads/pending/user/up-audio/sound.m4a',
+          upload_url: 'https://oss-upload.example.com/uploads/pending/user/up-audio/sound.m4a?signature=put',
           region: 'oss-cn-hangzhou',
           bucket: 'bucket',
           endpoint: 'oss-cn-hangzhou.aliyuncs.com',
@@ -133,9 +176,7 @@ describe('uploadToOSS', () => {
       content_type: '',
       size: 1024,
     })
-    expect(putMock).toHaveBeenCalledWith('uploads/pending/user/up-audio/sound.m4a', expect.any(File), expect.objectContaining({
-      headers: expect.objectContaining({ 'Content-Type': 'audio/mp4' }),
-    }))
+    expect(xhrInstances[0].setRequestHeader).toHaveBeenCalledWith('Content-Type', 'audio/mp4')
     expect(result.contentType).toBe('audio/mp4')
   })
 
@@ -165,14 +206,14 @@ describe('uploadToOSS', () => {
   })
 
   it('maps expired credential errors to a Chinese retry hint', async () => {
-    putMock
+    multipartUploadMock
       .mockRejectedValueOnce(Object.assign(new Error('Request has expired'), { code: 'AccessDenied' }))
       .mockRejectedValueOnce(Object.assign(new Error('Request has expired'), { code: 'AccessDenied' }))
 
-    await expect(uploadToOSS({ purpose: 'project_reference', file: fileOf(1024) }))
+    await expect(uploadToOSS({ purpose: 'project_reference', file: fileOf(12 * 1024 * 1024) }))
       .rejects.toThrow('上传凭证已过期，请重试上传')
     expect(http.post).toHaveBeenCalledTimes(2)
-    expect(putMock).toHaveBeenCalledTimes(2)
+    expect(multipartUploadMock).toHaveBeenCalledTimes(2)
   })
 
   it('re-prepares credentials once when the first OSS upload credential has expired', async () => {
@@ -211,17 +252,72 @@ describe('uploadToOSS', () => {
           },
         },
       })
-    putMock
+    multipartUploadMock
       .mockRejectedValueOnce(Object.assign(new Error('Request has expired'), { code: 'AccessDenied' }))
       .mockResolvedValueOnce({})
 
-    const result = await uploadToOSS({ purpose: 'project_reference', file: fileOf(1024) })
+    const result = await uploadToOSS({ purpose: 'project_reference', file: fileOf(12 * 1024 * 1024) })
 
     expect(http.post).toHaveBeenCalledTimes(2)
-    expect(putMock).toHaveBeenNthCalledWith(1, 'uploads/pending/user/up-1/asset.png', expect.any(File), expect.any(Object))
-    expect(putMock).toHaveBeenNthCalledWith(2, 'uploads/pending/user/up-2/asset.png', expect.any(File), expect.any(Object))
+    expect(multipartUploadMock).toHaveBeenNthCalledWith(1, 'uploads/pending/user/up-1/asset.png', expect.any(File), expect.any(Object))
+    expect(multipartUploadMock).toHaveBeenNthCalledWith(2, 'uploads/pending/user/up-2/asset.png', expect.any(File), expect.any(Object))
     expect(result.uploadId).toBe('up-2')
     expect(result.publicUrl).toBe('https://cdn.example.com/uploads/pending/user/up-2/asset.png')
+  })
+
+  it('passes AbortSignal to prepare and aborts an in-flight signed PUT without retrying', async () => {
+    xhrAutoComplete = false
+    const controller = new AbortController()
+    const promise = uploadToOSS({
+      purpose: 'ai_entry_attachment',
+      file: fileOf(1024),
+      signal: controller.signal,
+    })
+
+    await vi.waitFor(() => expect(xhrInstances).toHaveLength(1))
+    expect(http.post).toHaveBeenCalledWith('/uploads/prepare', expect.any(Object), {
+      signal: controller.signal,
+    })
+
+    controller.abort()
+
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    expect(xhrInstances[0].abort).toHaveBeenCalledTimes(1)
+    expect(http.post).toHaveBeenCalledTimes(1)
+  })
+
+  it('short-circuits an already aborted upload before preparing credentials', async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(uploadToOSS({
+      purpose: 'ai_entry_attachment',
+      file: fileOf(1024),
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' })
+
+    expect(http.post).not.toHaveBeenCalled()
+  })
+
+  it('cancels an in-flight multipart upload through the OSS client', async () => {
+    const controller = new AbortController()
+    let rejectUpload!: (reason?: unknown) => void
+    multipartUploadMock.mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectUpload = reject
+    }))
+    const promise = uploadToOSS({
+      purpose: 'video_reference',
+      file: fileOf(12 * 1024 * 1024, 'video/mp4'),
+      signal: controller.signal,
+    })
+    await vi.waitFor(() => expect(multipartUploadMock).toHaveBeenCalledTimes(1))
+
+    controller.abort()
+    rejectUpload(new Error('cancelled'))
+
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    expect(cancelMock).toHaveBeenCalledTimes(1)
+    expect(http.post).toHaveBeenCalledTimes(1)
   })
 })
 

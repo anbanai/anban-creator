@@ -567,6 +567,49 @@ func TestPrepareDirectUploadRejectsInvalidPurposeSizeAndMIME(t *testing.T) {
 	}
 }
 
+func TestPrepareDirectUploadRequiresExactMIMEExtensionPairs(t *testing.T) {
+	store := &fakeDirectUploadStore{name: "oss"}
+	cfg := DirectUploadConfig{
+		Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", Region: "oss-cn-hangzhou"},
+		CredentialIssuer: StaticUploadCredentialIssuer(func(context.Context, UploadCredentialRequest) (*UploadCredential, error) {
+			return &UploadCredential{AccessKeyID: "ak", AccessKeySecret: "sk", SecurityToken: "token", ExpiresAt: time.Now().Add(time.Minute)}, nil
+		}),
+	}
+	tests := []struct {
+		name        string
+		filename    string
+		contentType string
+		wantOK      bool
+	}{
+		{name: "png", filename: "photo.png", contentType: "image/png", wantOK: true},
+		{name: "jpeg alias", filename: "photo.jpg", contentType: "image/jpeg", wantOK: true},
+		{name: "m4a alias", filename: "voice.m4a", contentType: "audio/mp4", wantOK: true},
+		{name: "quicktime alias", filename: "clip.mov", contentType: "video/quicktime", wantOK: true},
+		{name: "docx", filename: "brief.docx", contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", wantOK: true},
+		{name: "markdown", filename: "brief.md", contentType: "text/markdown", wantOK: true},
+		{name: "generic fallback", filename: "voice.m4a", contentType: "application/octet-stream", wantOK: true},
+		{name: "extensionless known mime", filename: "photo", contentType: "image/png", wantOK: true},
+		{name: "svg disguised as png", filename: "payload.png", contentType: "image/svg+xml"},
+		{name: "same category mismatch", filename: "photo.jpg", contentType: "image/png"},
+		{name: "audio mime on video extension", filename: "clip.mp4", contentType: "audio/mp4"},
+		{name: "executable mime on text extension", filename: "notes.txt", contentType: "application/x-msdownload"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := PrepareDirectUpload(context.Background(), store, &fakePendingUploadRepo{}, cfg, DirectUploadPrepareRequest{
+				UserID: "u", Purpose: DirectUploadPurposeAIEntryAttachment,
+				Filename: tt.filename, ContentType: tt.contentType, Size: 1024,
+			})
+			if tt.wantOK && err != nil {
+				t.Fatalf("PrepareDirectUpload(%s, %s): %v", tt.filename, tt.contentType, err)
+			}
+			if !tt.wantOK && err == nil {
+				t.Fatalf("PrepareDirectUpload(%s, %s) succeeded, want error", tt.filename, tt.contentType)
+			}
+		})
+	}
+}
+
 func TestResolveDirectUploadAttachment(t *testing.T) {
 	now := time.Date(2026, 7, 15, 9, 0, 0, 0, time.UTC)
 	const (

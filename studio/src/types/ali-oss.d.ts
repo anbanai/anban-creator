@@ -18,5 +18,6 @@ declare module 'ali-oss' {
     constructor(options: OSSClientOptions)
     put(name: string, file: Blob | File, options?: OSSUploadOptions): Promise<unknown>
     multipartUpload(name: string, file: Blob | File, options?: OSSUploadOptions): Promise<unknown>
+    cancel(): void
   }
 }

@@ -88,6 +88,53 @@ describe('usePromptAttachments', () => {
     expect(JSON.stringify(result.current.toInputAttachments())).not.toContain('cdn.example.com')
   })
 
+  it('round-trips trusted inherited URL, key-only, and inline-text sources', () => {
+    const inherited: InputAttachment[] = [
+      {
+        type: 'image',
+        url: '/api/v1/files/tasks/task-1/input/legacy.png',
+        key: 'tasks/task-1/input/legacy.png',
+        file_name: 'legacy.png',
+        content_type: 'image/png',
+        size: 20,
+        role: 'reference',
+        instruction: '保留旧素材',
+      },
+      {
+        type: 'document',
+        key: 'tasks/task-1/input/brief.pdf',
+        file_name: 'brief.pdf',
+        content_type: 'application/pdf',
+        size: 30,
+        instruction: '阅读简报',
+      },
+      {
+        type: 'text',
+        text: '原始内联说明',
+        file_name: 'brief.txt',
+        content_type: 'text/plain',
+        size: 8,
+        role: 'brief',
+        instruction: '逐字保留',
+      },
+    ]
+    const { result } = renderHook(() => usePromptAttachments({
+      adapter: { mode: 'direct' },
+      policy,
+      initialAttachments: inherited,
+      createId: idSequence(),
+      createObjectURL: vi.fn(),
+    }))
+
+    expect(result.current.toInputAttachments()).toEqual(inherited)
+    expect(result.current.attachments).toHaveLength(3)
+    for (const attachment of result.current.attachments) {
+      expect(attachment).not.toHaveProperty('url')
+      expect(attachment).not.toHaveProperty('text')
+      expect(attachment).not.toHaveProperty('file')
+    }
+  })
+
   it('uploads direct files concurrently while preserving add order and progress', async () => {
     const first = fileOf('first.png')
     const second = fileOf('second.pdf', 'application/pdf')
@@ -258,9 +305,14 @@ describe('usePromptAttachments', () => {
 
   it('revokes each transient URL once and ignores stale async completion', async () => {
     const operations: ReturnType<typeof deferred<UploadToOSSResult>>[] = []
-    const upload = vi.fn(({ file }: UploadToOSSOptions) => {
+    const signals: Array<AbortSignal | undefined> = []
+    const upload = vi.fn(({ file, signal }: UploadToOSSOptions) => {
       const operation = deferred<UploadToOSSResult>()
       operations.push(operation)
+      signals.push(signal)
+      signal?.addEventListener('abort', () => {
+        operation.reject(new DOMException('Upload aborted', 'AbortError'))
+      }, { once: true })
       return operation.promise.then(() => uploadResult(file))
     })
     const revokeObjectURL = vi.fn()
@@ -276,6 +328,7 @@ describe('usePromptAttachments', () => {
     act(() => result.current.addFiles([fileOf('removed.png')]))
     act(() => result.current.remove('attachment-1'))
     expect(result.current.attachments).toEqual([])
+    expect(signals[0]?.aborted).toBe(true)
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:removed.png')
 
     await act(async () => {
@@ -287,9 +340,11 @@ describe('usePromptAttachments', () => {
     act(() => result.current.addFiles([fileOf('cleared.png')]))
     act(() => result.current.clear())
     expect(result.current.attachments).toEqual([])
+    expect(signals[1]?.aborted).toBe(true)
 
     act(() => result.current.addFiles([fileOf('unmounted.png')]))
     unmount()
+    expect(signals[2]?.aborted).toBe(true)
     await act(async () => {
       operations[1].resolve(uploadResult(fileOf('cleared.png')))
       operations[2].resolve(uploadResult(fileOf('unmounted.png')))

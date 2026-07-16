@@ -866,26 +866,76 @@ func directUploadPolicyJSON(bucket, key string) string {
 	return string(raw)
 }
 
-func isDirectUploadImage(contentType, ext string) bool {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	if strings.HasPrefix(ct, "image/") {
-		switch strings.ToLower(ext) {
-		case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", "":
-			return true
+type directUploadFileRule struct {
+	kind         string
+	contentTypes []string
+}
+
+var directUploadFileRules = map[string]directUploadFileRule{
+	".jpg":      {kind: "image", contentTypes: []string{"image/jpeg", "image/jpg", "image/pjpeg"}},
+	".jpeg":     {kind: "image", contentTypes: []string{"image/jpeg", "image/jpg", "image/pjpeg"}},
+	".png":      {kind: "image", contentTypes: []string{"image/png", "image/x-png"}},
+	".webp":     {kind: "image", contentTypes: []string{"image/webp"}},
+	".gif":      {kind: "image", contentTypes: []string{"image/gif"}},
+	".bmp":      {kind: "image", contentTypes: []string{"image/bmp", "image/x-ms-bmp"}},
+	".mp3":      {kind: "audio", contentTypes: []string{"audio/mpeg", "audio/mp3"}},
+	".wav":      {kind: "audio", contentTypes: []string{"audio/wav", "audio/x-wav"}},
+	".m4a":      {kind: "audio", contentTypes: []string{"audio/mp4", "audio/x-m4a"}},
+	".aac":      {kind: "audio", contentTypes: []string{"audio/aac"}},
+	".ogg":      {kind: "audio", contentTypes: []string{"audio/ogg", "application/ogg"}},
+	".mp4":      {kind: "video", contentTypes: []string{"video/mp4"}},
+	".mov":      {kind: "video", contentTypes: []string{"video/quicktime"}},
+	".webm":     {kind: "video", contentTypes: []string{"video/webm"}},
+	".pdf":      {kind: "document", contentTypes: []string{"application/pdf"}},
+	".doc":      {kind: "document", contentTypes: []string{"application/msword"}},
+	".docx":     {kind: "document", contentTypes: []string{"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}},
+	".ppt":      {kind: "document", contentTypes: []string{"application/vnd.ms-powerpoint"}},
+	".pptx":     {kind: "document", contentTypes: []string{"application/vnd.openxmlformats-officedocument.presentationml.presentation"}},
+	".xls":      {kind: "document", contentTypes: []string{"application/vnd.ms-excel"}},
+	".xlsx":     {kind: "document", contentTypes: []string{"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}},
+	".json":     {kind: "document", contentTypes: []string{"application/json", "text/json"}},
+	".csv":      {kind: "text", contentTypes: []string{"text/csv", "application/csv"}},
+	".txt":      {kind: "text", contentTypes: []string{"text/plain"}},
+	".md":       {kind: "text", contentTypes: []string{"text/markdown", "text/plain"}},
+	".markdown": {kind: "text", contentTypes: []string{"text/markdown", "text/plain"}},
+}
+
+func directUploadFileKind(contentType, ext string) string {
+	ct := normalizeDirectUploadContentType(contentType)
+	ext = strings.ToLower(strings.TrimSpace(ext))
+	if ext != "" {
+		rule, ok := directUploadFileRules[ext]
+		if !ok {
+			return ""
+		}
+		for _, allowed := range rule.contentTypes {
+			if ct == allowed {
+				return rule.kind
+			}
+		}
+		return ""
+	}
+	for _, rule := range directUploadFileRules {
+		for _, allowed := range rule.contentTypes {
+			if ct == allowed {
+				return rule.kind
+			}
 		}
 	}
-	return false
+	return ""
+}
+
+func isDirectUploadImage(contentType, ext string) bool {
+	return directUploadFileKind(contentType, ext) == "image"
 }
 
 func isDirectUploadVideoReference(contentType, ext string) bool {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	if strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") {
-		switch strings.ToLower(ext) {
-		case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".mp4", ".mov", ".webm", "":
-			return true
-		}
+	switch directUploadFileKind(contentType, ext) {
+	case "image", "audio", "video":
+		return true
+	default:
+		return false
 	}
-	return false
 }
 
 func isDirectUploadAIEntryAttachment(contentType, ext string) bool {
@@ -897,47 +947,14 @@ func isDirectUploadMontageAsset(contentType, ext string) bool {
 }
 
 func aiEntryAttachmentMaxSize(contentType, ext string) int64 {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	ext = strings.ToLower(strings.TrimSpace(ext))
-	if strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") {
-		switch ext {
-		case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".mp4", ".mov", ".webm", "":
-			return 50 * 1024 * 1024
-		}
+	switch directUploadFileKind(contentType, ext) {
+	case "image", "audio", "video":
+		return 50 * 1024 * 1024
+	case "document", "text":
+		return 25 * 1024 * 1024
+	default:
+		return 0
 	}
-	switch ext {
-	case ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".csv", ".txt", ".md", ".markdown", ".json":
-		if isAIEntryDocumentContentType(ct, ext) {
-			return 25 * 1024 * 1024
-		}
-	}
-	return 0
-}
-
-func isAIEntryDocumentContentType(ct, ext string) bool {
-	if strings.HasPrefix(ct, "text/") {
-		switch ext {
-		case ".csv", ".txt", ".md", ".markdown":
-			return true
-		}
-	}
-	switch ct {
-	case "application/pdf",
-		"application/msword",
-		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-		"application/vnd.ms-powerpoint",
-		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
-		"application/vnd.ms-excel",
-		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-		"application/csv",
-		"application/json":
-		return true
-	case "application/octet-stream":
-		// Some browsers report generic types for local files. Keep the allowlist
-		// extension-bound so executable formats are still rejected.
-		return ext != ""
-	}
-	return false
 }
 
 func sanitizeUploadFilename(raw string) string {

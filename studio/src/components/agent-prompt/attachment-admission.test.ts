@@ -50,6 +50,9 @@ describe('classifyPromptAttachment', () => {
   it.each([
     ['report.pdf', 'image/png'],
     ['photo.png', 'application/pdf'],
+    ['payload.png', 'image/svg+xml'],
+    ['photo.jpg', 'image/png'],
+    ['notes.txt', 'application/x-msdownload'],
     ['payload.exe', 'image/png'],
     ['payload.exe', 'application/octet-stream'],
   ] as const)('rejects mismatched or unsupported metadata for %s (%s)', (name, mime) => {
@@ -121,5 +124,22 @@ describe('admitPromptAttachments', () => {
       { file: overCapacity, reason: AttachmentRejectionReason.Capacity },
     ])
     expect(result.accepted.length + result.rejected.length).toBe(4)
+  })
+
+  it('applies per-type max byte overrides at the exact boundary', () => {
+    const atDesignerLimit = fileOf('allowed.png', 'image/png', 10 * MB)
+    const overDesignerLimit = fileOf('rejected.png', 'image/png', 10 * MB + 1)
+
+    const result = admitPromptAttachments([], [atDesignerLimit, overDesignerLimit], {
+      allowedTypes: ['image'],
+      maxCount: 2,
+      maxBytes: { image: 10 * MB },
+    })
+
+    expect(result.accepted).toEqual([{ file: atDesignerLimit, type: 'image' }])
+    expect(result.rejected).toEqual([{
+      file: overDesignerLimit,
+      reason: AttachmentRejectionReason.TooLarge,
+    }])
   })
 })

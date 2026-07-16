@@ -19,47 +19,52 @@ export interface AttachmentAdmissionResult {
 }
 
 const MB = 1024 * 1024
+export const DEFAULT_ATTACHMENT_MAX_BYTES: Record<InputAttachmentType, number> = {
+  image: 50 * MB,
+  audio: 50 * MB,
+  video: 50 * MB,
+  document: 25 * MB,
+  text: 25 * MB,
+}
 const GENERIC_MIME_TYPES = new Set(['', 'application/octet-stream'])
-const DOCUMENT_MIME_TYPES = new Set([
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/csv',
-  'application/json',
+type AttachmentTypeRule = {
+  type: InputAttachmentType
+  mimeTypes: readonly string[]
+}
+
+const EXTENSION_RULES = new Map<string, AttachmentTypeRule>([
+  ['jpg', { type: 'image', mimeTypes: ['image/jpeg', 'image/jpg', 'image/pjpeg'] }],
+  ['jpeg', { type: 'image', mimeTypes: ['image/jpeg', 'image/jpg', 'image/pjpeg'] }],
+  ['png', { type: 'image', mimeTypes: ['image/png', 'image/x-png'] }],
+  ['webp', { type: 'image', mimeTypes: ['image/webp'] }],
+  ['gif', { type: 'image', mimeTypes: ['image/gif'] }],
+  ['bmp', { type: 'image', mimeTypes: ['image/bmp', 'image/x-ms-bmp'] }],
+  ['mp3', { type: 'audio', mimeTypes: ['audio/mpeg', 'audio/mp3'] }],
+  ['wav', { type: 'audio', mimeTypes: ['audio/wav', 'audio/x-wav'] }],
+  ['m4a', { type: 'audio', mimeTypes: ['audio/mp4', 'audio/x-m4a'] }],
+  ['aac', { type: 'audio', mimeTypes: ['audio/aac'] }],
+  ['ogg', { type: 'audio', mimeTypes: ['audio/ogg', 'application/ogg'] }],
+  ['mp4', { type: 'video', mimeTypes: ['video/mp4'] }],
+  ['mov', { type: 'video', mimeTypes: ['video/quicktime'] }],
+  ['webm', { type: 'video', mimeTypes: ['video/webm'] }],
+  ['pdf', { type: 'document', mimeTypes: ['application/pdf'] }],
+  ['doc', { type: 'document', mimeTypes: ['application/msword'] }],
+  ['docx', { type: 'document', mimeTypes: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'] }],
+  ['ppt', { type: 'document', mimeTypes: ['application/vnd.ms-powerpoint'] }],
+  ['pptx', { type: 'document', mimeTypes: ['application/vnd.openxmlformats-officedocument.presentationml.presentation'] }],
+  ['xls', { type: 'document', mimeTypes: ['application/vnd.ms-excel'] }],
+  ['xlsx', { type: 'document', mimeTypes: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'] }],
+  ['json', { type: 'document', mimeTypes: ['application/json', 'text/json'] }],
+  ['csv', { type: 'text', mimeTypes: ['text/csv', 'application/csv'] }],
+  ['txt', { type: 'text', mimeTypes: ['text/plain'] }],
+  ['md', { type: 'text', mimeTypes: ['text/markdown', 'text/plain'] }],
+  ['markdown', { type: 'text', mimeTypes: ['text/markdown', 'text/plain'] }],
 ])
 
-const EXTENSION_TYPES = new Map<string, readonly InputAttachmentType[]>([
-  ['jpg', ['image']],
-  ['jpeg', ['image']],
-  ['png', ['image']],
-  ['webp', ['image']],
-  ['gif', ['image']],
-  ['bmp', ['image']],
-  ['mp3', ['audio']],
-  ['wav', ['audio']],
-  ['m4a', ['audio']],
-  ['aac', ['audio']],
-  ['ogg', ['audio']],
-  ['mp4', ['video']],
-  ['mov', ['video']],
-  ['webm', ['video']],
-  ['pdf', ['document']],
-  ['doc', ['document']],
-  ['docx', ['document']],
-  ['ppt', ['document']],
-  ['pptx', ['document']],
-  ['xls', ['document']],
-  ['xlsx', ['document']],
-  ['json', ['document', 'text']],
-  ['csv', ['text', 'document']],
-  ['txt', ['text', 'document']],
-  ['md', ['text', 'document']],
-  ['markdown', ['text', 'document']],
-])
+const MIME_TYPES = new Map<string, InputAttachmentType>()
+for (const rule of EXTENSION_RULES.values()) {
+  for (const mimeType of rule.mimeTypes) MIME_TYPES.set(mimeType, rule.type)
+}
 
 function normalizedMime(file: File) {
   return file.type.split(';', 1)[0].trim().toLowerCase()
@@ -70,26 +75,17 @@ function fileExtension(name: string) {
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : ''
 }
 
-function typeFromMime(mime: string): InputAttachmentType | null {
-  if (mime.startsWith('image/')) return 'image'
-  if (mime.startsWith('audio/')) return 'audio'
-  if (mime.startsWith('video/')) return 'video'
-  if (mime.startsWith('text/')) return 'text'
-  if (DOCUMENT_MIME_TYPES.has(mime)) return 'document'
-  return null
-}
-
 export function classifyPromptAttachment(file: File): InputAttachmentType | null {
   const mime = normalizedMime(file)
   const extension = fileExtension(file.name)
-  const extensionTypes = extension ? EXTENSION_TYPES.get(extension) : undefined
+  const extensionRule = extension ? EXTENSION_RULES.get(extension) : undefined
 
-  if (extension && !extensionTypes) return null
-  if (GENERIC_MIME_TYPES.has(mime)) return extensionTypes?.[0] ?? null
+  if (extension && !extensionRule) return null
+  if (GENERIC_MIME_TYPES.has(mime)) return extensionRule?.type ?? null
 
-  const mimeType = typeFromMime(mime)
+  const mimeType = MIME_TYPES.get(mime) ?? null
   if (!mimeType) return null
-  if (extensionTypes && !extensionTypes.includes(mimeType)) return null
+  if (extensionRule && !extensionRule.mimeTypes.includes(mime)) return null
   return mimeType
 }
 
@@ -105,10 +101,6 @@ function attachmentIdentity(attachment: PromptAttachment) {
     attachment.lastModified ?? 0,
     attachment.contentType ?? '',
   ])
-}
-
-function maxBytes(type: InputAttachmentType) {
-  return type === 'document' || type === 'text' ? 25 * MB : 50 * MB
 }
 
 export function admitPromptAttachments(
@@ -134,7 +126,8 @@ export function admitPromptAttachments(
       rejected.push({ file, reason: AttachmentRejectionReason.UnsupportedType })
       continue
     }
-    if (file.size > maxBytes(type)) {
+    const maxBytes = policy.maxBytes?.[type] ?? DEFAULT_ATTACHMENT_MAX_BYTES[type]
+    if (file.size > maxBytes) {
       rejected.push({ file, reason: AttachmentRejectionReason.TooLarge })
       continue
     }

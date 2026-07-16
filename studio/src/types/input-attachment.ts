@@ -51,6 +51,7 @@ export interface AgentPromptValue {
 export interface AttachmentAdmissionPolicy {
   allowedTypes: readonly InputAttachmentType[]
   maxCount: number
+  maxBytes?: Partial<Record<InputAttachmentType, number>>
 }
 
 export enum AttachmentRejectionReason {

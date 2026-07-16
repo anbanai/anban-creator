@@ -63,7 +63,7 @@ function hydrateAttachment(attachment: InputAttachment, id: string): PromptAttac
   }
 }
 
-function serializeAttachment(attachment: PromptAttachment): InputAttachment | null {
+function serializeUploadedAttachment(attachment: PromptAttachment): InputAttachment | null {
   if (attachment.status !== 'uploaded' || !attachment.uploadId || !attachment.key) return null
 
   const serialized: InputAttachment = {
@@ -87,12 +87,16 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
   const createObjectURLRef = useRef(options.createObjectURL ?? ((file: File) => URL.createObjectURL(file)))
   const revokeObjectURLRef = useRef(options.revokeObjectURL ?? ((url: string) => URL.revokeObjectURL(url)))
   const previewsRef = useRef(new Map<string, string>())
+  const inheritedSourcesRef = useRef(new Map<string, InputAttachment>())
   const attemptsRef = useRef(new Map<string, number>())
+  const activeUploadsRef = useRef(new Map<string, AbortController>())
   const mountedRef = useRef(true)
   const [attachments, setAttachments] = useState<PromptAttachment[]>(() => (
-    (options.initialAttachments ?? []).map((attachment) => (
-      hydrateAttachment(attachment, createIdRef.current())
-    ))
+    (options.initialAttachments ?? []).map((attachment) => {
+      const id = createIdRef.current()
+      inheritedSourcesRef.current.set(id, { ...attachment })
+      return hydrateAttachment(attachment, id)
+    })
   ))
   const attachmentsRef = useRef(attachments)
 
@@ -117,11 +121,21 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     revokeObjectURLRef.current(url)
   }, [])
 
+  const cancelUpload = useCallback((id: string) => {
+    const controller = activeUploadsRef.current.get(id)
+    if (!controller) return
+    activeUploadsRef.current.delete(id)
+    controller.abort()
+  }, [])
+
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      for (const controller of activeUploadsRef.current.values()) controller.abort()
+      activeUploadsRef.current.clear()
       attemptsRef.current.clear()
+      inheritedSourcesRef.current.clear()
       for (const id of [...previewsRef.current.keys()]) revokePreview(id)
     }
   }, [revokePreview])
@@ -131,6 +145,9 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     const mode = adapterRef.current.mode
     if (!attachment?.file || mode === 'local') return
 
+    cancelUpload(id)
+    const controller = new AbortController()
+    activeUploadsRef.current.set(id, controller)
     const attempt = (attemptsRef.current.get(id) ?? 0) + 1
     attemptsRef.current.set(id, attempt)
     updateAttachments((current) => current.map((item) => (
@@ -157,6 +174,7 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     void uploadRef.current({
       purpose,
       file: attachment.file,
+      signal: controller.signal,
       onProgress: (progress) => {
         if (!isCurrent()) return
         updateAttachments((current) => current.map((item) => (
@@ -197,8 +215,12 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
             }
           : item
       )))
+    }).finally(() => {
+      if (activeUploadsRef.current.get(id) === controller) {
+        activeUploadsRef.current.delete(id)
+      }
     })
-  }, [updateAttachments])
+  }, [cancelUpload, updateAttachments])
 
   const addFiles = useCallback((files: readonly File[]) => {
     const admission = admitPromptAttachments(
@@ -243,21 +265,32 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
 
   const remove = useCallback((id: string) => {
     if (!attachmentsRef.current.some((item) => item.id === id)) return
+    cancelUpload(id)
     attemptsRef.current.delete(id)
+    inheritedSourcesRef.current.delete(id)
     revokePreview(id)
     updateAttachments((current) => current.filter((item) => item.id !== id))
-  }, [revokePreview, updateAttachments])
+  }, [cancelUpload, revokePreview, updateAttachments])
 
   const clear = useCallback(() => {
     if (attachmentsRef.current.length === 0) return
+    for (const id of [...activeUploadsRef.current.keys()]) cancelUpload(id)
     attemptsRef.current.clear()
+    inheritedSourcesRef.current.clear()
     for (const id of attachmentsRef.current.map((attachment) => attachment.id)) revokePreview(id)
     updateAttachments(() => [])
-  }, [revokePreview, updateAttachments])
+  }, [cancelUpload, revokePreview, updateAttachments])
 
   const toInputAttachments = useCallback(() => attachmentsRef.current.flatMap((attachment) => {
+    if (attachment.status !== 'uploaded') return []
+    const inherited = inheritedSourcesRef.current.get(attachment.id)
+    if (inherited) {
+      if (!inherited.upload_id || !inherited.key) return [{ ...inherited }]
+      const serialized = serializeUploadedAttachment(attachment)
+      return serialized ? [serialized] : []
+    }
     if (adapterRef.current.mode === 'local' && attachment.file) return []
-    const serialized = serializeAttachment(attachment)
+    const serialized = serializeUploadedAttachment(attachment)
     return serialized ? [serialized] : []
   }), [])
 
