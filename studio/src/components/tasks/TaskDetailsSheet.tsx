@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatFullDateTimeCN } from '@/lib/labels'
 import type { Project, Task, TaskFile } from '@/types'
 
-type TaskDetailsTab = 'overview' | 'configuration' | 'materials' | 'logs'
+export type TaskDetailsTab = 'overview' | 'configuration' | 'materials' | 'logs'
 
 export interface TaskDetailsSheetProps {
   open: boolean
