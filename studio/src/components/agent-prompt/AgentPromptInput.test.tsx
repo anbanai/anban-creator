@@ -66,6 +66,7 @@ function controller(
     toInputAttachments: vi.fn(() => []),
     localFiles: vi.fn(() => []),
     previewSource: vi.fn(),
+    sourceAttachment: vi.fn(),
     ...overrides,
   }
 }

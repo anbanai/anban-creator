@@ -57,6 +57,7 @@ export interface PromptAttachmentsController {
   toInputAttachments: () => InputAttachment[]
   localFiles: () => File[]
   previewSource: (id: string) => string | undefined
+  sourceAttachment: (id: string) => InputAttachment | undefined
 }
 
 let nextPromptAttachmentId = 0
@@ -349,6 +350,10 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
   }, [])
 
   const previewSource = useCallback((id: string) => previewsRef.current.get(id), [])
+  const sourceAttachment = useCallback((id: string) => {
+    const source = inheritedSourcesRef.current.get(id)
+    return source ? { ...source } : undefined
+  }, [])
 
   return {
     attachments: renderedAttachments,
@@ -363,5 +368,6 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     toInputAttachments,
     localFiles,
     previewSource,
+    sourceAttachment,
   }
 }

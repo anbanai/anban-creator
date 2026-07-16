@@ -66,8 +66,8 @@ for (const rule of EXTENSION_RULES.values()) {
   for (const mimeType of rule.mimeTypes) MIME_TYPES.set(mimeType, rule.type)
 }
 
-function normalizedMime(file: File) {
-  return file.type.split(';', 1)[0].trim().toLowerCase()
+function normalizedMime(contentType: string) {
+  return contentType.split(';', 1)[0].trim().toLowerCase()
 }
 
 function fileExtension(name: string) {
@@ -75,9 +75,12 @@ function fileExtension(name: string) {
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : ''
 }
 
-export function classifyPromptAttachment(file: File): InputAttachmentType | null {
-  const mime = normalizedMime(file)
-  const extension = fileExtension(file.name)
+export function classifyPromptAttachmentMetadata(
+  fileName: string,
+  contentType: string,
+): InputAttachmentType | null {
+  const mime = normalizedMime(contentType)
+  const extension = fileExtension(fileName)
   const extensionRule = extension ? EXTENSION_RULES.get(extension) : undefined
 
   if (extension && !extensionRule) return null
@@ -87,6 +90,10 @@ export function classifyPromptAttachment(file: File): InputAttachmentType | null
   if (!mimeType) return null
   if (extensionRule && !extensionRule.mimeTypes.includes(mime)) return null
   return mimeType
+}
+
+export function classifyPromptAttachment(file: File): InputAttachmentType | null {
+  return classifyPromptAttachmentMetadata(file.name, file.type)
 }
 
 function fileIdentity(file: Pick<File, 'name' | 'size' | 'lastModified' | 'type'>) {

@@ -153,6 +153,12 @@ describe('usePromptAttachments', () => {
       expect(attachment).not.toHaveProperty('text')
       expect(attachment).not.toHaveProperty('file')
     }
+
+    const source = result.current.sourceAttachment('attachment-3')
+    expect(source).toEqual(inherited[2])
+    if (source) source.text = 'mutated outside the controller'
+    expect(result.current.sourceAttachment('attachment-3')).toEqual(inherited[2])
+    expect(result.current.sourceAttachment('missing')).toBeUndefined()
   })
 
   it('updates attachment instructions and reports each attachment mutation', () => {
