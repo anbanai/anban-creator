@@ -122,10 +122,6 @@ async function uploadMultipart(
   let latestUploadId = ''
   let queueCancelled = false
   let remoteAbortPromise: Promise<void> | null = null
-  let markRemoteAbortStarted!: () => void
-  const remoteAbortStarted = new Promise<void>((resolve) => {
-    markRemoteAbortStarted = resolve
-  })
   const abortRemoteUpload = () => {
     if (!latestUploadId || remoteAbortPromise) return
     try {
@@ -134,7 +130,6 @@ async function uploadMultipart(
     } catch {
       remoteAbortPromise = Promise.resolve()
     }
-    markRemoteAbortStarted()
   }
   const cancel = () => {
     if (!queueCancelled) {
@@ -166,8 +161,7 @@ async function uploadMultipart(
   }
   if (signal?.aborted) {
     abortRemoteUpload()
-    if (!remoteAbortPromise) await remoteAbortStarted
-    await remoteAbortPromise
+    if (remoteAbortPromise) await remoteAbortPromise
     throw uploadAbortError()
   }
   if (uploadFailed) throw uploadFailure

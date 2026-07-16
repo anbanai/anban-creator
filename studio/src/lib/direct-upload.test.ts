@@ -391,6 +391,41 @@ describe('uploadToOSS', () => {
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
     expect(http.post).toHaveBeenCalledTimes(1)
   })
+
+  it('rejects promptly when multipart cancellation settles without a checkpoint', async () => {
+    const controller = new AbortController()
+    let rejectUpload!: (reason?: unknown) => void
+    multipartUploadMock.mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectUpload = reject
+    }))
+    cancelMock.mockImplementation(() => rejectUpload(new Error('cancelled by SDK')))
+    const promise = uploadToOSS({
+      purpose: 'video_reference',
+      file: fileOf(12 * 1024 * 1024, 'video/mp4'),
+      signal: controller.signal,
+    })
+    await vi.waitFor(() => expect(multipartUploadMock).toHaveBeenCalledTimes(1))
+
+    controller.abort()
+
+    const outcome = await Promise.race([
+      promise.then(
+        () => ({ state: 'resolved' as const }),
+        (error: unknown) => ({ state: 'rejected' as const, error }),
+      ),
+      new Promise<{ state: 'timeout' }>((resolve) => {
+        setTimeout(() => resolve({ state: 'timeout' }), 250)
+      }),
+    ])
+    expect(outcome).toMatchObject({
+      state: 'rejected',
+      error: { name: 'AbortError' },
+    })
+    expect(cancelMock).toHaveBeenCalledOnce()
+    expect(cancelMock.mock.calls[0]).toEqual([])
+    expect(abortMultipartUploadMock).not.toHaveBeenCalled()
+    expect(http.post).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('directUploadResultToInputAttachment', () => {
