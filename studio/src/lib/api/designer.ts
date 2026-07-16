@@ -46,15 +46,10 @@ export const designerApi = {
   generate: (req: GenerateRequest) =>
     unwrap<{ generation_id: string; status: string; estimated_credits?: number; billing_mode?: string }>(http.post('/designer/generate', req)),
 
-  uploadReference: (file: File) => {
-    const form = new FormData()
-    form.append('file', file)
-    return unwrap<{ file_id: string; filename: string; size: number }>(
-      http.post('/designer/upload-reference', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      }),
-    )
-  },
+  registerReference: (data: { upload_id: string; key: string }) =>
+    unwrap<{ file_id: string; filename: string; size: number }>(
+      http.post('/designer/register-reference', data),
+    ),
 
   uploadReferenceFromUrl: (url: string) =>
     unwrap<{ file_id: string; filename: string; size: number }>(

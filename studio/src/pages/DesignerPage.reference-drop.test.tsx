@@ -1,42 +1,62 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
-import {
-  act,
-  fireEvent,
-  render as testingRender,
-  screen,
-  waitFor,
-  within,
-} from '@testing-library/react'
-import { QueryClientProvider, useQuery, type QueryClient } from '@tanstack/react-query'
+import { act, fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react'
+import { QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import { ThemeProvider } from 'next-themes'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DesignerPage from './DesignerPage'
 import { designerApi } from '@/lib/api/designer'
+import { api } from '@/lib/api'
+import { uploadToOSS } from '@/lib/direct-upload'
 import { createTestQueryClient, render } from '@/test/test-utils'
-import type { DesignerProvider } from '@/types/designer'
+import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
+import type { DesignerProvider, ImageGeneration } from '@/types/designer'
 
-const PROVIDERS_QUERY_KEY = ['designer', 'providers'] as const
-
-const toast = vi.hoisted(() => ({
-  error: vi.fn(),
-  success: vi.fn(),
-  warning: vi.fn(),
-}))
+const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }))
 
 vi.mock('sonner', () => ({ toast }))
-
+vi.mock('@/lib/direct-upload', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/direct-upload')>()
+  return { ...actual, uploadToOSS: vi.fn() }
+})
 vi.mock('@/lib/api/designer', () => ({
   designerApi: {
     getProviders: vi.fn(),
     generate: vi.fn(),
-    uploadReference: vi.fn(),
+    registerReference: vi.fn(),
     uploadReferenceFromUrl: vi.fn(),
     getHistory: vi.fn(),
     getGeneration: vi.fn(),
   },
 }))
+vi.mock('@/lib/api', () => ({
+  api: {
+    credits: { balance: vi.fn() },
+    projects: { list: vi.fn() },
+    designer: {
+      getHistory: vi.fn(),
+    },
+  },
+}))
+vi.mock('@/components/designer/DesignerCanvas', () => ({
+  default: ({ onEdit }: { onEdit: (image: { url: string; index: number }) => void }) => (
+    <button type="button" onClick={() => onEdit({ url: '/api/v1/files/user-1/designer/source.png', index: 0 })}>
+      测试编辑
+    </button>
+  ),
+}))
+vi.mock('@/components/designer/InlineMaskEditor', async () => {
+  const React = await import('react')
+  return {
+    default: React.forwardRef(function MaskEditor(_props, ref) {
+      React.useImperativeHandle(ref, () => ({
+        exportMask: async () => new File(['mask'], 'mask.png', { type: 'image/png' }),
+      }))
+      return <div>蒙版编辑器</div>
+    }),
+  }
+})
 
 function provider(overrides: Partial<DesignerProvider['capabilities']> = {}): DesignerProvider {
   return {
@@ -50,640 +70,241 @@ function provider(overrides: Partial<DesignerProvider['capabilities']> = {}): De
     enabled: true,
     idx: 0,
     capabilities: {
-      qualityLevels: ['auto'],
-      sizePresets: ['auto'],
-      defaultSize: 'auto',
-      maxBatch: 1,
-      maxReferenceImages: 2,
-      supportsReference: true,
-      supportsMask: false,
-      outputFormats: ['png'],
-      hasBackground: false,
-      hasCompression: false,
-      watermark: false,
+      qualityLevels: ['auto'], sizePresets: ['auto'], defaultSize: 'auto', maxBatch: 1,
+      maxReferenceImages: 3, supportsReference: true, supportsMask: true,
+      outputFormats: ['png'], hasBackground: false, hasCompression: false, watermark: false,
       ...overrides,
     },
     pricing: {},
   }
 }
 
-function dragData(files: File[] = [], types: string[] = ['Files']) {
-  return {
-    types,
-    files,
-    items: files.map((file) => ({ kind: 'file', type: file.type })),
-    dropEffect: 'none',
-  } as unknown as DataTransfer
-}
-
-function dispatchReferenceDrop(target: Element, dataTransfer: DataTransfer) {
-  const event = new Event('drop', { bubbles: true, cancelable: true })
-  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
-  target.dispatchEvent(event)
-}
-
-function image(name: string, lastModified = 100) {
+function image(name: string, lastModified = 1) {
   return new File(['image'], name, { type: 'image/png', lastModified })
 }
 
-function renderWithQueryClient(queryClient: QueryClient, extra?: ReactNode) {
-  return testingRender(
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <DesignerPage />
-          {extra}
-        </ThemeProvider>
-      </BrowserRouter>
-    </QueryClientProvider>,
-  )
+function uploadResult(file: File) {
+  return {
+    uploadId: `upload:${file.name}`,
+    key: `uploads/finalized/user-1/upload:${file.name}/${file.name}`,
+    publicUrl: '', contentType: file.type, size: file.size,
+  }
 }
 
-function GenerateBeforeProviderReconciliation({
-  shouldSubmit = (provider) => !provider.capabilities.supportsReference,
-}: {
-  shouldSubmit?: (provider: DesignerProvider) => boolean
-} = {}) {
-  const submittedRef = useRef(false)
-  const { data: providers } = useQuery({
-    queryKey: PROVIDERS_QUERY_KEY,
+function SubmitBeforeProviderReconciliation() {
+  const submitted = useRef(false)
+  const { data } = useQuery({
+    queryKey: ['designer', 'providers'],
     queryFn: () => designerApi.getProviders(),
   })
-  const effectiveProvider = providers?.find((candidate) => candidate.enabled)
-
   useLayoutEffect(() => {
-    if (
-      submittedRef.current
-      || !effectiveProvider
-      || !shouldSubmit(effectiveProvider)
-    ) {
-      return
-    }
-
-    submittedRef.current = true
+    if (submitted.current || data?.[0]?.capabilities.maxReferenceImages !== 1) return
+    submitted.current = true
     screen.getByRole('button', { name: '生成' }).click()
-  }, [effectiveProvider, shouldSubmit])
-
+  }, [data])
   return null
 }
 
-function getResponsiveDocks() {
-  const docks = screen.getAllByTestId('designer-reference-dock')
-  expect(docks.map((dock) => dock.dataset.compact)).toEqual(
-    expect.arrayContaining(['false', 'true']),
-  )
-  return docks
+async function addFiles(files: File[]) {
+  await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
+  const input = screen.getByLabelText('选择附件文件')
+  fireEvent.change(input, { target: { files } })
+  await waitFor(() => expect(uploadToOSS).toHaveBeenCalledTimes(files.length))
+  await waitFor(() => {
+    for (const file of files) expect(screen.getByText(file.name)).toBeInTheDocument()
+  })
 }
 
-async function findResponsiveDocks() {
-  await screen.findAllByTestId('designer-reference-dock')
-  return getResponsiveDocks()
-}
-
-describe('Designer workspace reference drop', () => {
+describe('Designer shared prompt composer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
-    const NativeURL = URL
-    vi.stubGlobal('URL', class extends NativeURL {
-      static createObjectURL = vi.fn((file: File) => `blob:${file.name}`)
-      static revokeObjectURL = vi.fn()
+    Object.defineProperty(Element.prototype, 'getAnimations', {
+      configurable: true,
+      value: vi.fn(() => []),
     })
     vi.mocked(designerApi.getProviders).mockResolvedValue([provider()])
-    vi.mocked(designerApi.uploadReference).mockImplementation(async (file) => ({
-      file_id: `uploaded:${file.name}`,
-      filename: file.name,
-      size: file.size,
+    vi.mocked(api.projects.list).mockResolvedValue([
+      { id: 'project-1', name: '品牌项目', platform: 'article' } as never,
+    ])
+    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 1000 } as never)
+    vi.mocked(api.designer.getHistory).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 })
+    vi.mocked(uploadToOSS).mockImplementation(async ({ file }) => uploadResult(file))
+    vi.mocked(designerApi.registerReference).mockImplementation(async ({ upload_id }) => ({
+      file_id: `registered:${upload_id}`, filename: upload_id, size: 5,
     }))
-    vi.mocked(designerApi.generate).mockResolvedValue({
-      generation_id: 'generation-1',
-      status: 'generating',
-    })
+    vi.mocked(designerApi.generate).mockResolvedValue({ generation_id: 'generation-1', status: 'generating' })
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('shows a stable overlay across nested drag enter and leave events', async () => {
+  it('renders the single shared composer in the canvas and removes the old dock and overlay', async () => {
     render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    await findResponsiveDocks()
-    const canvas = screen.getByTestId('designer-canvas-frame')
-    const dataTransfer = dragData()
-
-    fireEvent.dragEnter(workspace, { dataTransfer })
-    expect(screen.getByText('释放以添加参考图')).toBeInTheDocument()
-
-    fireEvent.dragOver(workspace, { dataTransfer })
-    expect(dataTransfer.dropEffect).toBe('copy')
-
-    fireEvent.dragEnter(canvas, { dataTransfer })
-    fireEvent.dragLeave(canvas, { dataTransfer })
-    expect(screen.getByText('释放以添加参考图')).toBeInTheDocument()
-
-    fireEvent.dragLeave(workspace, { dataTransfer })
-    expect(screen.queryByText('释放以添加参考图')).not.toBeInTheDocument()
-  })
-
-  it('handles a drop over the dock once and updates every responsive dock', async () => {
-    render(<DesignerPage />)
-    await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const first = image('first.png')
-    const second = image('second.png', 200)
-    const dataTransfer = dragData([first, second])
-
-    fireEvent.dragEnter(docks[0], { dataTransfer })
-    expect(screen.getByText('释放以添加 2 张参考图')).toBeInTheDocument()
-    fireEvent.drop(docks[0], { dataTransfer })
-
-    await waitFor(() => {
-      for (const dock of docks) {
-        expect(within(dock).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
-        expect(within(dock).getByRole('img', { name: 'second.png' })).toBeInTheDocument()
-      }
-    })
-    expect(toast.warning).not.toHaveBeenCalled()
+    const canvas = await screen.findByTestId('designer-canvas-frame')
+    expect(canvas.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
+    expect(screen.queryByTestId('designer-reference-dock')).not.toBeInTheDocument()
     expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
   })
 
-  it('enforces provider capacity and reports partial admission', async () => {
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
-      provider({ maxReferenceImages: 1 }),
-    ])
+  it('uploads on selection, then only registers ordered keys before generation', async () => {
     render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
     const first = image('first.png')
-    const second = image('second.png', 200)
+    const second = image('second.png', 2)
+    await addFiles([first, second])
 
-    fireEvent.drop(workspace, { dataTransfer: dragData([first, second]) })
+    expect(uploadToOSS).toHaveBeenNthCalledWith(1, expect.objectContaining({ purpose: 'designer_reference', file: first }))
+    expect(designerApi.registerReference).not.toHaveBeenCalled()
+    expect(designerApi.generate).not.toHaveBeenCalled()
 
-    await waitFor(() => {
-      for (const dock of docks) {
-        expect(within(dock).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
-        expect(within(dock).queryByRole('img', { name: 'second.png' })).not.toBeInTheDocument()
-      }
-    })
-    expect(toast.warning).toHaveBeenCalledWith(
-      '已添加 1 张，另外 1 张超过当前模型的 1 张上限',
-    )
-  })
-
-  it('accepts full-capacity dragover so drop can report overflow without activating the overlay', async () => {
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
-      provider({ maxReferenceImages: 1 }),
-    ])
-    render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const first = image('first.png')
-    const second = image('second.png', 200)
-
-    fireEvent.drop(workspace, { dataTransfer: dragData([first]) })
-    await waitFor(() => {
-      expect(within(docks[0]).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
-    })
-    toast.warning.mockClear()
-
-    const dataTransfer = dragData([second])
-    fireEvent.dragEnter(workspace, { dataTransfer })
-    expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
-
-    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(false)
-    expect(dataTransfer.dropEffect).toBe('copy')
-
-    fireEvent.drop(workspace, { dataTransfer })
-
-    await waitFor(() => {
-      for (const dock of docks) {
-        expect(within(dock).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
-        expect(within(dock).queryByRole('img', { name: 'second.png' })).not.toBeInTheDocument()
-      }
-    })
-    expect(toast.warning).toHaveBeenCalledWith(
-      '参考图已达到当前模型的 1 张上限',
-    )
-  })
-
-  it('retains only the supported prefix when switching to a lower-capacity provider', async () => {
-    const singleReferenceProvider = {
-      ...provider({ maxReferenceImages: 1 }),
-      id: 'single_reference',
-      name: 'Single Reference',
-      idx: 1,
-    }
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
-      provider({ maxReferenceImages: 2 }),
-      singleReferenceProvider,
-    ])
-    render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const first = image('first.png')
-    const second = image('second.png', 200)
-
-    fireEvent.drop(workspace, { dataTransfer: dragData([first, second]) })
-    await waitFor(() => {
-      expect(within(docks[0]).getByRole('img', { name: 'second.png' })).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getAllByRole('combobox')[0])
-    fireEvent.click(await screen.findByText('Single Reference'))
-
-    await waitFor(() => {
-      for (const dock of docks) {
-        expect(within(dock).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
-        expect(within(dock).queryByRole('img', { name: 'second.png' })).not.toBeInTheDocument()
-      }
-    })
-    expect(toast.warning).toHaveBeenCalledWith(
-      '当前模型最多支持 1 张参考图，已移除 1 张',
-    )
-  })
-
-  it('normalizes references once when the effective provider capacity shrinks in query data', async () => {
-    const queryClient = createTestQueryClient()
-    const initialProvider = provider({ maxReferenceImages: 2, watermark: true })
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([initialProvider])
-    renderWithQueryClient(queryClient)
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const first = image('first.png')
-    const second = image('second.png', 200)
-
-    fireEvent.click(screen.getByRole('button', { name: /水印/ }))
-    expect(screen.getByRole('button', { name: /水印/ })).toHaveClass('border-primary')
-
-    fireEvent.drop(workspace, { dataTransfer: dragData([first, second]) })
-    await waitFor(() => {
-      expect(within(docks[0]).getByRole('img', { name: 'second.png' })).toBeInTheDocument()
-    })
-    toast.warning.mockClear()
-
-    await act(async () => {
-      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [
-        provider({ maxReferenceImages: 1, watermark: true }),
-      ])
-    })
-
-    await waitFor(() => {
-      for (const dock of docks) {
-        expect(within(dock).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
-        expect(within(dock).queryByRole('img', { name: 'second.png' })).not.toBeInTheDocument()
-      }
-    })
-    expect(screen.getByRole('button', { name: /水印/ })).toHaveClass('border-primary')
-    expect(toast.warning).toHaveBeenCalledTimes(1)
-    expect(toast.warning).toHaveBeenCalledWith(
-      '当前模型最多支持 1 张参考图，已移除 1 张',
-    )
-  })
-
-  it('reconciles a disabled selection to an unsupported fallback and does not restore hidden refs', async () => {
-    const queryClient = createTestQueryClient()
-    const initialProvider = provider({ maxReferenceImages: 3 })
-    const fallbackProvider: DesignerProvider = {
-      ...provider({ supportsReference: false, maxReferenceImages: 0 }),
-      id: 'fallback_unsupported',
-      name: 'Fallback Unsupported',
-      provider: 'gemini',
-      model: 'fallback-model',
-      idx: 1,
-    }
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
-      initialProvider,
-      fallbackProvider,
-    ])
-    renderWithQueryClient(queryClient)
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const first = image('first.png')
-    const second = image('second.png', 200)
-
-    fireEvent.drop(workspace, { dataTransfer: dragData([first, second]) })
-    await waitFor(() => {
-      expect(within(docks[0]).getByRole('img', { name: 'second.png' })).toBeInTheDocument()
-    })
-    fireEvent.dragEnter(workspace, { dataTransfer: dragData() })
-    expect(screen.getByTestId('designer-drop-overlay')).toBeInTheDocument()
-    toast.warning.mockClear()
-
-    await act(async () => {
-      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [
-        { ...initialProvider, enabled: false },
-        fallbackProvider,
-      ])
-    })
-
-    await waitFor(() => {
-      expect(screen.queryAllByTestId('designer-reference-dock')).toHaveLength(0)
-      expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
-      for (const selector of screen.getAllByRole('combobox')) {
-        expect(selector).toHaveTextContent('Fallback Unsupported')
-      }
-    })
-    expect(toast.warning).toHaveBeenCalledTimes(1)
-    expect(toast.warning).toHaveBeenCalledWith(
-      '当前模型最多支持 0 张参考图，已移除 2 张',
-    )
-
-    const unsupportedDrag = dragData([image('ignored.png')])
-    expect(fireEvent.dragOver(workspace, { dataTransfer: unsupportedDrag })).toBe(true)
-    expect(unsupportedDrag.dropEffect).toBe('none')
-
-    await act(async () => {
-      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [initialProvider, fallbackProvider])
-    })
-
-    await waitFor(() => {
-      expect(screen.queryAllByTestId('designer-reference-dock')).toHaveLength(0)
-      for (const selector of screen.getAllByRole('combobox')) {
-        expect(selector).toHaveTextContent('Fallback Unsupported')
-      }
-    })
-    expect(toast.warning).toHaveBeenCalledTimes(1)
-  })
-
-  it('ignores unsupported known image MIME items before files become readable', async () => {
-    render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    await findResponsiveDocks()
-    const dataTransfer = {
-      types: ['Files'],
-      files: [],
-      items: [{ kind: 'file', type: 'image/avif' }],
-      dropEffect: 'none',
-    } as unknown as DataTransfer
-
-    fireEvent.dragEnter(workspace, { dataTransfer })
-
-    expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
-    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(true)
-    expect(dataTransfer.dropEffect).toBe('none')
-  })
-
-  it('conservatively accepts file items whose MIME is hidden', async () => {
-    render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    await findResponsiveDocks()
-    const dataTransfer = {
-      types: ['Files'],
-      files: [],
-      items: [{ kind: 'file', type: '' }],
-      dropEffect: 'none',
-    } as unknown as DataTransfer
-
-    fireEvent.dragEnter(workspace, { dataTransfer })
-
-    expect(screen.getByTestId('designer-drop-overlay')).toBeInTheDocument()
-    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(false)
-    expect(dataTransfer.dropEffect).toBe('copy')
-  })
-
-  it('ignores explicit non-image desktop file drags before drop', async () => {
-    render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    await findResponsiveDocks()
-    const textFile = new File(['notes'], 'notes.txt', { type: 'text/plain' })
-    const dataTransfer = dragData([textFile])
-
-    fireEvent.dragEnter(workspace, { dataTransfer })
-
-    expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
-    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(true)
-    expect(dataTransfer.dropEffect).toBe('none')
-  })
-
-  it('bounds submit-time reference uploads before passive provider reconciliation', async () => {
-    const queryClient = createTestQueryClient()
-    const initialProvider = provider({ maxReferenceImages: 2 })
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([initialProvider])
-    renderWithQueryClient(queryClient, <GenerateBeforeProviderReconciliation />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const first = image('first.png')
-    const second = image('second.png', 200)
-
-    fireEvent.drop(workspace, { dataTransfer: dragData([first, second]) })
-    await waitFor(() => {
-      expect(within(docks[0]).getByRole('img', { name: 'second.png' })).toBeInTheDocument()
-    })
-
-    fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
-      target: { value: '生成一张测试图片' },
-    })
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: '生成' })).not.toBeDisabled()
-    })
-    vi.mocked(designerApi.uploadReference).mockClear()
-    vi.mocked(designerApi.generate).mockClear()
-
-    await act(async () => {
-      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [
-        provider({ supportsReference: false, maxReferenceImages: 0 }),
-      ])
-    })
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '生成海报' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
 
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
-    expect(designerApi.uploadReference).not.toHaveBeenCalled()
-    expect(vi.mocked(designerApi.generate).mock.calls[0][0].reference_file_ids).toBeUndefined()
+    expect(vi.mocked(designerApi.registerReference).mock.calls.map(([value]) => value.upload_id)).toEqual([
+      'upload:first.png', 'upload:second.png',
+    ])
+    expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: 'default',
+      reference_file_ids: ['registered:upload:first.png', 'registered:upload:second.png'],
+    }))
   })
 
-  it('uploads only the ordered non-zero prefix at submit-time before reconciliation', async () => {
+  it('retains the ordered prefix and aborts overflow uploads when provider capacity shrinks', async () => {
+    const pending = new Map<string, { signal?: AbortSignal; resolve: (value: ReturnType<typeof uploadResult>) => void }>()
+    vi.mocked(uploadToOSS).mockImplementation(({ file, signal }) => new Promise((resolve) => {
+      pending.set(file.name, { signal, resolve })
+    }))
     const queryClient = createTestQueryClient()
-    const initialProvider = provider({ maxReferenceImages: 3 })
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([initialProvider])
-    renderWithQueryClient(
-      queryClient,
-      <GenerateBeforeProviderReconciliation
-        shouldSubmit={(candidate) => candidate.capabilities.maxReferenceImages === 1}
-      />,
-    )
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const first = image('first.png')
-    const second = image('second.png', 200)
-    const third = image('third.png', 300)
-
-    fireEvent.drop(workspace, { dataTransfer: dragData([first, second, third]) })
-    await waitFor(() => {
-      expect(within(docks[0]).getByRole('img', { name: 'third.png' })).toBeInTheDocument()
+    testingRender(<DesignerPage />, {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+              <AgentPromptDropProvider>{children}</AgentPromptDropProvider>
+            </ThemeProvider>
+          </BrowserRouter>
+        </QueryClientProvider>
+      ),
     })
-    expect(designerApi.uploadReference).not.toHaveBeenCalled()
-
-    fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
-      target: { value: '生成一张测试图片' },
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+      target: { files: [image('first.png'), image('second.png', 2), image('third.png', 3)] },
     })
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: '生成' })).not.toBeDisabled()
-    })
-    vi.mocked(designerApi.uploadReference).mockClear()
-    vi.mocked(designerApi.generate).mockClear()
+    await waitFor(() => expect(uploadToOSS).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(screen.getByText('third.png')).toBeInTheDocument())
 
     await act(async () => {
-      queryClient.setQueryData(PROVIDERS_QUERY_KEY, [
-        provider({ maxReferenceImages: 1 }),
-      ])
+      queryClient.setQueryData(['designer', 'providers'], [provider({ maxReferenceImages: 1 })])
     })
+    await waitFor(() => expect(pending.get('second.png')?.signal?.aborted).toBe(true))
+    expect(pending.get('third.png')?.signal?.aborted).toBe(true)
+    pending.get('first.png')?.resolve(uploadResult(image('first.png')))
+    await waitFor(() => expect(screen.getByText('first.png')).toBeInTheDocument())
+    expect(screen.queryByText('second.png')).not.toBeInTheDocument()
 
-    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
-    expect(designerApi.uploadReference).toHaveBeenCalledTimes(1)
-    expect(designerApi.uploadReference).toHaveBeenCalledWith(first)
-    expect(vi.mocked(designerApi.generate).mock.calls[0][0].reference_file_ids).toEqual([
-      'uploaded:first.png',
-    ])
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '只用第一张' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
+      reference_file_ids: ['registered:upload:first.png'],
+    })))
   })
 
-  it('keeps reference state intact across batched toolbar setting writes', async () => {
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
-      provider({ maxReferenceImages: 3, watermark: true }),
-    ])
+  it('clears references when the provider does not support them', async () => {
+    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([provider({ supportsReference: false, maxReferenceImages: 9 })])
     render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const mobileDock = docks.find((dock) => dock.dataset.compact === 'true')!
-    const first = image('first.png')
-    const second = image('second.png', 200)
-
-    fireEvent.drop(workspace, { dataTransfer: dragData([first]) })
-    await waitFor(() => {
-      expect(within(docks[0]).getByRole('img', { name: 'first.png' })).toBeInTheDocument()
-    })
-
-    const watermarkButton = screen.getByRole('button', { name: /水印/ })
-    act(() => {
-      dispatchReferenceDrop(workspace, dragData([second]))
-      watermarkButton.click()
-    })
-
-    await waitFor(() => {
-      for (const dock of docks) {
-        expect(within(dock).getAllByRole('img', { name: 'first.png' })).toHaveLength(1)
-        expect(within(dock).getAllByRole('img', { name: 'second.png' })).toHaveLength(1)
-      }
-    })
-
-    const removeFirst = within(mobileDock).getByRole('button', {
-      name: '移除参考图：first.png',
-    })
-    act(() => {
-      removeFirst.click()
-      watermarkButton.click()
-    })
-
-    await waitFor(() => {
-      for (const dock of docks) {
-        expect(within(dock).queryByRole('img', { name: 'first.png' })).not.toBeInTheDocument()
-        expect(within(dock).getAllByRole('img', { name: 'second.png' })).toHaveLength(1)
-      }
-    })
+    await screen.findByLabelText('Designer prompt')
+    expect(screen.getByRole('button', { name: '添加附件' })).toBeDisabled()
   })
 
-  it('reports duplicate and non-image files instead of silently discarding them', async () => {
+  it('uses selected project for generation and explicit project IDs for history', async () => {
     render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const existing = image('existing.png')
-    const duplicate = image('existing.png')
-    const text = new File(['notes'], 'notes.txt', { type: 'text/plain' })
+    const projectControl = await screen.findByRole('combobox', { name: '项目上下文' })
+    await waitFor(() => expect(projectControl).not.toBeDisabled())
+    fireEvent.click(projectControl)
+    fireEvent.click(await screen.findByRole('option', { name: '品牌项目' }))
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '品牌图' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({ project_id: 'project-1' })))
 
-    fireEvent.drop(workspace, { dataTransfer: dragData([existing]) })
-    await waitFor(() => {
-      expect(within(docks[0]).getByRole('img', { name: 'existing.png' })).toBeInTheDocument()
-    })
-    toast.warning.mockClear()
+    fireEvent.click(screen.getAllByText('历史记录')[0])
+    await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: 'project-1', page_size: 50 }))
+  })
 
-    fireEvent.drop(workspace, { dataTransfer: dragData([duplicate, text]) })
+  it('requests default-project history explicitly', async () => {
+    render(<DesignerPage />)
+    fireEvent.click((await screen.findAllByText('历史记录'))[0])
+    await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: 'default', page_size: 50 }))
+  })
 
-    expect(toast.warning).toHaveBeenCalledWith(
-      '忽略 1 个非图片文件，忽略 1 张重复图片',
+  it('bounds submit to the new provider prefix before passive reconciliation', async () => {
+    const queryClient = createTestQueryClient()
+    testingRender(
+      <>
+        <DesignerPage />
+        <SubmitBeforeProviderReconciliation />
+      </>,
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={queryClient}>
+            <BrowserRouter>
+              <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+                <AgentPromptDropProvider>{children}</AgentPromptDropProvider>
+              </ThemeProvider>
+            </BrowserRouter>
+          </QueryClientProvider>
+        ),
+      },
     )
-  })
+    await addFiles([image('first.png'), image('second.png', 2), image('third.png', 3)])
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '只用新容量' } })
 
-  it('reports duplicate-only admission with the focused aggregate message', async () => {
-    render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const existing = image('existing.png')
-    const duplicate = image('existing.png')
-
-    fireEvent.drop(workspace, { dataTransfer: dragData([existing]) })
-    await waitFor(() => {
-      expect(within(docks[0]).getByRole('img', { name: 'existing.png' })).toBeInTheDocument()
-    })
-    toast.warning.mockClear()
-
-    fireEvent.drop(workspace, { dataTransfer: dragData([duplicate]) })
-
-    expect(toast.warning).toHaveBeenCalledWith('这些图片已经在参考素材中')
-  })
-
-  it('does not activate for text drags', async () => {
-    render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    await findResponsiveDocks()
-
-    fireEvent.dragEnter(workspace, { dataTransfer: dragData([], ['text/plain']) })
-
-    expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
-  })
-
-  it('does not activate for providers without reference support', async () => {
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
-      provider({ supportsReference: false, maxReferenceImages: 0 }),
-    ])
-    render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    await screen.findAllByText('GPT Image 2')
-
-    const dataTransfer = dragData([image('ignored.png')])
-    fireEvent.dragEnter(workspace, { dataTransfer })
-
-    expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
-    expect(fireEvent.dragOver(workspace, { dataTransfer })).toBe(true)
-    expect(dataTransfer.dropEffect).toBe('none')
-  })
-
-  it('clears the overlay when Escape is pressed', async () => {
-    render(<DesignerPage />)
-    const workspace = await screen.findByTestId('designer-workspace')
-    await findResponsiveDocks()
-
-    fireEvent.dragEnter(workspace, { dataTransfer: dragData() })
-    expect(screen.getByTestId('designer-drop-overlay')).toBeInTheDocument()
-
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(screen.queryByTestId('designer-drop-overlay')).not.toBeInTheDocument()
-  })
-
-  it('shares picker additions and removals through page-owned state and capacity', async () => {
-    render(<DesignerPage />)
-    await screen.findByTestId('designer-workspace')
-    const docks = await findResponsiveDocks()
-    const desktopDock = docks.find((dock) => dock.dataset.compact === 'false')!
-    const mobileDock = docks.find((dock) => dock.dataset.compact === 'true')!
-    const picker = within(desktopDock).getByTestId('designer-reference-input')
-    const selected = image('picker.png')
-
-    fireEvent.change(picker, { target: { files: [selected] } })
-
-    await waitFor(() => {
-      for (const dock of docks) {
-        expect(within(dock).getByRole('img', { name: 'picker.png' })).toBeInTheDocument()
-      }
+    await act(async () => {
+      queryClient.setQueryData(['designer', 'providers'], [provider({ maxReferenceImages: 1 })])
     })
 
-    fireEvent.click(within(mobileDock).getByRole('button', { name: '移除参考图：picker.png' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
+      reference_file_ids: ['registered:upload:first.png'],
+    })))
+  })
 
-    await waitFor(() => {
-      for (const dock of docks) {
-        expect(within(dock).queryByRole('img', { name: 'picker.png' })).not.toBeInTheDocument()
-        expect(within(dock).getByRole('button', { name: '添加参考图' })).toBeInTheDocument()
-      }
-    })
-    expect(screen.getByText('0/2')).toBeInTheDocument()
+  it('uploads the edit mask to OSS and registers it before generating', async () => {
+    vi.mocked(designerApi.uploadReferenceFromUrl).mockResolvedValue({ file_id: 'source-1', filename: 'source', size: 0 })
+    render(<DesignerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '测试编辑' }))
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '改成红色' } })
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+
+    await waitFor(() => expect(uploadToOSS).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: 'designer_reference', file: expect.objectContaining({ name: 'mask.png' }),
+    })))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: 'default', reference_file_ids: ['source-1'], mask_file_id: 'registered:upload:mask.png',
+    })))
+  })
+
+  it('restores a history prompt without losing current references', async () => {
+    const generation = {
+      id: 'history-1', user_id: 'user-1', project_id: 'default', prompt: '历史提示词', provider: 'openai',
+      model: 'gpt-image-2', n: 1, status: 'completed', created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    } satisfies ImageGeneration
+    vi.mocked(api.designer.getHistory).mockResolvedValue({ items: [generation], total: 1, page: 1, page_size: 50 })
+    render(<DesignerPage />)
+    await addFiles([image('keep.png')])
+    fireEvent.click(screen.getAllByText('历史记录')[0])
+    fireEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+    expect(screen.getByLabelText('Designer prompt')).toHaveValue('历史提示词')
+    expect(screen.getByText('keep.png')).toBeInTheDocument()
+  })
+
+  it('cancels an active generation from the shared composer', async () => {
+    render(<DesignerPage />)
+    await screen.findByLabelText('Designer prompt')
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '生成后取消' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '取消生成' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: '取消生成' })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '生成' })).toBeInTheDocument()
   })
 })

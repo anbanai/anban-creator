@@ -113,6 +113,9 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	if req.ProjectID == "" {
 		req.ProjectID = "default"
 	}
+	if err := s.validateDesignerProjectOwnership(ctx, userID, req.ProjectID); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(req.ProviderID) == "" {
 		return nil, fmt.Errorf("provider_id is required")
 	}
@@ -259,6 +262,26 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	}
 
 	return &DesignerGenerationCreated{GenerationID: genID, Status: model.ImageGenerationStatusGenerating, EstimatedCredits: totalCost, BillingMode: billingMode}, nil
+}
+
+func (s *DesignerService) validateDesignerProjectOwnership(ctx context.Context, userID, projectID string) error {
+	if projectID == "default" {
+		return nil
+	}
+	if s.db == nil {
+		return fmt.Errorf("validate designer project ownership: database is required")
+	}
+	var project model.Project
+	if err := s.db.WithContext(ctx).Select("id", "user_id").First(&project, "id = ?", projectID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: %s", ErrProjectNotFound, projectID)
+		}
+		return fmt.Errorf("validate designer project ownership: %w", err)
+	}
+	if project.UserID != userID {
+		return ErrProjectOwnedByUser
+	}
+	return nil
 }
 
 func validateDesignerGenerateRequest(req DesignerGenerateRequest, caps DesignerProviderCapabilities) error {

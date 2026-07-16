@@ -271,6 +271,51 @@ func TestDesignerGenerateRedactsReferenceRepositoryFailure(t *testing.T) {
 	}
 }
 
+func TestDesignerGenerateMapsProjectOwnershipErrors(t *testing.T) {
+	_, handler, db := setupDesignerHandlerTest(t)
+	userID := uuid.NewString()
+	otherUserID := uuid.NewString()
+	foreignProjectID := uuid.NewString()
+	if err := db.Create(&model.Project{
+		ID: foreignProjectID, UserID: otherUserID, Platform: model.PlatformArticle,
+		Name: "Foreign", Status: model.ProjectStatusActive,
+	}).Error; err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
+	app := fiber.New()
+	app.Post("/designer/generate", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return handler.Generate(c)
+	})
+
+	for _, tc := range []struct {
+		name      string
+		projectID string
+		wantCode  int
+	}{
+		{name: "missing", projectID: uuid.NewString(), wantCode: fiber.StatusNotFound},
+		{name: "foreign", projectID: foreignProjectID, wantCode: fiber.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := mustMarshalJSON(t, service.DesignerGenerateRequest{
+				ProjectID: tc.projectID, Prompt: "a cat", ProviderID: "test-openai",
+				Quality: "medium", Size: "1024x1024", N: 1,
+			})
+			req := httptest.NewRequest(http.MethodPost, "/designer/generate", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != tc.wantCode {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d body=%s, want %d", resp.StatusCode, responseBody, tc.wantCode)
+			}
+		})
+	}
+}
+
 func TestRegisterDesignerReference(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	pending := &designerPendingUploadRepo{uploads: map[string]*model.PendingUpload{}}

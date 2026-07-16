@@ -79,13 +79,12 @@ describe('Designer provider contract', () => {
 
   it('floats the prompt bar inside the designer canvas frame', () => {
     const page = read('src/pages/DesignerPage.tsx')
-    const promptBar = read('src/components/designer/DesignerPromptBar.tsx')
 
-    expect(promptBar).not.toContain('max-w-5xl')
-    expect(promptBar).toContain('pointer-events-none absolute inset-x-4 bottom-4')
-    expect(promptBar).toContain('pointer-events-auto w-full rounded-2xl')
-    expect(page).toContain('pb-24')
-    expect(page).toContain('md:pb-28')
+    expect(page).toContain('<AgentPromptInput')
+    expect(page).toContain('pointer-events-none absolute inset-x-4 bottom-4')
+    expect(page).toContain('pointer-events-auto w-full')
+    expect(page).toContain('pb-52')
+    expect(page).toContain('md:pb-56')
   })
 
   it('does not infer GPT Image sizes in the Studio API client', () => {

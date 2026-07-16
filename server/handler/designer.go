@@ -78,6 +78,12 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 
 	created, err := h.svc.CreateGenerationRecord(c.Context(), userID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
+		}
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "project not owned by user")
+		}
 		if errors.Is(err, service.ErrInsufficientCredits) {
 			return Error(c, fiber.StatusPaymentRequired, "积分不足，请充值后重试")
 		}

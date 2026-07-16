@@ -1,9 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { normalizeProvider } from './designer'
+import { http } from '@/lib/http-client'
 import type { RawDesignerProvider } from '@/types/designer'
 
 describe('designer API normalization', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('maps provider capabilities without model-specific size inference', () => {
     const provider = normalizeProvider({
       id: 'gpt_image_2',
@@ -33,5 +38,27 @@ describe('designer API normalization', () => {
       '1536x1024',
       '1024x1536',
     ])
+  })
+
+  it('registers an immutable direct upload identity without multipart data', async () => {
+    const post = vi.spyOn(http, 'post').mockResolvedValue({
+      data: {
+        code: 0,
+        msg: 'success',
+        data: { file_id: 'reference-1', filename: 'reference.png', size: 42 },
+      },
+    })
+
+    const { designerApi } = await import('./designer')
+    const result = await designerApi.registerReference({
+      upload_id: 'upload-1',
+      key: 'uploads/finalized/user-1/upload-1/reference.png',
+    })
+
+    expect(post).toHaveBeenCalledWith('/designer/register-reference', {
+      upload_id: 'upload-1',
+      key: 'uploads/finalized/user-1/upload-1/reference.png',
+    })
+    expect(result.file_id).toBe('reference-1')
   })
 })
