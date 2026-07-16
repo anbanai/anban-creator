@@ -109,7 +109,9 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
     clearOverlay()
   }, [clearOverlay])
 
-  const selectTarget = useCallback((dataTransfer: DataTransfer) => {
+  const selectRoutableTarget = useCallback((
+    acceptsRegistration: (registration: DropTargetRegistration) => boolean = () => true,
+  ) => {
     const topOverlay = latestOpenOverlay()
     if (topOverlay?.dataset.slot === 'alert-dialog-content') return null
 
@@ -119,8 +121,8 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       return isElementAvailable(element)
         && options.enabled
         && options.remainingCapacity > 0
-        && isPotentiallyAccepted(dataTransfer, options)
         && (!topOverlay || topOverlay.contains(element))
+        && acceptsRegistration(registration)
     })
 
     let lastFocused: DropTargetRegistration | null = null
@@ -132,6 +134,12 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
     if (lastFocused) return lastFocused
     return eligible.length === 1 ? eligible[0] : null
   }, [])
+
+  const selectOverlayTarget = useCallback((dataTransfer: DataTransfer) => (
+    selectRoutableTarget((registration) => (
+      isPotentiallyAccepted(dataTransfer, registration.optionsRef.current)
+    ))
+  ), [selectRoutableTarget])
 
   const activateTarget = useCallback((
     registration: DropTargetRegistration,
@@ -182,13 +190,13 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       resetDrag()
       return
     }
-    const selected = selectTarget(dataTransfer)
+    const selected = selectOverlayTarget(dataTransfer)
     if (selected?.id !== id) {
       resetDrag()
       return
     }
     activateTarget(selected, dataTransfer)
-  }, [activateTarget, resetDrag, selectTarget])
+  }, [activateTarget, resetDrag, selectOverlayTarget])
 
   const registry = useMemo<DropTargetRegistry>(() => ({
     register,
@@ -201,7 +209,7 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       if (!isFilesTransfer(event.dataTransfer)) return
       dragDepthRef.current += 1
       dragTransferRef.current = event.dataTransfer
-      const selected = selectTarget(event.dataTransfer)
+      const selected = selectOverlayTarget(event.dataTransfer)
       if (selected) {
         activateTarget(selected, event.dataTransfer)
       } else {
@@ -212,7 +220,7 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
     const onDragOver = (event: DragEvent) => {
       if (!isFilesTransfer(event.dataTransfer)) return
       dragTransferRef.current = event.dataTransfer
-      const selected = selectTarget(event.dataTransfer)
+      const selected = selectOverlayTarget(event.dataTransfer)
       if (!selected) {
         clearOverlay()
         return
@@ -233,14 +241,12 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       if (!isFilesTransfer(event.dataTransfer)) return
 
       event.preventDefault()
-      const selected = selectTarget(event.dataTransfer)
+      const selected = selectRoutableTarget()
       const files = Array.from(event.dataTransfer.files ?? [])
       resetDrag()
 
       if (wasDefaultPrevented || !selected || files.length === 0) return
-      const options = selected.optionsRef.current
-      if (!files.some((file) => options.acceptsFile(file))) return
-      options.onFiles(files)
+      selected.optionsRef.current.onFiles(files)
     }
 
     const onDropCapture = (event: DragEvent) => {
@@ -267,7 +273,7 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       resetDrag()
       registrationsRef.current.clear()
     }
-  }, [activateTarget, clearOverlay, resetDrag, selectTarget])
+  }, [activateTarget, clearOverlay, resetDrag, selectOverlayTarget, selectRoutableTarget])
 
   const overlayStatus = overlay
     ? [

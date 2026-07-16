@@ -190,6 +190,31 @@ describe('AgentPromptInput', () => {
     expect(addFiles).toHaveBeenCalledWith([file])
   })
 
+  it('routes an unsupported global drop through controller admission and announces rejection', () => {
+    const file = new File(['binary'], 'script.exe', { type: 'application/x-msdownload' })
+    const rejection = { file, reason: AttachmentRejectionReason.UnsupportedType }
+    const addFiles = vi.fn(() => ({ accepted: [], rejected: [rejection] }))
+    const onAttachmentRejected = vi.fn()
+    renderPrompt({
+      attachmentController: controller({ addFiles }),
+      onAttachmentRejected,
+      acceptedTypesLabel: '图片或文档',
+    })
+    fireEvent.focus(screen.getByRole('textbox'))
+    const dataTransfer = dragData([file])
+
+    fireEvent.dragEnter(document.body, { dataTransfer })
+    expect(screen.queryByTestId('agent-prompt-drop-overlay')).not.toBeInTheDocument()
+    fireEvent.drop(document.body, { dataTransfer })
+
+    expect(addFiles).toHaveBeenCalledOnce()
+    expect(addFiles).toHaveBeenCalledWith([file])
+    expect(onAttachmentRejected).toHaveBeenCalledWith([rejection])
+    expect(screen.getByRole('alert')).toHaveTextContent('拒绝 1 个附件')
+    expect(screen.getByRole('alert')).toHaveTextContent('不支持的类型')
+    expect(document.querySelector('[data-slot="agent-prompt-attachment"]')).not.toBeInTheDocument()
+  })
+
   it('submits on Enter, preserves Shift+Enter, and ignores IME events', () => {
     const onSubmit = vi.fn()
     const current = attachment()

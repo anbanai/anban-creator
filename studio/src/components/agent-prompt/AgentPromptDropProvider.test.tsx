@@ -437,7 +437,7 @@ describe('AgentPromptDropProvider', () => {
     expect(screen.queryByTestId('agent-prompt-drop-overlay')).not.toBeInTheDocument()
   })
 
-  it('does not deliver when no actual dropped file is accepted', () => {
+  it('delivers an all-invalid external drop without showing an acceptance overlay', () => {
     const onFiles = vi.fn()
     render(
       <AgentPromptDropProvider>
@@ -445,13 +445,19 @@ describe('AgentPromptDropProvider', () => {
           name="images"
           onFiles={onFiles}
           acceptsFile={(file) => file.type.startsWith('image/')}
+          acceptsItemType={(mime) => mime.startsWith('image/')}
         />
       </AgentPromptDropProvider>,
     )
     const text = new File(['text'], 'notes.txt', { type: 'text/plain' })
+    const dataTransfer = dragData({ files: [text] })
 
-    expect(documentDrop(dragData({ files: [text] }))).toBe(false)
-    expect(onFiles).not.toHaveBeenCalled()
+    fireEvent.dragEnter(document.body, { dataTransfer })
+    expect(screen.queryByTestId('agent-prompt-drop-overlay')).not.toBeInTheDocument()
+    expect(documentDrop(dataTransfer)).toBe(false)
+
+    expect(onFiles).toHaveBeenCalledOnce()
+    expect(onFiles).toHaveBeenCalledWith([text])
   })
 
   it('defers to a local drop handler that already prevented the event', () => {
@@ -494,10 +500,13 @@ describe('AgentPromptDropProvider', () => {
     }))).toBe(false)
   })
 
-  it('does not activate or intercept dragover when the target is full', () => {
+  it('does not activate or deliver to full or disabled targets', () => {
+    const full = vi.fn()
+    const disabled = vi.fn()
     render(
       <AgentPromptDropProvider>
-        <TargetHarness name="full" onFiles={vi.fn()} remainingCapacity={0} />
+        <TargetHarness name="full" onFiles={full} remainingCapacity={0} />
+        <TargetHarness name="disabled" onFiles={disabled} enabled={false} />
       </AgentPromptDropProvider>,
     )
     const dataTransfer = dragData({ files: [image()] })
@@ -507,6 +516,9 @@ describe('AgentPromptDropProvider', () => {
     expect(screen.queryByTestId('agent-prompt-drop-overlay')).not.toBeInTheDocument()
     expect(fireEvent.dragOver(document.body, { dataTransfer })).toBe(true)
     expect(dataTransfer.dropEffect).toBe('none')
+    expect(documentDrop(dataTransfer)).toBe(false)
+    expect(full).not.toHaveBeenCalled()
+    expect(disabled).not.toHaveBeenCalled()
   })
 
   it('keeps registrations and document listeners stable across option changes', () => {
