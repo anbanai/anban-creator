@@ -12,6 +12,21 @@ const (
 	ImageGenerationStatusFailed     = "failed"
 )
 
+// DesignerReference is the durable, user-owned identity behind Designer
+// reference_file_id and mask_file_id values.
+type DesignerReference struct {
+	ID          string    `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID      string    `gorm:"type:char(36);index;not null" json:"user_id"`
+	StorageKey  string    `gorm:"type:varchar(500);index;not null" json:"-"`
+	FileName    string    `gorm:"type:varchar(255);not null" json:"file_name"`
+	ContentType string    `gorm:"type:varchar(120);not null" json:"content_type"`
+	Size        int64     `gorm:"not null" json:"size"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (DesignerReference) TableName() string { return "designer_references" }
+
 // ImageGeneration 图片生成任务记录
 type ImageGeneration struct {
 	ID                     string                  `gorm:"type:char(36);primaryKey" json:"id"`

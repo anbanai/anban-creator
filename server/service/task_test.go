@@ -2590,15 +2590,22 @@ func TestTaskServiceCloneAppliesInputOverrides(t *testing.T) {
 	if got := inherited.InputAttachments.Data(); len(got) != 1 || got[0].Role != "brief" {
 		t.Fatalf("omitted attachments = %#v, want only non-resume source inputs", got)
 	}
-
 	emptyPrompt := ""
-	emptyAttachments := []model.EntryAttachment{}
-	cleared, err := svc.Clone(ctx, src.ID, CloneTaskParams{Prompt: &emptyPrompt, InputAttachments: &emptyAttachments})
+	attachmentOnly, err := svc.Clone(ctx, src.ID, CloneTaskParams{Prompt: &emptyPrompt, InputAttachments: &overrideAttachments})
 	if err != nil {
-		t.Fatalf("Clone empty inputs: %v", err)
+		t.Fatalf("Clone attachment-only inputs: %v", err)
 	}
-	if cleared.Prompt != "" || len(cleared.InputAttachments.Data()) != 0 {
-		t.Fatalf("explicit empty inputs were not preserved: prompt=%q attachments=%#v", cleared.Prompt, cleared.InputAttachments.Data())
+	if attachmentOnly.Prompt != "" || !reflect.DeepEqual(attachmentOnly.InputAttachments.Data(), overrideAttachments) {
+		t.Fatalf("attachment-only clone = prompt %q attachments %#v", attachmentOnly.Prompt, attachmentOnly.InputAttachments.Data())
+	}
+
+	emptyAttachments := []model.EntryAttachment{}
+	cleared, err := svc.Clone(ctx, src.ID, CloneTaskParams{InputAttachments: &emptyAttachments})
+	if err != nil {
+		t.Fatalf("Clone empty attachments: %v", err)
+	}
+	if cleared.Prompt != src.Prompt || len(cleared.InputAttachments.Data()) != 0 {
+		t.Fatalf("empty attachments did not preserve omitted prompt: prompt=%q attachments=%#v", cleared.Prompt, cleared.InputAttachments.Data())
 	}
 }
 
@@ -2899,6 +2906,156 @@ func TestTaskServiceCloneRejectsUnknownExecutionTarget(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].ID != src.ID {
 		t.Fatalf("unknown target clone persisted a task: %#v", tasks)
+	}
+}
+
+func TestTaskServiceClonePromptOverrideUpdatesStructuredBrief(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		prepare  func(*model.Task)
+		assert   func(*testing.T, *model.Task, *model.Task, string)
+	}{
+		{
+			name: "video creator", platform: model.PlatformVideoCreator,
+			prepare: func(task *model.Task) {
+				task.SetVideoInput(model.VideoInput{
+					Brief: "source creator brief", References: []model.VideoReferenceAsset{{Type: "image", URL: "/api/v1/files/reference.png", MustKeep: []string{"logo"}}},
+					HardConstraints: model.VideoHardConstraints{Ratio: "9:16", Duration: 5},
+				})
+				task.SetVideoConfig(model.VideoTaskConfig{ModelKey: "frozen-model", Resolution: "720p", EstimatedCredits: 1234})
+			},
+			assert: assertCloneVideoBrief,
+		},
+		{
+			name: "video editor", platform: model.PlatformVideoEditor,
+			prepare: func(task *model.Task) {
+				task.SetVideoInput(model.VideoInput{
+					Brief: "source editor brief", References: []model.VideoReferenceAsset{{Type: VideoReferenceVideo, URL: "/api/v1/files/source.mp4", MustKeep: []string{"timing"}}},
+					HardConstraints: model.VideoHardConstraints{Ratio: "16:9", Duration: 30},
+				})
+				task.SetVideoConfig(model.VideoTaskConfig{ModelKey: "frozen-editor", Resolution: "1080p", EstimatedCredits: 5678})
+			},
+			assert: assertCloneVideoBrief,
+		},
+		{
+			name: "montage", platform: model.PlatformMontage,
+			prepare: func(task *model.Task) {
+				task.SetMontageInput(model.MontageInput{
+					Brief: "source montage brief", PipelineKey: "frozen-pipeline",
+					SourceAssets: []model.MontageAsset{{Type: "video", URL: "/api/v1/files/source.mp4", FileName: "source.mp4"}},
+					Preferences:  model.MontagePreferences{AspectRatio: "1:1", DurationSeconds: 20},
+				})
+			},
+			assert: func(t *testing.T, source, clone *model.Task, wantBrief string) {
+				t.Helper()
+				want := source.MontageInput.Data()
+				want.Brief = wantBrief
+				if !reflect.DeepEqual(clone.MontageInput.Data(), want) {
+					t.Fatalf("montage input = %#v, want %#v", clone.MontageInput.Data(), want)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, tt.platform)
+			source := &model.Task{
+				ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+				Type: tt.platform, Status: model.TaskStatusCompleted, Prompt: "source task prompt",
+			}
+			tt.prepare(source)
+			if err := repo.Tasks().Create(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+
+			inherited, err := svc.Clone(ctx, source.ID, CloneTaskParams{})
+			if err != nil {
+				t.Fatalf("Clone omitted prompt: %v", err)
+			}
+			if inherited.Prompt != source.Prompt {
+				t.Fatalf("inherited prompt = %q, want %q", inherited.Prompt, source.Prompt)
+			}
+			structuredBrief := source.Prompt
+			if model.IsVideoPlatform(tt.platform) {
+				structuredBrief = source.VideoInput.Data().Brief
+			} else if model.IsMontagePlatform(tt.platform) {
+				structuredBrief = source.MontageInput.Data().Brief
+			}
+			tt.assert(t, source, inherited, structuredBrief)
+
+			override := "  edited brief  "
+			clone, err := svc.Clone(ctx, source.ID, CloneTaskParams{Prompt: &override})
+			if err != nil {
+				t.Fatalf("Clone prompt override: %v", err)
+			}
+			if clone.Prompt != "edited brief" {
+				t.Fatalf("clone prompt = %q, want trimmed override", clone.Prompt)
+			}
+			tt.assert(t, source, clone, "edited brief")
+
+			if model.IsVideoPlatform(tt.platform) {
+				empty := "   \n\t "
+				emptyClone, err := svc.Clone(ctx, source.ID, CloneTaskParams{Prompt: &empty})
+				if err != nil {
+					t.Fatalf("Clone explicit empty video brief: %v", err)
+				}
+				if emptyClone.Prompt != "" {
+					t.Fatalf("empty video clone prompt = %q, want empty", emptyClone.Prompt)
+				}
+				tt.assert(t, source, emptyClone, "")
+			}
+		})
+	}
+}
+
+func assertCloneVideoBrief(t *testing.T, source, clone *model.Task, wantBrief string) {
+	t.Helper()
+	want := source.VideoInput.Data()
+	want.Brief = wantBrief
+	if !reflect.DeepEqual(clone.VideoInput.Data(), want) {
+		t.Fatalf("video input = %#v, want %#v", clone.VideoInput.Data(), want)
+	}
+	if !reflect.DeepEqual(clone.VideoConfig.Data(), source.VideoConfig.Data()) {
+		t.Fatalf("video config changed: clone=%#v source=%#v", clone.VideoConfig.Data(), source.VideoConfig.Data())
+	}
+}
+
+func TestTaskServiceCloneRejectsEmptyMontageBriefBeforeSideEffects(t *testing.T) {
+	for _, prompt := range []string{"", "   \n\t "} {
+		t.Run(fmt.Sprintf("prompt_%q", prompt), func(t *testing.T) {
+			db := setupTaskTestDB(t)
+			repo := repository.New(db)
+			logger := zerolog.New(io.Discard)
+			enqueuer := &mockEnqueuer{}
+			svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformMontage)
+			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted, Prompt: "source"}
+			source.SetMontageInput(model.MontageInput{
+				Brief: "source montage brief", PipelineKey: "frozen-pipeline",
+				SourceAssets: []model.MontageAsset{{Type: "video", URL: "/api/v1/files/source.mp4", FileName: "source.mp4"}},
+			})
+			if err := repo.Tasks().Create(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+
+			clone, err := svc.Clone(ctx, source.ID, CloneTaskParams{Prompt: &prompt})
+			if err == nil || !errors.Is(err, ErrMontageInput) {
+				t.Fatalf("Clone result=%#v error=%v", clone, err)
+			}
+			if len(enqueuer.enqueued) != 0 {
+				t.Fatalf("empty montage clone enqueued %d tasks", len(enqueuer.enqueued))
+			}
+			tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+			if err != nil || len(tasks) != 1 || tasks[0].ID != source.ID {
+				t.Fatalf("empty montage clone persisted task: tasks=%#v err=%v", tasks, err)
+			}
+		})
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/anbanai/anban-creator/app/image"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -31,6 +33,12 @@ import (
 // Handlers should map this to a 4xx response.
 var ErrURLNotOwned = errors.New("url not allowed")
 
+// ErrDesignerReferenceInvalid covers malformed, missing, and unowned Designer
+// reference identities without disclosing which ownership check failed.
+var ErrDesignerReferenceInvalid = errors.New("designer reference is invalid or unavailable")
+
+const maxDesignerReferenceBytes int64 = 10 * 1024 * 1024
+
 type DesignerService struct {
 	db              *gorm.DB
 	imageSvc        *ImageService
@@ -38,6 +46,7 @@ type DesignerService struct {
 	fullCfg         *srvconfig.Config
 	imageCfg        *srvconfig.ImageAPIConfig
 	storage         storage.Provider
+	referenceRepo   repository.DesignerReferenceRepository
 	logger          *zerolog.Logger
 	providerFactory func(*config.ImageAPI, *zerolog.Logger) (image.Provider, error)
 }
@@ -54,6 +63,10 @@ func NewDesignerService(
 	if fullCfg != nil {
 		imageCfg = &fullCfg.ImageAPI
 	}
+	var referenceRepo repository.DesignerReferenceRepository
+	if db != nil {
+		referenceRepo = repository.NewDesignerReferenceRepository(db)
+	}
 	return &DesignerService{
 		db:              db,
 		imageSvc:        imageSvc,
@@ -61,6 +74,7 @@ func NewDesignerService(
 		fullCfg:         fullCfg,
 		imageCfg:        imageCfg,
 		storage:         store,
+		referenceRepo:   referenceRepo,
 		logger:          logger,
 		providerFactory: image.NewProvider,
 	}
@@ -175,6 +189,9 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		} else {
 			return nil, fmt.Errorf("designer provider %s is not configured", req.ProviderID)
 		}
+	}
+	if err := s.validateDesignerReferenceOwnership(ctx, userID, req.ReferenceFileIDs, req.MaskFileID); err != nil {
+		return nil, err
 	}
 	if totalCost == 0 {
 		if unitCost := s.resolveCredits(provider, modelName); unitCost > 0 {
@@ -484,7 +501,12 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 
 	var refFileIDs []string
 	if gen.ReferenceFiles != "" {
-		_ = json.Unmarshal([]byte(gen.ReferenceFiles), &refFileIDs)
+		if err := json.Unmarshal([]byte(gen.ReferenceFiles), &refFileIDs); err != nil {
+			s.logger.Error().Err(err).Str("gen_id", genID).Msg("decode designer reference contract failed")
+			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, "designer reference is invalid or unavailable")
+			refund()
+			return
+		}
 	}
 
 	s.logger.Info().
@@ -517,6 +539,15 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	}
 
 	providerFactory := s.providerFactory
+	refPaths, maskPath, cleanupReferences, err := s.materializeDesignerReferences(ctx, gen.UserID, refFileIDs, gen.MaskFileID)
+	if err != nil {
+		s.logger.Error().Err(err).Str("gen_id", genID).Str("user_id", gen.UserID).Msg("resolve designer references failed")
+		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, "designer reference is invalid or unavailable")
+		refund()
+		return
+	}
+	defer cleanupReferences()
+
 	if providerFactory == nil {
 		providerFactory = image.NewProvider
 	}
@@ -526,30 +557,6 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, designerGenerationUserError(err))
 		refund()
 		return
-	}
-
-	refPaths := make([]string, 0, len(refFileIDs))
-	for _, fileID := range refFileIDs {
-		path, err := s.resolveFilePath(fileID)
-		if err != nil {
-			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed,
-				fmt.Sprintf("resolve reference file %s: %v", fileID, err))
-			refund()
-			return
-		}
-		refPaths = append(refPaths, path)
-	}
-
-	maskPath := ""
-	if gen.MaskFileID != "" {
-		path, err := s.resolveFilePath(gen.MaskFileID)
-		if err != nil {
-			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed,
-				fmt.Sprintf("resolve mask file %s: %v", gen.MaskFileID, err))
-			refund()
-			return
-		}
-		maskPath = path
 	}
 
 	genOpts := &image.GenerateOptions{
@@ -830,13 +837,25 @@ func downloadToTempFile(ctx context.Context, url string, index int) (string, err
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
-	// Limit to 10MB to prevent disk exhaustion from oversized responses.
-	if _, err := io.Copy(f, io.LimitReader(resp.Body, 10*1024*1024)); err != nil {
-		f.Close()
-		os.Remove(f.Name())
+	cleanup := func() {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+	}
+	// Read one byte past the limit so an oversized response cannot be silently
+	// truncated and accepted as a valid reference image.
+	written, err := io.Copy(f, io.LimitReader(resp.Body, maxDesignerReferenceBytes+1))
+	if err != nil {
+		cleanup()
 		return "", fmt.Errorf("write temp file: %w", err)
 	}
-	f.Close()
+	if written > maxDesignerReferenceBytes {
+		cleanup()
+		return "", storage.ErrObjectExceedsMaxSize
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", fmt.Errorf("close temp file: %w", err)
+	}
 
 	return f.Name(), nil
 }
@@ -860,47 +879,64 @@ func isLocalFilePath(url string) bool {
 	return strings.HasPrefix(url, "/") || (!strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://"))
 }
 
-func (s *DesignerService) UploadReference(ctx context.Context, userID string, filename string, data []byte) (string, error) {
-	return s.registerReferenceFile(ctx, userID, filename, data, true)
-}
-
-// RegisterReferenceFile makes an already-persisted direct upload available to
-// image providers without copying the bytes to another storage object.
-func (s *DesignerService) RegisterReferenceFile(ctx context.Context, userID, filename string, data []byte) (string, error) {
-	return s.registerReferenceFile(ctx, userID, filename, data, false)
-}
-
-// registerReferenceFile saves the bytes to a temp file with the canonical
-// "anban-creator_ref_{fileID}_{filename}" naming (which resolveFilePath globs
-// against), optionally mirrors them to remote storage, and returns the fileID.
-func (s *DesignerService) registerReferenceFile(ctx context.Context, userID, filename string, data []byte, persist bool) (string, error) {
-	fileID := uuid.New().String()
-
-	// Always save locally so providers can read file paths
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anban-creator_ref_%s_%s", fileID, filename))
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return "", fmt.Errorf("save reference file: %w", err)
+func (s *DesignerService) UploadReference(ctx context.Context, userID, filename, contentType string, data []byte) (string, error) {
+	if s.storage == nil || s.referenceRepo == nil {
+		return "", fmt.Errorf("designer reference storage is unavailable")
 	}
-
-	// Optionally persist to remote storage
-	if persist && s.storage != nil {
-		ext := strings.ToLower(filepath.Ext(filename))
-		contentType := "image/png"
-		switch ext {
-		case ".jpg", ".jpeg":
-			contentType = "image/jpeg"
-		case ".gif":
-			contentType = "image/gif"
-		case ".webp":
-			contentType = "image/webp"
-		}
-		key := fmt.Sprintf("designer/refs/%s/%s/%s", userID, fileID, filename)
-		if _, err := s.storage.Upload(ctx, key, bytes.NewReader(data), contentType); err != nil {
-			s.logger.Warn().Err(err).Str("file_id", fileID).Msg("failed to persist reference to storage, local file available")
-		}
+	fileID := uuid.NewString()
+	filename, contentType, err := validateDesignerReferenceMetadata(filename, contentType, int64(len(data)))
+	if err != nil {
+		return "", err
 	}
-
+	key := path.Join(userID, "designer/references", fileID, filename)
+	if _, err := s.storage.Upload(ctx, key, bytes.NewReader(data), contentType); err != nil {
+		return "", fmt.Errorf("upload designer reference: %w", err)
+	}
+	reference := &model.DesignerReference{
+		ID: fileID, UserID: userID, StorageKey: key, FileName: filename,
+		ContentType: contentType, Size: int64(len(data)),
+	}
+	if err := s.referenceRepo.Create(ctx, reference); err != nil {
+		_ = s.storage.Delete(ctx, key)
+		return "", fmt.Errorf("persist designer reference: %w", err)
+	}
 	return fileID, nil
+}
+
+// RegisterStoredReference creates a user-owned file_id for an existing
+// immutable object without copying it to a second storage key.
+func (s *DesignerService) RegisterStoredReference(ctx context.Context, userID, key, filename, contentType string, size int64) (string, error) {
+	if s.referenceRepo == nil {
+		return "", fmt.Errorf("designer reference repository is unavailable")
+	}
+	filename, contentType, err := validateDesignerReferenceMetadata(filename, contentType, size)
+	if err != nil {
+		return "", err
+	}
+	fileID := uuid.NewString()
+	if err := s.referenceRepo.Create(ctx, &model.DesignerReference{
+		ID: fileID, UserID: userID, StorageKey: strings.TrimSpace(key), FileName: filename,
+		ContentType: contentType, Size: size,
+	}); err != nil {
+		return "", fmt.Errorf("persist designer reference: %w", err)
+	}
+	return fileID, nil
+}
+
+func validateDesignerReferenceMetadata(filename, contentType string, size int64) (string, string, error) {
+	filename = sanitizeUploadFilename(filename)
+	if filename == "" {
+		return "", "", fmt.Errorf("designer reference filename is invalid")
+	}
+	ext := strings.ToLower(filepath.Ext(filename))
+	contentType = normalizeDirectUploadContentType(contentType)
+	if contentType == "" {
+		contentType = contentTypeForUploadExt(ext)
+	}
+	if size < 0 || size > maxDesignerReferenceBytes || !isDirectUploadImage(contentType, ext) {
+		return "", "", fmt.Errorf("designer reference metadata is invalid")
+	}
+	return filename, contentType, nil
 }
 
 // UploadReferenceFromURL downloads an image from a storage URL owned by this
@@ -927,7 +963,7 @@ func (s *DesignerService) UploadReferenceFromURL(ctx context.Context, userID, ra
 			return "", ErrURLNotOwned
 		}
 		var err error
-		data, err = s.storage.Read(ctx, key)
+		data, err = storage.ReadObject(ctx, s.storage, key, maxDesignerReferenceBytes)
 		if err != nil {
 			return "", fmt.Errorf("read local reference: %w", err)
 		}
@@ -959,7 +995,7 @@ func (s *DesignerService) UploadReferenceFromURL(ctx context.Context, userID, ra
 	if ext == "" {
 		ext = ".png"
 	}
-	return s.registerReferenceFile(ctx, userID, "source"+ext, data, true)
+	return s.UploadReference(ctx, userID, "source"+ext, contentTypeForUploadExt(ext), data)
 }
 
 func (s *DesignerService) GetHistory(ctx context.Context, userID, projectID string, page, pageSize int) ([]model.ImageGeneration, int64, error) {
@@ -1300,13 +1336,103 @@ func (s *DesignerService) resolveProvider() string {
 	return "openai"
 }
 
-func (s *DesignerService) resolveFilePath(fileID string) (string, error) {
-	pattern := filepath.Join(os.TempDir(), fmt.Sprintf("anban-creator_ref_%s_*", fileID))
-	matches, err := filepath.Glob(pattern)
-	if err != nil || len(matches) == 0 {
-		return "", fmt.Errorf("reference file not found: %s", fileID)
+func (s *DesignerService) materializeDesignerReferences(ctx context.Context, userID string, referenceIDs []string, maskID string) ([]string, string, func(), error) {
+	paths := make([]string, 0, len(referenceIDs)+1)
+	cleanup := func() {
+		for _, filePath := range paths {
+			_ = os.Remove(filePath)
+		}
 	}
-	return matches[0], nil
+	materialize := func(fileID string) (string, error) {
+		if !isCanonicalDesignerReferenceID(fileID) {
+			return "", ErrDesignerReferenceInvalid
+		}
+		if s.referenceRepo == nil || s.storage == nil {
+			return "", fmt.Errorf("designer reference storage is unavailable")
+		}
+		reference, err := s.referenceRepo.FindByIDAndUserID(ctx, fileID, userID)
+		if err != nil {
+			return "", fmt.Errorf("designer reference not found")
+		}
+		data, err := storage.ReadObject(ctx, s.storage, reference.StorageKey, maxDesignerReferenceBytes)
+		if err != nil {
+			return "", fmt.Errorf("read designer reference: %w", err)
+		}
+		if int64(len(data)) != reference.Size {
+			return "", fmt.Errorf("designer reference size mismatch")
+		}
+		ext := strings.ToLower(filepath.Ext(reference.FileName))
+		file, err := os.CreateTemp("", "anban-designer-reference-"+reference.ID+"-*"+ext)
+		if err != nil {
+			return "", fmt.Errorf("create designer reference temp file: %w", err)
+		}
+		filePath := file.Name()
+		paths = append(paths, filePath)
+		if _, err := file.Write(data); err != nil {
+			_ = file.Close()
+			return "", fmt.Errorf("write designer reference temp file: %w", err)
+		}
+		if err := file.Close(); err != nil {
+			return "", fmt.Errorf("close designer reference temp file: %w", err)
+		}
+		return filePath, nil
+	}
+
+	referencePaths := make([]string, 0, len(referenceIDs))
+	for _, fileID := range referenceIDs {
+		filePath, err := materialize(fileID)
+		if err != nil {
+			cleanup()
+			return nil, "", func() {}, err
+		}
+		referencePaths = append(referencePaths, filePath)
+	}
+	maskPath := ""
+	if maskID != "" {
+		var err error
+		maskPath, err = materialize(maskID)
+		if err != nil {
+			cleanup()
+			return nil, "", func() {}, err
+		}
+	}
+	return referencePaths, maskPath, cleanup, nil
+}
+
+func (s *DesignerService) validateDesignerReferenceOwnership(ctx context.Context, userID string, referenceIDs []string, maskID string) error {
+	ids := make([]string, 0, len(referenceIDs)+1)
+	ids = append(ids, referenceIDs...)
+	if maskID != "" {
+		ids = append(ids, maskID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if s.referenceRepo == nil {
+		return fmt.Errorf("designer reference repository is unavailable")
+	}
+	seen := make(map[string]struct{}, len(ids))
+	for _, fileID := range ids {
+		if !isCanonicalDesignerReferenceID(fileID) {
+			return ErrDesignerReferenceInvalid
+		}
+		if _, ok := seen[fileID]; ok {
+			continue
+		}
+		seen[fileID] = struct{}{}
+		if _, err := s.referenceRepo.FindByIDAndUserID(ctx, fileID, userID); err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) && s.logger != nil {
+				s.logger.Error().Err(err).Str("user_id", userID).Str("file_id", fileID).Msg("validate designer reference ownership failed")
+			}
+			return ErrDesignerReferenceInvalid
+		}
+	}
+	return nil
+}
+
+func isCanonicalDesignerReferenceID(fileID string) bool {
+	parsed, err := uuid.Parse(fileID)
+	return err == nil && parsed.String() == fileID
 }
 
 // signResultURLs re-signs OSS URLs for private buckets so that expired

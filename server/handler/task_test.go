@@ -1094,6 +1094,78 @@ func TestCloneTaskAcceptsFinalInputSnapshot(t *testing.T) {
 	if stored := found.InputAttachments.Data(); len(stored) != 1 || stored[0].Key != finalKey || stored[0].URL != "" {
 		t.Fatalf("stored clone attachments = %#v", stored)
 	}
+
+	emptyResp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
+		"prompt":"",
+		"input_attachments":[{
+			"type":"image","upload_id":"`+uploadID+`","key":"`+pendingKey+`",
+			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999
+		}]
+	}`)
+	defer emptyResp.Body.Close()
+	if emptyResp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(emptyResp.Body)
+		t.Fatalf("empty prompt status = %d, body=%s", emptyResp.StatusCode, body)
+	}
+	var emptyEnvelope struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(emptyResp.Body).Decode(&emptyEnvelope); err != nil {
+		t.Fatalf("decode empty prompt response: %v", err)
+	}
+	if emptyEnvelope.Data.Prompt != "" {
+		t.Fatalf("empty prompt clone prompt = %q", emptyEnvelope.Data.Prompt)
+	}
+	if got := emptyEnvelope.Data.InputAttachments.Data(); len(got) != 1 || got[0].Key != finalKey || got[0].FileName != "reference.png" {
+		t.Fatalf("empty prompt clone attachments = %#v", got)
+	}
+}
+
+func TestCloneTaskRejectsEmptyMontageBriefBeforeSideEffects(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "clone-montage@example.com", Password: "hashed", InviteCode: "clonemontage", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformMontage, Name: "Montage", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.NewString()
+	source := &model.Task{
+		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformMontage,
+		Status: model.TaskStatusCompleted, Prompt: "source prompt", ExecutionTarget: model.ExecutionTargetCloud,
+	}
+	source.SetMontageInput(model.MontageInput{Brief: "source montage brief", PipelineKey: "default"})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Clone(c)
+	})
+
+	resp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{"prompt":"  \n\t "}`)
+	defer resp.Body.Close()
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body.Msg, "montage task requires brief") {
+		t.Fatalf("status=%d response=%#v; want montage validation error", resp.StatusCode, body)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 1 || tasks[0].ID != taskID {
+		t.Fatalf("invalid montage clone changed tasks: tasks=%#v err=%v", tasks, err)
+	}
 }
 
 func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T) {

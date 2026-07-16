@@ -34,6 +34,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&TopicPool{},
 		&ImageGeneration{},
 		&ImageGenerationResult{},
+		&DesignerReference{},
 		&VideoGeneration{},
 		&VideoGenerationSegment{},
 		&AgentFeedback{},

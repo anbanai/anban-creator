@@ -19,6 +19,7 @@ import (
 	appconfig "github.com/anbanai/anban-creator/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
@@ -81,7 +82,8 @@ func (*designerPendingUploadRepo) ReopenPendingUploadExpiration(context.Context,
 	return false, nil
 }
 
-func setupDesignerHandlerTest() *fiber.App {
+func setupDesignerHandlerTest(t *testing.T) (*fiber.App, *DesignerHandler) {
+	t.Helper()
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enabled := true
 	cfg := &srvconfig.Config{
@@ -140,16 +142,16 @@ func setupDesignerHandlerTest() *fiber.App {
 			},
 		},
 	}
-	designerSvc := service.NewDesignerService(nil, nil, nil, cfg, nil, &logger)
+	designerSvc := service.NewDesignerService(setupTaskHandlerTestDB(t), nil, nil, cfg, nil, &logger)
 	handler := NewDesignerHandler(designerSvc, &logger)
 
 	app := fiber.New()
 	app.Get("/designer/providers", handler.GetProviders)
-	return app
+	return app, handler
 }
 
 func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
-	app := setupDesignerHandlerTest()
+	app, _ := setupDesignerHandlerTest(t)
 
 	resp, err := app.Test(httptest.NewRequest("GET", "/designer/providers", nil))
 	if err != nil {
@@ -214,7 +216,31 @@ func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
 	}
 }
 
+func TestDesignerGenerateRejectsInvalidReferenceWithGenericClientError(t *testing.T) {
+	_, h := setupDesignerHandlerTest(t)
+	userID := uuid.NewString()
+	app := fiber.New()
+	app.Post("/designer/generate", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Generate(c)
+	})
+
+	resp := postJSON(t, app, "/designer/generate", `{
+		"prompt":"edit","provider_id":"test-openai","quality":"medium","size":"1024x1024","n":1,
+		"reference_file_ids":["*"]
+	}`)
+	defer resp.Body.Close()
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusBadRequest || body.Msg != "designer reference is invalid or unavailable" || strings.Contains(body.Msg, "*") {
+		t.Fatalf("status=%d response=%#v; want generic reference rejection", resp.StatusCode, body)
+	}
+}
+
 func TestRegisterDesignerReference(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
 	pending := &designerPendingUploadRepo{uploads: map[string]*model.PendingUpload{}}
 	logger := zerolog.New(io.Discard)
 	userID := uuid.NewString()
@@ -251,7 +277,7 @@ func TestRegisterDesignerReference(t *testing.T) {
 		fixtures[5].finalKey: {Key: fixtures[5].finalKey, Size: 9, ContentType: "image/png", ETag: "oversize"},
 		fixtures[6].finalKey: {Key: fixtures[6].finalKey, Size: 9, ContentType: "image/png", ETag: "backend"},
 	}
-	designerSvc := service.NewDesignerService(nil, nil, nil, nil, store, &logger)
+	designerSvc := service.NewDesignerService(db, nil, nil, nil, store, &logger)
 	h := NewDesignerHandler(designerSvc, &logger)
 	h.SetDirectUploadDependencies(pending, store)
 	app := fiber.New()
@@ -302,6 +328,10 @@ func TestRegisterDesignerReference(t *testing.T) {
 		if len(store.uploaded) != 0 {
 			t.Fatalf("%s duplicated reference bytes to %#v", success.id, store.uploaded)
 		}
+		reference, err := repository.NewDesignerReferenceRepository(db).FindByIDAndUserID(context.Background(), envelope.Data.FileID, userID)
+		if err != nil || reference.StorageKey != success.finalKey || reference.FileName != "reference.png" || reference.ContentType != "image/png" || reference.Size != 9 {
+			t.Fatalf("%s durable reference = %#v err=%v", success.id, reference, err)
+		}
 	}
 	foundPending, err := pending.FindPendingUploadByID(context.Background(), "pending-ok")
 	if err != nil || foundPending.Status != model.PendingUploadStatusFinalized || foundPending.FinalizedKey != fixtures[0].finalKey {
@@ -331,6 +361,36 @@ func TestRegisterDesignerReference(t *testing.T) {
 	resp, body = request("backend", fixtures[6].finalKey)
 	if resp.StatusCode != fiber.StatusInternalServerError || strings.Contains(body, "OSS secret backend detail") {
 		t.Fatalf("backend status=%d body=%s", resp.StatusCode, body)
+	}
+}
+
+func TestUploadDesignerReferenceFromURLRedactsBackendErrors(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	userID := uuid.NewString()
+	const backendSecret = "OSS endpoint secret: request signature"
+	store := &fakeStorageProvider{readErr: errors.New(backendSecret)}
+	logger := zerolog.New(io.Discard)
+	designerSvc := service.NewDesignerService(db, nil, nil, nil, store, &logger)
+	h := NewDesignerHandler(designerSvc, &logger)
+	app := fiber.New()
+	app.Post("/designer/upload-reference-from-url", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.UploadReferenceFromURL(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/designer/upload-reference-from-url", strings.NewReader(`{"url":"/api/v1/files/`+userID+`/designer/result.png"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusInternalServerError || body.Msg != "failed to upload reference" || strings.Contains(body.Msg, backendSecret) {
+		t.Fatalf("status=%d response=%#v; want redacted backend error", resp.StatusCode, body)
 	}
 }
 

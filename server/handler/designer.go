@@ -81,6 +81,9 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrInsufficientCredits) {
 			return Error(c, fiber.StatusPaymentRequired, "积分不足，请充值后重试")
 		}
+		if errors.Is(err, service.ErrDesignerReferenceInvalid) {
+			return Error(c, fiber.StatusBadRequest, "designer reference is invalid or unavailable")
+		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("designer create generation record failed")
 		return Error(c, fiber.StatusInternalServerError, err.Error())
 	}
@@ -134,9 +137,12 @@ func (h *DesignerHandler) UploadReference(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to read file")
 	}
 
-	fileID, err := h.svc.UploadReference(c.Context(), userID, file.Filename, data)
+	fileID, err := h.svc.UploadReference(c.Context(), userID, file.Filename, contentType, data)
 	if err != nil {
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		if h.logger != nil {
+			h.logger.Error().Err(err).Str("user_id", userID).Msg("designer upload reference failed")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to upload reference")
 	}
 
 	return Success(c, fiber.Map{
@@ -174,11 +180,10 @@ func (h *DesignerHandler) RegisterReference(c fiber.Ctx) error {
 	if err != nil {
 		return h.respondRegisterReferenceError(c, err)
 	}
-	data, err := storage.ReadObject(c.Context(), h.store, verified.Key, maxDesignerReferenceBytes)
-	if err != nil {
+	if _, err := storage.ReadObject(c.Context(), h.store, verified.Key, maxDesignerReferenceBytes); err != nil {
 		return h.respondRegisterReferenceError(c, err)
 	}
-	fileID, err := h.svc.RegisterReferenceFile(c.Context(), userID, verified.FileName, data)
+	fileID, err := h.svc.RegisterStoredReference(c.Context(), userID, verified.Key, verified.FileName, verified.ContentType, verified.Size)
 	if err != nil {
 		return h.respondRegisterReferenceError(c, err)
 	}
@@ -239,8 +244,10 @@ func (h *DesignerHandler) UploadReferenceFromURL(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrURLNotOwned) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("designer upload reference from url failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		if h.logger != nil {
+			h.logger.Error().Err(err).Str("user_id", userID).Msg("designer upload reference from url failed")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to upload reference")
 	}
 
 	return Success(c, fiber.Map{

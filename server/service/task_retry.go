@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -49,7 +50,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	}
 	prompt := src.Prompt
 	if cloneParams.Prompt != nil {
-		prompt = *cloneParams.Prompt
+		prompt = strings.TrimSpace(*cloneParams.Prompt)
 	}
 	executionTarget, err := cloneExecutionTarget(src.ExecutionTarget)
 	if err != nil {
@@ -92,18 +93,27 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	}
 	if model.IsVideoCreatorPlatform(src.Type) {
 		input := src.VideoInput.Data()
+		if cloneParams.Prompt != nil {
+			input.Brief = prompt
+		}
 		config := src.VideoConfig.Data()
 		params.VideoCreatorInput = &input
 		params.FrozenVideoConfig = &config
 	}
 	if model.IsVideoEditorPlatform(src.Type) {
 		input := src.VideoInput.Data()
+		if cloneParams.Prompt != nil {
+			input.Brief = prompt
+		}
 		config := src.VideoConfig.Data()
 		params.VideoEditorInput = &input
 		params.FrozenVideoConfig = &config
 	}
 	if model.IsMontagePlatform(src.Type) {
 		input := src.MontageInput.Data()
+		if cloneParams.Prompt != nil {
+			input.Brief = prompt
+		}
 		params.MontageInput = &input
 	}
 
