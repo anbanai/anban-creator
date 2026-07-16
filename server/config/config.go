@@ -245,7 +245,7 @@ type MontageConfig struct {
 	ExecutionTargets       []string                               `yaml:"execution_targets"`
 	DefaultExecutionTarget string                                 `yaml:"default_execution_target"`
 	CreditCost             int                                    `yaml:"credit_cost"`
-	ProviderEnv            map[string]string                      `yaml:"provider_env"`
+	Env                    map[string]string                      `yaml:"env"`
 	ToolPolicy             map[string]MontageToolCapabilityPolicy `yaml:"tool_policy"`
 	PipelineDefaults       map[string]map[string]any              `yaml:"pipeline_defaults"`
 }
@@ -304,8 +304,8 @@ func (c *MontageConfig) ApplyDefaults() {
 	if c.CreditCost <= 0 {
 		c.CreditCost = 2000
 	}
-	if c.ProviderEnv == nil {
-		c.ProviderEnv = map[string]string{}
+	if c.Env == nil {
+		c.Env = map[string]string{}
 	}
 	if c.ToolPolicy == nil {
 		c.ToolPolicy = map[string]MontageToolCapabilityPolicy{}
@@ -348,41 +348,23 @@ func (c MontageConfig) Validate() error {
 			return fmt.Errorf("montage.execution_targets contains invalid target %q", target)
 		}
 	}
-	for key := range c.ProviderEnv {
-		if !IsSupportedMontageProviderEnv(key) {
-			return fmt.Errorf("montage.provider_env contains unsupported key %q", key)
+	for key, value := range c.Env {
+		if key == "" || strings.ContainsAny(key, "=\x00") {
+			return fmt.Errorf("montage.env contains invalid key %q", key)
+		}
+		if strings.ContainsRune(value, '\x00') {
+			return fmt.Errorf("montage.env value for %q contains a NUL byte", key)
 		}
 	}
 	return nil
 }
 
-func (c MontageConfig) RedactedProviderEnv() map[string]bool {
-	redacted := make(map[string]bool, len(c.ProviderEnv))
-	for key, value := range c.ProviderEnv {
+func (c MontageConfig) RedactedEnv() map[string]bool {
+	redacted := make(map[string]bool, len(c.Env))
+	for key, value := range c.Env {
 		redacted[key] = strings.TrimSpace(value) != ""
 	}
 	return redacted
-}
-
-func IsSupportedMontageProviderEnv(key string) bool {
-	_, ok := supportedMontageProviderEnv[key]
-	return ok
-}
-
-var supportedMontageProviderEnv = map[string]struct{}{
-	"FAL_KEY":                 {},
-	"PEXELS_API_KEY":          {},
-	"PIXABAY_API_KEY":         {},
-	"UNSPLASH_ACCESS_KEY":     {},
-	"SUNO_API_KEY":            {},
-	"ELEVENLABS_API_KEY":      {},
-	"OPENAI_API_KEY":          {},
-	"XAI_API_KEY":             {},
-	"GOOGLE_API_KEY":          {},
-	"HEYGEN_API_KEY":          {},
-	"RUNWAY_API_KEY":          {},
-	"VIDEO_GEN_LOCAL_ENABLED": {},
-	"VIDEO_GEN_LOCAL_MODEL":   {},
 }
 
 func validMontageTarget(target string) bool {

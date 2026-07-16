@@ -32,6 +32,7 @@ type Config struct {
 	ResumeSessionID          string
 	ResumeContextPath        string
 	RuntimeEnv               map[string]string
+	Env                      map[string]string
 }
 
 const (
@@ -143,43 +144,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func montageProviderEnvFromProcess(taskType string) map[string]string {
-	if taskType != "montage" {
-		return map[string]string{}
-	}
-	env := map[string]string{}
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || strings.TrimSpace(value) == "" {
-			continue
-		}
-		if !isSupportedMontageProviderEnv(key) {
-			continue
-		}
-		env[key] = value
-	}
-	return env
-}
-
-func isSupportedMontageProviderEnv(key string) bool {
-	_, ok := supportedMontageProviderEnv[key]
-	return ok
-}
-
-var supportedMontageProviderEnv = map[string]struct{}{
-	"FAL_KEY":                 {},
-	"PEXELS_API_KEY":          {},
-	"PIXABAY_API_KEY":         {},
-	"UNSPLASH_ACCESS_KEY":     {},
-	"SUNO_API_KEY":            {},
-	"ELEVENLABS_API_KEY":      {},
-	"OPENAI_API_KEY":          {},
-	"XAI_API_KEY":             {},
-	"GOOGLE_API_KEY":          {},
-	"HEYGEN_API_KEY":          {},
-	"RUNWAY_API_KEY":          {},
-	"VIDEO_GEN_LOCAL_ENABLED": {},
-	"VIDEO_GEN_LOCAL_MODEL":   {},
 }

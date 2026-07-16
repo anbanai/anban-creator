@@ -288,7 +288,11 @@ func TestValidateBootstrapFilesRejectsUnsafeContracts(t *testing.T) {
 }
 
 func TestBuildMontageBootstrapFiles(t *testing.T) {
-	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{MontageToolPolicy: map[string]config.MontageToolCapabilityPolicy{}, MontagePipelineDefaults: map[string]map[string]any{}}}
+	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{
+		MontageEnv:              map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
+		MontageToolPolicy:       map[string]config.MontageToolCapabilityPolicy{},
+		MontagePipelineDefaults: map[string]map[string]any{},
+	}}
 	files, err := svc.buildMontageFiles(&model.Task{Type: model.PlatformMontage})
 	if err != nil {
 		t.Fatal(err)
@@ -301,6 +305,12 @@ func TestBuildMontageBootstrapFiles(t *testing.T) {
 		if !paths[path] {
 			t.Fatalf("missing %s", path)
 		}
+	}
+	if got := svc.montageEnv(&model.Task{Type: model.PlatformMontage}); got["NEW_PROVIDER_TOKEN"] != "future-secret" {
+		t.Fatalf("Montage env = %#v, want future provider key", got)
+	}
+	if got := svc.montageEnv(&model.Task{Type: model.PlatformArticle}); len(got) != 0 {
+		t.Fatalf("article env = %#v, want empty", got)
 	}
 }
 

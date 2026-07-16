@@ -367,6 +367,9 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 	if err := serveragent.ValidateClaudeRuntimeEnv(response.RuntimeEnv); err != nil {
 		return fmt.Errorf("bootstrap runtime environment is invalid: %w", err)
 	}
+	if response.TaskType != model.PlatformMontage && len(response.Env) > 0 {
+		return fmt.Errorf("bootstrap environment is only valid for Montage tasks")
+	}
 	if len(response.Files) > maxBootstrapFiles {
 		return fmt.Errorf("bootstrap file count exceeds limit")
 	}

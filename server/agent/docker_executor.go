@@ -375,22 +375,35 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 }
 
 func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions, runtimeHome string) []string {
-	env := []string{"PATH=" + ContainerRuntimePath, "HOME=" + runtimeHome}
+	env := make([]string, 0, len(e.claudeEnv)+len(opts.MontageEnv)+5)
+	for key, value := range montageEnvForTask(opts) {
+		env = upsertContainerEnv(env, key, value)
+	}
 	for k, v := range e.claudeEnv {
 		if isManagedContainerEnv(k) {
 			continue
 		}
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
+		env = upsertContainerEnv(env, k, v)
 	}
+	env = upsertContainerEnv(env, "PATH", ContainerRuntimePath)
+	env = upsertContainerEnv(env, "HOME", runtimeHome)
 	if opts.Project != nil {
-		env = append(env, fmt.Sprintf("ANBAN_DEFAULT_PROJECT=%s", opts.Project.ID))
+		env = upsertContainerEnv(env, "ANBAN_DEFAULT_PROJECT", opts.Project.ID)
 	}
-	env = append(env, fmt.Sprintf("ANBAN_API_URL=%s", e.serverURL))
-	env = append(env, fmt.Sprintf("%s=%s", MontageSubmoduleEnvName, ContainerMontageSubmodulePath))
-	for key, value := range montageProviderEnvForTask(opts) {
-		env = append(env, fmt.Sprintf("%s=%s", key, value))
-	}
+	env = upsertContainerEnv(env, "ANBAN_API_URL", e.serverURL)
+	env = upsertContainerEnv(env, MontageSubmoduleEnvName, ContainerMontageSubmodulePath)
 	return env
+}
+
+func upsertContainerEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
 
 type execResult struct {

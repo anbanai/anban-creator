@@ -127,7 +127,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		},
 	}
 	if model.IsMontagePlatform(task.Type) {
-		opts.MontageProviderEnv = s.montageCfg.ProviderEnv
+		opts.MontageEnv = s.montageCfg.Env
 		opts.MontageToolPolicy = s.montageCfg.ToolPolicy
 		opts.MontagePipelineDefaults = s.montageCfg.PipelineDefaults
 	}

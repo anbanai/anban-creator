@@ -43,6 +43,7 @@ type AgentBootstrapResponse struct {
 	ResumeSessionID     string            `json:"resume_session_id,omitempty"`
 	ResumeContextPath   string            `json:"resume_context_path,omitempty"`
 	RuntimeEnv          map[string]string `json:"runtime_env,omitempty"`
+	Env                 map[string]string `json:"env,omitempty"`
 	Files               []BootstrapFile   `json:"files"`
 }
 
@@ -56,6 +57,7 @@ type AgentBootstrapConfig struct {
 	ImageAPIConfig          *srvconfig.ImageAPIConfig
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
+	MontageEnv              map[string]string
 	RuntimeEnv              map[string]string
 }
 
@@ -262,7 +264,20 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err := serveragent.ValidateClaudeRuntimeEnv(runtimeEnv); err != nil {
 		return nil, fmt.Errorf("build Claude runtime environment: %w", err)
 	}
-	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, Files: files}, nil
+	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, Env: s.montageEnv(task), Files: files}, nil
+}
+
+func (s *AgentBootstrapService) montageEnv(task *model.Task) map[string]string {
+	if task == nil || !model.IsMontagePlatform(task.Type) {
+		return nil
+	}
+	env := make(map[string]string, len(s.cfg.MontageEnv))
+	for key, value := range s.cfg.MontageEnv {
+		if strings.TrimSpace(value) != "" {
+			env[key] = value
+		}
+	}
+	return env
 }
 
 func (s *AgentBootstrapService) buildProductFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {

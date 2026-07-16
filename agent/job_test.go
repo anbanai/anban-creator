@@ -76,6 +76,20 @@ func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 	}
 }
 
+func TestJobRuntimeConfigMapsMontageEnvOnlyForMontageTasks(t *testing.T) {
+	jobCfg := JobConfig{ServerURL: "http://server", ExecutionID: "execution-1", Workspace: "/workspace"}
+	env := map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"}
+
+	montage := jobRuntimeConfig(jobCfg, &BootstrapResponse{TaskType: "montage", Env: env})
+	if montage.Env["NEW_PROVIDER_TOKEN"] != "future-secret" {
+		t.Fatalf("Montage env = %#v, want future provider key", montage.Env)
+	}
+	article := jobRuntimeConfig(jobCfg, &BootstrapResponse{TaskType: "article", Env: env})
+	if len(article.Env) != 0 {
+		t.Fatalf("article env = %#v, want empty", article.Env)
+	}
+}
+
 func TestJobCommandAcceptsOnlyBootstrapFlags(t *testing.T) {
 	cmd := newJobCommand(func(context.Context, JobConfig) (*BootstrapResponse, error) { return &BootstrapResponse{}, nil }, func(context.Context, *Config) error { return nil })
 	names := make(map[string]bool)

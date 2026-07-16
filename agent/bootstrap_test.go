@@ -225,6 +225,9 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		{"oversized runtime environment value", func(r *BootstrapResponse) {
 			r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)}
 		}},
+		{"Montage environment on article task", func(r *BootstrapResponse) {
+			r.Env = map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"}
+		}},
 		{"too many files", func(r *BootstrapResponse) { r.Files = make([]BootstrapFile, maxBootstrapFiles+1) }},
 	}
 	for _, tc := range tests {
@@ -235,6 +238,24 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 				t.Fatal("expected rejection")
 			}
 		})
+	}
+}
+
+func TestValidateBootstrapResponseAcceptsArbitraryMontageEnv(t *testing.T) {
+	response := BootstrapResponse{
+		ExecutionToken:      testExecutionToken(t, "execution-1", "task-1", "project-1"),
+		TaskID:              "task-1",
+		TaskType:            "montage",
+		ProjectID:           "project-1",
+		Prompt:              "make a video",
+		Model:               "sonnet",
+		MaxTurns:            40,
+		AgentFlag:           "anban:montage",
+		AutoMemoryDirectory: ".claude/memory",
+		Env:                 map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
+	}
+	if err := validateBootstrapResponse("execution-1", &response); err != nil {
+		t.Fatalf("validate bootstrap response: %v", err)
 	}
 }
 

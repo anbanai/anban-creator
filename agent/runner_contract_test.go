@@ -87,6 +87,35 @@ func TestRunnerOptionsInjectBootstrapClaudeEnvironmentWithoutOverridingExecution
 	}
 }
 
+func TestRunnerOptionsInjectExplicitMontageEnv(t *testing.T) {
+	runner := NewRunner(&Config{
+		Workspace: t.TempDir(), AgentFlag: "anban:montage", TaskType: "montage", MaxTurns: 10,
+		ServerURL: "https://server.example.com", APIKey: "execution-jwt", ProjectID: "project-1",
+		RuntimeEnv: map[string]string{"ANTHROPIC_AUTH_TOKEN": "runtime-token"},
+		Env: map[string]string{
+			"NEW_PROVIDER_TOKEN":    "future-secret",
+			"ANBAN_API_KEY":         "montage-override",
+			"ANBAN_API_URL":         "https://montage.invalid",
+			"ANBAN_DEFAULT_PROJECT": "montage-project",
+			"ANTHROPIC_AUTH_TOKEN":  "montage-token",
+		},
+	}, nil, nil)
+	opts, err := runner.buildSDKOptions(context.Background())
+	if err != nil {
+		t.Fatalf("buildSDKOptions: %v", err)
+	}
+	got := claudecode.NewOptions(opts...).ExtraEnv
+	if got["NEW_PROVIDER_TOKEN"] != "future-secret" {
+		t.Fatalf("Montage env = %#v, want future provider key", got)
+	}
+	if got["ANBAN_API_KEY"] != "execution-jwt" || got["ANBAN_API_URL"] != "https://server.example.com" || got["ANBAN_DEFAULT_PROJECT"] != "project-1" {
+		t.Fatalf("Montage env overrode execution identity: %#v", got)
+	}
+	if got["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" {
+		t.Fatalf("Montage env overrode managed Claude runtime: %#v", got)
+	}
+}
+
 func TestRunnerOptionsInjectManagedMCPAndProjectIdentity(t *testing.T) {
 	t.Setenv("CLAUDE_PLUGIN_ROOT", "/anbanai")
 	runner := NewRunner(&Config{

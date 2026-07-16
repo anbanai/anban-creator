@@ -66,8 +66,8 @@ func TestMontageRuntimeManifestFilesAreWrittenWithoutSecrets(t *testing.T) {
 	task := &model.Task{Type: model.PlatformMontage}
 	opts := &ExecutionOptions{
 		Task: task,
-		MontageProviderEnv: map[string]string{
-			"FAL_KEY": "fal-secret",
+		MontageEnv: map[string]string{
+			"NEW_PROVIDER_TOKEN": "future-secret",
 		},
 		MontageToolPolicy: map[string]srvconfig.MontageToolCapabilityPolicy{
 			"video_generation": {Preferred: []string{"fal"}},
@@ -90,8 +90,26 @@ func TestMontageRuntimeManifestFilesAreWrittenWithoutSecrets(t *testing.T) {
 		t.Fatalf("montage-pipeline-defaults.json = %s, want configured defaults", defaults)
 	}
 	combined := policy + defaults
-	if strings.Contains(combined, "fal-secret") {
-		t.Fatalf("runtime manifests leaked provider secret: %s", combined)
+	if strings.Contains(combined, "future-secret") {
+		t.Fatalf("runtime manifests leaked environment secret: %s", combined)
+	}
+}
+
+func TestMontageEnvForTaskAcceptsFutureKeysAndSkipsEmptyValues(t *testing.T) {
+	opts := &ExecutionOptions{
+		Task: &model.Task{Type: model.PlatformMontage},
+		MontageEnv: map[string]string{
+			"NEW_PROVIDER_TOKEN": "future-secret",
+			"EMPTY_PROVIDER_KEY": "",
+		},
+	}
+
+	got := montageEnvForTask(opts)
+	if got["NEW_PROVIDER_TOKEN"] != "future-secret" {
+		t.Fatalf("env = %#v, want future provider key", got)
+	}
+	if _, ok := got["EMPTY_PROVIDER_KEY"]; ok {
+		t.Fatalf("env = %#v, want empty value omitted", got)
 	}
 }
 
@@ -164,6 +182,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
 		"provider_menu_summary",
+		"env_keys",
 		"delivery-manifest.json",
 		"final.mp4",
 		"submit_agent_feedback",
@@ -201,6 +220,9 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 			t.Fatalf("codex montage agent missing %q", want)
 		}
 	}
+	if strings.Contains(codexAgent, "provider_env") {
+		t.Fatal("codex montage agent must use env_keys without the legacy provider_env name")
+	}
 
 	reg := readRepoFile(t, filepath.Join(root, "codex", "install", "agents-registration.toml"))
 	for _, want := range []string{
@@ -232,6 +254,7 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
 		"provider_menu_summary",
 		"Secrets only arrive through environment variables",
+		"env_keys",
 		"delivery-manifest.json",
 		"third_party/OpenMontage",
 		"Do not call `create_video_generation_job`",
@@ -240,6 +263,9 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 		if !strings.Contains(canonical, want) {
 			t.Fatalf("montage skill missing %q", want)
 		}
+	}
+	if strings.Contains(canonical, "provider_env") {
+		t.Fatal("montage skill must use env_keys without the legacy provider_env name")
 	}
 }
 

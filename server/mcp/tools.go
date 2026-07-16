@@ -593,11 +593,11 @@ func buildMontageProfileBlock(ch *model.Project, task *model.Task) map[string]an
 	if task != nil && model.IsMontagePlatform(task.Type) {
 		input = task.MontageInput.Data()
 	}
-	providerEnv := map[string]bool{}
+	env := map[string]bool{}
 	toolPolicy := map[string]any{}
 	pipelineDefaults := map[string]any{}
 	if billSvc != nil && billSvc.config != nil {
-		providerEnv = billSvc.config.Montage.RedactedProviderEnv()
+		env = billSvc.config.Montage.RedactedEnv()
 		for key, value := range billSvc.config.Montage.ToolPolicy {
 			toolPolicy[key] = value
 		}
@@ -616,7 +616,7 @@ func buildMontageProfileBlock(ch *model.Project, task *model.Task) map[string]an
 		"output_dir":             "output/montage",
 		"required_artifacts":     []string{"final.mp4", "delivery-manifest.json"},
 		"artifact_roles":         []string{"final_video", "delivery_manifest", "source_manifest", "timeline", "subtitles", "audio", "run_log", "failure_diagnosis"},
-		"provider_env":           providerEnv,
+		"env":                    env,
 		"tool_policy":            toolPolicy,
 		"pipeline_defaults":      pipelineDefaults,
 		"runner_contract":        "Agent prepares montage-input.json and montage-project.json, runs the Montage adapter from $ANBAN_MONTAGE_SUBMODULE_PATH when set, otherwise third_party/OpenMontage, then registers task files by artifact role.",

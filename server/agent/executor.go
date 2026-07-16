@@ -352,10 +352,10 @@ type ExecutionOptions struct {
 	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
 	// AutoMemoryDirectory is the Claude Code-visible memory directory for this task.
 	AutoMemoryDirectory string
-	// Montage runtime configuration is only used for montage tasks. ProviderEnv
+	// Montage runtime configuration is only used for montage tasks. Env
 	// may contain secrets and must only be injected into the agent process env,
 	// never written to workspace files, MCP profile responses, or logs.
-	MontageProviderEnv      map[string]string
+	MontageEnv              map[string]string
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
 }
@@ -648,11 +648,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// Environment variables (auth tokens, API keys, etc.).
-	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
-	sdkOpts = append(sdkOpts, claudecode.WithEnvVar(MontageSubmoduleEnvName, montageSubmoduleRuntimePath(e.pluginDir)))
-	for key, value := range montageProviderEnvForTask(opts) {
+	for key, value := range montageEnvForTask(opts) {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
 	}
+	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
+	sdkOpts = append(sdkOpts, claudecode.WithEnvVar(MontageSubmoduleEnvName, montageSubmoduleRuntimePath(e.pluginDir)))
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
 	// ${ANBAN_API_KEY} for the Anban Creator MCP server.
@@ -1036,16 +1036,13 @@ func writeJSONFile(path string, value any) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-func montageProviderEnvForTask(opts *ExecutionOptions) map[string]string {
+func montageEnvForTask(opts *ExecutionOptions) map[string]string {
 	if opts == nil || opts.Task == nil || !model.IsMontagePlatform(opts.Task.Type) {
 		return nil
 	}
-	env := make(map[string]string, len(opts.MontageProviderEnv))
-	for key, value := range opts.MontageProviderEnv {
+	env := make(map[string]string, len(opts.MontageEnv))
+	for key, value := range opts.MontageEnv {
 		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		if !srvconfig.IsSupportedMontageProviderEnv(key) {
 			continue
 		}
 		env[key] = value

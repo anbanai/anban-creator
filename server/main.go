@@ -347,6 +347,7 @@ func main() {
 				ImageAPIConfig:          &cfg.ImageAPI,
 				MontageToolPolicy:       cfg.Montage.ToolPolicy,
 				MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
+				MontageEnv:              cfg.Montage.Env,
 				RuntimeEnv:              cfg.Claude.Env,
 			}, *log)
 			taskSvc.SetKubernetesDispatcher(kubeDispatcher)

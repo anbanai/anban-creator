@@ -53,7 +53,7 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 	if response == nil {
 		response = &BootstrapResponse{}
 	}
-	return &Config{
+	cfg := &Config{
 		ServerURL:           jobCfg.ServerURL,
 		APIKey:              response.ExecutionToken,
 		ExecutionID:         jobCfg.ExecutionID,
@@ -72,4 +72,8 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		MaxTurns:            response.MaxTurns,
 		ArtifactUploadMode:  ArtifactUploadDirect,
 	}
+	if response.TaskType == "montage" {
+		cfg.Env = response.Env
+	}
+	return cfg
 }

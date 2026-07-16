@@ -1130,9 +1130,9 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	oldBillSvc := billSvc
 	defer func() { billSvc = oldBillSvc }()
 	SetBillingServices(nil, nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{
-		ProviderEnv: map[string]string{
-			"FAL_KEY":        "fal-secret",
-			"RUNWAY_API_KEY": "",
+		Env: map[string]string{
+			"NEW_PROVIDER_TOKEN": "future-secret",
+			"RUNWAY_API_KEY":     "",
 		},
 		ToolPolicy: map[string]srvconfig.MontageToolCapabilityPolicy{
 			"video_generation": {Preferred: []string{"fal"}},
@@ -1219,12 +1219,12 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	if !ok || !strings.Contains(contract, "ANBAN_MONTAGE_SUBMODULE_PATH") {
 		t.Fatalf("runner_contract = %#v, want Montage runtime env path hint", montage["runner_contract"])
 	}
-	providerEnv, ok := montage["provider_env"].(map[string]bool)
+	env, ok := montage["env"].(map[string]bool)
 	if !ok {
-		t.Fatalf("provider_env = %#v, want redacted map", montage["provider_env"])
+		t.Fatalf("env = %#v, want redacted map", montage["env"])
 	}
-	if providerEnv["FAL_KEY"] != true || providerEnv["RUNWAY_API_KEY"] != false {
-		t.Fatalf("provider_env = %#v, want configured statuses", providerEnv)
+	if env["NEW_PROVIDER_TOKEN"] != true || env["RUNWAY_API_KEY"] != false {
+		t.Fatalf("env = %#v, want configured statuses", env)
 	}
 	toolPolicy, ok := montage["tool_policy"].(map[string]any)
 	if !ok {
@@ -1244,11 +1244,11 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	}
 	if strings.Contains(strings.Join([]string{
 		contract,
-		toJSONForTest(t, montage["provider_env"]),
+		toJSONForTest(t, montage["env"]),
 		toJSONForTest(t, montage["tool_policy"]),
 		toJSONForTest(t, montage["pipeline_defaults"]),
-	}, "\n"), "fal-secret") {
-		t.Fatalf("montage profile leaked provider secret: %#v", montage)
+	}, "\n"), "future-secret") {
+		t.Fatalf("montage profile leaked environment secret: %#v", montage)
 	}
 }
 
@@ -1258,7 +1258,7 @@ func TestBuildMontageProfileBlockReturnsEmptyObjectsForUnsetRuntimeConfig(t *tes
 	SetBillingServices(nil, nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{}})
 
 	block := buildMontageProfileBlock(&model.Project{Platform: model.PlatformMontage}, &model.Task{Type: model.PlatformMontage})
-	for _, key := range []string{"provider_env", "tool_policy", "pipeline_defaults"} {
+	for _, key := range []string{"env", "tool_policy", "pipeline_defaults"} {
 		data, err := json.Marshal(block[key])
 		if err != nil {
 			t.Fatalf("marshal %s: %v", key, err)

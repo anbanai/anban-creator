@@ -146,22 +146,34 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 	e := &DockerExecutor{
 		serverURL: "http://localhost:8080/",
 		claudeEnv: map[string]string{
-			"HOME": "/configured-home",
-			"PATH": "/configured-bin",
+			"HOME":                 "/configured-home",
+			"PATH":                 "/configured-bin",
+			"ANTHROPIC_AUTH_TOKEN": "runtime-token",
 		},
 	}
 
 	env := e.buildAgentEnv(&ExecutionOptions{
-		Task:               &model.Task{ID: "task-1", Type: model.PlatformMontage},
-		Project:            &model.Project{ID: "project-1"},
-		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
+		Task:    &model.Task{ID: "task-1", Type: model.PlatformMontage},
+		Project: &model.Project{ID: "project-1"},
+		MontageEnv: map[string]string{
+			"NEW_PROVIDER_TOKEN":    "future-secret",
+			"HOME":                  "/montage-home",
+			"PATH":                  "/montage-bin",
+			"ANBAN_API_URL":         "https://montage.invalid",
+			"ANBAN_DEFAULT_PROJECT": "montage-project",
+			MontageSubmoduleEnvName: "/montage/source",
+			"ANTHROPIC_AUTH_TOKEN":  "montage-token",
+		},
 	}, dockerRuntimeHome("/workspace/task-1"))
 
 	if !slices.Contains(env, "ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage") {
 		t.Fatalf("env = %#v, want Montage runtime path", env)
 	}
-	if !slices.Contains(env, "FAL_KEY=fal-secret") {
-		t.Fatalf("env = %#v, want Montage provider env", env)
+	if !slices.Contains(env, "NEW_PROVIDER_TOKEN=future-secret") {
+		t.Fatalf("env = %#v, want unrestricted Montage env", env)
+	}
+	if countEnvKey(env, "ANTHROPIC_AUTH_TOKEN") != 1 || !slices.Contains(env, "ANTHROPIC_AUTH_TOKEN=runtime-token") {
+		t.Fatalf("env = %#v, want managed Claude runtime token to take precedence", env)
 	}
 	if !slices.Contains(env, "HOME=/workspace/task-1/.anban-runtime-home") || slices.Contains(env, "HOME=/home/node") {
 		t.Fatalf("env = %#v, want task-scoped Docker HOME", env)
@@ -169,22 +181,31 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 	if countEnvKey(env, "HOME") != 1 || countEnvKey(env, "PATH") != 1 {
 		t.Fatalf("env = %#v, want exactly one managed HOME and PATH", env)
 	}
+	for key, want := range map[string]string{
+		"ANBAN_API_URL":         "http://localhost:8080/",
+		"ANBAN_DEFAULT_PROJECT": "project-1",
+		MontageSubmoduleEnvName: ContainerMontageSubmodulePath,
+	} {
+		if countEnvKey(env, key) != 1 || !slices.Contains(env, key+"="+want) {
+			t.Fatalf("env = %#v, want one managed %s=%s", env, key, want)
+		}
+	}
 	if !slices.Contains(env, "PATH="+ContainerRuntimePath) {
 		t.Fatalf("env = %#v, want Agent-Reach venv on managed PATH", env)
 	}
 
 }
 
-func TestDockerExecutorDoesNotExposeMontageProviderEnvToOtherTasks(t *testing.T) {
+func TestDockerExecutorDoesNotExposeMontageEnvToOtherTasks(t *testing.T) {
 	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
 
 	env := e.buildAgentEnv(&ExecutionOptions{
-		Task:               &model.Task{ID: "task-1", Type: model.PlatformArticle},
-		MontageProviderEnv: map[string]string{"FAL_KEY": "fal-secret"},
+		Task:       &model.Task{ID: "task-1", Type: model.PlatformArticle},
+		MontageEnv: map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
 	}, dockerRuntimeHome("/workspace"))
 
-	if slices.Contains(env, "FAL_KEY=fal-secret") {
-		t.Fatalf("env = %#v, non-Montage task must not receive Montage provider env", env)
+	if slices.Contains(env, "NEW_PROVIDER_TOKEN=future-secret") {
+		t.Fatalf("env = %#v, non-Montage task must not receive Montage env", env)
 	}
 }
 

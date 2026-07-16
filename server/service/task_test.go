@@ -1417,7 +1417,7 @@ func TestTaskServiceHandleExecutionPassesMontageRuntimeConfig(t *testing.T) {
 		TimeoutMinutes:         90,
 		ExecutionTargets:       []string{"cloud"},
 		DefaultExecutionTarget: "cloud",
-		ProviderEnv:            map[string]string{"FAL_KEY": "fal-secret"},
+		Env:                    map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
 		ToolPolicy: map[string]config.MontageToolCapabilityPolicy{
 			"video_generation": {Preferred: []string{"fal"}},
 		},
@@ -1432,8 +1432,8 @@ func TestTaskServiceHandleExecutionPassesMontageRuntimeConfig(t *testing.T) {
 	if exec.opts == nil {
 		t.Fatal("executor options were not captured")
 	}
-	if exec.opts.MontageProviderEnv["FAL_KEY"] != "fal-secret" {
-		t.Fatalf("MontageProviderEnv = %#v, want FAL_KEY", exec.opts.MontageProviderEnv)
+	if exec.opts.MontageEnv["NEW_PROVIDER_TOKEN"] != "future-secret" {
+		t.Fatalf("MontageEnv = %#v, want NEW_PROVIDER_TOKEN", exec.opts.MontageEnv)
 	}
 	if exec.opts.MontageToolPolicy["video_generation"].Preferred[0] != "fal" {
 		t.Fatalf("MontageToolPolicy = %#v, want video_generation preference", exec.opts.MontageToolPolicy)

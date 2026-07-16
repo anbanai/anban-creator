@@ -191,9 +191,10 @@ montage:
   default_execution_target: "cloud"
   # Montage 基础任务服务费，单位 credits；同时保持 credits.task_costs.montage 一致。
   credit_cost: 2000
-  # OpenMontage 官方工具环境变量。这里只写环境变量引用，不写明文密钥。
+  # OpenMontage 运行时环境变量。key 由上游工具定义，Anban 不维护固定白名单。
+  # 这里只写环境变量引用，不写明文密钥。
   # 这些值只会注入 montage 任务的 Agent/Claude SDK 进程，不会写入 MCP profile、日志或 task files。
-  provider_env:
+  env:
     # FAL：FLUX/Recraft 图片、Veo/Kling/MiniMax 等视频生成 provider。
     FAL_KEY: "${MONTAGE_FAL_KEY}"
     # Pexels：免费视频/图片素材搜索。

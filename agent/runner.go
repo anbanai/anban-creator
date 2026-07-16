@@ -178,12 +178,17 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 		claudecode.WithExtraArgs(map[string]*string{
 			"agent": &r.cfg.AgentFlag,
 		}),
-		claudecode.WithEnvVar("ANBAN_API_KEY", r.cfg.APIKey),
-		claudecode.WithEnvVar("ANBAN_API_URL", r.cfg.ServerURL),
 		claudecode.WithStderrCallback(func(line string) {
 			_ = r.reporter.ReportProgress(ctx, strings.TrimSpace(line))
 		}),
 	}
+	if r.cfg.TaskType == "montage" && len(r.cfg.Env) > 0 {
+		sdkOpts = append(sdkOpts, claudecode.WithEnv(r.cfg.Env))
+	}
+	sdkOpts = append(sdkOpts,
+		claudecode.WithEnvVar("ANBAN_API_KEY", r.cfg.APIKey),
+		claudecode.WithEnvVar("ANBAN_API_URL", r.cfg.ServerURL),
+	)
 	if r.cfg.ServerURL != "" && r.cfg.APIKey != "" {
 		sdkOpts = append(sdkOpts, serveragent.WithManagedMCPAccess(r.cfg.ServerURL, r.cfg.APIKey))
 	}
@@ -206,9 +211,6 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 		if value, ok := r.cfg.RuntimeEnv[key]; ok {
 			sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
 		}
-	}
-	for key, value := range montageProviderEnvFromProcess(r.cfg.TaskType) {
-		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
 	}
 	if r.cfg.Model != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithModel(r.cfg.Model))

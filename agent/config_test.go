@@ -141,25 +141,3 @@ func TestAgentCommandPropagatesRunErrors(t *testing.T) {
 		t.Fatalf("expected run error %v, got %v", want, err)
 	}
 }
-
-func TestMontageProviderEnvFromProcessFiltersOfficialKeys(t *testing.T) {
-	t.Setenv("FAL_KEY", "fal-secret")
-	t.Setenv("NOT_MONTAGE_KEY", "secret")
-
-	got := montageProviderEnvFromProcess("montage")
-	if got["FAL_KEY"] != "fal-secret" {
-		t.Fatalf("FAL_KEY = %q, want fal-secret", got["FAL_KEY"])
-	}
-	if _, ok := got["NOT_MONTAGE_KEY"]; ok {
-		t.Fatalf("unexpected unsupported Montage env in %#v", got)
-	}
-}
-
-func TestMontageProviderEnvFromProcessSkipsOtherTaskTypes(t *testing.T) {
-	t.Setenv("FAL_KEY", "fal-secret")
-
-	got := montageProviderEnvFromProcess("article")
-	if len(got) != 0 {
-		t.Fatalf("non-Montage task got provider env %#v", got)
-	}
-}
