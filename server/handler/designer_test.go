@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
@@ -82,7 +83,7 @@ func (*designerPendingUploadRepo) ReopenPendingUploadExpiration(context.Context,
 	return false, nil
 }
 
-func setupDesignerHandlerTest(t *testing.T) (*fiber.App, *DesignerHandler) {
+func setupDesignerHandlerTest(t *testing.T) (*fiber.App, *DesignerHandler, *gorm.DB) {
 	t.Helper()
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enabled := true
@@ -142,16 +143,17 @@ func setupDesignerHandlerTest(t *testing.T) (*fiber.App, *DesignerHandler) {
 			},
 		},
 	}
-	designerSvc := service.NewDesignerService(setupTaskHandlerTestDB(t), nil, nil, cfg, nil, &logger)
+	db := setupTaskHandlerTestDB(t)
+	designerSvc := service.NewDesignerService(db, nil, nil, cfg, nil, &logger)
 	handler := NewDesignerHandler(designerSvc, &logger)
 
 	app := fiber.New()
 	app.Get("/designer/providers", handler.GetProviders)
-	return app, handler
+	return app, handler, db
 }
 
 func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
-	app, _ := setupDesignerHandlerTest(t)
+	app, _, _ := setupDesignerHandlerTest(t)
 
 	resp, err := app.Test(httptest.NewRequest("GET", "/designer/providers", nil))
 	if err != nil {
@@ -217,7 +219,7 @@ func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
 }
 
 func TestDesignerGenerateRejectsInvalidReferenceWithGenericClientError(t *testing.T) {
-	_, h := setupDesignerHandlerTest(t)
+	_, h, _ := setupDesignerHandlerTest(t)
 	userID := uuid.NewString()
 	app := fiber.New()
 	app.Post("/designer/generate", func(c fiber.Ctx) error {
@@ -236,6 +238,36 @@ func TestDesignerGenerateRejectsInvalidReferenceWithGenericClientError(t *testin
 	}
 	if resp.StatusCode != fiber.StatusBadRequest || body.Msg != "designer reference is invalid or unavailable" || strings.Contains(body.Msg, "*") {
 		t.Fatalf("status=%d response=%#v; want generic reference rejection", resp.StatusCode, body)
+	}
+}
+
+func TestDesignerGenerateRedactsReferenceRepositoryFailure(t *testing.T) {
+	_, h, db := setupDesignerHandlerTest(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql DB: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close DB: %v", err)
+	}
+	userID := uuid.NewString()
+	app := fiber.New()
+	app.Post("/designer/generate", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Generate(c)
+	})
+
+	resp := postJSON(t, app, "/designer/generate", `{
+		"prompt":"edit","provider_id":"test-openai","quality":"medium","size":"1024x1024","n":1,
+		"reference_file_ids":["`+uuid.NewString()+`"]
+	}`)
+	defer resp.Body.Close()
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusInternalServerError || body.Msg != "failed to create generation" || strings.Contains(body.Msg, "database is closed") {
+		t.Fatalf("status=%d response=%#v; want redacted infrastructure failure", resp.StatusCode, body)
 	}
 }
 

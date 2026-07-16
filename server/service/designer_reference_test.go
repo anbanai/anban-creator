@@ -33,6 +33,18 @@ type designerReferenceStore struct {
 	readErr   error
 }
 
+type designerReferenceErrorRepository struct {
+	err error
+}
+
+func (r designerReferenceErrorRepository) Create(context.Context, *model.DesignerReference) error {
+	return r.err
+}
+
+func (r designerReferenceErrorRepository) FindByIDAndUserID(context.Context, string, string) (*model.DesignerReference, error) {
+	return nil, r.err
+}
+
 func (s *designerReferenceStore) Name() string { return "designer-reference-test" }
 func (s *designerReferenceStore) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
 	data, err := io.ReadAll(reader)
@@ -439,6 +451,43 @@ func TestDesignerCreateGenerationRejectsInvalidOrUnownedReferencesBeforeSideEffe
 				t.Fatalf("credit transaction count = %d, err=%v; want 0", transactionCount, err)
 			}
 		})
+	}
+}
+
+func TestDesignerCreateGenerationPropagatesReferenceRepositoryFailureBeforeSideEffects(t *testing.T) {
+	svc, repo, db := setupDesignerBillingTest(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 5000)
+	backendErr := errors.New("database connection sentinel")
+	svc.referenceRepo = designerReferenceErrorRepository{err: backendErr}
+	providerCalls := 0
+	svc.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
+		providerCalls++
+		return nil, errors.New("provider must not be created")
+	}
+
+	created, err := svc.CreateGenerationRecord(ctx, userID, DesignerGenerateRequest{
+		ProjectID: "default", Prompt: "edit", ProviderID: "gpt_image_2",
+		Quality: "medium", Size: "1024x1024", N: 1,
+		ReferenceFileIDs: []string{uuid.NewString()},
+	})
+	if created != nil || !errors.Is(err, backendErr) || errors.Is(err, ErrDesignerReferenceInvalid) {
+		t.Fatalf("CreateGenerationRecord() = %#v, %v; want wrapped infrastructure error", created, err)
+	}
+	if providerCalls != 0 {
+		t.Fatalf("provider created %d times after repository failure", providerCalls)
+	}
+	balance, balanceErr := svc.creditSvc.GetBalance(ctx, userID)
+	if balanceErr != nil || balance != 5000 {
+		t.Fatalf("credit balance = %d, err=%v; want unchanged 5000", balance, balanceErr)
+	}
+	var generationCount int64
+	if err := db.Model(&model.ImageGeneration{}).Count(&generationCount).Error; err != nil || generationCount != 0 {
+		t.Fatalf("generation count = %d, err=%v; want 0", generationCount, err)
+	}
+	var transactionCount int64
+	if err := db.Model(&model.CreditTransaction{}).Count(&transactionCount).Error; err != nil || transactionCount != 0 {
+		t.Fatalf("credit transaction count = %d, err=%v; want 0", transactionCount, err)
 	}
 }
 

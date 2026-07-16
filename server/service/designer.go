@@ -1421,10 +1421,13 @@ func (s *DesignerService) validateDesignerReferenceOwnership(ctx context.Context
 		}
 		seen[fileID] = struct{}{}
 		if _, err := s.referenceRepo.FindByIDAndUserID(ctx, fileID, userID); err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) && s.logger != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrDesignerReferenceInvalid
+			}
+			if s.logger != nil {
 				s.logger.Error().Err(err).Str("user_id", userID).Str("file_id", fileID).Msg("validate designer reference ownership failed")
 			}
-			return ErrDesignerReferenceInvalid
+			return fmt.Errorf("validate designer reference ownership: %w", err)
 		}
 	}
 	return nil

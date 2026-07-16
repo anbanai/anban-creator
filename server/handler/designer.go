@@ -84,8 +84,10 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrDesignerReferenceInvalid) {
 			return Error(c, fiber.StatusBadRequest, "designer reference is invalid or unavailable")
 		}
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("designer create generation record failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		if h.logger != nil {
+			h.logger.Error().Err(err).Str("user_id", userID).Msg("designer create generation record failed")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to create generation")
 	}
 
 	go h.svc.ExecuteGeneration(context.Background(), created.GenerationID)
