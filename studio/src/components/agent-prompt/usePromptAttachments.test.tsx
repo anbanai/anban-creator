@@ -140,6 +140,77 @@ describe('usePromptAttachments', () => {
     }
   })
 
+  it('updates attachment instructions and reports each attachment mutation', () => {
+    const inherited: InputAttachment = {
+      type: 'document',
+      key: 'tasks/task-1/input/brief.pdf',
+      file_name: 'brief.pdf',
+      content_type: 'application/pdf',
+      size: 30,
+      instruction: '旧说明',
+    }
+    const onAttachmentsChange = vi.fn()
+    const { result } = renderHook(() => usePromptAttachments({
+      adapter: { mode: 'local' },
+      policy,
+      initialAttachments: [inherited],
+      createId: idSequence(),
+      createObjectURL: (file) => `blob:${file.name}`,
+      revokeObjectURL: vi.fn(),
+      onAttachmentsChange,
+    }))
+
+    expect(onAttachmentsChange).not.toHaveBeenCalled()
+
+    act(() => result.current.updateInstruction('attachment-1', '新说明'))
+    expect(result.current.attachments[0].instruction).toBe('新说明')
+    expect(result.current.toInputAttachments()).toEqual([{ ...inherited, instruction: '新说明' }])
+    expect(onAttachmentsChange).toHaveBeenLastCalledWith(result.current.attachments)
+
+    act(() => result.current.addFiles([fileOf('local.png')]))
+    expect(onAttachmentsChange).toHaveBeenLastCalledWith(result.current.attachments)
+
+    act(() => result.current.remove('attachment-2'))
+    expect(onAttachmentsChange).toHaveBeenLastCalledWith(result.current.attachments)
+
+    act(() => result.current.clear())
+    expect(onAttachmentsChange).toHaveBeenLastCalledWith([])
+    expect(onAttachmentsChange).toHaveBeenCalledTimes(4)
+  })
+
+  it('keeps initial attachments mount-only while using the latest mutation callback', () => {
+    const firstCallback = vi.fn()
+    const secondCallback = vi.fn()
+    const initial: InputAttachment = {
+      type: 'text',
+      text: 'initial',
+      file_name: 'initial.txt',
+    }
+    const replacement: InputAttachment = {
+      type: 'text',
+      text: 'replacement',
+      file_name: 'replacement.txt',
+    }
+    const { result, rerender } = renderHook(
+      ({ callback, attachments }) => usePromptAttachments({
+        adapter: { mode: 'local' },
+        policy,
+        initialAttachments: attachments,
+        createId: idSequence(),
+        onAttachmentsChange: callback,
+      }),
+      { initialProps: { callback: firstCallback, attachments: [initial] } },
+    )
+
+    rerender({ callback: secondCallback, attachments: [replacement] })
+    expect(result.current.attachments).toHaveLength(1)
+    expect(result.current.attachments[0].fileName).toBe('initial.txt')
+
+    act(() => result.current.updateInstruction('attachment-1', 'latest'))
+    expect(firstCallback).not.toHaveBeenCalled()
+    expect(secondCallback).toHaveBeenCalledOnce()
+  })
+
   it('uploads direct files concurrently while preserving add order and progress', async () => {
     const first = fileOf('first.png')
     const second = fileOf('second.pdf', 'application/pdf')

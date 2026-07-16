@@ -21,6 +21,7 @@ export interface UsePromptAttachmentsOptions {
   adapter: PromptAttachmentAdapter
   policy: AttachmentAdmissionPolicy
   initialAttachments?: readonly InputAttachment[]
+  onAttachmentsChange?: (attachments: PromptAttachment[]) => void
   upload?: (options: UploadToOSSOptions) => Promise<UploadToOSSResult>
   createId?: () => string
   createObjectURL?: (file: File) => string
@@ -32,6 +33,7 @@ export interface PromptAttachmentsController {
   addFiles: (files: readonly File[]) => AttachmentAdmissionResult
   retry: (id: string) => void
   remove: (id: string) => void
+  updateInstruction: (id: string, instruction: string) => void
   clear: () => void
   uploading: boolean
   hasFailures: boolean
@@ -84,6 +86,7 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
   const uploadRef = useRef(options.upload ?? uploadToOSS)
   const adapterRef = useRef(options.adapter)
   const policyRef = useRef(options.policy)
+  const onAttachmentsChangeRef = useRef(options.onAttachmentsChange)
   const createObjectURLRef = useRef(options.createObjectURL ?? ((file: File) => URL.createObjectURL(file)))
   const revokeObjectURLRef = useRef(options.revokeObjectURL ?? ((url: string) => URL.revokeObjectURL(url)))
   const previewsRef = useRef(new Map<string, string>())
@@ -103,6 +106,7 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
   uploadRef.current = options.upload ?? uploadToOSS
   adapterRef.current = options.adapter
   policyRef.current = options.policy
+  onAttachmentsChangeRef.current = options.onAttachmentsChange
 
   const updateAttachments = useCallback((
     updater: (current: PromptAttachment[]) => PromptAttachment[],
@@ -112,6 +116,7 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     if (next === attachmentsRef.current) return
     attachmentsRef.current = next
     setAttachments(() => next)
+    onAttachmentsChangeRef.current?.(next)
   }, [])
 
   const revokePreview = useCallback((id: string) => {
@@ -271,6 +276,18 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     updateAttachments((current) => current.filter((item) => item.id !== id))
   }, [cancelUpload, revokePreview, updateAttachments])
 
+  const updateInstruction = useCallback((id: string, instruction: string) => {
+    const attachment = attachmentsRef.current.find((item) => item.id === id)
+    if (!attachment || attachment.instruction === instruction) return
+    const inherited = inheritedSourcesRef.current.get(id)
+    if (inherited) {
+      inheritedSourcesRef.current.set(id, { ...inherited, instruction })
+    }
+    updateAttachments((current) => current.map((item) => (
+      item.id === id ? { ...item, instruction } : item
+    )))
+  }, [updateAttachments])
+
   const clear = useCallback(() => {
     if (attachmentsRef.current.length === 0) return
     for (const id of [...activeUploadsRef.current.keys()]) cancelUpload(id)
@@ -305,6 +322,7 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     addFiles,
     retry,
     remove,
+    updateInstruction,
     clear,
     uploading: attachments.some((attachment) => attachment.status === 'uploading'),
     hasFailures: attachments.some((attachment) => attachment.status === 'failed'),
