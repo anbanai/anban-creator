@@ -350,7 +350,7 @@ describe('TasksPage Seednote reference materials', () => {
     })
   })
 
-  it('blocks Seednote creation while reference images are uploading', async () => {
+  it('guards native form submit until Seednote reference uploads finish', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
 
     let resolveUpload!: (value: unknown) => void
@@ -363,10 +363,25 @@ describe('TasksPage Seednote reference materials', () => {
     })
 
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+    const form = document.getElementById('task-create-form')
+    expect(form).toBeInstanceOf(HTMLFormElement)
+    fireEvent.submit(form!)
+    await act(async () => { await Promise.resolve() })
+    expect(api.tasks.create).not.toHaveBeenCalled()
+
     await act(async () => {
       resolveUpload({ uploadId: 'pending', key: 'uploads/pending/pending.png', publicUrl: '', contentType: 'image/png', size: 7 })
       await Promise.resolve()
     })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.submit(form!)
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      input_attachments: [expect.objectContaining({
+        upload_id: 'pending',
+        key: 'uploads/pending/pending.png',
+      })],
+    })))
   })
 
   it('keeps the ecommerce product-photo uploader isolated from Seednote references', async () => {

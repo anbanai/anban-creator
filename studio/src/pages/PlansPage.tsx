@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, type BaseSyntheticEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -379,6 +379,14 @@ export default function PlansPage() {
     }
   }
 
+  function handlePlanSubmit(event?: BaseSyntheticEvent) {
+    if (attachmentController.uploading || attachmentController.hasFailures) {
+      event?.preventDefault()
+      return
+    }
+    return form.handleSubmit(onSubmit)(event)
+  }
+
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const promptComposer = (
     <AgentPromptInput
@@ -392,7 +400,7 @@ export default function PlansPage() {
         }
         if (value.attachments !== promptAttachments) setPromptAttachments(value.attachments)
       }}
-      onSubmit={() => form.handleSubmit(onSubmit)()}
+      onSubmit={() => handlePlanSubmit()}
       attachmentController={attachmentController}
       attachmentPolicy={{ allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 }}
       placeholder="描述每次计划的创作方向、内容要求和素材使用方式..."
@@ -570,7 +578,7 @@ export default function PlansPage() {
             <DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
-            <form id="plan-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
+            <form id="plan-form" onSubmit={handlePlanSubmit} className="max-h-[60vh] space-y-4 overflow-y-auto">
               <FormField control={form.control} name="type" render={({ field }) => (
                 <FormItem>
                   <FormLabel>内容类型</FormLabel>

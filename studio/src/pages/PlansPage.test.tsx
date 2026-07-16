@@ -416,7 +416,7 @@ describe('PlansPage Seednote reference snapshots', () => {
     }))
   })
 
-  it('disables plan save while reference images are uploading', async () => {
+  it('guards native form submit until plan reference uploads finish', async () => {
     window.history.pushState({}, '', `/plans?create=true&type=seednote&project_id=${seednoteProject.id}&intent=schedule`)
     let resolveUpload!: (value: unknown) => void
     uploadToOSSMock.mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve }))
@@ -428,10 +428,25 @@ describe('PlansPage Seednote reference snapshots', () => {
     })
 
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+    const form = document.getElementById('plan-form')
+    expect(form).toBeInstanceOf(HTMLFormElement)
+    fireEvent.submit(form!)
+    await act(async () => { await Promise.resolve() })
+    expect(api.plans.create).not.toHaveBeenCalled()
+
     await act(async () => {
       resolveUpload({ uploadId: 'pending', key: 'uploads/pending/pending.png', publicUrl: '', contentType: 'image/png', size: 7 })
       await Promise.resolve()
     })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.submit(form!)
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      input_attachments: [expect.objectContaining({
+        upload_id: 'pending',
+        key: 'uploads/pending/pending.png',
+      })],
+    })))
   })
 
   it('does not dirty hydrated attachments but marks instruction edits dirty', async () => {

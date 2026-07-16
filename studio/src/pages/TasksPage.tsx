@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, type BaseSyntheticEvent } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -462,6 +462,14 @@ export default function TasksPage() {
     }))
   }
 
+  function handleCreateSubmit(event?: BaseSyntheticEvent) {
+    if (attachmentController.uploading || attachmentController.hasFailures) {
+      event?.preventDefault()
+      return
+    }
+    return form.handleSubmit(onSubmit)(event)
+  }
+
   function toggleTaskSelection(taskId: string) {
     setSelectedTaskIds((prev) =>
       prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId],
@@ -548,7 +556,7 @@ export default function TasksPage() {
         }
         setPromptAttachments(value.attachments)
       }}
-      onSubmit={() => form.handleSubmit(onSubmit)()}
+      onSubmit={() => handleCreateSubmit()}
       attachmentController={attachmentController}
       attachmentPolicy={{ allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 }}
       placeholder="描述创作目标、内容要求和素材使用方式..."
@@ -890,7 +898,7 @@ export default function TasksPage() {
             </p>
           </DialogHeader>
           <Form {...form}>
-            <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            <form id="task-create-form" onSubmit={handleCreateSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
               <div className="rounded-lg border border-border bg-muted/30 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
