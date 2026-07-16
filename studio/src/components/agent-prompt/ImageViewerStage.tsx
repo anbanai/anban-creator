@@ -117,7 +117,7 @@ export function ImageViewerStage({
         </IconButton>
         <Slider
           aria-label="缩放比例"
-          value={zoom}
+          value={[zoom]}
           min={MIN_ZOOM}
           max={MAX_ZOOM}
           step={ZOOM_STEP}

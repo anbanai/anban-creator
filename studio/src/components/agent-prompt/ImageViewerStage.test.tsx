@@ -54,6 +54,8 @@ describe('ImageViewerStage', () => {
     const slider = screen.getByRole('group', { name: '缩放比例' })
 
     await waitFor(() => expect(slider.querySelector('[data-slot="slider-thumb"]')).toBeInTheDocument())
+    expect(slider.querySelectorAll('[data-slot="slider-thumb"]')).toHaveLength(1)
+    expect(slider.querySelectorAll('input')).toHaveLength(1)
     const thumb = slider.querySelector('[data-slot="slider-thumb"]') as HTMLElement
     for (let index = 0; index < 6; index += 1) fireEvent.keyDown(thumb, { key: 'ArrowUp' })
     expect(screen.getByText('250%')).toBeInTheDocument()
