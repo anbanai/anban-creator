@@ -72,7 +72,7 @@ describe('designer API normalization', () => {
     const controller = new AbortController()
     const { designerApi } = await import('./designer')
 
-    await designerApi.generate({ project_id: 'default', prompt: 'test' }, controller.signal)
+    await designerApi.generate({ project_id: 'default', prompt: 'test', provider: 'openai' }, controller.signal)
     await designerApi.registerReference({ upload_id: 'upload-1', key: 'uploads/finalized/reference.png' }, controller.signal)
     await designerApi.uploadReferenceFromUrl('https://example.com/source.png', controller.signal)
     await designerApi.getGeneration('generation-1', controller.signal)
