@@ -10,10 +10,19 @@ const { errorMock } = vi.hoisted(() => ({ errorMock: vi.fn() }))
 vi.mock('sonner', () => ({ toast: { error: errorMock, success: vi.fn() } }))
 
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
+const resolveDownloadUrlMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/direct-upload', async () => {
   const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
   return { ...actual, uploadToOSS: uploadToOSSMock }
+})
+
+vi.mock('@/lib/api/uploads', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api/uploads')>('@/lib/api/uploads')
+  return {
+    ...actual,
+    uploadsApi: { ...actual.uploadsApi, resolveDownloadUrl: resolveDownloadUrlMock },
+  }
 })
 
 vi.mock('@/lib/api', async () => {
@@ -349,6 +358,10 @@ describe('PlansPage Seednote reference snapshots', () => {
     vi.mocked(api.plans.create).mockResolvedValue(seednotePlan)
     vi.mocked(api.plans.update).mockResolvedValue(seednotePlan)
     vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+    resolveDownloadUrlMock.mockResolvedValue({
+      url: 'https://cdn.example.com/signed-plan-attachment.png',
+      expires_at: '2026-07-17T12:00:00Z',
+    })
   })
 
   it('creates a Seednote plan with the current reference snapshot', async () => {
@@ -465,5 +478,71 @@ describe('PlansPage Seednote reference snapshots', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(await screen.findByRole('alertdialog', { name: '放弃编辑？' })).toBeInTheDocument()
+  })
+
+  it('keeps legacy owner keys for preview but normalizes touched snapshots before update', async () => {
+    const legacyPlan = {
+      ...seednotePlan,
+      input_attachments: [
+        {
+          type: 'image',
+          url: '/api/v1/files/plans/seednote-plan-1/input/legacy.png',
+          key: 'plans/seednote-plan-1/input/legacy.png',
+          file_name: 'legacy.png',
+          content_type: 'image/png',
+          size: 20,
+          instruction: '保留原图',
+        },
+        {
+          type: 'document',
+          key: 'plans/seednote-plan-1/input/key-only.pdf',
+          file_name: 'key-only.pdf',
+          content_type: 'application/pdf',
+          size: 30,
+        },
+      ],
+    } as Plan
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [legacyPlan], total: 1 })
+    vi.mocked(api.plans.update).mockResolvedValue(legacyPlan)
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '预览 legacy.png' }))
+    await waitFor(() => expect(resolveDownloadUrlMock).toHaveBeenCalledWith({
+      key: 'plans/seednote-plan-1/input/legacy.png',
+      owner_type: 'plan',
+      owner_id: 'seednote-plan-1',
+    }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭附件预览' }))
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.plans.update).mock.calls[0][1]).not.toHaveProperty('input_attachments')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑计划' })).not.toBeInTheDocument())
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const editedDialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    fireEvent.click(within(editedDialog).getByRole('button', { name: '编辑 legacy.png 的附件说明' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), {
+      target: { value: '使用新版说明' },
+    })
+    fireEvent.click(within(editedDialog).getByRole('button', { name: '更新' }))
+    expect(await within(editedDialog).findByText('附件 key-only.pdf 缺少可复用的内部文件地址，请删除后重新上传')).toBeInTheDocument()
+    expect(api.plans.update).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(within(editedDialog).getByRole('button', { name: '删除 key-only.pdf' }))
+    fireEvent.click(within(editedDialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.plans.update).mock.calls[1][1]).toEqual(expect.objectContaining({
+      input_attachments: [{
+        type: 'image',
+        url: '/api/v1/files/plans/seednote-plan-1/input/legacy.png',
+        file_name: 'legacy.png',
+        content_type: 'image/png',
+        size: 20,
+        instruction: '使用新版说明',
+      }],
+    }))
   })
 })

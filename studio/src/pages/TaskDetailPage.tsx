@@ -40,6 +40,7 @@ import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from
 import { isVideoCreator, isVideoEditor, isVideoPlatform } from '@/lib/video-platforms'
 import { formatCreditDescription } from '@/lib/credit-display'
 import { taskFailureMessage } from '@/lib/studio-ux'
+import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 
 function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): string | null {
   const metadata = tx.metadata
@@ -89,46 +90,6 @@ interface CloneDialogSnapshot {
   prompt: string
   attachments: InputAttachment[]
   project: ProjectContextProject | null
-}
-
-function isInternalAttachmentURL(url: string) {
-  return url.startsWith('/api/v1/files/') || url.startsWith('/files/')
-}
-
-function prepareCloneAttachments(attachments: InputAttachment[]): {
-  attachments?: InputAttachment[]
-  error?: string
-} {
-  const prepared: InputAttachment[] = []
-  for (const attachment of attachments) {
-    const name = attachment.file_name || '未命名附件'
-    const hasUploadId = Boolean(attachment.upload_id)
-    const hasKey = Boolean(attachment.key)
-    const url = attachment.url?.trim() || ''
-
-    if (hasUploadId && !hasKey) {
-      return { error: `附件 ${name} 的上传信息不完整，请删除后重新上传` }
-    }
-    if (!hasUploadId && hasKey) {
-      if (!url) {
-        return { error: `附件 ${name} 缺少可复用的内部文件地址，请删除后重新上传` }
-      }
-      if (!isInternalAttachmentURL(url)) {
-        return { error: `附件 ${name} 使用外部地址，无法安全克隆，请删除后重新上传` }
-      }
-      const { key: _derivedKey, ...legacyURLAttachment } = attachment
-      prepared.push(legacyURLAttachment)
-      continue
-    }
-    if (url && !isInternalAttachmentURL(url)) {
-      return { error: `附件 ${name} 使用外部地址，无法安全克隆，请删除后重新上传` }
-    }
-    if (!hasUploadId && !url && !attachment.text) {
-      return { error: `附件 ${name} 缺少可复用的文件来源，请删除后重新上传` }
-    }
-    prepared.push(attachment)
-  }
-  return { attachments: prepared }
 }
 
 function ResumeTaskDialog({
@@ -242,7 +203,7 @@ function CloneTaskDialog({
 
   async function handleSubmit() {
     setValidationError(undefined)
-    const prepared = prepareCloneAttachments(attachmentController.toInputAttachments())
+    const prepared = prepareReusableInputAttachments(attachmentController.toInputAttachments())
     if (prepared.error) {
       setValidationError(prepared.error)
       throw new Error(prepared.error)

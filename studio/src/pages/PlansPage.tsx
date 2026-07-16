@@ -45,6 +45,7 @@ import { cn } from '@/lib/utils'
 import { parseCreationIntent } from '@/lib/command-center'
 import { taskCostFor } from '@/lib/pricing'
 import type { PromptAttachment } from '@/types/input-attachment'
+import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -86,6 +87,7 @@ export default function PlansPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
+  const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
   const highlightedPlanId = searchParams.get('highlight') || ''
@@ -116,6 +118,7 @@ export default function PlansPage() {
     attachments: promptAttachments,
     onAttachmentsChange: (next) => {
       setPromptAttachments(next)
+      setAttachmentSubmitError('')
       if (attachmentHydratingRef.current) return
       attachmentsTouchedRef.current = true
       const pendingAttachments = next.filter((attachment) => attachment.status !== 'uploaded').map((attachment) => ({
@@ -274,6 +277,7 @@ export default function PlansPage() {
       ? createIntent.type
       : 'seednote'
     setEditingPlan(null)
+    setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
     attachmentController.clear()
@@ -304,6 +308,7 @@ export default function PlansPage() {
 
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
+    setAttachmentSubmitError('')
     form.reset(planToFormValues(plan))
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -324,6 +329,7 @@ export default function PlansPage() {
     setModalOpen(false)
     setShowDirtyDialog(false)
     setEditingPlan(null)
+    setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
     attachmentController.clear()
@@ -349,9 +355,18 @@ export default function PlansPage() {
     // unchanged, "" = clear to system default. Always send it so explicit
     // "system default" selection actually clears the previously saved value.
     // For create (POST), "" is also valid (means system default).
-    const inputAttachments = editingPlan && !attachmentsTouchedRef.current
+    let inputAttachments = editingPlan && !attachmentsTouchedRef.current
       ? undefined
       : values.input_attachments
+    if (inputAttachments !== undefined) {
+      const prepared = prepareReusableInputAttachments(inputAttachments, { allowExternalURLs: true })
+      if (prepared.error) {
+        setAttachmentSubmitError(prepared.error)
+        return
+      }
+      inputAttachments = prepared.attachments ?? []
+    }
+    setAttachmentSubmitError('')
 
     const payload: CreatePlanRequest | UpdatePlanRequest = {
       type: values.type,
@@ -389,7 +404,8 @@ export default function PlansPage() {
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const promptComposer = (
-    <AgentPromptInput
+    <>
+      <AgentPromptInput
       value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
       onChange={(value) => {
         form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
@@ -427,7 +443,11 @@ export default function PlansPage() {
           }}
         />
       )}
-    />
+      />
+      {attachmentSubmitError ? (
+        <p role="alert" className="text-sm text-destructive">{attachmentSubmitError}</p>
+      ) : null}
+    </>
   )
 
   return (
