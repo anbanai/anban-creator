@@ -184,3 +184,50 @@ func TestValidateInputAttachmentsRejectsInvalidMetadataAndURL(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateInputAttachmentsRejectsTypeLimitsAndCrossTenantUpload(t *testing.T) {
+	tests := []struct {
+		name       string
+		attachment model.EntryAttachment
+		userID     string
+		pending    service.PendingUploadRepository
+		wantErr    string
+	}{
+		{
+			name:       "media over 50 MiB",
+			attachment: model.EntryAttachment{Type: "video", URL: "/api/v1/files/demo.mp4", FileName: "demo.mp4", ContentType: "video/mp4", Size: 50*1024*1024 + 1},
+			userID:     "user-1", wantErr: "50 MB limit",
+		},
+		{
+			name:       "document over 25 MiB",
+			attachment: model.EntryAttachment{Type: "document", URL: "/api/v1/files/brief.pdf", FileName: "brief.pdf", ContentType: "application/pdf", Size: 25*1024*1024 + 1},
+			userID:     "user-1", wantErr: "25 MB limit",
+		},
+		{
+			name:       "text over 25 MiB",
+			attachment: model.EntryAttachment{Type: "text", URL: "/api/v1/files/notes.txt", FileName: "notes.txt", ContentType: "text/plain", Size: 25*1024*1024 + 1},
+			userID:     "user-1", wantErr: "25 MB limit",
+		},
+		{
+			name:       "cross tenant pending upload",
+			attachment: model.EntryAttachment{UploadID: "upload-1", Key: "uploads/pending/owner/upload-1/product.png"},
+			userID:     "other-user",
+			pending: &aiEntryPendingRepo{upload: &model.PendingUpload{
+				ID: "upload-1", UserID: "owner", Purpose: service.DirectUploadPurposeAIEntryAttachment,
+				Key: "uploads/pending/owner/upload-1/product.png", FileName: "product.png", ContentType: "image/png", Size: 1024,
+				Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+			}},
+			wantErr: "pending upload access denied",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateInputAttachments(context.Background(), nil, tt.pending, tt.userID, []model.EntryAttachment{tt.attachment},
+				InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: allAgentAttachmentTypes})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}

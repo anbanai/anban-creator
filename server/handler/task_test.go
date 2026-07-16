@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -1751,7 +1752,32 @@ func TestCreateTaskAcceptsSeednoteInputAttachments(t *testing.T) {
 	}
 }
 
-func TestCreateTaskRejectsNonImageSeednoteAttachment(t *testing.T) {
+func TestCreateTaskAcceptsAllAgentAttachmentTypes(t *testing.T) {
+	tests := []struct {
+		name, typ, fileName, contentType string
+	}{
+		{"image", "image", "product.png", "image/png"},
+		{"audio", "audio", "voice.mp3", "audio/mpeg"},
+		{"video", "video", "demo.mp4", "video/mp4"},
+		{"document", "document", "brief.pdf", "application/pdf"},
+		{"text", "text", "notes.txt", "text/plain"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, _, _, _, projectID := setupSeednoteTaskCreateHandler(t)
+			body := fmt.Sprintf(`{"project_id":%q,"prompt":"test","input_attachments":[{"type":%q,"url":%q,"file_name":%q,"content_type":%q}]}`,
+				projectID, tt.typ, "/api/v1/files/"+tt.fileName, tt.fileName, tt.contentType)
+			resp := postJSON(t, app, "/tasks", body)
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusOK {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 200: %s", resp.StatusCode, raw)
+			}
+		})
+	}
+}
+
+func TestCreateTaskAcceptsNonImageSeednoteAttachment(t *testing.T) {
 	app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
 	resp := postJSON(t, app, "/tasks", `{
 		"project_id":"`+projectID+`",
@@ -1764,15 +1790,15 @@ func TestCreateTaskRejectsNonImageSeednoteAttachment(t *testing.T) {
 		}]
 	}`)
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusBadRequest {
+	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
 	if err != nil {
 		t.Fatalf("find tasks: %v", err)
 	}
-	if len(tasks) != 0 {
-		t.Fatalf("tasks = %#v, want none", tasks)
+	if len(tasks) != 1 || len(tasks[0].InputAttachments.Data()) != 1 || tasks[0].InputAttachments.Data()[0].Type != "video" {
+		t.Fatalf("tasks = %#v, want one video attachment", tasks)
 	}
 }

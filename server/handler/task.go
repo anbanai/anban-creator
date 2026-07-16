@@ -218,7 +218,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
 		MaxCount:     16,
-		AllowedTypes: map[string]bool{"image": true},
+		AllowedTypes: allAgentAttachmentTypes,
 	})
 	if err != nil {
 		return respondInputAttachmentError(c, h.logger, err)

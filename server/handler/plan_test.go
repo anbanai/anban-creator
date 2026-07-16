@@ -578,7 +578,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		return h.Update(c)
 	})
 
-	invalidBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"}]}`
+	invalidBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"video/mp4"}]}`
 	invalidReq := httptest.NewRequest("POST", "/plans", strings.NewReader(invalidBody))
 	invalidReq.Header.Set("Content-Type", "application/json")
 	invalidResp, err := app.Test(invalidReq)
@@ -589,7 +589,12 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		t.Fatalf("invalid create status = %d, want 400", invalidResp.StatusCode)
 	}
 
-	createBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png","instruction":"  聚焦包装正面  "}]}`
+	createBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[` +
+		`{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png","instruction":"  聚焦包装正面  "},` +
+		`{"type":"audio","url":"/api/v1/files/voice.mp3","file_name":"voice.mp3","content_type":"audio/mpeg"},` +
+		`{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4"},` +
+		`{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"},` +
+		`{"type":"text","url":"/api/v1/files/notes.txt","file_name":"notes.txt","content_type":"text/plain"}]}`
 	createReq := httptest.NewRequest("POST", "/plans", strings.NewReader(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createResp, err := app.Test(createReq)
@@ -610,8 +615,8 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}
 	planID := plans[0].ID
 	got := plans[0].InputAttachments.Data()
-	if len(got) != 1 || got[0].Instruction != "聚焦包装正面" {
-		t.Fatalf("created attachments = %#v, want normalized image", got)
+	if len(got) != 5 || got[0].Instruction != "聚焦包装正面" {
+		t.Fatalf("created attachments = %#v, want all five normalized types", got)
 	}
 
 	omitReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"prompt":"updated"}`))
@@ -627,8 +632,8 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find retained plan: %v", err)
 	}
-	if got := retained.InputAttachments.Data(); len(got) != 1 || got[0].Instruction != "聚焦包装正面" {
-		t.Fatalf("attachments after omitted update = %#v, want retained image", got)
+	if got := retained.InputAttachments.Data(); len(got) != 5 || got[0].Instruction != "聚焦包装正面" {
+		t.Fatalf("attachments after omitted update = %#v, want retained attachments", got)
 	}
 
 	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"input_attachments":[]}`))

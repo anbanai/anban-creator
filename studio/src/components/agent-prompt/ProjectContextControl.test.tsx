@@ -114,7 +114,7 @@ describe('ProjectContextControl', () => {
     expect(trigger).toBeDisabled()
     expect(trigger).toHaveTextContent('加载项目...')
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute('aria-busy', 'true')
-    expect(screen.getByRole('status')).toHaveTextContent('正在加载项目')
+    expect(screen.getByText('正在加载项目')).toBeInTheDocument()
   })
 
   it('keeps object selection stable while projects rerender with the popup open', async () => {

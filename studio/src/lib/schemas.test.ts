@@ -204,7 +204,7 @@ describe('createTaskSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('rejects non-image Seednote reference materials', () => {
+  it('accepts non-image Seednote attachments', () => {
     const result = createTaskSchema.safeParse({
       project_id: 'seednote-1',
       type: 'seednote',
@@ -212,7 +212,7 @@ describe('createTaskSchema', () => {
       input_attachments: [{ type: 'document', url: '/brief.pdf' }],
     })
 
-    expect(result.success).toBe(false)
+    expect(result.success).toBe(true)
   })
 
   it('rejects a reference instruction over 1000 Unicode code points', () => {
@@ -415,7 +415,7 @@ describe('planSchema', () => {
     expect(result.success).toBe(true)
   })
 
-  it('rejects more than 16 references and non-image Seednote plan materials', () => {
+  it('rejects more than 16 attachments and accepts non-image Seednote plan materials', () => {
     expect(planSchema.safeParse({
       type: 'seednote',
       cron_expr: '0 9 * * 1',
@@ -429,7 +429,7 @@ describe('planSchema', () => {
       type: 'seednote',
       cron_expr: '0 9 * * 1',
       input_attachments: [{ type: 'document', url: '/brief.pdf' }],
-    }).success).toBe(false)
+    }).success).toBe(true)
   })
 
   it('accepts valid plan data', () => {
