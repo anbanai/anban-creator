@@ -1,5 +1,18 @@
-import { useEffect, type RefObject } from 'react'
-import { AlertTriangle, Copy, Pause, Play, ReceiptText, RefreshCw, ScrollText } from 'lucide-react'
+import { useEffect, type ReactNode, type RefObject } from 'react'
+import {
+  AlertTriangle,
+  CalendarClock,
+  Copy,
+  FolderKanban,
+  Images,
+  Pause,
+  Play,
+  ReceiptText,
+  RefreshCw,
+  ScrollText,
+  Settings2,
+  type LucideIcon,
+} from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import ReferenceUsageSummary from '@/components/tasks/ReferenceUsageSummary'
@@ -66,6 +79,43 @@ interface TaskLogDetailsProps {
   logContainerRef: RefObject<HTMLDivElement | null>
 }
 
+interface TaskDetailsSectionProps {
+  label: string
+  title: string
+  icon: LucideIcon
+  children: ReactNode
+}
+
+function TaskDetailsSection({ label, title, icon: Icon, children }: TaskDetailsSectionProps) {
+  return (
+    <section aria-label={label} className="rounded-lg border border-border bg-card/60 p-4">
+      <div className="mb-4 flex items-center gap-2">
+        <span className="rounded-md bg-primary/10 p-2 text-primary">
+          <Icon aria-hidden="true" />
+        </span>
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function DetailRows({ rows }: { rows: Array<[string, string]> }) {
+  return (
+    <dl className="flex flex-col">
+      {rows.map(([label, value]) => (
+        <div
+          key={label}
+          className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 border-b border-border py-3 first:pt-0 last:border-b-0 last:pb-0"
+        >
+          <dt className="text-xs text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 break-words text-sm text-foreground">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 function TaskOverviewDetails({
   task,
   project,
@@ -77,39 +127,41 @@ function TaskOverviewDetails({
   const projectName = hasSnapshot
     ? task.project_snapshot?.project_name || '—'
     : project?.name || '—'
-  const rows = [
+  const timingRows: Array<[string, string]> = [
     ['创建时间', formatFullDateTimeCN(task.created_at)],
     ['开始时间', formatFullDateTimeCN(task.started_at)],
     ['完成时间', formatFullDateTimeCN(task.completed_at)],
     ['来源', task.plan_id ? '计划任务' : '手动创建'],
-    ['项目', projectName],
   ]
 
   return (
     <div className="flex flex-col gap-4">
-      <dl className="flex flex-col border-y border-border">
-        {rows.map(([label, value]) => (
-          <div
-            key={label}
-            className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 border-b border-border py-3 last:border-b-0"
-          >
-            <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd className="min-w-0 break-words text-sm text-foreground">{value}</dd>
+      <TaskDetailsSection
+        label="任务时间与来源"
+        title="任务时间与来源"
+        icon={CalendarClock}
+      >
+        <DetailRows rows={timingRows} />
+      </TaskDetailsSection>
+      <TaskDetailsSection label="项目与积分" title="项目与积分" icon={FolderKanban}>
+        <div className="flex flex-col gap-3">
+          <DetailRows rows={[['项目', projectName]]} />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="text-xs text-muted-foreground">积分消耗</p>
+              <p className="text-sm font-medium tabular-nums">
+                {netConsumedCredits.toLocaleString()}
+              </p>
+            </div>
+            {showCreditDetails ? (
+              <Button size="sm" variant="ghost" onClick={onOpenCreditDetails}>
+                <ReceiptText data-icon="inline-start" />
+                查看明细
+              </Button>
+            ) : null}
           </div>
-        ))}
-      </dl>
-      <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
-        <div className="flex flex-col gap-1">
-          <p className="text-xs text-muted-foreground">积分消耗</p>
-          <p className="text-sm font-medium tabular-nums">{netConsumedCredits.toLocaleString()}</p>
         </div>
-        {showCreditDetails ? (
-          <Button size="sm" variant="ghost" onClick={onOpenCreditDetails}>
-            <ReceiptText data-icon="inline-start" />
-            查看明细
-          </Button>
-        ) : null}
-      </div>
+      </TaskDetailsSection>
     </div>
   )
 }
@@ -189,10 +241,10 @@ function TaskLogDetails({
 
       <div
         ref={logContainerRef}
-        className="min-h-40 flex-1 overflow-y-auto border-y border-border py-3"
+        className="min-h-28 flex-1 overflow-y-auto rounded-md bg-muted/30 p-3"
       >
         {logs.length === 0 ? (
-          <Empty className="min-h-40 border-0 p-4">
+          <Empty className="min-h-28 border-0 p-3">
             <EmptyHeader>
               <EmptyMedia variant="icon"><ScrollText /></EmptyMedia>
               <EmptyTitle>等待输出中...</EmptyTitle>
@@ -279,27 +331,33 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
             />
           </TabsContent>
           <TabsContent value="configuration" className="min-h-0 overflow-y-auto p-4">
-            <TaskConfigurationDetails task={props.task} project={props.project} />
+            <TaskDetailsSection label="创作配置详情" title="创作配置" icon={Settings2}>
+              <TaskConfigurationDetails task={props.task} project={props.project} />
+            </TaskDetailsSection>
           </TabsContent>
           <TabsContent value="materials" className="min-h-0 overflow-y-auto p-4">
-            <ErrorBoundary
-              key={`task-details-materials-${props.task.id}`}
-              fallback={<CompactMaterialError />}
-            >
-              <ReferenceUsageSummary variant="compact" task={props.task} files={props.files} />
-            </ErrorBoundary>
+            <TaskDetailsSection label="参考素材详情" title="参考素材" icon={Images}>
+              <ErrorBoundary
+                key={`task-details-materials-${props.task.id}`}
+                fallback={<CompactMaterialError />}
+              >
+                <ReferenceUsageSummary variant="compact" task={props.task} files={props.files} />
+              </ErrorBoundary>
+            </TaskDetailsSection>
           </TabsContent>
           <TabsContent value="logs" className="min-h-0 overflow-y-auto p-4">
-            <TaskLogDetails
-              logs={props.logs}
-              logMarkdown={logMarkdown}
-              sseError={props.sseError}
-              autoScrollLogs={props.autoScrollLogs}
-              onToggleAutoScroll={props.onToggleAutoScroll}
-              onCopyLogs={props.onCopyLogs}
-              onReconnectLogs={props.onReconnectLogs}
-              logContainerRef={props.logContainerRef}
-            />
+            <TaskDetailsSection label="执行动态" title="执行动态" icon={ScrollText}>
+              <TaskLogDetails
+                logs={props.logs}
+                logMarkdown={logMarkdown}
+                sseError={props.sseError}
+                autoScrollLogs={props.autoScrollLogs}
+                onToggleAutoScroll={props.onToggleAutoScroll}
+                onCopyLogs={props.onCopyLogs}
+                onReconnectLogs={props.onReconnectLogs}
+                logContainerRef={props.logContainerRef}
+              />
+            </TaskDetailsSection>
           </TabsContent>
         </Tabs>
       </SheetContent>

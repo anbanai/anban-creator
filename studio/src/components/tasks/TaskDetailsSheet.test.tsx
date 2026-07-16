@@ -144,6 +144,46 @@ describe('TaskDetailsSheet', () => {
     expect(props.onOpenCreditDetails).toHaveBeenCalledTimes(1)
   })
 
+  it('groups Overview into timing and project-credit surfaces', () => {
+    render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
+
+    expect(screen.getByRole('region', { name: '任务时间与来源' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '项目与积分' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看明细' })).toBeInTheDocument()
+  })
+
+  it('places configuration, materials, and logs in named grouped surfaces', () => {
+    render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
+
+    fireEvent.click(screen.getByRole('tab', { name: '配置' }))
+    expect(screen.getByRole('region', { name: '创作配置详情' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '素材' }))
+    expect(screen.getByRole('region', { name: '参考素材详情' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+    expect(screen.getByRole('region', { name: '执行动态' })).toBeInTheDocument()
+  })
+
+  it('keeps the empty log surface compact', () => {
+    const props = createSheetProps({ logs: [] })
+    render(<ControlledTaskDetailsSheet {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+
+    const logRegion = screen.getByRole('region', { name: '执行动态' })
+    const emptyState = screen.getByText('等待输出中...').closest('[data-slot="empty"]')
+
+    expect(logRegion).toHaveClass('rounded-lg', 'border')
+    expect(props.logContainerRef.current).toHaveClass(
+      'min-h-28',
+      'rounded-md',
+      'bg-muted/30',
+      'p-3',
+    )
+    expect(emptyState).toHaveClass('min-h-28', 'border-0', 'p-3')
+    expect(screen.getByRole('button', { name: '复制日志' })).toBeDisabled()
+  })
+
   it('shows the immutable article snapshot on Configuration', () => {
     render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
 
