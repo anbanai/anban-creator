@@ -23,7 +23,7 @@ import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
-import { TaskDetailsSheet } from '@/components/tasks/TaskDetailsSheet'
+import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { VideoProductionPanel } from '@/components/video/VideoProductionPanel'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -97,6 +97,7 @@ export default function TaskDetailPage() {
   const [showResumeDialog, setShowResumeDialog] = useState(false)
   const [showCreditDialog, setShowCreditDialog] = useState(false)
   const [showTaskDetails, setShowTaskDetails] = useState(false)
+  const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
   const [returnToTaskDetailsAfterCredits, setReturnToTaskDetailsAfterCredits] = useState(false)
   const [resumePrompt, setResumePrompt] = useState('')
   const [resumeFiles, setResumeFiles] = useState<ResumeFileInput[]>([])
@@ -397,6 +398,10 @@ export default function TaskDetailPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task?.status])
+
+  useEffect(() => {
+    setTaskDetailsTab('overview')
+  }, [task?.id])
 
   if (isLoading) {
     return (
@@ -892,6 +897,8 @@ export default function TaskDetailPage() {
       <TaskDetailsSheet
         open={showTaskDetails}
         onOpenChange={setShowTaskDetails}
+        selectedTab={taskDetailsTab}
+        onTabChange={setTaskDetailsTab}
         task={task}
         project={project}
         files={publishedFiles}

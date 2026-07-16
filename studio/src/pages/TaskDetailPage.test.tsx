@@ -227,7 +227,7 @@ describe('TaskDetailPage', () => {
     })
 
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
-    expect(screen.getByText('创建时项目快照')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('创建时项目快照')).toBeInTheDocument()
     expect(screen.getByText('明亮纪实摄影')).toBeInTheDocument()
     expect(screen.getByText('3:2')).toBeInTheDocument()
   })
@@ -327,7 +327,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('已完成')).toBeInTheDocument()
+    const taskStatus = await screen.findByText('已完成')
+    expect(taskStatus).toBeInTheDocument()
     const filesHeading = await screen.findByText('生成文件 (2)')
     expect(filesHeading).toBeInTheDocument()
     expect(screen.queryByText('参考素材摘要暂时无法显示')).not.toBeInTheDocument()
@@ -335,7 +336,7 @@ describe('TaskDetailPage', () => {
 
     await openTaskDetails('素材')
     expect(await screen.findByText('参考素材摘要暂时无法显示')).toBeInTheDocument()
-    expect(screen.getByText('已完成')).toBeInTheDocument()
+    expect(taskStatus).toBeInTheDocument()
     expect(screen.getByText('生成文件 (2)')).toBeInTheDocument()
   })
 
@@ -700,7 +701,7 @@ describe('TaskDetailPage', () => {
 
     await openTaskDetails('配置')
     expect(screen.getByText('项目快照')).toBeInTheDocument()
-    expect(screen.getByText('快照项目')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('快照项目')).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: '参考图' })).not.toBeInTheDocument()
     expect(screen.queryByText('参考图')).not.toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
