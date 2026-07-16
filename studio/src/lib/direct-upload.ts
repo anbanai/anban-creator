@@ -1,4 +1,5 @@
 import http from '@/lib/http-client'
+import type { InputAttachment, InputAttachmentType } from '@/types/input-attachment'
 
 export type DirectUploadPurpose =
   | 'project_reference'
@@ -20,6 +21,23 @@ export interface UploadToOSSResult {
   publicUrl: string
   contentType: string
   size: number
+}
+
+export function directUploadResultToInputAttachment(
+  result: UploadToOSSResult,
+  file: File,
+  type: InputAttachmentType,
+  instruction?: string,
+): InputAttachment {
+  return {
+    type,
+    upload_id: result.uploadId,
+    key: result.key,
+    file_name: file.name,
+    content_type: result.contentType,
+    size: result.size,
+    instruction,
+  }
 }
 
 interface PrepareUploadResponse {

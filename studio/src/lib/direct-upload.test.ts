@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import http from '@/lib/http-client'
-import { uploadToOSS } from '@/lib/direct-upload'
+import { directUploadResultToInputAttachment, uploadToOSS } from '@/lib/direct-upload'
 
 const putMock = vi.fn()
 const multipartUploadMock = vi.fn()
@@ -222,5 +222,31 @@ describe('uploadToOSS', () => {
     expect(putMock).toHaveBeenNthCalledWith(2, 'uploads/pending/user/up-2/asset.png', expect.any(File), expect.any(Object))
     expect(result.uploadId).toBe('up-2')
     expect(result.publicUrl).toBe('https://cdn.example.com/uploads/pending/user/up-2/asset.png')
+  })
+})
+
+describe('directUploadResultToInputAttachment', () => {
+  it('keeps pending upload identity without serializing the public URL', () => {
+    const file = fileOf(2048, 'image/png', '产品图.png')
+
+    const attachment = directUploadResultToInputAttachment({
+      uploadId: 'up-composer',
+      key: 'uploads/pending/user/up-composer/product.png',
+      publicUrl: 'https://cdn.example.com/signed-or-public.png',
+      contentType: 'image/png',
+      size: 2048,
+    }, file, 'image', '保留包装')
+
+    expect(attachment).toEqual({
+      type: 'image',
+      upload_id: 'up-composer',
+      key: 'uploads/pending/user/up-composer/product.png',
+      file_name: '产品图.png',
+      content_type: 'image/png',
+      size: 2048,
+      instruction: '保留包装',
+    })
+    expect(attachment).not.toHaveProperty('url')
+    expect(JSON.stringify(attachment)).not.toContain('cdn.example.com')
   })
 })
