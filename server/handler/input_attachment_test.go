@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -231,3 +232,33 @@ func TestValidateInputAttachmentsRejectsTypeLimitsAndCrossTenantUpload(t *testin
 		})
 	}
 }
+
+type handlerAttachmentRouteCase struct {
+	name        string
+	attachments string
+}
+
+func handlerAttachmentRouteRejectionCases(foreignUploadID, foreignKey string) []handlerAttachmentRouteCase {
+	tooMany := make([]model.EntryAttachment, 17)
+	for i := range tooMany {
+		tooMany[i] = model.EntryAttachment{Type: "image", URL: fmt.Sprintf("/api/v1/files/%d.png", i), FileName: fmt.Sprintf("%d.png", i), ContentType: "image/png"}
+	}
+	tooManyJSON, _ := json.Marshal(tooMany)
+	foreignJSON, _ := json.Marshal([]model.EntryAttachment{{UploadID: foreignUploadID, Key: foreignKey}})
+	return []handlerAttachmentRouteCase{
+		{name: "mime extension conflict", attachments: `[{"type":"image","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"}]`},
+		{name: "seventeen attachments", attachments: string(tooManyJSON)},
+		{name: "media over 50 MiB", attachments: `[{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4","size":52428801}]`},
+		{name: "document over 25 MiB", attachments: `[{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf","size":26214401}]`},
+		{name: "text over 25 MiB", attachments: `[{"type":"text","url":"/api/v1/files/notes.txt","file_name":"notes.txt","content_type":"text/plain","size":26214401}]`},
+		{name: "foreign tenant upload", attachments: string(foreignJSON)},
+	}
+}
+
+const fiveTypeHandlerAttachmentsJSON = `[
+	{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png"},
+	{"type":"audio","url":"/api/v1/files/voice.mp3","file_name":"voice.mp3","content_type":"audio/mpeg"},
+	{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4"},
+	{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"},
+	{"type":"text","url":"/api/v1/files/notes.txt","file_name":"notes.txt","content_type":"text/plain"}
+]`

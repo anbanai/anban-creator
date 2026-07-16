@@ -116,7 +116,23 @@ export default function PlansPage() {
     attachments: promptAttachments,
     onAttachmentsChange: (next) => {
       setPromptAttachments(next)
-      if (!attachmentHydratingRef.current) attachmentsTouchedRef.current = true
+      if (attachmentHydratingRef.current) return
+      attachmentsTouchedRef.current = true
+      const pendingAttachments = next.filter((attachment) => attachment.status !== 'uploaded').map((attachment) => ({
+        type: attachment.type,
+        file_name: attachment.fileName,
+        content_type: attachment.contentType,
+        size: attachment.size,
+        instruction: attachment.instruction,
+        role: attachment.role,
+      }))
+      form.setValue('input_attachments', [
+        ...attachmentController.toInputAttachments(),
+        ...pendingAttachments,
+      ], {
+        shouldDirty: true,
+        shouldValidate: true,
+      })
     },
   })
 
@@ -335,7 +351,7 @@ export default function PlansPage() {
     // For create (POST), "" is also valid (means system default).
     const inputAttachments = editingPlan && !attachmentsTouchedRef.current
       ? undefined
-      : attachmentController.toInputAttachments()
+      : values.input_attachments
 
     const payload: CreatePlanRequest | UpdatePlanRequest = {
       type: values.type,
@@ -352,7 +368,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_creator_input) : undefined,
+      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, { ...values.video_creator_input, brief: values.prompt }) : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
@@ -369,7 +385,9 @@ export default function PlansPage() {
       value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
       onChange={(value) => {
         form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
-        if (watchedType === 'montage') {
+        if (isVideoCreator(watchedType)) {
+          form.setValue('video_creator_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        } else if (watchedType === 'montage') {
           form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
         }
         if (value.attachments !== promptAttachments) setPromptAttachments(value.attachments)

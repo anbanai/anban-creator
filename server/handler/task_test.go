@@ -1753,25 +1753,46 @@ func TestCreateTaskAcceptsSeednoteInputAttachments(t *testing.T) {
 }
 
 func TestCreateTaskAcceptsAllAgentAttachmentTypes(t *testing.T) {
-	tests := []struct {
-		name, typ, fileName, contentType string
-	}{
-		{"image", "image", "product.png", "image/png"},
-		{"audio", "audio", "voice.mp3", "audio/mpeg"},
-		{"video", "video", "demo.mp4", "video/mp4"},
-		{"document", "document", "brief.pdf", "application/pdf"},
-		{"text", "text", "notes.txt", "text/plain"},
+	app, repo, ctx, _, projectID := setupSeednoteTaskCreateHandler(t)
+	body := fmt.Sprintf(`{"project_id":%q,"prompt":"test","input_attachments":%s}`, projectID, fiveTypeHandlerAttachmentsJSON)
+	resp := postJSON(t, app, "/tasks", body)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, raw)
 	}
-	for _, tt := range tests {
+	data := decodeEnvelopeRawData(t, resp)
+	var task model.Task
+	if err := json.Unmarshal(data["id"], &task.ID); err != nil || task.ID == "" {
+		t.Fatalf("decode task id: %v", err)
+	}
+	stored, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil || len(stored.InputAttachments.Data()) != 5 {
+		t.Fatalf("stored attachments = %#v, err = %v", stored, err)
+	}
+}
+
+func TestCreateTaskRejectsInvalidAgentAttachmentsAtHandler(t *testing.T) {
+	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", "uploads/pending/foreign/foreign-upload/product.png") {
 		t.Run(tt.name, func(t *testing.T) {
-			app, _, _, _, projectID := setupSeednoteTaskCreateHandler(t)
-			body := fmt.Sprintf(`{"project_id":%q,"prompt":"test","input_attachments":[{"type":%q,"url":%q,"file_name":%q,"content_type":%q}]}`,
-				projectID, tt.typ, "/api/v1/files/"+tt.fileName, tt.fileName, tt.contentType)
+			app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
+			if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+				ID: "foreign-upload", UserID: "foreign-user", Purpose: service.DirectUploadPurposeAIEntryAttachment,
+				Key: "uploads/pending/foreign/foreign-upload/product.png", FileName: "product.png", ContentType: "image/png", Size: 10,
+				Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+			}); err != nil {
+				t.Fatalf("create foreign upload: %v", err)
+			}
+			body := fmt.Sprintf(`{"project_id":%q,"prompt":"test","input_attachments":%s}`, projectID, tt.attachments)
 			resp := postJSON(t, app, "/tasks", body)
 			defer resp.Body.Close()
-			if resp.StatusCode != fiber.StatusOK {
+			if resp.StatusCode != fiber.StatusBadRequest {
 				raw, _ := io.ReadAll(resp.Body)
-				t.Fatalf("status = %d, want 200: %s", resp.StatusCode, raw)
+				t.Fatalf("status = %d, want 400: %s", resp.StatusCode, raw)
+			}
+			tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+			if err != nil || len(tasks) != 0 {
+				t.Fatalf("rejected request persisted tasks = %#v, err = %v", tasks, err)
 			}
 		})
 	}

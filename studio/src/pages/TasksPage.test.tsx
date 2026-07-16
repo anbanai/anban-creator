@@ -174,6 +174,51 @@ describe('TasksPage unified prompt composer', () => {
       input_attachments: [],
     })))
   })
+
+  it('marks attachment changes dirty so closing asks for confirmation', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project])
+    uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
+      uploadId: `upload-${file.name}`,
+      key: `uploads/pending/user/${file.name}`,
+      publicUrl: '',
+      contentType: file.type,
+      size: file.size,
+    }))
+    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
+
+    await screen.findByRole('dialog', { name: '新建任务' })
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+      target: { files: [new File(['brief'], 'brief.pdf', { type: 'application/pdf' })] },
+    })
+    await screen.findByText('brief.pdf')
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(await screen.findByRole('alertdialog', { name: '放弃编辑？' })).toBeInTheDocument()
+  })
+
+  it('keeps the latest prompt authoritative after switching to a video project', async () => {
+    vi.mocked(api.tasks.create).mockClear()
+    const videoProject = { ...fixtures.project, id: 'video-project', platform: 'videocreator', name: '视频项目' } as Project
+    vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project, videoProject])
+    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 100000 })
+    vi.mocked(api.tasks.create).mockResolvedValue({ ...fixtures.failedTask, id: 'video-task', type: 'videocreator', project_id: videoProject.id } as Task)
+    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
+
+    await screen.findByRole('dialog', { name: '新建任务' })
+    const prompt = screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')
+    fireEvent.change(prompt, { target: { value: '切换前的文章要求' } })
+    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(await screen.findByRole('option', { name: /视频项目/ }))
+    fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
+      target: { value: '切换后的视频要求' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '切换后的视频要求',
+      video_creator_input: expect.objectContaining({ brief: '切换后的视频要求' }),
+    })))
+  })
 })
 
 describe('TasksPage URL-driven recovery filters', () => {

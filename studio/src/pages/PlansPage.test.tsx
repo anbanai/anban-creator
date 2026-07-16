@@ -180,6 +180,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
         description: '',
         cron_expr: '0 9 * * 1',
         prompt: '生成新品视频',
+        video_creator_input: { brief: '陈旧的嵌套 brief' },
         status: 'active',
         next_run_at: '2025-01-20T09:00:00Z',
         project_id: 'video-project-1',
@@ -240,6 +241,15 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     const [projectSelector] = await screen.findAllByRole('combobox')
     expect(projectSelector).toBeDisabled()
+
+    fireEvent.change(screen.getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
+      target: { value: '当前可见的视频计划要求' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith('plan-video-1', expect.objectContaining({
+      prompt: '当前可见的视频计划要求',
+      video_creator_input: expect.objectContaining({ brief: '当前可见的视频计划要求' }),
+    })))
   })
 
   it('highlights a plan addressed by the timeline highlight parameter', async () => {
@@ -422,5 +432,23 @@ describe('PlansPage Seednote reference snapshots', () => {
       resolveUpload({ uploadId: 'pending', key: 'uploads/pending/pending.png', publicUrl: '', contentType: 'image/png', size: 7 })
       await Promise.resolve()
     })
+  })
+
+  it('does not dirty hydrated attachments but marks instruction edits dirty', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    await screen.findByText('saved-product.png')
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑计划' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('alertdialog', { name: '放弃编辑？' })).not.toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    await screen.findByText('saved-product.png')
+    fireEvent.click(screen.getByRole('button', { name: '编辑 saved-product.png 的附件说明' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), {
+      target: { value: '改用新版包装说明' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(await screen.findByRole('alertdialog', { name: '放弃编辑？' })).toBeInTheDocument()
   })
 })

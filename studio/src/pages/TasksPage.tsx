@@ -156,7 +156,30 @@ export default function TasksPage() {
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: { allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 },
     attachments: promptAttachments,
-    onAttachmentsChange: setPromptAttachments,
+    onAttachmentsChange: (next) => {
+      setPromptAttachments(next)
+      form.setValue('input_attachments', next.map((attachment) => (
+        attachment.status === 'uploaded' && attachment.uploadId && attachment.key
+          ? {
+              type: attachment.type,
+              upload_id: attachment.uploadId,
+              key: attachment.key,
+              file_name: attachment.fileName,
+              content_type: attachment.contentType,
+              size: attachment.size,
+              instruction: attachment.instruction,
+              role: attachment.role,
+            }
+          : {
+              type: attachment.type,
+              file_name: attachment.fileName,
+              content_type: attachment.contentType,
+              size: attachment.size,
+              instruction: attachment.instruction,
+              role: attachment.role,
+            }
+      )), { shouldDirty: true, shouldValidate: true })
+    },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
@@ -420,7 +443,7 @@ export default function TasksPage() {
       goal: values.type !== 'ecommerce' && goalMode ? (goalText.trim() || undefined) : undefined,
       has_content_image: values.type === 'seednote' ? hasContentImage : undefined,
       has_tail_image: values.type === 'seednote' ? hasTailImage : undefined,
-      input_attachments: attachmentController.toInputAttachments(),
+      input_attachments: values.input_attachments,
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? articleWithCover : undefined,
       article_with_content_images: values.type === 'article' ? articleWithContentImages : undefined,
@@ -431,8 +454,8 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_creator_input) : undefined,
-      video_editor_input: isVideoEditor(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_editor_input) : undefined,
+      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, { ...values.video_creator_input, brief: values.prompt }) : undefined,
+      video_editor_input: isVideoEditor(values.type) ? buildVideoInputForSubmit(values.prompt, { ...values.video_editor_input, brief: values.prompt }) : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
       // Route to the desktop local executor only when it is running and able to claim now.
       execution_target: values.type !== 'montage' && runThisTaskLocally ? 'local' : undefined,
@@ -516,7 +539,11 @@ export default function TasksPage() {
       value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
       onChange={(value) => {
         form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
-        if (watchedType === 'montage') {
+        if (isVideoCreator(watchedType)) {
+          form.setValue('video_creator_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        } else if (isVideoEditor(watchedType)) {
+          form.setValue('video_editor_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        } else if (watchedType === 'montage') {
           form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
         }
         setPromptAttachments(value.attachments)

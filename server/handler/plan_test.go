@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -578,15 +579,25 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		return h.Update(c)
 	})
 
-	invalidBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"video/mp4"}]}`
-	invalidReq := httptest.NewRequest("POST", "/plans", strings.NewReader(invalidBody))
-	invalidReq.Header.Set("Content-Type", "application/json")
-	invalidResp, err := app.Test(invalidReq)
-	if err != nil {
-		t.Fatalf("invalid create request failed: %v", err)
+	const foreignKey = "uploads/pending/foreign/foreign-upload/product.png"
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+		ID: "foreign-upload", UserID: "foreign-user", Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		Key: foreignKey, FileName: "product.png", ContentType: "image/png", Size: 10,
+		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create foreign upload: %v", err)
 	}
-	if invalidResp.StatusCode != fiber.StatusBadRequest {
-		t.Fatalf("invalid create status = %d, want 400", invalidResp.StatusCode)
+	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
+		t.Run("create "+tt.name, func(t *testing.T) {
+			body := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + tt.attachments + `}`
+			req := httptest.NewRequest(http.MethodPost, "/plans", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil || resp.StatusCode != fiber.StatusBadRequest {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, err = %v, want 400: %s", resp.StatusCode, err, raw)
+			}
+		})
 	}
 
 	createBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[` +
@@ -636,6 +647,23 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		t.Fatalf("attachments after omitted update = %#v, want retained attachments", got)
 	}
 
+	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
+		t.Run("update "+tt.name, func(t *testing.T) {
+			body := `{"input_attachments":` + tt.attachments + `}`
+			req := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil || resp.StatusCode != fiber.StatusBadRequest {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, err = %v, want 400: %s", resp.StatusCode, err, raw)
+			}
+			unchanged, findErr := repo.Plans().FindByID(ctx, planID)
+			if findErr != nil || len(unchanged.InputAttachments.Data()) != 5 {
+				t.Fatalf("invalid update changed attachments = %#v, err = %v", unchanged, findErr)
+			}
+		})
+	}
+
 	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"input_attachments":[]}`))
 	clearReq.Header.Set("Content-Type", "application/json")
 	clearResp, err := app.Test(clearReq)
@@ -651,5 +679,17 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}
 	if got := cleared.InputAttachments.Data(); len(got) != 0 {
 		t.Fatalf("attachments after explicit empty update = %#v, want empty", got)
+	}
+
+	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"input_attachments":`+fiveTypeHandlerAttachmentsJSON+`}`))
+	replaceReq.Header.Set("Content-Type", "application/json")
+	replaceResp, err := app.Test(replaceReq)
+	if err != nil || replaceResp.StatusCode != fiber.StatusOK {
+		raw, _ := io.ReadAll(replaceResp.Body)
+		t.Fatalf("replace status = %d, err = %v, want 200: %s", replaceResp.StatusCode, err, raw)
+	}
+	replaced, err := repo.Plans().FindByID(ctx, planID)
+	if err != nil || len(replaced.InputAttachments.Data()) != 5 {
+		t.Fatalf("replacement attachments = %#v, err = %v", replaced, err)
 	}
 }
