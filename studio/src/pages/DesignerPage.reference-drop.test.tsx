@@ -166,7 +166,13 @@ describe('Designer shared prompt composer', () => {
 
     const workspace = await screen.findByTestId('designer-workspace')
     const canvas = screen.getByTestId('designer-canvas-frame')
-    expect(workspace).toHaveClass('flex-col', 'md:flex-row')
+    expect(workspace).toHaveClass(
+      'flex-col',
+      'h-[calc(100dvh-2.5rem)]',
+      'md:h-dvh',
+      'md:flex-row',
+    )
+    expect(workspace.style.height).toBe('')
     expect(canvas.parentElement).toHaveClass('w-full', 'min-w-0', 'md:w-auto')
   })
 

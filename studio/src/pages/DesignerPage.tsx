@@ -493,8 +493,7 @@ export default function DesignerPage() {
   return (
     <div
       data-testid="designer-workspace"
-      className="relative -mx-4 -my-6 flex flex-col overflow-hidden bg-background md:-mx-8 md:-my-8 md:flex-row"
-      style={{ height: '100dvh' }}
+      className="relative -mx-4 -my-6 flex h-[calc(100dvh-2.5rem)] flex-col overflow-hidden bg-background md:-mx-8 md:-my-8 md:h-dvh md:flex-row"
     >
       <DesignerToolbar
         providers={providerList}
