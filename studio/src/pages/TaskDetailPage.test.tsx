@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TaskDetailPage from './TaskDetailPage'
 import { render } from '@/test/test-utils'
@@ -9,6 +9,11 @@ import { api } from '@/lib/api'
 const mockNavigate = vi.fn()
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
 const resolveDownloadUrlMock = vi.hoisted(() => vi.fn())
+const toastSuccessMock = vi.hoisted(() => vi.fn())
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), message: vi.fn(), success: toastSuccessMock },
+}))
 
 vi.mock('@/lib/direct-upload', async () => {
   const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
@@ -95,6 +100,16 @@ function taskWith(overrides: Partial<Task>): Task {
     },
     ...overrides,
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
 }
 
 async function openResumeDialog() {
@@ -491,6 +506,102 @@ describe('TaskDetailPage', () => {
     const reopened = await openResumeDialog()
     expect(within(reopened).getByLabelText('继续任务要求')).toHaveValue('')
     expect(within(reopened).queryByText('notes.md')).not.toBeInTheDocument()
+  })
+
+  it('keeps the resume dialog mounted and dismiss controls disabled until its request settles', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'failed',
+      result: { files: null, output: '' },
+    }))
+    const request = deferred<Task>()
+    vi.mocked(api.tasks.resume).mockReturnValue(request.promise)
+
+    render(<TaskDetailPage />)
+
+    const reopenTrigger = await screen.findByRole('button', { name: '补充信息并继续' })
+    fireEvent.click(reopenTrigger)
+    const title = await screen.findByRole('heading', { name: '继续执行此任务' })
+    const dialog = title.closest('[data-slot="dialog-content"]') as HTMLElement
+    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), {
+      target: { value: '继续完成当前任务' },
+    })
+    fireEvent.click(within(dialog).getByLabelText('提交并继续'))
+    await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledTimes(1))
+
+    const cancel = within(dialog).getByRole('button', { name: '取消' })
+    const close = within(dialog).getByRole('button', { name: 'Close' })
+    expect(cancel).toBeDisabled()
+    expect(close).toBeDisabled()
+    fireEvent.click(cancel)
+    fireEvent.click(close)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    const overlay = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')
+    expect(overlay).not.toBeNull()
+    fireEvent.pointerDown(overlay as HTMLElement)
+    fireEvent.pointerUp(overlay as HTMLElement)
+    fireEvent.click(overlay as HTMLElement)
+    fireEvent.click(reopenTrigger)
+
+    expect(screen.getAllByRole('heading', { name: '继续执行此任务' })).toHaveLength(1)
+    expect(api.tasks.resume).toHaveBeenCalledTimes(1)
+    expect(toastSuccessMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      request.resolve(taskWith({ id: 'task-1', status: 'pending' }))
+      await request.promise
+    })
+
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
+    expect(api.tasks.resume).toHaveBeenCalledTimes(1)
+    expect(toastSuccessMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the clone dialog mounted and dismiss controls disabled until its request settles', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'completed',
+      prompt: '克隆当前任务',
+      result: { files: null, output: '' },
+    }))
+    const request = deferred<Task>()
+    vi.mocked(api.tasks.clone).mockReturnValue(request.promise)
+
+    render(<TaskDetailPage />)
+
+    const reopenTrigger = await screen.findByRole('button', { name: '更多任务操作' })
+    const dialog = await openCloneDialog()
+    fireEvent.click(within(dialog).getByLabelText('确认克隆'))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
+
+    const cancel = within(dialog).getByRole('button', { name: '取消' })
+    const close = within(dialog).getByRole('button', { name: 'Close' })
+    expect(cancel).toBeDisabled()
+    expect(close).toBeDisabled()
+    fireEvent.click(cancel)
+    fireEvent.click(close)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    const overlay = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')
+    expect(overlay).not.toBeNull()
+    fireEvent.pointerDown(overlay as HTMLElement)
+    fireEvent.pointerUp(overlay as HTMLElement)
+    fireEvent.click(overlay as HTMLElement)
+    fireEvent.click(reopenTrigger)
+
+    expect(screen.getAllByRole('heading', { name: '克隆任务' })).toHaveLength(1)
+    expect(api.tasks.clone).toHaveBeenCalledTimes(1)
+    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(toastSuccessMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      request.resolve(taskWith({ id: 'task-clone', status: 'pending' }))
+      await request.promise
+    })
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone'))
+    expect(mockNavigate).toHaveBeenCalledTimes(1)
+    expect(api.tasks.clone).toHaveBeenCalledTimes(1)
+    expect(toastSuccessMock).toHaveBeenCalledTimes(1)
   })
 
   it('discards resume input after cancel, close, or Escape and keeps remaining labels in file order', async () => {

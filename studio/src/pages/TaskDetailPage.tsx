@@ -162,8 +162,19 @@ function ResumeTaskDialog({
   const hasInput = Boolean(prompt.trim() || attachmentController.attachments.length > 0)
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-2xl">
+    <Dialog
+      open
+      disablePointerDismissal={resumeMutation.isPending}
+      onOpenChange={(open, eventDetails) => {
+        if (open) return
+        if (resumeMutation.isPending) {
+          eventDetails.cancel()
+          return
+        }
+        onClose()
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl" closeButtonDisabled={resumeMutation.isPending}>
         <DialogHeader>
           <DialogTitle>继续执行此任务</DialogTitle>
           <DialogDescription>
@@ -185,7 +196,7 @@ function ResumeTaskDialog({
           autoFocus
         />
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outline" disabled={resumeMutation.isPending} onClick={onClose}>取消</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -240,8 +251,19 @@ function CloneTaskDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-2xl">
+    <Dialog
+      open
+      disablePointerDismissal={cloneMutation.isPending}
+      onOpenChange={(open, eventDetails) => {
+        if (open) return
+        if (cloneMutation.isPending) {
+          eventDetails.cancel()
+          return
+        }
+        onClose()
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl" closeButtonDisabled={cloneMutation.isPending}>
         <DialogHeader>
           <DialogTitle>克隆任务</DialogTitle>
           <DialogDescription>
@@ -272,7 +294,7 @@ function CloneTaskDialog({
           </Alert>
         ) : null}
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outline" disabled={cloneMutation.isPending} onClick={onClose}>取消</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
