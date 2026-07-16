@@ -85,6 +85,7 @@ describe('TaskContextSummary', () => {
     renderSummary()
 
     expect(screen.getByRole('region', { name: '任务上下文' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '任务上下文', level: 2 })).toBeInTheDocument()
     expect(screen.getByText('茶小茶')).toBeInTheDocument()
     expect(screen.getByText('公众号文章')).toBeInTheDocument()
     expect(screen.getByText('清新茶感摄影 · 3:4')).toBeInTheDocument()
@@ -118,10 +119,68 @@ describe('TaskContextSummary', () => {
     expect(screen.queryByText('正在生成配图')).not.toBeInTheDocument()
   })
 
-  it('uses a two-column mobile grid and a four-column desktop grid', () => {
+  it('uses grouped mobile and desktop grid geometry for all summary actions', () => {
     renderSummary()
 
-    expect(screen.getByTestId('task-context-grid')).toHaveClass('grid-cols-2', 'lg:grid-cols-4')
+    const grid = screen.getByTestId('task-context-grid')
+    const overview = screen.getByRole('button', { name: '打开任务概览' })
+    const configuration = screen.getByRole('button', { name: '打开创作配置' })
+    const materials = screen.getByRole('button', { name: '打开参考素材' })
+    const logs = screen.getByRole('button', { name: '打开执行日志' })
+
+    expect(grid).toHaveClass('grid-cols-2', 'gap-0', 'lg:grid-cols-4')
+    expect(grid.parentElement).toHaveAttribute('data-slot', 'card-content')
+    expect(grid.parentElement).toHaveClass('p-0')
+
+    expect(overview).toHaveClass(
+      'rounded-none',
+      'border-r',
+      'border-b',
+      'border-r-border',
+      'border-b-border',
+      'lg:border-b-0',
+    )
+    expect(configuration).toHaveClass(
+      'rounded-none',
+      'border-b',
+      'border-b-border',
+      'lg:border-r',
+      'lg:border-r-border',
+      'lg:border-b-0',
+    )
+    expect(configuration).not.toHaveClass('border-r')
+    expect(materials).toHaveClass('rounded-none', 'border-r', 'border-r-border')
+    expect(materials).not.toHaveClass('border-b')
+    expect(materials).not.toHaveClass('lg:border-b-0')
+    expect(logs).toHaveClass('rounded-none')
+    expect(logs).not.toHaveClass('border-r')
+    expect(logs).not.toHaveClass('border-b')
+    expect(logs).not.toHaveClass('lg:border-r')
+    expect(logs).not.toHaveClass('lg:border-b-0')
+  })
+
+  it('exposes visible overview and log summaries as accessible descriptions', () => {
+    renderSummary({
+      task: { ...snapshotTask, status: 'running' },
+      logs: ['## 已完成大纲', '- 最新日志状态'],
+    })
+
+    const actions = [
+      screen.getByRole('button', { name: '打开任务概览' }),
+      screen.getByRole('button', { name: '打开创作配置' }),
+      screen.getByRole('button', { name: '打开参考素材' }),
+      screen.getByRole('button', { name: '打开执行日志' }),
+    ]
+
+    expect(actions[0]).toHaveAccessibleDescription(/茶小茶.*手动创建.*2,835 积分/)
+    expect(actions[3]).toHaveAccessibleDescription(/2 条 · 实时.*最新日志状态/)
+
+    const descriptionIds = actions.map((action) => action.getAttribute('aria-describedby'))
+    expect(descriptionIds.every(Boolean)).toBe(true)
+    expect(new Set(descriptionIds).size).toBe(actions.length)
+    for (const descriptionId of descriptionIds) {
+      expect(document.getElementById(descriptionId as string)).toBeInTheDocument()
+    }
   })
 
   it('opens the matching details tab from every summary action', () => {
@@ -193,6 +252,21 @@ describe('TaskContextSummary', () => {
     renderSummary({ task: { ...snapshotTask, status: 'pending' } })
 
     expect(screen.getByText('0 条 · 等待执行')).toBeInTheDocument()
+  })
+
+  it.each([
+    ['pending', '等待执行'],
+    ['completed', '已结束'],
+    ['failed', '已结束'],
+    ['cancelled', '已结束'],
+  ] as const)('keeps %s lifecycle truth when an SSE error is stale', (status, expectedState) => {
+    renderSummary({
+      task: { ...snapshotTask, status },
+      sseError: '已失效的连接错误',
+    })
+
+    expect(screen.getByText(`0 条 · ${expectedState}`)).toBeInTheDocument()
+    expect(screen.queryByText('0 条 · 连接中断')).not.toBeInTheDocument()
   })
 
   it('does not request file lists, content, previews, or downloads', () => {

@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import {
   ChevronRight,
   ClipboardList,
@@ -34,7 +35,9 @@ interface SummaryItemProps {
   actionLabel: string
   detail: string
   detailSuffix?: string
+  descriptionId: string
   icon: LucideIcon
+  index: number
   label: string
   neutral?: boolean
   onClick: () => void
@@ -58,7 +61,9 @@ function SummaryItem({
   actionLabel,
   detail,
   detailSuffix,
+  descriptionId,
   icon: Icon,
+  index,
   label,
   neutral = false,
   onClick,
@@ -69,38 +74,45 @@ function SummaryItem({
       type="button"
       variant="ghost"
       aria-label={actionLabel}
-      className="h-24 min-w-0 flex-col items-start justify-start gap-1.5 overflow-hidden px-3 py-2 text-left"
+      aria-describedby={descriptionId}
+      className={cn(
+        'h-24 min-w-0 flex-col items-start justify-start gap-1.5 overflow-hidden rounded-none px-3 py-2 text-left',
+        index === 0 && 'border-r border-b border-r-border border-b-border lg:border-b-0',
+        index === 1 && 'border-b border-b-border lg:border-r lg:border-r-border lg:border-b-0',
+        index === 2 && 'border-r border-r-border',
+      )}
       onClick={onClick}
     >
       <span className="flex w-full min-w-0 items-center gap-1.5 text-xs font-normal text-muted-foreground">
         <Icon data-icon="inline-start" />
         <span className="truncate">{label}</span>
       </span>
-      <span className="w-full truncate text-sm font-medium text-foreground" title={value}>
-        {value}
-      </span>
-      <span
-        className={cn(
-          'flex w-full min-w-0 items-center gap-1 truncate text-xs font-normal text-muted-foreground',
-          neutral && 'italic',
-        )}
-        title={detail}
-      >
-        <span className="min-w-0 truncate">{detail}</span>
-        {detailSuffix ? (
-          <>
-            <span aria-hidden="true">·</span>
-            <span className="shrink-0">{detailSuffix}</span>
-          </>
-        ) : null}
+      <span id={descriptionId} className="flex w-full min-w-0 flex-col items-start gap-1">
+        <span className="w-full truncate text-sm font-medium text-foreground" title={value}>
+          {value}
+        </span>
+        <span
+          className={cn(
+            'flex w-full min-w-0 items-center gap-1 truncate text-xs font-normal text-muted-foreground',
+            neutral && 'italic',
+          )}
+          title={detail}
+        >
+          <span className="min-w-0 truncate">{detail}</span>
+          {detailSuffix ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="shrink-0">{detailSuffix}</span>
+            </>
+          ) : null}
+        </span>
       </span>
     </Button>
   )
 }
 
 function taskLogState(task: Task, sseError: string | null) {
-  if (sseError) return '连接中断'
-  if (task.status === 'running') return '实时'
+  if (task.status === 'running') return sseError ? '连接中断' : '实时'
   if (task.status === 'pending') return '等待执行'
   return '已结束'
 }
@@ -115,6 +127,7 @@ export function TaskContextSummary({
   sseError,
   onOpenTab,
 }: TaskContextSummaryProps) {
+  const descriptionIdPrefix = useId()
   const snapshot = task.project_snapshot
   const hasSnapshot = Boolean(snapshot?.platform)
   const projectName = hasSnapshot ? snapshot?.project_name || '—' : project?.name || '—'
@@ -135,16 +148,20 @@ export function TaskContextSummary({
   return (
     <Card role="region" aria-label="任务上下文" size="sm">
       <CardHeader className="border-b border-border">
-        <CardTitle>任务上下文</CardTitle>
+        <CardTitle>
+          <h2>任务上下文</h2>
+        </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="p-0">
         <div
           data-testid="task-context-grid"
-          className="grid grid-cols-2 gap-1 lg:grid-cols-4"
+          className="grid grid-cols-2 gap-0 lg:grid-cols-4"
         >
           <SummaryItem
             actionLabel="打开任务概览"
+            descriptionId={`${descriptionIdPrefix}-overview`}
             icon={ClipboardList}
+            index={0}
             label="任务概览"
             value={projectName}
             detail={task.plan_id ? '计划任务' : '手动创建'}
@@ -153,7 +170,9 @@ export function TaskContextSummary({
           />
           <SummaryItem
             actionLabel="打开创作配置"
+            descriptionId={`${descriptionIdPrefix}-configuration`}
             icon={SlidersHorizontal}
+            index={1}
             label="创作配置"
             value={contentTypeLabel[platform] || platform}
             detail={configurationDetail}
@@ -162,7 +181,9 @@ export function TaskContextSummary({
           />
           <SummaryItem
             actionLabel="打开参考素材"
+            descriptionId={`${descriptionIdPrefix}-materials`}
             icon={Paperclip}
+            index={2}
             label="参考素材"
             value={`${attachmentCount} 项输入`}
             detail={hasReferenceSummary ? '已生成使用结论' : '仅任务输入'}
@@ -170,7 +191,9 @@ export function TaskContextSummary({
           />
           <SummaryItem
             actionLabel="打开执行日志"
+            descriptionId={`${descriptionIdPrefix}-logs`}
             icon={ScrollText}
+            index={3}
             label="执行日志"
             value={`${logs.length} 条 · ${logState}`}
             detail={logDetail}
