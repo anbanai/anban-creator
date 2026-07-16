@@ -610,6 +610,63 @@ func TestPrepareDirectUploadRequiresExactMIMEExtensionPairs(t *testing.T) {
 	}
 }
 
+func TestPrepareAndFinalizeExtensionlessDirectUploadsUseCanonicalExtensions(t *testing.T) {
+	now := time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC)
+	cfg := DirectUploadConfig{
+		Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", Region: "oss-cn-hangzhou"},
+		CredentialIssuer: StaticUploadCredentialIssuer(func(context.Context, UploadCredentialRequest) (*UploadCredential, error) {
+			return &UploadCredential{AccessKeyID: "ak", AccessKeySecret: "sk", SecurityToken: "token", ExpiresAt: now.Add(time.Hour)}, nil
+		}),
+		Now: func() time.Time { return now },
+	}
+	tests := []struct {
+		name          string
+		filename      string
+		contentType   string
+		wantExtension string
+	}{
+		{name: "jpeg", filename: "photo", contentType: "image/jpeg", wantExtension: ".jpg"},
+		{name: "png", filename: "diagram", contentType: "image/png", wantExtension: ".png"},
+		{name: "mp4", filename: "clip", contentType: "video/mp4", wantExtension: ".mp4"},
+		{name: "mp3", filename: "voice", contentType: "audio/mpeg", wantExtension: ".mp3"},
+		{name: "pdf", filename: "brief", contentType: "application/pdf", wantExtension: ".pdf"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeDirectUploadStore{name: "oss", objects: map[string]*storage.ObjectInfo{}}
+			repo := &fakePendingUploadRepo{}
+			result, err := PrepareDirectUpload(context.Background(), store, repo, cfg, DirectUploadPrepareRequest{
+				UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment,
+				Filename: tt.filename, ContentType: tt.contentType, Size: 1024,
+			})
+			if err != nil {
+				t.Fatalf("PrepareDirectUpload: %v", err)
+			}
+			wantFilename := tt.filename + tt.wantExtension
+			if repo.created == nil || repo.created.FileName != wantFilename || !strings.HasSuffix(result.Key, "/"+wantFilename) {
+				t.Fatalf("prepared upload = %#v key=%q, want filename %q", repo.created, result.Key, wantFilename)
+			}
+			store.objects[result.Key] = &storage.ObjectInfo{
+				Key: result.Key, Size: 1024, ContentType: tt.contentType, ETag: "etag-" + result.UploadID,
+			}
+			verified, err := VerifyDirectUploadAttachment(
+				context.Background(), repo, "user-1", []string{DirectUploadPurposeAIEntryAttachment},
+				result.UploadID, result.Key, now,
+			)
+			if err != nil {
+				t.Fatalf("VerifyDirectUploadAttachment: %v", err)
+			}
+			if err := FinalizeVerifiedDirectUploads(context.Background(), store, repo, []*VerifiedDirectUpload{verified}, now); err != nil {
+				t.Fatalf("FinalizeVerifiedDirectUploads: %v", err)
+			}
+			wantFinalKey := "uploads/finalized/user-1/" + result.UploadID + "/" + wantFilename
+			if repo.uploads[result.UploadID].FinalizedKey != wantFinalKey || store.objects[wantFinalKey] == nil {
+				t.Fatalf("finalized upload = %#v object=%#v, want key %q", repo.uploads[result.UploadID], store.objects[wantFinalKey], wantFinalKey)
+			}
+		})
+	}
+}
+
 func TestResolveDirectUploadAttachment(t *testing.T) {
 	now := time.Date(2026, 7, 15, 9, 0, 0, 0, time.UTC)
 	const (

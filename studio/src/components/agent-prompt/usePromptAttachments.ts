@@ -135,7 +135,6 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
       for (const controller of activeUploadsRef.current.values()) controller.abort()
       activeUploadsRef.current.clear()
       attemptsRef.current.clear()
-      inheritedSourcesRef.current.clear()
       for (const id of [...previewsRef.current.keys()]) revokePreview(id)
     }
   }, [revokePreview])

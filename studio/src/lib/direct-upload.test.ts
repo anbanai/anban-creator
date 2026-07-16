@@ -299,24 +299,62 @@ describe('uploadToOSS', () => {
     expect(http.post).not.toHaveBeenCalled()
   })
 
-  it('cancels an in-flight multipart upload through the OSS client', async () => {
+  it('cancels the remote multipart upload by checkpoint when abort follows progress', async () => {
     const controller = new AbortController()
     let rejectUpload!: (reason?: unknown) => void
     multipartUploadMock.mockImplementationOnce(() => new Promise((_, reject) => {
       rejectUpload = reject
     }))
+    cancelMock.mockImplementation(() => rejectUpload(new Error('cancelled by SDK')))
     const promise = uploadToOSS({
       purpose: 'video_reference',
       file: fileOf(12 * 1024 * 1024, 'video/mp4'),
       signal: controller.signal,
     })
     await vi.waitFor(() => expect(multipartUploadMock).toHaveBeenCalledTimes(1))
+    const progress = multipartUploadMock.mock.calls[0][2].progress
+    const checkpoint = { name: 'ignored-client-name', uploadId: 'multipart-upload-1' }
+    progress(0.4, checkpoint)
 
     controller.abort()
-    rejectUpload(new Error('cancelled'))
+    progress(0.5, checkpoint)
 
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
-    expect(cancelMock).toHaveBeenCalledTimes(1)
+    expect(cancelMock).toHaveBeenCalledOnce()
+    expect(cancelMock).toHaveBeenCalledWith({
+      name: 'uploads/pending/user/up-1/asset.png',
+      uploadId: 'multipart-upload-1',
+    })
+    expect(http.post).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels the queue before a checkpoint and aborts the remote upload when it arrives', async () => {
+    const controller = new AbortController()
+    let rejectUpload!: (reason?: unknown) => void
+    multipartUploadMock.mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectUpload = reject
+    }))
+    cancelMock.mockImplementation(() => rejectUpload(new Error('cancelled by SDK')))
+    const promise = uploadToOSS({
+      purpose: 'video_reference',
+      file: fileOf(12 * 1024 * 1024, 'video/mp4'),
+      signal: controller.signal,
+    })
+    await vi.waitFor(() => expect(multipartUploadMock).toHaveBeenCalledTimes(1))
+    const progress = multipartUploadMock.mock.calls[0][2].progress
+
+    controller.abort()
+    const checkpoint = { uploadId: 'multipart-upload-late' }
+    progress(0.1, checkpoint)
+    progress(0.2, checkpoint)
+
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    expect(cancelMock).toHaveBeenCalledTimes(2)
+    expect(cancelMock.mock.calls[0]).toEqual([])
+    expect(cancelMock).toHaveBeenNthCalledWith(2, {
+      name: 'uploads/pending/user/up-1/asset.png',
+      uploadId: 'multipart-upload-late',
+    })
     expect(http.post).toHaveBeenCalledTimes(1)
   })
 })

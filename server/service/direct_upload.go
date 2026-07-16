@@ -205,9 +205,7 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 		return nil, fmt.Errorf("file size exceeds the %d MB limit", maxSize/(1024*1024))
 	}
 	if ext == "" {
-		if exts, _ := mime.ExtensionsByType(contentType); len(exts) > 0 {
-			ext = strings.ToLower(exts[0])
-		}
+		ext = canonicalDirectUploadExtension(contentType)
 	}
 	if ext == "" {
 		ext = ".bin"
@@ -898,6 +896,27 @@ var directUploadFileRules = map[string]directUploadFileRule{
 	".txt":      {kind: "text", contentTypes: []string{"text/plain"}},
 	".md":       {kind: "text", contentTypes: []string{"text/markdown", "text/plain"}},
 	".markdown": {kind: "text", contentTypes: []string{"text/markdown", "text/plain"}},
+}
+
+var directUploadCanonicalExtensionOrder = []string{
+	".jpg", ".png", ".webp", ".gif", ".bmp",
+	".mp3", ".wav", ".m4a", ".aac", ".ogg",
+	".mp4", ".mov", ".webm",
+	".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
+	".json", ".csv", ".txt", ".md",
+}
+
+func canonicalDirectUploadExtension(contentType string) string {
+	ct := normalizeDirectUploadContentType(contentType)
+	for _, ext := range directUploadCanonicalExtensionOrder {
+		rule := directUploadFileRules[ext]
+		for _, allowed := range rule.contentTypes {
+			if ct == allowed {
+				return ext
+			}
+		}
+	}
+	return ""
 }
 
 func directUploadFileKind(contentType, ext string) string {

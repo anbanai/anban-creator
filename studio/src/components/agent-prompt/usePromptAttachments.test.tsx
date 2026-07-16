@@ -1,3 +1,4 @@
+import { StrictMode, type ReactNode } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -40,6 +41,10 @@ function idSequence() {
 const policy = {
   allowedTypes: ['image', 'audio', 'video', 'document', 'text'] as const,
   maxCount: 8,
+}
+
+function StrictModeWrapper({ children }: { children: ReactNode }) {
+  return <StrictMode>{children}</StrictMode>
 }
 
 describe('usePromptAttachments', () => {
@@ -124,7 +129,7 @@ describe('usePromptAttachments', () => {
       initialAttachments: inherited,
       createId: idSequence(),
       createObjectURL: vi.fn(),
-    }))
+    }), { wrapper: StrictModeWrapper, reactStrictMode: true })
 
     expect(result.current.toInputAttachments()).toEqual(inherited)
     expect(result.current.attachments).toHaveLength(3)

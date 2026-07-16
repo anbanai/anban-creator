@@ -119,12 +119,30 @@ async function uploadMultipart(
     stsToken: prepared.sts_security_token,
     secure: true,
   })
-  const cancel = () => client.cancel()
+  let latestUploadId = ''
+  let queueCancelled = false
+  let remoteUploadCancelled = false
+  const cancel = () => {
+    if (latestUploadId) {
+      if (remoteUploadCancelled) return
+      remoteUploadCancelled = true
+      client.cancel({ name: prepared.key, uploadId: latestUploadId })
+      return
+    }
+    if (queueCancelled) return
+    queueCancelled = true
+    client.cancel()
+  }
   signal?.addEventListener('abort', cancel, { once: true })
   try {
     await client.multipartUpload(prepared.key, file, {
       headers: { 'Content-Type': contentType },
-      progress: (p: number) => {
+      progress: (p: number, checkpoint) => {
+        if (checkpoint?.uploadId) latestUploadId = checkpoint.uploadId
+        if (signal?.aborted) {
+          cancel()
+          return
+        }
         onProgress?.(Math.min(99, Math.max(1, Math.round(p * 100))))
       },
     })
