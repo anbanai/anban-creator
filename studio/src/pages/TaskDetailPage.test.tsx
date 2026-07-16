@@ -7,6 +7,7 @@ import type { Task, TaskFile } from '@/types'
 import { api } from '@/lib/api'
 
 const mockNavigate = vi.fn()
+const routeState = vi.hoisted(() => ({ taskId: 'task-1' }))
 
 const mockReferenceUsageSummary = vi.hoisted(() => vi.fn(({ task }: {
   task: { title?: string; input_attachments?: Array<{ file_name?: string }> }
@@ -33,7 +34,7 @@ vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
   return {
     ...actual,
-    useParams: () => ({ id: 'task-1' }),
+    useParams: () => ({ id: routeState.taskId }),
     useNavigate: () => mockNavigate,
   }
 })
@@ -92,16 +93,18 @@ function taskWith(overrides: Partial<Task>): Task {
 }
 
 async function openTaskDetails(tab?: '概览' | '配置' | '素材' | '日志') {
-  fireEvent.click(await screen.findByRole('button', { name: /更多详情/ }))
+  fireEvent.click(await screen.findByRole('button', { name: '更多详情' }))
   expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
   if (tab) {
     fireEvent.click(screen.getByRole('tab', { name: tab }))
   }
+  expect(screen.getByRole('tab', { name: tab ?? '概览' })).toHaveAttribute('aria-selected', 'true')
 }
 
 describe('TaskDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    routeState.taskId = 'task-1'
     vi.mocked(api.tasks.files).mockResolvedValue([])
     vi.mocked(api.tasks.videoProduction).mockResolvedValue({
       task_id: 'task-1',
@@ -132,16 +135,91 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByText('42%')).toBeInTheDocument()
-    expect(screen.getByText('正在写作正文')).toBeInTheDocument()
+    const progressHeading = screen.getByRole('heading', { name: '正在写作正文' })
+    const progressSection = progressHeading.closest('section') as HTMLElement
     // progress_log noise like "Using tool: ..." must NOT leak into the card.
-    expect(screen.queryByText('Using tool: Read')).not.toBeInTheDocument()
+    expect(within(progressSection).queryByText('Using tool: Read')).not.toBeInTheDocument()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '任务结果' })).toBeInTheDocument()
     expect(screen.getByText('结果生成后将在这里显示')).toBeInTheDocument()
     expect(screen.queryByText('任务配置')).not.toBeInTheDocument()
-    expect(screen.queryByText('执行日志')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '执行动态' })).not.toBeInTheDocument()
     expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
+  })
+
+  it('shows balanced context after results and opens logs in one action', async () => {
+    mockTask(taskWith({
+      status: 'running',
+      progress: 42,
+      progress_log: '已读取参考素材\n正在写作正文',
+      latest_progress: {
+        stage: 'writing',
+        title: '正在写作正文',
+        description: '正在优化标题与段落结构',
+        percent: 42,
+      },
+      input_attachments: [{ type: 'image', file_name: 'tea-reference.jpg' }],
+      project_snapshot: {
+        project_name: '茶小茶',
+        platform: 'article',
+        visual_style: '清新茶感摄影',
+        image_ratio: '3:4',
+      },
+      result: null,
+      completed_at: '',
+    }))
+
+    render(<TaskDetailPage />)
+
+    const resultHeading = await screen.findByRole('heading', { name: '任务结果' })
+    const context = screen.getByRole('region', { name: '任务上下文' })
+    expect(resultHeading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(context).getByText('茶小茶')).toBeInTheDocument()
+    expect(within(context).getByText('公众号文章')).toBeInTheDocument()
+    expect(within(context).getByText('清新茶感摄影 · 3:4')).toBeInTheDocument()
+    expect(within(context).getByText('1 项输入')).toBeInTheDocument()
+    expect(within(context).getByText('2 条 · 实时')).toBeInTheDocument()
+
+    fireEvent.click(within(context).getByRole('button', { name: '打开执行日志' }))
+    expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '日志' })).toHaveAttribute('aria-selected', 'true')
+    const logSection = screen.getByRole('region', { name: '执行动态' })
+    expect(within(logSection).getByRole('heading', { name: '执行动态' })).toBeInTheDocument()
+    expect(logSection).toHaveTextContent('已读取参考素材')
+    expect(logSection).toHaveTextContent('正在写作正文')
+  })
+
+  it('opens Overview from the general More details command', async () => {
+    mockTask(taskWith({ status: 'completed', result: null }))
+
+    render(<TaskDetailPage />)
+
+    await openTaskDetails()
+  })
+
+  it('resets the controlled details tab when the route changes tasks', async () => {
+    mockTask(taskWith({ id: 'task-1', status: 'running', result: null, completed_at: '' }))
+    const view = render(<TaskDetailPage />)
+
+    const context = await screen.findByRole('region', { name: '任务上下文' })
+    fireEvent.click(within(context).getByRole('button', { name: '打开执行日志' }))
+    expect(screen.getByRole('tab', { name: '日志' })).toHaveAttribute('aria-selected', 'true')
+
+    routeState.taskId = 'task-2'
+    vi.mocked(api.tasks.get).mockResolvedValue(taskWith({
+      id: 'task-2',
+      title: '第二个任务',
+      status: 'running',
+      result: null,
+      completed_at: '',
+    }))
+    view.rerender(<TaskDetailPage />)
+
+    await waitFor(() => expect(api.tasks.get).toHaveBeenCalledWith('task-2'))
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
+    })
   })
 
   it('keeps the pending result destination when video production has only missing artifacts', async () => {
@@ -213,7 +291,9 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByText('正在写作正文')).toBeInTheDocument()
     expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '阶段日志' })).not.toBeInTheDocument()
-    expect(screen.queryByText('创建时项目快照')).not.toBeInTheDocument()
+    const context = screen.getByRole('region', { name: '任务上下文' })
+    expect(within(context).getByText('创建时项目快照')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '项目快照' })).not.toBeInTheDocument()
 
     await openTaskDetails('素材')
     expect(screen.getByText('未生成素材使用结论，仅展示任务输入。')).toBeInTheDocument()
@@ -409,9 +489,9 @@ describe('TaskDetailPage', () => {
 
     const generatedHeading = await screen.findByText('生成文件 (1)')
     const analyticsHeading = await screen.findByText('种草笔记数据')
-    const moreDetails = screen.getByRole('button', { name: /更多详情/ })
+    const context = screen.getByRole('region', { name: '任务上下文' })
     expect(generatedHeading.compareDocumentPosition(analyticsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(analyticsHeading.compareDocumentPosition(moreDetails) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(analyticsHeading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('disables delivery controls for payment-required tasks', async () => {
@@ -714,6 +794,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '概览' }))
+    expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('积分消耗')).toBeInTheDocument()
     expect(screen.queryByText('操作消耗')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '查看明细' }))

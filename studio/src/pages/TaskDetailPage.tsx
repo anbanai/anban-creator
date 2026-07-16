@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban, Upload, X, Info } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban, Upload, X } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -23,6 +23,7 @@ import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
+import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { VideoProductionPanel } from '@/components/video/VideoProductionPanel'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
@@ -402,6 +403,11 @@ export default function TaskDetailPage() {
   useEffect(() => {
     setTaskDetailsTab('overview')
   }, [task?.id])
+
+  function openTaskDetails(tab: TaskDetailsTab) {
+    setTaskDetailsTab(tab)
+    setShowTaskDetails(true)
+  }
 
   if (isLoading) {
     return (
@@ -1131,18 +1137,16 @@ export default function TaskDetailPage() {
         <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
-      <Button
-        variant="ghost"
-        size="lg"
-        className="w-full justify-start"
-        onClick={() => setShowTaskDetails(true)}
-      >
-        <Info data-icon="inline-start" />
-        更多详情
-        <span className="ml-auto hidden text-xs font-normal text-muted-foreground sm:inline">
-          概览 · 配置 · 素材 · 日志
-        </span>
-      </Button>
+      <TaskContextSummary
+        task={task}
+        project={project}
+        files={publishedFiles}
+        logs={displayLogs}
+        progressDescription={progressDescription}
+        netConsumedCredits={netConsumedCredits}
+        sseError={sseError}
+        onOpenTab={openTaskDetails}
+      />
 
       <Dialog open={showResumeDialog} onOpenChange={setShowResumeDialog}>
         <DialogContent className="sm:max-w-2xl">
