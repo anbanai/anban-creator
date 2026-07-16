@@ -205,6 +205,46 @@ describe('AgentPromptDropProvider', () => {
     expect(onFiles).toHaveBeenCalledWith([file])
   })
 
+  it('accepts mixed transfer types containing Files and delivers once', () => {
+    const onFiles = vi.fn()
+    render(
+      <AgentPromptDropProvider>
+        <TargetHarness name="only" onFiles={onFiles} />
+      </AgentPromptDropProvider>,
+    )
+    const file = image()
+    const dataTransfer = dragData({
+      files: [file],
+      types: ['text/uri-list', 'Files'],
+    })
+
+    fireEvent.dragEnter(document.body, { dataTransfer })
+    expect(screen.getByTestId('agent-prompt-drop-overlay')).toBeInTheDocument()
+    expect(fireEvent.dragOver(document.body, { dataTransfer })).toBe(false)
+    expect(documentDrop(dataTransfer)).toBe(false)
+
+    expect(onFiles).toHaveBeenCalledOnce()
+    expect(onFiles).toHaveBeenCalledWith([file])
+  })
+
+  it('keeps an empty live status mounted, then updates and clears it', () => {
+    render(
+      <AgentPromptDropProvider>
+        <TargetHarness name="only" onFiles={vi.fn()} />
+      </AgentPromptDropProvider>,
+    )
+    const status = screen.getByRole('status')
+    expect(status).toBeEmptyDOMElement()
+    const dataTransfer = dragData({ files: [image()] })
+
+    fireEvent.dragEnter(document.body, { dataTransfer })
+    expect(status).toHaveTextContent('释放以添加 1 个文件')
+
+    fireEvent.dragLeave(document.body, { dataTransfer })
+    expect(status).toBeEmptyDOMElement()
+    expect(screen.queryByTestId('agent-prompt-drop-overlay')).not.toBeInTheDocument()
+  })
+
   it('shows the dragged file count, accepted types, and selected target capacity', () => {
     render(
       <AgentPromptDropProvider>
@@ -427,18 +467,31 @@ describe('AgentPromptDropProvider', () => {
     )
     const target = screen.getByTestId('target-local')
     const file = image()
+    const dataTransfer = dragData({ files: [file] })
 
-    fireEvent.dragEnter(target, { dataTransfer: dragData({ files: [file] }) })
-    fireEvent.drop(target, { dataTransfer: dragData({ files: [file] }) })
+    fireEvent.dragEnter(target, { dataTransfer })
+    expect(screen.getByTestId('agent-prompt-drop-overlay')).toBeInTheDocument()
+    fireEvent.drop(target, { dataTransfer })
 
     expect(localDrop).toHaveBeenCalledOnce()
     expect(onFiles).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('agent-prompt-drop-overlay')).not.toBeInTheDocument()
+
+    fireEvent.dragEnter(target, { dataTransfer })
+    fireEvent.dragEnter(target.firstChild as Node, { dataTransfer })
+    fireEvent.dragLeave(target.firstChild as Node, { dataTransfer })
+    expect(screen.getByTestId('agent-prompt-drop-overlay')).toBeInTheDocument()
+    fireEvent.dragLeave(target, { dataTransfer })
+    expect(screen.queryByTestId('agent-prompt-drop-overlay')).not.toBeInTheDocument()
   })
 
   it('prevents browser navigation for external Files even without a selected target', () => {
     render(<AgentPromptDropProvider><div>No target</div></AgentPromptDropProvider>)
 
-    expect(documentDrop(dragData({ files: [image()] }))).toBe(false)
+    expect(documentDrop(dragData({
+      files: [image()],
+      types: ['Files', 'text/uri-list'],
+    }))).toBe(false)
   })
 
   it('does not activate or intercept dragover when the target is full', () => {
@@ -490,8 +543,12 @@ describe('AgentPromptDropProvider', () => {
     fireEvent.dragEnter(document.body, { dataTransfer: dragData({ files: [file] }) })
     expect(screen.getByTestId('agent-prompt-drop-overlay')).toBeInTheDocument()
     unmount()
-    for (const [type, listener] of additions) {
-      expect(remove).toHaveBeenCalledWith(type, listener)
+    for (const [type, listener, options] of additions) {
+      if (options === undefined) {
+        expect(remove).toHaveBeenCalledWith(type, listener)
+      } else {
+        expect(remove).toHaveBeenCalledWith(type, listener, options)
+      }
     }
     expect(screen.queryByTestId('agent-prompt-drop-overlay')).not.toBeInTheDocument()
   })

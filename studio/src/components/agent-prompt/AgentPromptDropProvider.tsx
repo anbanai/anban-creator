@@ -53,7 +53,7 @@ const DropTargetContext = createContext<DropTargetRegistry | null>(null)
 function isFilesTransfer(dataTransfer: DataTransfer | null): dataTransfer is DataTransfer {
   if (!dataTransfer) return false
   const types = Array.from(dataTransfer.types ?? [])
-  return types.length === 1 && types[0] === 'Files'
+  return types.includes('Files')
 }
 
 function isElementAvailable(element: HTMLElement | null) {
@@ -243,6 +243,10 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       options.onFiles(files)
     }
 
+    const onDropCapture = (event: DragEvent) => {
+      if (isFilesTransfer(event.dataTransfer)) resetDrag()
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') resetDrag()
     }
@@ -250,12 +254,14 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
     document.addEventListener('dragenter', onDragEnter)
     document.addEventListener('dragover', onDragOver)
     document.addEventListener('dragleave', onDragLeave)
+    document.addEventListener('drop', onDropCapture, true)
     document.addEventListener('drop', onDrop)
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('dragenter', onDragEnter)
       document.removeEventListener('dragover', onDragOver)
       document.removeEventListener('dragleave', onDragLeave)
+      document.removeEventListener('drop', onDropCapture, true)
       document.removeEventListener('drop', onDrop)
       document.removeEventListener('keydown', onKeyDown)
       resetDrag()
@@ -277,32 +283,30 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
     <DropTargetContext.Provider value={registry}>
       {children}
       {overlay && createPortal(
-        <>
-          <div
-            data-testid="agent-prompt-drop-overlay"
-            aria-hidden="true"
-            className="pointer-events-none fixed inset-0 isolate z-50 flex items-center justify-center p-4"
-          >
-            <div className="flex min-h-40 w-full max-w-xl items-center justify-center rounded-lg border-2 border-dashed border-primary bg-background/90 px-6 py-10 shadow-lg backdrop-blur-sm">
-              <div className="flex min-w-0 max-w-full flex-col items-center gap-3 text-center text-foreground">
-                <UploadIcon className="size-8 text-primary" />
-                <p className="max-w-full break-words text-base font-medium leading-relaxed text-pretty">
-                  {overlayStatus}
-                </p>
-              </div>
+        <div
+          data-testid="agent-prompt-drop-overlay"
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0 isolate z-50 flex items-center justify-center p-4"
+        >
+          <div className="flex min-h-40 w-full max-w-xl items-center justify-center rounded-lg border-2 border-dashed border-primary bg-background/90 px-6 py-10 shadow-lg backdrop-blur-sm">
+            <div className="flex min-w-0 max-w-full flex-col items-center gap-3 text-center text-foreground">
+              <UploadIcon className="size-8 text-primary" />
+              <p className="max-w-full break-words text-base font-medium leading-relaxed text-pretty">
+                {overlayStatus}
+              </p>
             </div>
           </div>
-          <div
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-            className="sr-only"
-          >
-            {overlayStatus}
-          </div>
-        </>,
+        </div>,
         document.body,
       )}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {overlayStatus}
+      </div>
     </DropTargetContext.Provider>
   )
 }
