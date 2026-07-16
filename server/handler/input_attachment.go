@@ -191,6 +191,9 @@ func classifyHandlerEntryAttachment(a model.EntryAttachment) string {
 
 func handlerAttachmentMetadataAllowed(typ, contentType, ext string) bool {
 	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if ct != "" && ext != "" {
+		return service.ClassifyDirectUploadFile(ct, ext) == typ
+	}
 	switch typ {
 	case "image":
 		return metadataMatches(ct, ext, []string{"image/"}, []string{".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"})
