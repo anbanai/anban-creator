@@ -105,6 +105,18 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.getByText('首选模型参考图上限不足')).toBeInTheDocument()
     expect(screen.getByText('未使用侧面图，因为与正面包装版本冲突')).toBeInTheDocument()
     expect(api.tasks.downloadFileBlob).toHaveBeenCalledWith('task-1', 'file-summary')
+
+    for (const surface of [
+      screen.getByText('#1 · front.png').closest('article'),
+      screen.getByText('cover.png').closest('article'),
+    ]) {
+      expect(surface).toHaveClass(
+        'rounded-lg',
+        'border',
+        'border-border/70',
+        'bg-background/70',
+      )
+    }
   })
 
   it('shows the first-input snapshot when the summary artifact is missing', () => {
@@ -130,6 +142,15 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.getByText('保留瓶身标签')).toBeInTheDocument()
     expect(screen.getByText('输入快照不代表 AI 实际使用结论')).toBeInTheDocument()
     expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
+
+    const attachmentSurface = screen.getByText('product-front.png')
+      .parentElement?.parentElement?.parentElement
+    expect(attachmentSurface).toHaveClass(
+      'rounded-lg',
+      'border',
+      'border-border/70',
+      'bg-background/70',
+    )
   })
 
   it('falls back to the plan snapshot when the summary artifact is malformed', async () => {
@@ -194,6 +215,19 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.getByText('首选模型参考图上限不足')).toBeInTheDocument()
     expect(screen.getByText('未使用侧面图，因为与正面包装版本冲突')).toBeInTheDocument()
     expect(screen.getAllByText('1 张')).toHaveLength(2)
+
+    for (const surface of [
+      screen.getByText('#1 · front.png').closest('article'),
+      screen.getByText('cover.png').closest('article'),
+    ]) {
+      expect(surface).toHaveClass('min-w-0', 'p-3')
+      expect(surface).not.toHaveClass(
+        'rounded-lg',
+        'border',
+        'border-border/70',
+        'bg-background/70',
+      )
+    }
   })
 
   it('renders compact loading skeletons without a card or header', () => {
@@ -239,6 +273,16 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.queryByText('输入快照不代表 AI 实际使用结论')).not.toBeInTheDocument()
     expect(container.querySelector('[data-slot="card"]')).not.toBeInTheDocument()
     expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
+
+    const attachmentSurface = screen.getByText('product-front.png')
+      .parentElement?.parentElement?.parentElement
+    expect(attachmentSurface).toHaveClass('min-w-0', 'p-3')
+    expect(attachmentSurface).not.toHaveClass(
+      'rounded-lg',
+      'border',
+      'border-border/70',
+      'bg-background/70',
+    )
   })
 
   it('renders a compact input fallback when the summary artifact is malformed', async () => {

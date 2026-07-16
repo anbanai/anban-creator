@@ -184,6 +184,22 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByRole('button', { name: '复制日志' })).toBeDisabled()
   })
 
+  it('keeps the log body as the constrained scrolling owner', () => {
+    const props = createSheetProps()
+    render(<ControlledTaskDetailsSheet {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+
+    const logPanel = screen.getByRole('tabpanel', { name: '日志' })
+    const logRegion = screen.getByRole('region', { name: '执行动态' })
+    const logDetails = props.logContainerRef.current?.parentElement
+
+    expect(logPanel).toHaveClass('flex', 'min-h-0', 'flex-col', 'overflow-hidden')
+    expect(logRegion).toHaveClass('flex', 'min-h-0', 'flex-1', 'flex-col')
+    expect(logDetails).toHaveClass('flex', 'min-h-0', 'flex-1', 'flex-col')
+    expect(props.logContainerRef.current).toHaveClass('flex-1', 'overflow-y-auto')
+    expect(logRegion.querySelector('svg')).toHaveClass('size-4')
+  })
+
   it('shows the immutable article snapshot on Configuration', () => {
     render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
 

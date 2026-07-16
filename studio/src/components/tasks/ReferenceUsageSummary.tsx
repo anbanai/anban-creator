@@ -155,10 +155,23 @@ function Warnings({ warnings }: { warnings?: string[] }) {
   )
 }
 
-function SnapshotAttachment({ attachment, index }: { attachment: InputAttachment; index: number }) {
+function SnapshotAttachment({
+  attachment,
+  index,
+  compact,
+}: {
+  attachment: InputAttachment
+  index: number
+  compact: boolean
+}) {
   const displayName = attachment.file_name || attachment.url || attachment.text || `素材 ${index + 1}`
   return (
-    <div className="min-w-0 rounded-lg border border-border/70 bg-background/70 p-3">
+    <div
+      className={cn(
+        'min-w-0 p-3',
+        !compact && 'rounded-lg border border-border/70 bg-background/70',
+      )}
+    >
       <div className="flex min-w-0 items-start gap-2">
         <FileImage className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 space-y-1">
@@ -212,6 +225,7 @@ function SnapshotFallback({
                 key={`${attachment.upload_id || attachment.url || attachment.file_name || index}-${index}`}
                 attachment={attachment}
                 index={index}
+                compact
               />
             ))}
           </div>
@@ -253,6 +267,7 @@ function SnapshotFallback({
                 key={`${attachment.upload_id || attachment.url || attachment.file_name || index}-${index}`}
                 attachment={attachment}
                 index={index}
+                compact={false}
               />
             ))}
           </div>
@@ -313,7 +328,10 @@ function SummaryContent({
                   return (
                     <article
                       key={`${input.attachment_index}-${input.file_name || input.url || index}`}
-                      className="min-w-0 rounded-lg border border-border/70 bg-background/70 p-3"
+                      className={cn(
+                        'min-w-0 p-3',
+                        !compact && 'rounded-lg border border-border/70 bg-background/70',
+                      )}
                     >
                       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -367,7 +385,10 @@ function SummaryContent({
                   return (
                     <article
                       key={`${output.file_name}-${index}`}
-                      className="min-w-0 rounded-lg border border-border/70 bg-background/70 p-3"
+                      className={cn(
+                        'min-w-0 p-3',
+                        !compact && 'rounded-lg border border-border/70 bg-background/70',
+                      )}
                     >
                       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
                         <p className="break-words text-sm font-medium text-foreground">{output.file_name}</p>

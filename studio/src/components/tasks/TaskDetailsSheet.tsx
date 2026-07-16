@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatFullDateTimeCN, statusBadgeVariant, taskStatusLabel } from '@/lib/labels'
+import { cn } from '@/lib/utils'
 import type { Project, Task, TaskFile } from '@/types'
 
 export type TaskDetailsTab = 'overview' | 'configuration' | 'materials' | 'logs'
@@ -83,15 +84,25 @@ interface TaskDetailsSectionProps {
   label: string
   title: string
   icon: LucideIcon
+  className?: string
   children: ReactNode
 }
 
-function TaskDetailsSection({ label, title, icon: Icon, children }: TaskDetailsSectionProps) {
+function TaskDetailsSection({
+  label,
+  title,
+  icon: Icon,
+  className,
+  children,
+}: TaskDetailsSectionProps) {
   return (
-    <section aria-label={label} className="rounded-lg border border-border bg-card/60 p-4">
-      <div className="mb-4 flex items-center gap-2">
+    <section
+      aria-label={label}
+      className={cn('rounded-lg border border-border bg-card/60 p-4', className)}
+    >
+      <div className="mb-4 flex shrink-0 items-center gap-2">
         <span className="rounded-md bg-primary/10 p-2 text-primary">
-          <Icon aria-hidden="true" />
+          <Icon aria-hidden="true" className="size-4" />
         </span>
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       </div>
@@ -192,7 +203,7 @@ function TaskLogDetails({
   }, [autoScrollLogs, logContainerRef, logs])
 
   return (
-    <div className="flex min-h-full flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">{logs.length} 条</span>
         <div className="flex items-center gap-1">
@@ -345,8 +356,13 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
               </ErrorBoundary>
             </TaskDetailsSection>
           </TabsContent>
-          <TabsContent value="logs" className="min-h-0 overflow-y-auto p-4">
-            <TaskDetailsSection label="执行动态" title="执行动态" icon={ScrollText}>
+          <TabsContent value="logs" className="flex min-h-0 flex-col overflow-hidden p-4">
+            <TaskDetailsSection
+              label="执行动态"
+              title="执行动态"
+              icon={ScrollText}
+              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
               <TaskLogDetails
                 logs={props.logs}
                 logMarkdown={logMarkdown}
