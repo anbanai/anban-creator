@@ -195,11 +195,13 @@ func handlerAttachmentMetadataAllowed(typ, contentType, ext string) bool {
 	case "image":
 		return metadataMatches(ct, ext, []string{"image/"}, []string{".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"})
 	case "audio":
-		return metadataMatches(ct, ext, []string{"audio/"}, []string{".mp3", ".wav", ".m4a", ".aac", ".ogg"})
+		return metadataMatches(ct, ext, []string{"audio/"}, []string{".mp3", ".wav", ".m4a", ".aac", ".ogg"}) ||
+			service.ClassifyDirectUploadFile(ct, ext) == "audio"
 	case "video":
 		return metadataMatches(ct, ext, []string{"video/"}, []string{".mp4", ".mov", ".webm"})
 	case "text":
-		return metadataMatches(ct, ext, []string{"text/"}, []string{".csv", ".txt", ".md", ".markdown", ".json"})
+		return metadataMatches(ct, ext, []string{"text/"}, []string{".csv", ".txt", ".md", ".markdown", ".json"}) ||
+			service.ClassifyDirectUploadFile(ct, ext) == "text"
 	case "document":
 		if ext != "" && !isExt(ext, ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".csv", ".txt", ".md", ".markdown", ".json") {
 			return false

@@ -247,6 +247,8 @@ func handlerAttachmentRouteRejectionCases(foreignUploadID, foreignKey string) []
 	foreignJSON, _ := json.Marshal([]model.EntryAttachment{{UploadID: foreignUploadID, Key: foreignKey}})
 	return []handlerAttachmentRouteCase{
 		{name: "mime extension conflict", attachments: `[{"type":"image","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"}]`},
+		{name: "application ogg mime on mp3 extension", attachments: `[{"type":"audio","url":"/api/v1/files/voice.mp3","file_name":"voice.mp3","content_type":"application/ogg"}]`},
+		{name: "application csv mime on txt extension", attachments: `[{"type":"text","url":"/api/v1/files/notes.txt","file_name":"notes.txt","content_type":"application/csv"}]`},
 		{name: "seventeen attachments", attachments: string(tooManyJSON)},
 		{name: "media over 50 MiB", attachments: `[{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4","size":52428801}]`},
 		{name: "document over 25 MiB", attachments: `[{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf","size":26214401}]`},
@@ -257,8 +259,8 @@ func handlerAttachmentRouteRejectionCases(foreignUploadID, foreignKey string) []
 
 const fiveTypeHandlerAttachmentsJSON = `[
 	{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png"},
-	{"type":"audio","url":"/api/v1/files/voice.mp3","file_name":"voice.mp3","content_type":"audio/mpeg"},
+	{"type":"audio","url":"/api/v1/files/voice.ogg","file_name":"voice.ogg","content_type":"application/ogg"},
 	{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4"},
 	{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"},
-	{"type":"text","url":"/api/v1/files/notes.txt","file_name":"notes.txt","content_type":"text/plain"}
+	{"type":"text","url":"/api/v1/files/notes.csv","file_name":"notes.csv","content_type":"application/csv"}
 ]`

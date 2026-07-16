@@ -174,7 +174,12 @@ export const createTaskSchema = z.object({
 
   if (data.type === "videoeditor") {
     const refs = data.video_editor_input?.references ?? []
-    const hasVideoSource = refs.some((ref) => ref.type === "video_url" && Boolean(ref.url || ref.task_file_id))
+    const hasStructuredVideoSource = refs.some((ref) => ref.type === "video_url" && Boolean(ref.url || ref.task_file_id))
+    const hasPromptVideoSource = data.input_attachments.some((attachment) => (
+      attachment.type === "video"
+      && Boolean((attachment.upload_id && attachment.key) || attachment.url)
+    ))
+    const hasVideoSource = hasStructuredVideoSource || hasPromptVideoSource
     if (!hasVideoSource) {
       ctx.addIssue({
         code: "custom",

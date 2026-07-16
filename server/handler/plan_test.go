@@ -602,10 +602,10 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 
 	createBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[` +
 		`{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png","instruction":"  聚焦包装正面  "},` +
-		`{"type":"audio","url":"/api/v1/files/voice.mp3","file_name":"voice.mp3","content_type":"audio/mpeg"},` +
+		`{"type":"audio","url":"/api/v1/files/voice.ogg","file_name":"voice.ogg","content_type":"application/ogg"},` +
 		`{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4"},` +
 		`{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"},` +
-		`{"type":"text","url":"/api/v1/files/notes.txt","file_name":"notes.txt","content_type":"text/plain"}]}`
+		`{"type":"text","url":"/api/v1/files/notes.csv","file_name":"notes.csv","content_type":"application/csv"}]}`
 	createReq := httptest.NewRequest("POST", "/plans", strings.NewReader(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createResp, err := app.Test(createReq)
@@ -626,7 +626,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}
 	planID := plans[0].ID
 	got := plans[0].InputAttachments.Data()
-	if len(got) != 5 || got[0].Instruction != "聚焦包装正面" {
+	if len(got) != 5 || got[0].Instruction != "聚焦包装正面" || got[1].ContentType != "application/ogg" || got[4].ContentType != "application/csv" {
 		t.Fatalf("created attachments = %#v, want all five normalized types", got)
 	}
 
@@ -691,5 +691,9 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	replaced, err := repo.Plans().FindByID(ctx, planID)
 	if err != nil || len(replaced.InputAttachments.Data()) != 5 {
 		t.Fatalf("replacement attachments = %#v, err = %v", replaced, err)
+	}
+	replacedAttachments := replaced.InputAttachments.Data()
+	if replacedAttachments[1].ContentType != "application/ogg" || replacedAttachments[4].ContentType != "application/csv" {
+		t.Fatalf("replacement canonical application MIME attachments = %#v", replacedAttachments)
 	}
 }

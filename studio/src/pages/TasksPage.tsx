@@ -188,6 +188,7 @@ export default function TasksPage() {
   const isMontageTask = watchedType === 'montage'
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
+  const watchedInputAttachments = useWatch({ control: form.control, name: 'input_attachments' })
   const watchedVideoEditorReferences = useWatch({ control: form.control, name: 'video_editor_input.references' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
@@ -531,7 +532,12 @@ export default function TasksPage() {
     balance: creditsBalance?.balance ?? 0,
   })
 
-  const videoEditorHasSourceMedia = (watchedVideoEditorReferences ?? []).some((ref) => ref.type === 'video_url' && (ref.url || ref.task_file_id))
+  const videoEditorHasStructuredSource = (watchedVideoEditorReferences ?? []).some((ref) => ref.type === 'video_url' && (ref.url || ref.task_file_id))
+  const videoEditorHasPromptVideo = (watchedInputAttachments ?? []).some((attachment) => (
+    attachment.type === 'video'
+    && Boolean((attachment.upload_id && attachment.key) || attachment.url)
+  ))
+  const videoEditorHasSourceMedia = videoEditorHasStructuredSource || videoEditorHasPromptVideo
   const creationBlocker = costPreview.insufficient
     ? { message: '积分不足，补充积分后再创建。', href: '/credits', actionLabel: '查看积分' }
     : watchedType !== 'ecommerce' && goalMode && !goalText.trim()

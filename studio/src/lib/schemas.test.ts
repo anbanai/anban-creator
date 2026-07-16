@@ -344,6 +344,24 @@ describe('createTaskSchema', () => {
       },
     })
     expect(withSource.success).toBe(true)
+
+    const withPromptVideo = createTaskSchema.safeParse({
+      project_id: 'video-editor-1',
+      type: 'videoeditor',
+      prompt: '加字幕',
+      video_editor_input: {
+        brief: '加字幕',
+        references: [],
+      },
+      input_attachments: [{
+        type: 'video',
+        upload_id: 'upload-source',
+        key: 'uploads/pending/user/upload-source/source.mp4',
+        file_name: 'source.mp4',
+        content_type: 'video/mp4',
+      }],
+    })
+    expect(withPromptVideo.success).toBe(true)
   })
 
   it('accepts moments tasks without a separate image-mode field', () => {

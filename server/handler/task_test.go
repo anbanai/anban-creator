@@ -1770,6 +1770,10 @@ func TestCreateTaskAcceptsAllAgentAttachmentTypes(t *testing.T) {
 	if err != nil || len(stored.InputAttachments.Data()) != 5 {
 		t.Fatalf("stored attachments = %#v, err = %v", stored, err)
 	}
+	attachments := stored.InputAttachments.Data()
+	if attachments[1].ContentType != "application/ogg" || attachments[4].ContentType != "application/csv" {
+		t.Fatalf("stored canonical application MIME attachments = %#v", attachments)
+	}
 }
 
 func TestCreateTaskRejectsInvalidAgentAttachmentsAtHandler(t *testing.T) {

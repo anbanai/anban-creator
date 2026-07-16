@@ -944,6 +944,12 @@ func directUploadFileKind(contentType, ext string) string {
 	return ""
 }
 
+// ClassifyDirectUploadFile returns the canonical attachment kind for an exact
+// content-type and extension pair accepted by the direct-upload boundary.
+func ClassifyDirectUploadFile(contentType, ext string) string {
+	return directUploadFileKind(contentType, ext)
+}
+
 func isDirectUploadImage(contentType, ext string) bool {
 	return directUploadFileKind(contentType, ext) == "image"
 }
