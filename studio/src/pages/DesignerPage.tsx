@@ -18,7 +18,12 @@ import { uploadToOSS } from '@/lib/direct-upload'
 import { getApiErrorMessage, sanitizeUserFacingErrorMessage } from '@/lib/http-client'
 import { buildDesignerRequestSize } from '@/lib/designer-size'
 import { clearActiveGeneration, loadActiveGeneration, saveActiveGeneration } from '@/lib/designer-session'
-import type { AgentPromptValue, AttachmentAdmissionPolicy } from '@/types/input-attachment'
+import {
+  AttachmentRejectionReason,
+  type AgentPromptValue,
+  type AttachmentAdmissionPolicy,
+  type AttachmentRejection,
+} from '@/types/input-attachment'
 import type { DesignerProvider, DesignerSettings, GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types/designer'
 import type { InlineMaskEditorHandle } from '@/components/designer/InlineMaskEditor'
 
@@ -58,6 +63,36 @@ function resultsToImages(results?: ImageGenerationResult[]): GenerateImage[] {
     }))
 }
 
+function describeAttachmentRejections(rejections: readonly AttachmentRejection[]): string {
+  const counts = new Map<AttachmentRejectionReason, number>()
+  for (const rejection of rejections) {
+    counts.set(rejection.reason, (counts.get(rejection.reason) ?? 0) + 1)
+  }
+  const labels: Record<AttachmentRejectionReason, string> = {
+    [AttachmentRejectionReason.Duplicate]: '重复文件',
+    [AttachmentRejectionReason.UnsupportedType]: '不支持的文件',
+    [AttachmentRejectionReason.TooLarge]: '超过大小限制的文件',
+    [AttachmentRejectionReason.Capacity]: '超过数量上限的文件',
+  }
+  return [...counts].map(([reason, count]) => `忽略 ${count} 个${labels[reason]}`).join('，')
+}
+
+interface GenerationAttempt {
+  id: number
+  signal: AbortSignal
+}
+
+function awaitGenerationAttempt<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new DOMException('Generation canceled', 'AbortError'))
+  return new Promise<T>((resolve, reject) => {
+    const handleAbort = () => reject(new DOMException('Generation canceled', 'AbortError'))
+    signal.addEventListener('abort', handleAbort, { once: true })
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', handleAbort)
+    })
+  })
+}
+
 export default function DesignerPage() {
   const queryClient = useQueryClient()
   const [selectedProviderId, setSelectedProviderId] = useState('')
@@ -75,6 +110,8 @@ export default function DesignerPage() {
   const maskEditorRef = useRef<InlineMaskEditorHandle>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortedRef = useRef(false)
+  const generationAttemptRef = useRef(0)
+  const generationAbortRef = useRef<AbortController | null>(null)
   const normalizedProviderIdRef = useRef('')
   const normalizedReferenceCapacityRef = useRef(0)
 
@@ -130,6 +167,27 @@ export default function DesignerPage() {
     })
   }, [])
 
+  const startGenerationAttempt = useCallback(() => {
+    generationAbortRef.current?.abort()
+    const controller = new AbortController()
+    generationAbortRef.current = controller
+    generationAttemptRef.current += 1
+    abortedRef.current = false
+    return { id: generationAttemptRef.current, signal: controller.signal }
+  }, [])
+
+  const isGenerationAttemptActive = useCallback((attempt: GenerationAttempt) => (
+    generationAttemptRef.current === attempt.id
+    && !attempt.signal.aborted
+    && !abortedRef.current
+  ), [])
+
+  const clearSubmittedPrompt = useCallback((submittedPrompt: string) => {
+    setPromptValue((current) => (
+      current.prompt === submittedPrompt ? { ...current, prompt: '' } : current
+    ))
+  }, [setPromptValue])
+
   useEffect(() => {
     if (providers === undefined) return
     const effectiveProviderID = effectiveProvider?.id ?? ''
@@ -150,6 +208,10 @@ export default function DesignerPage() {
   }, [attachmentController, effectiveProvider, maxReferenceImages, providers, resetSettingsForProvider, selectedProviderId])
 
   useEffect(() => () => {
+    generationAttemptRef.current += 1
+    abortedRef.current = true
+    generationAbortRef.current?.abort()
+    generationAbortRef.current = null
     if (pollingRef.current) clearInterval(pollingRef.current)
   }, [])
 
@@ -159,18 +221,13 @@ export default function DesignerPage() {
     pollingRef.current = null
   }, [])
 
-  const startPolling = useCallback((generationID: string) => {
+  const startPolling = useCallback((generationID: string, attempt: GenerationAttempt) => {
+    if (!isGenerationAttemptActive(attempt)) return
     stopPolling()
-    abortedRef.current = false
     let pollCount = 0
     let consecutiveErrors = 0
     pollingRef.current = setInterval(async () => {
-      if (abortedRef.current) {
-        stopPolling()
-        setIsGenerating(false)
-        clearActiveGeneration()
-        return
-      }
+      if (!isGenerationAttemptActive(attempt)) return
       pollCount += 1
       if (pollCount >= MAX_POLLS) {
         stopPolling()
@@ -180,7 +237,11 @@ export default function DesignerPage() {
         return
       }
       try {
-        const generation = await designerApi.getGeneration(generationID)
+        const generation = await awaitGenerationAttempt(
+          designerApi.getGeneration(generationID),
+          attempt.signal,
+        )
+        if (!isGenerationAttemptActive(attempt)) return
         consecutiveErrors = 0
         if (generation.status === 'completed') {
           stopPolling()
@@ -197,6 +258,7 @@ export default function DesignerPage() {
           toast.error(sanitizeUserFacingErrorMessage(generation.error, '图片生成失败，请稍后重试'))
         }
       } catch {
+        if (!isGenerationAttemptActive(attempt)) return
         consecutiveErrors += 1
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
           stopPolling()
@@ -206,12 +268,17 @@ export default function DesignerPage() {
         }
       }
     }, POLL_INTERVAL)
-  }, [queryClient, stopPolling])
+  }, [isGenerationAttemptActive, queryClient, stopPolling])
 
   useEffect(() => {
     const active = loadActiveGeneration()
     if (!active) return
-    designerApi.getGeneration(active.generationId).then((generation) => {
+    const attempt = startGenerationAttempt()
+    awaitGenerationAttempt(
+      designerApi.getGeneration(active.generationId),
+      attempt.signal,
+    ).then((generation) => {
+      if (!isGenerationAttemptActive(attempt)) return
       if (generation.status === 'completed') {
         setCurrentGeneration(generation)
         setCurrentImages(resultsToImages(generation.results))
@@ -223,24 +290,28 @@ export default function DesignerPage() {
       } else {
         setSelectedGenerationId(active.generationId)
         setIsGenerating(true)
-        startPolling(active.generationId)
+        startPolling(active.generationId, attempt)
       }
-    }).catch(clearActiveGeneration)
-  }, [startPolling])
+    }).catch(() => {
+      if (isGenerationAttemptActive(attempt)) clearActiveGeneration()
+    })
+  }, [isGenerationAttemptActive, startGenerationAttempt, startPolling])
 
-  const beginGeneration = useCallback((generationID: string) => {
+  const beginGeneration = useCallback((generationID: string, attempt: GenerationAttempt) => {
+    if (!isGenerationAttemptActive(attempt)) return
     setSelectedGenerationId(generationID)
     saveActiveGeneration(generationID)
-    startPolling(generationID)
-  }, [startPolling])
+    startPolling(generationID, attempt)
+  }, [isGenerationAttemptActive, startPolling])
 
   const handleGenerate = useCallback(async (value: AgentPromptValue) => {
     if (!effectiveProvider) {
       toast.error('没有可用的图片模型')
       return
     }
+    const attempt = startGenerationAttempt()
+    const submittedPrompt = value.prompt
     stopPolling()
-    abortedRef.current = false
     setIsGenerating(true)
     setCurrentGeneration(null)
     setCurrentImages([])
@@ -251,81 +322,116 @@ export default function DesignerPage() {
         if (!attachment.uploadId || !attachment.key || attachment.status !== 'uploaded') {
           throw new Error('参考图仍在上传或上传失败')
         }
-        const registered = await designerApi.registerReference({
-          upload_id: attachment.uploadId,
-          key: attachment.key,
-        })
+        const registered = await awaitGenerationAttempt(
+          designerApi.registerReference({
+            upload_id: attachment.uploadId,
+            key: attachment.key,
+          }),
+          attempt.signal,
+        )
+        if (!isGenerationAttemptActive(attempt)) return
         referenceFileIDs.push(registered.file_id)
       }
-      const { generation_id } = await designerApi.generate({
-        project_id: projectID,
-        prompt: value.prompt.trim(),
-        provider: effectiveProvider.provider,
-        provider_id: effectiveProvider.id,
-        quality: settings.quality !== 'auto' ? settings.quality : undefined,
-        size: buildDesignerRequestSize(settings.size, settings.resolution),
-        n: settings.n > 1 ? settings.n : undefined,
-        output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
-        output_compression: effectiveCaps?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
-        background: effectiveCaps?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
-        reference_file_ids: referenceFileIDs.length > 0 ? referenceFileIDs : undefined,
-        watermark: settings.watermark || undefined,
-      })
-      setPromptValue((current) => ({ ...current, prompt: '' }))
-      beginGeneration(generation_id)
+      const { generation_id } = await awaitGenerationAttempt(
+        designerApi.generate({
+          project_id: projectID,
+          prompt: value.prompt.trim(),
+          provider: effectiveProvider.provider,
+          provider_id: effectiveProvider.id,
+          quality: settings.quality !== 'auto' ? settings.quality : undefined,
+          size: buildDesignerRequestSize(settings.size, settings.resolution),
+          n: settings.n > 1 ? settings.n : undefined,
+          output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
+          output_compression: effectiveCaps?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
+          background: effectiveCaps?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
+          reference_file_ids: referenceFileIDs.length > 0 ? referenceFileIDs : undefined,
+          watermark: settings.watermark || undefined,
+        }),
+        attempt.signal,
+      )
+      if (!isGenerationAttemptActive(attempt)) return
+      clearSubmittedPrompt(submittedPrompt)
+      beginGeneration(generation_id, attempt)
     } catch (error) {
+      if (!isGenerationAttemptActive(attempt)) return
       setIsGenerating(false)
       toast.error(getApiErrorMessage(error, '图片生成失败，请重试'))
     }
-  }, [beginGeneration, effectiveCaps, effectiveProvider, maxReferenceImages, projectID, setPromptValue, settings, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, effectiveCaps, effectiveProvider, isGenerationAttemptActive, maxReferenceImages, projectID, settings, startGenerationAttempt, stopPolling])
 
   const handleEditSubmit = useCallback(async (value: AgentPromptValue) => {
     if (!effectiveProvider || !editingImage) return
-    const maskFile = await maskEditorRef.current?.exportMask()
-    if (!maskFile) {
-      toast.error('请先涂抹需要编辑的区域')
-      return
-    }
-    stopPolling()
-    abortedRef.current = false
+    const attempt = startGenerationAttempt()
+    const submittedPrompt = value.prompt
     setIsGenerating(true)
-    const sourceImage = editingImage
-    setEditingImage(null)
     try {
-      const [source, maskUpload] = await Promise.all([
-        designerApi.uploadReferenceFromUrl(sourceImage.url),
-        uploadToOSS({ purpose: 'designer_reference', file: maskFile }),
-      ])
-      const mask = await designerApi.registerReference({
-        upload_id: maskUpload.uploadId,
-        key: maskUpload.key,
-      })
-      const { generation_id } = await designerApi.generate({
-        project_id: projectID,
-        prompt: value.prompt.trim(),
-        provider: effectiveProvider.provider,
-        provider_id: effectiveProvider.id,
-        reference_file_ids: [source.file_id],
-        mask_file_id: mask.file_id,
-      })
-      setPromptValue((current) => ({ ...current, prompt: '' }))
-      beginGeneration(generation_id)
+      const maskFile = await awaitGenerationAttempt(
+        Promise.resolve(maskEditorRef.current?.exportMask()).then((result) => result ?? null),
+        attempt.signal,
+      )
+      if (!isGenerationAttemptActive(attempt)) return
+      if (!maskFile) {
+        setIsGenerating(false)
+        toast.error('请先涂抹需要编辑的区域')
+        return
+      }
+      stopPolling()
+      const sourceImage = editingImage
+      setEditingImage(null)
+      const [source, maskUpload] = await awaitGenerationAttempt(
+        Promise.all([
+          designerApi.uploadReferenceFromUrl(sourceImage.url),
+          uploadToOSS({ purpose: 'designer_reference', file: maskFile }),
+        ]),
+        attempt.signal,
+      )
+      if (!isGenerationAttemptActive(attempt)) return
+      const mask = await awaitGenerationAttempt(
+        designerApi.registerReference({
+          upload_id: maskUpload.uploadId,
+          key: maskUpload.key,
+        }),
+        attempt.signal,
+      )
+      if (!isGenerationAttemptActive(attempt)) return
+      const { generation_id } = await awaitGenerationAttempt(
+        designerApi.generate({
+          project_id: projectID,
+          prompt: value.prompt.trim(),
+          provider: effectiveProvider.provider,
+          provider_id: effectiveProvider.id,
+          reference_file_ids: [source.file_id],
+          mask_file_id: mask.file_id,
+        }),
+        attempt.signal,
+      )
+      if (!isGenerationAttemptActive(attempt)) return
+      clearSubmittedPrompt(submittedPrompt)
+      beginGeneration(generation_id, attempt)
     } catch (error) {
+      if (!isGenerationAttemptActive(attempt)) return
       setIsGenerating(false)
       toast.error(getApiErrorMessage(error, '编辑图片失败，请重试'))
     }
-  }, [beginGeneration, editingImage, effectiveProvider, projectID, setPromptValue, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveProvider, isGenerationAttemptActive, projectID, startGenerationAttempt, stopPolling])
 
   const handleCancel = useCallback(() => {
-    if (editingImage) {
-      setEditingImage(null)
-      return
-    }
+    generationAttemptRef.current += 1
     abortedRef.current = true
+    generationAbortRef.current?.abort()
+    generationAbortRef.current = null
     stopPolling()
     setIsGenerating(false)
     clearActiveGeneration()
+    if (editingImage) {
+      setEditingImage(null)
+    }
   }, [editingImage, stopPolling])
+
+  const handleAttachmentRejected = useCallback((rejections: AttachmentRejection[]) => {
+    const message = describeAttachmentRejections(rejections)
+    if (message) toast.warning(message)
+  }, [])
 
   function handleModelChange(providerID: string) {
     const provider = providerList.find((candidate) => candidate.id === providerID)
@@ -405,6 +511,7 @@ export default function DesignerPage() {
                 submitDisabled={!promptValue.prompt.trim() || !effectiveProvider}
                 ariaLabel="Designer prompt"
                 acceptedTypesLabel="图片"
+                onAttachmentRejected={handleAttachmentRejected}
                 status={isGenerating ? <span className="text-xs text-muted-foreground">正在生成...</span> : null}
                 trailingTools={isGenerating ? (
                   <Button type="button" size="sm" variant="ghost" aria-label="取消生成" onClick={handleCancel}>

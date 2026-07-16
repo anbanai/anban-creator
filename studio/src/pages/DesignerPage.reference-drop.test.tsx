@@ -3,7 +3,7 @@ import { act, fireEvent, render as testingRender, screen, waitFor } from '@testi
 import { QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import { ThemeProvider } from 'next-themes'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DesignerPage from './DesignerPage'
 import { designerApi } from '@/lib/api/designer'
@@ -14,6 +14,7 @@ import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDr
 import type { DesignerProvider, ImageGeneration } from '@/types/designer'
 
 const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }))
+const exportMaskMock = vi.hoisted(() => vi.fn())
 
 vi.mock('sonner', () => ({ toast }))
 vi.mock('@/lib/direct-upload', async (importOriginal) => {
@@ -51,7 +52,7 @@ vi.mock('@/components/designer/InlineMaskEditor', async () => {
   return {
     default: React.forwardRef(function MaskEditor(_props, ref) {
       React.useImperativeHandle(ref, () => ({
-        exportMask: async () => new File(['mask'], 'mask.png', { type: 'image/png' }),
+        exportMask: exportMaskMock,
       }))
       return <div>蒙版编辑器</div>
     }),
@@ -91,6 +92,16 @@ function uploadResult(file: File) {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 function SubmitBeforeProviderReconciliation() {
   const submitted = useRef(false)
   const { data } = useQuery({
@@ -125,6 +136,7 @@ describe('Designer shared prompt composer', () => {
       value: vi.fn(() => []),
     })
     vi.mocked(designerApi.getProviders).mockResolvedValue([provider()])
+    exportMaskMock.mockResolvedValue(new File(['mask'], 'mask.png', { type: 'image/png' }))
     vi.mocked(api.projects.list).mockResolvedValue([
       { id: 'project-1', name: '品牌项目', platform: 'article' } as never,
     ])
@@ -135,6 +147,10 @@ describe('Designer shared prompt composer', () => {
       file_id: `registered:${upload_id}`, filename: upload_id, size: 5,
     }))
     vi.mocked(designerApi.generate).mockResolvedValue({ generation_id: 'generation-1', status: 'generating' })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('renders the single shared composer in the canvas and removes the old dock and overlay', async () => {
@@ -166,6 +182,7 @@ describe('Designer shared prompt composer', () => {
       project_id: 'default',
       reference_file_ids: ['registered:upload:first.png', 'registered:upload:second.png'],
     }))
+    await waitFor(() => expect(screen.getByLabelText('Designer prompt')).toHaveValue(''))
   })
 
   it('retains the ordered prefix and aborts overflow uploads when provider capacity shrinks', async () => {
@@ -306,5 +323,120 @@ describe('Designer shared prompt composer', () => {
 
     await waitFor(() => expect(screen.queryByRole('button', { name: '取消生成' })).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: '生成' })).toBeInTheDocument()
+  })
+
+  it('does not restart generation when a canceled reference registration resolves late', async () => {
+    const registration = deferred<{ file_id: string; filename: string; size: number }>()
+    vi.mocked(designerApi.registerReference).mockReturnValueOnce(registration.promise)
+    render(<DesignerPage />)
+    await addFiles([image('late-register.png')])
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '提交 A' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.registerReference).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '提交 B' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '生成' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
+
+    registration.resolve({ file_id: 'late-reference', filename: 'late.png', size: 5 })
+    await act(async () => {})
+    expect(designerApi.generate).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a newer prompt and does not begin polling when canceled generate resolves late', async () => {
+    const generation = deferred<{ generation_id: string; status: string }>()
+    vi.mocked(designerApi.generate).mockReturnValueOnce(generation.promise)
+    render(<DesignerPage />)
+    await screen.findByLabelText('Designer prompt')
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '提交 A' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
+
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '用户继续输入 B' } })
+    fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
+    generation.resolve({ generation_id: 'late-generation', status: 'generating' })
+    await act(async () => {})
+
+    expect(screen.getByLabelText('Designer prompt')).toHaveValue('用户继续输入 B')
+    expect(designerApi.getGeneration).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '取消生成' })).not.toBeInTheDocument()
+  })
+
+  it('ignores a canceled in-flight poll result and allows a fresh submit', async () => {
+    const poll = deferred<ImageGeneration>()
+    vi.mocked(designerApi.getGeneration).mockReturnValueOnce(poll.promise)
+    render(<DesignerPage />)
+    await screen.findByLabelText('Designer prompt')
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '等待轮询' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+    expect(designerApi.getGeneration).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
+    poll.resolve({
+      id: 'late-generation', user_id: 'user-1', project_id: 'default', prompt: '等待轮询',
+      provider: 'openai', model: 'gpt-image-2', n: 1, status: 'completed',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      results: [{ id: 1, generation_id: 'late-generation', image_url: 'https://example.com/late.png', index: 0 }],
+    })
+    await act(async () => {})
+
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '取消生成' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '新的提交' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await act(async () => {})
+    expect(designerApi.generate).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows one visible aggregated warning for rejected attachments', async () => {
+    render(<DesignerPage />)
+    await addFiles([image('duplicate.png')])
+    toast.warning.mockClear()
+    const tooLarge = new File(
+      [new Uint8Array(10 * 1024 * 1024 + 1)],
+      'too-large.png',
+      { type: 'image/png' },
+    )
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+      target: {
+        files: [
+          image('duplicate.png'),
+          new File(['notes'], 'notes.txt', { type: 'text/plain' }),
+          tooLarge,
+          image('accepted-1.png', 2),
+          image('accepted-2.png', 3),
+          image('overflow.png', 4),
+        ],
+      },
+    })
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1))
+    expect(toast.warning).toHaveBeenCalledWith(
+      '忽略 1 个重复文件，忽略 1 个不支持的文件，忽略 1 个超过大小限制的文件，忽略 1 个超过数量上限的文件',
+    )
+  })
+
+  it('cancels a pending mask export without surfacing a submit error', async () => {
+    const mask = deferred<File>()
+    exportMaskMock.mockReturnValueOnce(mask.promise)
+    render(<DesignerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '测试编辑' }))
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '取消蒙版' } })
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    await waitFor(() => expect(exportMaskMock).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '生成' })).not.toBeDisabled())
+    expect(screen.queryByText('提交失败，请重试')).not.toBeInTheDocument()
+
+    mask.resolve(new File(['mask'], 'mask.png', { type: 'image/png' }))
+    await act(async () => {})
+    expect(designerApi.uploadReferenceFromUrl).not.toHaveBeenCalled()
   })
 })
