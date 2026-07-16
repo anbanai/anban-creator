@@ -43,22 +43,28 @@ export const designerApi = {
   getProviders: () =>
     unwrap<RawDesignerProvider[]>(http.get('/designer/providers')).then((items) => items.map(normalizeProvider)),
 
-  generate: (req: GenerateRequest) =>
-    unwrap<{ generation_id: string; status: string; estimated_credits?: number; billing_mode?: string }>(http.post('/designer/generate', req)),
-
-  registerReference: (data: { upload_id: string; key: string }) =>
-    unwrap<{ file_id: string; filename: string; size: number }>(
-      http.post('/designer/register-reference', data),
+  generate: (req: GenerateRequest, signal?: AbortSignal) =>
+    unwrap<{ generation_id: string; status: string; estimated_credits?: number; billing_mode?: string }>(
+      signal ? http.post('/designer/generate', req, { signal }) : http.post('/designer/generate', req),
     ),
 
-  uploadReferenceFromUrl: (url: string) =>
+  registerReference: (data: { upload_id: string; key: string }, signal?: AbortSignal) =>
     unwrap<{ file_id: string; filename: string; size: number }>(
-      http.post('/designer/upload-reference-from-url', { url }),
+      signal ? http.post('/designer/register-reference', data, { signal }) : http.post('/designer/register-reference', data),
+    ),
+
+  uploadReferenceFromUrl: (url: string, signal?: AbortSignal) =>
+    unwrap<{ file_id: string; filename: string; size: number }>(
+      signal
+        ? http.post('/designer/upload-reference-from-url', { url }, { signal })
+        : http.post('/designer/upload-reference-from-url', { url }),
     ),
 
   getHistory: (params: { project_id?: string; page?: number; page_size?: number } = {}) =>
     unwrap<HistoryResponse>(http.get('/designer/history', { params })),
 
-  getGeneration: (id: string) =>
-    unwrap<ImageGeneration>(http.get(`/designer/generations/${id}`)),
+  getGeneration: (id: string, signal?: AbortSignal) =>
+    unwrap<ImageGeneration>(
+      signal ? http.get(`/designer/generations/${id}`, { signal }) : http.get(`/designer/generations/${id}`),
+    ),
 }

@@ -61,4 +61,25 @@ describe('designer API normalization', () => {
     })
     expect(result.file_id).toBe('reference-1')
   })
+
+  it('passes cancellation signals to generation, registration, source import, and polling requests', async () => {
+    const post = vi.spyOn(http, 'post').mockResolvedValue({
+      data: { code: 0, msg: 'success', data: {} },
+    })
+    const get = vi.spyOn(http, 'get').mockResolvedValue({
+      data: { code: 0, msg: 'success', data: {} },
+    })
+    const controller = new AbortController()
+    const { designerApi } = await import('./designer')
+
+    await designerApi.generate({ project_id: 'default', prompt: 'test' }, controller.signal)
+    await designerApi.registerReference({ upload_id: 'upload-1', key: 'uploads/finalized/reference.png' }, controller.signal)
+    await designerApi.uploadReferenceFromUrl('https://example.com/source.png', controller.signal)
+    await designerApi.getGeneration('generation-1', controller.signal)
+
+    expect(post).toHaveBeenNthCalledWith(1, '/designer/generate', expect.any(Object), { signal: controller.signal })
+    expect(post).toHaveBeenNthCalledWith(2, '/designer/register-reference', expect.any(Object), { signal: controller.signal })
+    expect(post).toHaveBeenNthCalledWith(3, '/designer/upload-reference-from-url', expect.any(Object), { signal: controller.signal })
+    expect(get).toHaveBeenCalledWith('/designer/generations/generation-1', { signal: controller.signal })
+  })
 })

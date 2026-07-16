@@ -256,7 +256,7 @@ export default function DesignerPage() {
       }
       try {
         const generation = await awaitGenerationAttempt(
-          designerApi.getGeneration(generationID),
+          designerApi.getGeneration(generationID, attempt.signal),
           attempt.signal,
         )
         if (!isGenerationAttemptActive(attempt)) return
@@ -299,7 +299,7 @@ export default function DesignerPage() {
     if (!active) return
     const attempt = startGenerationAttempt()
     awaitGenerationAttempt(
-      designerApi.getGeneration(active.generationId),
+      designerApi.getGeneration(active.generationId, attempt.signal),
       attempt.signal,
     ).then((generation) => {
       if (!isGenerationAttemptActive(attempt)) return
@@ -352,7 +352,7 @@ export default function DesignerPage() {
           designerApi.registerReference({
             upload_id: attachment.uploadId,
             key: attachment.key,
-          }),
+          }, attempt.signal),
           attempt.signal,
         )
         if (!isGenerationAttemptActive(attempt)) return
@@ -372,7 +372,7 @@ export default function DesignerPage() {
           background: effectiveCaps?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
           reference_file_ids: referenceFileIDs.length > 0 ? referenceFileIDs : undefined,
           watermark: settings.watermark || undefined,
-        }),
+        }, attempt.signal),
         attempt.signal,
       )
       if (!isGenerationAttemptActive(attempt)) return
@@ -406,7 +406,7 @@ export default function DesignerPage() {
       setEditingImage(null)
       const [source, maskUpload] = await awaitGenerationAttempt(
         Promise.all([
-          designerApi.uploadReferenceFromUrl(sourceImage.url),
+          designerApi.uploadReferenceFromUrl(sourceImage.url, attempt.signal),
           uploadToOSS({
             purpose: 'designer_reference',
             file: maskFile,
@@ -420,7 +420,7 @@ export default function DesignerPage() {
         designerApi.registerReference({
           upload_id: maskUpload.uploadId,
           key: maskUpload.key,
-        }),
+        }, attempt.signal),
         attempt.signal,
       )
       if (!isGenerationAttemptActive(attempt)) return
@@ -432,7 +432,7 @@ export default function DesignerPage() {
           provider_id: effectiveProvider.id,
           reference_file_ids: [source.file_id],
           mask_file_id: mask.file_id,
-        }),
+        }, attempt.signal),
         attempt.signal,
       )
       if (!isGenerationAttemptActive(attempt)) return

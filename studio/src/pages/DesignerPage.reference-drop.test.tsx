@@ -196,7 +196,7 @@ describe('Designer shared prompt composer', () => {
     expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
       project_id: 'default',
       reference_file_ids: ['registered:upload:first.png', 'registered:upload:second.png'],
-    }))
+    }), expect.any(AbortSignal))
     await waitFor(() => expect(screen.getByLabelText('Designer prompt')).toHaveValue(''))
   })
 
@@ -237,7 +237,7 @@ describe('Designer shared prompt composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
       reference_file_ids: ['registered:upload:first.png'],
-    })))
+    }), expect.any(AbortSignal)))
   })
 
   it('clears references when the provider does not support them', async () => {
@@ -255,7 +255,10 @@ describe('Designer shared prompt composer', () => {
     fireEvent.click(await screen.findByRole('option', { name: '品牌项目' }))
     fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '品牌图' } })
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
-    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({ project_id: 'project-1' })))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(
+      expect.objectContaining({ project_id: 'project-1' }),
+      expect.any(AbortSignal),
+    ))
 
     fireEvent.click(screen.getAllByText('历史记录')[0])
     await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: 'project-1', page_size: 50 }))
@@ -295,7 +298,7 @@ describe('Designer shared prompt composer', () => {
 
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
       reference_file_ids: ['registered:upload:first.png'],
-    })))
+    }), expect.any(AbortSignal)))
   })
 
   it('uploads the edit mask to OSS and registers it before generating', async () => {
@@ -312,7 +315,7 @@ describe('Designer shared prompt composer', () => {
     })))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
       project_id: 'default', reference_file_ids: ['source-1'], mask_file_id: 'registered:upload:mask.png',
-    })))
+    }), expect.any(AbortSignal)))
   })
 
   it('restores a history prompt without losing current references', async () => {
@@ -379,6 +382,29 @@ describe('Designer shared prompt composer', () => {
     expect(screen.getByLabelText('Designer prompt')).toHaveValue('用户继续输入 B')
     expect(designerApi.getGeneration).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '取消生成' })).not.toBeInTheDocument()
+  })
+
+  it('aborts the dispatched generation request and never starts polling after cancellation', async () => {
+    let dispatchedSignal: AbortSignal | undefined
+    vi.mocked(designerApi.generate).mockImplementationOnce((_request, signal) => {
+      dispatchedSignal = signal
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('canceled', 'AbortError')), { once: true })
+      })
+    })
+    render(<DesignerPage />)
+    await screen.findByLabelText('Designer prompt')
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '真实取消' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
+
+    expect(dispatchedSignal).toBeInstanceOf(AbortSignal)
+    expect(dispatchedSignal?.aborted).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
+
+    await waitFor(() => expect(dispatchedSignal?.aborted).toBe(true))
+    expect(designerApi.getGeneration).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('ignores a canceled in-flight poll result and allows a fresh submit', async () => {
