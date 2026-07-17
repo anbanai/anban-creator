@@ -21,7 +21,7 @@ func baseKubernetesConfigForTest() Config {
 			Executor: "kubernetes",
 			Kubernetes: KubernetesConfig{
 				Namespace:            "anbanai-prod",
-				AgentImage:           "registry.example.com/creator-agent:latest",
+				AgentImage:           "registry.example.com/creator-agent@sha256:" + strings.Repeat("a", 64),
 				ServiceAccount:       "creator-agent-runner",
 				NASStorageClass:      "nas-sc-creator",
 				ProjectMemorySize:    "1Gi",
@@ -96,6 +96,37 @@ func TestValidateKubernetesImageProfiles(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := baseKubernetesConfigForTest()
 			cfg.Claude.Kubernetes.ImageProfiles = test.profiles
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateKubernetesRequiresImmutableImageDigests(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{
+			name: "default image tag",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.AgentImage = "registry.example.com/content:latest"
+			},
+			want: "claude.kubernetes.agent_image must use an immutable sha256 digest",
+		},
+		{
+			name: "profile image tag",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.ImageProfiles = map[string]string{model.PlatformMontage: "registry.example.com/montage:v1"}
+			},
+			want: "claude.kubernetes.image_profiles.montage must use an immutable sha256 digest",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			test.mutate(&cfg)
 			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Validate() error = %v, want %q", err, test.want)
 			}
@@ -210,7 +241,7 @@ claude:
   executor: "kubernetes"
   agent_server_url: "https://creator-api-svc:8443"
   kubernetes:
-    agent_image: "registry.example.com/creator-agent:latest"
+    agent_image: "registry.example.com/creator-agent@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     service_account: "creator-agent-runner"
     execution_token_secret: "0123456789abcdef0123456789abcdef"
     nas_storage_class: "nas-sc-creator"
