@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
 	"time"
 
@@ -20,9 +21,14 @@ const (
 	billingSettlementClaimLease       = 5 * time.Minute
 )
 
-// ErrBillingClaimRequiresTransaction means a MySQL settlement claim was
+// ErrBillingRequiresTransaction means a lock-dependent billing operation was
 // attempted outside Repository.WithTx.
-var ErrBillingClaimRequiresTransaction = errors.New("mysql billing settlement claim requires caller transaction")
+var ErrBillingRequiresTransaction = errors.New("billing operation requires caller transaction")
+
+var (
+	ErrBillingNotFound        = errors.New("billing record not found")
+	ErrBillingVersionConflict = errors.New("billing account version conflict")
+)
 
 // BillingRepository provides transaction-aware persistence for the fixed-price
 // wallet. Balance and overdraft decisions belong to the billing service.
@@ -30,9 +36,10 @@ type BillingRepository interface {
 	FindAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error)
 	LockAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error)
 	CreateAccount(ctx context.Context, account *model.BillingWalletAccount) error
-	UpdateAccount(ctx context.Context, account *model.BillingWalletAccount) error
+	UpdateAccount(ctx context.Context, account *model.BillingWalletAccount, expectedVersion int64) error
 
 	ListSpendableLots(ctx context.Context, userID, kind string, now time.Time) ([]model.BillingCreditLot, error)
+	ListExpiredPromotionalLotsForUpdate(ctx context.Context, now time.Time, limit int) ([]model.BillingCreditLot, error)
 	LockLotByID(ctx context.Context, lotID string) (*model.BillingCreditLot, error)
 	CreateLot(ctx context.Context, lot *model.BillingCreditLot) error
 	UpdateLot(ctx context.Context, lot *model.BillingCreditLot) error
@@ -99,6 +106,9 @@ func (r *billingRepository) FindAccount(ctx context.Context, userID string) (*mo
 }
 
 func (r *billingRepository) LockAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
 	var account model.BillingWalletAccount
 	err := r.db.WithContext(ctx).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -113,20 +123,42 @@ func (r *billingRepository) CreateAccount(ctx context.Context, account *model.Bi
 	return r.db.WithContext(ctx).Create(account).Error
 }
 
-func (r *billingRepository) UpdateAccount(ctx context.Context, account *model.BillingWalletAccount) error {
-	return r.db.WithContext(ctx).
+func (r *billingRepository) UpdateAccount(ctx context.Context, account *model.BillingWalletAccount, expectedVersion int64) error {
+	if expectedVersion < 0 || expectedVersion == math.MaxInt64 || account.Version != expectedVersion+1 {
+		return ErrBillingVersionConflict
+	}
+	result := r.db.WithContext(ctx).
 		Model(&model.BillingWalletAccount{}).
-		Where("user_id = ?", account.UserID).
+		Where("user_id = ? AND version = ?", account.UserID, expectedVersion).
 		Updates(map[string]any{
 			"paid_credits":        account.PaidCredits,
 			"promotional_credits": account.PromotionalCredits,
 			"debt_credits":        account.DebtCredits,
 			"version":             account.Version,
-			"updated_at":          account.UpdatedAt,
-		}).Error
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Model(&model.BillingWalletAccount{}).
+		Where("user_id = ?", account.UserID).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrBillingNotFound
+	}
+	return ErrBillingVersionConflict
 }
 
 func (r *billingRepository) ListSpendableLots(ctx context.Context, userID, kind string, now time.Time) ([]model.BillingCreditLot, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
 	var lots []model.BillingCreditLot
 	query := r.db.WithContext(ctx).
 		Where("user_id = ? AND kind = ? AND available_credits > 0", userID, kind).
@@ -140,7 +172,27 @@ func (r *billingRepository) ListSpendableLots(ctx context.Context, userID, kind 
 	return lots, err
 }
 
+func (r *billingRepository) ListExpiredPromotionalLotsForUpdate(ctx context.Context, now time.Time, limit int) ([]model.BillingCreditLot, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
+	if limit <= 0 {
+		return []model.BillingCreditLot{}, nil
+	}
+	var lots []model.BillingCreditLot
+	err := r.db.WithContext(ctx).
+		Where("kind = ? AND available_credits > 0 AND expires_at IS NOT NULL AND expires_at <= ?", model.BillingCreditLotKindPromotional, now).
+		Order("expires_at ASC, created_at ASC, id ASC").
+		Limit(limit).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Find(&lots).Error
+	return lots, err
+}
+
 func (r *billingRepository) LockLotByID(ctx context.Context, lotID string) (*model.BillingCreditLot, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
 	var lot model.BillingCreditLot
 	err := r.db.WithContext(ctx).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -156,14 +208,15 @@ func (r *billingRepository) CreateLot(ctx context.Context, lot *model.BillingCre
 }
 
 func (r *billingRepository) UpdateLot(ctx context.Context, lot *model.BillingCreditLot) error {
-	return r.db.WithContext(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&model.BillingCreditLot{}).
 		Where("id = ?", lot.ID).
 		Updates(map[string]any{
 			"available_credits": lot.AvailableCredits,
 			"consumed_credits":  lot.ConsumedCredits,
 			"expired_credits":   lot.ExpiredCredits,
-		}).Error
+		})
+	return billingRequireOneRow(result)
 }
 
 func (r *billingRepository) FindLotBySource(ctx context.Context, sourceType, sourceID string) (*model.BillingCreditLot, error) {
@@ -270,6 +323,9 @@ func (r *billingRepository) FindQuoteByKey(ctx context.Context, scope, key strin
 }
 
 func (r *billingRepository) LockQuote(ctx context.Context, quoteID string) (*model.BillingQuote, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
 	var quote model.BillingQuote
 	err := r.db.WithContext(ctx).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -295,6 +351,9 @@ func (r *billingRepository) MarkQuoteConsumed(ctx context.Context, quoteID strin
 // CreateCharge deliberately reuses r.db. Callers wrap it in Repository.WithTx
 // so the charge and allocations participate in the existing wallet transaction.
 func (r *billingRepository) CreateCharge(ctx context.Context, charge *model.BillingCharge, allocations []model.BillingChargeAllocation) error {
+	if !r.transactionBound {
+		return ErrBillingRequiresTransaction
+	}
 	if err := r.db.WithContext(ctx).Create(charge).Error; err != nil {
 		return err
 	}
@@ -389,7 +448,7 @@ func (r *billingRepository) ClaimSettlements(ctx context.Context, now time.Time,
 		return r.claimSQLiteSettlements(ctx, now, limit)
 	}
 	if !r.transactionBound {
-		return nil, ErrBillingClaimRequiresTransaction
+		return nil, ErrBillingRequiresTransaction
 	}
 
 	claim := func(tx *gorm.DB) ([]model.BillingSettlementOutbox, error) {
@@ -537,7 +596,7 @@ func (r *billingRepository) FindReferralIssue(ctx context.Context, inviteeUserID
 }
 
 func (r *billingRepository) UpdateReferralIssue(ctx context.Context, issue *model.BillingReferralIssue) error {
-	return r.db.WithContext(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&model.BillingReferralIssue{}).
 		Where("id = ?", issue.ID).
 		Updates(map[string]any{
@@ -545,8 +604,8 @@ func (r *billingRepository) UpdateReferralIssue(ctx context.Context, issue *mode
 			"inviter_lot_id": issue.InviterLotID,
 			"status":         issue.Status,
 			"issued_at":      issue.IssuedAt,
-			"updated_at":     issue.UpdatedAt,
-		}).Error
+		})
+	return billingRequireOneRow(result)
 }
 
 func (r *billingRepository) CountIssuedReferrals(ctx context.Context, inviterUserID, programID string) (int64, error) {

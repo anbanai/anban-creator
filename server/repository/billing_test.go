@@ -7,6 +7,7 @@ import (
 	"log"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -67,7 +68,7 @@ func TestBillingRepositoryAccessorParity(t *testing.T) {
 
 func TestBillingRepositoryLockingSQLContracts(t *testing.T) {
 	db, logs := openBillingMySQLDryRunDB(t)
-	repo := newBillingRepository(db)
+	repo := newTxBillingRepository(db)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 
@@ -75,6 +76,7 @@ func TestBillingRepositoryLockingSQLContracts(t *testing.T) {
 	_, _ = repo.LockLotByID(ctx, "lot-1")
 	_, _ = repo.ListSpendableLots(ctx, "user-1", string(model.BillingCreditLotKindPromotional), now)
 	_, _ = repo.ListSpendableLots(ctx, "user-1", string(model.BillingCreditLotKindPaid), now)
+	_, _ = repo.ListExpiredPromotionalLotsForUpdate(ctx, now, 25)
 	_, _ = repo.LockQuote(ctx, "quote-1")
 
 	sql := logs.String()
@@ -83,8 +85,8 @@ func TestBillingRepositoryLockingSQLContracts(t *testing.T) {
 			t.Errorf("locking SQL does not query %s:\n%s", table, sql)
 		}
 	}
-	if got := strings.Count(sql, "FOR UPDATE"); got != 5 {
-		t.Fatalf("FOR UPDATE count = %d, want 5:\n%s", got, sql)
+	if got := strings.Count(sql, "FOR UPDATE"); got != 6 {
+		t.Fatalf("FOR UPDATE count = %d, want 6:\n%s", got, sql)
 	}
 	if !strings.Contains(sql, "ORDER BY expires_at ASC, created_at ASC, id ASC") {
 		t.Errorf("promotional lot order missing:\n%s", sql)
@@ -92,10 +94,14 @@ func TestBillingRepositoryLockingSQLContracts(t *testing.T) {
 	if !strings.Contains(sql, "ORDER BY created_at ASC, id ASC") {
 		t.Errorf("paid lot order missing:\n%s", sql)
 	}
+	if !strings.Contains(sql, "kind = 'promotional' AND available_credits > 0 AND expires_at IS NOT NULL AND expires_at <=") ||
+		!strings.Contains(sql, "ORDER BY expires_at ASC, created_at ASC, id ASC LIMIT 25 FOR UPDATE") {
+		t.Errorf("expired promotional lot locking contract missing:\n%s", sql)
+	}
 }
 
 func TestBillingRepositoryListSpendableLotsFiltersAndOrders(t *testing.T) {
-	repo := New(setupTestDB(t)).Billing()
+	repo := New(setupTestDB(t))
 	ctx := context.Background()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	created := now.Add(-time.Hour)
@@ -115,24 +121,308 @@ func TestBillingRepositoryListSpendableLotsFiltersAndOrders(t *testing.T) {
 		billingLot("paid-id-a", "u1", model.BillingCreditLotKindPaid, 10, created, nil),
 	}
 	for i := range lots {
-		if err := repo.CreateLot(ctx, &lots[i]); err != nil {
+		if err := repo.Billing().CreateLot(ctx, &lots[i]); err != nil {
 			t.Fatalf("CreateLot(%s): %v", lots[i].ID, err)
 		}
 	}
 
-	promotional, err := repo.ListSpendableLots(ctx, "u1", string(model.BillingCreditLotKindPromotional), now)
-	if err != nil {
+	if err := repo.WithTx(ctx, func(txRepo Repository) error {
+		promotional, err := txRepo.Billing().ListSpendableLots(ctx, "u1", string(model.BillingCreditLotKindPromotional), now)
+		if err != nil {
+			return err
+		}
+		if got, want := billingLotIDs(promotional), []string{"promo-id-a", "promo-id-b", "promo-late"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("promotional IDs = %v, want %v", got, want)
+		}
+		paid, err := txRepo.Billing().ListSpendableLots(ctx, "u1", string(model.BillingCreditLotKindPaid), now)
+		if err != nil {
+			return err
+		}
+		if got, want := billingLotIDs(paid), []string{"paid-id-a", "paid-id-b", "paid-later"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("paid IDs = %v, want %v", got, want)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := billingLotIDs(promotional), []string{"promo-id-a", "promo-id-b", "promo-late"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("promotional IDs = %v, want %v", got, want)
+}
+
+func TestBillingRepositoryRootRejectsLocksAndChargeWrites(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+
+	for name, call := range map[string]func() error{
+		"LockAccount": func() error {
+			_, err := repo.Billing().LockAccount(ctx, "u1")
+			return err
+		},
+		"LockLotByID": func() error {
+			_, err := repo.Billing().LockLotByID(ctx, "lot-1")
+			return err
+		},
+		"ListSpendableLots": func() error {
+			_, err := repo.Billing().ListSpendableLots(ctx, "u1", string(model.BillingCreditLotKindPaid), now)
+			return err
+		},
+		"LockQuote": func() error {
+			_, err := repo.Billing().LockQuote(ctx, "quote-1")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			requireBillingTransactionError(t, call())
+		})
 	}
-	paid, err := repo.ListSpendableLots(ctx, "u1", string(model.BillingCreditLotKindPaid), now)
-	if err != nil {
+
+	charge := billingTaskCharge("root-charge", "root-task", "root-key")
+	err := repo.Billing().CreateCharge(ctx, charge, []model.BillingChargeAllocation{{ID: "root-allocation", ChargeID: charge.ID, LotID: "root-lot", Credits: 100}})
+	requireBillingTransactionError(t, err)
+	if _, err := repo.Billing().FindChargeByID(ctx, charge.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("root CreateCharge persisted data: %v", err)
+	}
+}
+
+func TestBillingRepositoryRootMySQLRejectsLocksAndChargeWrites(t *testing.T) {
+	db, logs := openBillingMySQLDryRunDB(t)
+	repo := newBillingRepository(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	for name, call := range map[string]func() error{
+		"LockAccount": func() error {
+			_, err := repo.LockAccount(ctx, "u1")
+			return err
+		},
+		"LockLotByID": func() error {
+			_, err := repo.LockLotByID(ctx, "lot-1")
+			return err
+		},
+		"ListSpendableLots": func() error {
+			_, err := repo.ListSpendableLots(ctx, "u1", string(model.BillingCreditLotKindPaid), now)
+			return err
+		},
+		"ListExpiredPromotionalLotsForUpdate": func() error {
+			_, err := repo.ListExpiredPromotionalLotsForUpdate(ctx, now, 10)
+			return err
+		},
+		"LockQuote": func() error {
+			_, err := repo.LockQuote(ctx, "quote-1")
+			return err
+		},
+		"CreateCharge": func() error {
+			return repo.CreateCharge(ctx, billingTaskCharge("root-mysql-charge", "root-mysql-task", "root-mysql-key"), nil)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			requireBillingTransactionError(t, call())
+		})
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("root transaction-required operations issued MySQL SQL:\n%s", logs.String())
+	}
+}
+
+func TestBillingRepositoryLockMethodsUseOuterTransactionAndRollback(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	account := &model.BillingWalletAccount{UserID: "u1", PaidCredits: 10}
+	lot := billingLot("paid-lot-lock", "u1", model.BillingCreditLotKindPaid, 10, now.Add(-time.Hour), nil)
+	quote := &model.BillingQuote{
+		ID: "quote-lock", UserID: "u1", CatalogID: "retail-v1", SKUID: "task.seednote.v1",
+		PriceCredits: 10, RequestFingerprint: strings.Repeat("e", 64), SKUSnapshot: datatypes.JSON(`{}`),
+		ExpiresAt: now.Add(time.Hour), IdempotencyScope: "quote-lock", IdempotencyKey: "quote-lock",
+	}
+	if err := repo.Billing().CreateAccount(ctx, account); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := billingLotIDs(paid), []string{"paid-id-a", "paid-id-b", "paid-later"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("paid IDs = %v, want %v", got, want)
+	if err := repo.Billing().CreateLot(ctx, &lot); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Billing().CreateQuote(ctx, quote); err != nil {
+		t.Fatal(err)
+	}
+
+	errRollback := errors.New("rollback lock transaction")
+	err := repo.WithTx(ctx, func(txRepo Repository) error {
+		if _, err := txRepo.Billing().LockAccount(ctx, account.UserID); err != nil {
+			return err
+		}
+		lockedLot, err := txRepo.Billing().LockLotByID(ctx, lot.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := txRepo.Billing().ListSpendableLots(ctx, account.UserID, string(model.BillingCreditLotKindPaid), now); err != nil {
+			return err
+		}
+		if _, err := txRepo.Billing().LockQuote(ctx, quote.ID); err != nil {
+			return err
+		}
+		lockedLot.AvailableCredits = 0
+		lockedLot.ConsumedCredits = lockedLot.OriginalCredits
+		if err := txRepo.Billing().UpdateLot(ctx, lockedLot); err != nil {
+			return err
+		}
+		return errRollback
+	})
+	if !errors.Is(err, errRollback) {
+		t.Fatalf("WithTx error = %v", err)
+	}
+	found, err := repo.Billing().FindLotBySource(ctx, lot.SourceType, lot.SourceID)
+	if err != nil || found.AvailableCredits != 10 || found.ConsumedCredits != 0 {
+		t.Fatalf("lot after outer rollback = %+v, %v", found, err)
+	}
+}
+
+func TestBillingRepositoryExpiredPromotionalLotsForUpdate(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	created := now.Add(-time.Hour)
+	before := now.Add(-time.Second)
+	future := now.Add(time.Second)
+	lots := []model.BillingCreditLot{
+		billingLot("expired-before", "u1", model.BillingCreditLotKindPromotional, 10, created, &before),
+		billingLot("expired-at-b", "u1", model.BillingCreditLotKindPromotional, 10, created, &now),
+		billingLot("expired-at-a", "u1", model.BillingCreditLotKindPromotional, 10, created, &now),
+		billingLot("future", "u1", model.BillingCreditLotKindPromotional, 10, created, &future),
+		billingLot("paid", "u1", model.BillingCreditLotKindPaid, 10, created, nil),
+		billingLot("exhausted", "u1", model.BillingCreditLotKindPromotional, 0, created, &before),
+	}
+	for i := range lots {
+		if err := repo.Billing().CreateLot(ctx, &lots[i]); err != nil {
+			t.Fatalf("CreateLot(%s): %v", lots[i].ID, err)
+		}
+	}
+
+	_, err := repo.Billing().ListExpiredPromotionalLotsForUpdate(ctx, now, 2)
+	requireBillingTransactionError(t, err)
+	errRollback := errors.New("rollback expiry")
+	err = repo.WithTx(ctx, func(txRepo Repository) error {
+		expired, err := txRepo.Billing().ListExpiredPromotionalLotsForUpdate(ctx, now, 2)
+		if err != nil {
+			return err
+		}
+		if got, want := billingLotIDs(expired), []string{"expired-before", "expired-at-a"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("expired lot IDs = %v, want %v", got, want)
+		}
+		expired[0].AvailableCredits = 0
+		expired[0].ExpiredCredits = expired[0].OriginalCredits
+		if err := txRepo.Billing().UpdateLot(ctx, &expired[0]); err != nil {
+			return err
+		}
+		again, err := txRepo.Billing().ListExpiredPromotionalLotsForUpdate(ctx, now, 2)
+		if err != nil {
+			return err
+		}
+		if got, want := billingLotIDs(again), []string{"expired-at-a", "expired-at-b"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("expired lots after mutation = %v, want %v", got, want)
+		}
+		return errRollback
+	})
+	if !errors.Is(err, errRollback) {
+		t.Fatalf("expiry transaction error = %v", err)
+	}
+	rolledBack, err := repo.Billing().FindLotBySource(ctx, "test", "expired-before")
+	if err != nil || rolledBack.AvailableCredits != 10 || rolledBack.ExpiredCredits != 0 {
+		t.Fatalf("rolled back expired lot = %+v, %v", rolledBack, err)
+	}
+}
+
+func TestBillingRepositoryExpiredPromotionalLotsUseCallerMySQLTransaction(t *testing.T) {
+	db, mock := openBillingMySQLMockDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	errRollback := errors.New("rollback expired lots")
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `billing_credit_lots` WHERE .*kind = .*available_credits > 0.*expires_at IS NOT NULL.*expires_at <= .*ORDER BY expires_at ASC, created_at ASC, id ASC LIMIT .* FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "kind", "original_credits", "available_credits", "consumed_credits", "expired_credits", "expires_at", "created_at"}).
+			AddRow("expired-mysql", "u1", "promotional", 10, 10, 0, 0, now.Add(-time.Minute), now.Add(-time.Hour)))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE `billing_credit_lots` SET `available_credits`=?,`consumed_credits`=?,`expired_credits`=? WHERE id = ?")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectRollback()
+
+	err := repo.WithTx(ctx, func(txRepo Repository) error {
+		lots, err := txRepo.Billing().ListExpiredPromotionalLotsForUpdate(ctx, now, 1)
+		if err != nil {
+			return err
+		}
+		if len(lots) != 1 || lots[0].ID != "expired-mysql" {
+			t.Fatalf("expired MySQL lots = %+v", lots)
+		}
+		lots[0].AvailableCredits = 0
+		lots[0].ExpiredCredits = lots[0].OriginalCredits
+		if err := txRepo.Billing().UpdateLot(ctx, &lots[0]); err != nil {
+			return err
+		}
+		return errRollback
+	})
+	if !errors.Is(err, errRollback) {
+		t.Fatalf("WithTx error = %v, want rollback sentinel", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expired lot MySQL transaction expectations: %v", err)
+	}
+}
+
+func TestBillingRepositoryAccountUpdatesUseMonotonicVersionCAS(t *testing.T) {
+	repo := New(setupTestDB(t)).Billing()
+	ctx := context.Background()
+	account := &model.BillingWalletAccount{UserID: "account-cas", PaidCredits: 100, Version: 3}
+	if err := repo.CreateAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+
+	updated := *account
+	updated.PaidCredits = 80
+	updated.Version = 4
+	if err := repo.UpdateAccount(ctx, &updated, 3); err != nil {
+		t.Fatalf("monotonic update: %v", err)
+	}
+	found, err := repo.FindAccount(ctx, account.UserID)
+	if err != nil || found.PaidCredits != 80 || found.Version != 4 {
+		t.Fatalf("updated account = %+v, %v", found, err)
+	}
+
+	stale := updated
+	stale.PaidCredits = 70
+	stale.Version = 4
+	if err := repo.UpdateAccount(ctx, &stale, 3); !errors.Is(err, ErrBillingVersionConflict) {
+		t.Fatalf("stale update error = %v", err)
+	}
+	missing := &model.BillingWalletAccount{UserID: "missing-account", Version: 1}
+	if err := repo.UpdateAccount(ctx, missing, 0); !errors.Is(err, ErrBillingNotFound) {
+		t.Fatalf("missing update error = %v", err)
+	}
+
+	for name, version := range map[string]int64{"rollback": 4, "jump": 6} {
+		t.Run(name, func(t *testing.T) {
+			invalid := *found
+			invalid.Version = version
+			if err := repo.UpdateAccount(ctx, &invalid, 4); !errors.Is(err, ErrBillingVersionConflict) {
+				t.Fatalf("invalid version update error = %v", err)
+			}
+		})
+	}
+	afterInvalid, err := repo.FindAccount(ctx, account.UserID)
+	if err != nil || afterInvalid.PaidCredits != 80 || afterInvalid.Version != 4 {
+		t.Fatalf("account changed after invalid CAS = %+v, %v", afterInvalid, err)
+	}
+}
+
+func TestBillingRepositoryUpdatesRejectMissingRows(t *testing.T) {
+	repo := New(setupTestDB(t)).Billing()
+	ctx := context.Background()
+	if err := repo.UpdateLot(ctx, &model.BillingCreditLot{ID: "missing-lot"}); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("missing lot update error = %v", err)
+	}
+	if err := repo.UpdateReferralIssue(ctx, &model.BillingReferralIssue{ID: "missing-referral"}); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("missing referral update error = %v", err)
 	}
 }
 
@@ -181,7 +471,8 @@ func TestBillingRepositoryWalletEntriesAreAppendOnlyAndReplayable(t *testing.T) 
 }
 
 func TestBillingRepositoryCatalogSKUAndQuotePersistence(t *testing.T) {
-	repo := New(setupTestDB(t)).Billing()
+	rootRepo := New(setupTestDB(t))
+	repo := rootRepo.Billing()
 	ctx := context.Background()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	catalog := &model.BillingCatalogVersion{CatalogID: "retail-v1", Currency: "credits", Status: "published", PublishedAt: now, Snapshot: datatypes.JSON(`{"id":"retail-v1"}`)}
@@ -238,9 +529,14 @@ func TestBillingRepositoryCatalogSKUAndQuotePersistence(t *testing.T) {
 	if err != nil || changed {
 		t.Fatalf("MarkQuoteConsumed replay = %v, %v", changed, err)
 	}
-	locked, err := repo.LockQuote(ctx, quote.ID)
-	if err != nil || locked.ConsumedAt == nil || locked.ResourceID != "task-1" {
-		t.Fatalf("LockQuote after consume = %+v, %v", locked, err)
+	if err := rootRepo.WithTx(ctx, func(txRepo Repository) error {
+		locked, err := txRepo.Billing().LockQuote(ctx, quote.ID)
+		if err != nil || locked.ConsumedAt == nil || locked.ResourceID != "task-1" {
+			t.Fatalf("LockQuote after consume = %+v, %v", locked, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -267,15 +563,24 @@ func TestBillingRepositoryCreateChargeUsesCallerTransactionAtomically(t *testing
 func TestBillingRepositoryChargeAllocationsSupportExactReversal(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
-	exhaustedLot := &model.BillingCreditLot{
+	promotionalLot := &model.BillingCreditLot{
 		ID: "promotional-lot", UserID: "u1", Kind: model.BillingCreditLotKindPromotional,
 		ProgramID: "program-v1", SourceType: "promotion", SourceID: "reward-1", CatalogID: "retail-v1",
 		OriginalCredits: 40, ConsumedCredits: 40, ExpiresAt: ptrTime(time.Now().Add(time.Hour)),
 	}
-	if err := repo.Billing().CreateLot(ctx, exhaustedLot); err != nil {
-		t.Fatalf("CreateLot: %v", err)
+	paidLot := &model.BillingCreditLot{
+		ID: "paid-lot", UserID: "u1", Kind: model.BillingCreditLotKindPaid,
+		SourceType: "topup", SourceID: "payment-1", CatalogID: "retail-v1",
+		OriginalCredits: 60, ConsumedCredits: 60,
+	}
+	for _, lot := range []*model.BillingCreditLot{promotionalLot, paidLot} {
+		if err := repo.Billing().CreateLot(ctx, lot); err != nil {
+			t.Fatalf("CreateLot(%s): %v", lot.ID, err)
+		}
 	}
 	charge := billingTaskCharge("charge-allocated", "task-allocated", "allocated-key")
+	charge.PaidCredits = 60
+	charge.PromotionalCredits = 40
 	allocations := []model.BillingChargeAllocation{
 		{ID: "allocation-b", ChargeID: charge.ID, LotID: "paid-lot", Credits: 60},
 		{ID: "allocation-a", ChargeID: charge.ID, LotID: "promotional-lot", Credits: 40},
@@ -293,9 +598,26 @@ func TestBillingRepositoryChargeAllocationsSupportExactReversal(t *testing.T) {
 	if got, want := []string{found[0].ID, found[1].ID}, []string{"allocation-a", "allocation-b"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("allocation IDs = %v, want %v", got, want)
 	}
-	lockedLot, err := repo.Billing().LockLotByID(ctx, exhaustedLot.ID)
-	if err != nil || lockedLot.AvailableCredits != 0 || lockedLot.ConsumedCredits != 40 {
-		t.Fatalf("LockLotByID(exhausted) = %+v, %v", lockedLot, err)
+	var allocated int64
+	for _, allocation := range found {
+		allocated += allocation.Credits
+	}
+	if allocated != charge.PaidCredits+charge.PromotionalCredits {
+		t.Fatalf("allocated credits = %d, charge lot-backed credits = %d", allocated, charge.PaidCredits+charge.PromotionalCredits)
+	}
+	if err := repo.WithTx(ctx, func(txRepo Repository) error {
+		for _, allocation := range found {
+			lockedLot, err := txRepo.Billing().LockLotByID(ctx, allocation.LotID)
+			if err != nil {
+				return err
+			}
+			if lockedLot.UserID != charge.UserID || lockedLot.AvailableCredits != 0 || lockedLot.ConsumedCredits != allocation.Credits {
+				t.Fatalf("locked allocation lot = %+v for allocation %+v", lockedLot, allocation)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -494,8 +816,16 @@ func TestBillingRepositorySettlementOutboxMySQLUsesSkipLocked(t *testing.T) {
 	db, logs := openBillingMySQLDryRunDB(t)
 	_, _ = newTxBillingRepository(db).ClaimSettlements(context.Background(), time.Now(), 10)
 	sql := logs.String()
-	if !strings.Contains(sql, "FROM `billing_settlement_outbox`") || !strings.Contains(sql, "FOR UPDATE SKIP LOCKED") {
-		t.Fatalf("MySQL settlement claim SQL contract invalid:\n%s", sql)
+	for _, fragment := range []string{
+		"FROM `billing_settlement_outbox`",
+		"status IN ('pending','retry')",
+		"next_attempt_at IS NULL OR next_attempt_at <=",
+		"status = 'processing' AND updated_at <=",
+		"ORDER BY created_at ASC, id ASC LIMIT 10 FOR UPDATE SKIP LOCKED",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("MySQL settlement claim SQL missing %q:\n%s", fragment, sql)
+		}
 	}
 }
 
@@ -507,10 +837,12 @@ func TestBillingRepositoryMySQLClaimUsesCallerTransactionWithoutSavepoint(t *tes
 	errRollback := errors.New("rollback outer transaction")
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .* FROM `billing_settlement_outbox` .*FOR UPDATE SKIP LOCKED").
+	mock.ExpectQuery("SELECT .* FROM `billing_settlement_outbox` WHERE .*status IN .*next_attempt_at IS NULL OR next_attempt_at <= .*status = .*updated_at <= .*ORDER BY created_at ASC, id ASC LIMIT .* FOR UPDATE SKIP LOCKED").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "attempts", "created_at", "updated_at"}).
 			AddRow("settlement-mysql", "pending", 0, now.Add(-time.Minute), now.Add(-time.Minute)))
-	mock.ExpectExec("UPDATE `billing_settlement_outbox` SET .* WHERE id = .*").
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE `billing_settlement_outbox` SET `attempts`=attempts + 1,`last_error`=?,`next_attempt_at`=?,`processed_at`=?,`status`=?,`updated_at`=? WHERE id = ? AND ((status IN (?,?) AND (next_attempt_at IS NULL OR next_attempt_at <= ?)) OR (status = ? AND updated_at <= ?))")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE `billing_settlement_outbox` SET `last_error`=?,`next_attempt_at`=?,`processed_at`=?,`status`=?,`updated_at`=? WHERE id = ? AND status = ? AND attempts = ?")).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectRollback()
 
@@ -521,6 +853,9 @@ func TestBillingRepositoryMySQLClaimUsesCallerTransactionWithoutSavepoint(t *tes
 		}
 		if len(claimed) != 1 || claimed[0].ID != "settlement-mysql" || claimed[0].Attempts != 1 {
 			t.Fatalf("claimed rows = %+v", claimed)
+		}
+		if err := txRepo.Billing().MarkSettlementRetry(ctx, claimed[0].ID, claimed[0].Attempts, now.Add(time.Minute), "retry"); err != nil {
+			return err
 		}
 		return errRollback
 	})
@@ -672,6 +1007,13 @@ func settlementIDs(rows []model.BillingSettlementOutbox) []string {
 		ids[i] = rows[i].ID
 	}
 	return ids
+}
+
+func requireBillingTransactionError(t *testing.T, err error) {
+	t.Helper()
+	if !errors.Is(err, ErrBillingRequiresTransaction) {
+		t.Fatalf("error = %v, want caller transaction requirement", err)
+	}
 }
 
 func ptrTime(value time.Time) *time.Time { return &value }
