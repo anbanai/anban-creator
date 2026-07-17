@@ -47,6 +47,38 @@ func TestProjectRequestMapsRequirePublishApproval(t *testing.T) {
 	}
 }
 
+func TestProjectRequestMapsMontageDefaults(t *testing.T) {
+	req := projectRequest{
+		Platform: model.PlatformMontage,
+		Name:     "Montage",
+		MontageDefaults: &model.MontageDefaults{
+			DefaultPipeline: "social-short",
+			Preferences: model.MontagePreferences{
+				AspectRatio:     "9:16",
+				DurationSeconds: 45,
+				Style:           "documentary",
+				MusicPrompt:     "minimal electronic",
+				SubtitleMode:    "burned-in",
+				VoiceoverMode:   "narrated",
+			},
+			AssetGuidance:   "prefer source footage",
+			DeliveryTargets: []string{"final_video", "subtitles"},
+		},
+	}
+
+	project := req.toProject()
+	if !project.MontageDefaultsSet {
+		t.Fatal("MontageDefaultsSet = false")
+	}
+	got := project.MontageDefaults.Data()
+	if got.DefaultPipeline != "social-short" || got.Preferences.MusicPrompt != "minimal electronic" || got.AssetGuidance != "prefer source footage" {
+		t.Fatalf("MontageDefaults = %#v", got)
+	}
+	if len(got.DeliveryTargets) != 2 || got.DeliveryTargets[1] != "subtitles" {
+		t.Fatalf("DeliveryTargets = %#v", got.DeliveryTargets)
+	}
+}
+
 func setupProjectDeleteHandlerTest(t *testing.T) (*fiber.App, repository.Repository) {
 	t.Helper()
 
@@ -81,6 +113,81 @@ func setupProjectDeleteHandlerTest(t *testing.T) (*fiber.App, repository.Reposit
 	app.Post("/api/v1/projects", injectUser, h.Create)
 	app.Put("/api/v1/projects/:id", injectUser, h.Update)
 	return app, repo
+}
+
+func TestProjectHandler_CreateAndUpdateMontageDefaults(t *testing.T) {
+	app, repo := setupProjectDeleteHandlerTest(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+
+	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
+		"platform": model.PlatformMontage,
+		"name":     "Launch montage",
+		"montage_defaults": map[string]any{
+			"default_pipeline": "social-short",
+			"preferences": map[string]any{
+				"aspect_ratio":     "9:16",
+				"duration_seconds": 45,
+				"style":            "documentary",
+				"music_prompt":     "minimal electronic",
+				"subtitle_mode":    "burned-in",
+				"voiceover_mode":   "narrated",
+			},
+			"asset_guidance":   "prefer source footage",
+			"delivery_targets": []string{"final_video", "subtitles"},
+		},
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("create status = %d, body=%#v", resp.StatusCode, decodeBody(t, resp))
+	}
+	createData := decodeBody(t, resp)["data"].(map[string]any)
+	createdProject := createData["project"].(map[string]any)
+	projectID := createdProject["id"].(string)
+	stored, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("FindByID after create: %v", err)
+	}
+	defaults := stored.MontageDefaults.Data()
+	if defaults.DefaultPipeline != "social-short" || defaults.Preferences.DurationSeconds != 45 || defaults.Preferences.VoiceoverMode != "narrated" {
+		t.Fatalf("created MontageDefaults = %#v", defaults)
+	}
+
+	resp = doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID, userID, map[string]any{
+		"platform": model.PlatformMontage,
+		"montage_defaults": map[string]any{
+			"default_pipeline": "product-demo",
+			"preferences": map[string]any{
+				"aspect_ratio":     "16:9",
+				"duration_seconds": 30,
+			},
+			"delivery_targets": []string{"final_video"},
+		},
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("update status = %d, body=%#v", resp.StatusCode, decodeBody(t, resp))
+	}
+	stored, err = repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("FindByID after update: %v", err)
+	}
+	defaults = stored.MontageDefaults.Data()
+	if defaults.DefaultPipeline != "product-demo" || defaults.Preferences.AspectRatio != "16:9" || defaults.Preferences.DurationSeconds != 30 {
+		t.Fatalf("updated MontageDefaults = %#v", defaults)
+	}
+}
+
+func TestProjectHandler_RejectsMontageDefaultsForArticle(t *testing.T) {
+	app, _ := setupProjectDeleteHandlerTest(t)
+	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", uuid.NewString(), map[string]any{
+		"platform": model.PlatformArticle,
+		"name":     "Article",
+		"montage_defaults": map[string]any{
+			"default_pipeline": "social-short",
+		},
+	})
+	if resp.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%#v", resp.StatusCode, decodeBody(t, resp))
+	}
 }
 
 func TestProjectHandler_SeednoteLoginStatusUnavailableWhenSidecarNotReady(t *testing.T) {
