@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -31,6 +33,14 @@ type dispatchTestDispatcher struct {
 	sideEffectOnError bool
 	started           chan struct{}
 	release           chan struct{}
+	runtimeSelection  srvconfig.RuntimeImageSelection
+}
+
+func (d *dispatchTestDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSelection {
+	if d.runtimeSelection.Profile != "" || d.runtimeSelection.Image != "" {
+		return d.runtimeSelection
+	}
+	return srvconfig.RuntimeImageSelection{Profile: "content", Image: "registry/content@sha256:test"}
 }
 
 func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*agent.KubernetesRuntimeIdentity, error) {
@@ -175,6 +185,25 @@ func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterJobAccepted(t *testing
 	}
 }
 
+func TestCreateCurrentExecutionPersistsRuntimeImage(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = srvconfig.RuntimeImageSelection{
+		Profile: model.PlatformMontage,
+		Image:   "registry/montage@sha256:abc",
+	}
+	task.Type = model.PlatformMontage
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	if execution.RuntimeProfile != model.PlatformMontage || execution.RuntimeImage != "registry/montage@sha256:abc" {
+		t.Fatalf("runtime identity = %q %q", execution.RuntimeProfile, execution.RuntimeImage)
+	}
+}
+
 func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.T) {
 	svc, repo, _, _, task := setupDispatchTest(t)
 	ctx := context.Background()
@@ -183,7 +212,10 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := &model.TaskExecution{ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed, Result: result}
+	parent := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed, Result: result,
+		RuntimeProfile: model.PlatformMontage, RuntimeImage: "registry/montage@sha256:parent",
+	}
 	if err := repo.TaskExecutions().Create(ctx, parent); err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +230,50 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 	current := mustCurrentExecution(t, repo, task.ID)
 	if current.Attempt != 2 || current.ParentExecutionID != parent.ID || current.ResumeSessionID != sessionID {
 		t.Fatalf("resumed execution = %#v", current)
+	}
+	if current.RuntimeProfile != parent.RuntimeProfile || current.RuntimeImage != parent.RuntimeImage {
+		t.Fatalf("resumed runtime = %q %q, want parent %q %q", current.RuntimeProfile, current.RuntimeImage, parent.RuntimeProfile, parent.RuntimeImage)
+	}
+}
+
+func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = srvconfig.RuntimeImageSelection{Profile: "content", Image: "registry/content@sha256:new"}
+	parent := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
+		RuntimeProfile: model.PlatformMontage, RuntimeImage: "registry/montage@sha256:original",
+	}
+	if err := repo.TaskExecutions().Create(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	task.CurrentExecutionID = &parent.ID
+	task.SetInputAttachments([]model.EntryAttachment{{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue"}})
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	current := mustCurrentExecution(t, repo, task.ID)
+	if current.RuntimeProfile != parent.RuntimeProfile || current.RuntimeImage != parent.RuntimeImage {
+		t.Fatalf("resumed runtime = %q %q, want parent %q %q", current.RuntimeProfile, current.RuntimeImage, parent.RuntimeProfile, parent.RuntimeImage)
+	}
+}
+
+func TestResumeExecutionRejectsParentWithoutRuntimeIdentity(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	parent := &model.TaskExecution{ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed}
+	if err := repo.TaskExecutions().Create(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	task.CurrentExecutionID = &parent.ID
+	task.SetInputAttachments([]model.EntryAttachment{{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue"}})
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
+	if err == nil || !strings.Contains(err.Error(), "resume parent execution runtime identity is missing") {
+		t.Fatalf("resume error = %v, want missing runtime identity", err)
 	}
 }
 

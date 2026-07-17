@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
@@ -151,9 +152,33 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		if err != nil {
 			return fmt.Errorf("allocate task execution attempt: %w", err)
 		}
-		parentExecutionID, resumeSessionID, err := resumeExecutionLineage(ctx, txRepo, task)
+		parent, resumeSessionID, err := resumeExecutionLineage(ctx, txRepo, task)
 		if err != nil {
 			return err
+		}
+		var runtime srvconfig.RuntimeImageSelection
+		if parent != nil {
+			runtime = srvconfig.RuntimeImageSelection{
+				Profile: strings.TrimSpace(parent.RuntimeProfile),
+				Image:   strings.TrimSpace(parent.RuntimeImage),
+			}
+			if runtime.Profile == "" || runtime.Image == "" {
+				return fmt.Errorf("resume parent execution runtime identity is missing: execution %s", parent.ID)
+			}
+		} else {
+			if s.kubernetesDispatcher == nil {
+				return fmt.Errorf("Kubernetes dispatcher is not configured")
+			}
+			runtime = s.kubernetesDispatcher.ResolveRuntime(task.Type)
+			runtime.Profile = strings.TrimSpace(runtime.Profile)
+			runtime.Image = strings.TrimSpace(runtime.Image)
+			if runtime.Profile == "" || runtime.Image == "" {
+				return fmt.Errorf("resolve runtime image for task type %q returned incomplete identity", task.Type)
+			}
+		}
+		parentExecutionID := ""
+		if parent != nil {
+			parentExecutionID = parent.ID
 		}
 		execution = &model.TaskExecution{
 			ID:                uuid.NewString(),
@@ -161,6 +186,8 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 			Attempt:           attempt,
 			ParentExecutionID: parentExecutionID,
 			ResumeSessionID:   resumeSessionID,
+			RuntimeProfile:    runtime.Profile,
+			RuntimeImage:      runtime.Image,
 			Target:            "kubernetes",
 			Status:            model.TaskExecutionCreated,
 		}
@@ -183,29 +210,29 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 	return execution, created, nil
 }
 
-func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (string, string, error) {
+func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, error) {
 	if task == nil || task.CurrentExecutionID == nil || !taskHasResumeInput(task) {
-		return "", "", nil
+		return nil, "", nil
 	}
 	parentID := strings.TrimSpace(*task.CurrentExecutionID)
 	if parentID == "" {
-		return "", "", nil
+		return nil, "", nil
 	}
 	parent, err := repo.TaskExecutions().FindByID(ctx, parentID)
 	if err != nil {
-		return "", "", fmt.Errorf("load resume parent execution: %w", err)
+		return nil, "", fmt.Errorf("load resume parent execution: %w", err)
 	}
 	if parent.TaskID != task.ID || !isTerminalExecution(parent.Status) {
-		return "", "", fmt.Errorf("resume parent execution %s is not a terminal attempt of task %s", parent.ID, task.ID)
+		return nil, "", fmt.Errorf("resume parent execution %s is not a terminal attempt of task %s", parent.ID, task.ID)
 	}
 	if len(parent.Result) == 0 {
-		return parent.ID, "", nil
+		return parent, "", nil
 	}
 	var result agent.ExecutionResult
 	if err := json.Unmarshal(parent.Result, &result); err != nil {
-		return "", "", fmt.Errorf("decode resume parent execution result: %w", err)
+		return nil, "", fmt.Errorf("decode resume parent execution result: %w", err)
 	}
-	return parent.ID, strings.TrimSpace(result.SessionID), nil
+	return parent, strings.TrimSpace(result.SessionID), nil
 }
 
 func taskHasResumeInput(task *model.Task) bool {

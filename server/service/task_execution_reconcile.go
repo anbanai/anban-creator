@@ -142,12 +142,14 @@ func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.
 			return errPreStartReplacementContended
 		}
 		replacement = &model.TaskExecution{
-			ID:        uuid.NewString(),
-			TaskID:    task.ID,
-			Attempt:   current.Attempt + 1,
-			Target:    current.Target,
-			Status:    model.TaskExecutionCreated,
-			Namespace: current.Namespace,
+			ID:             uuid.NewString(),
+			TaskID:         task.ID,
+			Attempt:        current.Attempt + 1,
+			RuntimeProfile: current.RuntimeProfile,
+			RuntimeImage:   current.RuntimeImage,
+			Target:         current.Target,
+			Status:         model.TaskExecutionCreated,
+			Namespace:      current.Namespace,
 		}
 		if err := txRepo.TaskExecutions().Create(ctx, replacement); err != nil {
 			return err
