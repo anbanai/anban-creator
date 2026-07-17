@@ -7,6 +7,7 @@ export type DirectUploadPurpose =
   | 'video_reference'
   | 'designer_reference'
   | 'ai_entry_attachment'
+  | 'montage_asset'
 
 export interface UploadToOSSOptions {
   purpose: DirectUploadPurpose

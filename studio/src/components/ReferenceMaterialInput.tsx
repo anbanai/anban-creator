@@ -16,7 +16,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
-import { uploadToOSS } from '@/lib/direct-upload'
+import { uploadToOSS, type DirectUploadPurpose } from '@/lib/direct-upload'
 import { cn } from '@/lib/utils'
 import type { InputAttachment, InputAttachmentType } from '@/types/input-attachment'
 
@@ -30,6 +30,7 @@ export interface ReferenceMaterialInputProps {
   compact?: boolean
   hint?: string
   onUploadingChange?: (uploading: boolean) => void
+  uploadPurpose?: DirectUploadPurpose
 }
 
 type UploadRow = {
@@ -111,6 +112,7 @@ export function ReferenceMaterialInput({
   compact = false,
   hint = DEFAULT_HINT,
   onUploadingChange,
+  uploadPurpose = 'ai_entry_attachment',
 }: ReferenceMaterialInputProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const valueRef = useRef(value)
@@ -152,7 +154,7 @@ export function ReferenceMaterialInput({
 
     try {
       const result = await uploadToOSS({
-        purpose: 'ai_entry_attachment',
+        purpose: uploadPurpose,
         file: row.file,
         onProgress: (progress) => {
           updateRows((current) => current.map((item) => (
