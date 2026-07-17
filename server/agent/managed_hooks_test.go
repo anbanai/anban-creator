@@ -143,6 +143,41 @@ func TestSeednoteQualityGateAcceptsRecoverableFailure(t *testing.T) {
 	}
 }
 
+func TestSeednoteQualityGateRejectsLegacyNestedFailureState(t *testing.T) {
+	workspace := t.TempDir()
+	failure := map[string]any{
+		"status":      "recoverable_failure",
+		"stage":       "visual_generation",
+		"error_code":  "image_provider_unavailable",
+		"message":     "image provider is unavailable",
+		"resume_from": "generate_images",
+	}
+	data, err := json.Marshal(failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyDir := filepath.Join(workspace, "output", "seednote", "title")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "failure-state.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runSeednoteQualityGate(t, workspace)
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("quality gate accepted a failure state outside canonical output/")
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("parse quality gate output %q: %v", output, err)
+	}
+	reason, _ := result["reason"].(string)
+	if result["decision"] != "block" || !strings.Contains(reason, "content.md（缺少最终正文）") {
+		t.Fatalf("quality gate output = %#v, want missing canonical output block", result)
+	}
+}
+
 func TestSeednoteQualityGateBlocksMalformedRecoverableFailure(t *testing.T) {
 	workspace := t.TempDir()
 	outputDir := filepath.Join(workspace, "output")
@@ -168,34 +203,19 @@ func TestSeednoteQualityGateBlocksMalformedRecoverableFailure(t *testing.T) {
 	}
 }
 
-func TestSeednoteQualityGateBlocksUnarchivedManagedMainSuccess(t *testing.T) {
+func TestSeednoteQualityGateAcceptsCanonicalManagedOutput(t *testing.T) {
 	workspace := t.TempDir()
-	archivedDir := writeSeednoteGateFixture(t, workspace, true)
-	outputDir := filepath.Join(workspace, "output")
-	for _, entry := range mustReadDir(t, archivedDir) {
-		if entry.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(archivedDir, entry.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(outputDir, entry.Name()), data, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.RemoveAll(filepath.Join(workspace, "output", "seednote")); err != nil {
-		t.Fatal(err)
-	}
-
+	writeSeednoteGateFixture(t, workspace, true)
 	output := runSeednoteQualityGate(t, workspace)
-	var result map[string]any
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		t.Fatalf("parse quality gate output %q: %v", output, err)
+	if strings.TrimSpace(output) != "" {
+		t.Fatalf("quality gate blocked canonical managed output: %s", output)
 	}
-	reason, _ := result["reason"].(string)
-	if result["decision"] != "block" || !strings.Contains(reason, "尚未完成 archive_workspace") {
-		t.Fatalf("quality gate output = %#v, want unarchived managed-main block", result)
+}
+
+func TestSeednoteArchiveScriptIsRemoved(t *testing.T) {
+	script := filepath.Join(repoRoot(t), "claudecode", "scripts", "archive-seednote-workspace.sh")
+	if _, err := os.Stat(script); !os.IsNotExist(err) {
+		t.Fatalf("archive script still exists or could not be checked: %v", err)
 	}
 }
 
@@ -210,7 +230,7 @@ func TestSeednoteQualityGateStaysMirroredForClaudeAndCodex(t *testing.T) {
 
 func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) string {
 	t.Helper()
-	dir := filepath.Join(workspace, "output", "seednote", "title")
+	dir := filepath.Join(workspace, "output")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -261,13 +281,4 @@ func runSeednoteQualityGate(t *testing.T, workspace string) string {
 		t.Fatalf("run seednote quality gate: %v\nstdout: %s\nstderr: %s", err, output, stderr.String())
 	}
 	return string(output)
-}
-
-func mustReadDir(t *testing.T, path string) []os.DirEntry {
-	t.Helper()
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return entries
 }
