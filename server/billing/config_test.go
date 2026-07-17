@@ -49,7 +49,9 @@ func TestLoadBundleRejectsStrictYAMLErrors(t *testing.T) {
 		{name: "currency rate must be string", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `"7.20"`, `7.20`, 1)}, want: "must be a quoted decimal string"},
 		{name: "malformed model price", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `input: "6.00"`, `input: "1e3"`, 1)}, want: "models.provider/model.input"},
 		{name: "malformed promotion price", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, `"10.00"`, `"-10.00"`, 1)}, want: "minimum_topup_cny"},
+		{name: "zero promotion minimum", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, `"10.00"`, `"0.00"`, 1)}, want: "minimum_topup_cny: must be positive"},
 		{name: "missing currency reference", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `currency: "CNY"`, `currency: "EUR"`, 1)}, want: "references missing currency rate"},
+		{name: "CNY rate must be unit", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `CNY: "1.00"`, `CNY: "1.01"`, 1)}, want: "currency_rates.CNY: must equal 1.00"},
 		{name: "invalid charge policy", overrides: map[string]string{"products.yaml": strings.Replace(validProductsYAML, "task_admission", "runtime_usage", 1)}, want: "charge_policy"},
 		{name: "promotion cannot repay debt", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, "can_repay_debt: false", "can_repay_debt: true", 1)}, want: "can_repay_debt must be false"},
 	}
@@ -64,6 +66,15 @@ func TestLoadBundleRejectsStrictYAMLErrors(t *testing.T) {
 				t.Fatalf("LoadBundle error = %#v, want structured ConfigError with file", err)
 			}
 		})
+	}
+}
+
+func TestLoadBundleRequiresCNYCurrencyRate(t *testing.T) {
+	costs := strings.Replace(validCostsYAML, "  CNY: \"1.00\"\n", "", 1)
+	costs = strings.Replace(costs, `currency: "CNY"`, `currency: "USD"`, 1)
+	_, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": costs}))
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "currency_rates.CNY: is required") {
+		t.Fatalf("LoadBundle error = %v, want mandatory CNY rate rejection", err)
 	}
 }
 

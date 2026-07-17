@@ -385,6 +385,13 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 		}
 		costs.CurrencyRates[canonicalCurrency] = parsed
 	}
+	cnyRate, exists := costs.CurrencyRates["CNY"]
+	if !exists {
+		return costs, configError("costs.yaml", "currency_rates.CNY", errors.New("is required"))
+	}
+	if cnyRate != MicroCNY(microCNYPerCNY) {
+		return costs, configError("costs.yaml", "currency_rates.CNY", errors.New("must equal 1.00"))
+	}
 	for modelID, rawModel := range raw.Models {
 		canonicalModelID := strings.TrimSpace(modelID)
 		field := "models." + canonicalModelID
@@ -504,6 +511,9 @@ func validatePromotions(raw rawPromotionCatalog) (PromotionCatalog, error) {
 		minimum, err := ParseMicroCNY(string(rawProgram.MinimumTopUpCNY))
 		if err != nil {
 			return promotions, configError("promotions.yaml", field+".minimum_topup_cny", err)
+		}
+		if minimum <= 0 {
+			return promotions, configError("promotions.yaml", field+".minimum_topup_cny", errors.New("must be positive"))
 		}
 		expiresAfter, err := parseCatalogDuration(rawProgram.ExpiresAfter)
 		if err != nil || expiresAfter <= 0 {

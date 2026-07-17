@@ -568,6 +568,32 @@ type BillingRuntimeConfig struct {
 	AdminAPIKey string `yaml:"admin_api_key" json:"-"`
 }
 
+func (c *BillingRuntimeConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.MappingNode {
+		return fmt.Errorf("billing_runtime must be a mapping")
+	}
+	seen := make(map[string]struct{}, len(value.Content)/2)
+	for index := 0; index+1 < len(value.Content); index += 2 {
+		key := value.Content[index].Value
+		switch key {
+		case "config_dir", "admin_api_key":
+		default:
+			return fmt.Errorf("unknown billing_runtime.%s", key)
+		}
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("duplicate billing_runtime.%s", key)
+		}
+		seen[key] = struct{}{}
+	}
+	type plain BillingRuntimeConfig
+	var decoded plain
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*c = BillingRuntimeConfig(decoded)
+	return nil
+}
+
 type RechargeTierConfig struct {
 	Key          string `yaml:"key" json:"key"`
 	Label        string `yaml:"label" json:"label"`

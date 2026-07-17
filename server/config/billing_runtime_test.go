@@ -114,6 +114,55 @@ billing_runtime:
 	}
 }
 
+func TestNewConfigRejectsUnknownBillingRuntimeField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	root := `database:
+  dsn: root:dev@tcp(localhost:3306)/db
+jwt:
+  secret_key: secret
+  access_expiry: 24h
+  refresh_expiry: 168h
+claude:
+  executor: docker
+billing_runtime:
+  config_di: catalogs
+  admin_api_key: secret
+`
+	if err := os.WriteFile(path, []byte(root), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "billing_runtime.config_di") {
+		t.Fatalf("NewConfig error = %v, want unknown billing_runtime.config_di rejection", err)
+	}
+}
+
+func TestNewConfigRejectsDuplicateBillingRuntimeField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	root := `database:
+  dsn: root:dev@tcp(localhost:3306)/db
+jwt:
+  secret_key: secret
+  access_expiry: 24h
+  refresh_expiry: 168h
+claude:
+  executor: docker
+billing_runtime:
+  config_dir: catalogs
+  config_dir: other-catalogs
+  admin_api_key: secret
+`
+	if err := os.WriteFile(path, []byte(root), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "config_dir") {
+		t.Fatalf("NewConfig error = %v, want duplicate billing_runtime.config_dir rejection", err)
+	}
+}
+
 func writeBillingRuntimeFixture(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
