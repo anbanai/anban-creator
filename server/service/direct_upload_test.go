@@ -14,6 +14,7 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -148,10 +149,19 @@ func (r *fakeUploadSessionRepo) ReopenExpiration(context.Context, string, string
 
 func newDirectUploadTestRepository(t *testing.T) repository.Repository {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:direct-upload-"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sqlite connection: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("close sqlite: %v", err)
+		}
+	})
 	if err := model.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate sqlite: %v", err)
 	}

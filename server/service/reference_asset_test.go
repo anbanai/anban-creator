@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,11 +15,12 @@ import (
 )
 
 type referenceAssetStore struct {
-	objects      map[string]*storage.ObjectInfo
-	signedKeys   []string
-	signedTTLs   []int
-	promoteCalls int
-	downloadErr  error
+	objects       map[string]*storage.ObjectInfo
+	signedKeys    []string
+	signedTTLs    []int
+	promoteCalls  int
+	downloadErr   error
+	emptyDownload bool
 }
 
 func (s *referenceAssetStore) Name() string { return "oss" }
@@ -43,6 +46,9 @@ func (s *referenceAssetStore) DownloadURL(_ context.Context, key string, ttl int
 	s.signedTTLs = append(s.signedTTLs, ttl)
 	if s.downloadErr != nil {
 		return "", s.downloadErr
+	}
+	if s.emptyDownload {
+		return "", nil
 	}
 	return "https://download.example.com/" + key, nil
 }
@@ -76,6 +82,44 @@ func (s *referenceAssetStore) PromoteObject(_ context.Context, sourceKey, finalK
 
 type providerOnlyReferenceAssetStore struct {
 	base *referenceAssetStore
+}
+
+type referenceAssetRepositoryOverride struct {
+	repository.Repository
+	uploadSessions repository.UploadSessionRepository
+	assets         repository.AssetRepository
+}
+
+func (r *referenceAssetRepositoryOverride) UploadSessions() repository.UploadSessionRepository {
+	if r.uploadSessions != nil {
+		return r.uploadSessions
+	}
+	return r.Repository.UploadSessions()
+}
+
+func (r *referenceAssetRepositoryOverride) Assets() repository.AssetRepository {
+	if r.assets != nil {
+		return r.assets
+	}
+	return r.Repository.Assets()
+}
+
+type failingReferenceUploadSessionRepository struct {
+	repository.UploadSessionRepository
+	err error
+}
+
+func (r *failingReferenceUploadSessionRepository) FindByID(context.Context, string) (*model.UploadSession, error) {
+	return nil, r.err
+}
+
+type failingReferenceAssetRepository struct {
+	repository.AssetRepository
+	err error
+}
+
+func (r *failingReferenceAssetRepository) FindOwnedByID(context.Context, string, string) (*model.Asset, error) {
+	return nil, r.err
 }
 
 func (s *providerOnlyReferenceAssetStore) Name() string { return s.base.Name() }
@@ -302,6 +346,108 @@ func TestReferenceAssetServiceSessionRequiresPromotionCapability(t *testing.T) {
 	_, err := svc.ResolveSelection(t.Context(), session.UserID, ReferenceImageSelection{UploadSessionID: session.ID}, []string{session.Purpose})
 	if !errors.Is(err, ErrReferenceAssetUnavailable) {
 		t.Fatalf("error = %v, want ErrReferenceAssetUnavailable", err)
+	}
+}
+
+func TestReferenceAssetServicePreservesRepositoryErrorChains(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+		resolve   func(context.Context, *ReferenceAssetService) error
+		wrapRepo  func(repository.Repository, error) repository.Repository
+	}{
+		{
+			name: "find session", operation: "find upload session",
+			resolve: func(ctx context.Context, svc *ReferenceAssetService) error {
+				_, err := svc.ResolveSelection(ctx, "user-1", ReferenceImageSelection{UploadSessionID: "session-1"}, []string{DirectUploadPurposeProjectReference})
+				return err
+			},
+			wrapRepo: func(base repository.Repository, err error) repository.Repository {
+				return &referenceAssetRepositoryOverride{Repository: base, uploadSessions: &failingReferenceUploadSessionRepository{UploadSessionRepository: base.UploadSessions(), err: err}}
+			},
+		},
+		{
+			name: "find asset", operation: "find asset",
+			resolve: func(ctx context.Context, svc *ReferenceAssetService) error {
+				_, err := svc.RequireOwned(ctx, "user-1", "asset-1", []string{DirectUploadPurposeProjectReference})
+				return err
+			},
+			wrapRepo: func(base repository.Repository, err error) repository.Repository {
+				return &referenceAssetRepositoryOverride{Repository: base, assets: &failingReferenceAssetRepository{AssetRepository: base.Assets(), err: err}}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := newDirectUploadTestRepository(t)
+			rootCause := context.Canceled
+			svc := NewReferenceAssetService(tt.wrapRepo(base, rootCause), &referenceAssetStore{objects: make(map[string]*storage.ObjectInfo)}, time.Now)
+			err := tt.resolve(t.Context(), svc)
+			assertReferenceErrorChain(t, err, tt.operation, ErrReferenceAssetUnavailable, rootCause)
+		})
+	}
+}
+
+func TestReferenceAssetServicePresentPreservesSigningErrorChain(t *testing.T) {
+	repo := newDirectUploadTestRepository(t)
+	asset := referenceAssetFixture("asset-sign-error", "user-1", DirectUploadPurposeProjectReference)
+	seedReferenceAsset(t, repo, asset)
+	rootCause := context.DeadlineExceeded
+	store := &referenceAssetStore{objects: make(map[string]*storage.ObjectInfo), downloadErr: rootCause}
+	svc := NewReferenceAssetService(repo, store, time.Now)
+
+	_, err := svc.Present(t.Context(), asset.UserID, asset.ID, []string{asset.Purpose})
+	assertReferenceErrorChain(t, err, "sign asset download", ErrReferenceAssetUnavailable, rootCause)
+}
+
+func TestReferenceAssetServicePresentClassifiesEmptySignedURL(t *testing.T) {
+	repo := newDirectUploadTestRepository(t)
+	asset := referenceAssetFixture("asset-empty-sign", "user-1", DirectUploadPurposeProjectReference)
+	seedReferenceAsset(t, repo, asset)
+	store := &referenceAssetStore{objects: make(map[string]*storage.ObjectInfo), emptyDownload: true}
+	svc := NewReferenceAssetService(repo, store, time.Now)
+
+	_, err := svc.Present(t.Context(), asset.UserID, asset.ID, []string{asset.Purpose})
+	assertReferenceErrorChain(t, err, "sign asset download", ErrReferenceAssetUnavailable, errReferenceAssetEmptyDownloadURL)
+}
+
+func TestMapReferenceFinalizationErrorPreservesClassifiedAndRootCauses(t *testing.T) {
+	rootCause := errors.New("root finalization failure")
+	tests := []struct {
+		name           string
+		finalizeClass  error
+		referenceClass error
+	}{
+		{name: "access denied", finalizeClass: ErrUploadSessionAccessDenied, referenceClass: ErrReferenceAssetForbidden},
+		{name: "expired", finalizeClass: ErrUploadSessionExpired, referenceClass: ErrReferenceAssetExpired},
+		{name: "conflict", finalizeClass: ErrUploadSessionStateConflict, referenceClass: ErrReferenceAssetConcurrentFinalization},
+		{name: "metadata", finalizeClass: ErrUploadSessionObjectInvalid, referenceClass: ErrReferenceAssetInvalidMetadata},
+		{name: "unavailable", finalizeClass: ErrUploadSessionUnavailable, referenceClass: ErrReferenceAssetUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			finalizeErr := fmt.Errorf("provider operation: %w", errors.Join(tt.finalizeClass, rootCause))
+			err := mapReferenceFinalizationError(finalizeErr)
+			assertReferenceErrorChain(t, err, "finalize upload session", tt.referenceClass, tt.finalizeClass, rootCause)
+		})
+	}
+	unknown := errors.New("unknown finalization failure")
+	assertReferenceErrorChain(t, mapReferenceFinalizationError(unknown), "finalize upload session", ErrReferenceAssetUnavailable, unknown)
+}
+
+func assertReferenceErrorChain(t *testing.T, err error, operation string, causes ...error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("error is nil")
+	}
+	if !strings.Contains(err.Error(), operation) {
+		t.Fatalf("error = %q, want operation %q", err, operation)
+	}
+	for _, cause := range causes {
+		if !errors.Is(err, cause) {
+			t.Fatalf("error = %v, want errors.Is(..., %v)", err, cause)
+		}
 	}
 }
 

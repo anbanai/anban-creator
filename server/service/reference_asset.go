@@ -21,6 +21,7 @@ var (
 	ErrReferenceAssetExpired                = errors.New("reference asset upload has expired")
 	ErrReferenceAssetInvalidMetadata        = errors.New("reference asset metadata is invalid")
 	ErrReferenceAssetUnavailable            = errors.New("reference asset dependency is unavailable")
+	errReferenceAssetEmptyDownloadURL       = errors.New("storage signer returned an empty download URL")
 )
 
 // ReferenceImageSelection identifies either an immutable asset or an upload
@@ -74,7 +75,7 @@ func (s *ReferenceAssetService) ResolveSelection(ctx context.Context, userID str
 		if errors.Is(err, model.ErrUploadSessionNotFound) {
 			return "", ErrReferenceAssetForbidden
 		}
-		return "", fmt.Errorf("%w: find upload session: %v", ErrReferenceAssetUnavailable, err)
+		return "", fmt.Errorf("%w: find upload session: %w", ErrReferenceAssetUnavailable, err)
 	}
 	if session.UserID != userID {
 		return "", ErrReferenceAssetForbidden
@@ -119,7 +120,7 @@ func (s *ReferenceAssetService) RequireOwned(ctx context.Context, userID, assetI
 		if errors.Is(err, model.ErrAssetNotFound) {
 			return nil, ErrReferenceAssetForbidden
 		}
-		return nil, fmt.Errorf("%w: find asset: %v", ErrReferenceAssetUnavailable, err)
+		return nil, fmt.Errorf("%w: find asset: %w", ErrReferenceAssetUnavailable, err)
 	}
 	if err := validateOwnedReferenceAsset(asset, userID, allowed); err != nil {
 		return nil, err
@@ -140,8 +141,11 @@ func (s *ReferenceAssetService) Present(ctx context.Context, userID, assetID str
 	}
 	now := s.now()
 	downloadURL, err := s.store.DownloadURL(ctx, asset.StorageKey, DefaultSignedURLTTL)
-	if err != nil || strings.TrimSpace(downloadURL) == "" {
-		return nil, fmt.Errorf("%w: sign asset download: %v", ErrReferenceAssetUnavailable, err)
+	if err != nil {
+		return nil, fmt.Errorf("%w: sign asset download: %w", ErrReferenceAssetUnavailable, err)
+	}
+	if strings.TrimSpace(downloadURL) == "" {
+		return nil, fmt.Errorf("%w: sign asset download: %w", ErrReferenceAssetUnavailable, errReferenceAssetEmptyDownloadURL)
 	}
 	return &model.AssetView{
 		AssetID: asset.ID, FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size,
@@ -171,18 +175,18 @@ func validateReferenceImageFileMetadata(fileName, contentType string, size int64
 }
 
 func mapReferenceFinalizationError(err error) error {
+	referenceErr := ErrReferenceAssetUnavailable
 	switch {
 	case errors.Is(err, ErrUploadSessionAccessDenied):
-		return ErrReferenceAssetForbidden
+		referenceErr = ErrReferenceAssetForbidden
 	case errors.Is(err, ErrUploadSessionExpired):
-		return ErrReferenceAssetExpired
+		referenceErr = ErrReferenceAssetExpired
 	case errors.Is(err, ErrUploadSessionStateConflict):
-		return ErrReferenceAssetConcurrentFinalization
+		referenceErr = ErrReferenceAssetConcurrentFinalization
 	case errors.Is(err, ErrUploadSessionObjectInvalid):
-		return ErrReferenceAssetInvalidMetadata
+		referenceErr = ErrReferenceAssetInvalidMetadata
 	case errors.Is(err, ErrUploadSessionUnavailable):
-		return ErrReferenceAssetUnavailable
-	default:
-		return fmt.Errorf("%w: finalize upload session: %v", ErrReferenceAssetUnavailable, err)
+		referenceErr = ErrReferenceAssetUnavailable
 	}
+	return fmt.Errorf("%w: finalize upload session: %w", referenceErr, err)
 }

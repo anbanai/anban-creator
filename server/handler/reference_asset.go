@@ -1,23 +1,42 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 )
 
-var errLegacyReferenceImageURL = errors.New("reference_image_url is no longer supported; use reference_image")
+var (
+	errReferenceAssetRequestInvalid = errors.New("reference image request is invalid")
+	errLegacyReferenceImageURL      = fmt.Errorf("%w: reference_image_url is no longer supported; use reference_image", errReferenceAssetRequestInvalid)
+)
 
 func rejectLegacyReferenceImageURL(body []byte) error {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return err
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return fmt.Errorf("%w: request body must be a JSON object", errReferenceAssetRequestInvalid)
 	}
-	if _, exists := raw["reference_image_url"]; exists {
-		return errLegacyReferenceImageURL
+	var value json.RawMessage
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		return fmt.Errorf("%w: decode request body: %w", errReferenceAssetRequestInvalid, err)
+	}
+	if len(value) == 0 || value[0] != '{' {
+		return fmt.Errorf("%w: request body must be a non-null JSON object", errReferenceAssetRequestInvalid)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return fmt.Errorf("%w: decode request object: %w", errReferenceAssetRequestInvalid, err)
+	}
+	for key := range raw {
+		if strings.EqualFold(key, "reference_image_url") {
+			return errLegacyReferenceImageURL
+		}
 	}
 	return nil
 }
@@ -26,6 +45,8 @@ func respondReferenceAssetError(c fiber.Ctx, logger *zerolog.Logger, err error) 
 	switch {
 	case errors.Is(err, errLegacyReferenceImageURL):
 		return Error(c, fiber.StatusBadRequest, errLegacyReferenceImageURL.Error())
+	case errors.Is(err, errReferenceAssetRequestInvalid):
+		return Error(c, fiber.StatusBadRequest, errReferenceAssetRequestInvalid.Error())
 	case errors.Is(err, service.ErrReferenceImageSelectionInvalid):
 		return Error(c, fiber.StatusBadRequest, "reference image selection is invalid")
 	case errors.Is(err, service.ErrReferenceAssetPurposeMismatch):
