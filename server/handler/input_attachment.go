@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
@@ -55,7 +56,7 @@ func inputAttachmentValidationErrorf(format string, args ...any) error {
 }
 
 func inputAttachmentServiceError(err error) error {
-	if errors.Is(err, service.ErrPendingUploadAccessDenied) || errors.Is(err, service.ErrPendingUploadExpired) || errors.Is(err, service.ErrPendingUploadNotPending) || errors.Is(err, service.ErrPendingUploadObjectInvalid) {
+	if errors.Is(err, service.ErrUploadSessionAccessDenied) || errors.Is(err, service.ErrUploadSessionExpired) || errors.Is(err, service.ErrUploadSessionStateConflict) || errors.Is(err, service.ErrUploadSessionObjectInvalid) {
 		return &inputAttachmentValidationError{err: err}
 	}
 	return err
@@ -71,13 +72,19 @@ func respondInputAttachmentError(c fiber.Ctx, logger *zerolog.Logger, err error)
 	return Error(c, fiber.StatusInternalServerError, "failed to validate attachments")
 }
 
-func validateInputAttachments(ctx context.Context, store storage.Provider, pending service.PendingUploadRepository, userID string, attachments []model.EntryAttachment, options InputAttachmentValidationOptions) ([]model.EntryAttachment, error) {
+func validateInputAttachments(ctx context.Context, store storage.Provider, repo repository.Repository, userID string, attachments []model.EntryAttachment, options InputAttachmentValidationOptions) ([]model.EntryAttachment, error) {
 	if options.MaxCount > 0 && len(attachments) > options.MaxCount {
 		return nil, inputAttachmentValidationErrorf("at most %d attachments are allowed", options.MaxCount)
 	}
 	now := time.Now()
 	normalized := make([]model.EntryAttachment, len(attachments))
-	verifiedUploads := make([]*service.VerifiedDirectUpload, 0, len(attachments))
+	finalStore, _ := store.(service.DirectUploadFinalizationStorage)
+	type pendingFinalization struct {
+		index       int
+		assertedKey string
+		verified    *service.VerifiedDirectUpload
+	}
+	pendingFinalizations := make([]pendingFinalization, 0, len(attachments))
 	for i, raw := range attachments {
 		a := normalizeHandlerEntryAttachment(raw)
 		if utf8.RuneCountInString(a.Instruction) > inputAttachmentInstructionMaxRunes {
@@ -87,7 +94,8 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, pendi
 			return nil, inputAttachmentValidationErrorf("attachment %d: storage attachment requires upload_id and key", i+1)
 		}
 		if a.UploadID != "" {
-			verified, err := service.VerifyDirectUploadAttachment(ctx, pending, userID, []string{
+			assertedKey := a.Key
+			verified, err := service.VerifyDirectUploadSessionAttachment(ctx, repo, userID, []string{
 				service.DirectUploadPurposeAIEntryAttachment,
 			}, a.UploadID, a.Key, now)
 			if err != nil {
@@ -104,7 +112,7 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, pendi
 			if options.MaxBytes > 0 && a.Size > options.MaxBytes {
 				return nil, inputAttachmentValidationErrorf("attachment %d exceeds the %d MB limit", i+1, options.MaxBytes/(1024*1024))
 			}
-			verifiedUploads = append(verifiedUploads, verified)
+			pendingFinalizations = append(pendingFinalizations, pendingFinalization{index: i, assertedKey: assertedKey, verified: verified})
 		}
 		if err := validateHandlerEntryAttachment(&a); err != nil {
 			return nil, &inputAttachmentValidationError{err: fmt.Errorf("attachment %d: %w", i+1, err)}
@@ -119,9 +127,14 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, pendi
 		}
 		normalized[i] = a
 	}
-	finalStore, _ := store.(service.DirectUploadFinalizationStorage)
-	if err := service.FinalizeVerifiedDirectUploads(ctx, finalStore, pending, verifiedUploads, now); err != nil {
-		return nil, inputAttachmentServiceError(err)
+	for _, pending := range pendingFinalizations {
+		verified, err := service.ResolveDirectUploadSessionAttachment(ctx, finalStore, repo, userID, []string{
+			service.DirectUploadPurposeAIEntryAttachment,
+		}, pending.verified.UploadID, pending.assertedKey, now)
+		if err != nil {
+			return nil, inputAttachmentServiceError(fmt.Errorf("attachment %d: %w", pending.index+1, err))
+		}
+		normalized[pending.index].Key = verified.Key
 	}
 	return normalized, nil
 }

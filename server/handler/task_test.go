@@ -63,10 +63,10 @@ func seedPendingHandlerUpload(t *testing.T, repo repository.Repository, userID, 
 	t.Helper()
 	key := "uploads/pending/" + userID + "/" + uploadID + "/" + filename
 	publicURL := "https://cdn.example.com/" + key
-	if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
-		ID: uploadID, UserID: userID, Purpose: purpose, Key: key, PublicURL: publicURL,
+	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
+		ID: uploadID, UserID: userID, Purpose: purpose, StagingKey: key,
 		FileName: filename, ContentType: contentType, Size: 1,
-		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("seed pending upload %s: %v", uploadID, err)
 	}
@@ -715,7 +715,7 @@ func TestCreateTaskPersistsFinalReferenceAndEcommercePhotoURLs(t *testing.T) {
 	refID, photoID := uuid.NewString(), uuid.NewString()
 	refURL := seedPendingHandlerUpload(t, repo, userID, refID, service.DirectUploadPurposeTaskReference, "reference.png", "image/png")
 	photoURL := seedPendingHandlerUpload(t, repo, userID, photoID, service.DirectUploadPurposeEcommercePhoto, "product.png", "image/png")
-	store := pendingUploadStatStore(repo.PendingUploads())
+	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -732,27 +732,24 @@ func TestCreateTaskPersistsFinalReferenceAndEcommercePhotoURLs(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
 	}
-	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte("uploads/finalized/")) {
+	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte("assets/users/")) {
 		t.Fatalf("task response contains non-final upload URL: %s", body)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("persisted tasks = %#v, %v", tasks, err)
 	}
-	wantRef := "/api/v1/files/uploads/finalized/" + userID + "/" + refID + "/reference.png"
-	wantPhoto := "/api/v1/files/uploads/finalized/" + userID + "/" + photoID + "/product.png"
+	wantRef := "/api/v1/files/assets/users/" + userID + "/" + refID + "/reference.png"
+	wantPhoto := "/api/v1/files/assets/users/" + userID + "/" + photoID + "/product.png"
 	photos := tasks[0].Ecommerce.Data().ProductPhotos
 	if tasks[0].ReferenceImageURL != wantRef || len(photos) != 1 || photos[0] != wantPhoto {
 		t.Fatalf("persisted reference/photos = %q/%#v", tasks[0].ReferenceImageURL, photos)
 	}
 	for id, wantKey := range map[string]string{
-		refID:   "uploads/finalized/" + userID + "/" + refID + "/reference.png",
-		photoID: "uploads/finalized/" + userID + "/" + photoID + "/product.png",
+		refID:   "assets/users/" + userID + "/" + refID + "/reference.png",
+		photoID: "assets/users/" + userID + "/" + photoID + "/product.png",
 	} {
-		upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, id)
-		if err != nil || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != wantKey {
-			t.Fatalf("finalized upload %s = %#v, %v", id, upload, err)
-		}
+		assertFinalizedAsset(t, repo, id, wantKey)
 	}
 }
 
@@ -768,7 +765,7 @@ func TestCreateVideoTaskPersistsFinalReferenceURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	refURL := seedPendingHandlerUpload(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
-	store := pendingUploadStatStore(repo.PendingUploads())
+	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -785,7 +782,7 @@ func TestCreateVideoTaskPersistsFinalReferenceURL(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
 	}
-	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte("uploads/finalized/")) {
+	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte("assets/users/")) {
 		t.Fatalf("video task response contains non-final reference: %s", body)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
@@ -793,14 +790,11 @@ func TestCreateVideoTaskPersistsFinalReferenceURL(t *testing.T) {
 		t.Fatalf("persisted tasks = %#v, %v", tasks, err)
 	}
 	references := tasks[0].VideoInput.Data().References
-	wantURL := "/api/v1/files/uploads/finalized/" + userID + "/" + uploadID + "/reference.mp4"
+	wantURL := "/api/v1/files/assets/users/" + userID + "/" + uploadID + "/reference.mp4"
 	if len(references) != 1 || references[0].URL != wantURL {
 		t.Fatalf("persisted video references = %#v", references)
 	}
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
-	if err != nil || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/reference.mp4" {
-		t.Fatalf("finalized video upload = %#v, %v", upload, err)
-	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/reference.mp4")
 }
 
 func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
@@ -828,23 +822,23 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeMontageAsset,
-		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
-		PublicURL:   assetURL,
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID:         uploadID,
+		UserID:     userID,
+		Purpose:    service.DirectUploadPurposeMontageAsset,
+		StagingKey: "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
+
 		FileName:    "clip.mp4",
 		ContentType: "video/mp4",
 		Size:        1234,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("create pending upload: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, pendingUploadStatStore(repo.PendingUploads()), nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, uploadSessionStatStore(repo.UploadSessions()), nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 	app := fiber.New()
@@ -869,16 +863,10 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read response: %v", err)
 	}
-	if bytes.Contains(responseBody, []byte("uploads/pending/")) || !bytes.Contains(responseBody, []byte("uploads/finalized/")) {
+	if bytes.Contains(responseBody, []byte("uploads/pending/")) || !bytes.Contains(responseBody, []byte("assets/users/")) {
 		t.Fatalf("task persisted non-final montage URL: %s", responseBody)
 	}
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
-	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
-	}
-	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/clip.mp4" {
-		t.Fatalf("upload identity = %#v", upload)
-	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/clip.mp4")
 }
 
 func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testing.T) {
@@ -906,16 +894,16 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeMontageAsset,
-		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
-		PublicURL:   assetURL,
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID:         uploadID,
+		UserID:     userID,
+		Purpose:    service.DirectUploadPurposeMontageAsset,
+		StagingKey: "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
+
 		FileName:    "clip.mp4",
 		ContentType: "video/mp4",
 		Size:        1234,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("create pending upload: %v", err)
@@ -943,11 +931,11 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
 	}
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	upload, err := repo.UploadSessions().FindByID(ctx, uploadID)
 	if err != nil {
 		t.Fatalf("find pending upload: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusPending {
+	if upload.Status != model.UploadSessionPending {
 		t.Fatalf("upload status = %q, want pending", upload.Status)
 	}
 }
@@ -1128,15 +1116,15 @@ func TestCloneTaskAcceptsFinalInputSnapshot(t *testing.T) {
 	}
 	uploadID := "clone-upload"
 	pendingKey := "uploads/pending/" + userID + "/" + uploadID + "/reference.png"
-	finalKey := "uploads/finalized/" + userID + "/" + uploadID + "/reference.png"
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+	finalKey := "assets/users/" + userID + "/" + uploadID + "/reference.png"
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
 		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		Key: pendingKey, FileName: "reference.png", ContentType: "image/png", Size: 123,
-		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+		StagingKey: pendingKey, FileName: "reference.png", ContentType: "image/png", Size: 123,
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("create pending upload: %v", err)
 	}
-	store := pendingUploadStatStore(repo.PendingUploads())
+	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -1222,15 +1210,15 @@ func TestCreateVideoEditorPromotesVerifiedPromptVideoToPersistedInputReference(t
 	}
 	uploadID := "video-upload"
 	pendingKey := "uploads/pending/" + userID + "/" + uploadID + "/source.mp4"
-	finalKey := "uploads/finalized/" + userID + "/" + uploadID + "/source.mp4"
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+	finalKey := "assets/users/" + userID + "/" + uploadID + "/source.mp4"
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
 		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		Key: pendingKey, FileName: "source.mp4", ContentType: "video/mp4", Size: 321,
-		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+		StagingKey: pendingKey, FileName: "source.mp4", ContentType: "video/mp4", Size: 321,
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("create pending upload: %v", err)
 	}
-	store := pendingUploadStatStore(repo.PendingUploads())
+	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -1363,15 +1351,15 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	}
 	uploadID := "resume-upload"
 	pendingKey := "uploads/pending/" + userID + "/" + uploadID + "/notes.md"
-	finalKey := "uploads/finalized/" + userID + "/" + uploadID + "/notes.md"
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+	finalKey := "assets/users/" + userID + "/" + uploadID + "/notes.md"
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
 		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		Key: pendingKey, FileName: "notes.md", ContentType: "text/markdown", Size: int64(len("# notes")),
-		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+		StagingKey: pendingKey, FileName: "notes.md", ContentType: "text/markdown", Size: int64(len("# notes")),
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("create pending upload: %v", err)
 	}
-	store := pendingUploadStatStore(repo.PendingUploads())
+	store := uploadSessionStatStore(repo.UploadSessions())
 	store.data = map[string][]byte{pendingKey: []byte("# notes")}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -1423,10 +1411,7 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	if !latest || !file {
 		t.Fatalf("resume attachments latest=%v file=%v: %#v", latest, file, resumed.InputAttachments.Data())
 	}
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
-	if err != nil || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != finalKey {
-		t.Fatalf("pending upload = %#v err=%v, want finalized key %q", upload, err, finalKey)
-	}
+	assertFinalizedAsset(t, repo, uploadID, finalKey)
 	if len(store.read) != 1 || store.read[0] != finalKey || len(store.readMax) != 1 || store.readMax[0] != maxTaskResumeFileBytes {
 		t.Fatalf("bounded reads keys=%v max=%v", store.read, store.readMax)
 	}
@@ -1970,10 +1955,10 @@ func TestCreateTaskRejectsInvalidAgentAttachmentsAtHandler(t *testing.T) {
 	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", "uploads/pending/foreign/foreign-upload/product.png") {
 		t.Run(tt.name, func(t *testing.T) {
 			app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
-			if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+			if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
 				ID: "foreign-upload", UserID: "foreign-user", Purpose: service.DirectUploadPurposeAIEntryAttachment,
-				Key: "uploads/pending/foreign/foreign-upload/product.png", FileName: "product.png", ContentType: "image/png", Size: 10,
-				Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+				StagingKey: "uploads/pending/foreign/foreign-upload/product.png", FileName: "product.png", ContentType: "image/png", Size: 10,
+				Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 			}); err != nil {
 				t.Fatalf("create foreign upload: %v", err)
 			}

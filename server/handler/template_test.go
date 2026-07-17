@@ -35,22 +35,23 @@ func setupTemplateHandlerTest(t *testing.T, configureStore ...func(*fakeStorageP
 			sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.Template{}, &model.PendingUpload{}); err != nil {
+	if err := db.AutoMigrate(&model.Template{}, &model.UploadSession{}, &model.Asset{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	db.Exec("DELETE FROM templates")
-	db.Exec("DELETE FROM pending_uploads")
+	db.Exec("DELETE FROM upload_sessions")
+	db.Exec("DELETE FROM assets")
 
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	svc := service.NewTemplateService(repo, &logger)
 	h := NewTemplateHandler(svc, &logger)
-	store := pendingUploadStatStore(repo.PendingUploads())
+	store := uploadSessionStatStore(repo.UploadSessions())
 	for _, configure := range configureStore {
 		configure(store)
 	}
 	h.SetStore(store)
-	h.SetPendingUploadRepository(repo.PendingUploads())
+	h.SetUploadRepository(repo)
 
 	app := fiber.New()
 	// Stub middleware: read X-User-ID into locals, mirroring how GetUserID works.
@@ -265,16 +266,16 @@ func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
 	uploadID := "thumbnail-upload"
 	key := "uploads/pending/" + userID + "/" + uploadID + "/thumb.png"
 	publicURL := "https://cdn.example.com/" + key
-	if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeProjectReference,
-		Key:         key,
-		PublicURL:   publicURL,
+	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
+		ID:         uploadID,
+		UserID:     userID,
+		Purpose:    service.DirectUploadPurposeProjectReference,
+		StagingKey: key,
+
 		FileName:    "thumb.png",
 		ContentType: "image/png",
 		Size:        123,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("seed pending upload: %v", err)
@@ -292,17 +293,11 @@ func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
 	}
 	responseBody := decodeBody(t, resp)
 	responseJSON, _ := json.Marshal(responseBody)
-	if bytes.Contains(responseJSON, []byte("uploads/pending/")) || !bytes.Contains(responseJSON, []byte("uploads/finalized/")) {
+	if bytes.Contains(responseJSON, []byte("uploads/pending/")) || !bytes.Contains(responseJSON, []byte("assets/users/")) {
 		t.Fatalf("template persisted non-final thumbnail: %s", responseJSON)
 	}
 
-	upload, err := repo.PendingUploads().FindPendingUploadByID(t.Context(), uploadID)
-	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
-	}
-	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/thumb.png" {
-		t.Fatalf("pending upload identity = %#v", upload)
-	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/thumb.png")
 }
 
 func TestTemplateHandler_CreateClassifiesPendingUploadFinalizeErrors(t *testing.T) {
@@ -347,11 +342,11 @@ func TestTemplateHandler_CreateClassifiesPendingUploadFinalizeErrors(t *testing.
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app, repo := setupTemplateHandlerTest(t, tt.configure)
-			if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
+			if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
 				ID: "thumbnail-upload", UserID: "user-1", Purpose: service.DirectUploadPurposeProjectReference,
-				Key: objectKey, PublicURL: "https://cdn.example.com/" + objectKey,
-				FileName: "thumb.png", ContentType: "image/png", Size: 123,
-				Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+				StagingKey: objectKey,
+				FileName:   "thumb.png", ContentType: "image/png", Size: 123,
+				Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 			}); err != nil {
 				t.Fatalf("seed pending upload: %v", err)
 			}
@@ -497,16 +492,16 @@ func TestTemplateHandler_UpdateFinalizesPendingThumbnail(t *testing.T) {
 	uploadID := "updated-thumbnail-upload"
 	key := "uploads/pending/" + owner + "/" + uploadID + "/thumb.png"
 	publicURL := "https://cdn.example.com/" + key
-	if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      owner,
-		Purpose:     service.DirectUploadPurposeProjectReference,
-		Key:         key,
-		PublicURL:   publicURL,
+	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
+		ID:         uploadID,
+		UserID:     owner,
+		Purpose:    service.DirectUploadPurposeProjectReference,
+		StagingKey: key,
+
 		FileName:    "thumb.png",
 		ContentType: "image/png",
 		Size:        123,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("seed pending upload: %v", err)
@@ -519,13 +514,7 @@ func TestTemplateHandler_UpdateFinalizesPendingThumbnail(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
 
-	upload, err := repo.PendingUploads().FindPendingUploadByID(t.Context(), uploadID)
-	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
-	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("pending upload status = %q, want finalized", upload.Status)
-	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+owner+"/"+uploadID+"/thumb.png")
 }
 
 // Empty type means "leave unchanged" (PATCH semantics). The handler must not

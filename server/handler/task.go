@@ -216,9 +216,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	var pending service.PendingUploadRepository
+	var pending repository.Repository
 	if h.repo != nil {
-		pending = h.repo.PendingUploads()
+		pending = h.repo
 	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
 		MaxCount:     maxAgentInputAttachments,
@@ -273,25 +273,25 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		if finalizationStore == nil {
 			finalizationStore = h.store
 		}
-		rewrites, err := finalizePendingURLs(c.Context(), finalizationStore, h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL})
+		rewrites, err := finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL})
 		if err != nil {
-			return respondPendingUploadFinalizeError(c, h.logger, err)
+			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		req.ReferenceImageURL = rewriteFinalizedUploadURL(req.ReferenceImageURL, rewrites)
-		rewrites, err = finalizePendingURLs(c.Context(), finalizationStore, h.repo.PendingUploads(), userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos)
+		rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos)
 		if err != nil {
-			return respondPendingUploadFinalizeError(c, h.logger, err)
+			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		rewriteFinalizedUploadURLSlice(req.ProductPhotos, rewrites)
-		rewrites, err = finalizePendingURLs(c.Context(), finalizationStore, h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput))
+		rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput))
 		if err != nil {
-			return respondPendingUploadFinalizeError(c, h.logger, err)
+			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			rewrites, err = finalizePendingURLs(c.Context(), finalizationStore, h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
-				return respondPendingUploadFinalizeError(c, h.logger, err)
+				return respondUploadSessionFinalizeError(c, h.logger, err)
 			}
 			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
@@ -532,9 +532,9 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		params.Prompt = &prompt
 	}
 	if req.InputAttachments != nil {
-		var pending service.PendingUploadRepository
+		var pending repository.Repository
 		if h.repo != nil {
-			pending = h.repo.PendingUploads()
+			pending = h.repo
 		}
 		attachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
 			MaxCount:     maxAgentInputAttachments,
@@ -601,9 +601,9 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 	if len(req.InputAttachments) > 0 && resumeStore == nil {
 		return Error(c, fiber.StatusServiceUnavailable, "补充文件存储暂不可用，请稍后重试")
 	}
-	var pending service.PendingUploadRepository
+	var pending repository.Repository
 	if h.repo != nil {
-		pending = h.repo.PendingUploads()
+		pending = h.repo
 	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), resumeStore, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
 		MaxCount:     maxTaskResumeFiles,

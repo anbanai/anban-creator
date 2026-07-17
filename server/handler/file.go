@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
@@ -16,7 +17,7 @@ import (
 // FileHandler handles authenticated file read endpoints.
 type FileHandler struct {
 	store          storage.Provider
-	pendingUploads service.PendingUploadRepository
+	uploadSessions repository.UploadSessionRepository
 	logger         *zerolog.Logger
 }
 
@@ -25,10 +26,10 @@ func NewFileHandler(store storage.Provider, logger *zerolog.Logger) *FileHandler
 	return &FileHandler{store: store, logger: logger}
 }
 
-// SetPendingUploadRepository allows /files/* to preview freshly direct-uploaded
-// pending objects after validating the matching pending upload record.
-func (h *FileHandler) SetPendingUploadRepository(repo service.PendingUploadRepository) {
-	h.pendingUploads = repo
+// SetUploadSessionRepository allows /files/* to preview freshly direct-uploaded
+// staging objects after validating the matching upload session.
+func (h *FileHandler) SetUploadSessionRepository(repo repository.UploadSessionRepository) {
+	h.uploadSessions = repo
 }
 
 // contentTypes maps common file extensions to MIME types.
@@ -100,7 +101,7 @@ func (h *FileHandler) ServeFile(c fiber.Ctx) error {
 }
 
 func (h *FileHandler) validatePendingFileAccess(c fiber.Ctx, userID, cleanKey string) error {
-	key, err := service.ValidatePendingUploadURL(c.Context(), h.pendingUploads, userID, []string{
+	key, err := service.ValidateUploadSessionURL(c.Context(), h.uploadSessions, userID, []string{
 		service.DirectUploadPurposeProjectReference,
 		service.DirectUploadPurposeTaskReference,
 		service.DirectUploadPurposeEcommercePhoto,
@@ -110,10 +111,10 @@ func (h *FileHandler) validatePendingFileAccess(c fiber.Ctx, userID, cleanKey st
 		service.DirectUploadPurposeAIEntryAttachment,
 	}, cleanKey, time.Now())
 	if err != nil {
-		if errors.Is(err, service.ErrPendingUploadInvalidURL) {
+		if errors.Is(err, service.ErrUploadSessionInvalidURL) {
 			return Error(c, fiber.StatusBadRequest, "invalid pending upload URL")
 		}
-		if errors.Is(err, service.ErrPendingUploadExpired) || errors.Is(err, service.ErrPendingUploadNotPending) || errors.Is(err, service.ErrPendingUploadAccessDenied) {
+		if errors.Is(err, service.ErrUploadSessionExpired) || errors.Is(err, service.ErrUploadSessionStateConflict) || errors.Is(err, service.ErrUploadSessionAccessDenied) {
 			return Forbidden(c, "you do not have access to this file")
 		}
 		h.logger.Error().Err(err).Str("key", cleanKey).Msg("failed to validate pending upload access")

@@ -9,11 +9,12 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-func finalizePendingURLs(ctx context.Context, store storage.Provider, repo service.PendingUploadRepository, userID, purpose string, urls []string) (map[string]string, error) {
+func finalizeUploadSessionURLs(ctx context.Context, store storage.Provider, repo repository.Repository, userID, purpose string, urls []string) (map[string]string, error) {
 	if repo == nil || len(urls) == 0 {
 		return map[string]string{}, nil
 	}
@@ -22,7 +23,7 @@ func finalizePendingURLs(ctx context.Context, store storage.Provider, repo servi
 	if store != nil {
 		ownedURLChecks = append(ownedURLChecks, store.IsOwnedURL)
 	}
-	return service.FinalizePendingUploadURLs(ctx, finalStore, repo, userID, purpose, urls, time.Now(), ownedURLChecks...)
+	return service.FinalizeUploadSessionURLs(ctx, finalStore, repo, userID, purpose, urls, time.Now(), ownedURLChecks...)
 }
 
 func rewriteFinalizedUploadURL(value string, rewrites map[string]string) string {
@@ -38,17 +39,17 @@ func rewriteFinalizedUploadURLSlice(values []string, rewrites map[string]string)
 	}
 }
 
-func respondPendingUploadFinalizeError(c fiber.Ctx, logger *zerolog.Logger, err error) error {
+func respondUploadSessionFinalizeError(c fiber.Ctx, logger *zerolog.Logger, err error) error {
 	switch {
-	case errors.Is(err, service.ErrPendingUploadAccessDenied):
+	case errors.Is(err, service.ErrUploadSessionAccessDenied):
 		return Error(c, fiber.StatusBadRequest, "pending upload access denied")
-	case errors.Is(err, service.ErrPendingUploadExpired):
+	case errors.Is(err, service.ErrUploadSessionExpired):
 		return Error(c, fiber.StatusBadRequest, "pending upload has expired")
-	case errors.Is(err, service.ErrPendingUploadNotPending):
+	case errors.Is(err, service.ErrUploadSessionStateConflict):
 		return Error(c, fiber.StatusBadRequest, "pending upload is not pending")
-	case errors.Is(err, service.ErrPendingUploadObjectInvalid):
+	case errors.Is(err, service.ErrUploadSessionObjectInvalid):
 		return Error(c, fiber.StatusBadRequest, "pending upload object is invalid")
-	case errors.Is(err, service.ErrPendingUploadInvalidURL):
+	case errors.Is(err, service.ErrUploadSessionInvalidURL):
 		return Error(c, fiber.StatusBadRequest, "pending upload URL is invalid")
 	default:
 		if logger != nil {

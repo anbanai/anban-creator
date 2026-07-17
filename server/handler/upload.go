@@ -18,7 +18,7 @@ import (
 
 type UploadHandler struct {
 	store     storage.Provider
-	repo      service.PendingUploadRepository
+	repo      repository.Repository
 	ownerRepo repository.Repository
 	cfg       service.DirectUploadConfig
 	logger    *zerolog.Logger
@@ -30,7 +30,7 @@ func (h *UploadHandler) SetRepository(repo repository.Repository) {
 	h.ownerRepo = repo
 }
 
-func NewUploadHandler(store storage.Provider, repo service.PendingUploadRepository, cfg service.DirectUploadConfig, logger *zerolog.Logger) *UploadHandler {
+func NewUploadHandler(store storage.Provider, repo repository.Repository, cfg service.DirectUploadConfig, logger *zerolog.Logger) *UploadHandler {
 	if logger == nil {
 		nop := zerolog.Nop()
 		logger = &nop
@@ -51,7 +51,11 @@ func (h *UploadHandler) Prepare(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 	req.UserID = userID
-	result, err := service.PrepareDirectUpload(c.Context(), h.store, h.repo, h.cfg, req)
+	var sessions repository.UploadSessionRepository
+	if h.repo != nil {
+		sessions = h.repo.UploadSessions()
+	}
+	result, err := service.PrepareDirectUpload(c.Context(), h.store, sessions, h.cfg, req)
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "storage provider") || strings.Contains(msg, "credential") || strings.Contains(msg, "OSS storage") {
@@ -99,7 +103,7 @@ func (h *UploadHandler) ResolveDownloadURL(c fiber.Ctx) error {
 
 	var status int
 	if req.UploadID != "" {
-		status = h.authorizePendingUpload(c.Context(), userID, req.UploadID, req.Key)
+		status = h.authorizeUploadSession(c.Context(), userID, req.UploadID, req.Key)
 	} else {
 		if req.OwnerType != "task" && req.OwnerType != "plan" {
 			return Error(c, fiber.StatusBadRequest, "owner_type must be task or plan")
@@ -131,28 +135,29 @@ func (h *UploadHandler) ResolveDownloadURL(c fiber.Ctx) error {
 	})
 }
 
-func (h *UploadHandler) authorizePendingUpload(ctx context.Context, userID, uploadID, key string) int {
+func (h *UploadHandler) authorizeUploadSession(ctx context.Context, userID, uploadID, key string) int {
 	if h.repo == nil {
 		return fiber.StatusInternalServerError
 	}
-	upload, err := h.repo.FindPendingUploadByID(ctx, uploadID)
-	if errors.Is(err, model.ErrPendingUploadNotFound) || errors.Is(err, service.ErrPendingUploadNotFound) {
+	session, err := h.repo.UploadSessions().FindByID(ctx, uploadID)
+	if errors.Is(err, model.ErrUploadSessionNotFound) {
 		return fiber.StatusNotFound
 	}
 	if err != nil {
 		h.logger.Error().Err(err).Str("upload_id", uploadID).Msg("resolve pending upload lookup failed")
 		return fiber.StatusInternalServerError
 	}
-	if upload.UserID != userID {
+	if session.UserID != userID {
 		return fiber.StatusForbidden
 	}
-	switch upload.Status {
-	case model.PendingUploadStatusPending:
-		if !upload.ExpiresAt.After(time.Now()) || upload.Key != key {
+	switch session.Status {
+	case model.UploadSessionPending:
+		if !session.ExpiresAt.After(time.Now()) || session.StagingKey != key {
 			return fiber.StatusForbidden
 		}
-	case model.PendingUploadStatusFinalized:
-		if upload.FinalizedKey == "" || upload.FinalizedKey != key {
+	case model.UploadSessionFinalized:
+		asset, err := h.repo.Assets().FindByID(ctx, session.AssetID)
+		if err != nil || asset.StorageKey != key || asset.UserID != userID {
 			return fiber.StatusForbidden
 		}
 	default:

@@ -36,7 +36,7 @@ type ProjectHandler struct {
 	modelConfigSvc *service.ModelConfigService
 	templateSvc    *service.TemplateService
 	store          storage.Provider
-	pendingUploads service.PendingUploadRepository
+	uploadRepo     repository.Repository
 	seednoteClient *seednote.Client
 	seednoteReady  service.Readiness
 }
@@ -73,8 +73,8 @@ func (h *ProjectHandler) SetStore(s storage.Provider) {
 	h.store = s
 }
 
-func (h *ProjectHandler) SetPendingUploadRepository(repo service.PendingUploadRepository) {
-	h.pendingUploads = repo
+func (h *ProjectHandler) SetUploadRepository(repo repository.Repository) {
+	h.uploadRepo = repo
 }
 
 // signProjectURLs resolves stored image URLs (avatar, reference image) to
@@ -310,9 +310,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
-	rewrites, err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL})
+	rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.uploadRepo, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL})
 	if err != nil {
-		return respondPendingUploadFinalizeError(c, h.logger, err)
+		return respondUploadSessionFinalizeError(c, h.logger, err)
 	}
 	req.AvatarURL = rewriteFinalizedUploadURL(req.AvatarURL, rewrites)
 	req.ReferenceImageURL = rewriteFinalizedUploadURL(req.ReferenceImageURL, rewrites)
@@ -416,9 +416,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
-	rewrites, err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL})
+	rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.uploadRepo, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL})
 	if err != nil {
-		return respondPendingUploadFinalizeError(c, h.logger, err)
+		return respondUploadSessionFinalizeError(c, h.logger, err)
 	}
 	req.AvatarURL = rewriteFinalizedUploadURL(req.AvatarURL, rewrites)
 	req.ReferenceImageURL = rewriteFinalizedUploadURL(req.ReferenceImageURL, rewrites)
@@ -1136,12 +1136,16 @@ func (h *ProjectHandler) cleanAnalysisImageKey(ctx context.Context, imageURL, us
 	if key, ok := storage.StorageKeyFromURL(imageURL); ok {
 		cleanKey := filepath.Clean(key)
 		if strings.HasPrefix(cleanKey, "uploads/pending/") {
-			pendingKey, err := service.ValidatePendingUploadURL(ctx, h.pendingUploads, userID, []string{
+			var sessions repository.UploadSessionRepository
+			if h.uploadRepo != nil {
+				sessions = h.uploadRepo.UploadSessions()
+			}
+			pendingKey, err := service.ValidateUploadSessionURL(ctx, sessions, userID, []string{
 				service.DirectUploadPurposeProjectReference,
 				service.DirectUploadPurposeTaskReference,
 			}, imageURL, time.Now())
 			if err != nil {
-				return "", pendingUploadAnalyzeError(h.logger, err)
+				return "", uploadSessionAnalyzeError(h.logger, err)
 			}
 			return pendingKey, nil
 		}
@@ -1149,15 +1153,15 @@ func (h *ProjectHandler) cleanAnalysisImageKey(ctx context.Context, imageURL, us
 	return cleanOwnedUploadKey(imageURL, userID)
 }
 
-func pendingUploadAnalyzeError(logger *zerolog.Logger, err error) fiberErrorFunc {
+func uploadSessionAnalyzeError(logger *zerolog.Logger, err error) fiberErrorFunc {
 	switch {
-	case errors.Is(err, service.ErrPendingUploadInvalidURL):
+	case errors.Is(err, service.ErrUploadSessionInvalidURL):
 		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
-	case errors.Is(err, service.ErrPendingUploadExpired):
+	case errors.Is(err, service.ErrUploadSessionExpired):
 		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "pending upload has expired") }
-	case errors.Is(err, service.ErrPendingUploadNotPending):
+	case errors.Is(err, service.ErrUploadSessionStateConflict):
 		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "pending upload is not pending") }
-	case errors.Is(err, service.ErrPendingUploadAccessDenied):
+	case errors.Is(err, service.ErrUploadSessionAccessDenied):
 		return func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }
 	default:
 		if logger != nil {

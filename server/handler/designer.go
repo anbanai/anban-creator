@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/gofiber/fiber/v3"
@@ -39,18 +40,18 @@ func truncate(s string, maxRunes int) string {
 }
 
 type DesignerHandler struct {
-	svc     *service.DesignerService
-	pending service.PendingUploadRepository
-	store   storage.Provider
-	logger  *zerolog.Logger
+	svc    *service.DesignerService
+	repo   repository.Repository
+	store  storage.Provider
+	logger *zerolog.Logger
 }
 
 func NewDesignerHandler(svc *service.DesignerService, logger *zerolog.Logger) *DesignerHandler {
 	return &DesignerHandler{svc: svc, logger: logger}
 }
 
-func (h *DesignerHandler) SetDirectUploadDependencies(pending service.PendingUploadRepository, store storage.Provider) {
-	h.pending = pending
+func (h *DesignerHandler) SetDirectUploadDependencies(repo repository.Repository, store storage.Provider) {
+	h.repo = repo
 	h.store = store
 }
 
@@ -182,7 +183,7 @@ func (h *DesignerHandler) RegisterReference(c fiber.Ctx) error {
 	}
 
 	finalStore, _ := h.store.(service.DirectUploadFinalizationStorage)
-	verified, err := service.ResolveDirectUploadAttachment(c.Context(), finalStore, h.pending, userID, []string{
+	verified, err := service.ResolveDirectUploadSessionAttachment(c.Context(), finalStore, h.repo, userID, []string{
 		service.DirectUploadPurposeDesignerReference,
 	}, req.UploadID, req.Key, time.Now())
 	if err != nil {
@@ -204,13 +205,13 @@ func (h *DesignerHandler) RegisterReference(c fiber.Ctx) error {
 
 func (h *DesignerHandler) respondRegisterReferenceError(c fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, service.ErrPendingUploadAccessDenied):
+	case errors.Is(err, service.ErrUploadSessionAccessDenied):
 		return Forbidden(c, "pending upload access denied")
-	case errors.Is(err, service.ErrPendingUploadExpired):
+	case errors.Is(err, service.ErrUploadSessionExpired):
 		return Error(c, fiber.StatusBadRequest, "pending upload has expired")
-	case errors.Is(err, service.ErrPendingUploadNotPending):
+	case errors.Is(err, service.ErrUploadSessionStateConflict):
 		return Error(c, fiber.StatusBadRequest, "pending upload is not reusable")
-	case errors.Is(err, service.ErrPendingUploadObjectInvalid):
+	case errors.Is(err, service.ErrUploadSessionObjectInvalid):
 		return Error(c, fiber.StatusBadRequest, "pending upload object is invalid")
 	case errors.Is(err, storage.ErrObjectExceedsMaxSize):
 		return Error(c, fiber.StatusBadRequest, "file too large (max 10MB)")

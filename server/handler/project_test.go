@@ -68,8 +68,8 @@ func setupProjectDeleteHandlerTest(t *testing.T) (*fiber.App, repository.Reposit
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	projectSvc := service.NewProjectService(repo, &logger)
 	h := NewProjectHandler(projectSvc, &logger)
-	h.SetStore(pendingUploadStatStore(repo.PendingUploads()))
-	h.SetPendingUploadRepository(repo.PendingUploads())
+	h.SetStore(uploadSessionStatStore(repo.UploadSessions()))
+	h.SetUploadRepository(repo)
 
 	app := fiber.New()
 	injectUser := func(c fiber.Ctx) error {
@@ -161,33 +161,31 @@ func TestProjectHandler_CreateFinalizesPendingAvatarAndReference(t *testing.T) {
 	avatarURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + avatarID + "/avatar.png"
 	refURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + refID + "/ref.png"
 
-	for _, upload := range []*model.PendingUpload{
+	for _, upload := range []*model.UploadSession{
 		{
 			ID:          avatarID,
 			UserID:      userID,
 			Purpose:     service.DirectUploadPurposeProjectReference,
-			Key:         "uploads/pending/" + userID + "/" + avatarID + "/avatar.png",
-			PublicURL:   avatarURL,
+			StagingKey:  "uploads/pending/" + userID + "/" + avatarID + "/avatar.png",
 			FileName:    "avatar.png",
 			ContentType: "image/png",
 			Size:        123,
-			Status:      model.PendingUploadStatusPending,
+			Status:      model.UploadSessionPending,
 			ExpiresAt:   time.Now().Add(time.Hour),
 		},
 		{
 			ID:          refID,
 			UserID:      userID,
 			Purpose:     service.DirectUploadPurposeProjectReference,
-			Key:         "uploads/pending/" + userID + "/" + refID + "/ref.png",
-			PublicURL:   refURL,
+			StagingKey:  "uploads/pending/" + userID + "/" + refID + "/ref.png",
 			FileName:    "ref.png",
 			ContentType: "image/png",
 			Size:        456,
-			Status:      model.PendingUploadStatusPending,
+			Status:      model.UploadSessionPending,
 			ExpiresAt:   time.Now().Add(time.Hour),
 		},
 	} {
-		if err := repo.PendingUploads().CreatePendingUpload(ctx, upload); err != nil {
+		if err := repo.UploadSessions().Create(ctx, upload); err != nil {
 			t.Fatalf("seed pending upload %s: %v", upload.ID, err)
 		}
 	}
@@ -203,18 +201,13 @@ func TestProjectHandler_CreateFinalizesPendingAvatarAndReference(t *testing.T) {
 	}
 	responseBody := decodeBody(t, resp)
 	responseJSON, _ := json.Marshal(responseBody)
-	if strings.Contains(string(responseJSON), "uploads/pending/") || !strings.Contains(string(responseJSON), "uploads/finalized/") {
+	if strings.Contains(string(responseJSON), "uploads/pending/") || !strings.Contains(string(responseJSON), "assets/users/") {
 		t.Fatalf("project persisted non-final URLs: %s", responseJSON)
 	}
 
 	for _, id := range []string{avatarID, refID} {
-		upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, id)
-		if err != nil {
-			t.Fatalf("find pending upload %s: %v", id, err)
-		}
-		if upload.Status != model.PendingUploadStatusFinalized || !strings.HasPrefix(upload.FinalizedKey, "uploads/finalized/"+userID+"/"+id+"/") {
-			t.Fatalf("upload %s identity = %#v", id, upload)
-		}
+		fileName := map[string]string{avatarID: "avatar.png", refID: "ref.png"}[id]
+		assertFinalizedAsset(t, repo, id, "assets/users/"+userID+"/"+id+"/"+fileName)
 	}
 }
 
@@ -236,16 +229,16 @@ func TestProjectHandler_UpdateFinalizesPendingAvatar(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeProjectReference,
-		Key:         key,
-		PublicURL:   publicURL,
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID:         uploadID,
+		UserID:     userID,
+		Purpose:    service.DirectUploadPurposeProjectReference,
+		StagingKey: key,
+
 		FileName:    "avatar.png",
 		ContentType: "image/png",
 		Size:        123,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("seed pending upload: %v", err)
@@ -259,17 +252,11 @@ func TestProjectHandler_UpdateFinalizesPendingAvatar(t *testing.T) {
 	}
 	responseBody := decodeBody(t, resp)
 	responseJSON, _ := json.Marshal(responseBody)
-	if strings.Contains(string(responseJSON), "uploads/pending/") || !strings.Contains(string(responseJSON), "uploads/finalized/") {
+	if strings.Contains(string(responseJSON), "uploads/pending/") || !strings.Contains(string(responseJSON), "assets/users/") {
 		t.Fatalf("updated project persisted non-final URL: %s", responseJSON)
 	}
 
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
-	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
-	}
-	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/avatar.png" {
-		t.Fatalf("pending upload identity = %#v", upload)
-	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/avatar.png")
 }
 
 func TestProjectHandler_DeleteWithAssociatedTasksReturnsConflict(t *testing.T) {

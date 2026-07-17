@@ -63,7 +63,7 @@ func (s *resolveDownloadStore) IsOwnedURL(rawURL string) bool {
 func newResolveUploadHandler(t *testing.T, repo repository.Repository, store *resolveDownloadStore, userID string) (*fiber.App, *UploadHandler) {
 	t.Helper()
 	logger := zerolog.New(io.Discard)
-	h := NewUploadHandler(store, repo.PendingUploads(), service.DirectUploadConfig{}, &logger)
+	h := NewUploadHandler(store, repo, service.DirectUploadConfig{}, &logger)
 	h.SetRepository(repo)
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
@@ -91,8 +91,26 @@ func resolveDownloadRequest(t *testing.T, app *fiber.App, payload string) (*http
 
 func createPendingUpload(t *testing.T, repo repository.Repository, upload model.PendingUpload) {
 	t.Helper()
-	if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &upload); err != nil {
+	session := &model.UploadSession{
+		ID: upload.ID, UserID: upload.UserID, Purpose: upload.Purpose, StagingKey: upload.Key,
+		FileName: upload.FileName, ContentType: upload.ContentType, Size: upload.Size,
+		Status: model.UploadSessionPending, ExpiresAt: upload.ExpiresAt,
+	}
+	if upload.Status == model.PendingUploadStatusFinalized {
+		session.Status = model.UploadSessionFinalized
+		session.AssetID = upload.ID
+	}
+	if err := repo.UploadSessions().Create(t.Context(), session); err != nil {
 		t.Fatalf("create pending upload: %v", err)
+	}
+	if session.Status == model.UploadSessionFinalized {
+		if err := repo.Assets().Create(t.Context(), &model.Asset{
+			ID: upload.ID, UserID: upload.UserID, Purpose: upload.Purpose,
+			StorageKey: upload.FinalizedKey, FileName: upload.FileName,
+			ContentType: upload.ContentType, Size: upload.Size, ETag: "etag-" + upload.ID,
+		}); err != nil {
+			t.Fatalf("create finalized asset: %v", err)
+		}
 	}
 }
 
@@ -103,7 +121,7 @@ func TestResolveAttachmentDownloadURLByUploadID(t *testing.T) {
 	otherUserID := uuid.NewString()
 	pendingKey := "uploads/pending/" + userID + "/pending/input.png"
 	finalSourceKey := "uploads/pending/" + userID + "/final/input.png"
-	finalKey := "uploads/finalized/" + userID + "/final/input.png"
+	finalKey := "assets/users/" + userID + "/final/input.png"
 	createPendingUpload(t, repo, model.PendingUpload{ID: "pending", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, Key: pendingKey, PublicURL: "/api/v1/files/" + pendingKey, FileName: "input.png", Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour)})
 	createPendingUpload(t, repo, model.PendingUpload{ID: "final", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, Key: finalSourceKey, FinalizedKey: finalKey, PublicURL: "/api/v1/files/" + finalSourceKey, FileName: "input.png", Status: model.PendingUploadStatusFinalized, ExpiresAt: now.Add(time.Hour)})
 	createPendingUpload(t, repo, model.PendingUpload{ID: "other", UserID: otherUserID, Purpose: service.DirectUploadPurposeAIEntryAttachment, Key: "uploads/pending/other/input.png", PublicURL: "/api/v1/files/uploads/pending/other/input.png", FileName: "input.png", Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour)})

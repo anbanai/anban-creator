@@ -38,7 +38,7 @@ func (r *designerPendingUploadRepo) CreatePendingUpload(_ context.Context, uploa
 func (r *designerPendingUploadRepo) FindPendingUploadByID(_ context.Context, id string) (*model.PendingUpload, error) {
 	upload := r.uploads[id]
 	if upload == nil {
-		return nil, service.ErrPendingUploadNotFound
+		return nil, model.ErrPendingUploadNotFound
 	}
 	copy := *upload
 	return &copy, nil
@@ -328,13 +328,13 @@ func TestRegisterDesignerReference(t *testing.T) {
 		status                                   string
 	}
 	fixtures := []uploadFixture{
-		{id: "pending-ok", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/pending-ok/reference.png", finalKey: "uploads/finalized/" + userID + "/pending-ok/reference.png", status: model.PendingUploadStatusPending},
-		{id: "final-ok", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/final-ok/reference.png", finalKey: "uploads/finalized/" + userID + "/final-ok/reference.png", status: model.PendingUploadStatusFinalized},
+		{id: "pending-ok", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/pending-ok/reference.png", finalKey: "assets/users/" + userID + "/pending-ok/reference.png", status: model.PendingUploadStatusPending},
+		{id: "final-ok", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/final-ok/reference.png", finalKey: "assets/users/" + userID + "/final-ok/reference.png", status: model.PendingUploadStatusFinalized},
 		{id: "wrong-purpose", userID: userID, purpose: service.DirectUploadPurposeAIEntryAttachment, sourceKey: "uploads/pending/" + userID + "/wrong-purpose/reference.png", finalKey: "", status: model.PendingUploadStatusPending},
 		{id: "other-user", userID: otherUserID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + otherUserID + "/other-user/reference.png", finalKey: "", status: model.PendingUploadStatusPending},
 		{id: "legacy-final", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/legacy-final/reference.png", finalKey: "", status: model.PendingUploadStatusFinalized},
-		{id: "oversize", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/oversize/reference.png", finalKey: "uploads/finalized/" + userID + "/oversize/reference.png", status: model.PendingUploadStatusFinalized},
-		{id: "backend", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/backend/reference.png", finalKey: "uploads/finalized/" + userID + "/backend/reference.png", status: model.PendingUploadStatusFinalized},
+		{id: "oversize", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/oversize/reference.png", finalKey: "assets/users/" + userID + "/oversize/reference.png", status: model.PendingUploadStatusFinalized},
+		{id: "backend", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/backend/reference.png", finalKey: "assets/users/" + userID + "/backend/reference.png", status: model.PendingUploadStatusFinalized},
 	}
 	for _, fixture := range fixtures {
 		if err := pending.CreatePendingUpload(context.Background(), &model.PendingUpload{
@@ -350,13 +350,17 @@ func TestRegisterDesignerReference(t *testing.T) {
 		fixtures[5].finalKey: []byte("too-large"), fixtures[6].finalKey: []byte("backend"),
 	}
 	store.objects = map[string]*storage.ObjectInfo{
-		fixtures[1].finalKey: {Key: fixtures[1].finalKey, Size: 9, ContentType: "image/png", ETag: "final"},
-		fixtures[5].finalKey: {Key: fixtures[5].finalKey, Size: 9, ContentType: "image/png", ETag: "oversize"},
-		fixtures[6].finalKey: {Key: fixtures[6].finalKey, Size: 9, ContentType: "image/png", ETag: "backend"},
+		fixtures[1].finalKey: {Key: fixtures[1].finalKey, Size: 9, ContentType: "image/png", ETag: "etag-final-ok"},
+		fixtures[5].finalKey: {Key: fixtures[5].finalKey, Size: 9, ContentType: "image/png", ETag: "etag-oversize"},
+		fixtures[6].finalKey: {Key: fixtures[6].finalKey, Size: 9, ContentType: "image/png", ETag: "etag-backend"},
 	}
 	designerSvc := service.NewDesignerService(db, nil, nil, nil, store, &logger)
 	h := NewDesignerHandler(designerSvc, &logger)
-	h.SetDirectUploadDependencies(pending, store)
+	uploadRepo := uploadRepositoryFromPendingMap(t, pending.uploads)
+	if err := db.Model(&model.UploadSession{}).Where("id = ?", "legacy-final").Update("asset_id", "").Error; err != nil {
+		t.Fatalf("break finalized session fixture: %v", err)
+	}
+	h.SetDirectUploadDependencies(uploadRepo, store)
 	app := fiber.New()
 	app.Post("/designer/register-reference", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -410,10 +414,7 @@ func TestRegisterDesignerReference(t *testing.T) {
 			t.Fatalf("%s durable reference = %#v err=%v", success.id, reference, err)
 		}
 	}
-	foundPending, err := pending.FindPendingUploadByID(context.Background(), "pending-ok")
-	if err != nil || foundPending.Status != model.PendingUploadStatusFinalized || foundPending.FinalizedKey != fixtures[0].finalKey {
-		t.Fatalf("pending upload not finalized to immutable key: upload=%#v err=%v", foundPending, err)
-	}
+	assertFinalizedAsset(t, uploadRepo, "pending-ok", fixtures[0].finalKey)
 
 	for _, rejected := range []struct{ name, id, key string }{
 		{"wrong purpose", "wrong-purpose", fixtures[2].sourceKey},

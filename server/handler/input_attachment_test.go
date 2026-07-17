@@ -14,7 +14,7 @@ import (
 )
 
 func TestInputAttachmentServiceErrorClassifiesObjectMetadataMismatch(t *testing.T) {
-	err := inputAttachmentServiceError(service.ErrPendingUploadObjectInvalid)
+	err := inputAttachmentServiceError(service.ErrUploadSessionObjectInvalid)
 	if !errors.Is(err, errInputAttachmentValidation) {
 		t.Fatalf("error = %v, want input attachment validation error", err)
 	}
@@ -35,7 +35,8 @@ func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}}
 
-	got, err := validateInputAttachments(context.Background(), pendingUploadStatStore(pending), pending, "user-1", []model.EntryAttachment{{
+	uploadRepo := uploadRepositoryFromPending(t, pending.upload)
+	got, err := validateInputAttachments(context.Background(), pendingUploadStatStore(pending), uploadRepo, "user-1", []model.EntryAttachment{{
 		Type:        " image ",
 		URL:         " https://attacker.example/forged.exe?signature=secret ",
 		FileName:    " forged.exe ",
@@ -64,14 +65,14 @@ func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	if got[0].ContentType != "image/png" {
 		t.Fatalf("content type = %q", got[0].ContentType)
 	}
-	if got[0].Size != 2048 || got[0].UploadID != "upload-1" || got[0].Key != "uploads/finalized/user-1/upload-1/product.png" {
+	if got[0].Size != 2048 || got[0].UploadID != "upload-1" || got[0].Key != "assets/users/user-1/upload-1/repository-product.png" {
 		t.Fatalf("repository storage metadata not persisted: %#v", got[0])
 	}
 	if got[0].Instruction != "保持包装和 Logo" {
 		t.Fatalf("instruction = %q", got[0].Instruction)
 	}
-	if len(pending.finalizedIDs) != 1 || pending.finalizedIDs[0] != "upload-1" {
-		t.Fatalf("finalized IDs = %#v, want upload-1", pending.finalizedIDs)
+	if _, err := uploadRepo.Assets().FindByID(t.Context(), "upload-1"); err != nil {
+		t.Fatalf("finalized asset missing: %v", err)
 	}
 }
 
@@ -83,7 +84,7 @@ func TestValidateInputAttachmentsDoesNotFinalizeBeforeWholeCollectionValidates(t
 		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
 	}}
 
-	_, err := validateInputAttachments(context.Background(), nil, pending, "user-1", []model.EntryAttachment{
+	_, err := validateInputAttachments(context.Background(), nil, uploadRepositoryFromPending(t, pending.upload), "user-1", []model.EntryAttachment{
 		{UploadID: "upload-1", Key: key, Instruction: "use the product"},
 		{Type: "image", URL: "https://attacker.example/invalid.png", FileName: "invalid.png", ContentType: "image/png"},
 	}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: allAgentAttachmentTypes})
@@ -191,7 +192,7 @@ func TestValidateInputAttachmentsRejectsTypeLimitsAndCrossTenantUpload(t *testin
 		name       string
 		attachment model.EntryAttachment
 		userID     string
-		pending    service.PendingUploadRepository
+		pending    *aiEntryPendingRepo
 		wantErr    string
 	}{
 		{
@@ -218,13 +219,17 @@ func TestValidateInputAttachmentsRejectsTypeLimitsAndCrossTenantUpload(t *testin
 				Key: "uploads/pending/owner/upload-1/product.png", FileName: "product.png", ContentType: "image/png", Size: 1024,
 				Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
 			}},
-			wantErr: "pending upload access denied",
+			wantErr: "upload session access denied",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := validateInputAttachments(context.Background(), nil, tt.pending, tt.userID, []model.EntryAttachment{tt.attachment},
+			var upload *model.PendingUpload
+			if tt.pending != nil {
+				upload = tt.pending.upload
+			}
+			_, err := validateInputAttachments(context.Background(), nil, uploadRepositoryFromPending(t, upload), tt.userID, []model.EntryAttachment{tt.attachment},
 				InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: allAgentAttachmentTypes})
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
@@ -239,7 +244,7 @@ func TestValidateInputAttachmentsAppliesCallSpecificLimitToVerifiedUploads(t *te
 		Key: "uploads/pending/user-1/resume-video/demo.mp4", FileName: "demo.mp4", ContentType: "video/mp4",
 		Size: 25*1024*1024 + 1, Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
 	}
-	_, err := validateInputAttachments(context.Background(), nil, &aiEntryPendingRepo{upload: upload}, "user-1", []model.EntryAttachment{{
+	_, err := validateInputAttachments(context.Background(), nil, uploadRepositoryFromPending(t, upload), "user-1", []model.EntryAttachment{{
 		UploadID: upload.ID,
 		Key:      upload.Key,
 	}}, InputAttachmentValidationOptions{

@@ -184,16 +184,16 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeMontageAsset,
-		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
-		PublicURL:   assetURL,
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID:         uploadID,
+		UserID:     userID,
+		Purpose:    service.DirectUploadPurposeMontageAsset,
+		StagingKey: "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
+
 		FileName:    "clip.mp4",
 		ContentType: "video/mp4",
 		Size:        1234,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("create pending upload: %v", err)
@@ -203,7 +203,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	planSvc := service.NewPlanService(repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
 	h.SetRepository(repo)
-	h.SetStore(pendingUploadStatStore(repo.PendingUploads()))
+	h.SetStore(uploadSessionStatStore(repo.UploadSessions()))
 	app := fiber.New()
 	app.Post("/plans", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -231,16 +231,10 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read response: %v", err)
 	}
-	if strings.Contains(string(responseBody), "uploads/pending/") || !strings.Contains(string(responseBody), "uploads/finalized/") {
+	if strings.Contains(string(responseBody), "uploads/pending/") || !strings.Contains(string(responseBody), "assets/users/") {
 		t.Fatalf("plan persisted non-final montage URL: %s", responseBody)
 	}
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
-	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
-	}
-	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/clip.mp4" {
-		t.Fatalf("upload identity = %#v", upload)
-	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/clip.mp4")
 }
 
 func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testing.T) {
@@ -268,16 +262,16 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeMontageAsset,
-		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
-		PublicURL:   assetURL,
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID:         uploadID,
+		UserID:     userID,
+		Purpose:    service.DirectUploadPurposeMontageAsset,
+		StagingKey: "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
+
 		FileName:    "clip.mp4",
 		ContentType: "video/mp4",
 		Size:        1234,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("create pending upload: %v", err)
@@ -310,11 +304,11 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
 	}
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	upload, err := repo.UploadSessions().FindByID(ctx, uploadID)
 	if err != nil {
 		t.Fatalf("find pending upload: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusPending {
+	if upload.Status != model.UploadSessionPending {
 		t.Fatalf("upload status = %q, want pending", upload.Status)
 	}
 }
@@ -449,7 +443,7 @@ func TestCreateVideoPlanPersistsFinalReferenceURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	refURL := seedPendingHandlerUpload(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
-	store := pendingUploadStatStore(repo.PendingUploads())
+	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
 	h := NewPlanHandler(service.NewPlanService(repo, &logger), &logger)
 	h.SetRepository(repo)
@@ -467,7 +461,7 @@ func TestCreateVideoPlanPersistsFinalReferenceURL(t *testing.T) {
 		t.Fatalf("status = %d data=%s", resp.StatusCode, mustMarshalTaskJSON(t, data))
 	}
 	encoded := mustMarshalTaskJSON(t, data)
-	if strings.Contains(string(encoded), "uploads/pending/") || !strings.Contains(string(encoded), "uploads/finalized/") {
+	if strings.Contains(string(encoded), "uploads/pending/") || !strings.Contains(string(encoded), "assets/users/") {
 		t.Fatalf("video plan response contains non-final reference: %s", encoded)
 	}
 	var response struct {
@@ -481,14 +475,11 @@ func TestCreateVideoPlanPersistsFinalReferenceURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	references := plan.VideoInput.Data().References
-	wantURL := "/api/v1/files/uploads/finalized/" + userID + "/" + uploadID + "/reference.mp4"
+	wantURL := "/api/v1/files/assets/users/" + userID + "/" + uploadID + "/reference.mp4"
 	if len(references) != 1 || references[0].URL != wantURL {
 		t.Fatalf("persisted plan references = %#v", references)
 	}
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
-	if err != nil || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/reference.mp4" {
-		t.Fatalf("finalized plan upload = %#v, %v", upload, err)
-	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/reference.mp4")
 }
 
 func TestCreatePlan_MomentsProjectReturnsBadRequest(t *testing.T) {
@@ -580,10 +571,10 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	})
 
 	const foreignKey = "uploads/pending/foreign/foreign-upload/product.png"
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
 		ID: "foreign-upload", UserID: "foreign-user", Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		Key: foreignKey, FileName: "product.png", ContentType: "image/png", Size: 10,
-		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+		StagingKey: foreignKey, FileName: "product.png", ContentType: "image/png", Size: 10,
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("create foreign upload: %v", err)
 	}

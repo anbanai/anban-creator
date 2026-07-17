@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"strings"
 	"testing"
 	"time"
@@ -16,9 +17,65 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
+
+func uploadRepositoryFromPending(t *testing.T, uploads ...*model.PendingUpload) repository.Repository {
+	t.Helper()
+	repo := repository.New(setupTaskHandlerTestDB(t))
+	for _, upload := range uploads {
+		if upload == nil {
+			continue
+		}
+		status := model.UploadSessionPending
+		if upload.Status == model.PendingUploadStatusFinalized {
+			status = model.UploadSessionFinalized
+		}
+		session := &model.UploadSession{
+			ID: upload.ID, UserID: upload.UserID, Purpose: upload.Purpose,
+			StagingKey: upload.Key, FileName: upload.FileName, ContentType: upload.ContentType,
+			Size: upload.Size, Status: status, ExpiresAt: upload.ExpiresAt,
+		}
+		if status == model.UploadSessionFinalized {
+			session.AssetID = upload.ID
+		}
+		if err := repo.UploadSessions().Create(t.Context(), session); err != nil {
+			t.Fatalf("create upload session %s: %v", upload.ID, err)
+		}
+		if status == model.UploadSessionFinalized {
+			if err := repo.Assets().Create(t.Context(), &model.Asset{
+				ID: upload.ID, UserID: upload.UserID, Purpose: upload.Purpose,
+				StorageKey: path.Join("assets/users", upload.UserID, upload.ID, upload.FileName),
+				FileName:   upload.FileName, ContentType: upload.ContentType, Size: upload.Size, ETag: "etag-" + upload.ID,
+			}); err != nil {
+				t.Fatalf("create asset %s: %v", upload.ID, err)
+			}
+		}
+	}
+	return repo
+}
+
+func uploadRepositoryFromPendingMap(t *testing.T, uploads map[string]*model.PendingUpload) repository.Repository {
+	values := make([]*model.PendingUpload, 0, len(uploads))
+	for _, upload := range uploads {
+		values = append(values, upload)
+	}
+	return uploadRepositoryFromPending(t, values...)
+}
+
+func assertFinalizedAsset(t *testing.T, repo repository.Repository, id, wantKey string) {
+	t.Helper()
+	session, err := repo.UploadSessions().FindByID(t.Context(), id)
+	if err != nil || session.Status != model.UploadSessionFinalized || session.AssetID != id {
+		t.Fatalf("finalized upload session %s = %#v, %v", id, session, err)
+	}
+	asset, err := repo.Assets().FindByID(t.Context(), id)
+	if err != nil || asset.StorageKey != wantKey {
+		t.Fatalf("finalized asset %s = %#v, %v; want key %q", id, asset, err, wantKey)
+	}
+}
 
 type fakeProjectLLM struct {
 	response string
@@ -37,15 +94,16 @@ func (f *fakeProjectLLM) CompleteWithImage(_ context.Context, systemPrompt, user
 }
 
 type fakeStorageProvider struct {
-	data     map[string][]byte
-	read     []string
-	uploaded []string
-	readErr  error
-	readMax  []int64
-	statRepo service.PendingUploadRepository
-	statErr  error
-	statInfo *storage.ObjectInfo
-	objects  map[string]*storage.ObjectInfo
+	data        map[string][]byte
+	read        []string
+	uploaded    []string
+	readErr     error
+	readMax     []int64
+	statRepo    repository.PendingUploadRepository
+	sessionRepo repository.UploadSessionRepository
+	statErr     error
+	statInfo    *storage.ObjectInfo
+	objects     map[string]*storage.ObjectInfo
 }
 
 var _ storage.Provider = (*fakeStorageProvider)(nil)
@@ -111,6 +169,13 @@ func (f *fakeStorageProvider) StatObject(ctx context.Context, key string) (*stor
 		return &copy, nil
 	}
 	parts := strings.Split(strings.Trim(key, "/"), "/")
+	if f.sessionRepo != nil && len(parts) >= 4 && parts[0] == "uploads" && parts[1] == "pending" {
+		session, err := f.sessionRepo.FindByID(ctx, parts[3])
+		if err != nil || session.StagingKey != key {
+			return nil, storage.ErrObjectNotFound
+		}
+		return &storage.ObjectInfo{Key: key, Size: session.Size, ContentType: session.ContentType, ETag: "etag-" + session.ID}, nil
+	}
 	if f.statRepo == nil || len(parts) < 4 || parts[0] != "uploads" || parts[1] != "pending" {
 		return nil, storage.ErrObjectNotFound
 	}
@@ -147,8 +212,12 @@ func (f *fakeStorageProvider) PromoteObject(ctx context.Context, sourceKey, fina
 	return nil
 }
 
-func pendingUploadStatStore(repo service.PendingUploadRepository) *fakeStorageProvider {
+func pendingUploadStatStore(repo repository.PendingUploadRepository) *fakeStorageProvider {
 	return &fakeStorageProvider{statRepo: repo}
+}
+
+func uploadSessionStatStore(repo repository.UploadSessionRepository) *fakeStorageProvider {
+	return &fakeStorageProvider{sessionRepo: repo}
 }
 
 func (f *fakeStorageProvider) Delete(context.Context, string) error { return nil }
@@ -181,7 +250,7 @@ func (r *fakeProjectPendingUploadRepo) CreatePendingUpload(context.Context, *mod
 
 func (r *fakeProjectPendingUploadRepo) FindPendingUploadByID(_ context.Context, id string) (*model.PendingUpload, error) {
 	if r.uploads == nil || r.uploads[id] == nil {
-		return nil, service.ErrPendingUploadNotFound
+		return nil, model.ErrPendingUploadNotFound
 	}
 	cp := *r.uploads[id]
 	return &cp, nil
@@ -399,7 +468,7 @@ func TestAnalyzeImageAllowsOwnPendingProjectReference(t *testing.T) {
 	}}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetPendingUploadRepository(pending)
+	h.SetUploadRepository(uploadRepositoryFromPending(t, pending.uploads["upload-1"]))
 	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
@@ -443,7 +512,7 @@ func TestAnalyzeImageAllowsOwnPendingTaskReference(t *testing.T) {
 	}}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetPendingUploadRepository(pending)
+	h.SetUploadRepository(uploadRepositoryFromPending(t, pending.uploads["upload-1"]))
 	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
@@ -487,7 +556,7 @@ func TestAnalyzeImageRejectsUnauthorizedPendingUpload(t *testing.T) {
 	}}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetPendingUploadRepository(pending)
+	h.SetUploadRepository(uploadRepositoryFromPending(t, pending.uploads["upload-1"]))
 	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
@@ -528,7 +597,7 @@ func TestAnalyzeImageRejectsPendingUploadWithWrongPurpose(t *testing.T) {
 	}}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetPendingUploadRepository(pending)
+	h.SetUploadRepository(uploadRepositoryFromPending(t, pending.uploads["upload-1"]))
 	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()

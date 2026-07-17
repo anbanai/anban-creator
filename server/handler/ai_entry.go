@@ -7,23 +7,24 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type AIEntryHandler struct {
 	submitter service.AIEntrySubmitter
-	pending   service.PendingUploadRepository
+	repo      repository.Repository
 	store     storage.Provider
 	logger    *zerolog.Logger
 }
 
-func NewAIEntryHandler(submitter service.AIEntrySubmitter, pending service.PendingUploadRepository, store storage.Provider, logger *zerolog.Logger) *AIEntryHandler {
+func NewAIEntryHandler(submitter service.AIEntrySubmitter, repo repository.Repository, store storage.Provider, logger *zerolog.Logger) *AIEntryHandler {
 	if logger == nil {
 		nop := zerolog.Nop()
 		logger = &nop
 	}
-	return &AIEntryHandler{submitter: submitter, pending: pending, store: store, logger: logger}
+	return &AIEntryHandler{submitter: submitter, repo: repo, store: store, logger: logger}
 }
 
 func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
@@ -48,7 +49,7 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 	if utf8.RuneCountInString(req.Text) > maxTaskPromptCharacters {
 		return Error(c, fiber.StatusBadRequest, "text must not exceed 5120 characters")
 	}
-	validatedAttachments, err := validateInputAttachments(c.Context(), h.store, h.pending, userID, req.Attachments, InputAttachmentValidationOptions{
+	validatedAttachments, err := validateInputAttachments(c.Context(), h.store, h.repo, userID, req.Attachments, InputAttachmentValidationOptions{
 		MaxCount:     maxAgentInputAttachments,
 		AllowedTypes: allAgentAttachmentTypes,
 	})

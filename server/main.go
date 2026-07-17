@@ -527,7 +527,7 @@ func main() {
 		}
 		if store != nil {
 			projectHandler.SetStore(store)
-			projectHandler.SetPendingUploadRepository(repo.PendingUploads())
+			projectHandler.SetUploadRepository(repo)
 		}
 		projectHandler.SetSeednoteClient(seednoteClient)
 		projectHandler.SetSeednoteReadiness(seednoteMonitor)
@@ -551,14 +551,14 @@ func main() {
 		})
 		if store != nil {
 			fileHandler = handler.NewFileHandler(store, log)
-			fileHandler.SetPendingUploadRepository(repo.PendingUploads())
-			uploadHandler = handler.NewUploadHandler(store, repo.PendingUploads(), service.DirectUploadConfig{
+			fileHandler.SetUploadSessionRepository(repo.UploadSessions())
+			uploadHandler = handler.NewUploadHandler(store, repo, service.DirectUploadConfig{
 				Storage: cfg.Storage,
 			}, log)
 			uploadHandler.SetRepository(repo)
 		}
 		if aiEntrySvc != nil {
-			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo.PendingUploads(), store, log)
+			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo, store, log)
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
@@ -566,7 +566,7 @@ func main() {
 			templateHandler.SetStore(store)
 		}
 		if repo != nil {
-			templateHandler.SetPendingUploadRepository(repo.PendingUploads())
+			templateHandler.SetUploadRepository(repo)
 		}
 		if viralAnalysisSvc != nil {
 			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
@@ -636,7 +636,7 @@ func main() {
 		if mysqlDB != nil && imageSvc != nil {
 			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, cfg, store, log)
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
-			designerHandler.SetDirectUploadDependencies(repo.PendingUploads(), store)
+			designerHandler.SetDirectUploadDependencies(repo, store)
 		}
 		if repo != nil {
 			if writingLLMClient != nil || imageUnderstandingClient != nil || videoUnderstandingClient != nil {
@@ -752,7 +752,7 @@ func main() {
 	if repo != nil && store != nil && store.Name() == "oss" {
 		uploadCleanupCtx, uploadCleanupCancel := context.WithCancel(context.Background())
 		defer uploadCleanupCancel()
-		service.StartPendingUploadCleanup(uploadCleanupCtx, store, repo.PendingUploads(), 30*time.Minute, log)
+		service.StartUploadSessionCleanup(uploadCleanupCtx, store, repo.UploadSessions(), 30*time.Minute, log)
 	}
 
 	// 15.4 Start ilink inbound poller and terminal notification worker.

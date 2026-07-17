@@ -48,10 +48,10 @@ func TestRespondPendingUploadFinalizeErrorClassifiesAndRedacts(t *testing.T) {
 		err        error
 		wantStatus int
 	}{
-		{name: "access denied", err: fmt.Errorf("%w: %s", service.ErrPendingUploadAccessDenied, secret), wantStatus: fiber.StatusBadRequest},
-		{name: "expired", err: fmt.Errorf("%w: %s", service.ErrPendingUploadExpired, secret), wantStatus: fiber.StatusBadRequest},
-		{name: "not pending", err: fmt.Errorf("%w: %s", service.ErrPendingUploadNotPending, secret), wantStatus: fiber.StatusBadRequest},
-		{name: "invalid object metadata", err: fmt.Errorf("%w: %s", service.ErrPendingUploadObjectInvalid, secret), wantStatus: fiber.StatusBadRequest},
+		{name: "access denied", err: fmt.Errorf("%w: %s", service.ErrUploadSessionAccessDenied, secret), wantStatus: fiber.StatusBadRequest},
+		{name: "expired", err: fmt.Errorf("%w: %s", service.ErrUploadSessionExpired, secret), wantStatus: fiber.StatusBadRequest},
+		{name: "not pending", err: fmt.Errorf("%w: %s", service.ErrUploadSessionStateConflict, secret), wantStatus: fiber.StatusBadRequest},
+		{name: "invalid object metadata", err: fmt.Errorf("%w: %s", service.ErrUploadSessionObjectInvalid, secret), wantStatus: fiber.StatusBadRequest},
 		{name: "backend error", err: fmt.Errorf("storage backend failed: %s", secret), wantStatus: fiber.StatusInternalServerError},
 		{name: "timeout", err: context.DeadlineExceeded, wantStatus: fiber.StatusInternalServerError},
 	}
@@ -59,7 +59,7 @@ func TestRespondPendingUploadFinalizeErrorClassifiesAndRedacts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			app := fiber.New()
 			app.Get("/", func(c fiber.Ctx) error {
-				return respondPendingUploadFinalizeError(c, nil, tt.err)
+				return respondUploadSessionFinalizeError(c, nil, tt.err)
 			})
 			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
 			if err != nil {
@@ -104,9 +104,9 @@ func TestFinalizePendingURLCallersUseSharedResponder(t *testing.T) {
 					return true
 				}
 				switch ident.Name {
-				case "finalizePendingURLs":
+				case "finalizeUploadSessionURLs":
 					finalizeCalls++
-				case "respondPendingUploadFinalizeError":
+				case "respondUploadSessionFinalizeError":
 					responderCalls++
 				}
 				return true

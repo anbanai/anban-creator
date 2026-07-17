@@ -51,7 +51,7 @@ func TestServeFile_AllowsOwnPendingUploadThroughRepository(t *testing.T) {
 		},
 	}}
 	h := NewFileHandler(store, &logger)
-	h.SetPendingUploadRepository(pending)
+	h.SetUploadSessionRepository(uploadRepositoryFromPending(t, pending.uploads["upload-1"]).UploadSessions())
 
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {

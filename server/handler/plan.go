@@ -144,9 +144,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
-	var pending service.PendingUploadRepository
+	var pending repository.Repository
 	if h.repo != nil {
-		pending = h.repo.PendingUploads()
+		pending = h.repo
 	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
 		MaxCount:     maxAgentInputAttachments,
@@ -157,20 +157,20 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	}
 	req.InputAttachments = validatedAttachments
 	if h.repo != nil {
-		rewrites, err := finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL})
+		rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL})
 		if err != nil {
-			return respondPendingUploadFinalizeError(c, h.logger, err)
+			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		req.ReferenceImageURL = rewriteFinalizedUploadURL(req.ReferenceImageURL, rewrites)
-		rewrites, err = finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
+		rewrites, err = finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
 		if err != nil {
-			return respondPendingUploadFinalizeError(c, h.logger, err)
+			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			rewrites, err = finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			rewrites, err = finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
-				return respondPendingUploadFinalizeError(c, h.logger, err)
+				return respondUploadSessionFinalizeError(c, h.logger, err)
 			}
 			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
@@ -320,9 +320,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if req.GoalMode != nil && *req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
-	var pending service.PendingUploadRepository
+	var pending repository.Repository
 	if h.repo != nil {
-		pending = h.repo.PendingUploads()
+		pending = h.repo
 	}
 	if req.InputAttachments != nil {
 		validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
@@ -336,21 +336,21 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	}
 	if h.repo != nil {
 		if req.ReferenceImageURL != nil {
-			rewrites, err := finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{*req.ReferenceImageURL})
+			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeTaskReference, []string{*req.ReferenceImageURL})
 			if err != nil {
-				return respondPendingUploadFinalizeError(c, h.logger, err)
+				return respondUploadSessionFinalizeError(c, h.logger, err)
 			}
 			*req.ReferenceImageURL = rewriteFinalizedUploadURL(*req.ReferenceImageURL, rewrites)
 		}
-		rewrites, err := finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
+		rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
 		if err != nil {
-			return respondPendingUploadFinalizeError(c, h.logger, err)
+			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if model.IsMontagePlatform(existing.Type) {
-			rewrites, err = finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			rewrites, err = finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
-				return respondPendingUploadFinalizeError(c, h.logger, err)
+				return respondUploadSessionFinalizeError(c, h.logger, err)
 			}
 			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
