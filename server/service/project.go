@@ -206,8 +206,9 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	existing.Author = ch.Author
 	// 建项来源模板：unconditional assign 以支持清空。
 	existing.CreatedFromTemplateID = ch.CreatedFromTemplateID
-	// ReferenceImageURL: unconditional assign to support clearing.
-	existing.ReferenceImageURL = ch.ReferenceImageURL
+	if ch.ReferenceImageSet {
+		existing.ReferenceImageAssetID = ch.ReferenceImageAssetID
+	}
 	// ImageRatio: unconditional assign to support clearing.
 	existing.ImageRatio = ch.ImageRatio
 	if ch.InstructionsSet {

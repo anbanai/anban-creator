@@ -73,3 +73,43 @@ func TestProjectDeleteSurfacesMemoryIdentityMismatchAfterDatabaseDelete(t *testi
 		t.Fatalf("memory deletions=%v", memory.ids)
 	}
 }
+
+func TestProjectUpdateReferenceImageAssetIDOnlyWhenExplicitlySet(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	svc := NewProjectService(repo, &logger)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	project := &model.Project{
+		ID: uuid.NewString(), UserID: userID, Name: "brand", Platform: model.PlatformArticle,
+		ReferenceImageAssetID: "asset-old", Status: model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Update(ctx, userID, project.ID, &model.Project{ReferenceImageAssetID: "ignored"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.Projects().FindByID(ctx, project.ID)
+	if got.ReferenceImageAssetID != "asset-old" {
+		t.Fatalf("implicit update changed reference to %q", got.ReferenceImageAssetID)
+	}
+
+	if _, err := svc.Update(ctx, userID, project.ID, &model.Project{ReferenceImageAssetID: "asset-new", ReferenceImageSet: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = repo.Projects().FindByID(ctx, project.ID)
+	if got.ReferenceImageAssetID != "asset-new" {
+		t.Fatalf("explicit update left reference at %q", got.ReferenceImageAssetID)
+	}
+
+	if _, err := svc.Update(ctx, userID, project.ID, &model.Project{ReferenceImageSet: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = repo.Projects().FindByID(ctx, project.ID)
+	if got.ReferenceImageAssetID != "" {
+		t.Fatalf("explicit clear left reference at %q", got.ReferenceImageAssetID)
+	}
+}

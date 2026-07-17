@@ -528,6 +528,7 @@ func main() {
 		if store != nil {
 			projectHandler.SetStore(store)
 			projectHandler.SetUploadRepository(repo)
+			projectHandler.SetReferenceAssetService(service.NewReferenceAssetService(repo, store, time.Now))
 		}
 		projectHandler.SetSeednoteClient(seednoteClient)
 		projectHandler.SetSeednoteReadiness(seednoteMonitor)
