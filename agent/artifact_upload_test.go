@@ -100,10 +100,13 @@ func TestScanWorkspaceArtifactsPrefersOutputAndSkipsRuntimeFiles(t *testing.T) {
 	writeAgentArtifactTestFile(t, root, "notes.md", "root note")
 	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
 	writeAgentArtifactTestFile(t, root, "output/images/cover.png", "png")
+	writeAgentArtifactTestFile(t, root, "output/final.mp4", "video")
 	writeAgentArtifactTestFile(t, root, "output/.env", "secret")
 	writeAgentArtifactTestFile(t, root, "output/.claude/session.json", "{}")
 	writeAgentArtifactTestFile(t, root, "output/node_modules/pkg/index.js", "module.exports = {}")
 	writeAgentArtifactTestFile(t, root, "output/package.json", "{}")
+	writeAgentArtifactTestFile(t, root, "openmontage/projects/task-1/checkpoint_assets.json", "{}")
+	writeAgentArtifactTestFile(t, root, ".anban-runtime-home/.claude/projects/session.jsonl", "{}")
 
 	files, err := ScanWorkspaceArtifacts(context.Background(), root)
 	if err != nil {
@@ -114,7 +117,7 @@ func TestScanWorkspaceArtifactsPrefersOutputAndSkipsRuntimeFiles(t *testing.T) {
 		rels = append(rels, file.RelativePath)
 	}
 	sort.Strings(rels)
-	want := []string{"output/article.md", "output/images/cover.png"}
+	want := []string{"output/article.md", "output/final.mp4", "output/images/cover.png"}
 	if len(rels) != len(want) {
 		t.Fatalf("rels = %#v, want %#v", rels, want)
 	}
