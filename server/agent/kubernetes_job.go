@@ -90,11 +90,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						Image:           runtimeImage,
 						ImagePullPolicy: corev1.PullAlways,
 						Command:         []string{"/bin/sh", "-c"},
-						Args: []string{
-							"chown 1000:1000 /workspace && chmod 0770 /workspace && " +
-								"install -d -m 0700 -o 1000 -g 1000 " + kubernetesRuntimeHomePath + " && " +
-								"install -d -m 0770 -o 1000 -g 1000 " + kubernetesMemoryMountPath,
-						},
+						Args:            []string{kubernetesWorkspaceInitScript(taskType(task))},
 						SecurityContext: &corev1.SecurityContext{
 							RunAsNonRoot:             &runAsRoot,
 							RunAsUser:                &rootUser,
@@ -180,6 +176,41 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	}
 	job.Annotations = map[string]string{kubernetesObjectConfigHashLabel: kubernetesObjectHash(job.Spec)}
 	return job
+}
+
+func kubernetesWorkspaceInitScript(taskType string) string {
+	lines := []string{
+		"set -eu",
+		"chown 1000:1000 /workspace",
+		"chmod 0770 /workspace",
+		"install -d -m 0700 -o 1000 -g 1000 " + kubernetesRuntimeHomePath,
+		"install -d -m 0770 -o 1000 -g 1000 " + kubernetesMemoryMountPath,
+	}
+	if strings.TrimSpace(taskType) != model.PlatformMontage {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(append(lines, kubernetesMontageInitScript(
+		"/app/third_party/OpenMontage",
+		"/workspace/openmontage",
+		"/workspace/.openmontage-init",
+	)), "\n")
+}
+
+func kubernetesMontageInitScript(templatePath, runtimePath, stagingPath string) string {
+	return strings.Join([]string{
+		"template=" + templatePath,
+		"runtime=" + runtimePath,
+		"staging=" + stagingPath,
+		`if [ ! -e "$runtime" ]; then`,
+		`  rm -rf "$staging"`,
+		`  mkdir -p "$staging"`,
+		`  cp -a "$template/." "$staging/"`,
+		`  mv "$staging" "$runtime"`,
+		"fi",
+		`test -f "$runtime/.anban-source-revision"`,
+		`cmp -s "$template/.anban-source-revision" "$runtime/.anban-source-revision"`,
+		`chown -R 1000:1000 "$runtime"`,
+	}, "\n")
 }
 
 func kubernetesResourceList(values map[string]string) corev1.ResourceList {
