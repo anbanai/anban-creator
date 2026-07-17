@@ -48,6 +48,12 @@ func TestNew(t *testing.T) {
 	if repo.TaskFiles() == nil {
 		t.Error("TaskFiles() should not be nil")
 	}
+	if repo.UploadSessions() == nil {
+		t.Error("UploadSessions() should not be nil")
+	}
+	if repo.Assets() == nil {
+		t.Error("Assets() should not be nil")
+	}
 }
 
 func TestNew_SeednoteTrackingRepositories(t *testing.T) {
