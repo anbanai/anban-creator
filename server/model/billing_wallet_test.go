@@ -183,6 +183,16 @@ func TestBillingChargeValidation(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "pending charge rejects conservation mismatch",
+			charge:  BillingCharge{Kind: BillingChargeKindTask, Status: BillingChargeStatusPending, PriceCredits: 100, PaidCredits: 99},
+			wantErr: true,
+		},
+		{
+			name:    "failed charge rejects conservation mismatch",
+			charge:  BillingCharge{Kind: BillingChargeKindTask, Status: BillingChargeStatusFailed, PriceCredits: 100, PaidCredits: 99},
+			wantErr: true,
+		},
+		{
 			name:    "negative paid component",
 			charge:  BillingCharge{Kind: BillingChargeKindTask, Status: BillingChargeStatusPosted, PriceCredits: 100, PaidCredits: -1, DebtCredits: 101},
 			wantErr: true,
@@ -285,6 +295,67 @@ func TestBillingAutoMigrateCreatesExactTablesAndIndexes(t *testing.T) {
 	assertBillingIndex(t, db, &BillingCharge{}, "idx_billing_charge_reversal")
 	assertBillingIndex(t, db, &BillingSettlementOutbox{}, "idx_billing_settlement_outbox_idempotency")
 	assertBillingIndex(t, db, &BillingReferralIssue{}, "idx_billing_referral_invitee_program")
+
+	var taskIndexColumns []struct {
+		Name string
+	}
+	if err := db.Raw(`PRAGMA index_info('idx_billing_charge_task_identity')`).Scan(&taskIndexColumns).Error; err != nil {
+		t.Fatalf("inspect task charge index: %v", err)
+	}
+	gotTaskIndexColumns := make([]string, 0, len(taskIndexColumns))
+	for _, column := range taskIndexColumns {
+		gotTaskIndexColumns = append(gotTaskIndexColumns, column.Name)
+	}
+	if want := []string{"task_id", "charge_kind"}; !reflect.DeepEqual(gotTaskIndexColumns, want) {
+		t.Fatalf("task charge unique index columns = %v, want %v", gotTaskIndexColumns, want)
+	}
+}
+
+func TestBillingChargeTaskIdentityConstraint(t *testing.T) {
+	db := openBillingModelTestDB(t)
+	if err := db.AutoMigrate(&BillingCharge{}); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+
+	taskID := uuid.NewString()
+	charge := validPersistedBillingCharge(taskID)
+	if err := db.Create(&charge).Error; err != nil {
+		t.Fatalf("create first task charge: %v", err)
+	}
+
+	duplicate := validPersistedBillingCharge(taskID)
+	if err := db.Create(&duplicate).Error; err == nil {
+		t.Fatal("duplicate task_id and charge kind unexpectedly persisted")
+	}
+}
+
+func TestBillingChargeDatabaseRejectsUnbalancedComponents(t *testing.T) {
+	for _, status := range []BillingChargeStatus{
+		BillingChargeStatusPending,
+		BillingChargeStatusPosted,
+		BillingChargeStatusFailed,
+	} {
+		for _, kind := range []BillingChargeKind{BillingChargeKindTask, BillingChargeKindReversal} {
+			t.Run(string(status)+"_"+string(kind), func(t *testing.T) {
+				db := openBillingModelTestDB(t)
+				if err := db.AutoMigrate(&BillingCharge{}); err != nil {
+					t.Fatalf("AutoMigrate: %v", err)
+				}
+
+				unbalanced := validPersistedBillingCharge(uuid.NewString())
+				unbalanced.Status = status
+				unbalanced.Kind = kind
+				if kind == BillingChargeKindReversal {
+					originalID := uuid.NewString()
+					unbalanced.ReversalOfID = &originalID
+				}
+				unbalanced.PriceCredits++
+				if err := db.Create(&unbalanced).Error; err == nil {
+					t.Fatal("unbalanced charge unexpectedly persisted")
+				}
+			})
+		}
+	}
 }
 
 func TestBillingWalletEntryAllowsAbsentExternalSourceIdentity(t *testing.T) {
@@ -308,7 +379,11 @@ func TestBillingModelsExcludeLegacyAndProviderCostContracts(t *testing.T) {
 		BillingCatalogVersion{}, BillingSKU{}, BillingQuote{}, BillingCharge{},
 		BillingChargeAllocation{}, BillingSettlementOutbox{}, BillingReferralIssue{},
 	}
-	forbiddenFieldFragments := []string{"hold", "reserved", "payment", "shortfall", "totalcostusd", "providercost", "monetarybudget"}
+	forbiddenFieldFragments := []string{
+		"hold", "reserved", "reservation", "capture", "release", "payment",
+		"shortfall", "totalcostusd", "providercost", "costbudget", "monetarybudget",
+		"taskchargeidentity",
+	}
 	for _, value := range models {
 		typeOf := reflect.TypeOf(value)
 		for i := 0; i < typeOf.NumField(); i++ {
@@ -321,15 +396,58 @@ func TestBillingModelsExcludeLegacyAndProviderCostContracts(t *testing.T) {
 		}
 	}
 
-	source, err := os.ReadFile("billing_wallet.go")
-	if err != nil {
-		t.Fatalf("read billing model source: %v", err)
-	}
-	lowerSource := strings.ToLower(string(source))
-	for _, forbidden := range []string{"type billinghold", "reservedcredits", "payment_required", "shortfall", "total_cost_usd"} {
-		if strings.Contains(lowerSource, forbidden) {
-			t.Errorf("billing model source contains forbidden contract %q", forbidden)
+	for _, sourcePath := range []string{"billing_wallet.go", "model.go"} {
+		source, err := os.ReadFile(sourcePath)
+		if err != nil {
+			t.Fatalf("read billing model source %s: %v", sourcePath, err)
 		}
+		lowerSource := strings.ToLower(string(source))
+		for _, forbidden := range []string{
+			"type billinghold", "reservedcredits", "reservation", "capture", "release",
+			"payment_required", "shortfall", "total_cost_usd", "provider_cost", "cost_budget",
+			"taskchargeidentity",
+		} {
+			if strings.Contains(lowerSource, forbidden) {
+				t.Errorf("billing model source %s contains forbidden contract %q", sourcePath, forbidden)
+			}
+		}
+	}
+
+	db := openBillingModelTestDB(t)
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+	var billingTables []string
+	if err := db.Raw(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'billing_%'`).Scan(&billingTables).Error; err != nil {
+		t.Fatalf("list billing tables: %v", err)
+	}
+	for _, table := range billingTables {
+		lowerTable := strings.ToLower(table)
+		for _, forbidden := range []string{"hold", "reserved", "reservation", "capture", "release", "payment", "shortfall", "provider_cost", "cost_budget"} {
+			if strings.Contains(lowerTable, forbidden) {
+				t.Errorf("migration created forbidden billing table %q", table)
+			}
+		}
+	}
+}
+
+func validPersistedBillingCharge(taskID string) BillingCharge {
+	return BillingCharge{
+		ID:                 uuid.NewString(),
+		UserID:             uuid.NewString(),
+		CatalogID:          "retail-v1",
+		SKUID:              "task.seednote.standard.v1",
+		ResourceType:       "task",
+		ResourceID:         taskID,
+		Kind:               BillingChargeKindTask,
+		Policy:             "task_admission",
+		Status:             BillingChargeStatusPending,
+		PriceCredits:       100,
+		PaidCredits:        100,
+		TaskID:             &taskID,
+		IdempotencyScope:   "task-charge",
+		IdempotencyKey:     uuid.NewString(),
+		RequestFingerprint: strings.Repeat("a", 64),
 	}
 }
 

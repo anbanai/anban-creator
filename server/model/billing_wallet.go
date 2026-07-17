@@ -242,17 +242,17 @@ type BillingCharge struct {
 	QuoteID            *string             `gorm:"type:char(36);index" json:"quote_id,omitempty"`
 	ResourceType       string              `gorm:"type:varchar(40);index:idx_billing_charge_resource,priority:1;not null" json:"resource_type"`
 	ResourceID         string              `gorm:"type:varchar(128);index:idx_billing_charge_resource,priority:2;not null" json:"resource_id"`
-	Kind               BillingChargeKind   `gorm:"type:varchar(20);index;not null" json:"kind"`
+	Kind               BillingChargeKind   `gorm:"column:charge_kind;type:varchar(20);index;uniqueIndex:idx_billing_charge_task_identity,priority:2;not null;check:chk_billing_charge_task_id,charge_kind <> 'task' OR task_id IS NOT NULL" json:"kind"`
 	Policy             string              `gorm:"type:varchar(40);index;not null" json:"policy"`
 	Status             BillingChargeStatus `gorm:"type:varchar(20);index;not null" json:"status"`
-	PriceCredits       int64               `gorm:"not null;check:chk_billing_charge_price,price_credits >= 0" json:"price_credits"`
+	PriceCredits       int64               `gorm:"not null;check:chk_billing_charge_conservation,price_credits >= 0 AND price_credits = paid_credits + promotional_credits + debt_credits" json:"price_credits"`
 	PaidCredits        int64               `gorm:"not null;check:chk_billing_charge_paid,paid_credits >= 0" json:"paid_credits"`
 	PromotionalCredits int64               `gorm:"not null;check:chk_billing_charge_promotional,promotional_credits >= 0" json:"promotional_credits"`
 	DebtCredits        int64               `gorm:"not null;check:chk_billing_charge_debt,debt_credits >= 0" json:"debt_credits"`
-	TaskID             *string             `gorm:"type:char(36);index;uniqueIndex:idx_billing_charge_tool_identity,priority:1" json:"task_id,omitempty"`
+	TaskID             *string             `gorm:"type:char(36);index;uniqueIndex:idx_billing_charge_task_identity,priority:1" json:"task_id,omitempty"`
+	OperationTaskID    *string             `gorm:"type:char(36);index;uniqueIndex:idx_billing_charge_tool_identity,priority:1" json:"operation_task_id,omitempty"`
 	AttemptID          *string             `gorm:"type:char(36);index;uniqueIndex:idx_billing_charge_tool_identity,priority:2" json:"attempt_id,omitempty"`
 	ToolCallID         *string             `gorm:"type:varchar(128);index;uniqueIndex:idx_billing_charge_tool_identity,priority:3" json:"tool_call_id,omitempty"`
-	TaskChargeIdentity *string             `gorm:"type:char(36);uniqueIndex:idx_billing_charge_task_identity" json:"task_charge_identity,omitempty"`
 	IdempotencyScope   string              `gorm:"type:varchar(80);uniqueIndex:idx_billing_charge_idempotency,priority:1;not null" json:"idempotency_scope"`
 	IdempotencyKey     string              `gorm:"type:varchar(128);uniqueIndex:idx_billing_charge_idempotency,priority:2;not null" json:"idempotency_key"`
 	ReversalOfID       *string             `gorm:"type:char(36);uniqueIndex:idx_billing_charge_reversal" json:"reversal_of_id,omitempty"`
@@ -278,9 +278,6 @@ func (c BillingCharge) Validate() error {
 	} else if c.ReversalOfID != nil {
 		return fmt.Errorf("original charge cannot identify a reversed charge")
 	}
-	if c.Status != BillingChargeStatusPosted {
-		return nil
-	}
 	paidAndPromotional, ok := checkedAddInt64(c.PaidCredits, c.PromotionalCredits)
 	if !ok {
 		return fmt.Errorf("charge component sum overflows int64")
@@ -290,7 +287,7 @@ func (c BillingCharge) Validate() error {
 		return fmt.Errorf("charge component sum overflows int64")
 	}
 	if total != c.PriceCredits {
-		return fmt.Errorf("posted charge components must equal price credits")
+		return fmt.Errorf("charge components must equal price credits")
 	}
 	return nil
 }
