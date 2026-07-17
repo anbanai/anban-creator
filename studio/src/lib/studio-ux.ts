@@ -137,7 +137,12 @@ export function buildProjectReadinessSummary(project: Project, stats?: ProjectSt
     )
     details.push(project.writer || project.theme || project.author ? '写作已配置' : '补写作配置')
   }
-  if (!isVideoPlatform(project.platform)) {
+  if (project.platform === 'montage') {
+    const pipeline = project.montage_defaults?.default_pipeline
+    const duration = project.montage_defaults?.preferences?.duration_seconds
+    details.push(pipeline ? `Pipeline ${pipeline}` : '使用系统默认 Pipeline')
+    details.push(duration ? `默认 ${duration} 秒` : '使用系统默认时长')
+  } else if (!isVideoPlatform(project.platform)) {
     details.push(project.visual_style ? '视觉已配置' : '补视觉配置')
   }
   if (project.platform === 'ecommerce') {

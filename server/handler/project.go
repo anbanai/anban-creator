@@ -128,6 +128,7 @@ type projectRequest struct {
 	Instructions       string                          `json:"instructions"`
 	InstructionsSet    bool                            `json:"-"`
 	EcommerceDefaults  *model.EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
+	MontageDefaults    *model.MontageDefaults          `json:"montage_defaults,omitempty"`
 	VideoDefaults      *model.VideoDefaults            `json:"video_defaults,omitempty"`
 	VideoModelPolicy   *model.VideoModelPolicy         `json:"video_model_policy,omitempty"`
 	// Config fields for platform-specific credentials.
@@ -180,6 +181,10 @@ func (req *projectRequest) toProject() *model.Project {
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
 		p.EcommerceDefaultsSet = true
+	}
+	if req.MontageDefaults != nil {
+		p.SetMontageDefaults(*req.MontageDefaults)
+		p.MontageDefaultsSet = true
 	}
 	if req.VideoDefaults != nil || req.VideoModelPolicy != nil {
 		if req.VideoDefaults != nil {
@@ -316,7 +321,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
-		if errors.Is(err, service.ErrVideoModelUnavailable) {
+		if errors.Is(err, service.ErrVideoModelUnavailable) || errors.Is(err, service.ErrProjectMontageDefaults) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
@@ -423,7 +428,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrProjectOwnedByUser) {
 			return Forbidden(c, "you do not have access to this project")
 		}
-		if errors.Is(err, service.ErrVideoModelUnavailable) {
+		if errors.Is(err, service.ErrVideoModelUnavailable) || errors.Is(err, service.ErrProjectMontageDefaults) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")

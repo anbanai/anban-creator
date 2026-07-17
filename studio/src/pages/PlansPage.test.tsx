@@ -407,3 +407,154 @@ describe('PlansPage Seednote reference snapshots', () => {
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
   })
 })
+
+describe('PlansPage Montage input', () => {
+  const montageProject = {
+    id: 'project-montage',
+    user_id: '1',
+    platform: 'montage',
+    name: 'Montage 项目',
+    avatar_url: '',
+    profile_url: '',
+    instructions: '新品短视频',
+    keywords: '',
+    visual_style: '',
+    writer: '',
+    theme: '',
+    author: '',
+    template_id: '',
+    reference_image_url: '',
+    image_ratio: '16:9',
+    montage_defaults: {
+      default_pipeline: 'project-pipeline',
+      preferences: {
+        aspect_ratio: '16:9',
+        duration_seconds: 45,
+        style: 'project style',
+        music_prompt: 'project music',
+        subtitle_mode: 'burned-in',
+        voiceover_mode: 'narrated',
+      },
+      asset_guidance: '优先使用实拍素材',
+      delivery_targets: ['final_video'],
+    },
+    max_concurrent_tasks: 2,
+    config: {},
+    status: 'active',
+    created_at: '2025-01-01T00:00:00Z',
+    updated_at: '2025-01-01T00:00:00Z',
+  } as Project
+  const savedMontagePlan = {
+    id: 'montage-plan-1',
+    type: 'montage',
+    title: 'Montage 周计划',
+    description: '',
+    cron_expr: '0 9 * * 1',
+    prompt: '',
+    status: 'active',
+    next_run_at: '2025-01-20T09:00:00Z',
+    project_id: montageProject.id,
+    montage_input: {
+      brief: '保存的 brief',
+      pipeline_key: 'saved-pipeline',
+      source_assets: [],
+      preferences: { aspect_ratio: '9:16', duration_seconds: 12 },
+      delivery_targets: [],
+    },
+    created_at: '2025-01-10T00:00:00Z',
+    updated_at: '2025-01-10T00:00:00Z',
+  } as Plan
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.history.pushState({}, '', '/')
+    referenceMaterialInputHarness.props = undefined
+    vi.mocked(api.projects.list).mockResolvedValue([montageProject])
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [], total: 0 })
+    vi.mocked(api.plans.create).mockResolvedValue(savedMontagePlan)
+    vi.mocked(api.plans.update).mockResolvedValue(savedMontagePlan)
+    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+  })
+
+  it('inherits project defaults and creates a plan with complete Montage input', async () => {
+    window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
+    render(<PlansPage />)
+
+    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
+    expect(await screen.findByDisplayValue('project-pipeline')).toBeInTheDocument()
+    expect(screen.getByLabelText('时长（秒）')).toHaveValue(45)
+    await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
+
+    fireEvent.change(screen.getByPlaceholderText('描述这次要生产的视频内容、素材用途、节奏和交付目标'), {
+      target: { value: '每周新品发布短片' },
+    })
+    act(() => {
+      referenceMaterialInputHarness.props?.onChange([{
+        type: 'video',
+        url: '/source.mp4',
+        file_name: 'source.mp4',
+        content_type: 'video/mp4',
+        size: 42,
+      }])
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'montage',
+      project_id: montageProject.id,
+      montage_input: expect.objectContaining({
+        brief: '每周新品发布短片',
+        pipeline_key: 'project-pipeline',
+        source_assets: [expect.objectContaining({ type: 'video_url', url: '/source.mp4' })],
+        preferences: {
+          aspect_ratio: '16:9',
+          duration_seconds: 45,
+          style: 'project style',
+          music_prompt: 'project music',
+          subtitle_mode: 'burned-in',
+          voiceover_mode: 'narrated',
+        },
+        delivery_targets: ['final_video'],
+      }),
+    })))
+  })
+
+  it('keeps saved Montage input ahead of current project defaults when editing', async () => {
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [savedMontagePlan], total: 1 })
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    expect(await screen.findByRole('dialog', { name: '编辑计划' })).toBeInTheDocument()
+    expect(screen.getByDisplayValue('saved-pipeline')).toBeInTheDocument()
+    expect(screen.getByLabelText('时长（秒）')).toHaveValue(12)
+    expect(screen.getByDisplayValue('9:16')).toBeInTheDocument()
+    expect(screen.queryByText('final_video')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(
+      savedMontagePlan.id,
+      expect.objectContaining({
+        montage_input: expect.objectContaining({
+          pipeline_key: 'saved-pipeline',
+          preferences: expect.objectContaining({ duration_seconds: 12, aspect_ratio: '9:16' }),
+          delivery_targets: [],
+        }),
+      }),
+    ))
+  })
+
+  it('blocks Montage plan save while source assets are uploading', async () => {
+    window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
+    render(<PlansPage />)
+
+    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
+
+    act(() => {
+      referenceMaterialInputHarness.props?.onUploadingChange?.(true)
+    })
+
+    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+  })
+})

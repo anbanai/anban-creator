@@ -14,6 +14,60 @@ describe('montage form helpers', () => {
     })
   })
 
+  it('initializes execution input from project defaults', () => {
+    expect(initialMontageInput('', undefined, {
+      default_pipeline: 'social-short',
+      preferences: {
+        aspect_ratio: '16:9',
+        duration_seconds: 45,
+        style: 'clean',
+        music_prompt: 'minimal electronic',
+        subtitle_mode: 'burned-in',
+        voiceover_mode: 'narrated',
+      },
+      delivery_targets: ['final_video', 'subtitles'],
+    })).toMatchObject({
+      pipeline_key: 'social-short',
+      source_assets: [],
+      preferences: {
+        aspect_ratio: '16:9',
+        duration_seconds: 45,
+        style: 'clean',
+        music_prompt: 'minimal electronic',
+        subtitle_mode: 'burned-in',
+        voiceover_mode: 'narrated',
+      },
+      delivery_targets: ['final_video', 'subtitles'],
+    })
+  })
+
+  it('keeps explicit execution fields ahead of project defaults', () => {
+    const result = initialMontageInput('brief', {
+      pipeline_key: 'manual',
+      preferences: {
+        duration_seconds: 15,
+        style: '',
+      },
+      delivery_targets: [],
+    }, {
+      default_pipeline: 'project',
+      preferences: {
+        aspect_ratio: '9:16',
+        duration_seconds: 45,
+        style: 'project style',
+        music_prompt: 'project music',
+      },
+      delivery_targets: ['final_video'],
+    })
+
+    expect(result.pipeline_key).toBe('manual')
+    expect(result.preferences?.aspect_ratio).toBe('9:16')
+    expect(result.preferences?.duration_seconds).toBe(15)
+    expect(result.preferences?.style).toBe('')
+    expect(result.preferences?.music_prompt).toBe('project music')
+    expect(result.delivery_targets).toEqual([])
+  })
+
   it('trims submit fields without adding execution target', () => {
     const result = buildMontageInputForSubmit('', {
       brief: '  新品短片  ',

@@ -13,10 +13,11 @@ import (
 )
 
 var (
-	ErrProjectNotFound       = errors.New("project not found")
-	ErrProjectOwnedByUser    = errors.New("project not owned by user")
-	ErrProjectDeleteConflict = errors.New("project delete conflict")
-	ErrVideoModelUnavailable = errors.New("video model unavailable")
+	ErrProjectNotFound        = errors.New("project not found")
+	ErrProjectOwnedByUser     = errors.New("project not owned by user")
+	ErrProjectDeleteConflict  = errors.New("project delete conflict")
+	ErrVideoModelUnavailable  = errors.New("video model unavailable")
+	ErrProjectMontageDefaults = errors.New("invalid montage project defaults")
 )
 
 type projectDeleteConflictError struct {
@@ -39,6 +40,21 @@ var validPlatforms = map[string]bool{
 	model.PlatformEcommerce:    true,
 	model.PlatformVideoCreator: true,
 	model.PlatformVideoEditor:  true,
+	model.PlatformMontage:      true,
+}
+
+func validateProjectMontageDefaults(project *model.Project) error {
+	if project == nil || !project.MontageDefaultsSet {
+		return nil
+	}
+	if !model.IsMontagePlatform(project.Platform) {
+		return fmt.Errorf("%w: montage_defaults can only be set on montage projects", ErrProjectMontageDefaults)
+	}
+	duration := project.MontageDefaults.Data().Preferences.DurationSeconds
+	if duration < 0 || duration > 600 {
+		return fmt.Errorf("%w: montage duration_seconds must be between 0 and 600", ErrProjectMontageDefaults)
+	}
+	return nil
 }
 
 // ProjectService handles project CRUD operations with ownership verification.
@@ -92,6 +108,9 @@ func (s *ProjectService) resolvedVideoCatalog() VideoModelCatalog {
 func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Project) (*model.Project, error) {
 	if !validPlatforms[ch.Platform] {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
+	}
+	if err := validateProjectMontageDefaults(ch); err != nil {
+		return nil, err
 	}
 	if ch.Instructions == "" && ch.Positioning != "" {
 		ch.Instructions = ch.Positioning
@@ -168,6 +187,17 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	if existing.UserID != userID {
 		return nil, ErrProjectOwnedByUser
 	}
+	effectivePlatform := existing.Platform
+	if ch.Platform != "" {
+		effectivePlatform = ch.Platform
+	}
+	if ch.MontageDefaultsSet {
+		candidate := *ch
+		candidate.Platform = effectivePlatform
+		if err := validateProjectMontageDefaults(&candidate); err != nil {
+			return nil, err
+		}
+	}
 
 	// Apply updatable fields from ch to existing (only non-empty values).
 	if ch.Name != "" {
@@ -218,6 +248,9 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	}
 	if ch.EcommerceDefaultsSet {
 		existing.EcommerceDefaults = ch.EcommerceDefaults
+	}
+	if ch.MontageDefaultsSet {
+		existing.MontageDefaults = ch.MontageDefaults
 	}
 	if ch.VideoProfileSet {
 		existing.VideoDefaults = ch.VideoDefaults

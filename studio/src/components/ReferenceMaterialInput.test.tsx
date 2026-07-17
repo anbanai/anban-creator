@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { uploadToOSS, type UploadToOSSResult } from '@/lib/direct-upload'
+import { uploadToOSS, type DirectUploadPurpose, type UploadToOSSResult } from '@/lib/direct-upload'
 import type { InputAttachment } from '@/types/input-attachment'
 import { ReferenceMaterialInput } from './ReferenceMaterialInput'
 
@@ -34,10 +34,12 @@ function ControlledReferenceInput({
   initialValue = [],
   onValueChange,
   instructionMaxLength = 1000,
+  uploadPurpose,
 }: {
   initialValue?: InputAttachment[]
   onValueChange?: (value: InputAttachment[]) => void
   instructionMaxLength?: number
+  uploadPurpose?: DirectUploadPurpose
 }) {
   const [value, setValue] = useState<InputAttachment[]>(initialValue)
   return (
@@ -51,6 +53,7 @@ function ControlledReferenceInput({
       maxCount={16}
       instructionEnabled
       instructionMaxLength={instructionMaxLength}
+      uploadPurpose={uploadPurpose}
     />
   )
 }
@@ -153,6 +156,22 @@ describe('ReferenceMaterialInput', () => {
     expect(uploadToOSS).toHaveBeenCalledWith(expect.objectContaining({
       purpose: 'ai_entry_attachment',
       file: expect.objectContaining({ name: 'drop.png' }),
+    }))
+  })
+
+  it('uses the caller supplied direct-upload purpose', async () => {
+    vi.mocked(uploadToOSS).mockResolvedValue(uploadResult('montage.png'))
+
+    render(<ControlledReferenceInput uploadPurpose="montage_asset" />)
+
+    fireEvent.change(screen.getByLabelText('添加参考素材'), {
+      target: { files: [imageFile('montage.png')] },
+    })
+
+    expect(await screen.findByAltText('montage.png')).toBeInTheDocument()
+    expect(uploadToOSS).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: 'montage_asset',
+      file: expect.objectContaining({ name: 'montage.png' }),
     }))
   })
 
