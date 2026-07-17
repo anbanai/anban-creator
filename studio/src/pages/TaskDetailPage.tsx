@@ -30,6 +30,7 @@ import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl, type ProjectContextProject } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -67,11 +68,10 @@ function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): strin
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
-const ALL_AGENT_ATTACHMENT_TYPES = ['image', 'audio', 'video', 'document', 'text'] as const
 const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
 const RESUME_ATTACHMENT_POLICY = {
-  allowedTypes: ALL_AGENT_ATTACHMENT_TYPES,
-  maxCount: 10,
+  allowedTypes: GENERAL_AGENT_ATTACHMENT_POLICY.allowedTypes,
+  maxCount: GENERAL_AGENT_ATTACHMENT_POLICY.maxCount,
   maxBytes: {
     image: RESUME_FILE_MAX_BYTES,
     audio: RESUME_FILE_MAX_BYTES,
@@ -81,8 +81,7 @@ const RESUME_ATTACHMENT_POLICY = {
   },
 } as const
 const CLONE_ATTACHMENT_POLICY = {
-  allowedTypes: ALL_AGENT_ATTACHMENT_TYPES,
-  maxCount: 16,
+  ...GENERAL_AGENT_ATTACHMENT_POLICY,
 } as const
 
 interface CloneDialogSnapshot {
@@ -103,14 +102,13 @@ function ResumeTaskDialog({
 }) {
   const [prompt, setPrompt] = useState('')
   const attachmentController = usePromptAttachments({
-    adapter: { mode: 'local' },
+    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: RESUME_ATTACHMENT_POLICY,
   })
   const resumeMutation = useMutation({
     mutationFn: () => api.tasks.resume(taskId, {
       prompt,
-      files: attachmentController.localFiles(),
-      fileLabels: attachmentController.attachments.map((attachment) => attachment.instruction ?? ''),
+      input_attachments: attachmentController.toInputAttachments(),
     }),
     onSuccess: () => {
       toast.success('已提交，任务将结合已有上下文继续执行')
@@ -153,7 +151,7 @@ function ResumeTaskDialog({
           submitLabel="提交并继续"
           submitting={resumeMutation.isPending}
           submitDisabled={!hasInput}
-          acceptedTypesLabel="图片、音频、视频、文档、文本；最多 10 个，单个不超过 25MB"
+          acceptedTypesLabel="图片、音频、视频、文档、文本；最多 5 个，单个不超过 25MB"
           autoFocus
         />
         <DialogFooter>

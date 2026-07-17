@@ -205,6 +205,38 @@ describe('AgentPromptDropProvider', () => {
     expect(onFiles).toHaveBeenCalledWith([file])
   })
 
+  it('positions drag feedback over the selected prompt surface', () => {
+    render(
+      <AgentPromptDropProvider>
+        <TargetHarness name="only" onFiles={vi.fn()} />
+      </AgentPromptDropProvider>,
+    )
+    const target = screen.getByTestId('target-only')
+    const surface = document.createElement('div')
+    surface.dataset.slot = 'agent-prompt-surface'
+    target.append(surface)
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      x: 120,
+      y: 180,
+      top: 180,
+      left: 120,
+      right: 760,
+      bottom: 420,
+      width: 640,
+      height: 240,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.dragEnter(document.body, { dataTransfer: dragData({ files: [image()] }) })
+
+    expect(screen.getByTestId('agent-prompt-drop-overlay')).toHaveStyle({
+      top: '180px',
+      left: '120px',
+      width: '640px',
+      height: '240px',
+    })
+  })
+
   it('accepts mixed transfer types containing Files and delivers once', () => {
     const onFiles = vi.fn()
     render(

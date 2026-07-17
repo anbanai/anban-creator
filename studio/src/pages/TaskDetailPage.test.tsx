@@ -1007,7 +1007,7 @@ describe('TaskDetailPage', () => {
     expect(api.tasks.clone).not.toHaveBeenCalled()
     expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('克隆任务要求')).toHaveValue('原始任务要求')
-    expect(within(dialog).getByText('original.png')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '预览 original.png' })).toBeInTheDocument()
     expect(within(dialog).queryByText('resume.md')).not.toBeInTheDocument()
 
     fireEvent.change(within(dialog).getByLabelText('克隆任务要求'), {
@@ -1071,7 +1071,7 @@ describe('TaskDetailPage', () => {
     })
   })
 
-  it('keeps a failed resume input intact for retry, then reopens with a blank local composer', async () => {
+  it('uploads resume files to OSS, keeps failed input for retry, then reopens blank', async () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
@@ -1092,6 +1092,10 @@ describe('TaskDetailPage', () => {
     fireEvent.change(within(dialog).getByLabelText('选择附件文件'), {
       target: { files: [file] },
     })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: 'ai_entry_attachment',
+      file,
+    })))
     fireEvent.click(within(dialog).getByRole('button', { name: '预览 notes.md' }))
     expect(await screen.findByRole('heading', { name: 'notes.md' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '关闭附件预览' }))
@@ -1103,14 +1107,21 @@ describe('TaskDetailPage', () => {
 
     await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledTimes(1))
     expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('请基于现有草稿继续修改')
-    expect(within(dialog).getByText('notes.md')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '预览 notes.md' })).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByLabelText('提交并继续'))
     await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledTimes(2))
     expect(api.tasks.resume).toHaveBeenLastCalledWith('task-1', {
       prompt: '请基于现有草稿继续修改',
-      files: [file],
-      fileLabels: ['修改意见'],
+      input_attachments: [{
+        type: 'text',
+        upload_id: 'upload-notes.md',
+        key: 'uploads/pending/user-1/upload-notes.md/notes.md',
+        file_name: 'notes.md',
+        content_type: 'text/markdown',
+        size: file.size,
+        instruction: '修改意见',
+      }],
     })
     expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/task-clone')
     await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
@@ -1143,8 +1154,10 @@ describe('TaskDetailPage', () => {
 
     const cancel = within(dialog).getByRole('button', { name: '取消' })
     const close = within(dialog).getByRole('button', { name: 'Close' })
-    expect(cancel).toBeDisabled()
-    expect(close).toBeDisabled()
+    await waitFor(() => {
+      expect(cancel).toBeDisabled()
+      expect(close).toBeDisabled()
+    })
     fireEvent.click(cancel)
     fireEvent.click(close)
     fireEvent.keyDown(document, { key: 'Escape' })
@@ -1257,13 +1270,20 @@ describe('TaskDetailPage', () => {
     await waitFor(() => {
       expect(api.tasks.resume).toHaveBeenCalledWith('task-1', {
         prompt: '',
-        files: [second],
-        fileLabels: ['第二份'],
+        input_attachments: [{
+          type: 'text',
+          upload_id: 'upload-second.md',
+          key: 'uploads/pending/user-1/upload-second.md/second.md',
+          file_name: 'second.md',
+          content_type: 'text/markdown',
+          size: second.size,
+          instruction: '第二份',
+        }],
       })
     })
   })
 
-  it('matches the resume server policy of ten files and 25 MiB per file', async () => {
+  it('matches the resume server policy of five files and 25 MiB per file', async () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
@@ -1272,19 +1292,20 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
     const dialog = await openResumeDialog()
-    const files = Array.from({ length: 11 }, (_, index) => (
+    const files = Array.from({ length: 6 }, (_, index) => (
       new File([`${index}`], `file-${index + 1}.txt`, { type: 'text/plain' })
     ))
     fireEvent.change(within(dialog).getByLabelText('选择附件文件'), {
       target: { files },
     })
 
-    expect(within(dialog).getByText('file-10.txt')).toBeInTheDocument()
-    expect(within(dialog).queryByText('file-11.txt')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '预览 file-5.txt' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '预览 file-6.txt' })).not.toBeInTheDocument()
+    expect(within(dialog).getByLabelText('选择附件文件')).toBeDisabled()
 
     const oversized = new File(['large'], 'too-large.pdf', { type: 'application/pdf' })
     Object.defineProperty(oversized, 'size', { value: 25 * 1024 * 1024 + 1 })
-    fireEvent.click(within(dialog).getByRole('button', { name: '删除 file-10.txt' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除 file-5.txt' }))
     fireEvent.change(within(dialog).getByLabelText('选择附件文件'), {
       target: { files: [oversized] },
     })

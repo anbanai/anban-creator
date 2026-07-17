@@ -41,6 +41,7 @@ interface OverlayState {
   acceptedTypesLabel: string
   remainingCapacity: number
   draggedFileCount: number | null
+  rect: { top: number; left: number; width: number; height: number }
 }
 
 const OPEN_OVERLAY_SELECTOR = [
@@ -84,6 +85,18 @@ function draggedFileCount(dataTransfer: DataTransfer) {
 function latestOpenOverlay() {
   const overlays = document.querySelectorAll<HTMLElement>(OPEN_OVERLAY_SELECTOR)
   return overlays.item(overlays.length - 1) || null
+}
+
+function promptSurfaceRect(registration: DropTargetRegistration) {
+  const target = registration.elementRef.current
+  const surface = target?.querySelector<HTMLElement>('[data-slot="agent-prompt-surface"]') ?? target
+  const rect = surface?.getBoundingClientRect()
+  return {
+    top: rect?.top ?? 0,
+    left: rect?.left ?? 0,
+    width: rect?.width ?? 0,
+    height: rect?.height ?? 0,
+  }
 }
 
 export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
@@ -149,12 +162,17 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
     const acceptedTypesLabel = options.acceptedTypesLabel
     const remainingCapacity = options.remainingCapacity
     const fileCount = draggedFileCount(dataTransfer)
+    const rect = promptSurfaceRect(registration)
     const currentOverlay = overlayRef.current
     if (
       activeTargetIdRef.current === registration.id
       && activeLabelRef.current === acceptedTypesLabel
       && currentOverlay?.remainingCapacity === remainingCapacity
       && currentOverlay.draggedFileCount === fileCount
+      && currentOverlay.rect.top === rect.top
+      && currentOverlay.rect.left === rect.left
+      && currentOverlay.rect.width === rect.width
+      && currentOverlay.rect.height === rect.height
     ) return
 
     activeTargetIdRef.current = registration.id
@@ -163,6 +181,7 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       acceptedTypesLabel,
       remainingCapacity,
       draggedFileCount: fileCount,
+      rect,
     }
     overlayRef.current = nextOverlay
     setOverlay(nextOverlay)
@@ -257,12 +276,32 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       if (event.key === 'Escape') resetDrag()
     }
 
+    const refreshActiveRect = () => {
+      const activeId = activeTargetIdRef.current
+      const current = overlayRef.current
+      if (!activeId || !current) return
+      const registration = registrationsRef.current.get(activeId)
+      if (!registration) return
+      const rect = promptSurfaceRect(registration)
+      if (
+        current.rect.top === rect.top
+        && current.rect.left === rect.left
+        && current.rect.width === rect.width
+        && current.rect.height === rect.height
+      ) return
+      const next = { ...current, rect }
+      overlayRef.current = next
+      setOverlay(next)
+    }
+
     document.addEventListener('dragenter', onDragEnter)
     document.addEventListener('dragover', onDragOver)
     document.addEventListener('dragleave', onDragLeave)
     document.addEventListener('drop', onDropCapture, true)
     document.addEventListener('drop', onDrop)
     document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('scroll', refreshActiveRect, true)
+    window.addEventListener('resize', refreshActiveRect)
     return () => {
       document.removeEventListener('dragenter', onDragEnter)
       document.removeEventListener('dragover', onDragOver)
@@ -270,6 +309,8 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('drop', onDropCapture, true)
       document.removeEventListener('drop', onDrop)
       document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('scroll', refreshActiveRect, true)
+      window.removeEventListener('resize', refreshActiveRect)
       resetDrag()
       registrationsRef.current.clear()
     }
@@ -292,9 +333,10 @@ export function AgentPromptDropProvider({ children }: { children: ReactNode }) {
         <div
           data-testid="agent-prompt-drop-overlay"
           aria-hidden="true"
-          className="pointer-events-none fixed inset-0 isolate z-50 flex items-center justify-center p-4"
+          className="pointer-events-none fixed isolate z-50 flex items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-primary bg-background/92 p-4 shadow-lg backdrop-blur-sm"
+          style={overlay.rect}
         >
-          <div className="flex min-h-40 w-full max-w-xl items-center justify-center rounded-lg border-2 border-dashed border-primary bg-background/90 px-6 py-10 shadow-lg backdrop-blur-sm">
+          <div className="flex min-h-0 w-full items-center justify-center px-4 py-6">
             <div className="flex min-w-0 max-w-full flex-col items-center gap-3 text-center text-foreground">
               <UploadIcon className="size-8 text-primary" />
               <p className="max-w-full break-words text-base font-medium leading-relaxed text-pretty">

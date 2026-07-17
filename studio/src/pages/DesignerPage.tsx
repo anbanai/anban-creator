@@ -4,6 +4,7 @@ import { PaintbrushIcon, SendIcon, XIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import DesignerToolbar, { type DesignerSettingsPatch } from '@/components/designer/DesignerToolbar'
@@ -137,12 +138,13 @@ export default function DesignerPage() {
   const effectiveProvider = activeProvider ?? providerList.find((provider) => provider.enabled)
   const effectiveCaps = effectiveProvider?.capabilities
   const maxReferenceImages = maxReferenceImagesForProvider(effectiveProvider)
+  const referenceCapacity = Math.min(maxReferenceImages, GENERAL_AGENT_ATTACHMENT_POLICY.maxCount)
   const projectID = selectedProjectId ?? 'default'
   const attachmentPolicy = useMemo<AttachmentAdmissionPolicy>(() => ({
     allowedTypes: ['image'],
-    maxCount: editingImage ? 0 : maxReferenceImages,
+    maxCount: editingImage ? 0 : referenceCapacity,
     maxBytes: { image: MAX_DESIGNER_REFERENCE_BYTES },
-  }), [editingImage, maxReferenceImages])
+  }), [editingImage, referenceCapacity])
 
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'designer' },
@@ -194,18 +196,18 @@ export default function DesignerPage() {
     if (selectedProviderId !== effectiveProviderID) setSelectedProviderId(effectiveProviderID)
 
     const providerChanged = normalizedProviderIdRef.current !== effectiveProviderID
-    const capacityChanged = normalizedReferenceCapacityRef.current !== maxReferenceImages
+    const capacityChanged = normalizedReferenceCapacityRef.current !== referenceCapacity
     if (!providerChanged && !capacityChanged) return
     normalizedProviderIdRef.current = effectiveProviderID
-    normalizedReferenceCapacityRef.current = maxReferenceImages
+    normalizedReferenceCapacityRef.current = referenceCapacity
     if (providerChanged) resetSettingsForProvider(effectiveProvider)
 
-    const overflow = promptValueRef.current.attachments.slice(maxReferenceImages)
+    const overflow = promptValueRef.current.attachments.slice(referenceCapacity)
     for (const attachment of overflow) attachmentController.remove(attachment.id)
     if (overflow.length > 0) {
-      toast.warning(`当前模型最多支持 ${maxReferenceImages} 张参考图，已移除 ${overflow.length} 张`)
+      toast.warning(`当前输入最多支持 ${referenceCapacity} 张参考图，已移除 ${overflow.length} 张`)
     }
-  }, [attachmentController, effectiveProvider, maxReferenceImages, providers, resetSettingsForProvider, selectedProviderId])
+  }, [attachmentController, effectiveProvider, providers, referenceCapacity, resetSettingsForProvider, selectedProviderId])
 
   useEffect(() => () => {
     generationAttemptRef.current += 1
@@ -342,7 +344,7 @@ export default function DesignerPage() {
     setCurrentGeneration(null)
     setCurrentImages([])
     try {
-      const supportedReferences = value.attachments.slice(0, maxReferenceImages)
+      const supportedReferences = value.attachments.slice(0, referenceCapacity)
       const referenceFileIDs: string[] = []
       for (const attachment of supportedReferences) {
         if (!attachment.uploadId || !attachment.key || attachment.status !== 'uploaded') {
@@ -383,7 +385,7 @@ export default function DesignerPage() {
       setIsGenerating(false)
       toast.error(getApiErrorMessage(error, '图片生成失败，请重试'))
     }
-  }, [beginGeneration, clearSubmittedPrompt, effectiveCaps, effectiveProvider, isGenerationAttemptActive, maxReferenceImages, projectID, settings, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, effectiveCaps, effectiveProvider, isGenerationAttemptActive, projectID, referenceCapacity, settings, startGenerationAttempt, stopPolling])
 
   const handleEditSubmit = useCallback(async (value: AgentPromptValue) => {
     if (!effectiveProvider || !editingImage) return

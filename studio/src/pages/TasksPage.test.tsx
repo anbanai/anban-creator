@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -149,9 +149,11 @@ describe('TasksPage unified prompt composer', () => {
   it('renders the shared composer with project context in the create dialog', async () => {
     renderTasksPage()
     fireEvent.click(await screen.findByRole('button', { name: '新建任务' }))
-    await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('dialog')
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '项目上下文' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '创建任务' })).not.toBeInTheDocument()
+    expect(within(dialog).getAllByRole('button', { name: '创建' })).toHaveLength(1)
     expect(document.querySelectorAll('form form')).toHaveLength(0)
   })
 
@@ -190,7 +192,7 @@ describe('TasksPage unified prompt composer', () => {
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['brief'], 'brief.pdf', { type: 'application/pdf' })] },
     })
-    await screen.findByText('brief.pdf')
+    await screen.findByRole('button', { name: '预览 brief.pdf' })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
     expect(await screen.findByRole('alertdialog', { name: '放弃编辑？' })).toBeInTheDocument()
@@ -240,7 +242,7 @@ describe('TasksPage unified prompt composer', () => {
     fireEvent.click(await screen.findByRole('option', { name: /视频剪辑项目/ }))
     const source = new File(['video'], 'source.mp4', { type: 'video/mp4' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [source] } })
-    await screen.findByText('source.mp4')
+    await screen.findByRole('button', { name: '预览 source.mp4' })
 
     await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '创建' }))

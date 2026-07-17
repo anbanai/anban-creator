@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -35,7 +36,7 @@ export default function DashboardPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
-    policy: { allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 },
+    policy: GENERAL_AGENT_ATTACHMENT_POLICY,
     attachments,
     onAttachmentsChange: setAttachments,
   })
@@ -158,7 +159,7 @@ export default function DashboardPage() {
             }}
             onSubmit={handleSubmit}
             attachmentController={attachmentController}
-            attachmentPolicy={{ allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 }}
+            attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
             placeholder="描述你想创作的内容、目标和素材要求..."
             submitLabel="发送创建任务"
             submitting={submitMutation.isPending}

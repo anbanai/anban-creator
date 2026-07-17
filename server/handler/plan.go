@@ -149,7 +149,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		pending = h.repo.PendingUploads()
 	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
-		MaxCount:     16,
+		MaxCount:     maxAgentInputAttachments,
 		AllowedTypes: allAgentAttachmentTypes,
 	})
 	if err != nil {
@@ -326,7 +326,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	}
 	if req.InputAttachments != nil {
 		validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
-			MaxCount:     16,
+			MaxCount:     maxAgentInputAttachments,
 			AllowedTypes: allAgentAttachmentTypes,
 		})
 		if err != nil {

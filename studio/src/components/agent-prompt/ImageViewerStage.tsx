@@ -28,6 +28,7 @@ export interface ImageViewerStageProps {
   onPrevious?: () => void
   onNext?: () => void
   onError?: () => void
+  lightbox?: boolean
 }
 
 function IconButton({
@@ -66,6 +67,7 @@ export function ImageViewerStage({
   onPrevious,
   onNext,
   onError,
+  lightbox = false,
 }: ImageViewerStageProps) {
   const [zoom, setZoom] = useState(FIT_ZOOM)
 
@@ -80,26 +82,36 @@ export function ImageViewerStage({
   return (
     <div
       data-slot="image-viewer-stage"
-      className="flex min-h-0 w-full flex-1 flex-col gap-3"
+      className={`relative flex min-h-0 w-full flex-1 flex-col ${lightbox ? 'gap-0' : 'gap-3'}`}
     >
-      <div className="relative flex min-h-64 flex-1 items-center justify-center overflow-auto rounded-md bg-muted/40 p-4 sm:min-h-80">
+      <div className={`relative flex min-h-64 flex-1 items-center justify-center overflow-auto sm:min-h-80 ${lightbox ? 'bg-transparent p-6' : 'rounded-md bg-muted/40 p-4'}`}>
         <img
           src={src}
           alt={alt}
           onError={onError}
-          className="max-h-[62vh] max-w-full object-contain transition-transform"
+          className={`${lightbox ? 'max-h-[calc(100dvh-7rem)]' : 'max-h-[62vh]'} max-w-full object-contain transition-transform`}
           style={{ transform: `scale(${zoom / 100})` }}
         />
 
         {hasNavigation ? (
           <>
             <div className="absolute inset-y-0 left-2 flex items-center">
-              <IconButton label="上一项" disabled={!canPrevious} onClick={onPrevious}>
+              <IconButton
+                label="上一项"
+                disabled={!canPrevious}
+                onClick={onPrevious}
+                className={lightbox ? 'rounded-full border-0 bg-white text-black shadow-lg hover:bg-white/85 hover:text-black' : undefined}
+              >
                 <ChevronLeftIcon data-icon="inline-start" />
               </IconButton>
             </div>
             <div className="absolute inset-y-0 right-2 flex items-center">
-              <IconButton label="下一项" disabled={!canNext} onClick={onNext}>
+              <IconButton
+                label="下一项"
+                disabled={!canNext}
+                onClick={onNext}
+                className={lightbox ? 'rounded-full border-0 bg-white text-black shadow-lg hover:bg-white/85 hover:text-black' : undefined}
+              >
                 <ChevronRightIcon data-icon="inline-start" />
               </IconButton>
             </div>
@@ -107,7 +119,9 @@ export function ImageViewerStage({
         ) : null}
       </div>
 
-      <div className="flex min-w-0 flex-wrap items-center justify-center gap-2">
+      <div className={lightbox
+        ? 'absolute bottom-5 left-1/2 z-10 flex -translate-x-1/2 items-center justify-center gap-1 rounded-full bg-white p-1 text-black shadow-lg'
+        : 'flex min-w-0 flex-wrap items-center justify-center gap-2'}>
         <IconButton
           label="缩小"
           disabled={zoom <= MIN_ZOOM}
@@ -131,7 +145,7 @@ export function ImageViewerStage({
               setZoom((current) => Math.max(MIN_ZOOM, current - ZOOM_STEP))
             }
           }}
-          className="w-36 max-w-[40vw]"
+          className={lightbox ? 'sr-only' : 'w-36 max-w-[40vw]'}
         />
         <span className="w-12 text-center text-xs tabular-nums text-muted-foreground">
           {zoom}%
@@ -143,9 +157,11 @@ export function ImageViewerStage({
         >
           <PlusIcon data-icon="inline-start" />
         </IconButton>
-        <IconButton label="适合窗口" onClick={() => setZoom(FIT_ZOOM)}>
-          <Maximize2Icon data-icon="inline-start" />
-        </IconButton>
+        {!lightbox ? (
+          <IconButton label="适合窗口" onClick={() => setZoom(FIT_ZOOM)}>
+            <Maximize2Icon data-icon="inline-start" />
+          </IconButton>
+        ) : null}
       </div>
     </div>
   )

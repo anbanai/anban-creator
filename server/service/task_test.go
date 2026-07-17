@@ -148,6 +148,8 @@ func (m *mockEnqueuer) EnqueueUnique(taskType string, payload []byte, uniqueKey 
 
 type resumeTestStorage struct {
 	files        map[string][]byte
+	readKeys     []string
+	readMax      []int64
 	deleted      []string
 	uploadCount  int
 	failUploadAt int
@@ -195,6 +197,19 @@ func (s *resumeTestStorage) Read(_ context.Context, key string) ([]byte, error) 
 	data, ok := s.files[key]
 	if !ok {
 		return nil, os.ErrNotExist
+	}
+	return data, nil
+}
+
+func (s *resumeTestStorage) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	s.readKeys = append(s.readKeys, key)
+	s.readMax = append(s.readMax, maxBytes)
+	data, err := s.Read(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, storage.ErrObjectExceedsMaxSize
 	}
 	return data, nil
 }
@@ -3259,6 +3274,37 @@ func TestTaskServiceResumePersistsObjectKey(t *testing.T) {
 	}
 	if string(store.files[file.Key]) != "resume bytes" {
 		t.Fatalf("stored bytes missing under stable key %q", file.Key)
+	}
+}
+
+func TestTaskServiceResumeReadsFinalizedObjectWithBoundBeforePersisting(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	const finalizedKey = "uploads/finalized/user-1/upload-1/notes.txt"
+	store := &resumeTestStorage{files: map[string][]byte{finalizedKey: []byte("resume bytes")}}
+	svc := NewTaskService(nil, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+
+	attachments, _, err := svc.persistResumeInputs(context.Background(), task, "continue", []ResumeTaskFile{{
+		OriginalName: "notes.txt",
+		Label:        "修改意见",
+		Key:          finalizedKey,
+		ContentType:  "text/plain",
+		Size:         int64(len("resume bytes")),
+	}})
+	if err != nil {
+		t.Fatalf("persistResumeInputs: %v", err)
+	}
+	if len(store.readKeys) != 1 || store.readKeys[0] != finalizedKey {
+		t.Fatalf("read keys = %v, want finalized object key", store.readKeys)
+	}
+	if len(store.readMax) != 1 || store.readMax[0] != 25*1024*1024 {
+		t.Fatalf("read max = %v, want 25 MiB", store.readMax)
+	}
+	if len(attachments) != 2 || attachments[1].Role != model.EntryAttachmentRoleResumeFile {
+		t.Fatalf("attachments = %#v, want latest plus resume file", attachments)
+	}
+	if got := string(store.files[attachments[1].Key]); got != "resume bytes" {
+		t.Fatalf("persisted resume bytes = %q", got)
 	}
 }
 

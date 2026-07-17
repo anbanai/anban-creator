@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { PromptAttachment } from '@/types/input-attachment'
 import {
   AttachmentRejectionReason,
+  GENERAL_AGENT_ATTACHMENT_POLICY,
   admitPromptAttachments,
   classifyPromptAttachment,
 } from './attachment-admission'
@@ -61,6 +62,19 @@ describe('classifyPromptAttachment', () => {
 })
 
 describe('admitPromptAttachments', () => {
+  it('defines the shared prompt policy as five files with server-aligned size limits', () => {
+    expect(GENERAL_AGENT_ATTACHMENT_POLICY).toEqual({
+      allowedTypes: ['image', 'audio', 'video', 'document', 'text'],
+      maxCount: 5,
+      maxBytes: {
+        image: 50 * MB,
+        audio: 50 * MB,
+        video: 50 * MB,
+        document: 25 * MB,
+        text: 25 * MB,
+      },
+    })
+  })
   const allTypes = ['image', 'audio', 'video', 'document', 'text'] as const
 
   it.each([

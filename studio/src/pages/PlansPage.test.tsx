@@ -368,10 +368,12 @@ describe('PlansPage Seednote reference snapshots', () => {
     window.history.pushState({}, '', `/plans?create=true&type=seednote&project_id=${seednoteProject.id}&intent=schedule`)
     render(<PlansPage />)
 
-    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(within(dialog).queryByRole('button', { name: '创建计划' })).not.toBeInTheDocument()
+    expect(within(dialog).getAllByRole('button', { name: '创建' })).toHaveLength(1)
     const file = new File(['saved'], 'saved-product.png', { type: 'image/png' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
-    await screen.findByText('saved-product.png')
+    await screen.findByRole('button', { name: '预览 saved-product.png' })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() => {
@@ -394,14 +396,14 @@ describe('PlansPage Seednote reference snapshots', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
     expect(await screen.findByRole('dialog', { name: '编辑计划' })).toBeInTheDocument()
-    expect(await screen.findByText('saved-product.png')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '预览 saved-product.png' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(1))
     expect(vi.mocked(api.plans.update).mock.calls[0][1]).not.toHaveProperty('input_attachments')
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await screen.findByText('saved-product.png')
+    await screen.findByRole('button', { name: '预览 saved-product.png' })
     fireEvent.click(screen.getByRole('button', { name: '删除 saved-product.png' }))
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(2))
@@ -410,11 +412,11 @@ describe('PlansPage Seednote reference snapshots', () => {
     }))
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await screen.findByText('saved-product.png')
+    await screen.findByRole('button', { name: '预览 saved-product.png' })
     fireEvent.click(screen.getByRole('button', { name: '删除 saved-product.png' }))
     const replacementFile = new File(['replacement'], 'replacement.png', { type: 'image/png' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [replacementFile] } })
-    await screen.findByText('replacement.png')
+    await screen.findByRole('button', { name: '预览 replacement.png' })
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(3))
     expect(vi.mocked(api.plans.update).mock.calls[2][1]).toEqual(expect.objectContaining({
@@ -465,13 +467,13 @@ describe('PlansPage Seednote reference snapshots', () => {
   it('does not dirty hydrated attachments but marks instruction edits dirty', async () => {
     render(<PlansPage />)
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await screen.findByText('saved-product.png')
+    await screen.findByRole('button', { name: '预览 saved-product.png' })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑计划' })).not.toBeInTheDocument())
     expect(screen.queryByRole('alertdialog', { name: '放弃编辑？' })).not.toBeInTheDocument()
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await screen.findByText('saved-product.png')
+    await screen.findByRole('button', { name: '预览 saved-product.png' })
     fireEvent.click(screen.getByRole('button', { name: '编辑 saved-product.png 的附件说明' }))
     fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), {
       target: { value: '改用新版包装说明' },

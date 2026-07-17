@@ -26,6 +26,11 @@ export const DEFAULT_ATTACHMENT_MAX_BYTES: Record<InputAttachmentType, number> =
   document: 25 * MB,
   text: 25 * MB,
 }
+export const GENERAL_AGENT_ATTACHMENT_POLICY: AttachmentAdmissionPolicy = {
+  allowedTypes: ['image', 'audio', 'video', 'document', 'text'],
+  maxCount: 5,
+  maxBytes: { ...DEFAULT_ATTACHMENT_MAX_BYTES },
+}
 const GENERIC_MIME_TYPES = new Set(['', 'application/octet-stream'])
 type AttachmentTypeRule = {
   type: InputAttachmentType

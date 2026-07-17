@@ -3,8 +3,7 @@ import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksRes
 
 export interface ResumeTaskRequest {
   prompt?: string
-  files?: File[]
-  fileLabels?: string[]
+  input_attachments: InputAttachment[]
 }
 
 export interface CloneTaskRequest {
@@ -32,20 +31,11 @@ export const tasksApi = {
   clone: (id: string, data: CloneTaskRequest) =>
     unwrap<Task>(http.post(`/tasks/${id}/clone`, data)),
 
-  resume: (id: string, data: ResumeTaskRequest) => {
-    const form = new FormData()
-    const prompt = data.prompt?.trim() ?? ''
-    if (prompt) form.append('prompt', prompt)
-    if (data.fileLabels && data.fileLabels.length > 0) {
-      form.append('file_labels', JSON.stringify(data.fileLabels))
-    }
-    for (const file of data.files ?? []) {
-      form.append('files', file, file.name)
-    }
-    return unwrap<Task>(http.post(`/tasks/${id}/resume`, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }))
-  },
+  resume: (id: string, data: ResumeTaskRequest) =>
+    unwrap<Task>(http.post(`/tasks/${id}/resume`, {
+      prompt: data.prompt?.trim() ?? '',
+      input_attachments: data.input_attachments,
+    })),
 
   delete: (id: string) =>
     unwrap<void>(http.delete(`/tasks/${id}`)),

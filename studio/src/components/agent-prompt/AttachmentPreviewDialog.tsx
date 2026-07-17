@@ -470,6 +470,7 @@ export function AttachmentPreviewDialog({
         onPrevious={() => choose(activeIndex - 1)}
         onNext={() => choose(activeIndex + 1)}
         onError={handleRendererError}
+        lightbox
       />
     )
   } else if (kind === 'video' && displaySource.url) {
@@ -493,21 +494,26 @@ export function AttachmentPreviewDialog({
       <DialogContent
         showCloseButton={false}
         finalFocus={finalFocus}
-        className="flex h-[min(90dvh,52rem)] w-[min(calc(100vw-2rem),72rem)] max-w-none min-w-0 flex-col gap-0 overflow-hidden p-0"
+        className="top-0 left-0 flex h-dvh w-screen max-w-none min-w-0 translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-black/95 p-0 text-white ring-0 sm:max-w-none"
       >
-        <DialogHeader className="relative shrink-0 border-b px-4 py-3 pr-12">
-          <DialogTitle className="min-w-0 break-words pr-2">
+        <DialogHeader className="absolute inset-x-0 top-0 z-20 flex-row items-center justify-end gap-2 p-3">
+          <DialogTitle className="sr-only">
             {selected?.fileName ?? '附件预览'}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="sr-only">
             {selected ? `${activeIndex + 1} / ${items.length} · ${selected.contentType || selected.type}` : '附件详情'}
           </DialogDescription>
+          {selected ? (
+            <Button type="button" variant="secondary" size="icon" onClick={handleDownload} aria-label={`下载 ${selected.fileName}`} className="rounded-full bg-white text-black hover:bg-white/85">
+              <DownloadIcon />
+            </Button>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
                 <DialogClose
                   render={
-                    <Button type="button" variant="ghost" size="icon-sm" aria-label="关闭附件预览" className="absolute right-3 top-3" />
+                    <Button type="button" variant="secondary" size="icon" aria-label="关闭附件预览" className="rounded-full bg-white text-black hover:bg-white/85" />
                   }
                 />
               }
@@ -518,20 +524,9 @@ export function AttachmentPreviewDialog({
           </Tooltip>
         </DialogHeader>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-auto p-3 sm:p-4">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">{renderer}</div>
           {error ? <p role="alert" className="sr-only">{error}</p> : null}
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t pt-3">
-            <div className="min-w-0 text-xs text-muted-foreground">
-              {selected ? `${selected.size.toLocaleString()} B` : null}
-            </div>
-            {selected ? (
-              <Button type="button" variant="outline" size="sm" onClick={handleDownload} aria-label={`下载 ${selected.fileName}`}>
-                <DownloadIcon data-icon="inline-start" />
-                下载
-              </Button>
-            ) : null}
-          </div>
         </div>
       </DialogContent>
     </Dialog>

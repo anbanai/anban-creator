@@ -12,6 +12,7 @@ import (
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/storage"
 	"gorm.io/datatypes"
 )
 
@@ -21,7 +22,10 @@ var (
 	ErrTaskResumeUnavailable        = errors.New("task resume requires kubernetes NAS execution")
 	ErrTaskResumeStorageUnavailable = errors.New("task resume storage is unavailable")
 	ErrTaskResumeConflict           = errors.New("task resume conflict")
+	ErrTaskResumeFileTooLarge       = errors.New("task resume file exceeds size limit")
 )
+
+const maxTaskResumeFileBytes = 25 * 1024 * 1024
 
 // ResumeTaskParams carries the operator's continuation prompt and optional
 // supplemental files for resuming a terminal task in its original workspace.
@@ -34,6 +38,9 @@ type ResumeTaskParams struct {
 type ResumeTaskFile struct {
 	OriginalName string
 	Label        string
+	Key          string
+	Type         string
+	ContentType  string
 	Reader       io.Reader
 	Size         int64
 }
@@ -143,7 +150,7 @@ func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task,
 	written := make([]resumeWrittenFile, 0, len(files))
 	usedNames := map[string]int{}
 	for _, file := range files {
-		if file.Reader == nil {
+		if file.Reader == nil && strings.TrimSpace(file.Key) == "" {
 			continue
 		}
 		safeName, err := serveragent.PrepareResumeAttachmentFilename(file.OriginalName, usedNames)
@@ -156,13 +163,34 @@ func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task,
 			s.deleteWrittenResumeFiles(ctx, written)
 			return nil, "", err
 		}
-		var buf bytes.Buffer
-		if _, err := io.Copy(&buf, file.Reader); err != nil {
-			s.deleteWrittenResumeFiles(ctx, written)
-			return nil, "", fmt.Errorf("read resume file: %w", err)
+		var data []byte
+		if sourceKey := strings.TrimSpace(file.Key); sourceKey != "" {
+			data, err = storage.ReadObject(ctx, s.store, sourceKey, maxTaskResumeFileBytes)
+			if err != nil {
+				s.deleteWrittenResumeFiles(ctx, written)
+				if errors.Is(err, storage.ErrObjectExceedsMaxSize) {
+					return nil, "", ErrTaskResumeFileTooLarge
+				}
+				return nil, "", fmt.Errorf("%w: read finalized resume file %s: %v", ErrTaskResumeStorageUnavailable, safeName, err)
+			}
+		} else {
+			var buf bytes.Buffer
+			if _, err := io.Copy(&buf, io.LimitReader(file.Reader, maxTaskResumeFileBytes+1)); err != nil {
+				s.deleteWrittenResumeFiles(ctx, written)
+				return nil, "", fmt.Errorf("read resume file: %w", err)
+			}
+			if buf.Len() > maxTaskResumeFileBytes {
+				s.deleteWrittenResumeFiles(ctx, written)
+				return nil, "", ErrTaskResumeFileTooLarge
+			}
+			data = buf.Bytes()
 		}
 		key := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID, "resume", stamp, "attachments", safeName)
-		upload, err := s.store.Upload(ctx, key, bytes.NewReader(buf.Bytes()), "application/octet-stream")
+		contentType := strings.TrimSpace(file.ContentType)
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		upload, err := s.store.Upload(ctx, key, bytes.NewReader(data), contentType)
 		if err != nil {
 			s.deleteWrittenResumeFiles(ctx, written, key)
 			return nil, "", fmt.Errorf("%w: upload resume file %s: %v", ErrTaskResumeStorageUnavailable, safeName, err)
@@ -171,16 +199,20 @@ func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task,
 			s.deleteWrittenResumeFiles(ctx, written, key)
 			return nil, "", fmt.Errorf("%w: upload resume file %s returned no object key", ErrTaskResumeStorageUnavailable, safeName)
 		}
+		attachmentType := strings.TrimSpace(file.Type)
+		if attachmentType == "" {
+			attachmentType = "document"
+		}
 		written = append(written, resumeWrittenFile{
 			OriginalName: file.OriginalName,
 			SafeName:     safeName,
 			Label:        strings.TrimSpace(file.Label),
 			RelPath:      relPath,
 			Attachment: model.EntryAttachment{
-				Type:        "document",
+				Type:        attachmentType,
 				FileName:    safeName,
-				ContentType: "application/octet-stream",
-				Size:        int64(buf.Len()),
+				ContentType: contentType,
+				Size:        int64(len(data)),
 				Role:        model.EntryAttachmentRoleResumeFile,
 				Key:         key,
 			},

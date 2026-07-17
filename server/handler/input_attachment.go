@@ -21,10 +21,12 @@ const (
 	aiEntryMediaAttachmentMaxBytes     int64 = 50 * 1024 * 1024
 	aiEntryDocumentAttachmentMaxBytes  int64 = 25 * 1024 * 1024
 	inputAttachmentInstructionMaxRunes       = 1000
+	maxAgentInputAttachments                 = 5
 )
 
 type InputAttachmentValidationOptions struct {
 	MaxCount     int
+	MaxBytes     int64
 	AllowedTypes map[string]bool
 }
 
@@ -98,6 +100,9 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, pendi
 				ContentType: verified.ContentType,
 				Size:        verified.Size,
 				Instruction: a.Instruction,
+			}
+			if options.MaxBytes > 0 && a.Size > options.MaxBytes {
+				return nil, inputAttachmentValidationErrorf("attachment %d exceeds the %d MB limit", i+1, options.MaxBytes/(1024*1024))
 			}
 			verifiedUploads = append(verifiedUploads, verified)
 		}

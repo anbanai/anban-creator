@@ -61,24 +61,33 @@ describe('tasksApi', () => {
     expectTypeOf(task.result).toEqualTypeOf<string | null | undefined>()
   })
 
-  it('posts resume prompt files and labels as form data', async () => {
+  it('posts resume prompt and stable OSS attachment identities as JSON', async () => {
     const post = vi.spyOn(clientHttp, 'post').mockResolvedValue({ data: { data: { id: 'task-1', status: 'pending' } } } as any)
-    const file = new File(['notes'], 'notes.md', { type: 'text/markdown' })
     await tasksApi.resume('task-1', {
       prompt: '继续写',
-      files: [file],
-      fileLabels: ['修改意见'],
+      input_attachments: [{
+        type: 'text',
+        upload_id: 'upload-notes',
+        key: 'uploads/pending/user-1/upload-notes/notes.md',
+        file_name: 'notes.md',
+        content_type: 'text/markdown',
+        size: 5,
+        instruction: '修改意见',
+      }],
     })
 
-    expect(post).toHaveBeenCalledWith('/tasks/task-1/resume', expect.any(FormData), {
-      headers: { 'Content-Type': 'multipart/form-data' },
+    expect(post).toHaveBeenCalledWith('/tasks/task-1/resume', {
+      prompt: '继续写',
+      input_attachments: [{
+        type: 'text',
+        upload_id: 'upload-notes',
+        key: 'uploads/pending/user-1/upload-notes/notes.md',
+        file_name: 'notes.md',
+        content_type: 'text/markdown',
+        size: 5,
+        instruction: '修改意见',
+      }],
     })
-    const form = post.mock.calls[0][1] as FormData
-    expect(form.get('prompt')).toBe('继续写')
-    expect(form.get('file_labels')).toBe(JSON.stringify(['修改意见']))
-    const submittedFile = form.get('files')
-    expect(submittedFile).toBeInstanceOf(File)
-    expect((submittedFile as File).name).toBe('notes.md')
   })
 
   it('always posts the complete clone input snapshot including empty fields', async () => {

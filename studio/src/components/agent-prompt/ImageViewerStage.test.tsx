@@ -102,4 +102,11 @@ describe('ImageViewerStage', () => {
     expect(screen.getByRole('button', { name: '下一项' })).toBeDisabled()
     await settleBaseUi()
   })
+
+  it('keeps lightbox navigation controls visible against the dark preview surface', () => {
+    renderStage({ lightbox: true })
+
+    expect(screen.getByRole('button', { name: '上一项' })).toHaveClass('bg-white', 'text-black')
+    expect(screen.getByRole('button', { name: '下一项' })).toHaveClass('bg-white', 'text-black')
+  })
 })

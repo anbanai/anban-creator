@@ -8,7 +8,10 @@ import type {
   InputAttachment,
   PromptAttachment,
 } from '@/types/input-attachment'
-import { AttachmentRejectionReason } from './attachment-admission'
+import {
+  AttachmentRejectionReason,
+  GENERAL_AGENT_ATTACHMENT_POLICY,
+} from './attachment-admission'
 import { AgentPromptDropProvider } from './AgentPromptDropProvider'
 import {
   AgentPromptInput,
@@ -129,6 +132,13 @@ function renderPrompt(overrides: Partial<AgentPromptInputProps> = {}) {
 }
 
 describe('AgentPromptInput', () => {
+  it('offers every document and text extension accepted by the shared policy', () => {
+    renderPrompt({ attachmentPolicy: GENERAL_AGENT_ATTACHMENT_POLICY })
+
+    const accepted = screen.getByLabelText('选择附件文件').getAttribute('accept')?.split(',')
+    expect(accepted).toEqual(expect.arrayContaining(['.json', '.csv', '.md', '.markdown', '.txt']))
+  })
+
   it('renders the stable section, surface, content order, and toolbar slots', () => {
     const current = attachment()
     renderPrompt({
@@ -154,7 +164,7 @@ describe('AgentPromptInput', () => {
     const surface = root.querySelector('[data-slot="agent-prompt-surface"]')
     expect(surface).toHaveClass('min-h-40', 'h-auto', 'flex-col', 'overflow-hidden')
     expect(surface?.className).toContain('max-h-[min(42rem,calc(100dvh-8rem))]')
-    const row = within(root).getByText('reference.png').closest('[data-slot="agent-prompt-attachment"]')
+    const row = within(root).getByRole('button', { name: '预览 reference.png' }).closest('[data-slot="agent-prompt-attachment"]')
     const textarea = screen.getByRole('textbox', { name: 'Agent request' })
     expect(row?.compareDocumentPosition(textarea)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
 
@@ -209,6 +219,9 @@ describe('AgentPromptInput', () => {
       value: { prompt: '', attachments: [local, inherited] },
       attachmentController,
     })
+
+    expect(screen.getByRole('img', { name: 'local.png 附件缩略图' })).toHaveAttribute('src', 'blob:local.png')
+    expect(document.querySelector('[data-slot="agent-prompt-attachments"]')).toHaveClass('flex-row', 'flex-wrap')
 
     fireEvent.click(screen.getByRole('button', { name: '预览 local.png' }))
     expect(await screen.findByRole('img', { name: 'local.png' })).toHaveAttribute('src', 'blob:local.png')
@@ -371,6 +384,15 @@ describe('AgentPromptInput', () => {
     resolveSubmit()
   })
 
+  it('leaves submission to the surrounding form in external mode', () => {
+    const onSubmit = vi.fn()
+    renderPrompt({ onSubmit, submitMode: 'external', submitLabel: 'Create task' })
+
+    expect(screen.queryByRole('button', { name: 'Create task' })).not.toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['disabled', { disabled: true }],
     ['submitting', { submitting: true }],
@@ -424,8 +446,8 @@ describe('AgentPromptInput', () => {
       }),
     })
 
-    const row = screen.getByText('reference.png').closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
-    expect(row).toHaveClass('min-h-10')
+    const row = screen.getByRole('button', { name: '预览 reference.png' }).closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
+    expect(row).toHaveClass('size-20')
     expect(within(row).getByText('1.5 KB')).toBeInTheDocument()
     expect(within(row).getByText('失败')).toBeInTheDocument()
     expect(within(row).getByText('Network error')).toBeInTheDocument()
@@ -453,11 +475,11 @@ describe('AgentPromptInput', () => {
       attachmentController: controller({ hasFailures: true }),
     })
 
-    const queuedRow = screen.getByText(longName).closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
-    expect(queuedRow).toHaveClass('min-w-0')
+    const queuedRow = screen.getByRole('button', { name: `预览 ${longName}` }).closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
+    expect(queuedRow).toHaveClass('size-20', 'shrink-0', 'overflow-hidden')
     expect(queuedRow.querySelector('[data-slot="agent-prompt-attachment-name"]')).toHaveClass('min-w-0', 'truncate')
     expect(queuedRow.querySelector('[data-slot="agent-prompt-attachment-meta"]')).toHaveClass('w-full', 'min-w-0')
-    expect(within(queuedRow).getByText('1.5 KB')).toHaveClass('shrink-0')
+    expect(within(queuedRow).getByText('1.5 KB')).toBeInTheDocument()
     expect(within(queuedRow).getByText('等待中').closest('[data-slot="agent-prompt-attachment-status"]')).toHaveClass('shrink-0')
     expect(within(queuedRow).getByRole('status')).toHaveAttribute('aria-live', 'polite')
 
@@ -465,7 +487,7 @@ describe('AgentPromptInput', () => {
     const failureAlert = screen.getByRole('alert', { name: 'failed.png 状态' })
     expect(failureAlert).toHaveTextContent('失败')
     expect(failureAlert).toHaveTextContent(longError)
-    expect(failureAlert.querySelector('[data-slot="agent-prompt-attachment-error"]')).toHaveClass('min-w-0', 'flex-1', 'truncate')
+    expect(failureAlert.querySelector('[data-slot="agent-prompt-attachment-error"]')).toHaveClass('min-w-0', 'truncate')
     expect(within(queuedRow).getByRole('button', { name: `删除 ${longName}` })).toHaveAttribute('data-size', 'icon-xs')
   })
 
@@ -484,7 +506,7 @@ describe('AgentPromptInput', () => {
       )
     }
     const expectPoliteStatus = (label: string) => {
-      const row = screen.getByText('transition.png').closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
+      const row = screen.getByRole('button', { name: '预览 transition.png' }).closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
       const region = within(row).getByRole('status', { name: 'transition.png 状态' })
       expect(region).toHaveAttribute('aria-live', 'polite')
       expect(region).toHaveAttribute('aria-atomic', 'true')
@@ -500,7 +522,7 @@ describe('AgentPromptInput', () => {
     expectPoliteStatus('已上传')
 
     renderState({ ...queued, status: 'failed', error: 'Upload failed' })
-    const row = screen.getByText('transition.png').closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
+    const row = screen.getByRole('button', { name: '预览 transition.png' }).closest('[data-slot="agent-prompt-attachment"]') as HTMLElement
     expect(within(row).queryByRole('status')).not.toBeInTheDocument()
     expect(within(row).getAllByRole('alert')).toHaveLength(1)
     expect(within(row).getByRole('alert', { name: 'transition.png 状态' })).toHaveTextContent('失败')
@@ -513,7 +535,7 @@ describe('AgentPromptInput', () => {
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
     expect(screen.getByTestId('controlled-attachment-names')).toHaveTextContent('controlled.png')
     const composer = document.querySelector('[data-slot="agent-prompt-input"]') as HTMLElement
-    expect(within(composer).getByText('controlled.png')).toBeInTheDocument()
+    expect(within(composer).getByRole('button', { name: '预览 controlled.png' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '删除 controlled.png' }))
     expect(screen.getByTestId('controlled-attachment-names')).toBeEmptyDOMElement()
@@ -521,6 +543,6 @@ describe('AgentPromptInput', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset task' }))
     expect(screen.getByTestId('controlled-attachment-names')).toHaveTextContent('task-b.txt')
-    expect(within(composer).getByText('task-b.txt')).toBeInTheDocument()
+    expect(within(composer).getByRole('button', { name: '预览 task-b.txt' })).toBeInTheDocument()
   })
 })

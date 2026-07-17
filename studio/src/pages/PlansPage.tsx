@@ -14,6 +14,7 @@ import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -114,7 +115,7 @@ export default function PlansPage() {
   })
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
-    policy: { allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 },
+    policy: GENERAL_AGENT_ATTACHMENT_POLICY,
     attachments: promptAttachments,
     onAttachmentsChange: (next) => {
       setPromptAttachments(next)
@@ -418,7 +419,8 @@ export default function PlansPage() {
       }}
       onSubmit={() => handlePlanSubmit()}
       attachmentController={attachmentController}
-      attachmentPolicy={{ allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 }}
+      attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
+      submitMode="external"
       placeholder="描述每次计划的创作方向、内容要求和素材使用方式..."
       submitLabel={editingPlan ? '更新计划' : '创建计划'}
       submitting={isSubmitting}

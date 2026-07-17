@@ -87,6 +87,12 @@ describe('Designer provider contract', () => {
     expect(page).toContain('md:pb-56')
   })
 
+  it('caps provider reference capacity at the shared five-file limit', () => {
+    const page = read('src/pages/DesignerPage.tsx')
+
+    expect(page).toContain('Math.min(maxReferenceImages, GENERAL_AGENT_ATTACHMENT_POLICY.maxCount)')
+  })
+
   it('does not infer GPT Image sizes in the Studio API client', () => {
     const apiClient = read('src/lib/api/designer.ts')
 

@@ -220,6 +220,7 @@ describe('DashboardPage AI entry', () => {
     await waitFor(() => expect(screen.queryByText('还没有任务')).not.toBeInTheDocument())
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files } })
     await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledTimes(5))
+    expect(screen.getByLabelText('选择附件文件')).toBeDisabled()
     await screen.findByText('product.png')
     fireEvent.change(prompt, { target: { value: '帮我写一篇新品发布公众号文章' } })
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))

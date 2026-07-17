@@ -10,12 +10,12 @@ import {
 } from 'react'
 import {
   ArrowUpIcon,
-  EyeIcon,
+  FileIcon,
   FilePenLineIcon,
   LoaderCircleIcon,
   PlusIcon,
   RotateCcwIcon,
-  Trash2Icon,
+  XIcon,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -85,8 +85,8 @@ const INPUT_ACCEPT_BY_TYPE: Record<InputAttachmentType, string> = {
   image: 'image/*',
   audio: 'audio/*',
   video: 'video/*',
-  document: '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx',
-  text: 'text/*,.md,.txt',
+  document: '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.json',
+  text: 'text/*,.csv,.md,.markdown,.txt',
 }
 
 export interface AgentPromptInputProps {
@@ -103,6 +103,7 @@ export interface AgentPromptInputProps {
   placeholder?: string
   submitLabel?: string
   submitIcon?: LucideIcon
+  submitMode?: 'inline' | 'external'
   submitting?: boolean
   disabled?: boolean
   submitDisabled?: boolean
@@ -130,37 +131,50 @@ function rejectionAnnouncement(rejections: readonly AttachmentRejection[]) {
   return `拒绝 ${rejections.length} 个附件：${reasons}`
 }
 
-interface AttachmentRowProps {
+interface AttachmentTileProps {
   attachment: PromptAttachment
   controller: PromptAttachmentsController
   disabled: boolean
+  previewSource?: string
   onPreview: (trigger: HTMLButtonElement) => void
 }
 
-function AttachmentRow({
+function AttachmentTile({
   attachment,
   controller,
   disabled,
+  previewSource,
   onPreview,
-}: AttachmentRowProps) {
+}: AttachmentTileProps) {
   const failed = attachment.status === 'failed'
   return (
     <div
       data-slot="agent-prompt-attachment"
-      className="flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-border px-2 py-1.5"
+      className="group/attachment relative size-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted/40"
     >
       <Button
         type="button"
         variant="ghost"
         aria-label={`预览 ${attachment.fileName}`}
         onClick={(event) => onPreview(event.currentTarget)}
-        className="h-auto min-w-0 flex-1 justify-start gap-2 p-0 text-left hover:bg-transparent"
+        className="h-full w-full min-w-0 rounded-none p-0 hover:bg-muted/70"
       >
-        <EyeIcon aria-hidden="true" className="text-muted-foreground" />
-        <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+        {attachment.type === 'image' && previewSource ? (
+          <img
+            src={previewSource}
+            alt={`${attachment.fileName} 附件缩略图`}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <span className="flex h-full w-full flex-col items-center justify-center gap-1 px-1.5 text-muted-foreground">
+            <FileIcon className="size-6" />
+            <span className="max-w-full truncate text-[10px]">{attachment.fileName}</span>
+          </span>
+        )}
+        <span className="sr-only">
           <span
             data-slot="agent-prompt-attachment-name"
-            className="w-full min-w-0 truncate text-sm font-medium"
+            className="min-w-0 truncate"
           >
             {attachment.fileName}
           </span>
@@ -170,9 +184,9 @@ function AttachmentRow({
             aria-label={`${attachment.fileName} 状态`}
             aria-live={failed ? undefined : 'polite'}
             aria-atomic="true"
-            className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+            className="w-full min-w-0"
           >
-            <span className="shrink-0">{formatFileSize(attachment.size)}</span>
+              <span>{formatFileSize(attachment.size)}</span>
             <span data-slot="agent-prompt-attachment-status" className="shrink-0">
               <Badge variant={failed ? 'destructive' : 'secondary'}>
                 {STATUS_LABELS[attachment.status]}
@@ -181,20 +195,22 @@ function AttachmentRow({
             {attachment.error ? (
               <span
                 data-slot="agent-prompt-attachment-error"
-                className="min-w-0 flex-1 truncate"
+                className="min-w-0 truncate"
                 title={attachment.error}
               >
                 {attachment.error}
               </span>
             ) : null}
           </span>
-          {attachment.status === 'uploading' ? (
-            <Progress value={attachment.progress} aria-label={`${attachment.fileName} 上传进度`} className="mt-1 h-1 w-full" />
-          ) : null}
         </span>
       </Button>
 
-      <Popover>
+      {attachment.status === 'uploading' ? (
+        <Progress value={attachment.progress} aria-label={`${attachment.fileName} 上传进度`} className="absolute inset-x-1 bottom-1 h-1" />
+      ) : null}
+
+      <div className="absolute inset-x-1 top-1 flex items-center justify-between gap-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/attachment:opacity-100 sm:group-focus-within/attachment:opacity-100">
+        <Popover>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -213,7 +229,7 @@ function AttachmentRow({
           </TooltipTrigger>
           <TooltipContent>编辑附件说明</TooltipContent>
         </Tooltip>
-        <PopoverContent align="end" className="w-72">
+        <PopoverContent align="start" className="w-72">
           <PopoverTitle>附件说明</PopoverTitle>
           <Input
             aria-label="附件说明"
@@ -223,41 +239,46 @@ function AttachmentRow({
             onChange={(event) => controller.updateInstruction(attachment.id, event.target.value)}
           />
         </PopoverContent>
-      </Popover>
+        </Popover>
 
-      {attachment.status === 'failed' ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <InputGroupButton
-                size="icon-xs"
-                aria-label={`重试 ${attachment.fileName}`}
-                disabled={disabled}
-                onClick={() => controller.retry(attachment.id)}
-              />
-            }
-          >
-            <RotateCcwIcon />
-          </TooltipTrigger>
-          <TooltipContent>重试上传</TooltipContent>
-        </Tooltip>
-      ) : null}
+        <span className="ml-auto flex items-center gap-1">
+          {attachment.status === 'failed' ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <InputGroupButton
+                    size="icon-xs"
+                    aria-label={`重试 ${attachment.fileName}`}
+                    disabled={disabled}
+                    onClick={() => controller.retry(attachment.id)}
+                    className="bg-background/90 shadow-sm"
+                  />
+                }
+              >
+                <RotateCcwIcon />
+              </TooltipTrigger>
+              <TooltipContent>重试上传</TooltipContent>
+            </Tooltip>
+          ) : null}
 
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <InputGroupButton
-              size="icon-xs"
-              aria-label={`删除 ${attachment.fileName}`}
-              disabled={disabled}
-              onClick={() => controller.remove(attachment.id)}
-            />
-          }
-        >
-          <Trash2Icon />
-        </TooltipTrigger>
-        <TooltipContent>删除附件</TooltipContent>
-      </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <InputGroupButton
+                  size="icon-xs"
+                  aria-label={`删除 ${attachment.fileName}`}
+                  disabled={disabled}
+                  onClick={() => controller.remove(attachment.id)}
+                  className="rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/80 hover:text-background"
+                />
+              }
+            >
+              <XIcon />
+            </TooltipTrigger>
+            <TooltipContent>删除附件</TooltipContent>
+          </Tooltip>
+        </span>
+      </div>
     </div>
   )
 }
@@ -275,6 +296,7 @@ export function AgentPromptInput({
   placeholder = '输入任务要求…',
   submitLabel = 'Submit',
   submitIcon: SubmitIcon = ArrowUpIcon,
+  submitMode = 'inline',
   submitting = false,
   disabled = false,
   submitDisabled = false,
@@ -357,6 +379,7 @@ export function AgentPromptInput({
   }, [blocked, onSubmit, onSubmitError, value.attachments, value.prompt])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (submitMode === 'external') return
     if (event.key !== 'Enter' || event.shiftKey) return
     const nativeEvent = event.nativeEvent
     if (composingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229) return
@@ -416,13 +439,14 @@ export function AgentPromptInput({
         >
           <div data-slot="agent-prompt-content" className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
             {value.attachments.length > 0 ? (
-              <div data-slot="agent-prompt-attachments" className="flex flex-col gap-1.5 px-2.5 pt-2.5">
+              <div data-slot="agent-prompt-attachments" className="flex flex-row flex-wrap gap-2 px-2.5 pt-2.5">
                 {value.attachments.map((item) => (
-                  <AttachmentRow
+                  <AttachmentTile
                     key={item.id}
                     attachment={item}
                     controller={attachmentController}
                     disabled={disabled}
+                    previewSource={attachmentController.previewSource(item.id)}
                     onPreview={(trigger) => openPreview(item.id, trigger)}
                   />
                 ))}
@@ -477,25 +501,27 @@ export function AgentPromptInput({
             <div data-slot="agent-prompt-actions" className="ml-auto flex min-w-0 items-center gap-1.5">
               {status}
               {trailingTools}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      type="button"
-                      size="icon"
-                      className="rounded-full"
-                      aria-label={submitLabel}
-                      disabled={blocked}
-                      onClick={() => { void submit() }}
-                    />
-                  }
-                >
-                  {submitting || locallySubmitting
-                    ? <LoaderCircleIcon className="animate-spin" />
-                    : <SubmitIcon />}
-                </TooltipTrigger>
-                <TooltipContent>{submitLabel}</TooltipContent>
-              </Tooltip>
+              {submitMode === 'inline' ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        type="button"
+                        size="icon"
+                        className="rounded-full"
+                        aria-label={submitLabel}
+                        disabled={blocked}
+                        onClick={() => { void submit() }}
+                      />
+                    }
+                  >
+                    {submitting || locallySubmitting
+                      ? <LoaderCircleIcon className="animate-spin" />
+                      : <SubmitIcon />}
+                  </TooltipTrigger>
+                  <TooltipContent>{submitLabel}</TooltipContent>
+                </Tooltip>
+              ) : null}
             </div>
           </InputGroupAddon>
         </InputGroup>

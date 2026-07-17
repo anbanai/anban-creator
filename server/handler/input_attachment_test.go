@@ -233,6 +233,25 @@ func TestValidateInputAttachmentsRejectsTypeLimitsAndCrossTenantUpload(t *testin
 	}
 }
 
+func TestValidateInputAttachmentsAppliesCallSpecificLimitToVerifiedUploads(t *testing.T) {
+	upload := &model.PendingUpload{
+		ID: "resume-video", UserID: "user-1", Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		Key: "uploads/pending/user-1/resume-video/demo.mp4", FileName: "demo.mp4", ContentType: "video/mp4",
+		Size: 25*1024*1024 + 1, Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	_, err := validateInputAttachments(context.Background(), nil, &aiEntryPendingRepo{upload: upload}, "user-1", []model.EntryAttachment{{
+		UploadID: upload.ID,
+		Key:      upload.Key,
+	}}, InputAttachmentValidationOptions{
+		MaxCount:     maxAgentInputAttachments,
+		MaxBytes:     maxTaskResumeFileBytes,
+		AllowedTypes: allAgentAttachmentTypes,
+	})
+	if err == nil || !strings.Contains(err.Error(), "25 MB limit") {
+		t.Fatalf("error = %v, want call-specific 25 MB limit", err)
+	}
+}
+
 type handlerAttachmentRouteCase struct {
 	name        string
 	attachments string

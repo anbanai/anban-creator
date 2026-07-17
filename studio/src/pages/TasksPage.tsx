@@ -40,6 +40,7 @@ import {
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
@@ -154,7 +155,7 @@ export default function TasksPage() {
   })
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
-    policy: { allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 },
+    policy: GENERAL_AGENT_ATTACHMENT_POLICY,
     attachments: promptAttachments,
     onAttachmentsChange: (next) => {
       setPromptAttachments(next)
@@ -564,7 +565,8 @@ export default function TasksPage() {
       }}
       onSubmit={() => handleCreateSubmit()}
       attachmentController={attachmentController}
-      attachmentPolicy={{ allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 }}
+      attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
+      submitMode="external"
       placeholder="描述创作目标、内容要求和素材使用方式..."
       submitLabel="创建任务"
       submitting={createMutation.isPending}

@@ -74,6 +74,14 @@ describe('AttachmentPreviewDialog', () => {
     renderDialog({ attachments: undefined, value, previewSource })
 
     expect(await screen.findByRole('img', { name: 'local.png' })).toHaveAttribute('src', 'blob:local-image')
+    expect(screen.getByRole('dialog')).toHaveClass(
+      'h-dvh',
+      'w-screen',
+      'max-w-none',
+      'sm:max-w-none',
+      'rounded-none',
+      'bg-black/95',
+    )
     expect(previewSource).toHaveBeenCalledWith('attachment-1')
     expect(uploadsApi.resolveDownloadUrl).not.toHaveBeenCalled()
     expect(JSON.stringify(value)).not.toContain('blob:local-image')
