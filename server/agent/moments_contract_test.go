@@ -86,13 +86,16 @@ func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 	codexHooks := readRepoFile(t, filepath.Join(root, "codex", "hooks", "hooks.json"))
 	for _, want := range []string{
 		`"matcher": "moments"`,
-		`agent_name=\"moments\"`,
 		"material-analysis.md",
 		"quality-review.md",
+		"只读质量摘要",
 	} {
 		if !strings.Contains(codexHooks, want) {
 			t.Fatalf("codex hooks missing moments delivery term %q", want)
 		}
+	}
+	if strings.Contains(codexHooks, "submit_agent_feedback") {
+		t.Fatal("codex hooks must not submit agent-owned feedback")
 	}
 
 	openclawHooks := readRepoFile(t, filepath.Join(root, "openclaw", "src", "hooks", "handler.ts"))

@@ -212,6 +212,46 @@ func TestCodexSeednoteSkillTracksTitleFinalizationInStepTable(t *testing.T) {
 	}
 }
 
+func TestCodexOverviewDocsUseCanonicalTaskDelivery(t *testing.T) {
+	root := repoRoot(t)
+	for _, relativePath := range []string{"codex/CODEX.md", "codex/README.md"} {
+		t.Run(relativePath, func(t *testing.T) {
+			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
+			seednote := lineContaining(t, body, "| `seednote` |")
+			ecommerce := lineContaining(t, body, "| `ecommerce` |")
+			for _, pipeline := range []string{seednote, ecommerce} {
+				if regexp.MustCompile(`(?i)\bArchive\b`).MatchString(pipeline) {
+					t.Errorf("%s contains legacy Archive pipeline step: %s", relativePath, pipeline)
+				}
+				for _, required := range []string{"$DIR", "delivery validation"} {
+					if !strings.Contains(strings.ToLower(pipeline), strings.ToLower(required)) {
+						t.Errorf("%s pipeline missing canonical delivery term %q: %s", relativePath, required, pipeline)
+					}
+				}
+			}
+			for _, required := range []string{"image-plan", "runtime mode"} {
+				if !strings.Contains(strings.ToLower(seednote), required) {
+					t.Errorf("%s Seednote pipeline missing %q: %s", relativePath, required, seednote)
+				}
+			}
+			if strings.Contains(seednote, "3-8 content images") {
+				t.Errorf("%s Seednote pipeline contains obsolete fixed image count", relativePath)
+			}
+		})
+	}
+}
+
+func lineContaining(t *testing.T, body, needle string) string {
+	t.Helper()
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	t.Fatalf("missing line containing %q", needle)
+	return ""
+}
+
 func TestDeliverableRelocationCommandDetection(t *testing.T) {
 	tests := []struct {
 		name string

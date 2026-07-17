@@ -104,6 +104,179 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 	})
 }
 
+func TestRuntimeHooksDoNotSubmitAgentFeedback(t *testing.T) {
+	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
+	for _, relativePath := range []string{
+		"claudecode/hooks/hooks.json",
+		"codex/hooks/hooks.json",
+	} {
+		t.Run(relativePath, func(t *testing.T) {
+			path := filepath.Join(root, filepath.FromSlash(relativePath))
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if !json.Valid(raw) {
+				t.Fatalf("%s is not valid JSON", relativePath)
+			}
+			if strings.Contains(string(raw), "submit_agent_feedback") {
+				t.Fatalf("%s must not own submit_agent_feedback side effects", relativePath)
+			}
+		})
+	}
+}
+
+func TestActiveRuntimeFeedbackScoresAreSerialized(t *testing.T) {
+	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
+	paths := []string{
+		"claudecode/agents/moments.md",
+		"claudecode/agents/videoeditor.md",
+		"claudecode/agents/seednote.md",
+		"claudecode/agents/live-slicer.md",
+		"claudecode/agents/ecommerce.md",
+		"claudecode/agents/designer.md",
+		"claudecode/agents/wechatarticle.md",
+		"claudecode/agents/videocreator.md",
+		"claudecode/agents/montage.md",
+		"codex/agents/moments.toml",
+		"codex/agents/videoeditor.toml",
+		"codex/agents/seednote.toml",
+		"codex/agents/live-slicer.toml",
+		"codex/agents/ecommerce.toml",
+		"codex/agents/designer.toml",
+		"codex/agents/wechatarticle.toml",
+		"codex/agents/videocreator.toml",
+		"codex/agents/montage.toml",
+		"openclaw/skills/seednote/SKILL.md",
+		"openclaw/skills/ecommerce/SKILL.md",
+	}
+	for _, relativePath := range paths {
+		t.Run(relativePath, func(t *testing.T) {
+			body := readRuntimeContractFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
+			if err := validateSerializedFeedbackCall(body); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestChangedRuntimeFeedbackOwnership(t *testing.T) {
+	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
+	tests := []struct {
+		path         string
+		reportMarker string
+	}{
+		{path: "claudecode/agents/seednote.md", reportMarker: "#### 步骤 12：最终报告"},
+		{path: "claudecode/agents/ecommerce.md", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
+		{path: "claudecode/agents/moments.md", reportMarker: "最终摘要包含"},
+		{path: "claudecode/agents/wechatarticle.md", reportMarker: "步骤 9 的最终验收都已写入报告后"},
+		{path: "codex/agents/seednote.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
+		{path: "codex/agents/ecommerce.toml", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
+		{path: "codex/agents/moments.toml", reportMarker: "最终摘要包含"},
+		{path: "codex/agents/wechatarticle.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
+		{path: "openclaw/skills/seednote/SKILL.md", reportMarker: "## 最终报告"},
+		{path: "openclaw/skills/ecommerce/SKILL.md", reportMarker: "### 步骤 8：生成 manifest 与最终报告"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			body := readRuntimeContractFile(t, filepath.Join(root, filepath.FromSlash(tt.path)))
+			if err := validateSerializedFeedbackCall(body); err != nil {
+				t.Fatal(err)
+			}
+			reportAt := strings.Index(body, tt.reportMarker)
+			feedbackAt := regexp.MustCompile(`submit_agent_feedback\s*\(`).FindStringIndex(body)
+			if reportAt < 0 || feedbackAt == nil || feedbackAt[0] <= reportAt {
+				t.Fatalf("feedback must occur after final report marker %q", tt.reportMarker)
+			}
+		})
+	}
+}
+
+func TestSerializedFeedbackCallValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{
+			name: "JSON stringify with explicit scores",
+			body: `submit_agent_feedback(scores=JSON.stringify({quality:8, completeness:9, efficiency:7}))`,
+		},
+		{
+			name: "JSON stringify with score variables",
+			body: `submit_agent_feedback(scores=JSON.stringify({quality, completeness, efficiency}))`,
+		},
+		{
+			name: "JSON string literal",
+			body: `submit_agent_feedback(scores='{"quality":8,"completeness":9,"efficiency":7}')`,
+		},
+		{
+			name:    "raw object with explicit scores",
+			body:    `submit_agent_feedback(scores={quality:8, completeness:9, efficiency:7})`,
+			wantErr: true,
+		},
+		{
+			name:    "raw object with score variables",
+			body:    `submit_agent_feedback(scores={quality, completeness, efficiency})`,
+			wantErr: true,
+		},
+		{
+			name:    "serialized scores missing a dimension",
+			body:    `submit_agent_feedback(scores=JSON.stringify({quality:8, completeness:9}))`,
+			wantErr: true,
+		},
+		{
+			name:    "unserialized score variable",
+			body:    `submit_agent_feedback(scores=scores)`,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSerializedFeedbackCall(tt.body)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateSerializedFeedbackCall() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func validateSerializedFeedbackCall(body string) error {
+	calls := regexp.MustCompile(`submit_agent_feedback\s*\(`).FindAllStringIndex(body, -1)
+	if len(calls) != 1 {
+		return fmt.Errorf("runtime has %d submit_agent_feedback calls, want exactly one", len(calls))
+	}
+	lineEnd := strings.IndexByte(body[calls[0][0]:], '\n')
+	if lineEnd < 0 {
+		lineEnd = len(body) - calls[0][0]
+	}
+	callLine := body[calls[0][0] : calls[0][0]+lineEnd]
+	jsonStringify := regexp.MustCompile(`scores\s*=\s*JSON\.stringify\s*\(\s*\{\s*quality\s*(?::\s*[^,}\n]+)?\s*,\s*completeness\s*(?::\s*[^,}\n]+)?\s*,\s*efficiency\s*(?::\s*[^,}\n]+)?\s*\}\s*\)`)
+	singleQuotedJSON := regexp.MustCompile(`scores\s*=\s*'\s*\{\s*"quality"\s*:\s*[^,}\n]+\s*,\s*"completeness"\s*:\s*[^,}\n]+\s*,\s*"efficiency"\s*:\s*[^,}\n]+\s*\}\s*'`)
+	if !jsonStringify.MatchString(callLine) && !singleQuotedJSON.MatchString(callLine) {
+		return fmt.Errorf("submit_agent_feedback scores must be an explicit JSON string serialization")
+	}
+	return nil
+}
+
+func readRuntimeContractFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(raw)
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
+}
+
 func TestSeednoteRuntimeDeliveryContracts(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -165,6 +338,7 @@ func TestSeednoteRuntimeDeliveryContractRejectsMutations(t *testing.T) {
 		{name: "template failure becomes blocking", body: strings.Replace(valid, "不阻塞", "会阻塞", 1)},
 		{name: "template tags omit JSON stringify", body: strings.Replace(valid, "JSON.stringify(template-meta.tags)", "template-meta.tags", 1)},
 		{name: "template adds unsupported structure", body: strings.Replace(valid, "style_prompt=", "structure=viral-template.json, style_prompt=", 1)},
+		{name: "feedback scores become raw object", body: strings.Replace(valid, `scores='{"quality":8,"completeness":8,"efficiency":8}'`, `scores={"quality":8,"completeness":8,"efficiency":8}`, 1)},
 		{name: "feedback precedes final report", body: swapFirstOccurrences(valid, "#### 步骤 12：最终报告", "submit_agent_feedback(")},
 	}
 	for _, tt := range tests {
@@ -255,6 +429,9 @@ func validateSeednoteRuntimeDocument(body string) error {
 	feedbackCalls := regexp.MustCompile(`submit_agent_feedback\s*\(`).FindAllStringIndex(body, -1)
 	if len(feedbackCalls) != 1 {
 		return fmt.Errorf("Seednote runtime has %d submit_agent_feedback calls, want exactly one", len(feedbackCalls))
+	}
+	if err := validateSerializedFeedbackCall(body); err != nil {
+		return err
 	}
 	if feedbackCalls[0][0] <= reportAt {
 		return fmt.Errorf("Seednote feedback must occur after the final report")
