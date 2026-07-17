@@ -2,6 +2,7 @@ package billing
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -38,71 +39,9 @@ func TestProductionBillingBundleMatchesPolicy(t *testing.T) {
 	}
 }
 
-func TestProductionTaskCatalogHasExactInitialCoverage(t *testing.T) {
-	type expectedTask struct {
-		price    int64
-		delivery string
-	}
-	want := map[string]expectedTask{
-		"task.article":        {price: 6000, delivery: "article_artifacts_verified"},
-		"task.seednote":       {price: 5000, delivery: "seednote_artifacts_verified"},
-		"task.moments":        {price: 3000, delivery: "moments_artifacts_verified"},
-		"task.ecommerce":      {price: 3000, delivery: "ecommerce_artifacts_verified"},
-		"task.videocreator":   {price: 2000, delivery: "final_video_verified"},
-		"task.videoeditor":    {price: 2000, delivery: "edited_video_verified"},
-		"task.montage":        {price: 2000, delivery: "montage_artifacts_verified"},
-		"task.viral_analysis": {price: 1200, delivery: "viral_analysis_report_verified"},
-	}
-	seen := make(map[string]int)
-	for _, sku := range loadProductionBundle(t).Products.SKUs {
-		if sku.ChargePolicy != "task_admission" {
-			continue
-		}
-		expected, ok := want[sku.Operation]
-		if !ok {
-			t.Fatalf("unexpected task operation %q", sku.Operation)
-		}
-		seen[sku.Operation]++
-		if sku.Route != "" || sku.PriceCredits != expected.price || sku.Delivery != expected.delivery {
-			t.Fatalf("task SKU %q = %#v, want price=%d delivery=%q and no route", sku.Operation, sku, expected.price, expected.delivery)
-		}
-	}
-	for operation := range want {
-		if seen[operation] != 1 {
-			t.Fatalf("task operation %q occurs %d times, want exactly once", operation, seen[operation])
-		}
-	}
-}
-
-func TestProductionImageCatalogHasExactInitialCoverage(t *testing.T) {
-	type imageIdentity struct {
-		operation string
-		policy    string
-		route     string
-	}
-	want := map[imageIdentity]bool{
-		{operation: "mcp.generate_image", policy: "accepted_task_operation", route: "image_generation.cover"}:               true,
-		{operation: "mcp.generate_image", policy: "accepted_task_operation", route: "image_generation.content"}:             true,
-		{operation: "designer.generate_image", policy: "standalone_operation", route: "image_generation.designer.seedream"}: true,
-	}
-	seen := make(map[imageIdentity]int)
-	for _, sku := range loadProductionBundle(t).Products.SKUs {
-		if !strings.HasPrefix(sku.Route, "image_generation.") {
-			continue
-		}
-		identity := imageIdentity{operation: sku.Operation, policy: sku.ChargePolicy, route: sku.Route}
-		if !want[identity] {
-			t.Fatalf("unexpected image SKU mapping %#v", sku)
-		}
-		seen[identity]++
-		if sku.PriceCredits != 500 || sku.Delivery != "persisted_image" {
-			t.Fatalf("image SKU mapping %#v must cost 500 credits and persist an image", sku)
-		}
-	}
-	for identity := range want {
-		if seen[identity] != 1 {
-			t.Fatalf("image mapping %#v occurs %d times, want exactly once", identity, seen[identity])
-		}
+func TestProductionRetailCatalogHasExactInitialCoverage(t *testing.T) {
+	if err := initialRetailCatalogContractError(loadProductionBundle(t).Products); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -161,14 +100,39 @@ func TestProductionPromotionsContainOnlyFirstPaidTopUpReferral(t *testing.T) {
 	}
 }
 
-func TestProductionRetailCatalogDocumentsPreCutoverBoundary(t *testing.T) {
-	for _, sku := range loadProductionBundle(t).Products.SKUs {
-		identity := strings.ToLower(sku.ID + " " + sku.Operation + " " + sku.Route)
-		// Exact video selector SKUs and GPT Image 2 quality/size SKUs are published
-		// by Plan 3 Task 5. Their absence keeps this foundation non-cutover-ready.
-		if strings.Contains(identity, "gpt-image") || strings.Contains(identity, "gpt_image") || strings.Contains(sku.Route, "video_generation.") {
-			t.Fatalf("pre-cutover retail catalog unexpectedly exposes %q", identity)
-		}
+func TestInitialRetailCatalogContractRejectsUnsupportedAdditions(t *testing.T) {
+	production := loadProductionBundle(t).Products
+	tests := []struct {
+		name string
+		sku  SKUConfig
+		want string
+	}{
+		{
+			name: "arbitrary extra SKU",
+			sku: SKUConfig{
+				ID: "extra.arbitrary.v1", Operation: "extra.arbitrary", ChargePolicy: "standalone_operation",
+				PriceCredits: 1, Route: "extra.arbitrary", Delivery: "extra",
+			},
+			want: "unexpected SKU",
+		},
+		{
+			name: "exact video generation route",
+			sku: SKUConfig{
+				ID: "video.pre-cutover.v1", Operation: "other.operation", ChargePolicy: "standalone_operation",
+				PriceCredits: 1, Route: "video_generation", Delivery: "video",
+			},
+			want: "video_generation",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog := production
+			catalog.SKUs = append(append([]SKUConfig(nil), production.SKUs...), tt.sku)
+			err := initialRetailCatalogContractError(catalog)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("contract error = %v, want error containing %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -272,4 +236,52 @@ func writeProductionBundle(t *testing.T, overrides map[string]string) string {
 		}
 	}
 	return dir
+}
+
+func initialRetailCatalogContractError(catalog ProductCatalog) error {
+	want := map[SKUConfig]struct{}{
+		{ID: "task.article.standard.v1", Operation: "task.article", ChargePolicy: "task_admission", PriceCredits: 6000, Delivery: "article_artifacts_verified"}:                                                     {},
+		{ID: "task.seednote.standard.v1", Operation: "task.seednote", ChargePolicy: "task_admission", PriceCredits: 5000, Delivery: "seednote_artifacts_verified"}:                                                  {},
+		{ID: "task.moments.standard.v1", Operation: "task.moments", ChargePolicy: "task_admission", PriceCredits: 3000, Delivery: "moments_artifacts_verified"}:                                                     {},
+		{ID: "task.ecommerce.standard.v1", Operation: "task.ecommerce", ChargePolicy: "task_admission", PriceCredits: 3000, Delivery: "ecommerce_artifacts_verified"}:                                               {},
+		{ID: "task.videocreator.standard.v1", Operation: "task.videocreator", ChargePolicy: "task_admission", PriceCredits: 2000, Delivery: "final_video_verified"}:                                                 {},
+		{ID: "task.videoeditor.standard.v1", Operation: "task.videoeditor", ChargePolicy: "task_admission", PriceCredits: 2000, Delivery: "edited_video_verified"}:                                                  {},
+		{ID: "task.montage.standard.v1", Operation: "task.montage", ChargePolicy: "task_admission", PriceCredits: 2000, Delivery: "montage_artifacts_verified"}:                                                     {},
+		{ID: "task.viral-analysis.standard.v1", Operation: "task.viral_analysis", ChargePolicy: "task_admission", PriceCredits: 1200, Delivery: "viral_analysis_report_verified"}:                                   {},
+		{ID: "image.seedream.cover.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Route: "image_generation.cover", Delivery: "persisted_image"}:                  {},
+		{ID: "image.seedream.content.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Route: "image_generation.content", Delivery: "persisted_image"}:              {},
+		{ID: "image.seedream.designer.v1", Operation: "designer.generate_image", ChargePolicy: "standalone_operation", PriceCredits: 500, Route: "image_generation.designer.seedream", Delivery: "persisted_image"}: {},
+	}
+	if catalog.CatalogID != "retail-2026-07-17-v1" || catalog.Currency != "credits" {
+		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
+	}
+	seen := make(map[SKUConfig]int, len(catalog.SKUs))
+	for _, sku := range catalog.SKUs {
+		route := strings.ToLower(strings.TrimSpace(sku.Route))
+		// Exact video selector SKUs and GPT Image 2 quality/size SKUs are published
+		// by Plan 3 Task 5. Their absence keeps this foundation non-cutover-ready.
+		if route == "video_generation" || strings.HasPrefix(route, "video_generation.") {
+			return fmt.Errorf("pre-cutover retail catalog exposes video route %q", sku.Route)
+		}
+		identity := strings.ToLower(sku.ID + " " + sku.Operation + " " + sku.Route)
+		if strings.Contains(identity, "gpt-image") || strings.Contains(identity, "gpt_image") {
+			return fmt.Errorf("pre-cutover retail catalog exposes GPT Image SKU %q", sku.ID)
+		}
+		if _, ok := want[sku]; !ok {
+			return fmt.Errorf("unexpected SKU identity %#v", sku)
+		}
+		seen[sku]++
+		if seen[sku] != 1 {
+			return fmt.Errorf("SKU identity %#v occurs %d times", sku, seen[sku])
+		}
+	}
+	if len(catalog.SKUs) != len(want) {
+		return fmt.Errorf("retail SKU count = %d, want %d", len(catalog.SKUs), len(want))
+	}
+	for sku := range want {
+		if seen[sku] != 1 {
+			return fmt.Errorf("missing SKU identity %#v", sku)
+		}
+	}
+	return nil
 }
