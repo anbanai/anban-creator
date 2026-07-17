@@ -193,7 +193,6 @@ func TestAgentDockerfileUsesOpenHandsAgentRuntime(t *testing.T) {
 		"mcporter --version",
 		"gh --version",
 		"COPY claudecode/",
-		"COPY third_party/OpenMontage/ /app/third_party/OpenMontage/",
 		"COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/",
 		"ENV AGENT_REACH_VENV=/opt/agent-reach-venv",
 		`python3 -m venv "$AGENT_REACH_VENV"`,
@@ -202,13 +201,55 @@ func TestAgentDockerfileUsesOpenHandsAgentRuntime(t *testing.T) {
 		`"$AGENT_REACH_VENV/bin/agent-reach" --version`,
 		`ENV PATH="${AGENT_REACH_VENV}/bin:${PATH}"`,
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
-		"ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage",
 		"npx -y skills@latest add heygen-com/hyperframes",
 		"--skill music-to-video",
 		"--skill slideshow",
 		"npx -y skills@latest add remotion-dev/skills",
 		"--skill remotion-best-practices",
 		"claude plugin install --scope user anban@anbanai",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s missing %q", path, want)
+		}
+	}
+	for _, forbidden := range []string{"COPY third_party/OpenMontage/", "ANBAN_MONTAGE_SUBMODULE_PATH"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("%s content runtime must not contain Montage dependency %q", path, forbidden)
+		}
+	}
+}
+
+func TestDockerRuntimeProfiles(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{"Dockerfile.agent", "Dockerfile.agent-montage"} {
+		path := filepath.Join(root, name)
+		body := readTextFile(t, path)
+		for _, want := range []string{
+			"ARG CLAUDE_CODE_VERSION=2.1.208",
+			"COPY --from=builder /out/anban",
+			"COPY claudecode/",
+			"ENTRYPOINT",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing %q", path, want)
+			}
+		}
+	}
+}
+
+func TestMontageRuntimeImageContract(t *testing.T) {
+	path := filepath.Join(repositoryRoot(t), "Dockerfile.agent-montage")
+	body := readTextFile(t, path)
+	for _, want := range []string{
+		"ARG OPENMONTAGE_REVISION",
+		"COPY third_party/OpenMontage/ /app/third_party/OpenMontage/",
+		"requirements.txt",
+		"remotion-composer/package-lock.json",
+		"npm ci",
+		"registry.discover()",
+		"load_pipeline",
+		".anban-source-revision",
+		"ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("%s missing %q", path, want)

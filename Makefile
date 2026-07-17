@@ -6,6 +6,7 @@
 BINARY      := anban-creator-server
 BINDIR      := bin
 AGENT_IMAGE := creator-agent:latest
+MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
 SERVER_IMAGE := anban-creator-server:latest
 STUDIO_IMAGE := anban-creator-studio:latest
 SERVER_CONFIG := server/config.yaml
@@ -15,7 +16,7 @@ SERVER_CONFIG := server/config.yaml
         agent-build-native plugin-binaries \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-server-image docker-studio-image docker-images
+        docker-agent-image docker-montage-agent-image docker-server-image docker-studio-image docker-images
 
 # Default target
 all: server-build
@@ -138,6 +139,15 @@ docker-agent-image:
 	docker build -f Dockerfile.agent -t $(AGENT_IMAGE) . && \
 	echo "Image build complete: $(AGENT_IMAGE)"
 
+# Build the dedicated Montage Agent image with an immutable OpenMontage template.
+docker-montage-agent-image:
+	@git submodule update --init --recursive third_party/OpenMontage claudecode
+	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
+	docker build -f Dockerfile.agent-montage \
+	  --build-arg OPENMONTAGE_REVISION=$$(git -C third_party/OpenMontage rev-parse HEAD) \
+	  -t $(MONTAGE_AGENT_IMAGE) . && \
+	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
+
 # Build the anban-creator-server Docker image
 docker-server-image:
 	@git submodule update --init --recursive
@@ -152,7 +162,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all application images
-docker-images: docker-agent-image docker-server-image docker-studio-image
+docker-images: docker-agent-image docker-montage-agent-image docker-server-image docker-studio-image
 
 # Backward-compatible alias (builds agent image)
 docker-image: docker-agent-image
@@ -222,6 +232,7 @@ help:
 	@echo "  make docker-down        - Stop containers"
 	@echo "  make docker-logs        - Follow container logs"
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
+	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
 	@echo "  make docker-studio-image - Build Studio image (Bun + nginx)"
 	@echo "  make docker-images      - Build all application images"
