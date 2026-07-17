@@ -59,14 +59,43 @@ func TestBillingWalletAccountDisplayBalanceAndValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.account.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			validateErr := tt.account.Validate()
+			if (validateErr != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", validateErr, tt.wantErr)
 			}
-			if !tt.wantErr && tt.account.DisplayBalance() != tt.want {
-				t.Fatalf("DisplayBalance() = %d, want %d", tt.account.DisplayBalance(), tt.want)
+			got, displayErr := tt.account.DisplayBalance()
+			if (displayErr != nil) != tt.wantErr {
+				t.Fatalf("DisplayBalance() error = %v, wantErr %v", displayErr, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Fatalf("DisplayBalance() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBillingWalletAccountDatabaseRejectsSpendableOverflow(t *testing.T) {
+	db := openBillingModelTestDB(t)
+	if err := db.AutoMigrate(&BillingWalletAccount{}); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+
+	overflow := BillingWalletAccount{
+		UserID:             uuid.NewString(),
+		PaidCredits:        math.MaxInt64,
+		PromotionalCredits: 1,
+	}
+	if err := db.Create(&overflow).Error; err == nil {
+		t.Fatal("wallet account with overflowing spendable credits unexpectedly persisted")
+	}
+
+	negativeDisplay := BillingWalletAccount{
+		UserID:      uuid.NewString(),
+		PaidCredits: 1,
+		DebtCredits: 2,
+	}
+	if err := db.Create(&negativeDisplay).Error; err != nil {
+		t.Fatalf("persist valid negative display balance: %v", err)
 	}
 }
 
@@ -329,6 +358,103 @@ func TestBillingChargeTaskIdentityConstraint(t *testing.T) {
 	}
 }
 
+func TestBillingAcceptedTaskOperationIdentityConstraints(t *testing.T) {
+	db := openBillingModelTestDB(t)
+	if err := db.AutoMigrate(&BillingCharge{}); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+
+	for _, missingField := range []string{"operation_task_id", "attempt_id", "tool_call_id"} {
+		t.Run("missing_"+missingField, func(t *testing.T) {
+			charge := validPersistedAcceptedOperationCharge()
+			switch missingField {
+			case "operation_task_id":
+				charge.OperationTaskID = nil
+			case "attempt_id":
+				charge.AttemptID = nil
+			case "tool_call_id":
+				charge.ToolCallID = nil
+			}
+			if err := db.Create(&charge).Error; err == nil {
+				t.Fatalf("accepted-task operation without %s unexpectedly persisted", missingField)
+			}
+		})
+	}
+
+	original := validPersistedAcceptedOperationCharge()
+	if err := db.Create(&original).Error; err != nil {
+		t.Fatalf("create accepted-task operation: %v", err)
+	}
+	duplicate := original
+	duplicate.ID = uuid.NewString()
+	duplicate.IdempotencyKey = uuid.NewString()
+	duplicate.ResourceID = uuid.NewString()
+	if err := db.Create(&duplicate).Error; err == nil {
+		t.Fatal("duplicate accepted-task operation identity unexpectedly persisted")
+	}
+
+	standalone := validPersistedAcceptedOperationCharge()
+	standalone.Policy = "standalone_operation"
+	standalone.OperationTaskID = nil
+	standalone.AttemptID = nil
+	standalone.ToolCallID = nil
+	if err := db.Create(&standalone).Error; err != nil {
+		t.Fatalf("standalone operation without task tool identity: %v", err)
+	}
+
+	if got, want := billingIndexColumns(t, db, "idx_billing_charge_tool_identity"), []string{
+		"operation_task_id", "attempt_id", "tool_call_id", "catalog_id", "sku_id",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("operation charge unique index columns = %v, want %v", got, want)
+	}
+}
+
+func TestBillingChargeReversalPersistenceConstraints(t *testing.T) {
+	t.Run("reversal requires original identity", func(t *testing.T) {
+		db := openBillingModelTestDB(t)
+		if err := db.AutoMigrate(&BillingCharge{}); err != nil {
+			t.Fatalf("AutoMigrate: %v", err)
+		}
+		charge := validPersistedBillingCharge(uuid.NewString())
+		charge.Kind = BillingChargeKindReversal
+		if err := db.Create(&charge).Error; err == nil {
+			t.Fatal("reversal without reversal_of_id unexpectedly persisted")
+		}
+	})
+
+	t.Run("original charge rejects reversal identity", func(t *testing.T) {
+		db := openBillingModelTestDB(t)
+		if err := db.AutoMigrate(&BillingCharge{}); err != nil {
+			t.Fatalf("AutoMigrate: %v", err)
+		}
+		charge := validPersistedBillingCharge(uuid.NewString())
+		originalID := uuid.NewString()
+		charge.ReversalOfID = &originalID
+		if err := db.Create(&charge).Error; err == nil {
+			t.Fatal("non-reversal charge with reversal_of_id unexpectedly persisted")
+		}
+	})
+
+	t.Run("original charge can be reversed once", func(t *testing.T) {
+		db := openBillingModelTestDB(t)
+		if err := db.AutoMigrate(&BillingCharge{}); err != nil {
+			t.Fatalf("AutoMigrate: %v", err)
+		}
+		originalID := uuid.NewString()
+		first := validPersistedReversalCharge(originalID)
+		if err := db.Create(&first).Error; err != nil {
+			t.Fatalf("create first reversal: %v", err)
+		}
+		duplicate := validPersistedReversalCharge(originalID)
+		if err := db.Create(&duplicate).Error; err == nil {
+			t.Fatal("duplicate reversal_of_id unexpectedly persisted")
+		}
+		if got, want := billingIndexColumns(t, db, "idx_billing_charge_reversal"), []string{"reversal_of_id"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("reversal unique index columns = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestBillingChargeDatabaseRejectsUnbalancedComponents(t *testing.T) {
 	for _, status := range []BillingChargeStatus{
 		BillingChargeStatusPending,
@@ -358,7 +484,7 @@ func TestBillingChargeDatabaseRejectsUnbalancedComponents(t *testing.T) {
 	}
 }
 
-func TestBillingWalletEntryAllowsAbsentExternalSourceIdentity(t *testing.T) {
+func TestBillingWalletEntryNonTopUpAllowsAbsentExternalSourceIdentity(t *testing.T) {
 	db := openBillingModelTestDB(t)
 	if err := db.AutoMigrate(&BillingWalletEntry{}); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
@@ -370,6 +496,71 @@ func TestBillingWalletEntryAllowsAbsentExternalSourceIdentity(t *testing.T) {
 	}
 	if err := db.Create(&entries).Error; err != nil {
 		t.Fatalf("create entries without external source identities: %v", err)
+	}
+}
+
+func TestBillingWalletEntryTopUpSourceIdentityConstraints(t *testing.T) {
+	for _, invalid := range []struct {
+		name       string
+		sourceType *string
+		sourceID   *string
+	}{
+		{name: "missing both"},
+		{name: "missing source type", sourceID: stringPointer("payment-1")},
+		{name: "missing source id", sourceType: stringPointer("wechatpay")},
+		{name: "empty source type", sourceType: stringPointer(""), sourceID: stringPointer("payment-2")},
+		{name: "empty source id", sourceType: stringPointer("wechatpay"), sourceID: stringPointer("")},
+	} {
+		t.Run(invalid.name, func(t *testing.T) {
+			db := openBillingModelTestDB(t)
+			if err := db.AutoMigrate(&BillingWalletEntry{}); err != nil {
+				t.Fatalf("AutoMigrate: %v", err)
+			}
+			entry := validPersistedDebtOnlyTopUpEntry()
+			entry.SourceType = invalid.sourceType
+			entry.SourceID = invalid.sourceID
+			if err := db.Create(&entry).Error; err == nil {
+				t.Fatal("top-up without a complete external source identity unexpectedly persisted")
+			}
+		})
+	}
+
+	db := openBillingModelTestDB(t)
+	if err := db.AutoMigrate(&BillingWalletEntry{}); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+	first := validPersistedDebtOnlyTopUpEntry()
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("create debt-only top-up entry: %v", err)
+	}
+	duplicate := validPersistedDebtOnlyTopUpEntry()
+	duplicate.SourceType = first.SourceType
+	duplicate.SourceID = first.SourceID
+	if err := db.Create(&duplicate).Error; err == nil {
+		t.Fatal("duplicate external top-up identity unexpectedly persisted")
+	}
+	if got, want := billingIndexColumns(t, db, "idx_billing_wallet_entry_source"), []string{"source_type", "source_id"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("wallet entry source unique index columns = %v, want %v", got, want)
+	}
+}
+
+func TestBillingReferralIssueIdentityConstraint(t *testing.T) {
+	db := openBillingModelTestDB(t)
+	if err := db.AutoMigrate(&BillingReferralIssue{}); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+
+	inviteeUserID := uuid.NewString()
+	first := validPersistedBillingReferralIssue(inviteeUserID)
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("create referral issue: %v", err)
+	}
+	duplicate := validPersistedBillingReferralIssue(inviteeUserID)
+	if err := db.Create(&duplicate).Error; err == nil {
+		t.Fatal("duplicate invitee and referral program unexpectedly persisted")
+	}
+	if got, want := billingIndexColumns(t, db, "idx_billing_referral_invitee_program"), []string{"invitee_user_id", "program_id"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("referral unique index columns = %v, want %v", got, want)
 	}
 }
 
@@ -451,6 +642,64 @@ func validPersistedBillingCharge(taskID string) BillingCharge {
 	}
 }
 
+func validPersistedAcceptedOperationCharge() BillingCharge {
+	operationTaskID := uuid.NewString()
+	attemptID := uuid.NewString()
+	toolCallID := uuid.NewString()
+	return BillingCharge{
+		ID:                 uuid.NewString(),
+		UserID:             uuid.NewString(),
+		CatalogID:          "retail-v1",
+		SKUID:              "image.seedream.standard.v1",
+		ResourceType:       "image",
+		ResourceID:         uuid.NewString(),
+		Kind:               BillingChargeKindOperation,
+		Policy:             "accepted_task_operation",
+		Status:             BillingChargeStatusPending,
+		PriceCredits:       100,
+		PaidCredits:        100,
+		OperationTaskID:    &operationTaskID,
+		AttemptID:          &attemptID,
+		ToolCallID:         &toolCallID,
+		IdempotencyScope:   "operation-charge",
+		IdempotencyKey:     uuid.NewString(),
+		RequestFingerprint: strings.Repeat("b", 64),
+	}
+}
+
+func validPersistedReversalCharge(originalID string) BillingCharge {
+	charge := validPersistedBillingCharge(uuid.NewString())
+	charge.Kind = BillingChargeKindReversal
+	charge.ReversalOfID = &originalID
+	return charge
+}
+
+func validPersistedDebtOnlyTopUpEntry() BillingWalletEntry {
+	return BillingWalletEntry{
+		ID:               uuid.NewString(),
+		UserID:           uuid.NewString(),
+		EventKind:        BillingWalletEventKindTopUp,
+		DebtDelta:        -100,
+		SourceType:       stringPointer("wechatpay"),
+		SourceID:         stringPointer(uuid.NewString()),
+		IdempotencyScope: "top-up",
+		IdempotencyKey:   uuid.NewString(),
+	}
+}
+
+func validPersistedBillingReferralIssue(inviteeUserID string) BillingReferralIssue {
+	return BillingReferralIssue{
+		ID:            uuid.NewString(),
+		ProgramID:     "referral-first-topup-v1",
+		CatalogID:     "promotion-v1",
+		InviteeUserID: inviteeUserID,
+		InviterUserID: uuid.NewString(),
+		Status:        "pending",
+	}
+}
+
+func stringPointer(value string) *string { return &value }
+
 func openBillingModelTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -465,4 +714,19 @@ func assertBillingIndex(t *testing.T, db *gorm.DB, model any, name string) {
 	if !db.Migrator().HasIndex(model, name) {
 		t.Errorf("%T missing index %s", model, name)
 	}
+}
+
+func billingIndexColumns(t *testing.T, db *gorm.DB, name string) []string {
+	t.Helper()
+	var columns []struct {
+		Name string
+	}
+	if err := db.Raw("PRAGMA index_info('" + name + "')").Scan(&columns).Error; err != nil {
+		t.Fatalf("inspect index %s: %v", name, err)
+	}
+	result := make([]string, 0, len(columns))
+	for _, column := range columns {
+		result = append(result, column.Name)
+	}
+	return result
 }

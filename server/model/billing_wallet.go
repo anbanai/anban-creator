@@ -54,7 +54,7 @@ const (
 // BillingWalletAccount is a rebuildable projection of a user's wallet.
 type BillingWalletAccount struct {
 	UserID             string    `gorm:"type:char(36);primaryKey" json:"user_id"`
-	PaidCredits        int64     `gorm:"not null;default:0;check:chk_billing_wallet_paid,paid_credits >= 0" json:"paid_credits"`
+	PaidCredits        int64     `gorm:"not null;default:0;check:chk_billing_wallet_paid_spendable,paid_credits >= 0 AND paid_credits <= 9223372036854775807 - promotional_credits" json:"paid_credits"`
 	PromotionalCredits int64     `gorm:"not null;default:0;check:chk_billing_wallet_promotional,promotional_credits >= 0" json:"promotional_credits"`
 	DebtCredits        int64     `gorm:"not null;default:0;check:chk_billing_wallet_debt,debt_credits >= 0" json:"debt_credits"`
 	Version            int64     `gorm:"not null;default:0;check:chk_billing_wallet_version,version >= 0" json:"version"`
@@ -64,27 +64,26 @@ type BillingWalletAccount struct {
 
 func (BillingWalletAccount) TableName() string { return "billing_wallet_accounts" }
 
-// DisplayBalance returns paid plus promotional credits less debt. Persisted
-// accounts must pass Validate before their projection is used.
-func (a BillingWalletAccount) DisplayBalance() int64 {
-	balance, _ := a.validatedDisplayBalance()
-	return balance
+// DisplayBalance returns paid plus promotional credits less debt and rejects
+// invalid projections rather than returning an ambiguous numeric value.
+func (a BillingWalletAccount) DisplayBalance() (int64, error) {
+	if a.PaidCredits < 0 {
+		return 0, fmt.Errorf("paid credits must be nonnegative")
+	}
+	if a.PromotionalCredits < 0 {
+		return 0, fmt.Errorf("promotional credits must be nonnegative")
+	}
+	if a.DebtCredits < 0 {
+		return 0, fmt.Errorf("debt credits must be nonnegative")
+	}
+	if a.Version < 0 {
+		return 0, fmt.Errorf("version must be nonnegative")
+	}
+	return a.validatedDisplayBalance()
 }
 
 func (a BillingWalletAccount) Validate() error {
-	if a.PaidCredits < 0 {
-		return fmt.Errorf("paid credits must be nonnegative")
-	}
-	if a.PromotionalCredits < 0 {
-		return fmt.Errorf("promotional credits must be nonnegative")
-	}
-	if a.DebtCredits < 0 {
-		return fmt.Errorf("debt credits must be nonnegative")
-	}
-	if a.Version < 0 {
-		return fmt.Errorf("version must be nonnegative")
-	}
-	_, err := a.validatedDisplayBalance()
+	_, err := a.DisplayBalance()
 	return err
 }
 
@@ -162,7 +161,7 @@ func (l BillingCreditLot) Validate() error {
 type BillingWalletEntry struct {
 	ID               string                 `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID           string                 `gorm:"type:char(36);index:idx_billing_wallet_entry_user_created,priority:1;not null" json:"user_id"`
-	EventKind        BillingWalletEventKind `gorm:"type:varchar(32);index;not null" json:"event_kind"`
+	EventKind        BillingWalletEventKind `gorm:"type:varchar(32);index;not null;check:chk_billing_wallet_entry_topup_source,event_kind <> 'topup' OR (source_type IS NOT NULL AND TRIM(source_type) <> '' AND source_id IS NOT NULL AND TRIM(source_id) <> '')" json:"event_kind"`
 	PaidDelta        int64                  `gorm:"not null" json:"paid_delta"`
 	PromotionalDelta int64                  `gorm:"not null" json:"promotional_delta"`
 	DebtDelta        int64                  `gorm:"not null" json:"debt_delta"`
@@ -238,12 +237,12 @@ type BillingCharge struct {
 	ID                 string              `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID             string              `gorm:"type:char(36);index;not null" json:"user_id"`
 	CatalogID          string              `gorm:"type:varchar(128);index;uniqueIndex:idx_billing_charge_tool_identity,priority:4;not null" json:"catalog_id"`
-	SKUID              string              `gorm:"type:varchar(128);index;uniqueIndex:idx_billing_charge_tool_identity,priority:5;not null" json:"sku_id"`
+	SKUID              string              `gorm:"column:sku_id;type:varchar(128);index;uniqueIndex:idx_billing_charge_tool_identity,priority:5;not null" json:"sku_id"`
 	QuoteID            *string             `gorm:"type:char(36);index" json:"quote_id,omitempty"`
 	ResourceType       string              `gorm:"type:varchar(40);index:idx_billing_charge_resource,priority:1;not null" json:"resource_type"`
 	ResourceID         string              `gorm:"type:varchar(128);index:idx_billing_charge_resource,priority:2;not null" json:"resource_id"`
 	Kind               BillingChargeKind   `gorm:"column:charge_kind;type:varchar(20);index;uniqueIndex:idx_billing_charge_task_identity,priority:2;not null;check:chk_billing_charge_task_id,charge_kind <> 'task' OR task_id IS NOT NULL" json:"kind"`
-	Policy             string              `gorm:"type:varchar(40);index;not null" json:"policy"`
+	Policy             string              `gorm:"type:varchar(40);index;not null;check:chk_billing_charge_accepted_operation_identity,policy <> 'accepted_task_operation' OR (charge_kind = 'operation' AND operation_task_id IS NOT NULL AND TRIM(operation_task_id) <> '' AND attempt_id IS NOT NULL AND TRIM(attempt_id) <> '' AND tool_call_id IS NOT NULL AND TRIM(tool_call_id) <> '')" json:"policy"`
 	Status             BillingChargeStatus `gorm:"type:varchar(20);index;not null" json:"status"`
 	PriceCredits       int64               `gorm:"not null;check:chk_billing_charge_conservation,price_credits >= 0 AND price_credits = paid_credits + promotional_credits + debt_credits" json:"price_credits"`
 	PaidCredits        int64               `gorm:"not null;check:chk_billing_charge_paid,paid_credits >= 0" json:"paid_credits"`
@@ -255,7 +254,7 @@ type BillingCharge struct {
 	ToolCallID         *string             `gorm:"type:varchar(128);index;uniqueIndex:idx_billing_charge_tool_identity,priority:3" json:"tool_call_id,omitempty"`
 	IdempotencyScope   string              `gorm:"type:varchar(80);uniqueIndex:idx_billing_charge_idempotency,priority:1;not null" json:"idempotency_scope"`
 	IdempotencyKey     string              `gorm:"type:varchar(128);uniqueIndex:idx_billing_charge_idempotency,priority:2;not null" json:"idempotency_key"`
-	ReversalOfID       *string             `gorm:"type:char(36);uniqueIndex:idx_billing_charge_reversal" json:"reversal_of_id,omitempty"`
+	ReversalOfID       *string             `gorm:"type:char(36);uniqueIndex:idx_billing_charge_reversal;check:chk_billing_charge_reversal_identity,(charge_kind = 'reversal' AND reversal_of_id IS NOT NULL AND TRIM(reversal_of_id) <> '') OR (charge_kind <> 'reversal' AND reversal_of_id IS NULL)" json:"reversal_of_id,omitempty"`
 	RequestFingerprint string              `gorm:"type:char(64);not null" json:"request_fingerprint"`
 	ActorType          string              `gorm:"type:varchar(40)" json:"actor_type,omitempty"`
 	ActorID            string              `gorm:"type:varchar(128)" json:"actor_id,omitempty"`
