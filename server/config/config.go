@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/model"
 )
 
@@ -40,6 +41,8 @@ type Config struct {
 	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
 	ModelPrices        ModelPricesConfig               `yaml:"model_prices"`
 	Billing            BillingConfig                   `yaml:"billing"`
+	BillingRuntime     BillingRuntimeConfig            `yaml:"billing_runtime" json:"billing_runtime"`
+	BillingBundle      *serverbilling.Bundle           `yaml:"-" json:"-"`
 	RechargeTiers      []RechargeTierConfig            `yaml:"recharge_tiers"`
 	ImageUnderstanding UnderstandingRuntimeConfig      `yaml:"-"`
 	VideoUnderstanding VideoUnderstandingRuntimeConfig `yaml:"-"`
@@ -556,6 +559,13 @@ type BillingConfig struct {
 	TierMultipliers       map[string]float64 `yaml:"tier_multipliers" json:"tier_multipliers"`
 	DefaultUserMultiplier float64            `yaml:"default_user_multiplier" json:"default_user_multiplier"`
 	MinimumChargeCredits  int                `yaml:"minimum_charge_credits" json:"minimum_charge_credits"`
+}
+
+// BillingRuntimeConfig points the server at the strict fixed-SKU billing
+// catalogs. It remains optional until the forward cutover publishes them.
+type BillingRuntimeConfig struct {
+	ConfigDir   string `yaml:"config_dir" json:"config_dir"`
+	AdminAPIKey string `yaml:"admin_api_key" json:"-"`
 }
 
 type RechargeTierConfig struct {
@@ -1353,7 +1363,17 @@ func NewConfig(path string) (*Config, error) {
 	if err := cfg.deriveModelRouteRuntimeConfig(); err != nil {
 		return nil, err
 	}
-	cfg.resolvePaths()
+	configPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve config file path: %w", err)
+	}
+	cfg.resolvePaths(filepath.Dir(configPath))
+	if cfg.BillingRuntime.ConfigDir != "" {
+		cfg.BillingBundle, err = serverbilling.LoadBundle(cfg.BillingRuntime.ConfigDir)
+		if err != nil {
+			return nil, fmt.Errorf("load billing bundle: %w", err)
+		}
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -1393,6 +1413,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"model_routes":    true,
 		"model_prices":    true,
 		"billing":         true,
+		"billing_runtime": true,
 		"recharge_tiers":  true,
 		"tingwu":          true,
 		"funasr":          true,
@@ -2032,7 +2053,10 @@ func (c *Config) AgentServerURL() string {
 // resolvePaths resolves relative paths to absolute. Must be called after
 // applyDefaults (and after ${VAR} expansion in NewConfig) so that values
 // supplied via the environment are also resolved.
-func (c *Config) resolvePaths() {
+func (c *Config) resolvePaths(rootConfigDir string) {
+	if c.BillingRuntime.ConfigDir != "" && !filepath.IsAbs(c.BillingRuntime.ConfigDir) {
+		c.BillingRuntime.ConfigDir = filepath.Join(rootConfigDir, c.BillingRuntime.ConfigDir)
+	}
 	// Resolve plugin_dir to absolute path if relative.
 	// The Claude Code CLI subprocess runs with CWD set to a temp directory,
 	// so relative paths like ".." would resolve incorrectly at execution time.
@@ -2095,6 +2119,9 @@ func detectPluginDir() string {
 // Validate checks that required configuration fields are set.
 func (c *Config) Validate() error {
 	var errs []string
+	if c.BillingRuntime.ConfigDir != "" && strings.TrimSpace(c.BillingRuntime.AdminAPIKey) == "" {
+		errs = append(errs, "billing_runtime.admin_api_key is required when billing_runtime.config_dir is configured")
+	}
 
 	if strings.TrimSpace(c.Database.DSN) == "" {
 		errs = append(errs, "database.dsn is required")
