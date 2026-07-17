@@ -81,7 +81,7 @@ type Project struct {
 	ReferenceImageSet     bool       `gorm:"-" json:"-"`
 	// ReferenceImageURL remains internal-only until task snapshots and runtimes
 	// complete their asset-ID cutover; project writes and responses never use it.
-	ReferenceImageURL  string        `gorm:"type:varchar(500)" json:"-"`
+	ReferenceImageURL  string        `gorm:"-" json:"-"`
 	ImageRatio         string        `gorm:"type:varchar(10);default:''" json:"image_ratio"`  // 图片比例: "3:4", "1:1", "4:3", "16:9"
 	MaxConcurrentTasks int           `gorm:"type:int;default:10" json:"max_concurrent_tasks"` // 最大并发任务数
 	Config             ProjectConfig `gorm:"type:json;serializer:json" json:"config"`         // 平台特有配置

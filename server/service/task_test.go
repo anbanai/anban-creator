@@ -502,19 +502,18 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	project := &model.Project{
-		ID:                uuid.New().String(),
-		UserID:            userID,
-		Platform:          model.PlatformArticle,
-		Name:              "旧项目名",
-		Status:            model.ProjectStatusActive,
-		Instructions:      "旧定位",
-		Keywords:          "旧关键词",
-		VisualStyle:       "旧视觉",
-		ReferenceImageURL: "/api/v1/files/ref-old",
-		ImageRatio:        "3:4",
-		Writer:            "dan-koe",
-		Theme:             "autumn-warm",
-		Author:            "旧署名",
+		ID:           uuid.New().String(),
+		UserID:       userID,
+		Platform:     model.PlatformArticle,
+		Name:         "旧项目名",
+		Status:       model.ProjectStatusActive,
+		Instructions: "旧定位",
+		Keywords:     "旧关键词",
+		VisualStyle:  "旧视觉",
+		ImageRatio:   "3:4",
+		Writer:       "dan-koe",
+		Theme:        "autumn-warm",
+		Author:       "旧署名",
 	}
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -550,7 +549,7 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 		snap.VisualStyle != "旧视觉" || snap.Author != "旧署名" {
 		t.Fatalf("snapshot = %+v, want original project values", snap)
 	}
-	if snap.ReferenceImageURL != "/api/v1/files/ref-old" || snap.ImageRatio != "3:4" {
+	if snap.ReferenceImageURL != "" || snap.ImageRatio != "3:4" {
 		t.Fatalf("snapshot image fields = %q/%q", snap.ReferenceImageURL, snap.ImageRatio)
 	}
 }
