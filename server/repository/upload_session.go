@@ -73,9 +73,10 @@ func (r *uploadSessionRepository) ReleaseFinalization(ctx context.Context, id, t
 func (r *uploadSessionRepository) FindForCleanup(ctx context.Context, expiredBefore, claimStaleBefore time.Time, limit int) ([]*model.UploadSession, error) {
 	var sessions []*model.UploadSession
 	err := r.db.WithContext(ctx).
-		Where("(status = ? AND expires_at <= ?) OR (status = ? AND cleanup_claimed_at <= ?)",
+		Where("(status = ? AND expires_at <= ?) OR (status = ? AND cleanup_claimed_at <= ?) OR (status = ? AND expires_at <= ? AND finalization_claimed_at <= ?)",
 			model.UploadSessionPending, expiredBefore,
-			model.UploadSessionExpiring, claimStaleBefore).
+			model.UploadSessionExpiring, claimStaleBefore,
+			model.UploadSessionFinalizing, expiredBefore, claimStaleBefore).
 		Order("expires_at ASC").
 		Limit(limit).
 		Find(&sessions).Error
@@ -84,12 +85,16 @@ func (r *uploadSessionRepository) FindForCleanup(ctx context.Context, expiredBef
 
 func (r *uploadSessionRepository) ClaimExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&model.UploadSession{}).
-		Where("id = ? AND ((status = ? AND expires_at <= ?) OR (status = ? AND cleanup_claimed_at <= ?))",
-			id, model.UploadSessionPending, claimedAt, model.UploadSessionExpiring, claimStaleBefore).
+		Where("id = ? AND ((status = ? AND expires_at <= ?) OR (status = ? AND cleanup_claimed_at <= ?) OR (status = ? AND expires_at <= ? AND finalization_claimed_at <= ?))",
+			id, model.UploadSessionPending, claimedAt,
+			model.UploadSessionExpiring, claimStaleBefore,
+			model.UploadSessionFinalizing, claimedAt, claimStaleBefore).
 		Updates(map[string]any{
-			"status":             model.UploadSessionExpiring,
-			"cleanup_claim_id":   claimID,
-			"cleanup_claimed_at": claimedAt,
+			"status":                  model.UploadSessionExpiring,
+			"cleanup_claim_id":        claimID,
+			"cleanup_claimed_at":      claimedAt,
+			"finalization_token":      "",
+			"finalization_claimed_at": nil,
 		})
 	return result.RowsAffected == 1, result.Error
 }

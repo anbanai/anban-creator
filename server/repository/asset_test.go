@@ -31,8 +31,8 @@ func TestAssetRepositoryFindOwnedByIDIsOpaque(t *testing.T) {
 	if err != nil {
 		t.Fatalf("owned FindOwnedByID: %v", err)
 	}
-	if found.ID != asset.ID {
-		t.Fatalf("found ID = %q, want %q", found.ID, asset.ID)
+	if found.ID != asset.ID || found.StorageKey != asset.StorageKey {
+		t.Fatalf("found asset = %+v, want ID %q and StorageKey %q", found, asset.ID, asset.StorageKey)
 	}
 
 	if _, err := repo.Assets().FindOwnedByID(ctx, asset.ID, "user-2"); !errors.Is(err, model.ErrAssetNotFound) {
