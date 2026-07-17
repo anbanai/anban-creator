@@ -417,6 +417,84 @@ func TestProjectReferenceViewsAreSignedForCreateUpdateGetAndList(t *testing.T) {
 	}
 }
 
+func TestProjectCreateSigningFailureDoesNotPersist(t *testing.T) {
+	app, repo, store := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+	asset := &model.Asset{
+		ID: "asset-sign-failure", UserID: userID, Purpose: service.DirectUploadPurposeProjectReference,
+		StorageKey: "assets/users/" + userID + "/asset-sign-failure/ref.png", FileName: "ref.png",
+		ContentType: "image/png", Size: 3, ETag: "etag",
+	}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	store.downloadErr = errors.New("signer unavailable")
+
+	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
+		"platform": model.PlatformArticle, "name": "must-not-persist",
+		"reference_image": map[string]any{"asset_id": asset.ID},
+	})
+	if resp.StatusCode != fiber.StatusServiceUnavailable {
+		t.Fatalf("status=%d want 503 body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+	projects, err := repo.Projects().ListByUserID(t.Context(), userID, repository.ProjectListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("signing failure persisted projects: %#v", projects)
+	}
+}
+
+func TestProjectUpdateSigningFailureDoesNotMutate(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     map[string]any
+		targetID string
+	}{
+		{name: "omission presents current asset", body: map[string]any{"name": "after"}, targetID: "asset-current"},
+		{name: "replacement presents selected asset", body: map[string]any{"name": "after", "reference_image": map[string]any{"asset_id": "asset-replacement"}}, targetID: "asset-replacement"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, repo, store := setupProjectHandlerTest(t)
+			userID := uuid.NewString()
+			projectID := uuid.NewString()
+			for _, assetID := range []string{"asset-current", "asset-replacement"} {
+				if err := repo.Assets().Create(t.Context(), &model.Asset{
+					ID: assetID, UserID: userID, Purpose: service.DirectUploadPurposeProjectReference,
+					StorageKey: "assets/users/" + userID + "/" + assetID + "/ref.png", FileName: "ref.png",
+					ContentType: "image/png", Size: 3, ETag: "etag-" + assetID,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := repo.Projects().Create(t.Context(), &model.Project{
+				ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "before",
+				ReferenceImageAssetID: "asset-current", Status: model.ProjectStatusActive,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			store.downloadErr = errors.New("signer unavailable")
+
+			resp := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID, userID, tt.body)
+			if resp.StatusCode != fiber.StatusServiceUnavailable {
+				t.Fatalf("status=%d want 503 body=%v", resp.StatusCode, decodeBody(t, resp))
+			}
+			if len(store.signedKeys) != 1 || store.signedKeys[0] != "assets/users/"+userID+"/"+tt.targetID+"/ref.png" {
+				t.Fatalf("signed keys=%#v, want target %q", store.signedKeys, tt.targetID)
+			}
+			persisted, err := repo.Projects().FindByID(t.Context(), projectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Name != "before" || persisted.ReferenceImageAssetID != "asset-current" {
+				t.Fatalf("signing failure mutated project: name=%q reference=%q", persisted.Name, persisted.ReferenceImageAssetID)
+			}
+		})
+	}
+}
+
 func TestProjectHandler_UpdateFinalizesAvatarUploadSession(t *testing.T) {
 	app, repo := setupProjectDeleteHandlerTest(t)
 	ctx := context.Background()

@@ -112,19 +112,22 @@ func (h *ProjectHandler) presentProjectReference(ctx context.Context, userID str
 	if ch == nil {
 		return nil
 	}
-	if h.referenceAssets == nil {
-		if ch.ReferenceImageAssetID == "" {
-			ch.ReferenceImage = nil
-			return nil
-		}
-		return service.ErrReferenceAssetUnavailable
-	}
-	view, err := h.referenceAssets.Present(ctx, userID, ch.ReferenceImageAssetID, []string{service.DirectUploadPurposeProjectReference})
+	view, err := h.projectReferenceView(ctx, userID, ch.ReferenceImageAssetID)
 	if err != nil {
 		return err
 	}
 	ch.ReferenceImage = view
 	return nil
+}
+
+func (h *ProjectHandler) projectReferenceView(ctx context.Context, userID, assetID string) (*model.AssetView, error) {
+	if h.referenceAssets == nil {
+		if assetID == "" {
+			return nil, nil
+		}
+		return nil, service.ErrReferenceAssetUnavailable
+	}
+	return h.referenceAssets.Present(ctx, userID, assetID, []string{service.DirectUploadPurposeProjectReference})
 }
 
 // SetSeednoteClient injects the Seednote SDK client.
@@ -358,6 +361,10 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	ch := req.toProject()
+	referenceView, err := h.projectReferenceView(c.Context(), userID, ch.ReferenceImageAssetID)
+	if err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
@@ -379,9 +386,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	h.service.SanitizeProjectForResponse(created)
 	h.signProjectURLs(c.Context(), created)
-	if err := h.presentProjectReference(c.Context(), userID, created); err != nil {
-		return respondReferenceAssetError(c, h.logger, err)
-	}
+	created.ReferenceImage = referenceView
 
 	// For Seednote projects, include recommended templates.
 	recommended := []*model.Template{}
@@ -471,7 +476,26 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
+	current, _, err := h.service.Get(c.Context(), userID, projectID)
+	if err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
+		}
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "you do not have access to this project")
+		}
+		h.logger.Error().Err(err).Str("project_id", projectID).Msg("get project before update failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to update project")
+	}
+	targetReferenceAssetID := current.ReferenceImageAssetID
 	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
+	if req.ReferenceImageSet {
+		targetReferenceAssetID = req.ReferenceImageAssetID
+	}
+	referenceView, err := h.projectReferenceView(c.Context(), userID, targetReferenceAssetID)
+	if err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	ch := req.toProject()
@@ -502,9 +526,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 
 	h.service.SanitizeProjectForResponse(updated)
 	h.signProjectURLs(c.Context(), updated)
-	if err := h.presentProjectReference(c.Context(), userID, updated); err != nil {
-		return respondReferenceAssetError(c, h.logger, err)
-	}
+	updated.ReferenceImage = referenceView
 	return Success(c, updated)
 }
 
