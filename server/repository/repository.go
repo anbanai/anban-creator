@@ -33,6 +33,7 @@ type Repository interface {
 	AgentFeedbacks() AgentFeedbackRepository
 	IlinkBindings() IlinkBindingRepository
 	IlinkNotifications() IlinkNotificationRepository
+	Billing() BillingRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -304,6 +305,7 @@ type repository struct {
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
+	billing                 BillingRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -330,6 +332,7 @@ func New(db *gorm.DB) Repository {
 	agentFeedbacks := newAgentFeedbackRepository(db)
 	ilinkBindings := newIlinkBindingRepository(db)
 	ilinkNotifications := newIlinkNotificationRepository(db)
+	billing := newBillingRepository(db)
 
 	return &repository{
 		db:                      db,
@@ -355,6 +358,7 @@ func New(db *gorm.DB) Repository {
 		agentFeedbacks:          agentFeedbacks,
 		ilinkBindings:           ilinkBindings,
 		ilinkNotifications:      ilinkNotifications,
+		billing:                 billing,
 	}
 }
 
@@ -390,6 +394,7 @@ func (r *repository) IlinkBindings() IlinkBindingRepository {
 func (r *repository) IlinkNotifications() IlinkNotificationRepository {
 	return r.ilinkNotifications
 }
+func (r *repository) Billing() BillingRepository { return r.billing }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -438,6 +443,7 @@ type txRepository struct {
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
+	billing                 BillingRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -465,6 +471,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
 		ilinkBindings:           newIlinkBindingRepository(tx),
 		ilinkNotifications:      newIlinkNotificationRepository(tx),
+		billing:                 newBillingRepository(tx),
 	}
 }
 
@@ -500,6 +507,7 @@ func (r *txRepository) IlinkBindings() IlinkBindingRepository {
 func (r *txRepository) IlinkNotifications() IlinkNotificationRepository {
 	return r.ilinkNotifications
 }
+func (r *txRepository) Billing() BillingRepository { return r.billing }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.
