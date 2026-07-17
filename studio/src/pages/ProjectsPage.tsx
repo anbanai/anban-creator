@@ -38,6 +38,7 @@ import { useImageModels } from '@/hooks/useImageModels'
 import { videoModelDisplayName } from '@/lib/video-display'
 import { createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { isVideoCreator, isVideoPlatform } from '@/lib/video-platforms'
+import { MontageProjectDefaultsPanel } from '@/components/montage/MontageProjectDefaultsPanel'
 
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
@@ -46,6 +47,7 @@ const platformOptions = [
   { value: 'ecommerce', label: '电商出图' },
   { value: 'videocreator', label: 'AI 视频生成' },
   { value: 'videoeditor', label: '视频剪辑后期' },
+  { value: 'montage', label: 'Montage' },
 ]
 
 const statusTabs: { label: string; value: string }[] = [
@@ -72,6 +74,19 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   ecommerce_target_platform: '',
   ecommerce_brand_brief: '',
   ecommerce_image_model_key: '',
+  montage_defaults: {
+    default_pipeline: '',
+    preferences: {
+      aspect_ratio: '9:16',
+      duration_seconds: 30,
+      style: '',
+      music_prompt: '',
+      subtitle_mode: '',
+      voiceover_mode: '',
+    },
+    asset_guidance: '',
+    delivery_targets: [],
+  },
   video_defaults: {
     purpose: 'planting',
     model_key: '',
@@ -105,6 +120,7 @@ function projectPlatformFromIntent(type?: string): ProjectPlatform {
     case 'ecommerce':
     case 'videocreator':
     case 'videoeditor':
+    case 'montage':
       return type
     default:
       return CHANNEL_FORM_DEFAULTS.platform
@@ -142,6 +158,15 @@ function projectToForm(ch: Project, configuredVideoModels: VideoModelSpec[] = []
     ecommerce_target_platform: ch.ecommerce_defaults?.target_platform || '',
     ecommerce_brand_brief: ch.ecommerce_defaults?.brand_brief || '',
     ecommerce_image_model_key: ch.ecommerce_defaults?.image_model_key || '',
+    montage_defaults: {
+      ...CHANNEL_FORM_DEFAULTS.montage_defaults,
+      ...(ch.montage_defaults || {}),
+      preferences: {
+        ...CHANNEL_FORM_DEFAULTS.montage_defaults?.preferences,
+        ...(ch.montage_defaults?.preferences || {}),
+      },
+      delivery_targets: ch.montage_defaults?.delivery_targets || [],
+    },
     video_defaults: videoDefaults,
     video_model_policy: videoPolicy,
     reference_image_url: ch.reference_image_url || '',
@@ -183,6 +208,7 @@ export default function ProjectsPage() {
   const isSeednote = selectedPlatform === 'seednote'
   const isMoments = selectedPlatform === 'moments'
   const isEcommerce = selectedPlatform === 'ecommerce'
+  const isMontage = selectedPlatform === 'montage'
   const isVideo = isVideoPlatform(selectedPlatform)
   const isVideoCreatorProject = isVideoCreator(selectedPlatform)
   const visualTemplateType: TemplateType | null = isWechat ? 'article' : isSeednote ? 'seednote' : isEcommerce ? 'ecommerce' : null
@@ -530,7 +556,7 @@ export default function ProjectsPage() {
       avatar_url: values.avatar_url?.trim() || undefined,
       keywords: values.keywords?.trim() || undefined,
       instructions: values.instructions?.trim() || undefined,
-      visual_style: isVideoPlatform(values.platform) ? undefined : values.visual_style?.trim() || undefined,
+      visual_style: isVideoPlatform(values.platform) || values.platform === 'montage' ? undefined : values.visual_style?.trim() || undefined,
       writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
@@ -548,6 +574,21 @@ export default function ProjectsPage() {
         target_platform: values.ecommerce_target_platform || undefined,
         brand_brief: values.ecommerce_brand_brief?.trim() || undefined,
         image_model_key: values.ecommerce_image_model_key || undefined,
+      }
+    }
+    if (values.platform === 'montage') {
+      payload.montage_defaults = {
+        default_pipeline: values.montage_defaults?.default_pipeline?.trim() || undefined,
+        preferences: {
+          aspect_ratio: values.montage_defaults?.preferences?.aspect_ratio?.trim() || undefined,
+          duration_seconds: values.montage_defaults?.preferences?.duration_seconds,
+          style: values.montage_defaults?.preferences?.style?.trim() || undefined,
+          music_prompt: values.montage_defaults?.preferences?.music_prompt?.trim() || undefined,
+          subtitle_mode: values.montage_defaults?.preferences?.subtitle_mode?.trim() || undefined,
+          voiceover_mode: values.montage_defaults?.preferences?.voiceover_mode?.trim() || undefined,
+        },
+        asset_guidance: values.montage_defaults?.asset_guidance?.trim() || undefined,
+        delivery_targets: values.montage_defaults?.delivery_targets || [],
       }
     }
     if (isVideoCreator(values.platform)) {
@@ -934,7 +975,7 @@ export default function ProjectsPage() {
                 </div>
               )}
 
-              {!isVideo ? (
+              {!isVideo && !isMontage ? (
                 <FormField control={form.control} name="visual_style" render={({ field }) => (
                   <FormItem>
                     <FormLabel>视觉风格</FormLabel>
@@ -978,6 +1019,8 @@ export default function ProjectsPage() {
                   </FormItem>
                 )} />
               ) : null}
+
+              {isMontage && <MontageProjectDefaultsPanel form={form} />}
 
               {isEcommerce && (
                 <>

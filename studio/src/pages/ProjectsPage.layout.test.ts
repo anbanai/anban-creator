@@ -57,7 +57,7 @@ describe('ProjectsPage layout contracts', () => {
   it('keeps video project positioning in instructions instead of a visual style field', () => {
     const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
 
-    expect(source).toContain('isVideoPlatform(values.platform) ? undefined : values.visual_style')
+    expect(source).toContain("isVideoPlatform(values.platform) || values.platform === 'montage' ? undefined : values.visual_style")
     expect(source).toContain('品牌定位、账号人设、产品基础信息、画面偏好、禁忌与长期要求')
     expect(source).not.toContain('视频风格与禁忌')
   })

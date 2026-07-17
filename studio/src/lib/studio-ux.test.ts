@@ -164,6 +164,20 @@ describe('studio business UX helpers', () => {
     })
   })
 
+  it('summarizes Montage defaults instead of image visual readiness', () => {
+    expect(buildProjectReadinessSummary(project({
+      platform: 'montage',
+      montage_defaults: {
+        default_pipeline: 'social-short',
+        preferences: { duration_seconds: 45 },
+      },
+    }))).toEqual({
+      tone: 'ready',
+      headline: '创作配置已就绪',
+      details: ['Pipeline social-short', '默认 45 秒'],
+    })
+  })
+
   it('labels the primary task action signal', () => {
     expect(taskActionSignal(task({ status: 'failed', error_message: '模型超时' }))).toMatchObject({
       label: '查看失败原因',
