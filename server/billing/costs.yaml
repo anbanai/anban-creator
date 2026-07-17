@@ -1,0 +1,69 @@
+catalog_id: "provider-cost-2026-07-17-v1"
+currency_rates:
+  CNY: "1.00"
+  USD: "7.20"
+models:
+  volcengine_ark/doubao-seed-evolving:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "6.00"
+    cache_read_input: "1.20"
+    cache_creation_input: "6.00"
+    output: "30.00"
+    operator_evidence: "Volcengine Ark official pricing verified 2026-07-17"
+    effective_at: "2026-07-17T00:00:00+08:00"
+
+  volcengine_ark/doubao-seed-2-1-pro-260628:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "6.00"
+    cache_read_input: "1.20"
+    cache_creation_input: "6.00"
+    output: "30.00"
+    operator_evidence: "Volcengine Ark official pricing verified 2026-07-17"
+    effective_at: "2026-07-17T00:00:00+08:00"
+
+  volcengine_ark/doubao-seed-2-1-turbo-260628:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "3.00"
+    cache_read_input: "0.60"
+    cache_creation_input: "3.00"
+    output: "15.00"
+    operator_evidence: "Volcengine Ark official pricing verified 2026-07-17"
+    effective_at: "2026-07-17T00:00:00+08:00"
+
+  moonshot/kimi-k2.7-code:
+    pricing_type: "token"
+    currency: "USD"
+    unit: 1000000
+    input: "0.95"
+    cache_read_input: "0.19"
+    cache_creation_input: "0.95"
+    output: "4.00"
+    operator_evidence: "Moonshot official pricing verified 2026-07-17"
+    effective_at: "2026-07-17T00:00:00+08:00"
+
+  moonshot/kimi-k2.7-code-highspeed:
+    pricing_type: "token"
+    currency: "USD"
+    unit: 1000000
+    input: "1.90"
+    cache_read_input: "0.38"
+    cache_creation_input: "1.90"
+    output: "8.00"
+    operator_evidence: "Moonshot official pricing verified 2026-07-17"
+    effective_at: "2026-07-17T00:00:00+08:00"
+
+  volcengine_ark/doubao-seedream-5-0-pro-260628:
+    pricing_type: "output_pixel_tier"
+    currency: "CNY"
+    tiers:
+      - max_pixels: 2360000
+        price: "0.30"
+      - price: "0.60"
+    operator_evidence: "Volcengine Ark official pricing verified 2026-07-17"
+    effective_at: "2026-07-17T00:00:00+08:00"

@@ -1,0 +1,10 @@
+catalog_id: "promotion-2026-07-17-v1"
+programs:
+  - id: "referral-first-topup-v1"
+    trigger: "invitee_first_paid_topup"
+    minimum_topup_cny: "10.00"
+    inviter_credits: 1000
+    invitee_credits: 1000
+    expires_after: "30d"
+    max_inviter_rewards: 10
+    can_repay_debt: false

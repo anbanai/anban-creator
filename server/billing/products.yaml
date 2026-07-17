@@ -1,0 +1,71 @@
+catalog_id: "retail-2026-07-17-v1"
+currency: "credits"
+skus:
+  - id: "task.article.standard.v1"
+    operation: "task.article"
+    charge_policy: "task_admission"
+    price_credits: 6000
+    delivery: "article_artifacts_verified"
+
+  - id: "task.seednote.standard.v1"
+    operation: "task.seednote"
+    charge_policy: "task_admission"
+    price_credits: 5000
+    delivery: "seednote_artifacts_verified"
+
+  - id: "task.moments.standard.v1"
+    operation: "task.moments"
+    charge_policy: "task_admission"
+    price_credits: 3000
+    delivery: "moments_artifacts_verified"
+
+  - id: "task.ecommerce.standard.v1"
+    operation: "task.ecommerce"
+    charge_policy: "task_admission"
+    price_credits: 3000
+    delivery: "ecommerce_artifacts_verified"
+
+  - id: "task.videocreator.standard.v1"
+    operation: "task.videocreator"
+    charge_policy: "task_admission"
+    price_credits: 2000
+    delivery: "final_video_verified"
+
+  - id: "task.videoeditor.standard.v1"
+    operation: "task.videoeditor"
+    charge_policy: "task_admission"
+    price_credits: 2000
+    delivery: "edited_video_verified"
+
+  - id: "task.montage.standard.v1"
+    operation: "task.montage"
+    charge_policy: "task_admission"
+    price_credits: 2000
+    delivery: "montage_artifacts_verified"
+
+  - id: "task.viral-analysis.standard.v1"
+    operation: "task.viral_analysis"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    delivery: "viral_analysis_report_verified"
+
+  - id: "image.seedream.cover.v1"
+    operation: "mcp.generate_image"
+    charge_policy: "accepted_task_operation"
+    price_credits: 500
+    route: "image_generation.cover"
+    delivery: "persisted_image"
+
+  - id: "image.seedream.content.v1"
+    operation: "mcp.generate_image"
+    charge_policy: "accepted_task_operation"
+    price_credits: 500
+    route: "image_generation.content"
+    delivery: "persisted_image"
+
+  - id: "image.seedream.designer.v1"
+    operation: "designer.generate_image"
+    charge_policy: "standalone_operation"
+    price_credits: 500
+    route: "image_generation.designer.seedream"
+    delivery: "persisted_image"
