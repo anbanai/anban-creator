@@ -81,12 +81,33 @@ func TestLoadBundleRejectsWeakenedPolicy(t *testing.T) {
 		{name: "topup repays debt first", old: "repay_debt_first: true", new: "repay_debt_first: false", want: "top_up.repay_debt_first: must be true"},
 		{name: "promotions never repay debt", old: "may_repay_debt: false", new: "may_repay_debt: true", want: "promotions.may_repay_debt: must be false"},
 		{name: "failure reversal enabled", old: "enabled: true", new: "enabled: false", want: "task_failure_reversal.enabled: must be true"},
-		{name: "failure reasons required", old: "reasons: [platform_error, provider_error]", new: "reasons: []", want: "task_failure_reversal.reasons: must not be empty"},
+		{name: "failure reasons required", old: "reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]", new: "reasons: []", want: "task_failure_reversal.reasons: must not be empty"},
 		{name: "failure reasons constrained", old: "provider_error", new: "user_cancelled", want: "unsupported reversal reason"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			policy := strings.Replace(validPolicyYAML, tt.old, tt.new, 1)
+			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": policy}))
+			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadBundleRequiresExactReversalReasonSet(t *testing.T) {
+	tests := []struct {
+		name    string
+		reasons string
+		want    string
+	}{
+		{name: "missing reason", reasons: "[platform_error, provider_error, execution_timeout]", want: "must equal the approved set"},
+		{name: "extra reason", reasons: "[platform_error, provider_error, execution_timeout, infrastructure_cancelled, user_cancelled]", want: "must equal the approved set"},
+		{name: "duplicate reason", reasons: "[platform_error, provider_error, execution_timeout, platform_error]", want: "duplicate reason"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := strings.Replace(validPolicyYAML, "[platform_error, provider_error, execution_timeout, infrastructure_cancelled]", tt.reasons, 1)
 			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": policy}))
 			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
@@ -145,6 +166,93 @@ func TestLoadBundleNormalizesBlankTaskAdmissionRoute(t *testing.T) {
 	}
 	if got := bundle.Products.SKUs[0].Route; got != "" {
 		t.Fatalf("task admission route = %q, want canonical empty route", got)
+	}
+}
+
+func TestLoadBundleCanonicalizesSKUFields(t *testing.T) {
+	products := `catalog_id: " retail-v1 "
+currency: " credits "
+skus:
+  - id: " image.standard.v1 "
+    operation: " mcp.generate_image "
+    charge_policy: " accepted_task_operation "
+    price_credits: 500
+    route: " image_generation.content "
+    delivery: " persisted_image "
+`
+	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+	if err != nil {
+		t.Fatalf("LoadBundle: %v", err)
+	}
+	if bundle.Products.CatalogID != "retail-v1" || bundle.Products.Currency != "credits" {
+		t.Fatalf("product identity = catalog %q currency %q", bundle.Products.CatalogID, bundle.Products.Currency)
+	}
+	want := SKUConfig{
+		ID: "image.standard.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation",
+		PriceCredits: 500, Route: "image_generation.content", Delivery: "persisted_image",
+	}
+	if got := bundle.Products.SKUs[0]; got != want {
+		t.Fatalf("SKU = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadBundleCanonicalizesSinglePaddedOperation(t *testing.T) {
+	products := strings.Replace(validProductsYAML, "operation: task.seednote", `operation: " task.seednote "`, 1)
+	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+	if err != nil {
+		t.Fatalf("LoadBundle: %v", err)
+	}
+	if got := bundle.Products.SKUs[0].Operation; got != "task.seednote" {
+		t.Fatalf("operation = %q, want canonical task.seednote", got)
+	}
+}
+
+func TestLoadBundleRejectsCanonicalDuplicateSKUIDs(t *testing.T) {
+	products := `catalog_id: retail-v1
+currency: credits
+skus:
+  - id: " duplicate.v1 "
+    operation: task.one
+    charge_policy: task_admission
+    price_credits: 100
+    delivery: one
+  - id: duplicate.v1
+    operation: task.two
+    charge_policy: task_admission
+    price_credits: 100
+    delivery: two
+`
+	_, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "duplicate SKU id") {
+		t.Fatalf("LoadBundle error = %v, want canonical duplicate SKU rejection", err)
+	}
+}
+
+func TestLoadBundleCanonicalizesCatalogAndCurrencyIdentities(t *testing.T) {
+	policy := strings.Replace(validPolicyYAML, `version: "2026-07-17"`, `version: " 2026-07-17 "`, 1)
+	costs := strings.Replace(validCostsYAML, "catalog_id: provider-cost-v1", `catalog_id: " provider-cost-v1 "`, 1)
+	costs = strings.Replace(costs, "  CNY: \"1.00\"", `  " CNY ": "1.00"`, 1)
+	costs = strings.Replace(costs, `currency: "CNY"`, `currency: " CNY "`, 1)
+	promotions := strings.Replace(validPromotionsYAML, "catalog_id: promotion-v1", `catalog_id: " promotion-v1 "`, 1)
+	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{
+		"policy.yaml": policy, "costs.yaml": costs, "promotions.yaml": promotions,
+	}))
+	if err != nil {
+		t.Fatalf("LoadBundle: %v", err)
+	}
+	if bundle.Policy.Version != "2026-07-17" || bundle.Costs.CatalogID != "provider-cost-v1" || bundle.Promotions.CatalogID != "promotion-v1" {
+		t.Fatalf("catalog identities not canonical: policy=%q costs=%q promotions=%q", bundle.Policy.Version, bundle.Costs.CatalogID, bundle.Promotions.CatalogID)
+	}
+	if _, ok := bundle.Costs.CurrencyRates["CNY"]; !ok || bundle.Costs.Models["provider/model"].Currency != "CNY" {
+		t.Fatalf("currency identities not canonical: rates=%#v model=%#v", bundle.Costs.CurrencyRates, bundle.Costs.Models["provider/model"])
+	}
+}
+
+func TestLoadBundleRejectsCanonicalDuplicateCurrencies(t *testing.T) {
+	costs := strings.Replace(validCostsYAML, "  CNY: \"1.00\"", "  CNY: \"1.00\"\n  \" CNY \": \"1.00\"", 1)
+	_, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": costs}))
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "duplicate canonical currency") {
+		t.Fatalf("LoadBundle error = %v, want canonical duplicate currency rejection", err)
 	}
 }
 
@@ -263,7 +371,7 @@ promotions:
   may_repay_debt: false
 task_failure_reversal:
   enabled: true
-  reasons: [platform_error, provider_error]
+  reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]
 `
 
 const validProductsYAML = `catalog_id: retail-v1

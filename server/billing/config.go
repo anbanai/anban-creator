@@ -240,7 +240,8 @@ func decodeRequired(path string, destination any) error {
 }
 
 func validateBundle(bundle *Bundle) error {
-	if strings.TrimSpace(bundle.Policy.Version) == "" {
+	bundle.Policy.Version = strings.TrimSpace(bundle.Policy.Version)
+	if bundle.Policy.Version == "" {
 		return configError("policy.yaml", "version", errors.New("is required"))
 	}
 	if bundle.Policy.CreditsPerCNY <= 0 {
@@ -276,6 +277,9 @@ func validateBundle(bundle *Bundle) error {
 		"execution_timeout":        {},
 		"infrastructure_cancelled": {},
 	}
+	if len(bundle.Policy.TaskFailureReversal.Reasons) != len(allowedReversalReasons) {
+		return configError("policy.yaml", "task_failure_reversal.reasons", errors.New("must equal the approved set: platform_error, provider_error, execution_timeout, infrastructure_cancelled"))
+	}
 	seenReasons := make(map[string]struct{}, len(bundle.Policy.TaskFailureReversal.Reasons))
 	for _, reason := range bundle.Policy.TaskFailureReversal.Reasons {
 		if strings.TrimSpace(reason) == "" {
@@ -290,7 +294,9 @@ func validateBundle(bundle *Bundle) error {
 		seenReasons[reason] = struct{}{}
 	}
 
-	if strings.TrimSpace(bundle.Products.CatalogID) == "" {
+	bundle.Products.CatalogID = strings.TrimSpace(bundle.Products.CatalogID)
+	bundle.Products.Currency = strings.TrimSpace(bundle.Products.Currency)
+	if bundle.Products.CatalogID == "" {
 		return configError("products.yaml", "catalog_id", errors.New("is required"))
 	}
 	if bundle.Products.Currency != "credits" {
@@ -308,8 +314,14 @@ func validateBundle(bundle *Bundle) error {
 	seenBillableIdentities := make(map[billableIdentity]string, len(bundle.Products.SKUs))
 	for index, sku := range bundle.Products.SKUs {
 		field := fmt.Sprintf("skus[%d]", index)
-		if strings.TrimSpace(sku.ID) == "" || strings.TrimSpace(sku.Operation) == "" || strings.TrimSpace(sku.Delivery) == "" {
-			return configError("products.yaml", field, errors.New("id, operation, and delivery are required"))
+		sku.ID = strings.TrimSpace(sku.ID)
+		sku.Operation = strings.TrimSpace(sku.Operation)
+		sku.ChargePolicy = strings.TrimSpace(sku.ChargePolicy)
+		sku.Route = strings.TrimSpace(sku.Route)
+		sku.Delivery = strings.TrimSpace(sku.Delivery)
+		bundle.Products.SKUs[index] = sku
+		if sku.ID == "" || sku.Operation == "" || sku.ChargePolicy == "" || sku.Delivery == "" {
+			return configError("products.yaml", field, errors.New("id, operation, charge_policy, and delivery are required"))
 		}
 		if _, exists := seenSKUs[sku.ID]; exists {
 			return configError("products.yaml", field+".id", fmt.Errorf("duplicate SKU id %q", sku.ID))
@@ -318,21 +330,19 @@ func validateBundle(bundle *Bundle) error {
 		if sku.PriceCredits < 0 {
 			return configError("products.yaml", field+".price_credits", errors.New("must be non-negative"))
 		}
-		route := strings.TrimSpace(sku.Route)
-		bundle.Products.SKUs[index].Route = route
 		switch sku.ChargePolicy {
 		case "task_admission":
 		case "accepted_task_operation", "standalone_operation":
-			if route == "" {
+			if sku.Route == "" {
 				return configError("products.yaml", field+".route", fmt.Errorf("route is required for %s", sku.ChargePolicy))
 			}
 		default:
 			return configError("products.yaml", field+".charge_policy", fmt.Errorf("unsupported value %q", sku.ChargePolicy))
 		}
 		identity := billableIdentity{
-			operation:    strings.TrimSpace(sku.Operation),
-			chargePolicy: strings.TrimSpace(sku.ChargePolicy),
-			route:        route,
+			operation:    sku.Operation,
+			chargePolicy: sku.ChargePolicy,
+			route:        sku.Route,
 		}
 		if existingID, exists := seenBillableIdentities[identity]; exists {
 			return configError("products.yaml", field, fmt.Errorf("SKU %q duplicates billable identity of %q", sku.ID, existingID))
@@ -349,33 +359,38 @@ func validateBundle(bundle *Bundle) error {
 
 func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 	costs := CostCatalog{
-		CatalogID:     raw.CatalogID,
+		CatalogID:     strings.TrimSpace(raw.CatalogID),
 		CurrencyRates: make(map[string]MicroCNY, len(raw.CurrencyRates)),
 		Models:        make(map[string]ModelCostConfig, len(raw.Models)),
 	}
-	if strings.TrimSpace(raw.CatalogID) == "" {
+	if costs.CatalogID == "" {
 		return costs, configError("costs.yaml", "catalog_id", errors.New("is required"))
 	}
 	for currency, value := range raw.CurrencyRates {
-		if strings.TrimSpace(currency) == "" {
+		canonicalCurrency := strings.TrimSpace(currency)
+		if canonicalCurrency == "" {
 			return costs, configError("costs.yaml", "currency_rates", errors.New("contains an empty currency"))
+		}
+		if _, exists := costs.CurrencyRates[canonicalCurrency]; exists {
+			return costs, configError("costs.yaml", "currency_rates", fmt.Errorf("duplicate canonical currency %q", canonicalCurrency))
 		}
 		parsed, err := ParseMicroCNY(string(value))
 		if err != nil || parsed <= 0 {
 			if err == nil {
 				err = errors.New("must be positive")
 			}
-			return costs, configError("costs.yaml", "currency_rates."+currency, err)
+			return costs, configError("costs.yaml", "currency_rates."+canonicalCurrency, err)
 		}
-		costs.CurrencyRates[currency] = parsed
+		costs.CurrencyRates[canonicalCurrency] = parsed
 	}
 	for modelID, rawModel := range raw.Models {
 		field := "models." + modelID
 		if strings.TrimSpace(modelID) == "" {
 			return costs, configError("costs.yaml", "models", errors.New("contains an empty model id"))
 		}
-		if _, exists := costs.CurrencyRates[rawModel.Currency]; !exists {
-			return costs, configError("costs.yaml", field+".currency", fmt.Errorf("references missing currency rate %q", rawModel.Currency))
+		canonicalCurrency := strings.TrimSpace(rawModel.Currency)
+		if _, exists := costs.CurrencyRates[canonicalCurrency]; !exists {
+			return costs, configError("costs.yaml", field+".currency", fmt.Errorf("references missing currency rate %q", canonicalCurrency))
 		}
 		if strings.TrimSpace(rawModel.OperatorEvidence) == "" {
 			return costs, configError("costs.yaml", field+".operator_evidence", errors.New("operator_evidence is required"))
@@ -385,7 +400,7 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 			return costs, configError("costs.yaml", field+".effective_at", errors.New("effective_at must be RFC3339"))
 		}
 		model := ModelCostConfig{
-			PricingType: rawModel.PricingType, Currency: rawModel.Currency, Unit: rawModel.Unit,
+			PricingType: rawModel.PricingType, Currency: canonicalCurrency, Unit: rawModel.Unit,
 			OperatorEvidence: strings.TrimSpace(rawModel.OperatorEvidence), EffectiveAt: effectiveAt,
 		}
 		prices := []struct {
@@ -460,8 +475,8 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 }
 
 func validatePromotions(raw rawPromotionCatalog) (PromotionCatalog, error) {
-	promotions := PromotionCatalog{CatalogID: raw.CatalogID, Programs: make([]ReferralProgram, 0, len(raw.Programs))}
-	if strings.TrimSpace(raw.CatalogID) == "" {
+	promotions := PromotionCatalog{CatalogID: strings.TrimSpace(raw.CatalogID), Programs: make([]ReferralProgram, 0, len(raw.Programs))}
+	if promotions.CatalogID == "" {
 		return promotions, configError("promotions.yaml", "catalog_id", errors.New("is required"))
 	}
 	seen := make(map[string]struct{}, len(raw.Programs))

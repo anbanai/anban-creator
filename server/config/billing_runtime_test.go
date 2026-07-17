@@ -126,7 +126,7 @@ task_admission: {require_zero_debt: true, require_full_price: true}
 accepted_task: {continue_when_balance_negative: true, operation_charge_may_create_debt: true}
 top_up: {repay_debt_first: true}
 promotions: {may_repay_debt: false}
-task_failure_reversal: {enabled: true, reasons: [platform_error]}
+task_failure_reversal: {enabled: true, reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]}
 `,
 		"products.yaml": `catalog_id: retail-v1
 currency: credits
