@@ -94,6 +94,7 @@ export default function TasksPage() {
   const [projectImageRatio, setProjectImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
+  const [montageUploading, setMontageUploading] = useState(false)
   // Desktop local-executor integration: when the Tauri shell reports a
   // provisioned local executor, default new tasks to run on the user's machine
   // (enables ffmpeg / local-shell). The user can flip this off to force cloud.
@@ -341,11 +342,14 @@ export default function TasksPage() {
       language: '',
       video_creator_input: isVideoCreator(defaultType) ? initialVideoInput('') : undefined,
       video_editor_input: isVideoEditor(defaultType) ? initialVideoInput('') : undefined,
-      montage_input: defaultType === 'montage' ? initialMontageInput('') : undefined,
+      montage_input: defaultType === 'montage'
+        ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
+        : undefined,
     })
     setQuantity(1)
     setWatermark(false)
     setReferenceUploading(false)
+    setMontageUploading(false)
     setProjectImageRatio(defaults.imageRatio)
     setHasContentImage(true)
     setHasTailImage(false)
@@ -373,6 +377,7 @@ export default function TasksPage() {
     setQuantity(1)
     setWatermark(false)
     setReferenceUploading(false)
+    setMontageUploading(false)
     setGoalMode(false)
     setGoalText('')
     setProjectImageRatio('')
@@ -829,6 +834,7 @@ export default function TasksPage() {
                       value={field.value || ''}
                       onChange={(id) => {
                         field.onChange(id)
+                        setMontageUploading(false)
                         if (id) {
                           const ch = projects.find((c) => c.id === id)
                           const defaults = getProjectCreationDefaults(ch)
@@ -840,7 +846,13 @@ export default function TasksPage() {
                           form.setValue('image_model_key', defaults.imageModelKey, { shouldDirty: false })
                           form.setValue('video_creator_input', isVideoCreator(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
                           form.setValue('video_editor_input', isVideoEditor(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
-                          form.setValue('montage_input', defaults.type === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+                          form.setValue(
+                            'montage_input',
+                            defaults.type === 'montage'
+                              ? initialMontageInput(form.getValues('prompt') || '', undefined, ch?.montage_defaults)
+                              : undefined,
+                            { shouldDirty: false },
+                          )
                         } else {
                           setProjectImageRatio('')
                           form.setValue('video_creator_input', undefined, { shouldDirty: false })
@@ -990,6 +1002,7 @@ export default function TasksPage() {
                 <MontageCreationPanel
                   form={form}
                   fieldRoot="montage_input"
+                  onUploadingChange={setMontageUploading}
                 />
               )}
 
@@ -1340,7 +1353,9 @@ export default function TasksPage() {
               type="submit"
               form="task-create-form"
               loading={createMutation.isPending}
-              disabled={Boolean(creationBlocker) || (watchedType === 'seednote' && referenceUploading)}
+              disabled={Boolean(creationBlocker)
+                || (watchedType === 'seednote' && referenceUploading)
+                || (isMontageTask && montageUploading)}
             >
               {runLocally && !isMontageTask && localExecutorStatus?.state === 'ready_stopped'
                 ? '启动并创建'

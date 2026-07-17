@@ -84,6 +84,7 @@ export default function PlansPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [referenceUploading, setReferenceUploading] = useState(false)
+  const [montageUploading, setMontageUploading] = useState(false)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
   const highlightedPlanId = searchParams.get('highlight') || ''
@@ -241,8 +242,10 @@ export default function PlansPage() {
     const requestedType: PlanType = createIntent.type === 'article' || createIntent.type === 'montage' || isVideoCreator(createIntent.type)
       ? createIntent.type
       : 'seednote'
+    const selectedIntentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
     setEditingPlan(null)
     setReferenceUploading(false)
+    setMontageUploading(false)
     form.reset({
       project_id: createIntent.projectId ?? '',
       type: requestedType,
@@ -255,7 +258,9 @@ export default function PlansPage() {
       article_with_cover: true,
       article_with_content_images: true,
       video_creator_input: isVideoCreator(requestedType) ? initialVideoInput('') : undefined,
-      montage_input: requestedType === 'montage' ? initialMontageInput('') : undefined,
+      montage_input: requestedType === 'montage'
+        ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
+        : undefined,
     })
     setModalOpen(true)
   }, [createIntent.projectId, createIntent.type, form, projectMap])
@@ -270,6 +275,7 @@ export default function PlansPage() {
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
     setReferenceUploading(false)
+    setMontageUploading(false)
     form.reset(planToFormValues(plan))
     setModalOpen(true)
   }
@@ -287,6 +293,7 @@ export default function PlansPage() {
     setShowDirtyDialog(false)
     setEditingPlan(null)
     setReferenceUploading(false)
+    setMontageUploading(false)
     form.reset({
       project_id: '',
       type: 'seednote',
@@ -501,14 +508,22 @@ export default function PlansPage() {
                       value={field.value || ''}
                       onChange={(id, platform) => {
                         field.onChange(id)
+                        setMontageUploading(false)
                         if (id) {
+                          const project = projectMap[id]
                           form.setValue('type', platform as PlanType)
                           if (isVideoCreator(platform)) {
                             form.setValue('video_creator_input', initialVideoInput(form.getValues('prompt') || ''), { shouldDirty: false })
                           } else {
                             form.setValue('video_creator_input', undefined, { shouldDirty: false })
                           }
-                          form.setValue('montage_input', platform === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+                          form.setValue(
+                            'montage_input',
+                            platform === 'montage'
+                              ? initialMontageInput(form.getValues('prompt') || '', undefined, project?.montage_defaults)
+                              : undefined,
+                            { shouldDirty: false },
+                          )
                         } else {
                           form.setValue('video_creator_input', undefined, { shouldDirty: false })
                           form.setValue('montage_input', undefined, { shouldDirty: false })
@@ -534,6 +549,7 @@ export default function PlansPage() {
                       onValueChange={(v) => {
                         const nextType = v as PlanType
                         field.onChange(nextType)
+                        setMontageUploading(false)
                         form.setValue('video_creator_input', isVideoCreator(nextType) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: true })
                         form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: true })
                       }}
@@ -614,7 +630,11 @@ export default function PlansPage() {
               )}
 
               {isMontagePlan && (
-                <MontageCreationPanel form={form} fieldRoot="montage_input" />
+                <MontageCreationPanel
+                  form={form}
+                  fieldRoot="montage_input"
+                  onUploadingChange={setMontageUploading}
+                />
               )}
 
               {!isVideoCreator(watchedType) && !isMontagePlan && <FormField control={form.control} name="watermark" render={({ field }) => (
@@ -846,7 +866,8 @@ export default function PlansPage() {
               type="submit"
               form="plan-form"
               loading={isSubmitting}
-              disabled={watchedType === 'seednote' && referenceUploading}
+              disabled={(watchedType === 'seednote' && referenceUploading)
+                || (isMontagePlan && montageUploading)}
             >
               {editingPlan ? '更新' : '创建'}
             </Button>

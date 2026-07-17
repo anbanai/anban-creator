@@ -306,3 +306,107 @@ describe('TasksPage Seednote reference materials', () => {
     expect(referenceMaterialInputHarness.props).toBeUndefined()
   })
 })
+
+describe('TasksPage Montage creation', () => {
+  const montageProject = {
+    ...fixtures.project,
+    id: 'project-montage',
+    platform: 'montage',
+    name: 'Montage 项目',
+    montage_defaults: {
+      default_pipeline: 'social-short',
+      preferences: {
+        aspect_ratio: '16:9',
+        duration_seconds: 45,
+        style: 'clean product film',
+        music_prompt: 'minimal electronic',
+        subtitle_mode: 'burned-in',
+        voiceover_mode: 'narrated',
+      },
+      asset_guidance: '优先使用实拍素材',
+      delivery_targets: ['final_video', 'subtitles'],
+    },
+  } as Project
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    referenceMaterialInputHarness.props = undefined
+    vi.mocked(api.tasks.list).mockResolvedValue({ items: [], total: 0 })
+    vi.mocked(api.projects.list).mockResolvedValue([montageProject])
+    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+    vi.mocked(api.tasks.create).mockResolvedValue({
+      ...fixtures.failedTask,
+      id: 'created-montage-task',
+      type: 'montage',
+      title: '新品发布短片',
+      project_id: montageProject.id,
+      status: 'pending',
+    } as Task)
+  })
+
+  it('inherits project defaults and submits the complete Montage input', async () => {
+    renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
+
+    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByDisplayValue('social-short')).toBeInTheDocument()
+    expect(screen.getByLabelText('时长（秒）')).toHaveValue(45)
+    expect(screen.getByLabelText('音乐提示')).toHaveValue('minimal electronic')
+    expect(screen.getByLabelText('字幕模式')).toHaveValue('burned-in')
+    expect(screen.getByLabelText('配音模式')).toHaveValue('narrated')
+    expect(screen.getByText('final_video')).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
+
+    fireEvent.change(screen.getByPlaceholderText('描述这次要生产的视频内容、素材用途、节奏和交付目标'), {
+      target: { value: '新品发布短片' },
+    })
+    act(() => {
+      referenceMaterialInputHarness.props?.onChange([{
+        type: 'video',
+        url: '/source.mp4',
+        file_name: 'source.mp4',
+        content_type: 'video/mp4',
+        size: 42,
+      }])
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'montage',
+      project_id: montageProject.id,
+      montage_input: {
+        brief: '新品发布短片',
+        pipeline_key: 'social-short',
+        source_assets: [{
+          type: 'video_url',
+          url: '/source.mp4',
+          file_name: 'source.mp4',
+          mime_type: 'video/mp4',
+          file_size: 42,
+        }],
+        preferences: {
+          aspect_ratio: '16:9',
+          duration_seconds: 45,
+          style: 'clean product film',
+          music_prompt: 'minimal electronic',
+          subtitle_mode: 'burned-in',
+          voiceover_mode: 'narrated',
+        },
+        delivery_targets: ['final_video', 'subtitles'],
+        advanced: undefined,
+      },
+    })))
+  })
+
+  it('blocks Montage creation while source assets are uploading', async () => {
+    renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
+
+    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
+
+    act(() => {
+      referenceMaterialInputHarness.props?.onUploadingChange?.(true)
+    })
+
+    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+  })
+})
