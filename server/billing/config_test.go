@@ -256,6 +256,100 @@ func TestLoadBundleRejectsCanonicalDuplicateCurrencies(t *testing.T) {
 	}
 }
 
+func TestLoadBundleCanonicalizesCostModelIDs(t *testing.T) {
+	costs := strings.Replace(validCostsYAML, "  provider/model:", `  " provider/model ":`, 1)
+	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": costs}))
+	if err != nil {
+		t.Fatalf("LoadBundle: %v", err)
+	}
+	if _, ok := bundle.Costs.Models["provider/model"]; !ok {
+		t.Fatalf("model keys = %#v, want canonical provider/model", bundle.Costs.Models)
+	}
+	if _, exists := bundle.Costs.Models[" provider/model "]; exists {
+		t.Fatalf("model keys retained padded identity: %#v", bundle.Costs.Models)
+	}
+}
+
+func TestLoadBundleRejectsCanonicalDuplicateCostModelIDs(t *testing.T) {
+	costs := validCostsYAML + `  " provider/model ":
+    pricing_type: token
+    currency: "CNY"
+    unit: 1000000
+    input: "6.00"
+    cache_read_input: "1.20"
+    cache_creation_input: "6.00"
+    output: "30.00"
+    operator_evidence: ark-price-sheet
+    effective_at: "2026-07-17T00:00:00Z"
+`
+	_, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": costs}))
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "duplicate model id") {
+		t.Fatalf("LoadBundle error = %v, want canonical duplicate model rejection", err)
+	}
+}
+
+func TestLoadBundleCanonicalizesReferralProgramIDs(t *testing.T) {
+	promotions := strings.Replace(validPromotionsYAML, "id: referral-v1", `id: " referral-v1 "`, 1)
+	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"promotions.yaml": promotions}))
+	if err != nil {
+		t.Fatalf("LoadBundle: %v", err)
+	}
+	if got := bundle.Promotions.Programs[0].ID; got != "referral-v1" {
+		t.Fatalf("program id = %q, want canonical referral-v1", got)
+	}
+}
+
+func TestLoadBundleRejectsCanonicalDuplicateReferralProgramIDs(t *testing.T) {
+	promotions := validPromotionsYAML + `  - id: " referral-v1 "
+    trigger: invitee_first_paid_topup
+    minimum_topup_cny: "10.00"
+    inviter_credits: 1000
+    invitee_credits: 1000
+    expires_after: 30d
+    max_inviter_rewards: 10
+    can_repay_debt: false
+`
+	_, err := LoadBundle(writeBundleFixture(t, map[string]string{"promotions.yaml": promotions}))
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "duplicate referral program id") {
+		t.Fatalf("LoadBundle error = %v, want canonical duplicate referral rejection", err)
+	}
+}
+
+func TestLoadBundleCanonicalizesRemainingEnumIdentifiers(t *testing.T) {
+	t.Run("reversal reason", func(t *testing.T) {
+		policy := strings.Replace(validPolicyYAML, "platform_error", `" platform_error "`, 1)
+		bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": policy}))
+		if err != nil {
+			t.Fatalf("LoadBundle: %v", err)
+		}
+		if got := bundle.Policy.TaskFailureReversal.Reasons[0]; got != "platform_error" {
+			t.Fatalf("reversal reason = %q, want canonical platform_error", got)
+		}
+	})
+
+	t.Run("pricing type", func(t *testing.T) {
+		costs := strings.Replace(validCostsYAML, "pricing_type: token", `pricing_type: " token "`, 1)
+		bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": costs}))
+		if err != nil {
+			t.Fatalf("LoadBundle: %v", err)
+		}
+		if got := bundle.Costs.Models["provider/model"].PricingType; got != "token" {
+			t.Fatalf("pricing type = %q, want canonical token", got)
+		}
+	})
+
+	t.Run("referral trigger", func(t *testing.T) {
+		promotions := strings.Replace(validPromotionsYAML, "trigger: invitee_first_paid_topup", `trigger: " invitee_first_paid_topup "`, 1)
+		bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"promotions.yaml": promotions}))
+		if err != nil {
+			t.Fatalf("LoadBundle: %v", err)
+		}
+		if got := bundle.Promotions.Programs[0].Trigger; got != "invitee_first_paid_topup" {
+			t.Fatalf("trigger = %q, want canonical invitee_first_paid_topup", got)
+		}
+	})
+}
+
 func TestLoadBundleValidatesCostMetadataAndTokenProfile(t *testing.T) {
 	tests := []struct {
 		name  string

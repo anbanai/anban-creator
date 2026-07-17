@@ -281,8 +281,10 @@ func validateBundle(bundle *Bundle) error {
 		return configError("policy.yaml", "task_failure_reversal.reasons", errors.New("must equal the approved set: platform_error, provider_error, execution_timeout, infrastructure_cancelled"))
 	}
 	seenReasons := make(map[string]struct{}, len(bundle.Policy.TaskFailureReversal.Reasons))
-	for _, reason := range bundle.Policy.TaskFailureReversal.Reasons {
-		if strings.TrimSpace(reason) == "" {
+	for index, reason := range bundle.Policy.TaskFailureReversal.Reasons {
+		reason = strings.TrimSpace(reason)
+		bundle.Policy.TaskFailureReversal.Reasons[index] = reason
+		if reason == "" {
 			return configError("policy.yaml", "task_failure_reversal.reasons", errors.New("must not contain an empty reason"))
 		}
 		if _, exists := seenReasons[reason]; exists {
@@ -384,9 +386,13 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 		costs.CurrencyRates[canonicalCurrency] = parsed
 	}
 	for modelID, rawModel := range raw.Models {
-		field := "models." + modelID
-		if strings.TrimSpace(modelID) == "" {
+		canonicalModelID := strings.TrimSpace(modelID)
+		field := "models." + canonicalModelID
+		if canonicalModelID == "" {
 			return costs, configError("costs.yaml", "models", errors.New("contains an empty model id"))
+		}
+		if _, exists := costs.Models[canonicalModelID]; exists {
+			return costs, configError("costs.yaml", field, fmt.Errorf("duplicate model id %q", canonicalModelID))
 		}
 		canonicalCurrency := strings.TrimSpace(rawModel.Currency)
 		if _, exists := costs.CurrencyRates[canonicalCurrency]; !exists {
@@ -399,8 +405,9 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 		if err != nil {
 			return costs, configError("costs.yaml", field+".effective_at", errors.New("effective_at must be RFC3339"))
 		}
+		pricingType := strings.TrimSpace(rawModel.PricingType)
 		model := ModelCostConfig{
-			PricingType: rawModel.PricingType, Currency: canonicalCurrency, Unit: rawModel.Unit,
+			PricingType: pricingType, Currency: canonicalCurrency, Unit: rawModel.Unit,
 			OperatorEvidence: strings.TrimSpace(rawModel.OperatorEvidence), EffectiveAt: effectiveAt,
 		}
 		prices := []struct {
@@ -423,7 +430,7 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 			}
 			*price.value = parsed
 		}
-		switch rawModel.PricingType {
+		switch pricingType {
 		case "token":
 			if rawModel.Unit <= 0 || rawModel.Input == "" || rawModel.CacheReadInput == "" || rawModel.CacheCreationInput == "" || rawModel.Output == "" || len(rawModel.Tiers) != 0 {
 				return costs, configError("costs.yaml", field, errors.New("token pricing requires positive unit and input, cache_read_input, cache_creation_input, and output prices and forbids tiers"))
@@ -464,9 +471,9 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 				model.Tiers = append(model.Tiers, CostTier{MaxPixels: rawTier.MaxPixels, Price: parsed})
 			}
 		default:
-			return costs, configError("costs.yaml", field+".pricing_type", fmt.Errorf("unsupported value %q", rawModel.PricingType))
+			return costs, configError("costs.yaml", field+".pricing_type", fmt.Errorf("unsupported value %q", pricingType))
 		}
-		costs.Models[modelID] = model
+		costs.Models[canonicalModelID] = model
 	}
 	if len(costs.Models) == 0 {
 		return costs, configError("costs.yaml", "models", errors.New("must not be empty"))
@@ -482,15 +489,17 @@ func validatePromotions(raw rawPromotionCatalog) (PromotionCatalog, error) {
 	seen := make(map[string]struct{}, len(raw.Programs))
 	for index, rawProgram := range raw.Programs {
 		field := fmt.Sprintf("programs[%d]", index)
-		if strings.TrimSpace(rawProgram.ID) == "" {
+		programID := strings.TrimSpace(rawProgram.ID)
+		if programID == "" {
 			return promotions, configError("promotions.yaml", field+".id", errors.New("is required"))
 		}
-		if _, exists := seen[rawProgram.ID]; exists {
-			return promotions, configError("promotions.yaml", field+".id", fmt.Errorf("duplicate referral program id %q", rawProgram.ID))
+		if _, exists := seen[programID]; exists {
+			return promotions, configError("promotions.yaml", field+".id", fmt.Errorf("duplicate referral program id %q", programID))
 		}
-		seen[rawProgram.ID] = struct{}{}
-		if rawProgram.Trigger != "invitee_first_paid_topup" {
-			return promotions, configError("promotions.yaml", field+".trigger", fmt.Errorf("unsupported value %q", rawProgram.Trigger))
+		seen[programID] = struct{}{}
+		trigger := strings.TrimSpace(rawProgram.Trigger)
+		if trigger != "invitee_first_paid_topup" {
+			return promotions, configError("promotions.yaml", field+".trigger", fmt.Errorf("unsupported value %q", trigger))
 		}
 		minimum, err := ParseMicroCNY(string(rawProgram.MinimumTopUpCNY))
 		if err != nil {
@@ -504,7 +513,7 @@ func validatePromotions(raw rawPromotionCatalog) (PromotionCatalog, error) {
 			return promotions, configError("promotions.yaml", field, errors.New("credit values and max_inviter_rewards must be non-negative"))
 		}
 		promotions.Programs = append(promotions.Programs, ReferralProgram{
-			ID: rawProgram.ID, Trigger: rawProgram.Trigger, MinimumTopUpCNY: minimum,
+			ID: programID, Trigger: trigger, MinimumTopUpCNY: minimum,
 			InviterCredits: rawProgram.InviterCredits, InviteeCredits: rawProgram.InviteeCredits,
 			ExpiresAfter: expiresAfter, MaxInviterRewards: rawProgram.MaxInviterRewards,
 			CanRepayDebt: rawProgram.CanRepayDebt,
