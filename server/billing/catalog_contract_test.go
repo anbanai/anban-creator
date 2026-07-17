@@ -74,8 +74,8 @@ func TestProductionCostCatalogHasExactEvidencedProfiles(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing cost profile %q", modelID)
 		}
-		if model.PricingType != expected.pricingType || model.Currency != expected.currency || strings.TrimSpace(model.OperatorEvidence) == "" || model.EffectiveAt.IsZero() {
-			t.Fatalf("cost profile %q identity/evidence = %#v", modelID, model)
+		if model.PricingType != expected.pricingType || model.Currency != expected.currency {
+			t.Fatalf("cost profile %q identity = %#v", modelID, model)
 		}
 		if model.PricingType == "token" {
 			if model.Unit != 1_000_000 || model.Input != expected.input || model.CacheReadInput != expected.cacheRead || model.CacheCreationInput != expected.cacheCreate || model.Output != expected.output || len(model.Tiers) != 0 {
@@ -89,6 +89,12 @@ func TestProductionCostCatalogHasExactEvidencedProfiles(t *testing.T) {
 	}
 }
 
+func TestProductionCatalogMetadataMatchesApprovedSnapshots(t *testing.T) {
+	if err := initialCatalogMetadataContractError(loadProductionBundle(t)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProductionPromotionsContainOnlyFirstPaidTopUpReferral(t *testing.T) {
 	programs := loadProductionBundle(t).Promotions.Programs
 	if len(programs) != 1 {
@@ -97,6 +103,60 @@ func TestProductionPromotionsContainOnlyFirstPaidTopUpReferral(t *testing.T) {
 	program := programs[0]
 	if program.ID != "referral-first-topup-v1" || program.Trigger != "invitee_first_paid_topup" || program.MinimumTopUpCNY != 10_000_000 || program.InviterCredits != 1000 || program.InviteeCredits != 1000 || program.ExpiresAfter != 30*24*time.Hour || program.MaxInviterRewards != 10 || program.CanRepayDebt {
 		t.Fatalf("referral program = %#v", program)
+	}
+}
+
+func TestInitialCatalogMetadataContractRejectsMutations(t *testing.T) {
+	production := loadProductionBundle(t)
+	tests := []struct {
+		name   string
+		mutate func(*Bundle)
+		want   string
+	}{
+		{
+			name: "cost catalog ID",
+			mutate: func(bundle *Bundle) {
+				bundle.Costs.CatalogID = "provider-cost-other"
+			},
+			want: "cost catalog ID",
+		},
+		{
+			name: "promotion catalog ID",
+			mutate: func(bundle *Bundle) {
+				bundle.Promotions.CatalogID = "promotion-other"
+			},
+			want: "promotion catalog ID",
+		},
+		{
+			name: "operator evidence locator",
+			mutate: func(bundle *Bundle) {
+				modelID := "volcengine_ark/doubao-seed-evolving"
+				model := bundle.Costs.Models[modelID]
+				model.OperatorEvidence = "pricing-snapshot:changed"
+				bundle.Costs.Models[modelID] = model
+			},
+			want: "operator_evidence",
+		},
+		{
+			name: "effective timestamp",
+			mutate: func(bundle *Bundle) {
+				modelID := "moonshot/kimi-k2.7-code"
+				model := bundle.Costs.Models[modelID]
+				model.EffectiveAt = model.EffectiveAt.Add(time.Second)
+				bundle.Costs.Models[modelID] = model
+			},
+			want: "effective_at",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bundle := cloneCatalogMetadataBundle(production)
+			tt.mutate(&bundle)
+			err := initialCatalogMetadataContractError(&bundle)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("contract error = %v, want error containing %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -238,24 +298,74 @@ func writeProductionBundle(t *testing.T, overrides map[string]string) string {
 	return dir
 }
 
+func cloneCatalogMetadataBundle(source *Bundle) Bundle {
+	clone := *source
+	clone.Costs.Models = make(map[string]ModelCostConfig, len(source.Costs.Models))
+	for modelID, model := range source.Costs.Models {
+		clone.Costs.Models[modelID] = model
+	}
+	return clone
+}
+
+func initialCatalogMetadataContractError(bundle *Bundle) error {
+	if bundle.Costs.CatalogID != "provider-cost-2026-07-17-v1" {
+		return fmt.Errorf("cost catalog ID = %q", bundle.Costs.CatalogID)
+	}
+	if bundle.Promotions.CatalogID != "promotion-2026-07-17-v1" {
+		return fmt.Errorf("promotion catalog ID = %q", bundle.Promotions.CatalogID)
+	}
+	wantEvidence := map[string]string{
+		"volcengine_ark/doubao-seed-evolving":           "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
+		"volcengine_ark/doubao-seed-2-1-pro-260628":     "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
+		"volcengine_ark/doubao-seed-2-1-turbo-260628":   "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
+		"moonshot/kimi-k2.7-code":                       "pricing-snapshot:moonshot:model-token-prices:2026-07-13",
+		"moonshot/kimi-k2.7-code-highspeed":             "pricing-snapshot:moonshot:model-token-prices:2026-07-13",
+		"volcengine_ark/doubao-seedream-5-0-pro-260628": "pricing-snapshot:volcengine-ark:seedream-output-pixel-prices:2026-07-13",
+	}
+	wantEffectiveAt := time.Date(2026, time.July, 13, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	if len(bundle.Costs.Models) != len(wantEvidence) {
+		return fmt.Errorf("cost model count = %d, want %d evidenced models", len(bundle.Costs.Models), len(wantEvidence))
+	}
+	for modelID, evidence := range wantEvidence {
+		model, ok := bundle.Costs.Models[modelID]
+		if !ok {
+			return fmt.Errorf("missing evidenced cost model %q", modelID)
+		}
+		if model.OperatorEvidence != evidence {
+			return fmt.Errorf("models.%s.operator_evidence = %q, want %q", modelID, model.OperatorEvidence, evidence)
+		}
+		if !model.EffectiveAt.Equal(wantEffectiveAt) {
+			return fmt.Errorf("models.%s.effective_at = %q, want %q", modelID, model.EffectiveAt.Format(time.RFC3339), wantEffectiveAt.Format(time.RFC3339))
+		}
+	}
+	return nil
+}
+
 func initialRetailCatalogContractError(catalog ProductCatalog) error {
-	want := map[SKUConfig]struct{}{
-		{ID: "task.article.standard.v1", Operation: "task.article", ChargePolicy: "task_admission", PriceCredits: 6000, Delivery: "article_artifacts_verified"}:                                                     {},
-		{ID: "task.seednote.standard.v1", Operation: "task.seednote", ChargePolicy: "task_admission", PriceCredits: 5000, Delivery: "seednote_artifacts_verified"}:                                                  {},
-		{ID: "task.moments.standard.v1", Operation: "task.moments", ChargePolicy: "task_admission", PriceCredits: 3000, Delivery: "moments_artifacts_verified"}:                                                     {},
-		{ID: "task.ecommerce.standard.v1", Operation: "task.ecommerce", ChargePolicy: "task_admission", PriceCredits: 3000, Delivery: "ecommerce_artifacts_verified"}:                                               {},
-		{ID: "task.videocreator.standard.v1", Operation: "task.videocreator", ChargePolicy: "task_admission", PriceCredits: 2000, Delivery: "final_video_verified"}:                                                 {},
-		{ID: "task.videoeditor.standard.v1", Operation: "task.videoeditor", ChargePolicy: "task_admission", PriceCredits: 2000, Delivery: "edited_video_verified"}:                                                  {},
-		{ID: "task.montage.standard.v1", Operation: "task.montage", ChargePolicy: "task_admission", PriceCredits: 2000, Delivery: "montage_artifacts_verified"}:                                                     {},
-		{ID: "task.viral-analysis.standard.v1", Operation: "task.viral_analysis", ChargePolicy: "task_admission", PriceCredits: 1200, Delivery: "viral_analysis_report_verified"}:                                   {},
-		{ID: "image.seedream.cover.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Route: "image_generation.cover", Delivery: "persisted_image"}:                  {},
-		{ID: "image.seedream.content.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Route: "image_generation.content", Delivery: "persisted_image"}:              {},
-		{ID: "image.seedream.designer.v1", Operation: "designer.generate_image", ChargePolicy: "standalone_operation", PriceCredits: 500, Route: "image_generation.designer.seedream", Delivery: "persisted_image"}: {},
+	type skuSnapshot struct {
+		operation    string
+		chargePolicy string
+		route        string
+		delivery     string
+		priceCredits int64
+	}
+	want := map[string]skuSnapshot{
+		"task.article.standard.v1":        {operation: "task.article", chargePolicy: "task_admission", priceCredits: 6000, delivery: "article_artifacts_verified"},
+		"task.seednote.standard.v1":       {operation: "task.seednote", chargePolicy: "task_admission", priceCredits: 5000, delivery: "seednote_artifacts_verified"},
+		"task.moments.standard.v1":        {operation: "task.moments", chargePolicy: "task_admission", priceCredits: 3000, delivery: "moments_artifacts_verified"},
+		"task.ecommerce.standard.v1":      {operation: "task.ecommerce", chargePolicy: "task_admission", priceCredits: 3000, delivery: "ecommerce_artifacts_verified"},
+		"task.videocreator.standard.v1":   {operation: "task.videocreator", chargePolicy: "task_admission", priceCredits: 2000, delivery: "final_video_verified"},
+		"task.videoeditor.standard.v1":    {operation: "task.videoeditor", chargePolicy: "task_admission", priceCredits: 2000, delivery: "edited_video_verified"},
+		"task.montage.standard.v1":        {operation: "task.montage", chargePolicy: "task_admission", priceCredits: 2000, delivery: "montage_artifacts_verified"},
+		"task.viral-analysis.standard.v1": {operation: "task.viral_analysis", chargePolicy: "task_admission", priceCredits: 1200, delivery: "viral_analysis_report_verified"},
+		"image.seedream.cover.v1":         {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.cover", delivery: "persisted_image"},
+		"image.seedream.content.v1":       {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.content", delivery: "persisted_image"},
+		"image.seedream.designer.v1":      {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.seedream", delivery: "persisted_image"},
 	}
 	if catalog.CatalogID != "retail-2026-07-17-v1" || catalog.Currency != "credits" {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
 	}
-	seen := make(map[SKUConfig]int, len(catalog.SKUs))
+	seen := make(map[string]int, len(catalog.SKUs))
 	for _, sku := range catalog.SKUs {
 		route := strings.ToLower(strings.TrimSpace(sku.Route))
 		// Exact video selector SKUs and GPT Image 2 quality/size SKUs are published
@@ -267,20 +377,28 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		if strings.Contains(identity, "gpt-image") || strings.Contains(identity, "gpt_image") {
 			return fmt.Errorf("pre-cutover retail catalog exposes GPT Image SKU %q", sku.ID)
 		}
-		if _, ok := want[sku]; !ok {
-			return fmt.Errorf("unexpected SKU identity %#v", sku)
+		expected, ok := want[sku.ID]
+		if !ok {
+			return fmt.Errorf("unexpected SKU ID %q", sku.ID)
 		}
-		seen[sku]++
-		if seen[sku] != 1 {
-			return fmt.Errorf("SKU identity %#v occurs %d times", sku, seen[sku])
+		actual := skuSnapshot{
+			operation: sku.Operation, chargePolicy: sku.ChargePolicy, route: sku.Route,
+			delivery: sku.Delivery, priceCredits: sku.PriceCredits,
+		}
+		if actual != expected {
+			return fmt.Errorf("SKU %q snapshot = %#v, want %#v", sku.ID, actual, expected)
+		}
+		seen[sku.ID]++
+		if seen[sku.ID] != 1 {
+			return fmt.Errorf("SKU ID %q occurs %d times", sku.ID, seen[sku.ID])
 		}
 	}
 	if len(catalog.SKUs) != len(want) {
 		return fmt.Errorf("retail SKU count = %d, want %d", len(catalog.SKUs), len(want))
 	}
-	for sku := range want {
-		if seen[sku] != 1 {
-			return fmt.Errorf("missing SKU identity %#v", sku)
+	for skuID := range want {
+		if seen[skuID] != 1 {
+			return fmt.Errorf("missing SKU ID %q", skuID)
 		}
 	}
 	return nil
