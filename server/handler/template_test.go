@@ -260,7 +260,7 @@ func TestTemplateHandler_Create_Success(t *testing.T) {
 	}
 }
 
-func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
+func TestTemplateHandler_CreateFinalizesThumbnailUploadSession(t *testing.T) {
 	app, repo := setupTemplateHandlerTest(t)
 	userID := uuid.New().String()
 	uploadID := "thumbnail-upload"
@@ -278,7 +278,7 @@ func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
 		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}); err != nil {
-		t.Fatalf("seed pending upload: %v", err)
+		t.Fatalf("seed upload session: %v", err)
 	}
 
 	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
@@ -300,7 +300,7 @@ func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
 	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/thumb.png")
 }
 
-func TestTemplateHandler_CreateClassifiesPendingUploadFinalizeErrors(t *testing.T) {
+func TestTemplateHandler_CreateClassifiesUploadSessionFinalizeErrors(t *testing.T) {
 	const (
 		objectKey     = "uploads/pending/user-1/thumbnail-upload/thumb.png"
 		backendDetail = "oss-cn-hangzhou.aliyuncs.com provider secret"
@@ -348,7 +348,7 @@ func TestTemplateHandler_CreateClassifiesPendingUploadFinalizeErrors(t *testing.
 				FileName:   "thumb.png", ContentType: "image/png", Size: 123,
 				Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 			}); err != nil {
-				t.Fatalf("seed pending upload: %v", err)
+				t.Fatalf("seed upload session: %v", err)
 			}
 
 			resp := doRequest(t, app, http.MethodPost, "/api/v1/templates/", "user-1", map[string]any{
@@ -485,7 +485,7 @@ func TestTemplateHandler_Update_OwnerSucceeds(t *testing.T) {
 	}
 }
 
-func TestTemplateHandler_UpdateFinalizesPendingThumbnail(t *testing.T) {
+func TestTemplateHandler_UpdateFinalizesThumbnailUploadSession(t *testing.T) {
 	app, repo := setupTemplateHandlerTest(t)
 	owner := uuid.New().String()
 	tmpl := createTemplateRow(t, repo, owner, "public", "old name")
@@ -504,7 +504,7 @@ func TestTemplateHandler_UpdateFinalizesPendingThumbnail(t *testing.T) {
 		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}); err != nil {
-		t.Fatalf("seed pending upload: %v", err)
+		t.Fatalf("seed upload session: %v", err)
 	}
 
 	resp := doRequest(t, app, "PUT", "/api/v1/templates/"+tmpl.ID, owner, map[string]any{

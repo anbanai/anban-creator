@@ -25,64 +25,6 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-type designerPendingUploadRepo struct {
-	uploads map[string]*model.PendingUpload
-}
-
-func (r *designerPendingUploadRepo) CreatePendingUpload(_ context.Context, upload *model.PendingUpload) error {
-	copy := *upload
-	r.uploads[upload.ID] = &copy
-	return nil
-}
-
-func (r *designerPendingUploadRepo) FindPendingUploadByID(_ context.Context, id string) (*model.PendingUpload, error) {
-	upload := r.uploads[id]
-	if upload == nil {
-		return nil, model.ErrPendingUploadNotFound
-	}
-	copy := *upload
-	return &copy, nil
-}
-
-func (r *designerPendingUploadRepo) FinalizePendingUploadClaims(_ context.Context, claims []model.PendingUploadClaim, finalizedAt time.Time) error {
-	for _, claim := range claims {
-		upload := r.uploads[claim.UploadID]
-		allowed := false
-		for _, purpose := range claim.AllowedPurposes {
-			allowed = allowed || upload != nil && upload.Purpose == purpose
-		}
-		if upload == nil || upload.UserID != claim.UserID || upload.Key != claim.Key || claim.FinalizedKey == "" || !allowed {
-			return model.ErrPendingUploadClaimRejected
-		}
-		if upload.Status == model.PendingUploadStatusFinalized {
-			if upload.FinalizedKey != claim.FinalizedKey {
-				return model.ErrPendingUploadClaimRejected
-			}
-			continue
-		}
-		if upload.Status != model.PendingUploadStatusPending || !upload.ExpiresAt.After(finalizedAt) {
-			return model.ErrPendingUploadClaimRejected
-		}
-		upload.Status = model.PendingUploadStatusFinalized
-		upload.FinalizedKey = claim.FinalizedKey
-		upload.FinalizedAt = &finalizedAt
-	}
-	return nil
-}
-
-func (*designerPendingUploadRepo) FindPendingUploadsForCleanup(context.Context, time.Time, time.Time, int) ([]*model.PendingUpload, error) {
-	return nil, nil
-}
-func (*designerPendingUploadRepo) ClaimPendingUploadExpiration(context.Context, string, string, time.Time, time.Time) (bool, error) {
-	return false, nil
-}
-func (*designerPendingUploadRepo) CompletePendingUploadExpiration(context.Context, string, string, time.Time) (bool, error) {
-	return false, nil
-}
-func (*designerPendingUploadRepo) ReopenPendingUploadExpiration(context.Context, string, string) (bool, error) {
-	return false, nil
-}
-
 func setupDesignerHandlerTest(t *testing.T) (*fiber.App, *DesignerHandler, *gorm.DB) {
 	t.Helper()
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -318,7 +260,6 @@ func TestDesignerGenerateMapsProjectOwnershipErrors(t *testing.T) {
 
 func TestRegisterDesignerReference(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
-	pending := &designerPendingUploadRepo{uploads: map[string]*model.PendingUpload{}}
 	logger := zerolog.New(io.Discard)
 	userID := uuid.NewString()
 	otherUserID := uuid.NewString()
@@ -328,25 +269,26 @@ func TestRegisterDesignerReference(t *testing.T) {
 		status                                   string
 	}
 	fixtures := []uploadFixture{
-		{id: "pending-ok", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/pending-ok/reference.png", finalKey: "assets/users/" + userID + "/pending-ok/reference.png", status: model.PendingUploadStatusPending},
-		{id: "final-ok", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/final-ok/reference.png", finalKey: "assets/users/" + userID + "/final-ok/reference.png", status: model.PendingUploadStatusFinalized},
-		{id: "wrong-purpose", userID: userID, purpose: service.DirectUploadPurposeAIEntryAttachment, sourceKey: "uploads/pending/" + userID + "/wrong-purpose/reference.png", finalKey: "", status: model.PendingUploadStatusPending},
-		{id: "other-user", userID: otherUserID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + otherUserID + "/other-user/reference.png", finalKey: "", status: model.PendingUploadStatusPending},
-		{id: "legacy-final", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/legacy-final/reference.png", finalKey: "", status: model.PendingUploadStatusFinalized},
-		{id: "oversize", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/oversize/reference.png", finalKey: "assets/users/" + userID + "/oversize/reference.png", status: model.PendingUploadStatusFinalized},
-		{id: "backend", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/backend/reference.png", finalKey: "assets/users/" + userID + "/backend/reference.png", status: model.PendingUploadStatusFinalized},
+		{id: "staging-ok", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/staging-ok/reference.png", finalKey: "assets/users/" + userID + "/staging-ok/reference.png", status: model.UploadSessionPending},
+		{id: "final-ok", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/final-ok/reference.png", finalKey: "assets/users/" + userID + "/final-ok/reference.png", status: model.UploadSessionFinalized},
+		{id: "wrong-purpose", userID: userID, purpose: service.DirectUploadPurposeAIEntryAttachment, sourceKey: "uploads/pending/" + userID + "/wrong-purpose/reference.png", finalKey: "", status: model.UploadSessionPending},
+		{id: "other-user", userID: otherUserID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + otherUserID + "/other-user/reference.png", finalKey: "", status: model.UploadSessionPending},
+		{id: "legacy-final", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/legacy-final/reference.png", finalKey: "", status: model.UploadSessionFinalized},
+		{id: "oversize", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/oversize/reference.png", finalKey: "assets/users/" + userID + "/oversize/reference.png", status: model.UploadSessionFinalized},
+		{id: "backend", userID: userID, purpose: service.DirectUploadPurposeDesignerReference, sourceKey: "uploads/pending/" + userID + "/backend/reference.png", finalKey: "assets/users/" + userID + "/backend/reference.png", status: model.UploadSessionFinalized},
 	}
+	sessions := make([]*model.UploadSession, 0, len(fixtures))
 	for _, fixture := range fixtures {
-		if err := pending.CreatePendingUpload(context.Background(), &model.PendingUpload{
-			ID: fixture.id, UserID: fixture.userID, Purpose: fixture.purpose, Key: fixture.sourceKey, FinalizedKey: fixture.finalKey,
+		sessions = append(sessions, &model.UploadSession{
+			ID: fixture.id, UserID: fixture.userID, Purpose: fixture.purpose, StagingKey: fixture.sourceKey,
 			FileName: "reference.png", ContentType: "image/png", Size: 9, Status: fixture.status, ExpiresAt: now.Add(time.Hour),
-		}); err != nil {
-			t.Fatalf("create upload %s: %v", fixture.id, err)
-		}
+		})
 	}
-	store := pendingUploadStatStore(pending)
+	uploadRepo := repository.New(db)
+	seedUploadSessions(t, uploadRepo, sessions...)
+	store := uploadSessionStatStore(uploadRepo.UploadSessions())
 	store.data = map[string][]byte{
-		fixtures[0].sourceKey: []byte("pending"), fixtures[1].finalKey: []byte("finalized"),
+		fixtures[0].sourceKey: []byte("staging"), fixtures[1].finalKey: []byte("finalized"),
 		fixtures[5].finalKey: []byte("too-large"), fixtures[6].finalKey: []byte("backend"),
 	}
 	store.objects = map[string]*storage.ObjectInfo{
@@ -356,7 +298,6 @@ func TestRegisterDesignerReference(t *testing.T) {
 	}
 	designerSvc := service.NewDesignerService(db, nil, nil, nil, store, &logger)
 	h := NewDesignerHandler(designerSvc, &logger)
-	uploadRepo := uploadRepositoryFromPendingMap(t, pending.uploads)
 	if err := db.Model(&model.UploadSession{}).Where("id = ?", "legacy-final").Update("asset_id", "").Error; err != nil {
 		t.Fatalf("break finalized session fixture: %v", err)
 	}
@@ -382,7 +323,7 @@ func TestRegisterDesignerReference(t *testing.T) {
 		return resp, string(body)
 	}
 
-	for _, success := range []struct{ id, key, finalKey string }{{"pending-ok", fixtures[0].sourceKey, fixtures[0].finalKey}, {"final-ok", fixtures[1].finalKey, fixtures[1].finalKey}} {
+	for _, success := range []struct{ id, key, finalKey string }{{"staging-ok", fixtures[0].sourceKey, fixtures[0].finalKey}, {"final-ok", fixtures[1].finalKey, fixtures[1].finalKey}} {
 		store.read = nil
 		store.readMax = nil
 		store.uploaded = nil
@@ -414,12 +355,12 @@ func TestRegisterDesignerReference(t *testing.T) {
 			t.Fatalf("%s durable reference = %#v err=%v", success.id, reference, err)
 		}
 	}
-	assertFinalizedAsset(t, uploadRepo, "pending-ok", fixtures[0].finalKey)
+	assertFinalizedAsset(t, uploadRepo, "staging-ok", fixtures[0].finalKey)
 
 	for _, rejected := range []struct{ name, id, key string }{
 		{"wrong purpose", "wrong-purpose", fixtures[2].sourceKey},
 		{"cross user", "other-user", fixtures[3].sourceKey},
-		{"mismatched key", "pending-ok", "uploads/pending/attacker/reference.png"},
+		{"mismatched key", "staging-ok", "uploads/pending/attacker/reference.png"},
 		{"legacy finalized", "legacy-final", fixtures[4].sourceKey},
 	} {
 		t.Run(rejected.name, func(t *testing.T) {

@@ -22,47 +22,35 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-func uploadRepositoryFromPending(t *testing.T, uploads ...*model.PendingUpload) repository.Repository {
+func uploadRepositoryFromSessions(t *testing.T, sessions ...*model.UploadSession) repository.Repository {
 	t.Helper()
 	repo := repository.New(setupTaskHandlerTestDB(t))
-	for _, upload := range uploads {
-		if upload == nil {
-			continue
-		}
-		status := model.UploadSessionPending
-		if upload.Status == model.PendingUploadStatusFinalized {
-			status = model.UploadSessionFinalized
-		}
-		session := &model.UploadSession{
-			ID: upload.ID, UserID: upload.UserID, Purpose: upload.Purpose,
-			StagingKey: upload.Key, FileName: upload.FileName, ContentType: upload.ContentType,
-			Size: upload.Size, Status: status, ExpiresAt: upload.ExpiresAt,
-		}
-		if status == model.UploadSessionFinalized {
-			session.AssetID = upload.ID
-		}
-		if err := repo.UploadSessions().Create(t.Context(), session); err != nil {
-			t.Fatalf("create upload session %s: %v", upload.ID, err)
-		}
-		if status == model.UploadSessionFinalized {
-			if err := repo.Assets().Create(t.Context(), &model.Asset{
-				ID: upload.ID, UserID: upload.UserID, Purpose: upload.Purpose,
-				StorageKey: path.Join("assets/users", upload.UserID, upload.ID, upload.FileName),
-				FileName:   upload.FileName, ContentType: upload.ContentType, Size: upload.Size, ETag: "etag-" + upload.ID,
-			}); err != nil {
-				t.Fatalf("create asset %s: %v", upload.ID, err)
-			}
-		}
-	}
+	seedUploadSessions(t, repo, sessions...)
 	return repo
 }
 
-func uploadRepositoryFromPendingMap(t *testing.T, uploads map[string]*model.PendingUpload) repository.Repository {
-	values := make([]*model.PendingUpload, 0, len(uploads))
-	for _, upload := range uploads {
-		values = append(values, upload)
+func seedUploadSessions(t *testing.T, repo repository.Repository, sessions ...*model.UploadSession) {
+	t.Helper()
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if session.Status == model.UploadSessionFinalized && session.AssetID == "" {
+			session.AssetID = session.ID
+		}
+		if err := repo.UploadSessions().Create(t.Context(), session); err != nil {
+			t.Fatalf("create upload session %s: %v", session.ID, err)
+		}
+		if session.Status == model.UploadSessionFinalized {
+			if err := repo.Assets().Create(t.Context(), &model.Asset{
+				ID: session.AssetID, UserID: session.UserID, Purpose: session.Purpose,
+				StorageKey: path.Join("assets/users", session.UserID, session.ID, session.FileName),
+				FileName:   session.FileName, ContentType: session.ContentType, Size: session.Size, ETag: "etag-" + session.ID,
+			}); err != nil {
+				t.Fatalf("create asset %s: %v", session.ID, err)
+			}
+		}
 	}
-	return uploadRepositoryFromPending(t, values...)
 }
 
 func assertFinalizedAsset(t *testing.T, repo repository.Repository, id, wantKey string) {
@@ -99,7 +87,6 @@ type fakeStorageProvider struct {
 	uploaded    []string
 	readErr     error
 	readMax     []int64
-	statRepo    repository.PendingUploadRepository
 	sessionRepo repository.UploadSessionRepository
 	statErr     error
 	statInfo    *storage.ObjectInfo
@@ -176,14 +163,7 @@ func (f *fakeStorageProvider) StatObject(ctx context.Context, key string) (*stor
 		}
 		return &storage.ObjectInfo{Key: key, Size: session.Size, ContentType: session.ContentType, ETag: "etag-" + session.ID}, nil
 	}
-	if f.statRepo == nil || len(parts) < 4 || parts[0] != "uploads" || parts[1] != "pending" {
-		return nil, storage.ErrObjectNotFound
-	}
-	upload, err := f.statRepo.FindPendingUploadByID(ctx, parts[3])
-	if err != nil || upload.Key != key {
-		return nil, storage.ErrObjectNotFound
-	}
-	return &storage.ObjectInfo{Key: key, Size: upload.Size, ContentType: upload.ContentType, ETag: "etag-" + upload.ID}, nil
+	return nil, storage.ErrObjectNotFound
 }
 
 func (f *fakeStorageProvider) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) error {
@@ -212,10 +192,6 @@ func (f *fakeStorageProvider) PromoteObject(ctx context.Context, sourceKey, fina
 	return nil
 }
 
-func pendingUploadStatStore(repo repository.PendingUploadRepository) *fakeStorageProvider {
-	return &fakeStorageProvider{statRepo: repo}
-}
-
 func uploadSessionStatStore(repo repository.UploadSessionRepository) *fakeStorageProvider {
 	return &fakeStorageProvider{sessionRepo: repo}
 }
@@ -237,44 +213,6 @@ func (f *fakeStorageProvider) IsOwnedURL(rawURL string) bool {
 	return strings.HasPrefix(rawURL, "/api/v1/files/") ||
 		strings.HasPrefix(rawURL, "https://cdn.example.com/") ||
 		strings.HasPrefix(rawURL, "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/")
-}
-
-type fakeProjectPendingUploadRepo struct {
-	uploads   map[string]*model.PendingUpload
-	finalized []string
-}
-
-func (r *fakeProjectPendingUploadRepo) CreatePendingUpload(context.Context, *model.PendingUpload) error {
-	return fmt.Errorf("not implemented")
-}
-
-func (r *fakeProjectPendingUploadRepo) FindPendingUploadByID(_ context.Context, id string) (*model.PendingUpload, error) {
-	if r.uploads == nil || r.uploads[id] == nil {
-		return nil, model.ErrPendingUploadNotFound
-	}
-	cp := *r.uploads[id]
-	return &cp, nil
-}
-
-func (r *fakeProjectPendingUploadRepo) FinalizePendingUploadClaims(_ context.Context, claims []model.PendingUploadClaim, _ time.Time) error {
-	for _, claim := range claims {
-		r.finalized = append(r.finalized, claim.UploadID)
-	}
-	return nil
-}
-
-func (r *fakeProjectPendingUploadRepo) FindPendingUploadsForCleanup(context.Context, time.Time, time.Time, int) ([]*model.PendingUpload, error) {
-	return nil, nil
-}
-
-func (r *fakeProjectPendingUploadRepo) ClaimPendingUploadExpiration(context.Context, string, string, time.Time, time.Time) (bool, error) {
-	return false, nil
-}
-func (r *fakeProjectPendingUploadRepo) CompletePendingUploadExpiration(context.Context, string, string, time.Time) (bool, error) {
-	return false, nil
-}
-func (r *fakeProjectPendingUploadRepo) ReopenPendingUploadExpiration(context.Context, string, string) (bool, error) {
-	return false, nil
 }
 
 func TestProjectFetchProfileAIAnalysisMergesFields(t *testing.T) {
@@ -448,27 +386,17 @@ func TestAnalyzeImageAllowsReferenceUploadPrefix(t *testing.T) {
 	}
 }
 
-func TestAnalyzeImageAllowsOwnPendingProjectReference(t *testing.T) {
+func TestAnalyzeImageAllowsOwnStagingProjectReference(t *testing.T) {
 	key := "uploads/pending/user-1/upload-1/reference.png"
 	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
 	store := &fakeStorageProvider{
 		data: map[string][]byte{key: tinyPNG()},
 	}
-	pending := &fakeProjectPendingUploadRepo{uploads: map[string]*model.PendingUpload{
-		"upload-1": {
-			ID:          "upload-1",
-			UserID:      "user-1",
-			Purpose:     service.DirectUploadPurposeProjectReference,
-			Key:         key,
-			PublicURL:   imageURL,
-			ContentType: "image/png",
-			Status:      model.PendingUploadStatusPending,
-			ExpiresAt:   time.Now().Add(time.Minute),
-		},
-	}}
+	session := &model.UploadSession{ID: "upload-1", UserID: "user-1", Purpose: service.DirectUploadPurposeProjectReference, StagingKey: key, FileName: "reference.png", ContentType: "image/png", Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Minute)}
+	repo := uploadRepositoryFromSessions(t, session)
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetUploadRepository(uploadRepositoryFromPending(t, pending.uploads["upload-1"]))
+	h.SetUploadRepository(repo)
 	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
@@ -487,32 +415,23 @@ func TestAnalyzeImageAllowsOwnPendingProjectReference(t *testing.T) {
 	if len(store.read) != 1 || store.read[0] != key {
 		t.Fatalf("store.Read keys = %v, want [%s]", store.read, key)
 	}
-	if len(pending.finalized) != 0 {
-		t.Fatalf("AnalyzeImage finalized pending uploads = %v, want none", pending.finalized)
+	found, err := repo.UploadSessions().FindByID(t.Context(), session.ID)
+	if err != nil || found.Status != model.UploadSessionPending || found.AssetID != "" {
+		t.Fatalf("analysis changed upload session: %#v, %v", found, err)
 	}
 }
 
-func TestAnalyzeImageAllowsOwnPendingTaskReference(t *testing.T) {
+func TestAnalyzeImageAllowsOwnStagingTaskReference(t *testing.T) {
 	key := "uploads/pending/user-1/upload-1/template.png"
 	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
 	store := &fakeStorageProvider{
 		data: map[string][]byte{key: tinyPNG()},
 	}
-	pending := &fakeProjectPendingUploadRepo{uploads: map[string]*model.PendingUpload{
-		"upload-1": {
-			ID:          "upload-1",
-			UserID:      "user-1",
-			Purpose:     service.DirectUploadPurposeTaskReference,
-			Key:         key,
-			PublicURL:   imageURL,
-			ContentType: "image/png",
-			Status:      model.PendingUploadStatusPending,
-			ExpiresAt:   time.Now().Add(time.Minute),
-		},
-	}}
+	session := &model.UploadSession{ID: "upload-1", UserID: "user-1", Purpose: service.DirectUploadPurposeTaskReference, StagingKey: key, FileName: "template.png", ContentType: "image/png", Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Minute)}
+	repo := uploadRepositoryFromSessions(t, session)
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetUploadRepository(uploadRepositoryFromPending(t, pending.uploads["upload-1"]))
+	h.SetUploadRepository(repo)
 	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
@@ -531,32 +450,23 @@ func TestAnalyzeImageAllowsOwnPendingTaskReference(t *testing.T) {
 	if len(store.read) != 1 || store.read[0] != key {
 		t.Fatalf("store.Read keys = %v, want [%s]", store.read, key)
 	}
-	if len(pending.finalized) != 0 {
-		t.Fatalf("AnalyzeImage finalized pending uploads = %v, want none", pending.finalized)
+	found, err := repo.UploadSessions().FindByID(t.Context(), session.ID)
+	if err != nil || found.Status != model.UploadSessionPending || found.AssetID != "" {
+		t.Fatalf("analysis changed upload session: %#v, %v", found, err)
 	}
 }
 
-func TestAnalyzeImageRejectsUnauthorizedPendingUpload(t *testing.T) {
+func TestAnalyzeImageRejectsUnauthorizedUploadSession(t *testing.T) {
 	key := "uploads/pending/user-2/upload-1/reference.png"
 	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
 	store := &fakeStorageProvider{
 		data: map[string][]byte{key: tinyPNG()},
 	}
-	pending := &fakeProjectPendingUploadRepo{uploads: map[string]*model.PendingUpload{
-		"upload-1": {
-			ID:          "upload-1",
-			UserID:      "user-2",
-			Purpose:     service.DirectUploadPurposeProjectReference,
-			Key:         key,
-			PublicURL:   imageURL,
-			ContentType: "image/png",
-			Status:      model.PendingUploadStatusPending,
-			ExpiresAt:   time.Now().Add(time.Minute),
-		},
-	}}
+	session := &model.UploadSession{ID: "upload-1", UserID: "user-2", Purpose: service.DirectUploadPurposeProjectReference, StagingKey: key, FileName: "reference.png", ContentType: "image/png", Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Minute)}
+	repo := uploadRepositoryFromSessions(t, session)
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetUploadRepository(uploadRepositoryFromPending(t, pending.uploads["upload-1"]))
+	h.SetUploadRepository(repo)
 	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
@@ -573,31 +483,21 @@ func TestAnalyzeImageRejectsUnauthorizedPendingUpload(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusForbidden)
 	}
 	if len(store.read) != 0 {
-		t.Fatalf("store.Read should not be called for unauthorized pending upload, got %v", store.read)
+		t.Fatalf("store.Read should not be called for unauthorized upload session, got %v", store.read)
 	}
 }
 
-func TestAnalyzeImageRejectsPendingUploadWithWrongPurpose(t *testing.T) {
+func TestAnalyzeImageRejectsUploadSessionWithWrongPurpose(t *testing.T) {
 	key := "uploads/pending/user-1/upload-1/document.png"
 	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
 	store := &fakeStorageProvider{
 		data: map[string][]byte{key: tinyPNG()},
 	}
-	pending := &fakeProjectPendingUploadRepo{uploads: map[string]*model.PendingUpload{
-		"upload-1": {
-			ID:          "upload-1",
-			UserID:      "user-1",
-			Purpose:     service.DirectUploadPurposeAIEntryAttachment,
-			Key:         key,
-			PublicURL:   imageURL,
-			ContentType: "image/png",
-			Status:      model.PendingUploadStatusPending,
-			ExpiresAt:   time.Now().Add(time.Minute),
-		},
-	}}
+	session := &model.UploadSession{ID: "upload-1", UserID: "user-1", Purpose: service.DirectUploadPurposeAIEntryAttachment, StagingKey: key, FileName: "document.png", ContentType: "image/png", Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Minute)}
+	repo := uploadRepositoryFromSessions(t, session)
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetUploadRepository(uploadRepositoryFromPending(t, pending.uploads["upload-1"]))
+	h.SetUploadRepository(repo)
 	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
@@ -614,7 +514,7 @@ func TestAnalyzeImageRejectsPendingUploadWithWrongPurpose(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusForbidden)
 	}
 	if len(store.read) != 0 {
-		t.Fatalf("store.Read should not be called for wrong-purpose pending upload, got %v", store.read)
+		t.Fatalf("store.Read should not be called for wrong-purpose upload session, got %v", store.read)
 	}
 }
 

@@ -21,27 +21,27 @@ import (
 
 func TestRewriteFinalizedUploadURLsCoversCurrentConsumers(t *testing.T) {
 	const (
-		pending = "https://cdn.example.com/uploads/pending/user-1/upload-1/input.mp4"
-		final   = "https://cdn.example.com/uploads/finalized/user-1/upload-1/input.mp4"
+		stagingURL   = "https://cdn.example.com/uploads/pending/user-1/upload-1/input.mp4"
+		finalizedURL = "https://cdn.example.com/uploads/finalized/user-1/upload-1/input.mp4"
 	)
-	rewrites := map[string]string{pending: final}
-	values := []string{pending, "https://external.example.com/image.png"}
-	cfg := &model.VideoTaskConfig{References: []model.VideoReferenceAsset{{URL: pending}}}
-	input := &model.VideoInput{References: []model.VideoReferenceAsset{{URL: pending}}}
-	montage := &model.MontageInput{SourceAssets: []model.MontageAsset{{URL: pending}}}
+	rewrites := map[string]string{stagingURL: finalizedURL}
+	values := []string{stagingURL, "https://external.example.com/image.png"}
+	cfg := &model.VideoTaskConfig{References: []model.VideoReferenceAsset{{URL: stagingURL}}}
+	input := &model.VideoInput{References: []model.VideoReferenceAsset{{URL: stagingURL}}}
+	montage := &model.MontageInput{SourceAssets: []model.MontageAsset{{URL: stagingURL}}}
 
-	if got := rewriteFinalizedUploadURL(pending, rewrites); got != final {
+	if got := rewriteFinalizedUploadURL(stagingURL, rewrites); got != finalizedURL {
 		t.Fatalf("scalar rewrite = %q", got)
 	}
 	rewriteFinalizedUploadURLSlice(values, rewrites)
 	rewriteFinalizedVideoReferenceURLs(rewrites, cfg, input, nil, nil)
 	rewriteFinalizedMontageAssetURLs(montage, rewrites)
-	if values[0] != final || values[1] != "https://external.example.com/image.png" || cfg.References[0].URL != final || input.References[0].URL != final || montage.SourceAssets[0].URL != final {
+	if values[0] != finalizedURL || values[1] != "https://external.example.com/image.png" || cfg.References[0].URL != finalizedURL || input.References[0].URL != finalizedURL || montage.SourceAssets[0].URL != finalizedURL {
 		t.Fatalf("rewritten values: values=%#v cfg=%#v input=%#v montage=%#v", values, cfg, input, montage)
 	}
 }
 
-func TestRespondPendingUploadFinalizeErrorClassifiesAndRedacts(t *testing.T) {
+func TestRespondUploadSessionFinalizeErrorClassifiesAndRedacts(t *testing.T) {
 	const secret = "uploads/pending/user-1/upload-1/object.png at oss-secret.example.com"
 	tests := []struct {
 		name       string
@@ -50,7 +50,7 @@ func TestRespondPendingUploadFinalizeErrorClassifiesAndRedacts(t *testing.T) {
 	}{
 		{name: "access denied", err: fmt.Errorf("%w: %s", service.ErrUploadSessionAccessDenied, secret), wantStatus: fiber.StatusBadRequest},
 		{name: "expired", err: fmt.Errorf("%w: %s", service.ErrUploadSessionExpired, secret), wantStatus: fiber.StatusBadRequest},
-		{name: "not pending", err: fmt.Errorf("%w: %s", service.ErrUploadSessionStateConflict, secret), wantStatus: fiber.StatusBadRequest},
+		{name: "state conflict", err: fmt.Errorf("%w: %s", service.ErrUploadSessionStateConflict, secret), wantStatus: fiber.StatusBadRequest},
 		{name: "invalid object metadata", err: fmt.Errorf("%w: %s", service.ErrUploadSessionObjectInvalid, secret), wantStatus: fiber.StatusBadRequest},
 		{name: "backend error", err: fmt.Errorf("storage backend failed: %s", secret), wantStatus: fiber.StatusInternalServerError},
 		{name: "timeout", err: context.DeadlineExceeded, wantStatus: fiber.StatusInternalServerError},
@@ -79,7 +79,7 @@ func TestRespondPendingUploadFinalizeErrorClassifiesAndRedacts(t *testing.T) {
 	}
 }
 
-func TestFinalizePendingURLCallersUseSharedResponder(t *testing.T) {
+func TestFinalizeUploadSessionURLCallersUseSharedResponder(t *testing.T) {
 	expectedCalls := map[string]int{
 		"task.go":     4,
 		"plan.go":     6,

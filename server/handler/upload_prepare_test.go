@@ -47,34 +47,6 @@ func (handlerDirectUploadStore) DownloadURL(_ context.Context, key string, _ int
 func (handlerDirectUploadStore) HasCustomDomain() bool  { return true }
 func (handlerDirectUploadStore) IsOwnedURL(string) bool { return false }
 
-type handlerPendingUploadRepo struct {
-	created *model.PendingUpload
-}
-
-func (r *handlerPendingUploadRepo) CreatePendingUpload(_ context.Context, upload *model.PendingUpload) error {
-	cp := *upload
-	r.created = &cp
-	return nil
-}
-func (r *handlerPendingUploadRepo) FindPendingUploadByID(context.Context, string) (*model.PendingUpload, error) {
-	return nil, model.ErrPendingUploadNotFound
-}
-func (r *handlerPendingUploadRepo) FinalizePendingUploadClaims(context.Context, []model.PendingUploadClaim, time.Time) error {
-	return nil
-}
-func (r *handlerPendingUploadRepo) FindPendingUploadsForCleanup(context.Context, time.Time, time.Time, int) ([]*model.PendingUpload, error) {
-	return nil, nil
-}
-func (r *handlerPendingUploadRepo) ClaimPendingUploadExpiration(context.Context, string, string, time.Time, time.Time) (bool, error) {
-	return false, nil
-}
-func (r *handlerPendingUploadRepo) CompletePendingUploadExpiration(context.Context, string, string, time.Time) (bool, error) {
-	return false, nil
-}
-func (r *handlerPendingUploadRepo) ReopenPendingUploadExpiration(context.Context, string, string) (bool, error) {
-	return false, nil
-}
-
 func TestUploadPrepareReturnsDirectUploadCredentials(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	store := handlerDirectUploadStore{}
@@ -148,6 +120,6 @@ func TestUploadPrepareReturnsDirectUploadCredentials(t *testing.T) {
 		t.Fatalf("method/max_size = %q/%d", decoded.Data.Method, decoded.Data.MaxSize)
 	}
 	if !strings.HasPrefix(decoded.Data.Key, "uploads/pending/user-1/") {
-		t.Fatalf("key = %q, want user pending prefix", decoded.Data.Key)
+		t.Fatalf("key = %q, want user staging prefix", decoded.Data.Key)
 	}
 }

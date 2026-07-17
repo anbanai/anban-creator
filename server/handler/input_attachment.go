@@ -299,7 +299,7 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func validAIEntryAttachmentURL(raw string, allowPendingUploadURL bool) bool {
+func validAIEntryAttachmentURL(raw string, allowUploadSessionURL bool) bool {
 	if raw == "" {
 		return true
 	}
@@ -309,14 +309,14 @@ func validAIEntryAttachmentURL(raw string, allowPendingUploadURL bool) bool {
 	if strings.HasPrefix(raw, "/api/v1/files/") || strings.HasPrefix(raw, "/files/") {
 		return true
 	}
-	if !allowPendingUploadURL {
+	if !allowUploadSessionURL {
 		return false
 	}
 	cut := strings.SplitN(strings.SplitN(raw, "#", 2)[0], "?", 2)[0]
-	return pendingUploadIDFromAIEntryURL(cut) != ""
+	return uploadSessionIDFromAIEntryURL(cut) != ""
 }
 
-func pendingUploadIDFromAIEntryURL(raw string) string {
+func uploadSessionIDFromAIEntryURL(raw string) string {
 	parts := strings.Split(raw, "/uploads/pending/")
 	if len(parts) < 2 {
 		return ""

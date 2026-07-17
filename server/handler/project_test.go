@@ -152,16 +152,16 @@ func TestProjectHandler_FetchProfileReturnsUnavailableWhenSeednoteNotReady(t *te
 	}
 }
 
-func TestProjectHandler_CreateFinalizesPendingAvatarAndReference(t *testing.T) {
+func TestProjectHandler_CreateFinalizesAvatarAndReferenceUploadSessions(t *testing.T) {
 	app, repo := setupProjectDeleteHandlerTest(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	avatarID := "avatar-upload"
 	refID := "reference-upload"
-	avatarURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + avatarID + "/avatar.png"
-	refURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + refID + "/ref.png"
+	avatarStagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + avatarID + "/avatar.png"
+	refStagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + refID + "/ref.png"
 
-	for _, upload := range []*model.UploadSession{
+	for _, session := range []*model.UploadSession{
 		{
 			ID:          avatarID,
 			UserID:      userID,
@@ -185,16 +185,16 @@ func TestProjectHandler_CreateFinalizesPendingAvatarAndReference(t *testing.T) {
 			ExpiresAt:   time.Now().Add(time.Hour),
 		},
 	} {
-		if err := repo.UploadSessions().Create(ctx, upload); err != nil {
-			t.Fatalf("seed pending upload %s: %v", upload.ID, err)
+		if err := repo.UploadSessions().Create(ctx, session); err != nil {
+			t.Fatalf("seed upload session %s: %v", session.ID, err)
 		}
 	}
 
 	resp := doRequest(t, app, "POST", "/api/v1/projects", userID, map[string]any{
 		"platform":            model.PlatformArticle,
 		"name":                "公众号项目",
-		"avatar_url":          avatarURL,
-		"reference_image_url": refURL,
+		"avatar_url":          avatarStagingURL,
+		"reference_image_url": refStagingURL,
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
@@ -211,14 +211,14 @@ func TestProjectHandler_CreateFinalizesPendingAvatarAndReference(t *testing.T) {
 	}
 }
 
-func TestProjectHandler_UpdateFinalizesPendingAvatar(t *testing.T) {
+func TestProjectHandler_UpdateFinalizesAvatarUploadSession(t *testing.T) {
 	app, repo := setupProjectDeleteHandlerTest(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := uuid.New().String()
 	uploadID := "updated-avatar-upload"
 	key := "uploads/pending/" + userID + "/" + uploadID + "/avatar.png"
-	publicURL := "https://cdn.example.com/" + key
+	stagingURL := "https://cdn.example.com/" + key
 
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
@@ -241,11 +241,11 @@ func TestProjectHandler_UpdateFinalizesPendingAvatar(t *testing.T) {
 		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}); err != nil {
-		t.Fatalf("seed pending upload: %v", err)
+		t.Fatalf("seed upload session: %v", err)
 	}
 
 	resp := doRequest(t, app, "PUT", "/api/v1/projects/"+projectID, userID, map[string]any{
-		"avatar_url": publicURL,
+		"avatar_url": stagingURL,
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))

@@ -166,7 +166,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := uuid.New().String()
 	uploadID := uuid.New().String()
-	assetURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
+	stagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      userID + "@example.com",
@@ -196,7 +196,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -215,7 +215,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 		"cron_expr": "0 9 * * *",
 		"montage_input": {
 			"brief": "每天剪一条发布会短片",
-			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
+			"source_assets": [{"type": "video", "url": "`+stagingURL+`"}]
 		}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -244,7 +244,7 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	userID := uuid.New().String()
 	projectID := uuid.New().String()
 	uploadID := uuid.New().String()
-	assetURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
+	stagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      userID + "@example.com",
@@ -274,7 +274,7 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -292,7 +292,7 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		"cron_expr": "0 9 * * *",
 		"montage_input": {
 			"brief": "错误平台",
-			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
+			"source_assets": [{"type": "video", "url": "`+stagingURL+`"}]
 		}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -304,12 +304,12 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
 	}
-	upload, err := repo.UploadSessions().FindByID(ctx, uploadID)
+	session, err := repo.UploadSessions().FindByID(ctx, uploadID)
 	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
+		t.Fatalf("find upload session: %v", err)
 	}
-	if upload.Status != model.UploadSessionPending {
-		t.Fatalf("upload status = %q, want pending", upload.Status)
+	if session.Status != model.UploadSessionPending || session.AssetID != "" {
+		t.Fatalf("upload session changed: %#v", session)
 	}
 }
 
@@ -442,7 +442,7 @@ func TestCreateVideoPlanPersistsFinalReferenceURL(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoCreator, Name: "Video", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	refURL := seedPendingHandlerUpload(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
+	refURL := seedHandlerUploadSession(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
 	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
 	h := NewPlanHandler(service.NewPlanService(repo, &logger), &logger)

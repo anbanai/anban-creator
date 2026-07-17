@@ -89,27 +89,14 @@ func resolveDownloadRequest(t *testing.T, app *fiber.App, payload string) (*http
 	return resp, body
 }
 
-func createPendingUpload(t *testing.T, repo repository.Repository, upload model.PendingUpload) {
+func createUploadSession(t *testing.T, repo repository.Repository, session *model.UploadSession, asset *model.Asset) {
 	t.Helper()
-	session := &model.UploadSession{
-		ID: upload.ID, UserID: upload.UserID, Purpose: upload.Purpose, StagingKey: upload.Key,
-		FileName: upload.FileName, ContentType: upload.ContentType, Size: upload.Size,
-		Status: model.UploadSessionPending, ExpiresAt: upload.ExpiresAt,
-	}
-	if upload.Status == model.PendingUploadStatusFinalized {
-		session.Status = model.UploadSessionFinalized
-		session.AssetID = upload.ID
-	}
 	if err := repo.UploadSessions().Create(t.Context(), session); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
-	if session.Status == model.UploadSessionFinalized {
-		if err := repo.Assets().Create(t.Context(), &model.Asset{
-			ID: upload.ID, UserID: upload.UserID, Purpose: upload.Purpose,
-			StorageKey: upload.FinalizedKey, FileName: upload.FileName,
-			ContentType: upload.ContentType, Size: upload.Size, ETag: "etag-" + upload.ID,
-		}); err != nil {
-			t.Fatalf("create finalized asset: %v", err)
+	if asset != nil {
+		if err := repo.Assets().Create(t.Context(), asset); err != nil {
+			t.Fatalf("create asset: %v", err)
 		}
 	}
 }
@@ -119,13 +106,14 @@ func TestResolveAttachmentDownloadURLByUploadID(t *testing.T) {
 	now := time.Now()
 	userID := uuid.NewString()
 	otherUserID := uuid.NewString()
-	pendingKey := "uploads/pending/" + userID + "/pending/input.png"
+	stagingKey := "uploads/pending/" + userID + "/staging/input.png"
 	finalSourceKey := "uploads/pending/" + userID + "/final/input.png"
 	finalKey := "assets/users/" + userID + "/final/input.png"
-	createPendingUpload(t, repo, model.PendingUpload{ID: "pending", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, Key: pendingKey, PublicURL: "/api/v1/files/" + pendingKey, FileName: "input.png", Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour)})
-	createPendingUpload(t, repo, model.PendingUpload{ID: "final", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, Key: finalSourceKey, FinalizedKey: finalKey, PublicURL: "/api/v1/files/" + finalSourceKey, FileName: "input.png", Status: model.PendingUploadStatusFinalized, ExpiresAt: now.Add(time.Hour)})
-	createPendingUpload(t, repo, model.PendingUpload{ID: "other", UserID: otherUserID, Purpose: service.DirectUploadPurposeAIEntryAttachment, Key: "uploads/pending/other/input.png", PublicURL: "/api/v1/files/uploads/pending/other/input.png", FileName: "input.png", Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(time.Hour)})
-	createPendingUpload(t, repo, model.PendingUpload{ID: "expired", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, Key: "uploads/pending/expired/input.png", PublicURL: "/api/v1/files/uploads/pending/expired/input.png", FileName: "input.png", Status: model.PendingUploadStatusPending, ExpiresAt: now.Add(-time.Minute)})
+	createUploadSession(t, repo, &model.UploadSession{ID: "staging", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StagingKey: stagingKey, FileName: "input.png", Status: model.UploadSessionPending, ExpiresAt: now.Add(time.Hour)}, nil)
+	createUploadSession(t, repo, &model.UploadSession{ID: "final", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StagingKey: finalSourceKey, FileName: "input.png", Status: model.UploadSessionFinalized, AssetID: "final", ExpiresAt: now.Add(time.Hour)}, &model.Asset{ID: "final", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StorageKey: finalKey, FileName: "input.png", ETag: "etag-final"})
+	createUploadSession(t, repo, &model.UploadSession{ID: "other", UserID: otherUserID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StagingKey: "uploads/pending/other/input.png", FileName: "input.png", Status: model.UploadSessionPending, ExpiresAt: now.Add(time.Hour)}, nil)
+	createUploadSession(t, repo, &model.UploadSession{ID: "expired", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StagingKey: "uploads/pending/expired/input.png", FileName: "input.png", Status: model.UploadSessionPending, ExpiresAt: now.Add(-time.Minute)}, nil)
+	assertFinalizedAsset(t, repo, "final", finalKey)
 
 	store := &resolveDownloadStore{}
 	app, _ := newResolveUploadHandler(t, repo, store, userID)
@@ -135,13 +123,13 @@ func TestResolveAttachmentDownloadURLByUploadID(t *testing.T) {
 		wantStatus int
 		wantKey    string
 	}{
-		{name: "pending source preview", payload: fmt.Sprintf(`{"upload_id":"pending","key":%q}`, pendingKey), wantStatus: fiber.StatusOK, wantKey: pendingKey},
+		{name: "staging source preview", payload: fmt.Sprintf(`{"upload_id":"staging","key":%q}`, stagingKey), wantStatus: fiber.StatusOK, wantKey: stagingKey},
 		{name: "finalized immutable key", payload: fmt.Sprintf(`{"upload_id":"final","key":%q}`, finalKey), wantStatus: fiber.StatusOK, wantKey: finalKey},
 		{name: "finalized source rejected", payload: fmt.Sprintf(`{"upload_id":"final","key":%q}`, finalSourceKey), wantStatus: fiber.StatusForbidden},
 		{name: "cross user rejected", payload: `{"upload_id":"other","key":"uploads/pending/other/input.png"}`, wantStatus: fiber.StatusForbidden},
-		{name: "key mismatch rejected", payload: `{"upload_id":"pending","key":"uploads/pending/attacker.png"}`, wantStatus: fiber.StatusForbidden},
-		{name: "expired pending rejected", payload: `{"upload_id":"expired","key":"uploads/pending/expired/input.png"}`, wantStatus: fiber.StatusForbidden},
-		{name: "unknown upload", payload: `{"upload_id":"missing","key":"uploads/pending/missing.png"}`, wantStatus: fiber.StatusNotFound},
+		{name: "key mismatch rejected", payload: `{"upload_id":"staging","key":"uploads/pending/attacker.png"}`, wantStatus: fiber.StatusForbidden},
+		{name: "expired upload session rejected", payload: `{"upload_id":"expired","key":"uploads/pending/expired/input.png"}`, wantStatus: fiber.StatusForbidden},
+		{name: "unknown upload session", payload: `{"upload_id":"missing","key":"uploads/pending/missing.png"}`, wantStatus: fiber.StatusNotFound},
 	}
 
 	for _, tt := range tests {
@@ -239,7 +227,7 @@ func TestResolveAttachmentDownloadURLRedactsStorageFailure(t *testing.T) {
 	repo := repository.New(setupTaskHandlerTestDB(t))
 	userID := uuid.NewString()
 	key := "uploads/pending/" + userID + "/input.png"
-	createPendingUpload(t, repo, model.PendingUpload{ID: "broken", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, Key: key, PublicURL: "/api/v1/files/" + key, FileName: "input.png", Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour)})
+	createUploadSession(t, repo, &model.UploadSession{ID: "broken", UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StagingKey: key, FileName: "input.png", Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour)}, nil)
 	store := &resolveDownloadStore{downloadErr: errors.New("backend secret credential leaked")}
 	app, _ := newResolveUploadHandler(t, repo, store, userID)
 	resp, body := resolveDownloadRequest(t, app, fmt.Sprintf(`{"upload_id":"broken","key":%q}`, key))

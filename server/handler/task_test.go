@@ -59,7 +59,7 @@ func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func seedPendingHandlerUpload(t *testing.T, repo repository.Repository, userID, uploadID, purpose, filename, contentType string) string {
+func seedHandlerUploadSession(t *testing.T, repo repository.Repository, userID, uploadID, purpose, filename, contentType string) string {
 	t.Helper()
 	key := "uploads/pending/" + userID + "/" + uploadID + "/" + filename
 	publicURL := "https://cdn.example.com/" + key
@@ -68,7 +68,7 @@ func seedPendingHandlerUpload(t *testing.T, repo repository.Repository, userID, 
 		FileName: filename, ContentType: contentType, Size: 1,
 		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
-		t.Fatalf("seed pending upload %s: %v", uploadID, err)
+		t.Fatalf("seed upload session %s: %v", uploadID, err)
 	}
 	return publicURL
 }
@@ -713,8 +713,8 @@ func TestCreateTaskPersistsFinalReferenceAndEcommercePhotoURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 	refID, photoID := uuid.NewString(), uuid.NewString()
-	refURL := seedPendingHandlerUpload(t, repo, userID, refID, service.DirectUploadPurposeTaskReference, "reference.png", "image/png")
-	photoURL := seedPendingHandlerUpload(t, repo, userID, photoID, service.DirectUploadPurposeEcommercePhoto, "product.png", "image/png")
+	refURL := seedHandlerUploadSession(t, repo, userID, refID, service.DirectUploadPurposeTaskReference, "reference.png", "image/png")
+	photoURL := seedHandlerUploadSession(t, repo, userID, photoID, service.DirectUploadPurposeEcommercePhoto, "product.png", "image/png")
 	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
@@ -764,7 +764,7 @@ func TestCreateVideoTaskPersistsFinalReferenceURL(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoCreator, Name: "Video", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	refURL := seedPendingHandlerUpload(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
+	refURL := seedHandlerUploadSession(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
 	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
@@ -804,7 +804,7 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := uuid.New().String()
 	uploadID := uuid.New().String()
-	assetURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
+	stagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      userID + "@example.com",
@@ -834,7 +834,7 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -851,7 +851,7 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 		"project_id": "`+projectID+`",
 		"montage_input": {
 			"brief": "剪成一条发布会短片",
-			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
+			"source_assets": [{"type": "video", "url": "`+stagingURL+`"}]
 		}
 	}`)
 	defer resp.Body.Close()
@@ -876,7 +876,7 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	userID := uuid.New().String()
 	projectID := uuid.New().String()
 	uploadID := uuid.New().String()
-	assetURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
+	stagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      userID + "@example.com",
@@ -906,7 +906,7 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -923,7 +923,7 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		"project_id": "`+projectID+`",
 		"montage_input": {
 			"brief": "错误平台",
-			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
+			"source_assets": [{"type": "video", "url": "`+stagingURL+`"}]
 		}
 	}`)
 	defer resp.Body.Close()
@@ -931,16 +931,16 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
 	}
-	upload, err := repo.UploadSessions().FindByID(ctx, uploadID)
+	session, err := repo.UploadSessions().FindByID(ctx, uploadID)
 	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
+		t.Fatalf("find upload session: %v", err)
 	}
-	if upload.Status != model.UploadSessionPending {
-		t.Fatalf("upload status = %q, want pending", upload.Status)
+	if session.Status != model.UploadSessionPending || session.AssetID != "" {
+		t.Fatalf("upload session changed: %#v", session)
 	}
 }
 
-func TestCreateTaskRejectsMalformedPendingReferenceWithoutCreatingTask(t *testing.T) {
+func TestCreateTaskRejectsMalformedUploadSessionReferenceWithoutCreatingTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -983,7 +983,7 @@ func TestCreateTaskRejectsMalformedPendingReferenceWithoutCreatingTask(t *testin
 	}
 }
 
-func TestCreateTaskAllowsExternalPendingLikeReferencePath(t *testing.T) {
+func TestCreateTaskAllowsExternalStagingLikeReferencePath(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -1115,14 +1115,14 @@ func TestCloneTaskAcceptsFinalInputSnapshot(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	uploadID := "clone-upload"
-	pendingKey := "uploads/pending/" + userID + "/" + uploadID + "/reference.png"
+	stagingKey := "uploads/pending/" + userID + "/" + uploadID + "/reference.png"
 	finalKey := "assets/users/" + userID + "/" + uploadID + "/reference.png"
 	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
 		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		StagingKey: pendingKey, FileName: "reference.png", ContentType: "image/png", Size: 123,
+		StagingKey: stagingKey, FileName: "reference.png", ContentType: "image/png", Size: 123,
 		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
 	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
@@ -1139,7 +1139,7 @@ func TestCloneTaskAcceptsFinalInputSnapshot(t *testing.T) {
 	resp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
 		"prompt":"  edited prompt  ",
 		"input_attachments":[{
-			"type":"image","upload_id":"`+uploadID+`","key":"`+pendingKey+`",
+			"type":"image","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
 			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999,
 			"url":"https://attacker.example/secret","instruction":"  keep logo  "
 		}]
@@ -1173,7 +1173,7 @@ func TestCloneTaskAcceptsFinalInputSnapshot(t *testing.T) {
 	emptyResp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
 		"prompt":"",
 		"input_attachments":[{
-			"type":"image","upload_id":"`+uploadID+`","key":"`+pendingKey+`",
+			"type":"image","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
 			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999
 		}]
 	}`)
@@ -1209,14 +1209,14 @@ func TestCreateVideoEditorPromotesVerifiedPromptVideoToPersistedInputReference(t
 		t.Fatalf("create project: %v", err)
 	}
 	uploadID := "video-upload"
-	pendingKey := "uploads/pending/" + userID + "/" + uploadID + "/source.mp4"
+	stagingKey := "uploads/pending/" + userID + "/" + uploadID + "/source.mp4"
 	finalKey := "assets/users/" + userID + "/" + uploadID + "/source.mp4"
 	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
 		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		StagingKey: pendingKey, FileName: "source.mp4", ContentType: "video/mp4", Size: 321,
+		StagingKey: stagingKey, FileName: "source.mp4", ContentType: "video/mp4", Size: 321,
 		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
 	store := uploadSessionStatStore(repo.UploadSessions())
 	logger := zerolog.New(io.Discard)
@@ -1235,7 +1235,7 @@ func TestCreateVideoEditorPromotesVerifiedPromptVideoToPersistedInputReference(t
 		"prompt":"给源视频加字幕",
 		"quantity":1,
 		"input_attachments":[{
-			"type":"video","upload_id":"`+uploadID+`","key":"`+pendingKey+`",
+			"type":"video","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
 			"file_name":"forged.mov","content_type":"video/quicktime","size":999
 		}]
 	}`)
@@ -1350,17 +1350,17 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 		t.Fatalf("create task: %v", err)
 	}
 	uploadID := "resume-upload"
-	pendingKey := "uploads/pending/" + userID + "/" + uploadID + "/notes.md"
+	stagingKey := "uploads/pending/" + userID + "/" + uploadID + "/notes.md"
 	finalKey := "assets/users/" + userID + "/" + uploadID + "/notes.md"
 	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
 		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		StagingKey: pendingKey, FileName: "notes.md", ContentType: "text/markdown", Size: int64(len("# notes")),
+		StagingKey: stagingKey, FileName: "notes.md", ContentType: "text/markdown", Size: int64(len("# notes")),
 		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
 	store := uploadSessionStatStore(repo.UploadSessions())
-	store.data = map[string][]byte{pendingKey: []byte("# notes")}
+	store.data = map[string][]byte{stagingKey: []byte("# notes")}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
@@ -1377,7 +1377,7 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{
 		"prompt":"继续写结论",
 		"input_attachments":[{
-			"type":"text","upload_id":"`+uploadID+`","key":"`+pendingKey+`",
+			"type":"text","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
 			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999,
 			"instruction":"修改意见"
 		}]
