@@ -136,7 +136,7 @@ skus:
 		"costs.yaml": `catalog_id: costs-v1
 currency_rates: {CNY: "1.00"}
 models:
-  provider/model: {pricing_type: token, currency: CNY, unit: 1000000, input: "1.00", output: "2.00"}
+  provider/model: {pricing_type: token, currency: CNY, unit: 1000000, input: "1.00", cache_read_input: "0.20", cache_creation_input: "1.00", output: "2.00", operator_evidence: test-fixture, effective_at: "2026-07-17T00:00:00Z"}
 `,
 		"promotions.yaml": `catalog_id: promotions-v1
 programs:

@@ -51,7 +51,7 @@ func TestLoadBundleRejectsStrictYAMLErrors(t *testing.T) {
 		{name: "malformed promotion price", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, `"10.00"`, `"-10.00"`, 1)}, want: "minimum_topup_cny"},
 		{name: "missing currency reference", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `currency: "CNY"`, `currency: "EUR"`, 1)}, want: "references missing currency rate"},
 		{name: "invalid charge policy", overrides: map[string]string{"products.yaml": strings.Replace(validProductsYAML, "task_admission", "runtime_usage", 1)}, want: "charge_policy"},
-		{name: "promotion cannot repay debt", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, "can_repay_debt: false", "can_repay_debt: true", 1)}, want: "contradicts policy.promotions.may_repay_debt"},
+		{name: "promotion cannot repay debt", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, "can_repay_debt: false", "can_repay_debt: true", 1)}, want: "can_repay_debt must be false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,6 +62,157 @@ func TestLoadBundleRejectsStrictYAMLErrors(t *testing.T) {
 			var configErr *ConfigError
 			if !errors.As(err, &configErr) || configErr.File == "" {
 				t.Fatalf("LoadBundle error = %#v, want structured ConfigError with file", err)
+			}
+		})
+	}
+}
+
+func TestLoadBundleRejectsWeakenedPolicy(t *testing.T) {
+	tests := []struct {
+		name string
+		old  string
+		new  string
+		want string
+	}{
+		{name: "task admission requires zero debt", old: "require_zero_debt: true", new: "require_zero_debt: false", want: "task_admission.require_zero_debt: must be true"},
+		{name: "task admission requires full price", old: "require_full_price: true", new: "require_full_price: false", want: "task_admission.require_full_price: must be true"},
+		{name: "accepted task continues negative", old: "continue_when_balance_negative: true", new: "continue_when_balance_negative: false", want: "accepted_task.continue_when_balance_negative: must be true"},
+		{name: "operation may create debt", old: "operation_charge_may_create_debt: true", new: "operation_charge_may_create_debt: false", want: "accepted_task.operation_charge_may_create_debt: must be true"},
+		{name: "topup repays debt first", old: "repay_debt_first: true", new: "repay_debt_first: false", want: "top_up.repay_debt_first: must be true"},
+		{name: "promotions never repay debt", old: "may_repay_debt: false", new: "may_repay_debt: true", want: "promotions.may_repay_debt: must be false"},
+		{name: "failure reversal enabled", old: "enabled: true", new: "enabled: false", want: "task_failure_reversal.enabled: must be true"},
+		{name: "failure reasons required", old: "reasons: [platform_error, provider_error]", new: "reasons: []", want: "task_failure_reversal.reasons: must not be empty"},
+		{name: "failure reasons constrained", old: "provider_error", new: "user_cancelled", want: "unsupported reversal reason"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := strings.Replace(validPolicyYAML, tt.old, tt.new, 1)
+			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": policy}))
+			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadBundleRejectsAmbiguousOrUnroutableSKUs(t *testing.T) {
+	tests := []struct {
+		name     string
+		products string
+		want     string
+	}{
+		{
+			name: "duplicate billable identity normalizes blank route",
+			products: validProductsYAML + `  - id: task.seednote.alternate.v1
+    operation: task.seednote
+    charge_policy: task_admission
+    price_credits: 6000
+    route: "   "
+    delivery: alternate
+`,
+			want: "duplicates billable identity",
+		},
+		{
+			name: "accepted task operation requires route",
+			products: strings.Replace(validProductsYAML, `operation: task.seednote
+    charge_policy: task_admission`, `operation: mcp.generate_image
+    charge_policy: accepted_task_operation`, 1),
+			want: "route is required for accepted_task_operation",
+		},
+		{
+			name: "standalone operation requires route",
+			products: strings.Replace(validProductsYAML, `operation: task.seednote
+    charge_policy: task_admission`, `operation: designer.generate_image
+    charge_policy: standalone_operation`, 1),
+			want: "route is required for standalone_operation",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": tt.products}))
+			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadBundleNormalizesBlankTaskAdmissionRoute(t *testing.T) {
+	products := strings.Replace(validProductsYAML, "    delivery: verified\n", "    route: \"   \"\n    delivery: verified\n", 1)
+	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+	if err != nil {
+		t.Fatalf("LoadBundle: %v", err)
+	}
+	if got := bundle.Products.SKUs[0].Route; got != "" {
+		t.Fatalf("task admission route = %q, want canonical empty route", got)
+	}
+}
+
+func TestLoadBundleValidatesCostMetadataAndTokenProfile(t *testing.T) {
+	tests := []struct {
+		name  string
+		costs string
+		want  string
+	}{
+		{name: "operator evidence required", costs: strings.Replace(validCostsYAML, "    operator_evidence: ark-price-sheet\n", "", 1), want: "operator_evidence is required"},
+		{name: "effective time required", costs: strings.Replace(validCostsYAML, "    effective_at: \"2026-07-17T00:00:00Z\"\n", "", 1), want: "effective_at must be RFC3339"},
+		{name: "effective time RFC3339", costs: strings.Replace(validCostsYAML, "2026-07-17T00:00:00Z", "2026-07-17", 1), want: "effective_at must be RFC3339"},
+		{name: "cache read price required", costs: strings.Replace(validCostsYAML, "    cache_read_input: \"1.20\"\n", "", 1), want: "token pricing requires"},
+		{name: "cache creation price required", costs: strings.Replace(validCostsYAML, "    cache_creation_input: \"6.00\"\n", "", 1), want: "token pricing requires"},
+		{name: "token prices positive", costs: strings.Replace(validCostsYAML, `input: "6.00"`, `input: "0.00"`, 1), want: "token prices must be positive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": tt.costs}))
+			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadBundleValidatesOutputPixelTiers(t *testing.T) {
+	validPixelCosts := `catalog_id: provider-cost-v1
+currency_rates:
+  CNY: "1.00"
+models:
+  provider/image:
+    pricing_type: output_pixel_tier
+    currency: CNY
+    tiers:
+      - max_pixels: 2360000
+        price: "0.30"
+      - price: "0.60"
+    operator_evidence: ark-price-sheet
+    effective_at: "2026-07-17T00:00:00Z"
+`
+	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": validPixelCosts}))
+	if err != nil {
+		t.Fatalf("LoadBundle valid output pixel tiers: %v", err)
+	}
+	if got := bundle.Costs.Models["provider/image"].Tiers; len(got) != 2 || got[0].MaxPixels != 2360000 || got[1].MaxPixels != 0 {
+		t.Fatalf("pixel tiers = %#v", got)
+	}
+
+	tests := []struct {
+		name string
+		old  string
+		new  string
+		want string
+	}{
+		{name: "tiers required", old: "    tiers:\n      - max_pixels: 2360000\n        price: \"0.30\"\n      - price: \"0.60\"\n", new: "    tiers: []\n", want: "requires tiers"},
+		{name: "bounded tier positive", old: "max_pixels: 2360000", new: "max_pixels: -1", want: "bounded max_pixels must be positive"},
+		{name: "bounds ascending", old: "      - price: \"0.60\"", new: "      - max_pixels: 100\n        price: \"0.40\"\n      - price: \"0.60\"", want: "max_pixels must be strictly ascending"},
+		{name: "only final tier unbounded", old: "      - max_pixels: 2360000\n        price: \"0.30\"", new: "      - price: \"0.30\"", want: "only the final tier may be unbounded"},
+		{name: "final tier unbounded", old: "      - price: \"0.60\"", new: "      - max_pixels: 5000000\n        price: \"0.60\"", want: "final tier must be unbounded"},
+		{name: "tier prices positive", old: `price: "0.30"`, new: `price: "0.00"`, want: "price must be positive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			costs := strings.Replace(validPixelCosts, tt.old, tt.new, 1)
+			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": costs}))
+			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
 			}
 		})
 	}
@@ -138,6 +289,8 @@ models:
     cache_read_input: "1.20"
     cache_creation_input: "6.00"
     output: "30.00"
+    operator_evidence: ark-price-sheet
+    effective_at: "2026-07-17T00:00:00Z"
 `
 
 const validPromotionsYAML = `catalog_id: promotion-v1

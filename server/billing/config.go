@@ -131,7 +131,7 @@ type ModelCostConfig struct {
 	Output             MicroCNY
 	Tiers              []CostTier
 	OperatorEvidence   string
-	EffectiveAt        string
+	EffectiveAt        time.Time
 }
 
 type CostTier struct {
@@ -246,6 +246,36 @@ func validateBundle(bundle *Bundle) error {
 	if bundle.Policy.CreditsPerCNY <= 0 {
 		return configError("policy.yaml", "credits_per_cny", errors.New("must be positive"))
 	}
+	if !bundle.Policy.TaskAdmission.RequireZeroDebt {
+		return configError("policy.yaml", "task_admission.require_zero_debt", errors.New("must be true"))
+	}
+	if !bundle.Policy.TaskAdmission.RequireFullPrice {
+		return configError("policy.yaml", "task_admission.require_full_price", errors.New("must be true"))
+	}
+	if !bundle.Policy.AcceptedTask.ContinueWhenBalanceNegative {
+		return configError("policy.yaml", "accepted_task.continue_when_balance_negative", errors.New("must be true"))
+	}
+	if !bundle.Policy.AcceptedTask.OperationChargeMayCreateDebt {
+		return configError("policy.yaml", "accepted_task.operation_charge_may_create_debt", errors.New("must be true"))
+	}
+	if !bundle.Policy.TopUp.RepayDebtFirst {
+		return configError("policy.yaml", "top_up.repay_debt_first", errors.New("must be true"))
+	}
+	if bundle.Policy.Promotions.MayRepayDebt {
+		return configError("policy.yaml", "promotions.may_repay_debt", errors.New("must be false"))
+	}
+	if !bundle.Policy.TaskFailureReversal.Enabled {
+		return configError("policy.yaml", "task_failure_reversal.enabled", errors.New("must be true"))
+	}
+	if len(bundle.Policy.TaskFailureReversal.Reasons) == 0 {
+		return configError("policy.yaml", "task_failure_reversal.reasons", errors.New("must not be empty"))
+	}
+	allowedReversalReasons := map[string]struct{}{
+		"platform_error":           {},
+		"provider_error":           {},
+		"execution_timeout":        {},
+		"infrastructure_cancelled": {},
+	}
 	seenReasons := make(map[string]struct{}, len(bundle.Policy.TaskFailureReversal.Reasons))
 	for _, reason := range bundle.Policy.TaskFailureReversal.Reasons {
 		if strings.TrimSpace(reason) == "" {
@@ -253,6 +283,9 @@ func validateBundle(bundle *Bundle) error {
 		}
 		if _, exists := seenReasons[reason]; exists {
 			return configError("policy.yaml", "task_failure_reversal.reasons", fmt.Errorf("duplicate reason %q", reason))
+		}
+		if _, allowed := allowedReversalReasons[reason]; !allowed {
+			return configError("policy.yaml", "task_failure_reversal.reasons", fmt.Errorf("unsupported reversal reason %q", reason))
 		}
 		seenReasons[reason] = struct{}{}
 	}
@@ -267,6 +300,12 @@ func validateBundle(bundle *Bundle) error {
 		return configError("products.yaml", "skus", errors.New("must not be empty"))
 	}
 	seenSKUs := make(map[string]struct{}, len(bundle.Products.SKUs))
+	type billableIdentity struct {
+		operation    string
+		chargePolicy string
+		route        string
+	}
+	seenBillableIdentities := make(map[billableIdentity]string, len(bundle.Products.SKUs))
 	for index, sku := range bundle.Products.SKUs {
 		field := fmt.Sprintf("skus[%d]", index)
 		if strings.TrimSpace(sku.ID) == "" || strings.TrimSpace(sku.Operation) == "" || strings.TrimSpace(sku.Delivery) == "" {
@@ -279,15 +318,30 @@ func validateBundle(bundle *Bundle) error {
 		if sku.PriceCredits < 0 {
 			return configError("products.yaml", field+".price_credits", errors.New("must be non-negative"))
 		}
+		route := strings.TrimSpace(sku.Route)
+		bundle.Products.SKUs[index].Route = route
 		switch sku.ChargePolicy {
-		case "task_admission", "accepted_task_operation", "standalone_operation":
+		case "task_admission":
+		case "accepted_task_operation", "standalone_operation":
+			if route == "" {
+				return configError("products.yaml", field+".route", fmt.Errorf("route is required for %s", sku.ChargePolicy))
+			}
 		default:
 			return configError("products.yaml", field+".charge_policy", fmt.Errorf("unsupported value %q", sku.ChargePolicy))
 		}
+		identity := billableIdentity{
+			operation:    strings.TrimSpace(sku.Operation),
+			chargePolicy: strings.TrimSpace(sku.ChargePolicy),
+			route:        route,
+		}
+		if existingID, exists := seenBillableIdentities[identity]; exists {
+			return configError("products.yaml", field, fmt.Errorf("SKU %q duplicates billable identity of %q", sku.ID, existingID))
+		}
+		seenBillableIdentities[identity] = sku.ID
 	}
 	for index, program := range bundle.Promotions.Programs {
-		if program.CanRepayDebt && !bundle.Policy.Promotions.MayRepayDebt {
-			return configError("promotions.yaml", fmt.Sprintf("programs[%d].can_repay_debt", index), errors.New("contradicts policy.promotions.may_repay_debt"))
+		if program.CanRepayDebt {
+			return configError("promotions.yaml", fmt.Sprintf("programs[%d].can_repay_debt", index), errors.New("can_repay_debt must be false"))
 		}
 	}
 	return nil
@@ -323,9 +377,16 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 		if _, exists := costs.CurrencyRates[rawModel.Currency]; !exists {
 			return costs, configError("costs.yaml", field+".currency", fmt.Errorf("references missing currency rate %q", rawModel.Currency))
 		}
+		if strings.TrimSpace(rawModel.OperatorEvidence) == "" {
+			return costs, configError("costs.yaml", field+".operator_evidence", errors.New("operator_evidence is required"))
+		}
+		effectiveAt, err := time.Parse(time.RFC3339, rawModel.EffectiveAt)
+		if err != nil {
+			return costs, configError("costs.yaml", field+".effective_at", errors.New("effective_at must be RFC3339"))
+		}
 		model := ModelCostConfig{
 			PricingType: rawModel.PricingType, Currency: rawModel.Currency, Unit: rawModel.Unit,
-			OperatorEvidence: rawModel.OperatorEvidence, EffectiveAt: rawModel.EffectiveAt,
+			OperatorEvidence: strings.TrimSpace(rawModel.OperatorEvidence), EffectiveAt: effectiveAt,
 		}
 		prices := []struct {
 			name  string
@@ -349,17 +410,41 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 		}
 		switch rawModel.PricingType {
 		case "token":
-			if rawModel.Unit <= 0 || rawModel.Input == "" || rawModel.Output == "" || len(rawModel.Tiers) != 0 {
-				return costs, configError("costs.yaml", field, errors.New("token pricing requires positive unit, input, and output and forbids tiers"))
+			if rawModel.Unit <= 0 || rawModel.Input == "" || rawModel.CacheReadInput == "" || rawModel.CacheCreationInput == "" || rawModel.Output == "" || len(rawModel.Tiers) != 0 {
+				return costs, configError("costs.yaml", field, errors.New("token pricing requires positive unit and input, cache_read_input, cache_creation_input, and output prices and forbids tiers"))
+			}
+			if model.Input <= 0 || model.CacheReadInput <= 0 || model.CacheCreationInput <= 0 || model.Output <= 0 {
+				return costs, configError("costs.yaml", field, errors.New("token prices must be positive"))
 			}
 		case "output_pixel_tier":
 			if len(rawModel.Tiers) == 0 || rawModel.Unit != 0 || rawModel.Input != "" || rawModel.Output != "" || rawModel.CacheReadInput != "" || rawModel.CacheCreationInput != "" {
 				return costs, configError("costs.yaml", field, errors.New("output_pixel_tier pricing requires tiers and forbids token fields"))
 			}
+			var previousMaxPixels int64
 			for index, rawTier := range rawModel.Tiers {
 				parsed, err := ParseMicroCNY(string(rawTier.Price))
 				if err != nil {
 					return costs, configError("costs.yaml", fmt.Sprintf("%s.tiers[%d].price", field, index), err)
+				}
+				if parsed <= 0 {
+					return costs, configError("costs.yaml", fmt.Sprintf("%s.tiers[%d].price", field, index), errors.New("price must be positive"))
+				}
+				last := index == len(rawModel.Tiers)-1
+				if last {
+					if rawTier.MaxPixels != 0 {
+						return costs, configError("costs.yaml", fmt.Sprintf("%s.tiers[%d].max_pixels", field, index), errors.New("final tier must be unbounded"))
+					}
+				} else {
+					if rawTier.MaxPixels == 0 {
+						return costs, configError("costs.yaml", fmt.Sprintf("%s.tiers[%d].max_pixels", field, index), errors.New("only the final tier may be unbounded"))
+					}
+					if rawTier.MaxPixels < 0 {
+						return costs, configError("costs.yaml", fmt.Sprintf("%s.tiers[%d].max_pixels", field, index), errors.New("bounded max_pixels must be positive"))
+					}
+					if rawTier.MaxPixels <= previousMaxPixels {
+						return costs, configError("costs.yaml", fmt.Sprintf("%s.tiers[%d].max_pixels", field, index), errors.New("max_pixels must be strictly ascending"))
+					}
+					previousMaxPixels = rawTier.MaxPixels
 				}
 				model.Tiers = append(model.Tiers, CostTier{MaxPixels: rawTier.MaxPixels, Price: parsed})
 			}
