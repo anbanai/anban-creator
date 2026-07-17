@@ -317,7 +317,7 @@ func TestMCPHandlerToolsList(t *testing.T) {
 			t.Errorf("expected tool %q not found in tools/list response", expected)
 		}
 	}
-	for _, removed := range []string{"write_article", "research_topics", "optimize_seo", "generate_outline"} {
+	for _, removed := range []string{"write_article", "research_topics", "optimize_seo", "generate_outline", "archive_workspace"} {
 		if toolNames[removed] {
 			t.Errorf("unexpected removed tool %q found in tools/list response", removed)
 		}

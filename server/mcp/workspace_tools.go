@@ -11,29 +11,16 @@ import (
 func registerWorkspaceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_workspace",
-		Description: "Returns the canonical working directory path for the given content type and task. Does NOT create directories — the agent must run mkdir -p locally. When task_id is provided, returns 'output', a relative path rooted at the agent task workspace/current working directory. Otherwise, returns the base output directory for the content type (e.g. 'output/seednote').",
+		Description: "Returns the canonical task-relative output directory, a relative path rooted at the agent task workspace/current working directory. Managed server tasks must provide task_id. The agent leaves deliverables in place for server collection.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"content_type": map[string]any{"type": "string", "description": "Content type (articles, seednote, moments, ecommerce, videocreator, videoeditor)"},
-				"task_id":      map[string]any{"type": "string", "description": "Task ID — when provided, returns 'output' relative to task workspace"},
+				"task_id":      map[string]any{"type": "string", "description": "Managed server task ID"},
 			},
-			"required": []any{"content_type"},
+			"required": []any{"content_type", "task_id"},
 		},
 	}, prepareWorkspaceHandler)
-
-	server.AddTool(&mcp.Tool{
-		Name:        "archive_workspace",
-		Description: "Returns the computed archive directory path for the given content type. Does NOT move files — the agent must run mkdir -p and mv locally. If name is provided, the archive directory is named after the sanitized title.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"content_type": map[string]any{"type": "string", "description": "Content type"},
-				"name":         map[string]any{"type": "string", "description": "Archive directory name (title-based)"},
-			},
-			"required": []any{"content_type"},
-		},
-	}, archiveWorkspaceHandler)
 }
 
 func prepareWorkspaceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -51,26 +38,6 @@ func prepareWorkspaceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mc
 	result, err := svcs.WorkspaceSvc.Prepare(contentType, taskID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("prepare workspace: %v", err)), nil
-	}
-
-	return textResult(result)
-}
-
-func archiveWorkspaceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.WorkspaceSvc == nil {
-		return errorResult("workspace service not available"), nil
-	}
-	args := parseArgs(req.Params.Arguments)
-
-	contentType, _ := args["content_type"].(string)
-	name, _ := args["name"].(string)
-	if contentType == "" {
-		return errorResult("content_type is required"), nil
-	}
-
-	result, err := svcs.WorkspaceSvc.Archive(contentType, name)
-	if err != nil {
-		return errorResult(fmt.Sprintf("archive workspace: %v", err)), nil
 	}
 
 	return textResult(result)

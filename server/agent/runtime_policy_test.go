@@ -122,6 +122,23 @@ func TestValidateManagedMCPStatusRequiresConnectedSeednoteTools(t *testing.T) {
 	}
 }
 
+func TestManagedRequiredMCPToolsExcludeArchive(t *testing.T) {
+	got := managedRequiredMCPTools("seednote")
+	want := []string{
+		"analyze_image",
+		"finalize_task_title",
+		"generate_image",
+		"get_project_profile",
+		"list_project_titles",
+		"prepare_workspace",
+		"submit_agent_feedback",
+		"update_task_progress",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("managedRequiredMCPTools(\"seednote\") = %#v, want %#v", got, want)
+	}
+}
+
 func TestValidateManagedMCPStatusRejectsDisconnectedServer(t *testing.T) {
 	detail := "401 unauthorized"
 	status := &claudecode.McpStatusResponse{McpServers: []claudecode.McpServerStatus{{

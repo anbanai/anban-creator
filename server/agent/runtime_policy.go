@@ -278,7 +278,6 @@ func managedRequiredMCPTools(taskType string) []string {
 	}
 	return []string{
 		"analyze_image",
-		"archive_workspace",
 		"finalize_task_title",
 		"generate_image",
 		"get_project_profile",
