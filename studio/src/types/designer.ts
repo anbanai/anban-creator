@@ -80,7 +80,6 @@ export interface DesignerSettings {
   outputFormat: string
   compression: number
   background: string
-  referenceFiles: File[]
   watermark: boolean
 }
 

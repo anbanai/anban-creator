@@ -555,9 +555,10 @@ func main() {
 			uploadHandler = handler.NewUploadHandler(store, repo.PendingUploads(), service.DirectUploadConfig{
 				Storage: cfg.Storage,
 			}, log)
+			uploadHandler.SetRepository(repo)
 		}
 		if aiEntrySvc != nil {
-			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo.PendingUploads(), log)
+			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo.PendingUploads(), store, log)
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
@@ -635,6 +636,7 @@ func main() {
 		if mysqlDB != nil && imageSvc != nil {
 			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, cfg, store, log)
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
+			designerHandler.SetDirectUploadDependencies(repo.PendingUploads(), store)
 		}
 		if repo != nil {
 			if writingLLMClient != nil || imageUnderstandingClient != nil || videoUnderstandingClient != nil {

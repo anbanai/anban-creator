@@ -204,7 +204,7 @@ describe('createTaskSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('rejects non-image Seednote reference materials', () => {
+  it('accepts non-image Seednote attachments', () => {
     const result = createTaskSchema.safeParse({
       project_id: 'seednote-1',
       type: 'seednote',
@@ -212,7 +212,7 @@ describe('createTaskSchema', () => {
       input_attachments: [{ type: 'document', url: '/brief.pdf' }],
     })
 
-    expect(result.success).toBe(false)
+    expect(result.success).toBe(true)
   })
 
   it('rejects a reference instruction over 1000 Unicode code points', () => {
@@ -344,6 +344,24 @@ describe('createTaskSchema', () => {
       },
     })
     expect(withSource.success).toBe(true)
+
+    const withPromptVideo = createTaskSchema.safeParse({
+      project_id: 'video-editor-1',
+      type: 'videoeditor',
+      prompt: '加字幕',
+      video_editor_input: {
+        brief: '加字幕',
+        references: [],
+      },
+      input_attachments: [{
+        type: 'video',
+        upload_id: 'upload-source',
+        key: 'uploads/pending/user/upload-source/source.mp4',
+        file_name: 'source.mp4',
+        content_type: 'video/mp4',
+      }],
+    })
+    expect(withPromptVideo.success).toBe(true)
   })
 
   it('accepts moments tasks without a separate image-mode field', () => {
@@ -415,7 +433,7 @@ describe('planSchema', () => {
     expect(result.success).toBe(true)
   })
 
-  it('rejects more than 16 references and non-image Seednote plan materials', () => {
+  it('rejects more than 16 attachments and accepts non-image Seednote plan materials', () => {
     expect(planSchema.safeParse({
       type: 'seednote',
       cron_expr: '0 9 * * 1',
@@ -429,7 +447,7 @@ describe('planSchema', () => {
       type: 'seednote',
       cron_expr: '0 9 * * 1',
       input_attachments: [{ type: 'document', url: '/brief.pdf' }],
-    }).success).toBe(false)
+    }).success).toBe(true)
   })
 
   it('accepts valid plan data', () => {

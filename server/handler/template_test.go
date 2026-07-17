@@ -2,7 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,9 +20,10 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
-func setupTemplateHandlerTest(t *testing.T) (*fiber.App, repository.Repository) {
+func setupTemplateHandlerTest(t *testing.T, configureStore ...func(*fakeStorageProvider)) (*fiber.App, repository.Repository) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -42,6 +45,11 @@ func setupTemplateHandlerTest(t *testing.T) (*fiber.App, repository.Repository) 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	svc := service.NewTemplateService(repo, &logger)
 	h := NewTemplateHandler(svc, &logger)
+	store := pendingUploadStatStore(repo.PendingUploads())
+	for _, configure := range configureStore {
+		configure(store)
+	}
+	h.SetStore(store)
 	h.SetPendingUploadRepository(repo.PendingUploads())
 
 	app := fiber.New()
@@ -282,13 +290,88 @@ func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
+	responseBody := decodeBody(t, resp)
+	responseJSON, _ := json.Marshal(responseBody)
+	if bytes.Contains(responseJSON, []byte("uploads/pending/")) || !bytes.Contains(responseJSON, []byte("uploads/finalized/")) {
+		t.Fatalf("template persisted non-final thumbnail: %s", responseJSON)
+	}
 
 	upload, err := repo.PendingUploads().FindPendingUploadByID(t.Context(), uploadID)
 	if err != nil {
 		t.Fatalf("find pending upload: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("pending upload status = %q, want finalized", upload.Status)
+	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/thumb.png" {
+		t.Fatalf("pending upload identity = %#v", upload)
+	}
+}
+
+func TestTemplateHandler_CreateClassifiesPendingUploadFinalizeErrors(t *testing.T) {
+	const (
+		objectKey     = "uploads/pending/user-1/thumbnail-upload/thumb.png"
+		backendDetail = "oss-cn-hangzhou.aliyuncs.com provider secret"
+	)
+	tests := []struct {
+		name       string
+		configure  func(*fakeStorageProvider)
+		wantStatus int
+	}{
+		{
+			name: "missing object is redacted bad request",
+			configure: func(store *fakeStorageProvider) {
+				store.statErr = storage.ErrObjectNotFound
+			},
+			wantStatus: fiber.StatusBadRequest,
+		},
+		{
+			name: "metadata mismatch is redacted bad request",
+			configure: func(store *fakeStorageProvider) {
+				store.statInfo = &storage.ObjectInfo{Key: objectKey, Size: 124, ContentType: "image/png"}
+			},
+			wantStatus: fiber.StatusBadRequest,
+		},
+		{
+			name: "backend error is redacted internal error",
+			configure: func(store *fakeStorageProvider) {
+				store.statErr = errors.New(backendDetail)
+			},
+			wantStatus: fiber.StatusInternalServerError,
+		},
+		{
+			name: "timeout is redacted internal error",
+			configure: func(store *fakeStorageProvider) {
+				store.statErr = context.DeadlineExceeded
+			},
+			wantStatus: fiber.StatusInternalServerError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, repo := setupTemplateHandlerTest(t, tt.configure)
+			if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
+				ID: "thumbnail-upload", UserID: "user-1", Purpose: service.DirectUploadPurposeProjectReference,
+				Key: objectKey, PublicURL: "https://cdn.example.com/" + objectKey,
+				FileName: "thumb.png", ContentType: "image/png", Size: 123,
+				Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+			}); err != nil {
+				t.Fatalf("seed pending upload: %v", err)
+			}
+
+			resp := doRequest(t, app, http.MethodPost, "/api/v1/templates/", "user-1", map[string]any{
+				"name": "template", "type": "seednote", "thumbnail_url": "https://cdn.example.com/" + objectKey,
+			})
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response: %v", err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, body = %s; want %d", resp.StatusCode, body, tt.wantStatus)
+			}
+			for _, secret := range []string{objectKey, backendDetail, "oss-cn-hangzhou", "provider secret"} {
+				if bytes.Contains(body, []byte(secret)) {
+					t.Fatalf("response leaked %q: %s", secret, body)
+				}
+			}
+		})
 	}
 }
 

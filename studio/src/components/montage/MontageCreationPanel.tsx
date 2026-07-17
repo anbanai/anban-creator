@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { UseFormReturn } from 'react-hook-form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -6,14 +7,15 @@ import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/comp
 interface MontageCreationPanelProps {
   form: UseFormReturn<any>
   fieldRoot: 'montage_input'
+  briefField?: ReactNode
 }
 
-export function MontageCreationPanel({ form, fieldRoot }: MontageCreationPanelProps) {
+export function MontageCreationPanel({ form, fieldRoot, briefField }: MontageCreationPanelProps) {
   const control = form.control
 
   return (
     <div className="space-y-4">
-      <FormField control={control} name={`${fieldRoot}.brief`} render={({ field }) => (
+      {briefField ?? <FormField control={control} name={`${fieldRoot}.brief`} render={({ field }) => (
         <FormItem>
           <FormLabel>视频 brief</FormLabel>
           <FormControl>
@@ -26,7 +28,7 @@ export function MontageCreationPanel({ form, fieldRoot }: MontageCreationPanelPr
           </FormControl>
           <FormMessage />
         </FormItem>
-      )} />
+      )} />}
 
       <div className="grid gap-3 md:grid-cols-3">
         <FormField control={control} name={`${fieldRoot}.pipeline_key`} render={({ field }) => (

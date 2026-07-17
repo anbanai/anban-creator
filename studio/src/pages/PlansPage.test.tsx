@@ -3,23 +3,27 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import PlansPage from './PlansPage'
 import { render } from '@/test/test-utils'
 import { api } from '@/lib/api'
-import type { ReferenceMaterialInputProps } from '@/components/ReferenceMaterialInput'
 import type { InputAttachment, Plan, Project } from '@/types'
 
 const { errorMock } = vi.hoisted(() => ({ errorMock: vi.fn() }))
 
 vi.mock('sonner', () => ({ toast: { error: errorMock, success: vi.fn() } }))
 
-const referenceMaterialInputHarness = vi.hoisted(() => ({
-  props: undefined as ReferenceMaterialInputProps | undefined,
-}))
+const uploadToOSSMock = vi.hoisted(() => vi.fn())
+const resolveDownloadUrlMock = vi.hoisted(() => vi.fn())
 
-vi.mock('@/components/ReferenceMaterialInput', () => ({
-  ReferenceMaterialInput: (props: ReferenceMaterialInputProps) => {
-    referenceMaterialInputHarness.props = props
-    return <div />
-  },
-}))
+vi.mock('@/lib/direct-upload', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
+  return { ...actual, uploadToOSS: uploadToOSSMock }
+})
+
+vi.mock('@/lib/api/uploads', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api/uploads')>('@/lib/api/uploads')
+  return {
+    ...actual,
+    uploadsApi: { ...actual.uploadsApi, resolveDownloadUrl: resolveDownloadUrlMock },
+  }
+})
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -75,6 +79,13 @@ vi.mock('@/lib/api', async () => {
 describe('PlansPage — mutation failure feedback (no silent failure)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
+      uploadId: `upload-${file.name}`,
+      key: `uploads/pending/user/${file.name}`,
+      publicUrl: `https://cdn.example/${file.name}?signed=secret`,
+      contentType: file.type,
+      size: file.size,
+    }))
     window.history.pushState({}, '', '/')
     vi.mocked(api.plans.list).mockResolvedValue({
       items: [{
@@ -128,6 +139,15 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     vi.mocked(api.credits.balance).mockResolvedValue({ balance: 0 })
   })
 
+  it('renders the shared composer with project context in the create dialog', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
+    await screen.findByRole('dialog')
+    expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '项目上下文' })).toBeInTheDocument()
+    expect(document.querySelectorAll('form form')).toHaveLength(0)
+  })
+
   it('shows an error toast when pausing a plan fails (was previously silent)', async () => {
     // pause is wired through useSubmitLock().submit(mutateAsync) with no catch —
     // before this fix, a rejection surfaced nothing to the user. Now the server's
@@ -151,7 +171,8 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     render(<PlansPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    const [, typeSelect] = screen.getAllByRole('combobox')
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    const [typeSelect] = within(dialog).getAllByRole('combobox')
     fireEvent.click(typeSelect)
 
     expect(await screen.findByRole('option', { name: '公众号文章' })).toBeInTheDocument()
@@ -168,6 +189,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
         description: '',
         cron_expr: '0 9 * * 1',
         prompt: '生成新品视频',
+        video_creator_input: { brief: '陈旧的嵌套 brief' },
         status: 'active',
         next_run_at: '2025-01-20T09:00:00Z',
         project_id: 'video-project-1',
@@ -228,6 +250,15 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     const [projectSelector] = await screen.findAllByRole('combobox')
     expect(projectSelector).toBeDisabled()
+
+    fireEvent.change(screen.getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
+      target: { value: '当前可见的视频计划要求' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith('plan-video-1', expect.objectContaining({
+      prompt: '当前可见的视频计划要求',
+      video_creator_input: expect.objectContaining({ brief: '当前可见的视频计划要求' }),
+    })))
   })
 
   it('highlights a plan addressed by the timeline highlight parameter', async () => {
@@ -275,15 +306,6 @@ describe('PlansPage Seednote reference snapshots', () => {
     key: 'uploads/saved-product.png',
     instruction: '保留包装、Logo 和瓶身比例',
   }
-  const replacementAttachment: InputAttachment = {
-    type: 'image',
-    url: '/replacement.png',
-    file_name: 'replacement.png',
-    content_type: 'image/png',
-    upload_id: 'upload-replacement',
-    key: 'uploads/replacement.png',
-    instruction: '使用新版包装',
-  }
   const seednoteProject = {
     id: 'seednote-project-1',
     user_id: '1',
@@ -324,37 +346,45 @@ describe('PlansPage Seednote reference snapshots', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.history.pushState({}, '', '/')
-    referenceMaterialInputHarness.props = undefined
+    uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
+      uploadId: `upload-${file.name}`,
+      key: `uploads/pending/user/${file.name}`,
+      publicUrl: `https://cdn.example/${file.name}?signed=secret`,
+      contentType: file.type,
+      size: file.size,
+    }))
     vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
     vi.mocked(api.plans.list).mockResolvedValue({ items: [seednotePlan], total: 1 })
     vi.mocked(api.plans.create).mockResolvedValue(seednotePlan)
     vi.mocked(api.plans.update).mockResolvedValue(seednotePlan)
     vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+    resolveDownloadUrlMock.mockResolvedValue({
+      url: 'https://cdn.example.com/signed-plan-attachment.png',
+      expires_at: '2026-07-17T12:00:00Z',
+    })
   })
 
   it('creates a Seednote plan with the current reference snapshot', async () => {
+    window.history.pushState({}, '', `/plans?create=true&type=seednote&project_id=${seednoteProject.id}&intent=schedule`)
     render(<PlansPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
     expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
-    await waitFor(() => expect(referenceMaterialInputHarness.props).toBeDefined())
-    expect(screen.getByRole('region', { name: 'Seednote 参考素材' })).toBeInTheDocument()
-    expect(referenceMaterialInputHarness.props).toEqual(expect.objectContaining({
-      allowedTypes: ['image'],
-      maxCount: 16,
-      instructionEnabled: true,
-      instructionMaxLength: 1000,
-    }))
-
-    act(() => {
-      referenceMaterialInputHarness.props?.onChange([savedAttachment])
-    })
+    const file = new File(['saved'], 'saved-product.png', { type: 'image/png' })
+    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
+    await screen.findByText('saved-product.png')
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() => {
       expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
         type: 'seednote',
-        input_attachments: [savedAttachment],
+        input_attachments: [{
+          type: 'image',
+          upload_id: 'upload-saved-product.png',
+          key: 'uploads/pending/user/saved-product.png',
+          file_name: 'saved-product.png',
+          content_type: 'image/png',
+          size: file.size,
+        }],
       }))
     })
   })
@@ -364,17 +394,15 @@ describe('PlansPage Seednote reference snapshots', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
     expect(await screen.findByRole('dialog', { name: '编辑计划' })).toBeInTheDocument()
-    await waitFor(() => expect(referenceMaterialInputHarness.props?.value).toEqual([savedAttachment]))
+    expect(await screen.findByText('saved-product.png')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(1))
     expect(vi.mocked(api.plans.update).mock.calls[0][1]).not.toHaveProperty('input_attachments')
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await waitFor(() => expect(referenceMaterialInputHarness.props?.value).toEqual([savedAttachment]))
-    act(() => {
-      referenceMaterialInputHarness.props?.onChange([])
-    })
+    await screen.findByText('saved-product.png')
+    fireEvent.click(screen.getByRole('button', { name: '删除 saved-product.png' }))
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(2))
     expect(vi.mocked(api.plans.update).mock.calls[1][1]).toEqual(expect.objectContaining({
@@ -382,28 +410,139 @@ describe('PlansPage Seednote reference snapshots', () => {
     }))
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await waitFor(() => expect(referenceMaterialInputHarness.props?.value).toEqual([savedAttachment]))
-    act(() => {
-      referenceMaterialInputHarness.props?.onChange([replacementAttachment])
-    })
+    await screen.findByText('saved-product.png')
+    fireEvent.click(screen.getByRole('button', { name: '删除 saved-product.png' }))
+    const replacementFile = new File(['replacement'], 'replacement.png', { type: 'image/png' })
+    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [replacementFile] } })
+    await screen.findByText('replacement.png')
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(3))
     expect(vi.mocked(api.plans.update).mock.calls[2][1]).toEqual(expect.objectContaining({
-      input_attachments: [replacementAttachment],
+      input_attachments: [{
+        type: 'image',
+        upload_id: 'upload-replacement.png',
+        key: 'uploads/pending/user/replacement.png',
+        file_name: 'replacement.png',
+        content_type: 'image/png',
+        size: replacementFile.size,
+      }],
     }))
   })
 
-  it('disables plan save while reference images are uploading', async () => {
+  it('guards native form submit until plan reference uploads finish', async () => {
+    window.history.pushState({}, '', `/plans?create=true&type=seednote&project_id=${seednoteProject.id}&intent=schedule`)
+    let resolveUpload!: (value: unknown) => void
+    uploadToOSSMock.mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve }))
     render(<PlansPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
     expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
-    await waitFor(() => expect(referenceMaterialInputHarness.props).toBeDefined())
-
-    act(() => {
-      referenceMaterialInputHarness.props?.onUploadingChange?.(true)
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+      target: { files: [new File(['pending'], 'pending.png', { type: 'image/png' })] },
     })
 
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+    const form = document.getElementById('plan-form')
+    expect(form).toBeInstanceOf(HTMLFormElement)
+    fireEvent.submit(form!)
+    await act(async () => { await Promise.resolve() })
+    expect(api.plans.create).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveUpload({ uploadId: 'pending', key: 'uploads/pending/pending.png', publicUrl: '', contentType: 'image/png', size: 7 })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.submit(form!)
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      input_attachments: [expect.objectContaining({
+        upload_id: 'pending',
+        key: 'uploads/pending/pending.png',
+      })],
+    })))
+  })
+
+  it('does not dirty hydrated attachments but marks instruction edits dirty', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    await screen.findByText('saved-product.png')
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑计划' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('alertdialog', { name: '放弃编辑？' })).not.toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    await screen.findByText('saved-product.png')
+    fireEvent.click(screen.getByRole('button', { name: '编辑 saved-product.png 的附件说明' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), {
+      target: { value: '改用新版包装说明' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(await screen.findByRole('alertdialog', { name: '放弃编辑？' })).toBeInTheDocument()
+  })
+
+  it('keeps legacy owner keys for preview but normalizes touched snapshots before update', async () => {
+    const legacyPlan = {
+      ...seednotePlan,
+      input_attachments: [
+        {
+          type: 'image',
+          url: '/api/v1/files/plans/seednote-plan-1/input/legacy.png',
+          key: 'plans/seednote-plan-1/input/legacy.png',
+          file_name: 'legacy.png',
+          content_type: 'image/png',
+          size: 20,
+          instruction: '保留原图',
+        },
+        {
+          type: 'document',
+          key: 'plans/seednote-plan-1/input/key-only.pdf',
+          file_name: 'key-only.pdf',
+          content_type: 'application/pdf',
+          size: 30,
+        },
+      ],
+    } as Plan
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [legacyPlan], total: 1 })
+    vi.mocked(api.plans.update).mockResolvedValue(legacyPlan)
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '预览 legacy.png' }))
+    await waitFor(() => expect(resolveDownloadUrlMock).toHaveBeenCalledWith({
+      key: 'plans/seednote-plan-1/input/legacy.png',
+      owner_type: 'plan',
+      owner_id: 'seednote-plan-1',
+    }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭附件预览' }))
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.plans.update).mock.calls[0][1]).not.toHaveProperty('input_attachments')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑计划' })).not.toBeInTheDocument())
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const editedDialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    fireEvent.click(within(editedDialog).getByRole('button', { name: '编辑 legacy.png 的附件说明' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), {
+      target: { value: '使用新版说明' },
+    })
+    fireEvent.click(within(editedDialog).getByRole('button', { name: '更新' }))
+    expect(await within(editedDialog).findByText('附件 key-only.pdf 缺少可复用的内部文件地址，请删除后重新上传')).toBeInTheDocument()
+    expect(api.plans.update).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(within(editedDialog).getByRole('button', { name: '删除 key-only.pdf' }))
+    fireEvent.click(within(editedDialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.plans.update).mock.calls[1][1]).toEqual(expect.objectContaining({
+      input_attachments: [{
+        type: 'image',
+        url: '/api/v1/files/plans/seednote-plan-1/input/legacy.png',
+        file_name: 'legacy.png',
+        content_type: 'image/png',
+        size: 20,
+        instruction: '使用新版说明',
+      }],
+    }))
   })
 })

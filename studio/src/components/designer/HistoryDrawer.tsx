@@ -17,12 +17,13 @@ interface HistoryDrawerProps {
   onSelect: (generation: ImageGeneration) => void
   onRegenerate?: (generation: ImageGeneration) => void
   selectedId?: string
+  projectId: string
 }
 
-export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenerate, selectedId }: HistoryDrawerProps) {
+export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenerate, selectedId, projectId }: HistoryDrawerProps) {
   const { data, isLoading } = useQuery({
-    queryKey: ['designer', 'history'],
-    queryFn: () => api.designer.getHistory({ page_size: 50 }),
+    queryKey: ['designer', 'history', projectId],
+    queryFn: () => api.designer.getHistory({ project_id: projectId, page_size: 50 }),
     enabled: open,
   })
 

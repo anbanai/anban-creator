@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,6 +39,9 @@ type fakeVideoReferenceStorage struct {
 	files             map[string][]byte
 	uploadContentType string
 	downloadURL       string
+	rejectUnbounded   bool
+	boundedReadLimits []int64
+	actualSize        int64
 }
 
 func TestVideoGenerationSchemaDoesNotExposeModelSelection(t *testing.T) {
@@ -205,6 +209,20 @@ func (f *fakeVideoReferenceStorage) GetURL(key string) string {
 	return strings.TrimRight(prefix, "/") + "/" + strings.TrimLeft(key, "/")
 }
 func (f *fakeVideoReferenceStorage) Read(_ context.Context, key string) ([]byte, error) {
+	if f.rejectUnbounded {
+		return nil, errors.New("unbounded storage read invoked")
+	}
+	data, ok := f.files[key]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return append([]byte(nil), data...), nil
+}
+func (f *fakeVideoReferenceStorage) ReadObject(_ context.Context, key string, maxBytes int64) ([]byte, error) {
+	f.boundedReadLimits = append(f.boundedReadLimits, maxBytes)
+	if f.actualSize > maxBytes {
+		return nil, fmt.Errorf("object too large: size=%d max=%d", f.actualSize, maxBytes)
+	}
 	data, ok := f.files[key]
 	if !ok {
 		return nil, errors.New("not found")
@@ -1523,6 +1541,258 @@ func TestPrepareVideoGenerationInputsMaterializesOwnedStudioReferences(t *testin
 		if !seen[want] {
 			t.Fatalf("task file %q missing, got %#v", want, seen)
 		}
+	}
+}
+
+func TestPrepareVideoGenerationInputsMaterializesVerifiedKeyFirstVideo(t *testing.T) {
+	for _, platform := range []string{model.PlatformVideoCreator, model.PlatformVideoEditor} {
+		t.Run(platform, func(t *testing.T) {
+			old := svcs
+			t.Cleanup(func() { svcs = old })
+			store := &fakeVideoReferenceStorage{
+				ownedPrefix: "https://oss.example.com/",
+				url:         "https://private.example.com/runtime.mp4?Signature=temporary",
+				files:       map[string][]byte{},
+			}
+			ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+			taskUserID := "user-1"
+			key := "uploads/finalized/" + taskUserID + "/video-upload/source.mp4"
+			store.files[key] = []byte("fake-key-first-mp4")
+			task := &model.Task{
+				ID: uuid.NewString(), UserID: taskUserID, ProjectID: projectID,
+				Type: platform, Status: model.TaskStatusRunning, Prompt: "参考视频生成内容",
+			}
+			task.SetInputAttachments([]model.EntryAttachment{{
+				Type: "video", UploadID: "video-upload", Key: key,
+				FileName: "source.mp4", ContentType: "video/mp4", Size: int64(len(store.files[key])),
+			}})
+			task.SetVideoInput(model.VideoInput{Brief: task.Prompt, References: []model.VideoReferenceAsset{{
+				Type: service.VideoReferenceVideo, URL: key, FileName: "source.mp4",
+				MimeType: "video/mp4", FileSize: int64(len(store.files[key])), InputDurationSeconds: 12,
+			}}})
+			if err := repo.Tasks().Create(ctx, task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			installFakeVideoUnderstanding(t, repo, nil)
+
+			req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+				"project_id":` + strconv.Quote(projectID) + `,
+				"task_id":` + strconv.Quote(task.ID) + `
+			}`)}}
+			result, err := prepareVideoGenerationInputsHandler(ctx, req)
+			if err != nil {
+				t.Fatalf("prepareVideoGenerationInputsHandler: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("prepare error: %s", callToolText(result))
+			}
+			files, err := repo.TaskFiles().FindByTaskID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("find task files: %v", err)
+			}
+			foundInput := false
+			for _, file := range files {
+				if file != nil && file.FilePath == "video-inputs/source.mp4" {
+					foundInput = true
+				}
+			}
+			if !foundInput {
+				t.Fatalf("key-first task file not materialized: %#v", files)
+			}
+			contractText := readMCPTaskFileText(t, ctx, repo, task.ID, "video-input-contract.json")
+			if !strings.Contains(contractText, key) || !strings.Contains(contractText, `"task_file_id"`) {
+				t.Fatalf("contract lost verified key/task file identity: %s", contractText)
+			}
+			for _, forbidden := range []string{"signature=", "Signature=", "download.example.com"} {
+				if strings.Contains(contractText, forbidden) {
+					t.Fatalf("contract persisted temporary signed URL fragment %q: %s", forbidden, contractText)
+				}
+			}
+			persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("find task: %v", err)
+			}
+			refs := persisted.VideoInput.Data().References
+			if len(refs) != 1 || refs[0].URL != key {
+				t.Fatalf("persisted signed/transformed reference: %#v", refs)
+			}
+		})
+	}
+}
+
+func TestPrepareVideoGenerationInputsConsumesPromptOnlyKeyFirstVideoEditorAttachment(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	userID := "user-1"
+	key := "uploads/finalized/" + userID + "/video-upload/source.mp4"
+	store := &fakeVideoReferenceStorage{
+		ownedPrefix: "https://oss.example.com/",
+		files:       map[string][]byte{key: makeTinyMP4(t, "1.2")},
+	}
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.UserID = userID
+	project.Platform = model.PlatformVideoEditor
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	ctx = withMCPUserID(ctx, userID)
+	tasks, err := svcs.TaskSvc.CreateManual(ctx, service.CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "给源视频加字幕",
+		InputAttachments: []model.EntryAttachment{{
+			Type: "video", UploadID: "video-upload", Key: key,
+			FileName: "source.mp4", ContentType: "video/mp4", Size: int64(len(store.files[key])),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if refs := tasks[0].VideoInput.Data().References; len(refs) != 1 || refs[0].URL != key {
+		t.Fatalf("persisted prompt video references = %#v", refs)
+	}
+	installFakeVideoUnderstanding(t, repo, nil)
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(tasks[0].ID) + `
+	}`)}}
+	result, err := prepareVideoGenerationInputsHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("prepareVideoGenerationInputsHandler: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("prepare error: %s", callToolText(result))
+	}
+	contractText := readMCPTaskFileText(t, ctx, repo, tasks[0].ID, "video-input-contract.json")
+	if !strings.Contains(contractText, key) || !strings.Contains(contractText, `"input_duration_seconds"`) || !strings.Contains(contractText, `"task_file_id"`) {
+		t.Fatalf("prepared contract did not consume prompt video attachment: %s", contractText)
+	}
+	if strings.Contains(strings.ToLower(contractText), "signature=") {
+		t.Fatalf("prepared contract persisted signed URL: %s", contractText)
+	}
+}
+
+func TestPrepareVideoGenerationInputsRejectsPendingKeyFirstVideo(t *testing.T) {
+	for _, platform := range []string{model.PlatformVideoCreator, model.PlatformVideoEditor} {
+		t.Run(platform, func(t *testing.T) {
+			old := svcs
+			t.Cleanup(func() { svcs = old })
+			key := "uploads/pending/user-1/video-upload/source.mp4"
+			store := &fakeVideoReferenceStorage{files: map[string][]byte{key: []byte("mutable")}}
+			ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+			taskUserID := "user-1"
+			task := &model.Task{ID: uuid.NewString(), UserID: taskUserID, ProjectID: projectID, Type: platform, Status: model.TaskStatusRunning, Prompt: "参考视频生成内容"}
+			task.SetInputAttachments([]model.EntryAttachment{{
+				Type: "video", UploadID: "video-upload", Key: key, FileName: "source.mp4", ContentType: "video/mp4", Size: int64(len(store.files[key])),
+			}})
+			task.SetVideoInput(model.VideoInput{Brief: task.Prompt, References: []model.VideoReferenceAsset{{
+				Type: service.VideoReferenceVideo, URL: key, FileName: "source.mp4", MimeType: "video/mp4", FileSize: int64(len(store.files[key])), InputDurationSeconds: 12,
+			}}})
+			if err := repo.Tasks().Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+
+			req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":` + strconv.Quote(projectID) + `,"task_id":` + strconv.Quote(task.ID) + `}`)}}
+			result, err := prepareVideoGenerationInputsHandler(ctx, req)
+			if err != nil {
+				t.Fatalf("prepareVideoGenerationInputsHandler: %v", err)
+			}
+			if !result.IsError || !strings.Contains(strings.ToLower(callToolText(result)), "finalized") {
+				t.Fatalf("pending direct upload result = %s", callToolText(result))
+			}
+			if len(store.boundedReadLimits) != 0 {
+				t.Fatalf("pending key reached storage read: %#v", store.boundedReadLimits)
+			}
+		})
+	}
+}
+
+func TestPrepareVideoGenerationInputsRejectsOwnedPendingURL(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	key := "uploads/pending/user-1/video-upload/source.mp4"
+	url := "https://oss.example.com/" + key
+	store := &fakeVideoReferenceStorage{ownedPrefix: "https://oss.example.com/", files: map[string][]byte{key: []byte("mutable")}}
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	task := &model.Task{ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID, Type: model.PlatformVideoCreator, Status: model.TaskStatusRunning, Prompt: "参考视频生成内容"}
+	task.SetVideoInput(model.VideoInput{Brief: task.Prompt, References: []model.VideoReferenceAsset{{
+		Type: service.VideoReferenceVideo, URL: url, FileName: "source.mp4", MimeType: "video/mp4", FileSize: int64(len(store.files[key])), InputDurationSeconds: 12,
+	}}})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":` + strconv.Quote(projectID) + `,"task_id":` + strconv.Quote(task.ID) + `}`)}}
+	result, err := prepareVideoGenerationInputsHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("prepareVideoGenerationInputsHandler: %v", err)
+	}
+	if !result.IsError || !strings.Contains(strings.ToLower(callToolText(result)), "finalized") {
+		t.Fatalf("owned pending URL result = %s", callToolText(result))
+	}
+	if len(store.boundedReadLimits) != 0 {
+		t.Fatalf("owned pending URL reached storage read: %#v", store.boundedReadLimits)
+	}
+}
+
+func TestVerifiedTaskAttachmentForKeyValidatesFinalizedIdentity(t *testing.T) {
+	task := &model.Task{UserID: "user-1"}
+	task.SetInputAttachments([]model.EntryAttachment{
+		{Type: "video", UploadID: "video-upload", Key: "uploads/finalized/user-2/video-upload/source.mp4", ContentType: "video/mp4"},
+		{Type: "video", UploadID: "video-upload", Key: "uploads/finalized/user-1/other-upload/source.mp4", ContentType: "video/mp4"},
+		{Type: "video", UploadID: "video-upload", Key: "uploads/users/user-1/projects/project-1/tasks/task-1/input.mp4", ContentType: "video/mp4"},
+	})
+	for _, key := range []string{
+		"uploads/finalized/user-2/video-upload/source.mp4",
+		"uploads/finalized/user-1/other-upload/source.mp4",
+	} {
+		if _, ok, err := verifiedTaskAttachmentForKey(task, key, service.VideoReferenceVideo); err == nil || ok {
+			t.Fatalf("mismatched finalized key %q accepted: ok=%v err=%v", key, ok, err)
+		}
+	}
+	nonDirect := "uploads/users/user-1/projects/project-1/tasks/task-1/input.mp4"
+	if _, ok, err := verifiedTaskAttachmentForKey(task, nonDirect, service.VideoReferenceVideo); err != nil || !ok {
+		t.Fatalf("non-direct task key rejected: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestPrepareVideoGenerationInputsRejectsOversizedActualKeyObjectWithBoundedRead(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{
+		ownedPrefix: "https://oss.example.com/", rejectUnbounded: true, actualSize: (50 << 20) + 1,
+		files: map[string][]byte{},
+	}
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	taskUserID := "user-1"
+	key := "uploads/finalized/" + taskUserID + "/video-upload/source.mp4"
+	store.files[key] = []byte("declared-small")
+	task := &model.Task{ID: uuid.NewString(), UserID: taskUserID, ProjectID: projectID, Type: model.PlatformVideoCreator, Status: model.TaskStatusRunning, Prompt: "参考视频生成内容"}
+	task.SetInputAttachments([]model.EntryAttachment{{
+		Type: "video", UploadID: "video-upload", Key: key, FileName: "source.mp4", ContentType: "video/mp4", Size: 1,
+	}})
+	task.SetVideoInput(model.VideoInput{Brief: task.Prompt, References: []model.VideoReferenceAsset{{
+		Type: service.VideoReferenceVideo, URL: key, FileName: "source.mp4", MimeType: "video/mp4", FileSize: 1, InputDurationSeconds: 12,
+	}}})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":` + strconv.Quote(projectID) + `,"task_id":` + strconv.Quote(task.ID) + `}`)}}
+	result, err := prepareVideoGenerationInputsHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("prepareVideoGenerationInputsHandler: %v", err)
+	}
+	if !result.IsError || !strings.Contains(callToolText(result), "too large") {
+		t.Fatalf("prepare result = %s, want actual object size rejection", callToolText(result))
+	}
+	if len(store.boundedReadLimits) != 1 || store.boundedReadLimits[0] != 50<<20 {
+		t.Fatalf("bounded read limits = %#v, want [50MB]", store.boundedReadLimits)
 	}
 }
 

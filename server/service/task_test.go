@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -150,6 +151,8 @@ type resumeTestStorage struct {
 	deleted      []string
 	uploadCount  int
 	failUploadAt int
+	returnedKey  string
+	returnedURL  string
 }
 
 func (s *resumeTestStorage) Name() string { return "resume-test" }
@@ -167,7 +170,15 @@ func (s *resumeTestStorage) Upload(_ context.Context, key string, reader io.Read
 		s.files = map[string][]byte{}
 	}
 	s.files[key] = data
-	return &storage.UploadResult{Key: key, URL: "https://storage.test/" + key, Size: int64(len(data)), MimeType: contentType}, nil
+	resultKey := key
+	if s.returnedKey != "" {
+		resultKey = s.returnedKey
+	}
+	resultURL := "https://storage.test/" + key
+	if s.returnedURL != "" {
+		resultURL = s.returnedURL
+	}
+	return &storage.UploadResult{Key: resultKey, URL: resultURL, Size: int64(len(data)), MimeType: contentType}, nil
 }
 
 func (s *resumeTestStorage) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {
@@ -963,6 +974,81 @@ func TestTaskService_CreateManualVideoEditorRequiresSourceVideo(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "videoeditor task requires at least one source video") {
 		t.Fatalf("CreateManual error = %v, want source video rejection", err)
+	}
+}
+
+func TestTaskService_CreateManualVideoEditorPromotesPromptVideoAttachmentToInputReference(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+	key := "uploads/finalized/" + userID + "/video-upload/source.mp4"
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "为源视频加字幕并剪成短视频",
+		InputAttachments: []model.EntryAttachment{{
+			Type: "video", UploadID: "video-upload", Key: key,
+			FileName: "source.mp4", ContentType: "video/mp4", Size: 1234,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	input := found.VideoInput.Data()
+	if input.Brief != "为源视频加字幕并剪成短视频" || len(input.References) != 1 {
+		t.Fatalf("video input = %#v, want prompt brief and one promoted reference", input)
+	}
+	ref := input.References[0]
+	if ref.Type != VideoReferenceVideo || ref.URL != key || ref.FileName != "source.mp4" || ref.MimeType != "video/mp4" || ref.FileSize != 1234 {
+		t.Fatalf("promoted reference = %#v", ref)
+	}
+	if strings.Contains(strings.ToLower(ref.URL), "signature=") {
+		t.Fatalf("promoted reference persisted signed URL: %#v", ref)
+	}
+}
+
+func TestTaskService_CreateManualVideoInputKeepsStructuredOrderAndDeduplicatesPromptAttachments(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+	key := "uploads/finalized/" + userID + "/video-upload/source.mp4"
+	structured := []model.VideoReferenceAsset{
+		{Type: VideoReferenceImage, URL: "https://cdn.example.com/board.png", ReferenceRole: "storyboard"},
+		{Type: VideoReferenceVideo, URL: key, FileName: "source.mp4", InputDurationSeconds: 12},
+	}
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "按分镜剪辑",
+		VideoEditorInput: &model.VideoInput{
+			Brief:      "结构化 brief",
+			References: structured,
+		},
+		InputAttachments: []model.EntryAttachment{
+			{Type: "video", UploadID: "video-upload", Key: key, FileName: "source.mp4", ContentType: "video/mp4"},
+			{Type: "audio", UploadID: "audio-upload", Key: "uploads/finalized/" + userID + "/audio-upload/music.mp3", FileName: "music.mp3", ContentType: "audio/mpeg"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	input := tasks[0].VideoInput.Data()
+	if input.Brief != "结构化 brief" || len(input.References) != 3 {
+		t.Fatalf("video input = %#v, want two structured refs plus unique audio ref", input)
+	}
+	if !reflect.DeepEqual(input.References[:2], structured) {
+		t.Fatalf("structured reference order changed: %#v", input.References)
+	}
+	if input.References[2].Type != VideoReferenceAudio || input.References[2].FileName != "music.mp3" {
+		t.Fatalf("appended attachment reference = %#v", input.References[2])
 	}
 }
 
@@ -2470,7 +2556,7 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID)
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatalf("Clone completed task: %v", err)
 	}
@@ -2502,6 +2588,102 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCloneAppliesInputOverrides(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	articleCover := false
+	articleContent := false
+	src := &model.Task{
+		ID:                       uuid.NewString(),
+		UserID:                   userID,
+		ProjectID:                projectID,
+		Type:                     model.PlatformArticle,
+		Status:                   model.TaskStatusCompleted,
+		Prompt:                   "source prompt",
+		ImageRatio:               "16:9",
+		ImageModelKey:            "frozen-image-model",
+		SkipReferenceImage:       true,
+		ReferenceImageURL:        "/api/v1/files/frozen-reference.png",
+		Watermark:                true,
+		HasContentImage:          false,
+		HasTailImage:             true,
+		ExecutionTarget:          model.ExecutionTargetLocal,
+		Goal:                     "frozen goal",
+		GoalMode:                 true,
+		ArticleWithCover:         &articleCover,
+		ArticleWithContentImages: &articleContent,
+	}
+	src.SetProjectSnapshot(model.ProjectSnapshot{ProjectName: "frozen project", Platform: model.PlatformArticle, Instructions: "frozen instructions"})
+	src.SetOverrides(model.StyleOverrides{VisualStyle: "frozen style"})
+	src.SetInputAttachments([]model.EntryAttachment{
+		{Role: "brief", Text: "original input", FileName: "brief.txt"},
+		{Role: model.EntryAttachmentRoleResumeLatest, Text: "old resume", FileName: "latest.md"},
+		{Role: model.EntryAttachmentRoleResumeFile, Key: "resume/old.pdf", FileName: "old.pdf"},
+	})
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+
+	overridePrompt := "edited final prompt"
+	overrideAttachments := []model.EntryAttachment{{
+		Type: "image", UploadID: "upload-final", Key: "uploads/finalized/" + userID + "/upload-final/reference.png",
+		FileName: "reference.png", ContentType: "image/png", Size: 321, Instruction: "keep logo",
+	}}
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{Prompt: &overridePrompt, InputAttachments: &overrideAttachments})
+	if err != nil {
+		t.Fatalf("Clone with overrides: %v", err)
+	}
+	if clone.Prompt != overridePrompt {
+		t.Fatalf("prompt = %q, want %q", clone.Prompt, overridePrompt)
+	}
+	if got := clone.InputAttachments.Data(); !reflect.DeepEqual(got, overrideAttachments) {
+		t.Fatalf("attachments = %#v, want exact override %#v", got, overrideAttachments)
+	}
+	if clone.InputSourceTaskID != src.ID {
+		t.Fatalf("input source = %q, want %q", clone.InputSourceTaskID, src.ID)
+	}
+	if clone.Type != src.Type || clone.ImageRatio != src.ImageRatio || clone.ImageModelKey != src.ImageModelKey || clone.ExecutionTarget != src.ExecutionTarget {
+		t.Fatalf("frozen scalar config changed: clone=%#v source=%#v", clone, src)
+	}
+	if !reflect.DeepEqual(clone.ProjectSnapshot.Data(), src.ProjectSnapshot.Data()) ||
+		!reflect.DeepEqual(clone.Overrides.Data(), src.Overrides.Data()) {
+		t.Fatalf("frozen structured config changed: snapshot=%#v overrides=%#v", clone.ProjectSnapshot.Data(), clone.Overrides.Data())
+	}
+	if clone.SkipReferenceImage != src.SkipReferenceImage || clone.ReferenceImageURL != src.ReferenceImageURL || clone.Watermark != src.Watermark || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode || clone.HasContentImage != src.HasContentImage || clone.HasTailImage != src.HasTailImage || *clone.ArticleWithCover || *clone.ArticleWithContentImages {
+		t.Fatalf("frozen image/goal config changed: clone=%#v source=%#v", clone, src)
+	}
+
+	inherited, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	if err != nil {
+		t.Fatalf("Clone omitted inputs: %v", err)
+	}
+	if inherited.Prompt != src.Prompt {
+		t.Fatalf("omitted prompt = %q, want inherited %q", inherited.Prompt, src.Prompt)
+	}
+	if got := inherited.InputAttachments.Data(); len(got) != 1 || got[0].Role != "brief" {
+		t.Fatalf("omitted attachments = %#v, want only non-resume source inputs", got)
+	}
+	emptyPrompt := ""
+	attachmentOnly, err := svc.Clone(ctx, src.ID, CloneTaskParams{Prompt: &emptyPrompt, InputAttachments: &overrideAttachments})
+	if err != nil {
+		t.Fatalf("Clone attachment-only inputs: %v", err)
+	}
+	if attachmentOnly.Prompt != "" || !reflect.DeepEqual(attachmentOnly.InputAttachments.Data(), overrideAttachments) {
+		t.Fatalf("attachment-only clone = prompt %q attachments %#v", attachmentOnly.Prompt, attachmentOnly.InputAttachments.Data())
+	}
+
+	emptyAttachments := []model.EntryAttachment{}
+	cleared, err := svc.Clone(ctx, src.ID, CloneTaskParams{InputAttachments: &emptyAttachments})
+	if err != nil {
+		t.Fatalf("Clone empty attachments: %v", err)
+	}
+	if cleared.Prompt != src.Prompt || len(cleared.InputAttachments.Data()) != 0 {
+		t.Fatalf("empty attachments did not preserve omitted prompt: prompt=%q attachments=%#v", cleared.Prompt, cleared.InputAttachments.Data())
+	}
+}
+
 func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -2520,7 +2702,7 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID)
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2554,7 +2736,7 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID)
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatalf("Clone montage task: %v", err)
 	}
@@ -2564,6 +2746,391 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 	}
 	if got.Preferences.AspectRatio != "1:1" || got.Preferences.DurationSeconds != 20 {
 		t.Fatalf("preferences = %#v", got.Preferences)
+	}
+}
+
+func TestTaskServiceClonePreservesFrozenTaskTypeAndConfigs(t *testing.T) {
+	t.Run("task type ignores current project platform", func(t *testing.T) {
+		svc, repo := setupTaskServiceWithEnqueuer(t)
+		ctx := context.Background()
+		userID := uuid.NewString()
+		projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+		src := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, Prompt: "frozen article"}
+		if err := repo.Tasks().Create(ctx, src); err != nil {
+			t.Fatal(err)
+		}
+		project, err := repo.Projects().FindByID(ctx, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		project.Platform = model.PlatformSeednote
+		if err := repo.Projects().Update(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+
+		clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if clone.Type != model.PlatformArticle {
+			t.Fatalf("clone type = %q, want frozen source type %q", clone.Type, model.PlatformArticle)
+		}
+	})
+
+	t.Run("ecommerce does not merge current project defaults", func(t *testing.T) {
+		svc, repo := setupTaskServiceWithEnqueuer(t)
+		ctx := context.Background()
+		userID := uuid.NewString()
+		projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
+		project, err := repo.Projects().FindByID(ctx, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		project.SetEcommerceDefaults(model.EcommerceProjectDefaults{BrandBrief: "new project default", ImageModelKey: "new-project-model"})
+		if err := repo.Projects().Update(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+		src := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformEcommerce, Status: model.TaskStatusCompleted, Prompt: "frozen ecommerce", ImageModelKey: ""}
+		src.SetEcommerce(model.EcommerceConfig{SelectedModules: map[string]int{"main_images": 2}, SellingPoints: "source selling points"})
+		if err := repo.Tasks().Create(ctx, src); err != nil {
+			t.Fatal(err)
+		}
+
+		clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(clone.Ecommerce.Data(), src.Ecommerce.Data()) || clone.ImageModelKey != src.ImageModelKey {
+			t.Fatalf("clone ecommerce/model changed: clone=%#v model=%q source=%#v model=%q", clone.Ecommerce.Data(), clone.ImageModelKey, src.Ecommerce.Data(), src.ImageModelKey)
+		}
+	})
+
+	t.Run("montage preserves source execution target", func(t *testing.T) {
+		svc, repo := setupTaskServiceWithEnqueuer(t)
+		ctx := context.Background()
+		userID := uuid.NewString()
+		projectID := createTestProject(t, repo, userID, model.PlatformMontage)
+		src := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted, Prompt: "frozen montage", ExecutionTarget: model.ExecutionTargetLocal}
+		src.SetMontageInput(model.MontageInput{Brief: "frozen montage", PipelineKey: "default"})
+		if err := repo.Tasks().Create(ctx, src); err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.MontageConfig{Enabled: true}
+		cfg.ApplyDefaults()
+		cfg.DefaultExecutionTarget = model.ExecutionTargetCloud
+		cfg.ExecutionTargets = []string{model.ExecutionTargetCloud}
+		svc.SetMontageConfig(cfg)
+
+		clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if clone.ExecutionTarget != model.ExecutionTargetLocal || clone.LocalClaimDeadline == nil {
+			t.Fatalf("clone execution target = %q deadline=%v, want frozen local billing path", clone.ExecutionTarget, clone.LocalClaimDeadline)
+		}
+	})
+}
+
+func TestTaskServiceClonePreservesFrozenVideoConfig(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.SetVideoDefaults(model.VideoDefaults{ModelKey: "current-project-model", Resolution: "1080p", Duration: 10})
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	src := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: model.PlatformVideoCreator, Status: model.TaskStatusCompleted, Prompt: "source video prompt",
+	}
+	src.SetVideoInput(model.VideoInput{
+		Brief:           "frozen video brief",
+		References:      []model.VideoReferenceAsset{{Type: "image", URL: "/api/v1/files/frozen-reference.png", MustKeep: []string{"logo"}}},
+		HardConstraints: model.VideoHardConstraints{Ratio: "9:16", Duration: 5},
+	})
+	src.SetVideoConfig(model.VideoTaskConfig{
+		ScenarioKey: "frozen-scenario", ModelKey: "frozen-video-model", Model: "provider-model-v1",
+		Resolution: "720p", Ratio: "9:16", Duration: 5, EstimatedCredits: 4321,
+		DeliveryTargets: []string{"mp4"},
+		PricingBreakdown: &model.VideoPricingBreakdown{
+			CNY: 4.321, CreditMultiplier: 1000, CreditsPerCNY: 1000, Resolution: "720p", Ratio: "9:16", ModelKey: "frozen-video-model",
+		},
+	})
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(clone.VideoInput.Data(), src.VideoInput.Data()) {
+		t.Fatalf("clone video input = %#v, want %#v", clone.VideoInput.Data(), src.VideoInput.Data())
+	}
+	if !reflect.DeepEqual(clone.VideoConfig.Data(), src.VideoConfig.Data()) {
+		t.Fatalf("clone video config = %#v, want frozen source %#v", clone.VideoConfig.Data(), src.VideoConfig.Data())
+	}
+}
+
+func TestTaskServiceCloneNormalizesExecutionTargetAndResetsEphemeralState(t *testing.T) {
+	tests := []struct {
+		name           string
+		sourceTarget   string
+		wantTarget     string
+		wantEnqueued   int
+		wantClaimLimit bool
+	}{
+		{name: "cloud remains cloud", sourceTarget: model.ExecutionTargetCloud, wantTarget: model.ExecutionTargetCloud, wantEnqueued: 1},
+		{name: "local remains schedulable local", sourceTarget: model.ExecutionTargetLocal, wantTarget: model.ExecutionTargetLocal, wantClaimLimit: true},
+		{name: "claimed local becomes schedulable local", sourceTarget: model.ExecutionTargetLocalClaimed, wantTarget: model.ExecutionTargetLocal, wantClaimLimit: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskTestDB(t)
+			t.Cleanup(func() {
+				sqlDB, _ := db.DB()
+				if sqlDB != nil {
+					sqlDB.Close()
+				}
+			})
+			repo := repository.New(db)
+			logger := zerolog.New(io.Discard)
+			enqueuer := &mockEnqueuer{}
+			svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			oldDeadline := time.Now().Add(-time.Hour).Round(time.Second)
+			completedAt := time.Now().Add(-time.Minute)
+			executionID := uuid.NewString()
+			src := &model.Task{
+				ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+				Type: model.PlatformArticle, Status: model.TaskStatusCompleted, Prompt: "clone execution path",
+				ExecutionTarget: tt.sourceTarget, LocalClaimDeadline: &oldDeadline,
+				CurrentExecutionID: &executionID, CompletedAt: &completedAt, Progress: 100,
+				ErrorMessage: "old terminal state", ExecutorInfo: datatypes.NewJSONType(model.ExecutorMeta{Hostname: "old-desktop", ClaimedAt: "old-claim"}),
+			}
+			if err := repo.Tasks().Create(ctx, src); err != nil {
+				t.Fatal(err)
+			}
+
+			clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if clone.ExecutionTarget != tt.wantTarget {
+				t.Fatalf("execution target = %q, want %q", clone.ExecutionTarget, tt.wantTarget)
+			}
+			if len(enqueuer.enqueued) != tt.wantEnqueued {
+				t.Fatalf("enqueued = %d, want %d for target %q", len(enqueuer.enqueued), tt.wantEnqueued, tt.wantTarget)
+			}
+			if tt.wantClaimLimit {
+				if clone.LocalClaimDeadline == nil || !clone.LocalClaimDeadline.After(time.Now()) || clone.LocalClaimDeadline.Equal(oldDeadline) {
+					t.Fatalf("local claim deadline = %v, want fresh future deadline", clone.LocalClaimDeadline)
+				}
+			} else if clone.LocalClaimDeadline != nil {
+				t.Fatalf("cloud clone inherited claim deadline %v", clone.LocalClaimDeadline)
+			}
+			if clone.Status != model.TaskStatusPending || clone.CurrentExecutionID != nil || clone.StartedAt != nil || clone.CompletedAt != nil || clone.Progress != 0 || clone.ErrorMessage != "" || clone.ExecutorInfo.Data() != (model.ExecutorMeta{}) {
+				t.Fatalf("clone inherited ephemeral execution state: %#v", clone)
+			}
+		})
+	}
+}
+
+func TestTaskServiceCloneRejectsUnknownExecutionTarget(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	enqueuer := &mockEnqueuer{}
+	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	src := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: model.PlatformArticle, Status: model.TaskStatusCompleted, Prompt: "unknown target",
+		ExecutionTarget: "stale_local_state",
+	}
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	if err == nil || !strings.Contains(err.Error(), "unsupported source execution target") {
+		t.Fatalf("Clone result=%#v error=%v, want unknown execution target rejection", clone, err)
+	}
+	if len(enqueuer.enqueued) != 0 {
+		t.Fatalf("unknown target clone enqueued %d tasks", len(enqueuer.enqueued))
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != src.ID {
+		t.Fatalf("unknown target clone persisted a task: %#v", tasks)
+	}
+}
+
+func TestTaskServiceClonePromptOverrideUpdatesStructuredBrief(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		prepare  func(*model.Task)
+		assert   func(*testing.T, *model.Task, *model.Task, string)
+	}{
+		{
+			name: "video creator", platform: model.PlatformVideoCreator,
+			prepare: func(task *model.Task) {
+				task.SetVideoInput(model.VideoInput{
+					Brief: "source creator brief", References: []model.VideoReferenceAsset{{Type: "image", URL: "/api/v1/files/reference.png", MustKeep: []string{"logo"}}},
+					HardConstraints: model.VideoHardConstraints{Ratio: "9:16", Duration: 5},
+				})
+				task.SetVideoConfig(model.VideoTaskConfig{ModelKey: "frozen-model", Resolution: "720p", EstimatedCredits: 1234})
+			},
+			assert: assertCloneVideoBrief,
+		},
+		{
+			name: "video editor", platform: model.PlatformVideoEditor,
+			prepare: func(task *model.Task) {
+				task.SetVideoInput(model.VideoInput{
+					Brief: "source editor brief", References: []model.VideoReferenceAsset{{Type: VideoReferenceVideo, URL: "/api/v1/files/source.mp4", MustKeep: []string{"timing"}}},
+					HardConstraints: model.VideoHardConstraints{Ratio: "16:9", Duration: 30},
+				})
+				task.SetVideoConfig(model.VideoTaskConfig{ModelKey: "frozen-editor", Resolution: "1080p", EstimatedCredits: 5678})
+			},
+			assert: assertCloneVideoBrief,
+		},
+		{
+			name: "montage", platform: model.PlatformMontage,
+			prepare: func(task *model.Task) {
+				task.SetMontageInput(model.MontageInput{
+					Brief: "source montage brief", PipelineKey: "frozen-pipeline",
+					SourceAssets: []model.MontageAsset{{Type: "video", URL: "/api/v1/files/source.mp4", FileName: "source.mp4"}},
+					Preferences:  model.MontagePreferences{AspectRatio: "1:1", DurationSeconds: 20},
+				})
+			},
+			assert: func(t *testing.T, source, clone *model.Task, wantBrief string) {
+				t.Helper()
+				want := source.MontageInput.Data()
+				want.Brief = wantBrief
+				if !reflect.DeepEqual(clone.MontageInput.Data(), want) {
+					t.Fatalf("montage input = %#v, want %#v", clone.MontageInput.Data(), want)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, tt.platform)
+			source := &model.Task{
+				ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+				Type: tt.platform, Status: model.TaskStatusCompleted, Prompt: "source task prompt",
+			}
+			tt.prepare(source)
+			if err := repo.Tasks().Create(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+
+			inherited, err := svc.Clone(ctx, source.ID, CloneTaskParams{})
+			if err != nil {
+				t.Fatalf("Clone omitted prompt: %v", err)
+			}
+			if inherited.Prompt != source.Prompt {
+				t.Fatalf("inherited prompt = %q, want %q", inherited.Prompt, source.Prompt)
+			}
+			structuredBrief := source.Prompt
+			if model.IsVideoPlatform(tt.platform) {
+				structuredBrief = source.VideoInput.Data().Brief
+			} else if model.IsMontagePlatform(tt.platform) {
+				structuredBrief = source.MontageInput.Data().Brief
+			}
+			tt.assert(t, source, inherited, structuredBrief)
+
+			override := "  edited brief  "
+			clone, err := svc.Clone(ctx, source.ID, CloneTaskParams{Prompt: &override})
+			if err != nil {
+				t.Fatalf("Clone prompt override: %v", err)
+			}
+			if clone.Prompt != "edited brief" {
+				t.Fatalf("clone prompt = %q, want trimmed override", clone.Prompt)
+			}
+			tt.assert(t, source, clone, "edited brief")
+
+			if model.IsVideoPlatform(tt.platform) {
+				empty := "   \n\t "
+				emptyClone, err := svc.Clone(ctx, source.ID, CloneTaskParams{Prompt: &empty})
+				if err != nil {
+					t.Fatalf("Clone explicit empty video brief: %v", err)
+				}
+				if emptyClone.Prompt != "" {
+					t.Fatalf("empty video clone prompt = %q, want empty", emptyClone.Prompt)
+				}
+				tt.assert(t, source, emptyClone, "")
+			}
+		})
+	}
+}
+
+func assertCloneVideoBrief(t *testing.T, source, clone *model.Task, wantBrief string) {
+	t.Helper()
+	want := source.VideoInput.Data()
+	want.Brief = wantBrief
+	if !reflect.DeepEqual(clone.VideoInput.Data(), want) {
+		t.Fatalf("video input = %#v, want %#v", clone.VideoInput.Data(), want)
+	}
+	if !reflect.DeepEqual(clone.VideoConfig.Data(), source.VideoConfig.Data()) {
+		t.Fatalf("video config changed: clone=%#v source=%#v", clone.VideoConfig.Data(), source.VideoConfig.Data())
+	}
+}
+
+func TestTaskServiceCloneRejectsEmptyMontageBriefBeforeSideEffects(t *testing.T) {
+	for _, prompt := range []string{"", "   \n\t "} {
+		t.Run(fmt.Sprintf("prompt_%q", prompt), func(t *testing.T) {
+			db := setupTaskTestDB(t)
+			repo := repository.New(db)
+			logger := zerolog.New(io.Discard)
+			enqueuer := &mockEnqueuer{}
+			svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformMontage)
+			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted, Prompt: "source"}
+			source.SetMontageInput(model.MontageInput{
+				Brief: "source montage brief", PipelineKey: "frozen-pipeline",
+				SourceAssets: []model.MontageAsset{{Type: "video", URL: "/api/v1/files/source.mp4", FileName: "source.mp4"}},
+			})
+			if err := repo.Tasks().Create(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+
+			clone, err := svc.Clone(ctx, source.ID, CloneTaskParams{Prompt: &prompt})
+			if err == nil || !errors.Is(err, ErrMontageInput) {
+				t.Fatalf("Clone result=%#v error=%v", clone, err)
+			}
+			if len(enqueuer.enqueued) != 0 {
+				t.Fatalf("empty montage clone enqueued %d tasks", len(enqueuer.enqueued))
+			}
+			tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+			if err != nil || len(tasks) != 1 || tasks[0].ID != source.ID {
+				t.Fatalf("empty montage clone persisted task: tasks=%#v err=%v", tasks, err)
+			}
+		})
 	}
 }
 
@@ -2657,6 +3224,41 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	}
 	if len(resumeFiles) != 2 || resumeFiles[0].FileName != "客户_反馈.txt" || resumeFiles[1].FileName != "客户_反馈_2.txt" || string(store.files[resumeFiles[0].Key]) != "feedback" || string(store.files[resumeFiles[1].Key]) != "feedback-2" {
 		t.Fatalf("resume files = %#v", resumeFiles)
+	}
+}
+
+func TestTaskServiceResumePersistsObjectKey(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	store := &resumeTestStorage{
+		files:       map[string][]byte{},
+		returnedKey: "https://signed.example.com/not-an-object-identity?token=secret",
+		returnedURL: "https://signed.example.com/resume.txt?token=secret",
+	}
+	svc := NewTaskService(nil, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+
+	attachments, _, err := svc.persistResumeInputs(context.Background(), task, "continue", []ResumeTaskFile{{
+		OriginalName: "notes.txt", Reader: strings.NewReader("resume bytes"), Size: int64(len("resume bytes")),
+	}})
+	if err != nil {
+		t.Fatalf("persistResumeInputs: %v", err)
+	}
+	if len(attachments) != 2 {
+		t.Fatalf("attachments = %#v, want latest and file", attachments)
+	}
+	file := attachments[1]
+	if file.Role != model.EntryAttachmentRoleResumeFile {
+		t.Fatalf("role = %q, want resume_file", file.Role)
+	}
+	wantPrefix := "uploads/users/user-1/projects/project-1/tasks/task-1/resume/"
+	if !strings.HasPrefix(file.Key, wantPrefix) || !strings.HasSuffix(file.Key, "/attachments/notes.txt") {
+		t.Fatalf("key = %q, want deterministic resume object key", file.Key)
+	}
+	if file.URL != "" {
+		t.Fatalf("url = %q, want no signed/public URL persisted", file.URL)
+	}
+	if string(store.files[file.Key]) != "resume bytes" {
+		t.Fatalf("stored bytes missing under stable key %q", file.Key)
 	}
 }
 

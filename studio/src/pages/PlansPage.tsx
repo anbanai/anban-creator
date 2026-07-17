@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, type BaseSyntheticEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -13,12 +13,13 @@ import type { Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } fr
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
-import { ReferenceMaterialInput } from '@/components/ReferenceMaterialInput'
+import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
+import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
@@ -43,6 +44,8 @@ import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { cn } from '@/lib/utils'
 import { parseCreationIntent } from '@/lib/command-center'
 import { taskCostFor } from '@/lib/pricing'
+import type { PromptAttachment } from '@/types/input-attachment'
+import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -83,11 +86,14 @@ export default function PlansPage() {
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
-  const [referenceUploading, setReferenceUploading] = useState(false)
+  const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
+  const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
   const highlightedPlanId = searchParams.get('highlight') || ''
   const planRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const attachmentsTouchedRef = useRef(false)
+  const attachmentHydratingRef = useRef(false)
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
@@ -106,6 +112,32 @@ export default function PlansPage() {
       montage_input: undefined,
     },
   })
+  const attachmentController = usePromptAttachments({
+    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
+    policy: { allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 },
+    attachments: promptAttachments,
+    onAttachmentsChange: (next) => {
+      setPromptAttachments(next)
+      setAttachmentSubmitError('')
+      if (attachmentHydratingRef.current) return
+      attachmentsTouchedRef.current = true
+      const pendingAttachments = next.filter((attachment) => attachment.status !== 'uploaded').map((attachment) => ({
+        type: attachment.type,
+        file_name: attachment.fileName,
+        content_type: attachment.contentType,
+        size: attachment.size,
+        instruction: attachment.instruction,
+        role: attachment.role,
+      }))
+      form.setValue('input_attachments', [
+        ...attachmentController.toInputAttachments(),
+        ...pendingAttachments,
+      ], {
+        shouldDirty: true,
+        shouldValidate: true,
+      })
+    },
+  })
 
   // Auto-focus title field when dialog opens
   useEffect(() => {
@@ -117,7 +149,6 @@ export default function PlansPage() {
   const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedGoalMode = useWatch({ control: form.control, name: 'goal_mode' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
-  const watchedInputAttachments = useWatch({ control: form.control, name: 'input_attachments' })
   const isMontagePlan = watchedType === 'montage'
 
   // Warn before closing with unsaved changes
@@ -164,6 +195,10 @@ export default function PlansPage() {
     }
     return map
   }, [allProjects])
+  const planContextProjects = useMemo(
+    () => (allProjects ?? []).filter((project) => planTypeOptions.some((option) => option.value === project.platform)),
+    [allProjects],
+  )
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
 
   // 每次执行（单次触发）的基础服务费。计划是定时单任务生成器，无 quantity；
@@ -242,7 +277,11 @@ export default function PlansPage() {
       ? createIntent.type
       : 'seednote'
     setEditingPlan(null)
-    setReferenceUploading(false)
+    setAttachmentSubmitError('')
+    attachmentsTouchedRef.current = false
+    attachmentHydratingRef.current = true
+    attachmentController.clear()
+    attachmentHydratingRef.current = false
     form.reset({
       project_id: createIntent.projectId ?? '',
       type: requestedType,
@@ -269,8 +308,12 @@ export default function PlansPage() {
 
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
-    setReferenceUploading(false)
+    setAttachmentSubmitError('')
     form.reset(planToFormValues(plan))
+    attachmentsTouchedRef.current = false
+    attachmentHydratingRef.current = true
+    attachmentController.reset(plan.input_attachments ?? [])
+    attachmentHydratingRef.current = false
     setModalOpen(true)
   }
 
@@ -286,7 +329,11 @@ export default function PlansPage() {
     setModalOpen(false)
     setShowDirtyDialog(false)
     setEditingPlan(null)
-    setReferenceUploading(false)
+    setAttachmentSubmitError('')
+    attachmentsTouchedRef.current = false
+    attachmentHydratingRef.current = true
+    attachmentController.clear()
+    attachmentHydratingRef.current = false
     form.reset({
       project_id: '',
       type: 'seednote',
@@ -308,13 +355,18 @@ export default function PlansPage() {
     // unchanged, "" = clear to system default. Always send it so explicit
     // "system default" selection actually clears the previously saved value.
     // For create (POST), "" is also valid (means system default).
-    const inputAttachments = values.type === 'seednote'
-      ? (
-          editingPlan && !form.formState.dirtyFields.input_attachments
-            ? undefined
-            : values.input_attachments
-        )
-      : undefined
+    let inputAttachments = editingPlan && !attachmentsTouchedRef.current
+      ? undefined
+      : values.input_attachments
+    if (inputAttachments !== undefined) {
+      const prepared = prepareReusableInputAttachments(inputAttachments, { allowExternalURLs: true })
+      if (prepared.error) {
+        setAttachmentSubmitError(prepared.error)
+        return
+      }
+      inputAttachments = prepared.attachments ?? []
+    }
+    setAttachmentSubmitError('')
 
     const payload: CreatePlanRequest | UpdatePlanRequest = {
       type: values.type,
@@ -331,7 +383,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_creator_input) : undefined,
+      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, { ...values.video_creator_input, brief: values.prompt }) : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
@@ -342,7 +394,61 @@ export default function PlansPage() {
     }
   }
 
+  function handlePlanSubmit(event?: BaseSyntheticEvent) {
+    if (attachmentController.uploading || attachmentController.hasFailures) {
+      event?.preventDefault()
+      return
+    }
+    return form.handleSubmit(onSubmit)(event)
+  }
+
   const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const promptComposer = (
+    <>
+      <AgentPromptInput
+      value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
+      onChange={(value) => {
+        form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
+        if (isVideoCreator(watchedType)) {
+          form.setValue('video_creator_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        } else if (watchedType === 'montage') {
+          form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        }
+        if (value.attachments !== promptAttachments) setPromptAttachments(value.attachments)
+      }}
+      onSubmit={() => handlePlanSubmit()}
+      attachmentController={attachmentController}
+      attachmentPolicy={{ allowedTypes: ['image', 'audio', 'video', 'document', 'text'], maxCount: 16 }}
+      placeholder="描述每次计划的创作方向、内容要求和素材使用方式..."
+      submitLabel={editingPlan ? '更新计划' : '创建计划'}
+      submitting={isSubmitting}
+      submitDisabled={!watchedProjectId}
+      attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
+      contextBar={editingPlan ? (
+        <ProjectContextControl mode="readonly" project={selectedProject ?? null} />
+      ) : (
+        <ProjectContextControl
+          mode="select"
+          projects={planContextProjects}
+          value={watchedProjectId || null}
+          allowNoProject={false}
+          placeholder="选择项目"
+          onValueChange={(id, project) => {
+            form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
+            if (!id || !project?.platform) return
+            const nextType = project.platform as PlanType
+            form.setValue('type', nextType, { shouldDirty: true })
+            form.setValue('video_creator_input', isVideoCreator(nextType) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+            form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+          }}
+        />
+      )}
+      />
+      {attachmentSubmitError ? (
+        <p role="alert" className="text-sm text-destructive">{attachmentSubmitError}</p>
+      ) : null}
+    </>
+  )
 
   return (
     <div className="space-y-6">
@@ -492,39 +598,7 @@ export default function PlansPage() {
             <DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
-            <form id="plan-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
-              <FormField control={form.control} name="project_id" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>项目</FormLabel>
-                  <FormControl>
-                    <ProjectSelector
-                      value={field.value || ''}
-                      onChange={(id, platform) => {
-                        field.onChange(id)
-                        if (id) {
-                          form.setValue('type', platform as PlanType)
-                          if (isVideoCreator(platform)) {
-                            form.setValue('video_creator_input', initialVideoInput(form.getValues('prompt') || ''), { shouldDirty: false })
-                          } else {
-                            form.setValue('video_creator_input', undefined, { shouldDirty: false })
-                          }
-                          form.setValue('montage_input', platform === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
-                        } else {
-                          form.setValue('video_creator_input', undefined, { shouldDirty: false })
-                          form.setValue('montage_input', undefined, { shouldDirty: false })
-                        }
-                      }}
-                      excludePlatforms={['moments', 'ecommerce', 'videoeditor']}
-                      disabled={!!editingPlan}
-                    />
-                  </FormControl>
-                  {editingPlan && (
-                    <p className="text-xs text-muted-foreground">计划创建后项目不可更换。</p>
-                  )}
-                  <FormMessage />
-                </FormItem>
-              )} />
-
+            <form id="plan-form" onSubmit={handlePlanSubmit} className="max-h-[60vh] space-y-4 overflow-y-auto">
               <FormField control={form.control} name="type" render={({ field }) => (
                 <FormItem>
                   <FormLabel>内容类型</FormLabel>
@@ -566,15 +640,7 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              {!isVideoCreator(watchedType) && !isMontagePlan && <FormField control={form.control} name="prompt" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Prompt（可选）</FormLabel>
-                  <FormControl>
-                    <Input placeholder="留空则根据项目信息自动生成" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />}
+              {!isVideoCreator(watchedType) && !isMontagePlan ? promptComposer : null}
 
               {!isVideoCreator(watchedType) && !isMontagePlan && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
@@ -600,21 +666,12 @@ export default function PlansPage() {
                   fieldRoot="video_creator_input"
                   selectedProject={selectedProject}
                   title="AI 视频生成计划"
-                  promptField={(
-                    <FormField control={form.control} name="prompt" render={({ field }) => (
-                      <FormItem>
-                        <FormControl>
-                          <Textarea placeholder="描述每次计划要生成的视频方向，留空则根据项目自动生成" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  )}
+                  promptField={promptComposer}
                 />
               )}
 
               {isMontagePlan && (
-                <MontageCreationPanel form={form} fieldRoot="montage_input" />
+                <MontageCreationPanel form={form} fieldRoot="montage_input" briefField={promptComposer} />
               )}
 
               {!isVideoCreator(watchedType) && !isMontagePlan && <FormField control={form.control} name="watermark" render={({ field }) => (
@@ -639,33 +696,6 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />}
-
-              {watchedType === 'seednote' && (
-                <section
-                  aria-label="Seednote 参考素材"
-                  className="space-y-3 rounded-lg border border-border p-3"
-                >
-                  <div>
-                    <h3 className="text-sm font-medium text-foreground">参考素材</h3>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      上传产品图、场景图或风格参考，AI 会自动判断如何使用。
-                    </p>
-                  </div>
-                  <ReferenceMaterialInput
-                    value={watchedInputAttachments ?? []}
-                    onChange={(value) => form.setValue('input_attachments', value, {
-                      shouldDirty: true,
-                      shouldValidate: true,
-                    })}
-                    allowedTypes={['image']}
-                    maxCount={16}
-                    instructionEnabled
-                    instructionMaxLength={1000}
-                    hint="AI 会先理解创作需求，再逐张分析图片并自动决定每页是否使用。"
-                    onUploadingChange={setReferenceUploading}
-                  />
-                </section>
-              )}
 
               {/* Image composition (seednote only) */}
               {watchedType === 'seednote' && (
@@ -846,7 +876,7 @@ export default function PlansPage() {
               type="submit"
               form="plan-form"
               loading={isSubmitting}
-              disabled={watchedType === 'seednote' && referenceUploading}
+              disabled={attachmentController.uploading || attachmentController.hasFailures}
             >
               {editingPlan ? '更新' : '创建'}
             </Button>

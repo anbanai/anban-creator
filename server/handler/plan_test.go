@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -202,6 +203,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	planSvc := service.NewPlanService(repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
 	h.SetRepository(repo)
+	h.SetStore(pendingUploadStatStore(repo.PendingUploads()))
 	app := fiber.New()
 	app.Post("/plans", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -225,12 +227,19 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if strings.Contains(string(responseBody), "uploads/pending/") || !strings.Contains(string(responseBody), "uploads/finalized/") {
+		t.Fatalf("plan persisted non-final montage URL: %s", responseBody)
+	}
 	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
 	if err != nil {
 		t.Fatalf("find pending upload: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("upload status = %q, want finalized", upload.Status)
+	if upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/clip.mp4" {
+		t.Fatalf("upload identity = %#v", upload)
 	}
 }
 
@@ -428,6 +437,60 @@ func TestPlanHandler_VideoCreatorSplitInputContract(t *testing.T) {
 	}
 }
 
+func TestCreateVideoPlanPersistsFinalReferenceURL(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, projectID, uploadID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "planvideoref"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoCreator, Name: "Video", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	refURL := seedPendingHandlerUpload(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
+	store := pendingUploadStatStore(repo.PendingUploads())
+	logger := zerolog.New(io.Discard)
+	h := NewPlanHandler(service.NewPlanService(repo, &logger), &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	app := fiber.New()
+	app.Post("/plans", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/plans", `{"project_id":"`+projectID+`","cron_expr":"0 9 * * *","video_creator_input":{"brief":"每日生成产品视频","references":[{"type":"video_url","url":"`+refURL+`"}]}}`)
+	defer resp.Body.Close()
+	data := decodeEnvelopeRawData(t, resp)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d data=%s", resp.StatusCode, mustMarshalTaskJSON(t, data))
+	}
+	encoded := mustMarshalTaskJSON(t, data)
+	if strings.Contains(string(encoded), "uploads/pending/") || !strings.Contains(string(encoded), "uploads/finalized/") {
+		t.Fatalf("video plan response contains non-final reference: %s", encoded)
+	}
+	var response struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(encoded, &response); err != nil || response.ID == "" {
+		t.Fatalf("decode plan identity: %#v, %v", response, err)
+	}
+	plan, err := repo.Plans().FindByID(ctx, response.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := plan.VideoInput.Data().References
+	wantURL := "/api/v1/files/uploads/finalized/" + userID + "/" + uploadID + "/reference.mp4"
+	if len(references) != 1 || references[0].URL != wantURL {
+		t.Fatalf("persisted plan references = %#v", references)
+	}
+	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	if err != nil || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey != "uploads/finalized/"+userID+"/"+uploadID+"/reference.mp4" {
+		t.Fatalf("finalized plan upload = %#v, %v", upload, err)
+	}
+}
+
 func TestCreatePlan_MomentsProjectReturnsBadRequest(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -516,18 +579,33 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		return h.Update(c)
 	})
 
-	invalidBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"}]}`
-	invalidReq := httptest.NewRequest("POST", "/plans", strings.NewReader(invalidBody))
-	invalidReq.Header.Set("Content-Type", "application/json")
-	invalidResp, err := app.Test(invalidReq)
-	if err != nil {
-		t.Fatalf("invalid create request failed: %v", err)
+	const foreignKey = "uploads/pending/foreign/foreign-upload/product.png"
+	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
+		ID: "foreign-upload", UserID: "foreign-user", Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		Key: foreignKey, FileName: "product.png", ContentType: "image/png", Size: 10,
+		Status: model.PendingUploadStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create foreign upload: %v", err)
 	}
-	if invalidResp.StatusCode != fiber.StatusBadRequest {
-		t.Fatalf("invalid create status = %d, want 400", invalidResp.StatusCode)
+	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
+		t.Run("create "+tt.name, func(t *testing.T) {
+			body := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + tt.attachments + `}`
+			req := httptest.NewRequest(http.MethodPost, "/plans", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil || resp.StatusCode != fiber.StatusBadRequest {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, err = %v, want 400: %s", resp.StatusCode, err, raw)
+			}
+		})
 	}
 
-	createBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png","instruction":"  聚焦包装正面  "}]}`
+	createBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[` +
+		`{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png","instruction":"  聚焦包装正面  "},` +
+		`{"type":"audio","url":"/api/v1/files/voice.ogg","file_name":"voice.ogg","content_type":"application/ogg"},` +
+		`{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4"},` +
+		`{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"},` +
+		`{"type":"text","url":"/api/v1/files/notes.csv","file_name":"notes.csv","content_type":"application/csv"}]}`
 	createReq := httptest.NewRequest("POST", "/plans", strings.NewReader(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createResp, err := app.Test(createReq)
@@ -548,8 +626,8 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}
 	planID := plans[0].ID
 	got := plans[0].InputAttachments.Data()
-	if len(got) != 1 || got[0].Instruction != "聚焦包装正面" {
-		t.Fatalf("created attachments = %#v, want normalized image", got)
+	if len(got) != 5 || got[0].Instruction != "聚焦包装正面" || got[1].ContentType != "application/ogg" || got[4].ContentType != "application/csv" {
+		t.Fatalf("created attachments = %#v, want all five normalized types", got)
 	}
 
 	omitReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"prompt":"updated"}`))
@@ -565,8 +643,25 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find retained plan: %v", err)
 	}
-	if got := retained.InputAttachments.Data(); len(got) != 1 || got[0].Instruction != "聚焦包装正面" {
-		t.Fatalf("attachments after omitted update = %#v, want retained image", got)
+	if got := retained.InputAttachments.Data(); len(got) != 5 || got[0].Instruction != "聚焦包装正面" {
+		t.Fatalf("attachments after omitted update = %#v, want retained attachments", got)
+	}
+
+	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
+		t.Run("update "+tt.name, func(t *testing.T) {
+			body := `{"input_attachments":` + tt.attachments + `}`
+			req := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil || resp.StatusCode != fiber.StatusBadRequest {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, err = %v, want 400: %s", resp.StatusCode, err, raw)
+			}
+			unchanged, findErr := repo.Plans().FindByID(ctx, planID)
+			if findErr != nil || len(unchanged.InputAttachments.Data()) != 5 {
+				t.Fatalf("invalid update changed attachments = %#v, err = %v", unchanged, findErr)
+			}
+		})
 	}
 
 	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"input_attachments":[]}`))
@@ -584,5 +679,21 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}
 	if got := cleared.InputAttachments.Data(); len(got) != 0 {
 		t.Fatalf("attachments after explicit empty update = %#v, want empty", got)
+	}
+
+	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"input_attachments":`+fiveTypeHandlerAttachmentsJSON+`}`))
+	replaceReq.Header.Set("Content-Type", "application/json")
+	replaceResp, err := app.Test(replaceReq)
+	if err != nil || replaceResp.StatusCode != fiber.StatusOK {
+		raw, _ := io.ReadAll(replaceResp.Body)
+		t.Fatalf("replace status = %d, err = %v, want 200: %s", replaceResp.StatusCode, err, raw)
+	}
+	replaced, err := repo.Plans().FindByID(ctx, planID)
+	if err != nil || len(replaced.InputAttachments.Data()) != 5 {
+		t.Fatalf("replacement attachments = %#v, err = %v", replaced, err)
+	}
+	replacedAttachments := replaced.InputAttachments.Data()
+	if replacedAttachments[1].ContentType != "application/ogg" || replacedAttachments[4].ContentType != "application/csv" {
+		t.Fatalf("replacement canonical application MIME attachments = %#v", replacedAttachments)
 	}
 }

@@ -214,9 +214,11 @@ type TaskExecutionRepository interface {
 type PendingUploadRepository interface {
 	CreatePendingUpload(ctx context.Context, upload *model.PendingUpload) error
 	FindPendingUploadByID(ctx context.Context, id string) (*model.PendingUpload, error)
-	FinalizePendingUploads(ctx context.Context, ids []string, finalizedAt time.Time) error
-	FindExpiredPendingUploads(ctx context.Context, before time.Time, limit int) ([]*model.PendingUpload, error)
-	MarkPendingUploadExpired(ctx context.Context, id string, expiredAt time.Time) error
+	FinalizePendingUploadClaims(ctx context.Context, claims []model.PendingUploadClaim, finalizedAt time.Time) error
+	FindPendingUploadsForCleanup(ctx context.Context, expiredBefore, claimStaleBefore time.Time, limit int) ([]*model.PendingUpload, error)
+	ClaimPendingUploadExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error)
+	CompletePendingUploadExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error)
+	ReopenPendingUploadExpiration(ctx context.Context, id, claimID string) (bool, error)
 }
 
 // FeedbackRepository provides access to the feedbacks table.

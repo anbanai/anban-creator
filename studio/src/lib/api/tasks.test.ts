@@ -80,4 +80,18 @@ describe('tasksApi', () => {
     expect(submittedFile).toBeInstanceOf(File)
     expect((submittedFile as File).name).toBe('notes.md')
   })
+
+  it('always posts the complete clone input snapshot including empty fields', async () => {
+    const post = vi.spyOn(clientHttp, 'post').mockResolvedValue({ data: { data: { id: 'task-clone', status: 'pending' } } } as any)
+
+    await tasksApi.clone('task-1', {
+      prompt: '',
+      input_attachments: [],
+    })
+
+    expect(post).toHaveBeenCalledWith('/tasks/task-1/clone', {
+      prompt: '',
+      input_attachments: [],
+    })
+  })
 })

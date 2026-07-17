@@ -157,6 +157,42 @@ func TestAIEntryServiceSubmitNeedsConfigurationForEcommerceWithoutProductImage(t
 	}
 }
 
+func TestAIEntryServiceSubmitCreatesEcommerceTaskFromKeyFirstImage(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
+	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"制作保温杯电商主图","selected_modules":{"main_images":1}}`}}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+	key := "uploads/pending/" + userID + "/image-upload/product.png"
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, Channel: "studio", Text: "制作保温杯电商主图",
+		Attachments: []model.EntryAttachment{{
+			Type: "image", UploadID: "image-upload", Key: key,
+			FileName: "product.png", ContentType: "image/png", Size: 2048,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || result.Task == nil {
+		t.Fatalf("result = %#v, want created", result)
+	}
+	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if photos := found.Ecommerce.Data().ProductPhotos; len(photos) != 1 || photos[0] != key {
+		t.Fatalf("product photos = %#v, want key source", photos)
+	}
+	attachments := found.InputAttachments.Data()
+	if len(attachments) != 1 || attachments[0].Key != key || attachments[0].URL != "" {
+		t.Fatalf("input attachments = %#v, want key-first snapshot", attachments)
+	}
+}
+
 func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 	t.Run("falls back to minimum legal default when parsed modules are invalid", func(t *testing.T) {
 		taskSvc, repo := setupTaskServiceWithEnqueuer(t)
@@ -317,6 +353,43 @@ func TestAIEntryServiceSubmitVideoEditorRequiresVideoAttachment(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "视频素材") {
 		t.Fatalf("message = %q, want source video hint", result.Message)
+	}
+}
+
+func TestAIEntryServiceSubmitCreatesVideoEditorTaskFromKeyFirstVideo(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideoEditor)
+	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"为视频加字幕并剪成三十秒"}`}}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+	key := "uploads/pending/" + userID + "/video-upload/source.mp4"
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, Channel: "studio", Text: "为视频加字幕并剪成三十秒",
+		Attachments: []model.EntryAttachment{{
+			Type: "video", UploadID: "video-upload", Key: key,
+			FileName: "source.mp4", ContentType: "video/mp4", Size: 4096,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || result.Task == nil {
+		t.Fatalf("result = %#v, want created", result)
+	}
+	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	attachments := found.InputAttachments.Data()
+	if len(attachments) != 1 || attachments[0].Key != key || attachments[0].URL != "" {
+		t.Fatalf("input attachments = %#v, want key-first snapshot", attachments)
+	}
+	refs := found.VideoInput.Data().References
+	if len(refs) != 1 || refs[0].Type != VideoReferenceVideo || refs[0].URL != key {
+		t.Fatalf("video references = %#v, want key source", refs)
 	}
 }
 

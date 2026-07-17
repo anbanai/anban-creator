@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"regexp"
 	"strconv"
@@ -31,20 +30,10 @@ func NewPlanHandler(svc *service.PlanService, logger *zerolog.Logger) *PlanHandl
 	return &PlanHandler{service: svc, logger: logger}
 }
 
-// SetStore injects a storage provider so the reference image URL can be resolved
-// to a signed, directly-fetchable URL in responses.
+// SetStore injects a storage provider for response-only owned-object key
+// serialization and attachment validation.
 func (h *PlanHandler) SetStore(s storage.Provider) {
 	h.store = s
-}
-
-// signPlanURLs resolves the stored reference-image URL to a directly-fetchable
-// signed URL. No-op when no store is wired (e.g. unit tests) or the URL is
-// external/empty.
-func (h *PlanHandler) signPlanURLs(ctx context.Context, p *model.Plan) {
-	if p == nil {
-		return
-	}
-	p.ReferenceImageURL = service.SignURL(ctx, h.store, h.logger, p.ReferenceImageURL, service.DefaultSignedURLTTL)
 }
 
 // SetImagePresets wires the system-managed image model presets for tier-gated
@@ -159,25 +148,31 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if h.repo != nil {
 		pending = h.repo.PendingUploads()
 	}
-	validatedAttachments, err := validateInputAttachments(c.Context(), pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
+	validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
 		MaxCount:     16,
-		AllowedTypes: map[string]bool{"image": true},
+		AllowedTypes: allAgentAttachmentTypes,
 	})
 	if err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		return respondInputAttachmentError(c, h.logger, err)
 	}
 	req.InputAttachments = validatedAttachments
 	if h.repo != nil {
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL}, h.store); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		rewrites, err := finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL})
+		if err != nil {
+			return respondPendingUploadFinalizeError(c, h.logger, err)
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil), h.store); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		req.ReferenceImageURL = rewriteFinalizedUploadURL(req.ReferenceImageURL, rewrites)
+		rewrites, err = finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
+		if err != nil {
+			return respondPendingUploadFinalizeError(c, h.logger, err)
 		}
+		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput), h.store); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
+			rewrites, err = finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			if err != nil {
+				return respondPendingUploadFinalizeError(c, h.logger, err)
 			}
+			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
 	}
 
@@ -218,8 +213,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
 	}
 
-	h.signPlanURLs(c.Context(), plan)
-	return Success(c, planAPIResponse(plan))
+	return Success(c, planAPIResponse(plan, h.store))
 }
 
 // List handles GET /api/v1/plans.
@@ -246,12 +240,8 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to list plans")
 	}
 
-	for _, p := range plans {
-		h.signPlanURLs(c.Context(), p)
-	}
-
 	return Success(c, fiber.Map{
-		"items": planAPIResponses(plans),
+		"items": planAPIResponses(plans, h.store),
 		"total": total,
 	})
 }
@@ -277,8 +267,7 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this plan")
 	}
 
-	h.signPlanURLs(c.Context(), plan)
-	return Success(c, planAPIResponse(plan))
+	return Success(c, planAPIResponse(plan, h.store))
 }
 
 // Update handles PUT /api/v1/plans/:id.
@@ -336,28 +325,34 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		pending = h.repo.PendingUploads()
 	}
 	if req.InputAttachments != nil {
-		validatedAttachments, err := validateInputAttachments(c.Context(), pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
+		validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
 			MaxCount:     16,
-			AllowedTypes: map[string]bool{"image": true},
+			AllowedTypes: allAgentAttachmentTypes,
 		})
 		if err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+			return respondInputAttachmentError(c, h.logger, err)
 		}
 		req.InputAttachments = &validatedAttachments
 	}
 	if h.repo != nil {
 		if req.ReferenceImageURL != nil {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{*req.ReferenceImageURL}, h.store); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
+			rewrites, err := finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{*req.ReferenceImageURL})
+			if err != nil {
+				return respondPendingUploadFinalizeError(c, h.logger, err)
 			}
+			*req.ReferenceImageURL = rewriteFinalizedUploadURL(*req.ReferenceImageURL, rewrites)
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil), h.store); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		rewrites, err := finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
+		if err != nil {
+			return respondPendingUploadFinalizeError(c, h.logger, err)
 		}
+		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if model.IsMontagePlatform(existing.Type) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput), h.store); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
+			rewrites, err = finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			if err != nil {
+				return respondPendingUploadFinalizeError(c, h.logger, err)
 			}
+			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
 	}
 
@@ -388,8 +383,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")
 	}
 
-	h.signPlanURLs(c.Context(), plan)
-	return Success(c, planAPIResponse(plan))
+	return Success(c, planAPIResponse(plan, h.store))
 }
 
 // Delete handles DELETE /api/v1/plans/:id.

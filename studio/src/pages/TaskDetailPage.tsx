@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback, type ChangeEvent } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban, Upload, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -11,7 +11,7 @@ import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
 import { formatUSD } from '@/lib/utils'
-import type { CreditTransaction, TaskFile } from '@/types'
+import type { CreditTransaction, InputAttachment, Task, TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
@@ -28,8 +28,10 @@ import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDe
 import { VideoProductionPanel } from '@/components/video/VideoProductionPanel'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
-import { Input } from '@/components/ui/input'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { ProjectContextControl, type ProjectContextProject } from '@/components/agent-prompt/ProjectContextControl'
+import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
@@ -38,6 +40,7 @@ import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from
 import { isVideoCreator, isVideoEditor } from '@/lib/video-platforms'
 import { formatCreditDescription } from '@/lib/credit-display'
 import { taskFailureMessage } from '@/lib/studio-ux'
+import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 
 function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): string | null {
   const metadata = tx.metadata
@@ -64,10 +67,199 @@ function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): strin
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
-interface ResumeFileInput {
-  id: string
-  file: File
-  label: string
+const ALL_AGENT_ATTACHMENT_TYPES = ['image', 'audio', 'video', 'document', 'text'] as const
+const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
+const RESUME_ATTACHMENT_POLICY = {
+  allowedTypes: ALL_AGENT_ATTACHMENT_TYPES,
+  maxCount: 10,
+  maxBytes: {
+    image: RESUME_FILE_MAX_BYTES,
+    audio: RESUME_FILE_MAX_BYTES,
+    video: RESUME_FILE_MAX_BYTES,
+    document: RESUME_FILE_MAX_BYTES,
+    text: RESUME_FILE_MAX_BYTES,
+  },
+} as const
+const CLONE_ATTACHMENT_POLICY = {
+  allowedTypes: ALL_AGENT_ATTACHMENT_TYPES,
+  maxCount: 16,
+} as const
+
+interface CloneDialogSnapshot {
+  taskId: string
+  prompt: string
+  attachments: InputAttachment[]
+  project: ProjectContextProject | null
+}
+
+function ResumeTaskDialog({
+  taskId,
+  onClose,
+  onSuccess,
+}: {
+  taskId: string
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const [prompt, setPrompt] = useState('')
+  const attachmentController = usePromptAttachments({
+    adapter: { mode: 'local' },
+    policy: RESUME_ATTACHMENT_POLICY,
+  })
+  const resumeMutation = useMutation({
+    mutationFn: () => api.tasks.resume(taskId, {
+      prompt,
+      files: attachmentController.localFiles(),
+      fileLabels: attachmentController.attachments.map((attachment) => attachment.instruction ?? ''),
+    }),
+    onSuccess: () => {
+      toast.success('已提交，任务将结合已有上下文继续执行')
+      onSuccess()
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '继续执行失败，请稍后再试'))
+    },
+  })
+  const hasInput = Boolean(prompt.trim() || attachmentController.attachments.length > 0)
+
+  return (
+    <Dialog
+      open
+      disablePointerDismissal={resumeMutation.isPending}
+      onOpenChange={(open, eventDetails) => {
+        if (open) return
+        if (resumeMutation.isPending) {
+          eventDetails.cancel()
+          return
+        }
+        onClose()
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl" closeButtonDisabled={resumeMutation.isPending}>
+        <DialogHeader>
+          <DialogTitle>继续执行此任务</DialogTitle>
+          <DialogDescription>
+            提供补充指令和文件后，任务会结合已有上下文继续执行。
+          </DialogDescription>
+        </DialogHeader>
+        <AgentPromptInput
+          value={{ prompt, attachments: attachmentController.attachments }}
+          onChange={(value) => setPrompt(value.prompt)}
+          onSubmit={async () => { await resumeMutation.mutateAsync() }}
+          attachmentController={attachmentController}
+          attachmentPolicy={RESUME_ATTACHMENT_POLICY}
+          placeholder="说明希望 AI 接着做什么，并可添加补充资料或修改意见..."
+          ariaLabel="继续任务要求"
+          submitLabel="提交并继续"
+          submitting={resumeMutation.isPending}
+          submitDisabled={!hasInput}
+          acceptedTypesLabel="图片、音频、视频、文档、文本；最多 10 个，单个不超过 25MB"
+          autoFocus
+        />
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={resumeMutation.isPending} onClick={onClose}>取消</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function CloneTaskDialog({
+  snapshot,
+  onClose,
+  onSuccess,
+}: {
+  snapshot: CloneDialogSnapshot
+  onClose: () => void
+  onSuccess: (task: Task) => void
+}) {
+  const [prompt, setPrompt] = useState(snapshot.prompt)
+  const [validationError, setValidationError] = useState<string>()
+  const attachmentController = usePromptAttachments({
+    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
+    policy: CLONE_ATTACHMENT_POLICY,
+    initialAttachments: snapshot.attachments,
+    onAttachmentsChange: () => setValidationError(undefined),
+  })
+  const cloneMutation = useMutation({
+    mutationFn: (inputAttachments: InputAttachment[]) => api.tasks.clone(snapshot.taskId, {
+      prompt,
+      input_attachments: inputAttachments,
+    }),
+    onSuccess: (task) => {
+      toast.success('已克隆为新任务，配置已保留')
+      onSuccess(task)
+    },
+    onError: (err: unknown) => {
+      const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
+      const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
+      if (status === 402 || code === 40200) {
+        toast.error('积分不足，无法克隆任务')
+      } else {
+        toast.error(getApiErrorMessage(err, '克隆任务失败，请稍后再试'))
+      }
+    },
+  })
+
+  async function handleSubmit() {
+    setValidationError(undefined)
+    const prepared = prepareReusableInputAttachments(attachmentController.toInputAttachments())
+    if (prepared.error) {
+      setValidationError(prepared.error)
+      throw new Error(prepared.error)
+    }
+    await cloneMutation.mutateAsync(prepared.attachments ?? [])
+  }
+
+  return (
+    <Dialog
+      open
+      disablePointerDismissal={cloneMutation.isPending}
+      onOpenChange={(open, eventDetails) => {
+        if (open) return
+        if (cloneMutation.isPending) {
+          eventDetails.cancel()
+          return
+        }
+        onClose()
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl" closeButtonDisabled={cloneMutation.isPending}>
+        <DialogHeader>
+          <DialogTitle>克隆任务</DialogTitle>
+          <DialogDescription>
+            已恢复原任务要求和素材。确认或修改后，将按新任务重新计费并执行。
+          </DialogDescription>
+        </DialogHeader>
+        <AgentPromptInput
+          value={{ prompt, attachments: attachmentController.attachments }}
+          onChange={(value) => {
+            setPrompt(value.prompt)
+            setValidationError(undefined)
+          }}
+          onSubmit={handleSubmit}
+          attachmentController={attachmentController}
+          attachmentPolicy={CLONE_ATTACHMENT_POLICY}
+          contextBar={<ProjectContextControl mode="readonly" project={snapshot.project} />}
+          placeholder="确认或修改任务要求..."
+          ariaLabel="克隆任务要求"
+          submitLabel="确认克隆"
+          submitting={cloneMutation.isPending}
+          attachmentPreviewOwner={{ ownerType: 'task', ownerId: snapshot.taskId }}
+          autoFocus
+        />
+        {validationError ? (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertDescription>{validationError}</AlertDescription>
+          </Alert>
+        ) : null}
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={cloneMutation.isPending} onClick={onClose}>取消</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 const MAX_SSE_LOGS = 500
@@ -144,19 +336,17 @@ export default function TaskDetailPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showProjectDialog, setShowProjectDialog] = useState(false)
   const [showResumeDialog, setShowResumeDialog] = useState(false)
+  const [cloneDialogSnapshot, setCloneDialogSnapshot] = useState<CloneDialogSnapshot | null>(null)
   const [showCreditDialog, setShowCreditDialog] = useState(false)
-  const [showTaskDetails, setShowTaskDetails] = useState(false)
-  const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
-  const [returnToTaskDetailsAfterCredits, setReturnToTaskDetailsAfterCredits] = useState(false)
-  const [resumePrompt, setResumePrompt] = useState('')
-  const [resumeFiles, setResumeFiles] = useState<ResumeFileInput[]>([])
+	const [showTaskDetails, setShowTaskDetails] = useState(false)
+	const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
+	const [returnToTaskDetailsAfterCredits, setReturnToTaskDetailsAfterCredits] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
   const activeSseTaskRef = useRef<string | null>(null)
   const persistedLogsRef = useRef<string[]>([])
   const logContainerRef = useRef<HTMLDivElement | null>(null)
-  const resumeFileInputRef = useRef<HTMLInputElement | null>(null)
-  const { submit, isSubmitting } = useSubmitLock()
+  const { submit } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
 
@@ -310,31 +500,12 @@ export default function TaskDetailPage() {
     },
   })
 
-  const resumeMutation = useMutation({
-    mutationFn: () => api.tasks.resume(id!, {
-      prompt: resumePrompt,
-      files: resumeFiles.map((item) => item.file),
-      fileLabels: resumeFiles.map((item) => item.label),
-    }),
-    onSuccess: () => {
-      toast.success('已提交，任务将结合已有上下文继续执行')
-      setShowResumeDialog(false)
-      setResumePrompt('')
-      setResumeFiles([])
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-    },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '继续执行失败，请稍后再试'))
-    },
-  })
-
-  const handleSSEEvent = useCallback((
-    taskId: string,
-    event: SSEEvent,
+	const handleSSEEvent = useCallback((
+		taskId: string,
+		event: SSEEvent,
     reconcileProgressReplay = false,
-  ): boolean => {
-    if (activeSseTaskRef.current !== taskId) return false
+	): boolean => {
+		if (activeSseTaskRef.current !== taskId) return false
 
     const parsed = typeof event.data === 'string'
       ? (() => { try { return JSON.parse(event.data) } catch { return event.data } })()
@@ -495,6 +666,11 @@ export default function TaskDetailPage() {
     setTaskDetailsTab('overview')
   }, [task?.id])
 
+  useEffect(() => {
+    setShowResumeDialog(false)
+    setCloneDialogSnapshot(null)
+  }, [id])
+
   function openTaskDetails(tab: TaskDetailsTab) {
     setTaskDetailsTab(tab)
     setShowTaskDetails(true)
@@ -647,65 +823,24 @@ export default function TaskDetailPage() {
     )
   }
 
-  // Clone this task as a fresh billed task. The server clones the full
-  // configuration (three-dimensional style, author/writer, ecommerce package,
-  // image model, watermark, goal mode…) so nothing is lost — unlike the previous
-  // client-side create() which only forwarded type/prompt/project/ratio.
-  async function handleClone() {
-    await submit(async () => {
-      try {
-        const nextTask = await api.tasks.clone(currentTask.id)
-        toast.success('已克隆为新任务，配置已保留')
-        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-        navigate(`/tasks/${nextTask.id}`)
-      } catch (err: unknown) {
-        const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
-        const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
-        if (status === 402 || code === 40200) {
-          toast.error('积分不足，无法克隆任务')
-        } else {
-          toast.error(getApiErrorMessage(err, '克隆任务失败，请稍后再试'))
-        }
-      }
+  function openCloneDialog() {
+    setCloneDialogSnapshot({
+      taskId: currentTask.id,
+      prompt: currentTask.prompt ?? '',
+      attachments: (currentTask.input_attachments ?? [])
+        .filter((attachment) => attachment.role !== 'resume_latest' && attachment.role !== 'resume_file')
+        .map((attachment) => ({ ...attachment })),
+      project: currentTask.project_id ? {
+        id: currentTask.project_id,
+        name: project?.name || currentTask.project_snapshot?.project_name || '未命名项目',
+        platform: project?.platform || currentTask.project_snapshot?.platform || currentTask.type,
+      } : null,
     })
   }
 
-  function handleVideoRetake(action: string) {
-    toast.info(`已选择返修决策：${action}`)
-    void handleClone()
+  function handleVideoRetake(_action: string) {
+    openCloneDialog()
   }
-
-  function handleResumeFilesChange(event: ChangeEvent<HTMLInputElement>) {
-    const selected = Array.from(event.target.files ?? [])
-    if (selected.length > 0) {
-      setResumeFiles((prev) => [
-        ...prev,
-        ...selected.map((file) => ({
-          id: `${file.name}-${file.size}-${file.lastModified}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          file,
-          label: '',
-        })),
-      ])
-    }
-    event.target.value = ''
-  }
-
-  function updateResumeFileLabel(fileID: string, label: string) {
-    setResumeFiles((prev) => prev.map((item) => item.id === fileID ? { ...item, label } : item))
-  }
-
-  function removeResumeFile(fileID: string) {
-    setResumeFiles((prev) => prev.filter((item) => item.id !== fileID))
-  }
-
-  async function handleResumeSubmit() {
-    if (!resumePrompt.trim() && resumeFiles.length === 0) return
-    await submit(async () => {
-      await resumeMutation.mutateAsync()
-    })
-  }
-
-  const canSubmitResume = Boolean(resumePrompt.trim() || resumeFiles.length > 0)
 
   return (
     <div className="space-y-6">
@@ -837,7 +972,7 @@ export default function TaskDetailPage() {
                   </DropdownMenuItem>
                 )}
                 {canClone && (
-                  <DropdownMenuItem onClick={() => void handleClone()}>
+                  <DropdownMenuItem onClick={openCloneDialog}>
                     <RefreshCw className="h-4 w-4" />
                     克隆任务
                   </DropdownMenuItem>
@@ -1109,7 +1244,7 @@ export default function TaskDetailPage() {
           <CardContent>
             <VideoProductionPanel
               production={videoProduction}
-              retakePending={isSubmitting}
+              retakePending={Boolean(cloneDialogSnapshot)}
               onRetakeAction={handleVideoRetake}
               onNextAction={(action) => toast.info(`已选择交付动作：${action}`)}
             />
@@ -1242,86 +1377,29 @@ export default function TaskDetailPage() {
         onOpenTab={openTaskDetails}
       />
 
-      <Dialog open={showResumeDialog} onOpenChange={setShowResumeDialog}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>继续执行此任务</DialogTitle>
-            <DialogDescription>
-              提供补充指令和文件后，任务会结合已有上下文继续执行。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="resume-prompt" className="text-sm font-medium text-foreground">补充指令</label>
-              <Textarea
-                id="resume-prompt"
-                value={resumePrompt}
-                onChange={(event) => setResumePrompt(event.target.value)}
-                placeholder="说明希望 AI 接着做什么，例如：基于现有草稿改成更口语化，并参考我上传的新素材。"
-                className="min-h-28 resize-y"
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <label htmlFor="resume-files" className="text-sm font-medium text-foreground">补充文件</label>
-                <Button type="button" variant="outline" size="sm" onClick={() => resumeFileInputRef.current?.click()}>
-                  <Upload className="h-4 w-4" />
-                  选择文件
-                </Button>
-              </div>
-              <Input
-                ref={resumeFileInputRef}
-                id="resume-files"
-                type="file"
-                multiple
-                className="sr-only"
-                onChange={handleResumeFilesChange}
-              />
-              {resumeFiles.length > 0 ? (
-                <div className="space-y-2">
-                  {resumeFiles.map((item) => (
-                    <div key={item.id} className="grid gap-2 rounded-lg border border-border bg-card/50 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(180px,240px)_auto] sm:items-center">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">{item.file.name}</p>
-                        <p className="text-xs text-muted-foreground">{(item.file.size / 1024).toFixed(1)} KB</p>
-                      </div>
-                      <div className="space-y-1">
-                        <label htmlFor={`resume-file-label-${item.id}`} className="sr-only">文件说明</label>
-                        <Input
-                          id={`resume-file-label-${item.id}`}
-                          value={item.label}
-                          onChange={(event) => updateResumeFileLabel(item.id, event.target.value)}
-                          placeholder="例如：客户反馈、参考图、修改意见、产品参数"
-                        />
-                      </div>
-                      <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeResumeFile(item.id)} aria-label={`移除 ${item.file.name}`}>
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-                  可选上传补充资料、修改意见或参考素材。
-                </div>
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setShowResumeDialog(false)}>
-              取消
-            </Button>
-            <Button
-              type="button"
-              disabled={!canSubmitResume || resumeMutation.isPending}
-              loading={resumeMutation.isPending}
-              onClick={() => void handleResumeSubmit()}
-            >
-              提交并继续
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {showResumeDialog ? (
+        <ResumeTaskDialog
+          taskId={currentTask.id}
+          onClose={() => setShowResumeDialog(false)}
+          onSuccess={() => {
+            setShowResumeDialog(false)
+            queryClient.invalidateQueries({ queryKey: ['task', id] })
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+          }}
+        />
+      ) : null}
+
+      {cloneDialogSnapshot ? (
+        <CloneTaskDialog
+          snapshot={cloneDialogSnapshot}
+          onClose={() => setCloneDialogSnapshot(null)}
+          onSuccess={(nextTask) => {
+            setCloneDialogSnapshot(null)
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+            navigate(`/tasks/${nextTask.id}`)
+          }}
+        />
+      ) : null}
 
       {project && (
         <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>

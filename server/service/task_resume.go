@@ -178,12 +178,11 @@ func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task,
 			RelPath:      relPath,
 			Attachment: model.EntryAttachment{
 				Type:        "document",
-				URL:         upload.URL,
 				FileName:    safeName,
 				ContentType: "application/octet-stream",
 				Size:        int64(buf.Len()),
 				Role:        model.EntryAttachmentRoleResumeFile,
-				Key:         upload.Key,
+				Key:         key,
 			},
 		})
 	}

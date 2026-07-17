@@ -156,6 +156,14 @@ func (s *TaskService) Repository() repository.Repository {
 	return s.repo
 }
 
+// Storage returns the configured provider for handler-level upload verification.
+func (s *TaskService) Storage() storage.Provider {
+	if s == nil {
+		return nil
+	}
+	return s.store
+}
+
 func (s *TaskService) SetProjectMemoryManager(memoryMgr *projectmemory.ProjectMemoryManager) {
 	s.memoryMgr = memoryMgr
 }
@@ -399,14 +407,19 @@ func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID            string
-	ProjectID         string
-	Prompt            string
-	Quantity          int
-	ImageRatio        string
-	ImageModelKey     string
-	SkipRefImage      *bool
-	ReferenceImageURL string
+	UserID    string
+	ProjectID string
+	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
+	// keep billing and runtime configuration anchored to the source task instead
+	// of re-deriving them from a project or server policy that changed later.
+	FrozenTaskType       string
+	PreserveFrozenConfig bool
+	Prompt               string
+	Quantity             int
+	ImageRatio           string
+	ImageModelKey        string
+	SkipRefImage         *bool
+	ReferenceImageURL    string
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
@@ -448,6 +461,9 @@ type CreateManualParams struct {
 	// videoeditor tasks. They are rejected for creator projects and vice versa.
 	VideoEditorConfig *model.VideoTaskConfig
 	VideoEditorInput  *model.VideoInput
+	// FrozenVideoConfig is clone-only resolved video state. Ordinary creation
+	// leaves it nil so the agent can resolve a fresh execution configuration.
+	FrozenVideoConfig *model.VideoTaskConfig
 	// MontageInput carries the Montage-specific creation contract.
 	// It is independent from video creator/editor payloads and is only valid
 	// for montage projects.
@@ -498,9 +514,15 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	taskType := project.Platform
+	if p.FrozenTaskType != "" {
+		taskType = p.FrozenTaskType
+	}
 	videoCfg, videoInput, err := p.videoPayloadForTask(taskType)
 	if err != nil {
 		return nil, err
+	}
+	if model.IsVideoPlatform(taskType) {
+		videoInput = videoInputWithAttachmentReferences(p.Prompt, videoInput, p.InputAttachments)
 	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
 		return nil, fmt.Errorf("%w: montage_input can only be set on montage tasks", ErrMontageInput)
@@ -512,7 +534,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	// stay per-task. Done before validation so selected modules are available to
 	// the agent; modules shape later MCP usage, not the creation-time base fee.
 	effectiveImageModelKey := p.ImageModelKey
-	if taskType == model.PlatformEcommerce {
+	if taskType == model.PlatformEcommerce && !p.PreserveFrozenConfig {
 		projEc := project.EcommerceDefaults.Data()
 		if p.Ecommerce == nil {
 			p.Ecommerce = &model.EcommerceConfig{}
@@ -538,17 +560,19 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
-		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
-			Config:          s.montageCfg,
-			TaskType:        taskType,
-			LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
-			CloudAvailable:  s.montageCloudAvailable(),
-			AssetsCloudSafe: true,
-		})
-		if err != nil {
-			return nil, err
+		if !p.PreserveFrozenConfig {
+			target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+				Config:          s.montageCfg,
+				TaskType:        taskType,
+				LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
+				CloudAvailable:  s.montageCloudAvailable(),
+				AssetsCloudSafe: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			p.ExecutionTarget = target
 		}
-		p.ExecutionTarget = target
 	}
 	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(videoInput, p.InputAttachments) {
 		return nil, fmt.Errorf("videoeditor task requires at least one source video")
@@ -625,7 +649,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		// to the agent's auto-research path. The generation skill respects an
 		// already-set topic, so it will not re-claim during execution.
 		taskPrompt := p.Prompt
-		if taskPrompt == "" && s.topicPoolSvc != nil &&
+		if taskPrompt == "" && !p.PreserveFrozenConfig && s.topicPoolSvc != nil &&
 			(taskType == model.PlatformArticle || taskType == model.PlatformSeednote || taskType == model.PlatformMoments) {
 			claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, p.UserID, p.ProjectID, taskID)
 			if claimErr != nil {
@@ -702,6 +726,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 				task.SetVideoInput(videoInputFromTaskConfig(taskPrompt, videoCfg))
 			} else if model.IsVideoCreatorPlatform(taskType) && strings.TrimSpace(taskPrompt) != "" {
 				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
+			}
+			if p.FrozenVideoConfig != nil {
+				task.SetVideoConfig(*p.FrozenVideoConfig)
 			}
 		}
 		if model.IsMontagePlatform(taskType) && p.MontageInput != nil {
@@ -782,11 +809,70 @@ func hasVideoEditorSourceVideo(input *model.VideoInput, attachments []model.Entr
 		}
 	}
 	for _, attachment := range attachments {
-		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && strings.TrimSpace(attachment.URL) != "" {
+		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && entryAttachmentStorageSource(attachment) != "" {
 			return true
 		}
 	}
 	return false
+}
+
+func videoInputWithAttachmentReferences(prompt string, input *model.VideoInput, attachments []model.EntryAttachment) *model.VideoInput {
+	attachmentRefs := videoReferencesFromEntryAttachments(attachments)
+	if input == nil && len(attachmentRefs) == 0 {
+		return nil
+	}
+	result := model.VideoInput{Brief: strings.TrimSpace(prompt)}
+	if input != nil {
+		result = *input
+		if strings.TrimSpace(result.Brief) == "" {
+			result.Brief = strings.TrimSpace(prompt)
+		}
+		result.References = cloneVideoReferenceAssets(input.References)
+	}
+	seen := make(map[string]struct{}, len(result.References)+len(attachmentRefs))
+	for _, ref := range result.References {
+		seen[videoReferenceAssetIdentity(ref)] = struct{}{}
+	}
+	for _, ref := range attachmentRefs {
+		identity := videoReferenceAssetIdentity(ref)
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		result.References = append(result.References, ref)
+	}
+	return &result
+}
+
+func cloneVideoReferenceAssets(references []model.VideoReferenceAsset) []model.VideoReferenceAsset {
+	cloned := make([]model.VideoReferenceAsset, len(references))
+	for i, ref := range references {
+		cloned[i] = ref
+		cloned[i].MustKeep = append([]string(nil), ref.MustKeep...)
+		cloned[i].CanChange = append([]string(nil), ref.CanChange...)
+		cloned[i].MustNotTransfer = append([]string(nil), ref.MustNotTransfer...)
+	}
+	return cloned
+}
+
+func videoReferenceAssetIdentity(ref model.VideoReferenceAsset) string {
+	typ := strings.ToLower(strings.TrimSpace(ref.Type))
+	switch typ {
+	case "image":
+		typ = VideoReferenceImage
+	case "audio":
+		typ = VideoReferenceAudio
+	case "video":
+		typ = VideoReferenceVideo
+	case "text":
+		typ = VideoReferenceText
+	}
+	return strings.Join([]string{
+		typ,
+		strings.TrimSpace(ref.URL),
+		strings.TrimSpace(ref.TaskFileID),
+		strings.TrimSpace(ref.Text),
+	}, "\x00")
 }
 
 func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) VideoGenerationRequest {

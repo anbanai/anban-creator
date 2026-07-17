@@ -493,14 +493,14 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		// Task-level image takes priority over project brand image.
 		// SkipReferenceImage only controls the project brand image, not task-level.
 		if opts.Task.ReferenceImageURL != "" {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.UserID, opts.Task.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
 					Str("task_id", opts.Task.ID).
 					Str("url", opts.Task.ReferenceImageURL).
 					Msg("failed to download task reference image, continuing without it")
 			}
 		} else if opts.Project.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Project.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.UserID, opts.Project.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
 					Str("task_id", opts.Task.ID).
 					Str("url", opts.Project.ReferenceImageURL).
@@ -513,7 +513,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// agent can reference local paths (analyze_image / generate_image ref).
 	if opts.Task.Type == model.PlatformEcommerce {
 		photos := opts.Task.Ecommerce.Data().ProductPhotos
-		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, photos); n == 0 && len(photos) > 0 {
+		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, opts.Task.UserID, photos); n == 0 && len(photos) > 0 {
 			// E-commerce output is a consistency contract on the uploaded product
 			// photos. If none materialized, the agent has no product reference and
 			// would hallucinate inconsistent assets. Fail fast (task error → refund)
@@ -523,10 +523,10 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		}
 	}
 	if attachments := opts.Task.InputAttachments.Data(); len(attachments) > 0 {
-		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, workDir, attachments); err != nil {
+		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, workDir, opts.Task.UserID, attachments); err != nil {
 			return nil, fmt.Errorf("materialize resume inputs: %w", err)
 		}
-		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, attachments); n == 0 && hasNonResumeInputAttachments(attachments) {
+		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, opts.Task.UserID, attachments); n == 0 && hasNonResumeInputAttachments(attachments) {
 			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
 		}
 	}

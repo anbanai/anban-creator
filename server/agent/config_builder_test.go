@@ -31,6 +31,26 @@ type fakeStore struct {
 	ownedPred func(string) bool
 }
 
+type boundedOnlyStore struct {
+	*fakeStore
+	actualSize   int64
+	boundedCalls []int64
+	unbounded    bool
+}
+
+func (f *boundedOnlyStore) Read(context.Context, string) ([]byte, error) {
+	f.unbounded = true
+	return nil, errors.New("unbounded storage read invoked")
+}
+
+func (f *boundedOnlyStore) ReadObject(_ context.Context, _ string, maxBytes int64) ([]byte, error) {
+	f.boundedCalls = append(f.boundedCalls, maxBytes)
+	if f.actualSize > maxBytes {
+		return nil, fmt.Errorf("object too large: size=%d max=%d", f.actualSize, maxBytes)
+	}
+	return []byte("bounded"), nil
+}
+
 var _ storage.Provider = (*fakeStore)(nil)
 
 func (f *fakeStore) Name() string { return "fake" }
@@ -50,6 +70,16 @@ func (f *fakeStore) Read(_ context.Context, key string) ([]byte, error) {
 		return data, nil
 	}
 	return nil, fmt.Errorf("not found: %s", key)
+}
+func (f *fakeStore) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	data, err := f.Read(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: size=%d max=%d", storage.ErrObjectExceedsMaxSize, len(data), maxBytes)
+	}
+	return data, nil
 }
 func (f *fakeStore) Delete(context.Context, string) error { return nil }
 func (f *fakeStore) UploadURL(context.Context, string, string, int) (string, error) {
@@ -89,7 +119,7 @@ func TestDownloadReferenceImage_NilStoreExternalURL(t *testing.T) {
 	url := serveBytes(t, http.StatusOK, body)
 
 	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), nil, nil, workDir, url); err != nil {
+	if err := DownloadReferenceImage(context.Background(), nil, nil, workDir, "user-1", url); err != nil {
 		t.Fatalf("DownloadReferenceImage: %v", err)
 	}
 
@@ -117,7 +147,7 @@ func TestDownloadReferenceImage_OwnedStoreReadHitsDisk(t *testing.T) {
 	imageURL := "https://oss.example.com/uploads/references/u/pic.jpg"
 
 	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, imageURL); err != nil {
+	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", imageURL); err != nil {
 		t.Fatalf("DownloadReferenceImage: %v", err)
 	}
 
@@ -133,6 +163,213 @@ func TestDownloadReferenceImage_OwnedStoreReadHitsDisk(t *testing.T) {
 	}
 }
 
+func TestDownloadKeyFirstSourcesReadStorageForSharedExecutors(t *testing.T) {
+	t.Run("reference image", func(t *testing.T) {
+		workDir := t.TempDir()
+		key := "uploads/finalized/user-1/reference/reference.png"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("reference-bytes")}}
+
+		if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", key); err != nil {
+			t.Fatalf("DownloadReferenceImage: %v", err)
+		}
+		got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
+		if err != nil || string(got) != "reference-bytes" {
+			t.Fatalf("reference = %q, %v", got, err)
+		}
+		if len(store.readKeys) != 1 || store.readKeys[0] != key {
+			t.Fatalf("read keys = %#v", store.readKeys)
+		}
+	})
+
+	t.Run("product image", func(t *testing.T) {
+		workDir := t.TempDir()
+		key := "uploads/finalized/user-1/product/product.webp"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("product-bytes")}}
+
+		if count := DownloadProductImages(context.Background(), store, noopLogger(), workDir, "user-1", []string{key}); count != 1 {
+			t.Fatalf("DownloadProductImages count = %d, want 1", count)
+		}
+		got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "products", "product_01.webp"))
+		if err != nil || string(got) != "product-bytes" {
+			t.Fatalf("product = %q, %v", got, err)
+		}
+	})
+
+	t.Run("input attachment", func(t *testing.T) {
+		workDir := t.TempDir()
+		key := "uploads/finalized/user-1/attachment/brief.pdf"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("attachment-bytes")}}
+		attachments := []model.EntryAttachment{{
+			Type: "document", UploadID: "attachment", Key: key,
+			FileName: "brief.pdf", ContentType: "application/pdf", Size: 16,
+		}}
+
+		if count := DownloadInputAttachments(context.Background(), store, noopLogger(), workDir, "user-1", attachments); count != 1 {
+			t.Fatalf("DownloadInputAttachments count = %d, want 1", count)
+		}
+		got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "input-attachments", "attachment_01_brief.pdf"))
+		if err != nil || string(got) != "attachment-bytes" {
+			t.Fatalf("attachment = %q, %v", got, err)
+		}
+	})
+}
+
+func TestRuntimeMaterializersRejectPendingDirectUploadKeys(t *testing.T) {
+	t.Run("reference image", func(t *testing.T) {
+		key := "uploads/pending/user-1/reference/reference.png"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("mutable")}}
+		if err := DownloadReferenceImage(context.Background(), store, noopLogger(), t.TempDir(), "user-1", key); err == nil {
+			t.Fatal("pending reference image was materialized")
+		}
+		if len(store.readKeys) != 0 {
+			t.Fatalf("pending reference reached storage read: %#v", store.readKeys)
+		}
+	})
+
+	t.Run("product image", func(t *testing.T) {
+		key := "uploads/pending/user-1/product/product.webp"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("mutable")}}
+		if count := DownloadProductImages(context.Background(), store, noopLogger(), t.TempDir(), "user-1", []string{key}); count != 0 {
+			t.Fatalf("pending product materialized count = %d", count)
+		}
+		if len(store.readKeys) != 0 {
+			t.Fatalf("pending product reached storage read: %#v", store.readKeys)
+		}
+	})
+
+	t.Run("input attachment", func(t *testing.T) {
+		key := "uploads/pending/user-1/attachment/brief.pdf"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("mutable")}}
+		attachments := []model.EntryAttachment{{Type: "document", UploadID: "attachment", Key: key, FileName: "brief.pdf", ContentType: "application/pdf"}}
+		if count := DownloadInputAttachments(context.Background(), store, noopLogger(), t.TempDir(), "user-1", attachments); count != 0 {
+			t.Fatalf("pending attachment materialized count = %d", count)
+		}
+		if len(store.readKeys) != 0 {
+			t.Fatalf("pending attachment reached storage read: %#v", store.readKeys)
+		}
+	})
+
+	t.Run("resume attachment", func(t *testing.T) {
+		key := "uploads/pending/user-1/resume-upload/feedback.pdf"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("mutable")}}
+		attachments := []model.EntryAttachment{
+			{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue", FileName: "latest.md"},
+			{Role: model.EntryAttachmentRoleResumeFile, UploadID: "resume-upload", Key: key, FileName: "feedback.pdf"},
+		}
+		if _, err := MaterializeResumeInputs(context.Background(), store, noopLogger(), t.TempDir(), "user-1", attachments); err == nil {
+			t.Fatal("pending resume attachment was materialized")
+		}
+		if len(store.readKeys) != 0 {
+			t.Fatalf("pending resume attachment reached storage read: %#v", store.readKeys)
+		}
+	})
+}
+
+func TestRuntimeMaterializersRejectMismatchedFinalizedIdentity(t *testing.T) {
+	t.Run("reference user", func(t *testing.T) {
+		key := "uploads/finalized/user-2/reference/reference.png"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("other-user")}}
+		if err := DownloadReferenceImage(context.Background(), store, noopLogger(), t.TempDir(), "user-1", key); err == nil {
+			t.Fatal("other user's finalized reference was materialized")
+		}
+		if len(store.readKeys) != 0 {
+			t.Fatalf("mismatched reference reached storage read: %#v", store.readKeys)
+		}
+	})
+
+	t.Run("product user", func(t *testing.T) {
+		key := "uploads/finalized/user-2/product/product.webp"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("other-user")}}
+		if count := DownloadProductImages(context.Background(), store, noopLogger(), t.TempDir(), "user-1", []string{key}); count != 0 {
+			t.Fatalf("other user's product materialized count = %d", count)
+		}
+		if len(store.readKeys) != 0 {
+			t.Fatalf("mismatched product reached storage read: %#v", store.readKeys)
+		}
+	})
+
+	t.Run("attachment upload", func(t *testing.T) {
+		key := "uploads/finalized/user-1/other-upload/brief.pdf"
+		store := &fakeStore{readData: map[string][]byte{key: []byte("other-upload")}}
+		attachments := []model.EntryAttachment{{Type: "document", UploadID: "expected-upload", Key: key, FileName: "brief.pdf"}}
+		if count := DownloadInputAttachments(context.Background(), store, noopLogger(), t.TempDir(), "user-1", attachments); count != 0 {
+			t.Fatalf("mismatched upload materialized count = %d", count)
+		}
+		if len(store.readKeys) != 0 {
+			t.Fatalf("mismatched attachment reached storage read: %#v", store.readKeys)
+		}
+	})
+}
+
+func TestRuntimeMaterializerDoesNotFallbackPendingOwnedURLToHTTP(t *testing.T) {
+	hitHTTP := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hitHTTP = true
+		_, _ = w.Write([]byte("mutable"))
+	}))
+	t.Cleanup(srv.Close)
+	url := srv.URL + "/uploads/pending/user-1/reference/reference.png"
+	store := &fakeStore{ownedPred: func(raw string) bool { return raw == url }}
+	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), t.TempDir(), "user-1", url); err == nil {
+		t.Fatal("owned pending URL was accepted")
+	}
+	if hitHTTP {
+		t.Fatal("owned pending URL reached HTTP fallback")
+	}
+}
+
+func TestKeyFirstMaterializationUsesBoundedStorageReads(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxBytes int64
+		wantErr  bool
+		run      func(context.Context, storage.Provider, string) error
+	}{
+		{
+			name: "reference image", maxBytes: maxReferenceImageBytes, wantErr: true,
+			run: func(ctx context.Context, store storage.Provider, workDir string) error {
+				return DownloadReferenceImage(ctx, store, noopLogger(), workDir, "user-1", "uploads/finalized/user-1/reference/image.png")
+			},
+		},
+		{
+			name: "product image", maxBytes: maxReferenceImageBytes,
+			run: func(ctx context.Context, store storage.Provider, workDir string) error {
+				if got := DownloadProductImages(ctx, store, noopLogger(), workDir, "user-1", []string{"uploads/finalized/user-1/product/image.png"}); got != 0 {
+					return fmt.Errorf("materialized %d oversized product images", got)
+				}
+				return nil
+			},
+		},
+		{
+			name: "input attachment", maxBytes: maxInputAttachmentBytes,
+			run: func(ctx context.Context, store storage.Provider, workDir string) error {
+				if got := DownloadInputAttachments(ctx, store, noopLogger(), workDir, "user-1", []model.EntryAttachment{{
+					Type: "document", UploadID: "attachment", Key: "uploads/finalized/user-1/attachment/brief.pdf",
+					FileName: "brief.pdf", ContentType: "application/pdf", Size: 1,
+				}}); got != 0 {
+					return fmt.Errorf("materialized %d oversized attachments", got)
+				}
+				return nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &boundedOnlyStore{fakeStore: &fakeStore{}, actualSize: tt.maxBytes + 1}
+			err := tt.run(context.Background(), store, t.TempDir())
+			if tt.wantErr && (err == nil || !strings.Contains(err.Error(), "too large")) {
+				t.Fatalf("error = %v, want oversized object rejection", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatal(err)
+			}
+			if store.unbounded || len(store.boundedCalls) != 1 || store.boundedCalls[0] != tt.maxBytes {
+				t.Fatalf("read boundary: unbounded=%v bounded=%#v, want only max=%d", store.unbounded, store.boundedCalls, tt.maxBytes)
+			}
+		})
+	}
+}
+
 func TestDownloadReferenceImage_LocalRelativePathReadsStore(t *testing.T) {
 	// Regression test for C1: local storage returns relative URLs like
 	// /api/v1/files/<key>. The HTTP path cannot fetch those (unsupported
@@ -145,7 +382,7 @@ func TestDownloadReferenceImage_LocalRelativePathReadsStore(t *testing.T) {
 	imageURL := "/api/v1/files/uploads/references/u/pic.jpg"
 
 	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, imageURL); err != nil {
+	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", imageURL); err != nil {
 		t.Fatalf("DownloadReferenceImage: %v", err)
 	}
 
@@ -172,7 +409,7 @@ func TestDownloadReferenceImage_OwnedStoreReadFailsFallsBackToHTTP(t *testing.T)
 	imageURL := url + "/uploads/references/u/pic.jpg"
 
 	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, imageURL); err != nil {
+	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", imageURL); err != nil {
 		t.Fatalf("DownloadReferenceImage: %v", err)
 	}
 
@@ -195,7 +432,7 @@ func TestDownloadReferenceImage_NotOwnedTakesDirectHTTP(t *testing.T) {
 	store := &fakeStore{ownedPred: func(string) bool { return false }}
 
 	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, url); err != nil {
+	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", url); err != nil {
 		t.Fatalf("DownloadReferenceImage: %v", err)
 	}
 
@@ -215,7 +452,7 @@ func TestDownloadReferenceImage_HTTPNonOKReturnsError(t *testing.T) {
 	url := serveBytes(t, http.StatusForbidden, []byte("forbidden"))
 
 	workDir := t.TempDir()
-	err := DownloadReferenceImage(context.Background(), nil, nil, workDir, url)
+	err := DownloadReferenceImage(context.Background(), nil, nil, workDir, "user-1", url)
 	if err == nil || !strings.Contains(err.Error(), "HTTP 403") {
 		t.Fatalf("err = %v, want HTTP 403", err)
 	}
@@ -232,7 +469,7 @@ func TestDownloadReferenceImage_OversizedStoreReadReturnsError(t *testing.T) {
 	}
 
 	workDir := t.TempDir()
-	err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "https://oss.example.com/big")
+	err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", "https://oss.example.com/big")
 	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("err = %v, want 'too large'", err)
 	}
@@ -267,7 +504,7 @@ func TestDownloadInputAttachmentsMaterializesFilesAndIndex(t *testing.T) {
 		},
 	}
 
-	if n := DownloadInputAttachments(context.Background(), nil, noopLogger(), workDir, attachments); n != 2 {
+	if n := DownloadInputAttachments(context.Background(), nil, noopLogger(), workDir, "user-1", attachments); n != 2 {
 		t.Fatalf("DownloadInputAttachments count = %d, want 2", n)
 	}
 	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
@@ -304,7 +541,7 @@ func TestDownloadInputAttachmentsSkipsResumeRoles(t *testing.T) {
 		{Type: "document", Text: "resume file", FileName: "resume.txt", Role: model.EntryAttachmentRoleResumeFile},
 	}
 
-	if n := DownloadInputAttachments(context.Background(), nil, noopLogger(), workDir, attachments); n != 1 {
+	if n := DownloadInputAttachments(context.Background(), nil, noopLogger(), workDir, "user-1", attachments); n != 1 {
 		t.Fatalf("DownloadInputAttachments count = %d, want 1", n)
 	}
 	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
@@ -339,7 +576,7 @@ func TestMaterializeResumeInputsWritesLatestAndAttachments(t *testing.T) {
 		{Type: "document", Key: "resume/task-1/attachments/feedback.txt", FileName: "feedback.txt", Role: model.EntryAttachmentRoleResumeFile},
 	}
 
-	n, err := MaterializeResumeInputs(context.Background(), store, noopLogger(), workDir, attachments)
+	n, err := MaterializeResumeInputs(context.Background(), store, noopLogger(), workDir, "user-1", attachments)
 	if err != nil {
 		t.Fatalf("MaterializeResumeInputs error = %v", err)
 	}
@@ -373,7 +610,7 @@ func TestMaterializeResumeInputsFailsWhenResumeAttachmentMissing(t *testing.T) {
 		{Type: "document", Key: "resume/task-1/attachments/missing.txt", FileName: "missing.txt", Role: model.EntryAttachmentRoleResumeFile},
 	}
 
-	if _, err := MaterializeResumeInputs(context.Background(), &fakeStore{}, noopLogger(), workDir, attachments); err == nil {
+	if _, err := MaterializeResumeInputs(context.Background(), &fakeStore{}, noopLogger(), workDir, "user-1", attachments); err == nil {
 		t.Fatal("MaterializeResumeInputs succeeded with missing resume attachment")
 	}
 	if _, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "resume", "latest.md")); !os.IsNotExist(err) {
@@ -393,7 +630,7 @@ func TestMaterializeResumeInputsRejectsPortableFilenameCollision(t *testing.T) {
 			{Text: "one", FileName: names[0], Role: model.EntryAttachmentRoleResumeFile},
 			{Text: "two", FileName: names[1], Role: model.EntryAttachmentRoleResumeFile},
 		}
-		if _, err := MaterializeResumeInputs(context.Background(), nil, noopLogger(), workDir, attachments); err == nil {
+		if _, err := MaterializeResumeInputs(context.Background(), nil, noopLogger(), workDir, "user-1", attachments); err == nil {
 			t.Fatalf("case-folded duplicate resume filenames %q accepted", names)
 		}
 		if _, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "resume", "latest.md")); !os.IsNotExist(err) {
@@ -408,7 +645,7 @@ func TestMaterializeResumeInputsRejectsOverlongFilenameBeforeFilesystemWrites(t 
 		{Text: "read attachment", Role: model.EntryAttachmentRoleResumeLatest},
 		{Text: "content", FileName: strings.Repeat("a", 256), Role: model.EntryAttachmentRoleResumeFile},
 	}
-	if _, err := MaterializeResumeInputs(context.Background(), nil, noopLogger(), workDir, attachments); err == nil {
+	if _, err := MaterializeResumeInputs(context.Background(), nil, noopLogger(), workDir, "user-1", attachments); err == nil {
 		t.Fatal("overlong resume filename accepted")
 	}
 	if _, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "resume")); !os.IsNotExist(err) {
@@ -488,7 +725,7 @@ func TestDownloadInputAttachmentsKeepsOriginalIndicesAndWritesErrors(t *testing.
 		},
 	}
 
-	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, attachments); count != 1 {
+	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, "user-1", attachments); count != 1 {
 		t.Fatalf("DownloadInputAttachments count = %d, want 1", count)
 	}
 	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
@@ -555,7 +792,7 @@ func TestDownloadInputAttachmentsSkipsResumeRolesWithoutRenumbering(t *testing.T
 		},
 	}
 
-	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, attachments); count != 1 {
+	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, "user-1", attachments); count != 1 {
 		t.Fatalf("DownloadInputAttachments count = %d, want 1", count)
 	}
 	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
@@ -593,7 +830,7 @@ func TestDownloadInputAttachmentsRemovesStaleErrorsOnSuccess(t *testing.T) {
 	failure := []model.EntryAttachment{{
 		Type: "image", URL: srv.URL + "/fail.png", FileName: "fail.png", ContentType: "image/png",
 	}}
-	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, failure); count != 0 {
+	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, "user-1", failure); count != 0 {
 		t.Fatalf("failure materialization count = %d, want 0", count)
 	}
 	base := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
@@ -604,7 +841,7 @@ func TestDownloadInputAttachmentsRemovesStaleErrorsOnSuccess(t *testing.T) {
 	success := []model.EntryAttachment{{
 		Type: "image", URL: srv.URL + "/success.png", FileName: "success.png", ContentType: "image/png",
 	}}
-	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, success); count != 1 {
+	if count := DownloadInputAttachments(context.Background(), nil, nil, workDir, "user-1", success); count != 1 {
 		t.Fatalf("success materialization count = %d, want 1", count)
 	}
 	if _, err := os.Stat(filepath.Join(base, "errors.json")); !os.IsNotExist(err) {

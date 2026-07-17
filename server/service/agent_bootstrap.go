@@ -209,6 +209,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if instructions := strings.TrimSpace(effective.Instructions); instructions != "" {
 		files = append(files, BootstrapFile{Path: "CLAUDE.md", Text: "# CLAUDE.md\n\n## 项目定位\n\n" + instructions, Mode: 0644})
 	}
+	attachments := task.InputAttachments.Data()
 	reference := strings.TrimSpace(task.ReferenceImageURL)
 	referencePurposes := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
 	if reference == "" && !task.SkipReferenceImage {
@@ -216,13 +217,13 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		referencePurposes = []string{DirectUploadPurposeProjectReference}
 	}
 	if reference != "" {
-		signed, err := s.signedDownloadURL(ctx, task, bootstrapDownloadSource{URL: reference, AllowedPurposes: referencePurposes}, credentialDeadline)
+		source := bootstrapSourceForStoredValue(reference, attachments, referencePurposes)
+		signed, err := s.signedDownloadURL(ctx, task, source, credentialDeadline)
 		if err != nil {
 			return nil, fmt.Errorf("sign reference image: %w", err)
 		}
 		files = append(files, BootstrapFile{Path: ".anban-creator/reference.png", DownloadURL: signed, Mode: 0644})
 	}
-	attachments := task.InputAttachments.Data()
 	attachmentFiles, err := s.buildAttachmentFiles(ctx, execution.ID, task, attachments, credentialDeadline)
 	if err != nil {
 		return nil, err
@@ -290,8 +291,11 @@ func (s *AgentBootstrapService) buildProductFiles(ctx context.Context, task *mod
 	}
 	files := make([]BootstrapFile, 0, len(photos)+1)
 	names := make([]string, 0, len(photos))
+	attachments := task.InputAttachments.Data()
 	for i, photo := range photos {
-		signed, err := s.signedDownloadURL(ctx, task, bootstrapDownloadSource{URL: photo, AllowedPurposes: []string{DirectUploadPurposeEcommercePhoto, DirectUploadPurposeAIEntryAttachment}}, credentialDeadline)
+		purposes := []string{DirectUploadPurposeEcommercePhoto, DirectUploadPurposeAIEntryAttachment}
+		source := bootstrapSourceForStoredValue(photo, attachments, purposes)
+		signed, err := s.signedDownloadURL(ctx, task, source, credentialDeadline)
 		if err != nil {
 			return nil, fmt.Errorf("sign product photo %d: %w", i+1, err)
 		}
@@ -345,6 +349,24 @@ type bootstrapDownloadSource struct {
 	AllowedPurposes []string
 }
 
+func bootstrapSourceForStoredValue(value string, attachments []model.EntryAttachment, allowedPurposes []string) bootstrapDownloadSource {
+	value = strings.TrimSpace(value)
+	for _, attachment := range attachments {
+		key := strings.TrimSpace(attachment.Key)
+		uploadID := strings.TrimSpace(attachment.UploadID)
+		if key == "" || uploadID == "" {
+			continue
+		}
+		if key == value {
+			return bootstrapDownloadSource{AssertedKey: key, UploadID: uploadID, AllowedPurposes: allowedPurposes}
+		}
+		if strings.TrimSpace(attachment.URL) == value {
+			return bootstrapDownloadSource{URL: value, AssertedKey: key, UploadID: uploadID, AllowedPurposes: allowedPurposes}
+		}
+	}
+	return bootstrapDownloadSource{URL: value, AllowedPurposes: allowedPurposes}
+}
+
 func (s *AgentBootstrapService) signedDownloadURL(ctx context.Context, task *model.Task, source bootstrapDownloadSource, credentialDeadline time.Time) (string, error) {
 	if s.cfg.Store == nil {
 		return "", fmt.Errorf("%w: storage provider is required for bootstrap downloads", ErrAgentBootstrapUnavailable)
@@ -353,18 +375,27 @@ func (s *AgentBootstrapService) signedDownloadURL(ctx context.Context, task *mod
 		return "", fmt.Errorf("%w: task identity is required for bootstrap download", ErrAgentBootstrapConflict)
 	}
 	rawURL := strings.TrimSpace(source.URL)
-	if rawURL == "" || !s.cfg.Store.IsOwnedURL(rawURL) {
-		return "", fmt.Errorf("%w: bootstrap download is not owned by configured storage", ErrAgentBootstrapConflict)
+	assertedKey := strings.TrimPrefix(strings.TrimSpace(source.AssertedKey), "/")
+	var key string
+	if rawURL != "" {
+		if !s.cfg.Store.IsOwnedURL(rawURL) {
+			return "", fmt.Errorf("%w: bootstrap download is not owned by configured storage", ErrAgentBootstrapConflict)
+		}
+		resolvedKey, ok := storage.StorageKeyFromURL(rawURL)
+		if !ok || resolvedKey == "" {
+			return "", fmt.Errorf("%w: cannot resolve bootstrap storage object key", ErrAgentBootstrapConflict)
+		}
+		key = strings.TrimPrefix(resolvedKey, "/")
+	} else {
+		if assertedKey == "" || strings.TrimSpace(source.UploadID) == "" {
+			return "", fmt.Errorf("%w: key-only bootstrap download requires upload identity", ErrAgentBootstrapConflict)
+		}
+		key = assertedKey
 	}
-	key, ok := storage.StorageKeyFromURL(rawURL)
-	if !ok || key == "" {
-		return "", fmt.Errorf("%w: cannot resolve bootstrap storage object key", ErrAgentBootstrapConflict)
-	}
-	key = strings.TrimPrefix(key, "/")
 	if clean := path.Clean(key); clean != key || clean == "." || strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("%w: bootstrap storage object key is invalid", ErrAgentBootstrapConflict)
 	}
-	if asserted := strings.TrimSpace(source.AssertedKey); asserted != "" && asserted != key {
+	if assertedKey != "" && assertedKey != key {
 		return "", fmt.Errorf("%w: bootstrap storage object key assertion mismatch", ErrAgentBootstrapConflict)
 	}
 	if err := s.authorizeBootstrapObject(ctx, task, rawURL, key, source); err != nil {
@@ -395,34 +426,40 @@ func (s *AgentBootstrapService) signedDownloadURL(ctx context.Context, task *mod
 }
 
 func (s *AgentBootstrapService) authorizeBootstrapObject(ctx context.Context, task *model.Task, rawURL, key string, source bootstrapDownloadSource) error {
-	taskPrefix := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID) + "/"
-	legacyTaskPrefix := path.Join(task.UserID, task.ID) + "/"
-	if strings.HasPrefix(key, taskPrefix) || strings.HasPrefix(key, legacyTaskPrefix) {
-		return nil
-	}
-	if inputSourceTaskID := strings.TrimSpace(task.InputSourceTaskID); inputSourceTaskID != "" {
-		sourcePrefix := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", inputSourceTaskID) + "/"
-		if strings.HasPrefix(key, sourcePrefix) {
+	if rawURL != "" {
+		taskPrefix := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID) + "/"
+		legacyTaskPrefix := path.Join(task.UserID, task.ID) + "/"
+		if strings.HasPrefix(key, taskPrefix) || strings.HasPrefix(key, legacyTaskPrefix) {
+			return nil
+		}
+		if inputSourceTaskID := strings.TrimSpace(task.InputSourceTaskID); inputSourceTaskID != "" {
+			sourcePrefix := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", inputSourceTaskID) + "/"
+			if strings.HasPrefix(key, sourcePrefix) {
+				return nil
+			}
+		}
+		if storage.IsUserOwnedKey(task.UserID, key) {
 			return nil
 		}
 	}
-	if storage.IsUserOwnedKey(task.UserID, key) {
-		return nil
-	}
-	pendingPrefix := path.Join("uploads/pending", task.UserID) + "/"
-	if !strings.HasPrefix(key, pendingPrefix) || s.repo == nil {
+	finalizedPrefix := path.Join("uploads/finalized", task.UserID) + "/"
+	if !strings.HasPrefix(key, finalizedPrefix) || s.repo == nil {
 		return errors.New("bootstrap storage object is outside task ownership")
 	}
-	id := pendingUploadIDFromURL(rawURL)
-	if id == "" || (strings.TrimSpace(source.UploadID) != "" && strings.TrimSpace(source.UploadID) != id) {
-		return errors.New("bootstrap pending upload identity mismatch")
+	id := strings.TrimSpace(source.UploadID)
+	urlID := directUploadIDFromURLWithNamespace(rawURL, "finalized")
+	if id == "" {
+		id = urlID
+	}
+	if id == "" || (urlID != "" && urlID != id) {
+		return errors.New("bootstrap finalized upload identity mismatch")
 	}
 	upload, err := s.repo.PendingUploads().FindPendingUploadByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("%w: pending upload ownership lookup: %v", ErrAgentBootstrapUnavailable, err)
+		return fmt.Errorf("%w: finalized upload ownership lookup: %v", ErrAgentBootstrapUnavailable, err)
 	}
-	if upload.UserID != task.UserID || upload.Status != model.PendingUploadStatusFinalized || !directUploadPurposeAllowed(upload.Purpose, source.AllowedPurposes) || upload.Key != key || !pendingUploadURLMatches(rawURL, upload) {
-		return errors.New("bootstrap pending upload ownership mismatch")
+	if upload.UserID != task.UserID || upload.Status != model.PendingUploadStatusFinalized || upload.FinalizedKey == "" || !directUploadPurposeAllowed(upload.Purpose, source.AllowedPurposes) || upload.FinalizedKey != key {
+		return errors.New("bootstrap finalized upload ownership mismatch")
 	}
 	return nil
 }

@@ -239,8 +239,9 @@ describe('ReferenceUsageSummary', () => {
       <ReferenceUsageSummary task={seednoteTask} files={[summaryTaskFile]} variant="compact" />,
     )
 
-    const status = screen.getByRole('status')
+    const status = screen.getByText('正在读取参考素材使用摘要').closest('[role="status"]')
 
+    expect(status).not.toBeNull()
     expect(status).toHaveAttribute('aria-live', 'polite')
     expect(status).toHaveAttribute('aria-atomic', 'true')
     expect(status).toHaveTextContent('正在读取参考素材使用摘要')
