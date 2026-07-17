@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
 
@@ -19,6 +20,10 @@ type reconcileTestDispatcher struct {
 	errs       map[string]error
 	deleteErrs []error
 	deletes    int
+}
+
+func (*reconcileTestDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSelection {
+	return srvconfig.RuntimeImageSelection{Profile: "content", Image: "registry/content@sha256:test"}
 }
 
 func (*reconcileTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*KubernetesRuntimeIdentity, error) {

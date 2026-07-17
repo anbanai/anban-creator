@@ -560,10 +560,10 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 		"name": true, "description": true, "model": true, "effort": true,
 		"maxTurns": true, "tools": true, "disallowedTools": true,
 		"skills": true, "memory": true, "background": true, "isolation": true,
-		"color": true,
+		"color": true, "permissionMode": true,
 	}
 	ignoredForPluginAgents := map[string]bool{
-		"hooks": true, "mcpServers": true, "permissionMode": true,
+		"hooks": true, "mcpServers": true,
 	}
 
 	root := filepath.Join(repoRoot(t), "claudecode", "agents")
@@ -595,8 +595,37 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 		if frontmatterString(fm["description"]) == "" {
 			t.Fatalf("%s must set description so Claude Code can delegate appropriately", path)
 		}
+		if got := frontmatterString(fm["permissionMode"]); got != "dontAsk" {
+			t.Fatalf("%s permissionMode = %q, want dontAsk for managed zero-interaction execution", path, got)
+		}
 		if isolation := frontmatterString(fm["isolation"]); isolation != "" && isolation != "worktree" {
 			t.Fatalf("%s isolation = %q, the only plugin-supported value is worktree", path, isolation)
+		}
+	}
+}
+
+func TestClaudeCodePluginAgentsDeclareAutonomousExecution(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "claudecode", "agents")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read claudecode agents: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		body := readRepoFile(t, path)
+		for _, want := range []string{
+			"全自动执行契约",
+			"不得调用 `AskUserQuestion`",
+			"不得在文本中向用户提问",
+			"任务输入 -> 项目默认 -> 服务端默认 -> 能力注册表推荐",
+			"结构化失败诊断",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing autonomous contract %q", path, want)
+			}
 		}
 	}
 }

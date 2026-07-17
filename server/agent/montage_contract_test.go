@@ -269,6 +269,24 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 	}
 }
 
+func TestMontageManagedApprovalPolicy(t *testing.T) {
+	root := repoRoot(t)
+	agentText := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "montage.md"))
+	skillText := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "montage", "SKILL.md"))
+	for _, want := range []string{
+		`"approval_policy"`,
+		`"mode": "auto"`,
+		`"source": "anban_managed_task"`,
+		`"scope": "full_run"`,
+		"自动批准常规 creative gate",
+		"不得跳过 checkpoint",
+	} {
+		if !strings.Contains(agentText+skillText, want) {
+			t.Fatalf("Montage autonomous contract missing %q", want)
+		}
+	}
+}
+
 func TestMontagePluginManifestsAdvertiseSupport(t *testing.T) {
 	root := repoRoot(t)
 	for _, path := range []string{

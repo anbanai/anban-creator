@@ -115,7 +115,7 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 	root := repoRoot(t)
 	agentsRoot := filepath.Join(root, "claudecode", "agents")
 	skillsRoot := filepath.Join(root, "claudecode", "skills")
-	forbiddenPluginAgentFields := []string{"hooks", "mcpServers", "permissionMode"}
+	forbiddenPluginAgentFields := []string{"hooks", "mcpServers"}
 
 	err := filepath.WalkDir(agentsRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -147,6 +147,9 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 		}
 		if strings.ContainsAny(description, "<>") {
 			t.Fatalf("%s description must not contain XML angle brackets", path)
+		}
+		if got := frontmatterStringValue(fm["permissionMode"]); got != "dontAsk" {
+			t.Fatalf("%s permissionMode = %q, want dontAsk for managed zero-interaction execution", path, got)
 		}
 
 		for _, field := range forbiddenPluginAgentFields {

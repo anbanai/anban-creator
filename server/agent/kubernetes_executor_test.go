@@ -3,6 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -125,6 +128,95 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	}
 }
 
+func TestWorkspaceInitScript(t *testing.T) {
+	content := kubernetesWorkspaceInitScript(model.PlatformSeednote)
+	for _, want := range []string{"set -eu", "chown 1000:1000 /workspace", kubernetesRuntimeHomePath, kubernetesMemoryMountPath} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("content init script missing %q: %s", want, content)
+		}
+	}
+	if strings.Contains(content, "OpenMontage") || strings.Contains(content, "openmontage") {
+		t.Fatalf("content init script references Montage: %s", content)
+	}
+
+	montage := kubernetesWorkspaceInitScript(model.PlatformMontage)
+	for _, want := range []string{
+		"template=/app/third_party/OpenMontage",
+		"runtime=/workspace/openmontage",
+		"staging=/workspace/.openmontage-init",
+		`if [ ! -e "$runtime" ]; then`,
+		`cp -a "$template/." "$staging/"`,
+		`mv "$staging" "$runtime"`,
+		`test -f "$runtime/.anban-source-revision"`,
+		`cmp -s "$template/.anban-source-revision" "$runtime/.anban-source-revision"`,
+		`chown -R 1000:1000 "$runtime"`,
+	} {
+		if !strings.Contains(montage, want) {
+			t.Fatalf("Montage init script missing %q: %s", want, montage)
+		}
+	}
+	if strings.Index(montage, `cmp -s "$template/.anban-source-revision"`) > strings.Index(montage, `chown -R 1000:1000 "$runtime"`) {
+		t.Fatal("Montage runtime must verify revision before modifying ownership")
+	}
+}
+
+func TestBuildKubernetesJobInitializesMontageRoot(t *testing.T) {
+	task := testTask()
+	task.Type = model.PlatformMontage
+	execution := testExecution()
+	execution.RuntimeProfile = model.PlatformMontage
+	execution.RuntimeImage = "registry.example.com/montage@sha256:run"
+	job := buildKubernetesJob(testJobConfig(), execution, task)
+	script := strings.Join(job.Spec.Template.Spec.InitContainers[0].Args, " ")
+	if !strings.Contains(script, "/workspace/openmontage") || !strings.Contains(script, ".anban-source-revision") {
+		t.Fatalf("Montage Job init script = %q", script)
+	}
+}
+
+func TestMontageWorkspaceInitScriptPreservesExistingRuntime(t *testing.T) {
+	root := t.TempDir()
+	template := filepath.Join(root, "template")
+	runtimePath := filepath.Join(root, "runtime")
+	staging := filepath.Join(root, "staging")
+	if err := os.MkdirAll(template, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(template, ".anban-source-revision"), []byte("revision-a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(template, "template.txt"), []byte("template"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	script := "set -eu\n" + kubernetesMontageInitScript(template, runtimePath, staging)
+	script = strings.Replace(script, `chown -R 1000:1000 "$runtime"`, ":", 1)
+	run := func() ([]byte, error) {
+		return exec.Command("/bin/sh", "-c", script).CombinedOutput()
+	}
+	if output, err := run(); err != nil {
+		t.Fatalf("new runtime init: %v: %s", err, output)
+	}
+	checkpoint := filepath.Join(runtimePath, "checkpoint.json")
+	if err := os.WriteFile(checkpoint, []byte("preserve-me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run(); err != nil {
+		t.Fatalf("matching runtime init: %v: %s", err, output)
+	}
+	if got, err := os.ReadFile(checkpoint); err != nil || string(got) != "preserve-me" {
+		t.Fatalf("matching runtime changed checkpoint: %q err=%v", got, err)
+	}
+	if err := os.WriteFile(filepath.Join(template, ".anban-source-revision"), []byte("revision-b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run(); err == nil {
+		t.Fatalf("mismatched runtime init succeeded: %s", output)
+	}
+	if got, err := os.ReadFile(checkpoint); err != nil || string(got) != "preserve-me" {
+		t.Fatalf("mismatched runtime changed checkpoint: %q err=%v", got, err)
+	}
+}
+
 func TestBuildProjectMemoryPVCUsesNASStorageClass(t *testing.T) {
 	pvc := buildProjectMemoryPVC(testJobConfig(), "project-1")
 	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "nas-sc-creator" {
@@ -171,6 +263,67 @@ func TestBuildKubernetesJobUsesTaskResourceProfile(t *testing.T) {
 	if resources.Requests.Cpu().String() != "500m" || resources.Limits.Memory().String() != "2Gi" {
 		t.Fatalf("fallback resources = %#v, want defaults", resources)
 	}
+}
+
+func TestBuildKubernetesJobUsesPersistedRuntimeImage(t *testing.T) {
+	execution := testExecution()
+	execution.RuntimeProfile = model.PlatformMontage
+	execution.RuntimeImage = "registry.example.com/montage@sha256:run"
+	job := buildKubernetesJob(testJobConfig(), execution, testTask())
+	if job.Spec.Template.Spec.InitContainers[0].Image != execution.RuntimeImage ||
+		job.Spec.Template.Spec.Containers[0].Image != execution.RuntimeImage {
+		t.Fatalf("job did not use persisted runtime image: init=%q main=%q", job.Spec.Template.Spec.InitContainers[0].Image, job.Spec.Template.Spec.Containers[0].Image)
+	}
+}
+
+func TestBuildKubernetesJobConfigHashIncludesPersistedRuntimeImage(t *testing.T) {
+	first := testExecution()
+	first.RuntimeImage = "registry.example.com/content@sha256:first"
+	second := *first
+	second.RuntimeImage = "registry.example.com/content@sha256:second"
+	firstJob := buildKubernetesJob(testJobConfig(), first, testTask())
+	secondJob := buildKubernetesJob(testJobConfig(), &second, testTask())
+	if firstJob.Annotations[kubernetesObjectConfigHashLabel] == secondJob.Annotations[kubernetesObjectConfigHashLabel] {
+		t.Fatal("persisted runtime image did not affect Kubernetes Job config hash")
+	}
+}
+
+func TestKubernetesDispatcherValidatesPersistedRuntimeIdentity(t *testing.T) {
+	t.Run("missing identity", func(t *testing.T) {
+		execution := testExecution()
+		execution.RuntimeProfile = ""
+		execution.RuntimeImage = ""
+		_, err := testDispatcher(fake.NewSimpleClientset()).Dispatch(context.Background(), execution, testTask())
+		if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "runtime identity is required") {
+			t.Fatalf("Dispatch error = %v, want permanent missing runtime identity", err)
+		}
+	})
+
+	t.Run("initial mismatch", func(t *testing.T) {
+		execution := testExecution()
+		execution.RuntimeImage = "registry.example.com/other@sha256:mismatch"
+		_, err := testDispatcher(fake.NewSimpleClientset()).Dispatch(context.Background(), execution, testTask())
+		if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "initial runtime identity mismatch") {
+			t.Fatalf("Dispatch error = %v, want permanent initial runtime mismatch", err)
+		}
+	})
+
+	t.Run("resume preserves parent digest", func(t *testing.T) {
+		execution := testExecution()
+		execution.Attempt = 2
+		execution.ParentExecutionID = "parent-execution"
+		execution.RuntimeProfile = model.PlatformMontage
+		execution.RuntimeImage = "registry.example.com/montage@sha256:parent"
+		cfg := testJobConfig()
+		client := fake.NewSimpleClientset(
+			buildProjectMemoryPVC(cfg, testTask().ProjectID),
+			buildTaskWorkspacePVC(cfg, testTask()),
+		)
+		dispatcher := &kubernetesJobDispatcher{config: cfg, kube: client}
+		if _, err := dispatcher.Dispatch(context.Background(), execution, testTask()); err != nil {
+			t.Fatalf("Dispatch resumed persisted runtime: %v", err)
+		}
+	})
 }
 
 func TestKubernetesFinalizationTimeoutIsBoundedByGraceAndDeadline(t *testing.T) {
@@ -1101,7 +1254,10 @@ func testJobConfig() kubernetesJobConfig {
 }
 
 func testExecution() *model.TaskExecution {
-	return &model.TaskExecution{ID: "execution-1", TaskID: "task-1", Namespace: "anban", JobName: kubernetesJobName("execution-1")}
+	return &model.TaskExecution{
+		ID: "execution-1", TaskID: "task-1", Attempt: 1, Namespace: "anban", JobName: kubernetesJobName("execution-1"),
+		RuntimeProfile: "content", RuntimeImage: testJobConfig().AgentImage,
+	}
 }
 
 func testTask() *model.Task {

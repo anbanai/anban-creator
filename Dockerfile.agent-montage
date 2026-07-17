@@ -29,7 +29,6 @@ RUN set -eux; \
     install -d -m 0755 -o 1000 -g 1000 /home/node; \
     rm -rf /var/lib/apt/lists/*
 
-# Upgrade Claude Code and the Go Agent SDK together after an execution smoke test.
 ARG CLAUDE_CODE_VERSION=2.1.208
 ARG MCPORTER_VERSION=0.9.0
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "mcporter@${MCPORTER_VERSION}" && \
@@ -38,12 +37,17 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "mcporter@
     gh --version
 
 COPY --from=builder /out/anban /usr/local/bin/anban
-COPY claudecode/   /anbanai/
+COPY claudecode/ /anbanai/
 COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/
+COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
 
+ARG OPENMONTAGE_REVISION
 ENV AGENT_REACH_VENV=/opt/agent-reach-venv
+ENV OPENMONTAGE_VENV=/opt/openmontage-venv
 
 RUN set -eux; \
+    test -n "$OPENMONTAGE_REVISION"; \
+    printf '%s\n' "$OPENMONTAGE_REVISION" > /app/third_party/OpenMontage/.anban-source-revision; \
     python3 -m venv "$AGENT_REACH_VENV"; \
     "$AGENT_REACH_VENV/bin/pip" install \
       --no-cache-dir \
@@ -52,8 +56,16 @@ RUN set -eux; \
     "$AGENT_REACH_VENV/bin/agent-reach" --version; \
     "$AGENT_REACH_VENV/bin/agent-reach" doctor --json | \
       "$AGENT_REACH_VENV/bin/python" -c 'import json, sys; data = json.load(sys.stdin); xhs = data["xiaohongshu"]; assert {"status", "active_backend", "message"} <= set(xhs)'; \
-    chown -R root:root /app/third_party/Agent-Reach "$AGENT_REACH_VENV"; \
-    chmod -R a=rX /app/third_party/Agent-Reach "$AGENT_REACH_VENV"
+    python3 -m venv "$OPENMONTAGE_VENV"; \
+    "$OPENMONTAGE_VENV/bin/pip" install --no-cache-dir -r /app/third_party/OpenMontage/requirements.txt; \
+    test -f /app/third_party/OpenMontage/remotion-composer/package-lock.json; \
+    cd /app/third_party/OpenMontage/remotion-composer; \
+    npm ci; \
+    cd /app/third_party/OpenMontage; \
+    "$OPENMONTAGE_VENV/bin/python" -c "from tools.tool_registry import registry; registry.discover(); summary = registry.provider_menu_summary(); assert isinstance(summary, dict)"; \
+    "$OPENMONTAGE_VENV/bin/python" -c "from lib.pipeline_loader import load_pipeline; manifest = load_pipeline('cinematic'); assert manifest.get('name') or manifest.get('display_name')"; \
+    chown -R root:root /app/third_party/Agent-Reach "$AGENT_REACH_VENV" /app/third_party/OpenMontage "$OPENMONTAGE_VENV"; \
+    chmod -R a=rX /app/third_party/Agent-Reach "$AGENT_REACH_VENV" /app/third_party/OpenMontage "$OPENMONTAGE_VENV"
 
 RUN set -eux; \
     if [ -n "$(find /anbanai -type l -print -quit)" ]; then \
@@ -65,8 +77,9 @@ RUN set -eux; \
 
 ENV CLAUDE_PLUGIN_ROOT=/anbanai
 ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template
+ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage
 ENV HOME=/home/node
-ENV PATH="${AGENT_REACH_VENV}/bin:${PATH}"
+ENV PATH="${OPENMONTAGE_VENV}/bin:${AGENT_REACH_VENV}/bin:${PATH}"
 
 USER 1000:1000
 RUN git config --global http.version HTTP/1.1

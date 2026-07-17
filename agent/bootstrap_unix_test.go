@@ -129,6 +129,42 @@ func TestMaterializeBootstrapDupFailureAfterMkdirRollsBackDirectory(t *testing.T
 	assertBootstrapWorkspaceEmpty(t, root)
 }
 
+func TestMaterializeBootstrapReplayPreservesMontageAndClaudeRuntimeState(t *testing.T) {
+	root := t.TempDir()
+	checkpointPath := filepath.Join(root, "openmontage", "projects", "task-1", "checkpoint_assets.json")
+	sessionPath := filepath.Join(root, ".anban-runtime-home", ".claude", "projects", "session.jsonl")
+	for path, body := range map[string]string{
+		checkpointPath: `{"checkpoint":"assets"}`,
+		sessionPath:    `{"session":"claude"}`,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkpointBefore, _ := os.ReadFile(checkpointPath)
+	sessionBefore, _ := os.ReadFile(sessionPath)
+	base := BootstrapFile{Path: ".anban-creator/task.json", Text: `{"task":"task-1"}`, Mode: 0o644}
+	if err := materializeBootstrap(context.Background(), root, []BootstrapFile{base}, nil); err != nil {
+		t.Fatal(err)
+	}
+	resume := BootstrapFile{Path: ".anban-creator/resume/execution-2/context.md", Text: "continue", Mode: 0o644}
+	if err := materializeBootstrap(context.Background(), root, []BootstrapFile{base, resume}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(checkpointPath); err != nil || string(got) != string(checkpointBefore) {
+		t.Fatalf("checkpoint changed across bootstrap replay: %q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(sessionPath); err != nil || string(got) != string(sessionBefore) {
+		t.Fatalf("Claude session changed across bootstrap replay: %q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(resume.Path))); err != nil || string(got) != resume.Text {
+		t.Fatalf("resume context = %q err=%v", got, err)
+	}
+}
+
 func assertBootstrapWorkspaceEmpty(t *testing.T, root string) {
 	t.Helper()
 	entries, err := os.ReadDir(root)

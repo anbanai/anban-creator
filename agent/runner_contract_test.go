@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +18,53 @@ func TestRunnerUsesManagedAgentRuntimePolicy(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "serveragent.WithManagedAgentRuntimePolicy()") {
 		t.Fatal("runner must apply serveragent.WithManagedAgentRuntimePolicy()")
+	}
+}
+
+func TestRuntimeCwd(t *testing.T) {
+	workspace := "/workspace"
+	if got := runtimeCwd(workspace, "montage"); got != "/workspace/openmontage" {
+		t.Fatalf("Montage cwd = %q", got)
+	}
+	if got := runtimeCwd(workspace, "seednote"); got != workspace {
+		t.Fatalf("Seednote cwd = %q, want %q", got, workspace)
+	}
+	if got := montageRuntimePath(workspace); got != "/workspace/openmontage" {
+		t.Fatalf("Montage runtime path = %q", got)
+	}
+}
+
+func TestRunnerOptionsUseWritableMontageRoot(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "/anbanai")
+	workspace := t.TempDir()
+	runner := NewRunner(&Config{
+		Workspace: workspace, AgentFlag: "anban:montage", TaskType: "montage", MaxTurns: 10,
+		Env: map[string]string{serveragent.MontageSubmoduleEnvName: "/provider/override"},
+	}, nil, nil)
+	opts, err := runner.buildSDKOptions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := claudecode.NewOptions(opts...)
+	wantRoot := filepath.Join(workspace, "openmontage")
+	if got.Cwd == nil || *got.Cwd != wantRoot {
+		t.Fatalf("Montage cwd = %#v, want %q", got.Cwd, wantRoot)
+	}
+	if got.ExtraEnv[serveragent.MontageSubmoduleEnvName] != wantRoot {
+		t.Fatalf("Montage runtime env = %#v, want platform-owned %q", got.ExtraEnv, wantRoot)
+	}
+
+	content := NewRunner(&Config{Workspace: workspace, AgentFlag: "anban:seednote", TaskType: "seednote", MaxTurns: 10}, nil, nil)
+	contentOpts, err := content.buildSDKOptions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentGot := claudecode.NewOptions(contentOpts...)
+	if contentGot.Cwd == nil || *contentGot.Cwd != workspace {
+		t.Fatalf("content cwd = %#v, want %q", contentGot.Cwd, workspace)
+	}
+	if _, exists := contentGot.ExtraEnv[serveragent.MontageSubmoduleEnvName]; exists {
+		t.Fatalf("content runtime env includes Montage path: %#v", contentGot.ExtraEnv)
 	}
 }
 

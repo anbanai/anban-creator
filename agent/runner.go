@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
@@ -16,6 +18,17 @@ type Runner struct {
 	cfg        *Config
 	reporter   *Reporter
 	downloader *Downloader
+}
+
+func runtimeCwd(workspace, taskType string) string {
+	if model.IsMontagePlatform(strings.TrimSpace(taskType)) {
+		return montageRuntimePath(workspace)
+	}
+	return workspace
+}
+
+func montageRuntimePath(workspace string) string {
+	return filepath.Join(workspace, serveragent.MontageRuntimeDirName)
 }
 
 func NewRunner(cfg *Config, reporter *Reporter, downloader *Downloader) *Runner {
@@ -168,7 +181,7 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 	}
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(r.cfg.MaxTurns),
-		claudecode.WithCwd(r.cfg.Workspace),
+		claudecode.WithCwd(runtimeCwd(r.cfg.Workspace, r.cfg.TaskType)),
 		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
 		// Load both user and project setting sources so a CLAUDE.md in the
 		// workspace (e.g., written by the desktop shell in the future) is picked up
@@ -211,6 +224,9 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 		if value, ok := r.cfg.RuntimeEnv[key]; ok {
 			sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
 		}
+	}
+	if model.IsMontagePlatform(strings.TrimSpace(r.cfg.TaskType)) {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(serveragent.MontageSubmoduleEnvName, montageRuntimePath(r.cfg.Workspace)))
 	}
 	if r.cfg.Model != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithModel(r.cfg.Model))

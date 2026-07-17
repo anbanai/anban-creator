@@ -16,6 +16,7 @@ const (
 	ContainerAgentReachVenvPath   = "/opt/agent-reach-venv"
 	ContainerRuntimePath          = ContainerAgentReachVenvPath + "/bin:/usr/local/bin:/usr/bin:/bin"
 	MontageSubmoduleEnvName       = "ANBAN_MONTAGE_SUBMODULE_PATH"
+	MontageRuntimeDirName         = "openmontage"
 	ContainerMontageSubmodulePath = "/app/third_party/OpenMontage"
 	OrphanedContainerNameFilter   = "^/" + EphemeralContainerNamePrefix
 )

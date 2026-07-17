@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -39,7 +40,10 @@ func setupCloudCompletionTest(t *testing.T, withArtifact bool, startedOverride .
 	if !started {
 		executionStatus = model.TaskExecutionStarting
 	}
-	execution := &model.TaskExecution{ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: executionStatus, Started: started}
+	execution := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: executionStatus, Started: started,
+		RuntimeProfile: "content", RuntimeImage: "registry/content@sha256:test",
+	}
 	if withArtifact {
 		execution.ManifestStatus = model.TaskExecutionManifestPending
 	}
@@ -470,6 +474,10 @@ type cancelOrderingDispatcher struct {
 	deleteErr      error
 }
 
+func (*cancelOrderingDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSelection {
+	return srvconfig.RuntimeImageSelection{Profile: "content", Image: "registry/content@sha256:test"}
+}
+
 func (*cancelOrderingDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*agent.KubernetesRuntimeIdentity, error) {
 	return &agent.KubernetesRuntimeIdentity{Namespace: "anban", JobName: "job-" + execution.ID}, nil
 }
@@ -560,6 +568,22 @@ func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
 			t.Fatalf("current=%+v task=%s dispatches=%d", current, foundTask.Status, dispatcher.callCount())
 		}
 	})
+}
+
+func TestReplacePreStartExecutionPreservesRuntimeImage(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	dispatcher := &dispatchTestDispatcher{}
+	svc.SetKubernetesDispatcher(dispatcher)
+	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement.RuntimeProfile != execution.RuntimeProfile || replacement.RuntimeImage != execution.RuntimeImage {
+		t.Fatalf("replacement runtime = %q %q, want %q %q", replacement.RuntimeProfile, replacement.RuntimeImage, execution.RuntimeProfile, execution.RuntimeImage)
+	}
 }
 
 func TestReplacementDispatchResumesSameAttemptAfterTransientFailure(t *testing.T) {

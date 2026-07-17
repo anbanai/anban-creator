@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 func baseKubernetesConfigForTest() Config {
@@ -19,7 +21,7 @@ func baseKubernetesConfigForTest() Config {
 			Executor: "kubernetes",
 			Kubernetes: KubernetesConfig{
 				Namespace:            "anbanai-prod",
-				AgentImage:           "registry.example.com/creator-agent:latest",
+				AgentImage:           "registry.example.com/creator-agent@sha256:" + strings.Repeat("a", 64),
 				ServiceAccount:       "creator-agent-runner",
 				NASStorageClass:      "nas-sc-creator",
 				ProjectMemorySize:    "1Gi",
@@ -56,6 +58,79 @@ func TestKubernetesAgentImageMustBeExplicit(t *testing.T) {
 	}
 	if cfg.Claude.Docker.Image != "creator-agent:latest" {
 		t.Fatalf("docker image default = %q, want creator-agent Docker runtime identity", cfg.Claude.Docker.Image)
+	}
+}
+
+func TestKubernetesImageForTaskUsesProfileThenDefault(t *testing.T) {
+	cfg := KubernetesConfig{
+		AgentImage: "registry/content@sha256:default",
+		ImageProfiles: map[string]string{
+			model.PlatformMontage: "registry/montage@sha256:montage",
+		},
+	}
+	if got := cfg.ImageForTask(model.PlatformMontage); got.Profile != "montage" || got.Image != "registry/montage@sha256:montage" {
+		t.Fatalf("montage runtime = %#v", got)
+	}
+	if got := cfg.ImageForTask(model.PlatformSeednote); got.Profile != "content" || got.Image != "registry/content@sha256:default" {
+		t.Fatalf("seednote runtime = %#v", got)
+	}
+}
+
+func TestValidateKubernetesImageProfiles(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		profiles map[string]string
+		want     string
+	}{
+		{
+			name:     "empty mapped image",
+			profiles: map[string]string{model.PlatformMontage: "  "},
+			want:     "claude.kubernetes.image_profiles.montage must not be empty",
+		},
+		{
+			name:     "unsupported task key",
+			profiles: map[string]string{"unknown": "registry/unknown@sha256:test"},
+			want:     `claude.kubernetes.image_profiles contains unsupported task type "unknown"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.Claude.Kubernetes.ImageProfiles = test.profiles
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateKubernetesRequiresImmutableImageDigests(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{
+			name: "default image tag",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.AgentImage = "registry.example.com/content:latest"
+			},
+			want: "claude.kubernetes.agent_image must use an immutable sha256 digest",
+		},
+		{
+			name: "profile image tag",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.ImageProfiles = map[string]string{model.PlatformMontage: "registry.example.com/montage:v1"}
+			},
+			want: "claude.kubernetes.image_profiles.montage must use an immutable sha256 digest",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			test.mutate(&cfg)
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
@@ -166,7 +241,7 @@ claude:
   executor: "kubernetes"
   agent_server_url: "https://creator-api-svc:8443"
   kubernetes:
-    agent_image: "registry.example.com/creator-agent:latest"
+    agent_image: "registry.example.com/creator-agent@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     service_account: "creator-agent-runner"
     execution_token_secret: "0123456789abcdef0123456789abcdef"
     nas_storage_class: "nas-sc-creator"

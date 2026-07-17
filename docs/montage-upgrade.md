@@ -27,6 +27,64 @@ go test ./server/config -run Montage -count=1
 cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.contract.test.ts src/lib/schemas.test.ts
 ```
 
+## Runtime Images
+
+Production uses two immutable Agent images:
+
+- `ANBAN_AGENT_IMAGE`: the default content runtime.
+- `ANBAN_MONTAGE_AGENT_IMAGE`: the Montage runtime with an embedded OpenMontage template.
+
+Build both images with:
+
+```bash
+make docker-agent-image
+make docker-montage-agent-image
+```
+
+The Montage build passes the pinned submodule commit as `OPENMONTAGE_REVISION`
+and writes it to `/app/third_party/OpenMontage/.anban-source-revision`. Publish
+both images by digest. Do not deploy mutable tags as the persisted
+`task_executions.runtime_image` value.
+
+## Workspace And Resume
+
+The task PVC is mounted at `/workspace`. The Montage init container copies the
+immutable image template once to `/workspace/openmontage`, then verifies the
+revision marker on every attempt. The agent runs with:
+
+```text
+cwd=/workspace/openmontage
+ANBAN_MONTAGE_SUBMODULE_PATH=/workspace/openmontage
+```
+
+OpenMontage project files, checkpoints, and Claude session state therefore stay
+on NAS across Job replacement and explicit task resume. Bootstrap replay only
+adds missing task/resume inputs and rejects conflicting files; it does not
+overwrite existing checkpoint or session data. A resume attempt reuses the
+parent execution's persisted runtime profile and image digest, even if current
+server configuration has changed.
+
+`/tmp` is an `emptyDir` and is intentionally not recoverable. Do not place
+resume-critical state there. Direct artifact upload scans `/workspace/output`
+only; source trees, checkpoints, `.anban-runtime-home`, `.claude`, secrets, and
+dependency caches remain on NAS and are not published as task artifacts unless
+the workflow explicitly registers a stable file through MCP.
+
+Terminal task workspaces remain available for resume. Permanently deleting the
+task deletes its task-workspace PVC; deleting the PVC out of band also makes the
+original execution state non-resumable. Project memory uses a separate PVC.
+
+Backlot is not exposed as an Anban task page. The platform retains normalized
+checkpoint, timeline, run-log, manifest, and delivery artifacts instead.
+
+Verify a live deployment with:
+
+```bash
+kubectl -n anbanai-prod get pod <pod> -o jsonpath='{range .status.initContainerStatuses[*]}{.name}{"="}{.imageID}{"\n"}{end}{range .status.containerStatuses[*]}{.name}{"="}{.imageID}{"\n"}{end}'
+kubectl -n anbanai-prod get pod <pod> -o jsonpath='{range .spec.volumes[*]}{.name}{"="}{.persistentVolumeClaim.claimName}{"\n"}{end}'
+kubectl -n anbanai-prod exec <pod> -- sh -c 'pwd; test -f /workspace/openmontage/.anban-source-revision; cat /workspace/openmontage/.anban-source-revision'
+```
+
 ## Adapter Rule
 
 If upstream pipeline metadata changes, update only Anban's Montage adapter

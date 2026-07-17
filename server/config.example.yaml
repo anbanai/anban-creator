@@ -414,9 +414,12 @@ claude:
   kubernetes:
     # Agent Job 所在命名空间。
     namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"
-    # Agent 镜像。生产镜像必须包含 anban agent 二进制、Claude/Codex 运行时、
-    # Anban 插件资产、ffmpeg/浏览器/Node/Python 以及 third_party/OpenMontage。
+    # 默认 content Agent 镜像。生产镜像必须包含 anban agent 二进制、Claude/Codex 运行时、
+    # Anban 插件资产、ffmpeg/浏览器/Node/Python。
     agent_image: "${ANBAN_AGENT_IMAGE}"
+    # 任务类型专用镜像；Montage 镜像额外包含固定 revision 的 OpenMontage runtime。
+    image_profiles:
+      montage: "${ANBAN_MONTAGE_AGENT_IMAGE}"
     # Agent Job 使用的 Kubernetes ServiceAccount。
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
     # 私有镜像仓库拉取 secret；公开镜像可留空。

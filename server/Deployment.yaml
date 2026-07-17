@@ -50,6 +50,8 @@ spec:
               value: ${namespace}
             - name: ANBAN_AGENT_IMAGE
               value: ${agent_image_repo}
+            - name: ANBAN_MONTAGE_AGENT_IMAGE
+              value: ${montage_agent_image_repo}
             - name: ANBAN_AGENT_SERVICE_ACCOUNT
               value: creator-agent-runner
             - name: ANBAN_AGENT_SERVER_CA_SECRET
