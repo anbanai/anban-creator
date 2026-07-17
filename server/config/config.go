@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // Config holds all server configuration.
@@ -1127,12 +1128,13 @@ type DockerConfig struct {
 
 // KubernetesConfig holds ACK/Kubernetes Job runtime settings.
 type KubernetesConfig struct {
-	Namespace            string `yaml:"namespace"`
-	AgentImage           string `yaml:"agent_image"`
-	ServiceAccount       string `yaml:"service_account"`
-	ImagePullSecret      string `yaml:"image_pull_secret"`
-	ServerCASecret       string `yaml:"server_ca_secret"`
-	ExecutionTokenSecret string `yaml:"execution_token_secret"`
+	Namespace            string            `yaml:"namespace"`
+	AgentImage           string            `yaml:"agent_image"`
+	ImageProfiles        map[string]string `yaml:"image_profiles"`
+	ServiceAccount       string            `yaml:"service_account"`
+	ImagePullSecret      string            `yaml:"image_pull_secret"`
+	ServerCASecret       string            `yaml:"server_ca_secret"`
+	ExecutionTokenSecret string            `yaml:"execution_token_secret"`
 
 	NASStorageClass         string                              `yaml:"nas_storage_class"`
 	ProjectMemorySize       string                              `yaml:"project_memory_size"`
@@ -1146,6 +1148,34 @@ type KubernetesConfig struct {
 	preStartRetryLimitSet   bool                                `yaml:"-"`
 	Resources               KubernetesResourceConfig            `yaml:"resources"`
 	ResourceProfiles        map[string]KubernetesResourceConfig `yaml:"resource_profiles"`
+}
+
+type RuntimeImageSelection struct {
+	Profile string
+	Image   string
+}
+
+func (c KubernetesConfig) ImageForTask(taskType string) RuntimeImageSelection {
+	taskType = strings.TrimSpace(taskType)
+	if image := strings.TrimSpace(c.ImageProfiles[taskType]); image != "" {
+		return RuntimeImageSelection{Profile: taskType, Image: image}
+	}
+	return RuntimeImageSelection{Profile: "content", Image: strings.TrimSpace(c.AgentImage)}
+}
+
+func isKubernetesImageProfileTaskType(taskType string) bool {
+	switch taskType {
+	case model.PlatformArticle,
+		model.PlatformSeednote,
+		model.PlatformMoments,
+		model.PlatformEcommerce,
+		model.PlatformVideoCreator,
+		model.PlatformVideoEditor,
+		model.PlatformMontage:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -2249,6 +2279,14 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.AgentImage) == "" {
 			errs = append(errs, "claude.kubernetes.agent_image is required")
+		}
+		for taskType, image := range c.Claude.Kubernetes.ImageProfiles {
+			if !isKubernetesImageProfileTaskType(taskType) {
+				errs = append(errs, fmt.Sprintf("claude.kubernetes.image_profiles contains unsupported task type %q", taskType))
+			}
+			if strings.TrimSpace(image) == "" {
+				errs = append(errs, fmt.Sprintf("claude.kubernetes.image_profiles.%s must not be empty", taskType))
+			}
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
 			errs = append(errs, "claude.kubernetes.service_account is required")

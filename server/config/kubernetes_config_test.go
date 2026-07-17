@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 func baseKubernetesConfigForTest() Config {
@@ -56,6 +58,48 @@ func TestKubernetesAgentImageMustBeExplicit(t *testing.T) {
 	}
 	if cfg.Claude.Docker.Image != "creator-agent:latest" {
 		t.Fatalf("docker image default = %q, want creator-agent Docker runtime identity", cfg.Claude.Docker.Image)
+	}
+}
+
+func TestKubernetesImageForTaskUsesProfileThenDefault(t *testing.T) {
+	cfg := KubernetesConfig{
+		AgentImage: "registry/content@sha256:default",
+		ImageProfiles: map[string]string{
+			model.PlatformMontage: "registry/montage@sha256:montage",
+		},
+	}
+	if got := cfg.ImageForTask(model.PlatformMontage); got.Profile != "montage" || got.Image != "registry/montage@sha256:montage" {
+		t.Fatalf("montage runtime = %#v", got)
+	}
+	if got := cfg.ImageForTask(model.PlatformSeednote); got.Profile != "content" || got.Image != "registry/content@sha256:default" {
+		t.Fatalf("seednote runtime = %#v", got)
+	}
+}
+
+func TestValidateKubernetesImageProfiles(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		profiles map[string]string
+		want     string
+	}{
+		{
+			name:     "empty mapped image",
+			profiles: map[string]string{model.PlatformMontage: "  "},
+			want:     "claude.kubernetes.image_profiles.montage must not be empty",
+		},
+		{
+			name:     "unsupported task key",
+			profiles: map[string]string{"unknown": "registry/unknown@sha256:test"},
+			want:     `claude.kubernetes.image_profiles contains unsupported task type "unknown"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.Claude.Kubernetes.ImageProfiles = test.profiles
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
