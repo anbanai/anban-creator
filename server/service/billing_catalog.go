@@ -151,6 +151,14 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("%w: user, fingerprint, and idempotency identity are required", ErrBillingInvalid)
 	}
+	if existing, err := s.repo.Billing().FindQuoteByKey(ctx, req.IdempotencyScope, req.IdempotencyKey); err == nil {
+		if quoteMatchesRequest(existing, req) {
+			return existing, nil
+		}
+		return nil, ErrBillingConflict
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
 	sku, err := s.ResolveSKU(ctx, req.CatalogID, req.Operation, req.Route)
 	if err != nil {
 		return nil, err
@@ -165,7 +173,7 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		existing, findErr := tx.Billing().FindQuoteByKey(ctx, quote.IdempotencyScope, quote.IdempotencyKey)
 		if findErr == nil {
-			if !sameQuoteRequest(existing, quote) {
+			if !quoteMatchesRequest(existing, req) {
 				return ErrBillingConflict
 			}
 			quote = existing
@@ -184,7 +192,7 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 	}
 	existing, findErr := s.repo.Billing().FindQuoteByKey(ctx, quote.IdempotencyScope, quote.IdempotencyKey)
 	if findErr == nil {
-		if sameQuoteRequest(existing, quote) {
+		if quoteMatchesRequest(existing, req) {
 			return existing, nil
 		}
 		return nil, ErrBillingConflict
@@ -220,10 +228,18 @@ func sameCatalog(left, right *model.BillingCatalogVersion) bool {
 		left.Status == right.Status && string(left.Snapshot) == string(right.Snapshot)
 }
 
-func sameQuoteRequest(left, right *model.BillingQuote) bool {
-	return left != nil && right != nil && left.UserID == right.UserID && left.CatalogID == right.CatalogID &&
-		left.SKUID == right.SKUID && left.PriceCredits == right.PriceCredits &&
-		left.RequestFingerprint == right.RequestFingerprint && string(left.SKUSnapshot) == string(right.SKUSnapshot)
+func quoteMatchesRequest(existing *model.BillingQuote, req QuoteRequest) bool {
+	if existing == nil || existing.UserID != strings.TrimSpace(req.UserID) || existing.RequestFingerprint != req.RequestFingerprint {
+		return false
+	}
+	if catalogID := strings.TrimSpace(req.CatalogID); catalogID != "" && existing.CatalogID != catalogID {
+		return false
+	}
+	var pinned billing.SKUConfig
+	if err := json.Unmarshal(existing.SKUSnapshot, &pinned); err != nil {
+		return false
+	}
+	return pinned.ID == existing.SKUID && pinned.Operation == strings.TrimSpace(req.Operation) && pinned.Route == strings.TrimSpace(req.Route)
 }
 
 func validBillingFingerprint(value string) bool {

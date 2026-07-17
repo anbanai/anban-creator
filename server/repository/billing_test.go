@@ -438,14 +438,16 @@ func TestBillingRepositoryWalletEntriesAreAppendOnlyAndReplayable(t *testing.T) 
 	ctx := context.Background()
 	sourceType, sourceID := "wechatpay", "payment-1"
 	entry := &model.BillingWalletEntry{
-		ID:               "entry-1",
-		UserID:           "u1",
-		EventKind:        model.BillingWalletEventKindTopUp,
-		PaidDelta:        1000,
-		SourceType:       &sourceType,
-		SourceID:         &sourceID,
-		IdempotencyScope: "top-up",
-		IdempotencyKey:   "key-1",
+		ID:                 "entry-1",
+		UserID:             "u1",
+		EventKind:          model.BillingWalletEventKindTopUp,
+		PaidDelta:          1000,
+		CatalogID:          "retail-v1",
+		RequestFingerprint: strings.Repeat("a", 64),
+		SourceType:         &sourceType,
+		SourceID:           &sourceID,
+		IdempotencyScope:   "top-up",
+		IdempotencyKey:     "key-1",
 	}
 	if err := repo.AppendEntry(ctx, entry); err != nil {
 		t.Fatalf("AppendEntry: %v", err)
@@ -759,6 +761,40 @@ func TestBillingRepositorySettlementOutboxClaimRetryAndProcessedState(t *testing
 	claimed, err = repo.ClaimSettlements(ctx, now, 10)
 	if err != nil || len(claimed) != 0 {
 		t.Fatalf("second claim = %+v, %v", claimed, err)
+	}
+}
+
+func TestBillingRepositorySettlementOutboxFailedStateIsTerminalAndFenced(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db).Billing()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	row := billingSettlement("settlement-failed", "key-failed", "pending", nil, now.Add(-time.Minute))
+	if err := repo.EnqueueSettlement(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := repo.ClaimSettlements(ctx, now, 1)
+	if err != nil || len(claimed) != 1 || claimed[0].Attempts != 1 {
+		t.Fatalf("claim = %+v, %v", claimed, err)
+	}
+	failedAt := now.Add(time.Second)
+	if err := repo.MarkSettlementFailed(ctx, row.ID, 0, failedAt, "permanent failure"); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("stale failure mark error = %v, want fenced not found", err)
+	}
+	if err := repo.MarkSettlementFailed(ctx, row.ID, 1, failedAt, "permanent failure"); err != nil {
+		t.Fatalf("MarkSettlementFailed: %v", err)
+	}
+	var failed model.BillingSettlementOutbox
+	if err := db.First(&failed, "id = ?", row.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != "failed" || failed.FailedAt == nil || !failed.FailedAt.Equal(failedAt) ||
+		failed.LastError != "permanent failure" || failed.NextAttemptAt != nil || failed.ProcessedAt != nil {
+		t.Fatalf("failed state = %+v", failed)
+	}
+	claimed, err = repo.ClaimSettlements(ctx, now.Add(24*time.Hour), 1)
+	if err != nil || len(claimed) != 0 {
+		t.Fatalf("failed settlement reclaimed = %+v, %v", claimed, err)
 	}
 }
 

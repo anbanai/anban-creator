@@ -159,26 +159,28 @@ func (l BillingCreditLot) Validate() error {
 
 // BillingWalletEntry is an append-only wallet event. Delta fields are signed.
 type BillingWalletEntry struct {
-	ID               string                 `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID           string                 `gorm:"type:char(36);index:idx_billing_wallet_entry_user_created,priority:1;not null" json:"user_id"`
-	EventKind        BillingWalletEventKind `gorm:"type:varchar(32);index;not null;check:chk_billing_wallet_entry_topup_source,event_kind <> 'topup' OR (source_type IS NOT NULL AND TRIM(source_type) <> '' AND source_id IS NOT NULL AND TRIM(source_id) <> '')" json:"event_kind"`
-	PaidDelta        int64                  `gorm:"not null" json:"paid_delta"`
-	PromotionalDelta int64                  `gorm:"not null" json:"promotional_delta"`
-	DebtDelta        int64                  `gorm:"not null" json:"debt_delta"`
-	ChargeID         *string                `gorm:"type:char(36);index" json:"charge_id,omitempty"`
-	LotID            *string                `gorm:"type:char(36);index" json:"lot_id,omitempty"`
-	ResourceType     string                 `gorm:"type:varchar(40);index:idx_billing_wallet_entry_resource,priority:1" json:"resource_type,omitempty"`
-	ResourceID       string                 `gorm:"type:varchar(128);index:idx_billing_wallet_entry_resource,priority:2" json:"resource_id,omitempty"`
-	SourceType       *string                `gorm:"type:varchar(40);uniqueIndex:idx_billing_wallet_entry_source,priority:1" json:"source_type,omitempty"`
-	SourceID         *string                `gorm:"type:varchar(128);uniqueIndex:idx_billing_wallet_entry_source,priority:2" json:"source_id,omitempty"`
-	IdempotencyScope string                 `gorm:"type:varchar(80);uniqueIndex:idx_billing_wallet_entry_idempotency,priority:1;not null" json:"idempotency_scope"`
-	IdempotencyKey   string                 `gorm:"type:varchar(128);uniqueIndex:idx_billing_wallet_entry_idempotency,priority:2;not null" json:"idempotency_key"`
-	ActorType        string                 `gorm:"type:varchar(40)" json:"actor_type,omitempty"`
-	ActorID          string                 `gorm:"type:varchar(128)" json:"actor_id,omitempty"`
-	SourceService    string                 `gorm:"type:varchar(80)" json:"source_service,omitempty"`
-	RequestID        string                 `gorm:"type:varchar(128);index" json:"request_id,omitempty"`
-	CorrelationID    string                 `gorm:"type:varchar(128);index" json:"correlation_id,omitempty"`
-	CreatedAt        time.Time              `gorm:"index:idx_billing_wallet_entry_user_created,priority:2" json:"created_at"`
+	ID                 string                 `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID             string                 `gorm:"type:char(36);index:idx_billing_wallet_entry_user_created,priority:1;not null" json:"user_id"`
+	EventKind          BillingWalletEventKind `gorm:"type:varchar(32);index;not null;check:chk_billing_wallet_entry_topup_source,event_kind <> 'topup' OR (source_type IS NOT NULL AND TRIM(source_type) <> '' AND source_id IS NOT NULL AND TRIM(source_id) <> '')" json:"event_kind"`
+	PaidDelta          int64                  `gorm:"not null" json:"paid_delta"`
+	PromotionalDelta   int64                  `gorm:"not null" json:"promotional_delta"`
+	DebtDelta          int64                  `gorm:"not null" json:"debt_delta"`
+	CatalogID          string                 `gorm:"type:varchar(128);index;check:chk_billing_wallet_entry_topup_catalog,event_kind <> 'topup' OR TRIM(catalog_id) <> ''" json:"catalog_id,omitempty"`
+	RequestFingerprint string                 `gorm:"type:char(64);check:chk_billing_wallet_entry_topup_fingerprint,event_kind <> 'topup' OR LENGTH(request_fingerprint) = 64" json:"request_fingerprint,omitempty"`
+	ChargeID           *string                `gorm:"type:char(36);index" json:"charge_id,omitempty"`
+	LotID              *string                `gorm:"type:char(36);index" json:"lot_id,omitempty"`
+	ResourceType       string                 `gorm:"type:varchar(40);index:idx_billing_wallet_entry_resource,priority:1" json:"resource_type,omitempty"`
+	ResourceID         string                 `gorm:"type:varchar(128);index:idx_billing_wallet_entry_resource,priority:2" json:"resource_id,omitempty"`
+	SourceType         *string                `gorm:"type:varchar(40);uniqueIndex:idx_billing_wallet_entry_source,priority:1" json:"source_type,omitempty"`
+	SourceID           *string                `gorm:"type:varchar(128);uniqueIndex:idx_billing_wallet_entry_source,priority:2" json:"source_id,omitempty"`
+	IdempotencyScope   string                 `gorm:"type:varchar(80);uniqueIndex:idx_billing_wallet_entry_idempotency,priority:1;not null" json:"idempotency_scope"`
+	IdempotencyKey     string                 `gorm:"type:varchar(128);uniqueIndex:idx_billing_wallet_entry_idempotency,priority:2;not null" json:"idempotency_key"`
+	ActorType          string                 `gorm:"type:varchar(40)" json:"actor_type,omitempty"`
+	ActorID            string                 `gorm:"type:varchar(128)" json:"actor_id,omitempty"`
+	SourceService      string                 `gorm:"type:varchar(80)" json:"source_service,omitempty"`
+	RequestID          string                 `gorm:"type:varchar(128);index" json:"request_id,omitempty"`
+	CorrelationID      string                 `gorm:"type:varchar(128);index" json:"correlation_id,omitempty"`
+	CreatedAt          time.Time              `gorm:"index:idx_billing_wallet_entry_user_created,priority:2" json:"created_at"`
 }
 
 func (BillingWalletEntry) TableName() string { return "billing_wallet_entries" }
@@ -321,6 +323,7 @@ type BillingSettlementOutbox struct {
 	NextAttemptAt      *time.Time              `gorm:"index" json:"next_attempt_at,omitempty"`
 	LastError          string                  `gorm:"type:text" json:"last_error,omitempty"`
 	ProcessedAt        *time.Time              `json:"processed_at,omitempty"`
+	FailedAt           *time.Time              `json:"failed_at,omitempty"`
 	RequestFingerprint string                  `gorm:"type:char(64);not null" json:"request_fingerprint"`
 	CreatedAt          time.Time               `json:"created_at"`
 	UpdatedAt          time.Time               `json:"updated_at"`

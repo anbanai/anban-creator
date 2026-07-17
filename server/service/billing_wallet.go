@@ -26,6 +26,7 @@ var (
 	ErrBillingQuoteMismatch                      = errors.New("billing quote mismatch")
 	ErrBillingReversalNotAllowed                 = errors.New("billing reversal not allowed")
 	ErrBillingLedgerInvalid                      = errors.New("billing ledger is not conserved")
+	errBillingSpendInsufficient                  = errors.New("billing spendable credits are insufficient")
 )
 
 type BillingWalletOptions struct {
@@ -83,6 +84,7 @@ type TopUpRequest struct {
 	ExternalSourceID   string
 	ExternalRef        string
 	CatalogID          string
+	RequestFingerprint string
 	IdempotencyScope   string
 	IdempotencyKey     string
 	ActorType          string
@@ -134,12 +136,29 @@ func NewBillingWalletService(repo repository.Repository, bundle *billing.Bundle,
 }
 
 func (s *BillingWalletService) ChargeTaskAdmission(ctx context.Context, req TaskChargeRequest) (*model.BillingCharge, error) {
+	var result *model.BillingCharge
+	err := s.withTx(ctx, func(tx repository.Repository) error {
+		var err error
+		result, err = s.ChargeTaskAdmissionInTx(ctx, tx, req)
+		return err
+	})
+	if err != nil {
+		if replay := s.chargeAfterRace(ctx, req.IdempotencyScope, req.IdempotencyKey, req.RequestFingerprint); replay != nil {
+			return replay, nil
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *BillingWalletService) ChargeTaskAdmissionInTx(ctx context.Context, tx repository.Repository, req TaskChargeRequest) (*model.BillingCharge, error) {
 	if strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.QuoteID) == "" ||
 		strings.TrimSpace(req.CatalogID) == "" || strings.TrimSpace(req.SKUID) == "" || !validBillingFingerprint(req.RequestFingerprint) ||
-		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
+		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" || tx == nil {
 		return nil, fmt.Errorf("%w: incomplete task charge identity", ErrBillingInvalid)
 	}
-	sku, err := s.repo.Billing().FindSKU(ctx, req.CatalogID, req.SKUID)
+	billingRepo := tx.Billing()
+	sku, err := billingRepo.FindSKU(ctx, req.CatalogID, req.SKUID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrBillingSKUNotFound
@@ -149,68 +168,58 @@ func (s *BillingWalletService) ChargeTaskAdmission(ctx context.Context, req Task
 	if sku.Policy != "task_admission" {
 		return nil, fmt.Errorf("%w: SKU policy is %q", ErrBillingInvalid, sku.Policy)
 	}
-	var result *model.BillingCharge
-	err = s.withTx(ctx, func(tx repository.Repository) error {
-		billingRepo := tx.Billing()
-		if replay, replayErr := findChargeReplay(ctx, billingRepo, req.IdempotencyScope, req.IdempotencyKey, req.RequestFingerprint); replayErr != nil || replay != nil {
-			result = replay
-			return replayErr
-		}
-		if _, findErr := billingRepo.FindChargeByTask(ctx, req.TaskID); findErr == nil {
-			return ErrBillingConflict
-		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
-			return findErr
-		}
-		account, lockErr := billingRepo.LockAccount(ctx, req.UserID)
-		if lockErr != nil {
-			return lockErr
-		}
-		quote, lockErr := billingRepo.LockQuote(ctx, req.QuoteID)
-		if lockErr != nil {
-			return lockErr
-		}
-		now := s.now().UTC()
-		if err := validateAdmissionQuote(quote, req.UserID, req.CatalogID, req.SKUID, sku.PriceCredits, req.RequestFingerprint, now); err != nil {
-			return err
-		}
-		if account.DebtCredits > 0 {
-			return ErrBillingDebtOutstanding
-		}
-		charge := newTaskCharge(req, sku, now)
-		allocations, entries, paid, promotional, _, spendErr := s.consumeForCharge(ctx, billingRepo, account, *sku, charge, false)
-		if spendErr != nil {
-			return ErrBillingInsufficientForTask
-		}
-		charge.PaidCredits, charge.PromotionalCredits = paid, promotional
-		if err := charge.Validate(); err != nil {
-			return fmt.Errorf("%w: %v", ErrBillingInvalid, err)
-		}
-		consumed, consumeErr := billingRepo.MarkQuoteConsumed(ctx, quote.ID, now, "task", req.TaskID)
-		if consumeErr != nil {
-			return consumeErr
-		}
-		if !consumed {
-			return ErrBillingQuoteConsumed
-		}
-		if err := billingRepo.CreateCharge(ctx, charge, allocations); err != nil {
-			return err
-		}
-		if err := appendWalletEntries(ctx, billingRepo, entries); err != nil {
-			return err
-		}
-		if err := updateBillingAccount(ctx, billingRepo, account); err != nil {
-			return err
-		}
-		result = charge
-		return nil
-	})
-	if err != nil {
-		if replay := s.chargeAfterRace(ctx, req.IdempotencyScope, req.IdempotencyKey, req.RequestFingerprint); replay != nil {
-			return replay, nil
-		}
+	if replay, replayErr := findChargeReplay(ctx, billingRepo, req.IdempotencyScope, req.IdempotencyKey, req.RequestFingerprint); replayErr != nil || replay != nil {
+		return replay, replayErr
+	}
+	if _, findErr := billingRepo.FindChargeByTask(ctx, req.TaskID); findErr == nil {
+		return nil, ErrBillingConflict
+	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return nil, findErr
+	}
+	account, lockErr := billingRepo.LockAccount(ctx, req.UserID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	quote, lockErr := billingRepo.LockQuote(ctx, req.QuoteID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	now := s.now().UTC()
+	if err := validateAdmissionQuote(quote, req.UserID, sku, req.RequestFingerprint, now); err != nil {
 		return nil, err
 	}
-	return result, nil
+	if account.DebtCredits > 0 {
+		return nil, ErrBillingDebtOutstanding
+	}
+	charge := newTaskCharge(req, sku, now)
+	allocations, entries, paid, promotional, _, spendErr := s.consumeForCharge(ctx, billingRepo, account, *sku, charge, false)
+	if spendErr != nil {
+		if errors.Is(spendErr, errBillingSpendInsufficient) {
+			return nil, ErrBillingInsufficientForTask
+		}
+		return nil, spendErr
+	}
+	charge.PaidCredits, charge.PromotionalCredits = paid, promotional
+	if err := charge.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBillingInvalid, err)
+	}
+	consumed, consumeErr := billingRepo.MarkQuoteConsumed(ctx, quote.ID, now, "task", req.TaskID)
+	if consumeErr != nil {
+		return nil, consumeErr
+	}
+	if !consumed {
+		return nil, ErrBillingQuoteConsumed
+	}
+	if err := billingRepo.CreateCharge(ctx, charge, allocations); err != nil {
+		return nil, err
+	}
+	if err := appendWalletEntries(ctx, billingRepo, entries); err != nil {
+		return nil, err
+	}
+	if err := updateBillingAccount(ctx, billingRepo, account); err != nil {
+		return nil, err
+	}
+	return charge, nil
 }
 
 func (s *BillingWalletService) ChargeAcceptedOperation(ctx context.Context, req OperationChargeRequest) (*model.BillingCharge, error) {
@@ -271,7 +280,7 @@ func (s *BillingWalletService) chargeOperation(ctx context.Context, req Operatio
 			if quoteErr != nil {
 				return quoteErr
 			}
-			if err := validateAdmissionQuote(quote, req.UserID, req.CatalogID, req.SKUID, sku.PriceCredits, req.RequestFingerprint, now); err != nil {
+			if err := validateAdmissionQuote(quote, req.UserID, sku, req.RequestFingerprint, now); err != nil {
 				return err
 			}
 			if account.DebtCredits > 0 {
@@ -281,7 +290,7 @@ func (s *BillingWalletService) chargeOperation(ctx context.Context, req Operatio
 		charge := newOperationCharge(req, sku, accepted, now)
 		allocations, entries, paid, promotional, debt, spendErr := s.consumeForCharge(ctx, billingRepo, account, *sku, charge, accepted)
 		if spendErr != nil {
-			if accepted {
+			if accepted || !errors.Is(spendErr, errBillingSpendInsufficient) {
 				return spendErr
 			}
 			return ErrBillingInsufficientForStandaloneOperation
@@ -370,7 +379,7 @@ func (s *BillingWalletService) consumeForCharge(ctx context.Context, repo reposi
 	}
 	if remaining > 0 {
 		if !allowDebt {
-			return nil, nil, 0, 0, 0, ErrBillingInsufficientForTask
+			return nil, nil, 0, 0, 0, errBillingSpendInsufficient
 		}
 		if account.DebtCredits > math.MaxInt64-remaining {
 			return nil, nil, 0, 0, 0, ErrBillingLedgerInvalid
@@ -396,7 +405,7 @@ func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*To
 	}
 	if strings.TrimSpace(req.UserID) == "" || req.Credits <= 0 || strings.TrimSpace(req.ExternalSourceType) == "" ||
 		strings.TrimSpace(req.ExternalSourceID) == "" || strings.TrimSpace(req.CatalogID) == "" ||
-		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
+		!validBillingFingerprint(req.RequestFingerprint) || strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
 	}
 	var result *TopUpResult
@@ -407,7 +416,7 @@ func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*To
 			return replayErr
 		}
 		if sourceEntry, sourceErr := billingRepo.FindEntryBySource(ctx, req.ExternalSourceType, req.ExternalSourceID); sourceErr == nil {
-			replay, replayErr := topUpResultFromEntry(sourceEntry, req)
+			replay, replayErr := topUpResultFromEntry(ctx, billingRepo, sourceEntry, req)
 			result = replay
 			return replayErr
 		} else if !errors.Is(sourceErr, gorm.ErrRecordNotFound) {
@@ -418,11 +427,18 @@ func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*To
 			return err
 		}
 		now := s.now().UTC()
+		debtPositions, attributedDebt, err := billingDebtPositions(ctx, billingRepo, req.UserID)
+		if err != nil {
+			return err
+		}
+		if attributedDebt != account.DebtCredits {
+			return ErrBillingLedgerInvalid
+		}
 		debtRepaid := minInt64(req.Credits, account.DebtCredits)
 		paidAdded := req.Credits - debtRepaid
 		entry := &model.BillingWalletEntry{
 			ID: uuid.NewString(), UserID: req.UserID, EventKind: model.BillingWalletEventKindTopUp,
-			PaidDelta: paidAdded, DebtDelta: -debtRepaid,
+			PaidDelta: paidAdded, CatalogID: req.CatalogID, RequestFingerprint: req.RequestFingerprint,
 			SourceType: stringPtr(req.ExternalSourceType), SourceID: stringPtr(req.ExternalSourceID),
 			IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey,
 			ActorType: req.ActorType, ActorID: req.ActorID, SourceService: req.SourceService,
@@ -452,6 +468,32 @@ func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*To
 		if err := billingRepo.AppendEntry(ctx, entry); err != nil {
 			return err
 		}
+		remainingRepayment := debtRepaid
+		for index, position := range debtPositions {
+			if remainingRepayment == 0 {
+				break
+			}
+			repaid := minInt64(remainingRepayment, position.Outstanding)
+			if repaid == 0 {
+				continue
+			}
+			repayment := &model.BillingWalletEntry{
+				ID: uuid.NewString(), UserID: req.UserID, EventKind: model.BillingWalletEventKindDebtRepayment,
+				DebtDelta: -repaid, CatalogID: req.CatalogID, RequestFingerprint: req.RequestFingerprint,
+				ChargeID: &position.ChargeID, ResourceType: "topup", ResourceID: entry.ID,
+				IdempotencyScope: "topup-repayment:" + entry.ID,
+				IdempotencyKey:   fmt.Sprintf("%06d:%s", index, position.ChargeID),
+				ActorType:        req.ActorType, ActorID: req.ActorID, SourceService: req.SourceService,
+				RequestID: req.RequestID, CorrelationID: req.CorrelationID, CreatedAt: now,
+			}
+			if err := billingRepo.AppendEntry(ctx, repayment); err != nil {
+				return err
+			}
+			remainingRepayment -= repaid
+		}
+		if remainingRepayment != 0 {
+			return ErrBillingLedgerInvalid
+		}
 		if err := updateBillingAccount(ctx, billingRepo, account); err != nil {
 			return err
 		}
@@ -459,11 +501,11 @@ func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*To
 		return nil
 	})
 	if err != nil {
-		if replay, _ := findTopUpReplay(ctx, s.repo.Billing(), req); replay != nil {
-			return replay, nil
+		if replay, replayErr := findTopUpReplay(ctx, s.repo.Billing(), req); replayErr != nil || replay != nil {
+			return replay, replayErr
 		}
 		if sourceEntry, sourceErr := s.repo.Billing().FindEntryBySource(ctx, req.ExternalSourceType, req.ExternalSourceID); sourceErr == nil {
-			return topUpResultFromEntry(sourceEntry, req)
+			return topUpResultFromEntry(ctx, s.repo.Billing(), sourceEntry, req)
 		}
 		return nil, err
 	}
@@ -502,6 +544,23 @@ func (s *BillingWalletService) Reverse(ctx context.Context, chargeID, reason, ke
 		account, err := billingRepo.LockAccount(ctx, original.UserID)
 		if err != nil {
 			return err
+		}
+		debtPositions, attributedDebt, err := billingDebtPositions(ctx, billingRepo, original.UserID)
+		if err != nil {
+			return err
+		}
+		if attributedDebt != account.DebtCredits {
+			return ErrBillingLedgerInvalid
+		}
+		originalDebtOutstanding := int64(0)
+		for _, position := range debtPositions {
+			if position.ChargeID == original.ID {
+				originalDebtOutstanding = position.Outstanding
+				break
+			}
+		}
+		if originalDebtOutstanding > original.DebtCredits {
+			return ErrBillingLedgerInvalid
 		}
 		allocations, err := billingRepo.ListChargeAllocations(ctx, original.ID)
 		if err != nil {
@@ -568,9 +627,10 @@ func (s *BillingWalletService) Reverse(ctx context.Context, chargeID, reason, ke
 			})
 		}
 		if original.DebtCredits > 0 {
-			debtReduced := minInt64(account.DebtCredits, original.DebtCredits)
+			debtReduced := originalDebtOutstanding
 			paidRefund := original.DebtCredits - debtReduced
 			entry := reversalEntry(original.UserID, reversal, "debt", now)
+			entry.ChargeID = &original.ID
 			entry.DebtDelta = -debtReduced
 			entry.PaidDelta = paidRefund
 			account.DebtCredits -= debtReduced
@@ -718,6 +778,7 @@ func (s *BillingWalletService) ExpirePromotionalCredits(ctx context.Context, now
 			entry := &model.BillingWalletEntry{
 				ID: uuid.NewString(), UserID: account.UserID, EventKind: model.BillingWalletEventKindExpiry,
 				PromotionalDelta: -credits, LotID: &lot.ID, ResourceType: "credit_lot", ResourceID: lot.ID,
+				CatalogID: lot.CatalogID, RequestFingerprint: billingFingerprint("expiry", lot.ID),
 				IdempotencyScope: "expiry", IdempotencyKey: lot.ID, CreatedAt: now,
 			}
 			if err := billingRepo.AppendEntry(ctx, entry); err != nil {
@@ -809,10 +870,25 @@ func (s *BillingWalletService) ProcessSettlementOutbox(ctx context.Context, limi
 	processed := 0
 	for _, settlement := range claimed {
 		settleErr := s.applySettlement(ctx, settlement)
-		if settleErr != nil && isRetryableBillingDBError(settleErr) {
-			retryAt := now.Add(settlementRetryDelay(settlement.Attempts))
+		if settleErr != nil {
+			if errors.Is(settleErr, context.Canceled) || errors.Is(settleErr, context.DeadlineExceeded) {
+				return processed, settleErr
+			}
+			if isRetryableBillingDBError(settleErr) {
+				retryAt := now.Add(settlementRetryDelay(settlement.Attempts))
+				markErr := s.withTx(ctx, func(tx repository.Repository) error {
+					return tx.Billing().MarkSettlementRetry(ctx, settlement.ID, settlement.Attempts, retryAt, settleErr.Error())
+				})
+				if errors.Is(markErr, gorm.ErrRecordNotFound) {
+					continue
+				}
+				if markErr != nil {
+					return processed, markErr
+				}
+				continue
+			}
 			markErr := s.withTx(ctx, func(tx repository.Repository) error {
-				return tx.Billing().MarkSettlementRetry(ctx, settlement.ID, settlement.Attempts, retryAt, settleErr.Error())
+				return tx.Billing().MarkSettlementFailed(ctx, settlement.ID, settlement.Attempts, s.now().UTC(), settleErr.Error())
 			})
 			if errors.Is(markErr, gorm.ErrRecordNotFound) {
 				continue
@@ -820,6 +896,7 @@ func (s *BillingWalletService) ProcessSettlementOutbox(ctx context.Context, limi
 			if markErr != nil {
 				return processed, markErr
 			}
+			processed++
 			continue
 		}
 		markErr := s.withTx(ctx, func(tx repository.Repository) error {
@@ -891,8 +968,9 @@ func settlementRetryDelay(attempts int) time.Duration {
 	return time.Duration(1<<uint(attempts-1)) * time.Second
 }
 
-func validateAdmissionQuote(quote *model.BillingQuote, userID, catalogID, skuID string, price int64, fingerprint string, now time.Time) error {
-	if quote == nil || quote.UserID != userID || quote.CatalogID != catalogID || quote.SKUID != skuID || quote.PriceCredits != price || quote.RequestFingerprint != fingerprint {
+func validateAdmissionQuote(quote *model.BillingQuote, userID string, sku *model.BillingSKU, fingerprint string, now time.Time) error {
+	if quote == nil || sku == nil || quote.UserID != userID || quote.CatalogID != sku.CatalogID || quote.SKUID != sku.SKUID ||
+		quote.PriceCredits != sku.PriceCredits || quote.RequestFingerprint != fingerprint || string(quote.SKUSnapshot) != string(sku.Snapshot) {
 		return ErrBillingQuoteMismatch
 	}
 	if quote.ConsumedAt != nil {
@@ -936,6 +1014,7 @@ func newOperationCharge(req OperationChargeRequest, sku *model.BillingSKU, accep
 func chargeEntry(userID string, charge *model.BillingCharge, key string, now time.Time) *model.BillingWalletEntry {
 	return &model.BillingWalletEntry{
 		ID: uuid.NewString(), UserID: userID, EventKind: model.BillingWalletEventKindCharge, ChargeID: &charge.ID,
+		CatalogID: charge.CatalogID, RequestFingerprint: charge.RequestFingerprint,
 		ResourceType: charge.ResourceType, ResourceID: charge.ResourceID,
 		IdempotencyScope: "charge:" + charge.ID, IdempotencyKey: key,
 		ActorType: charge.ActorType, ActorID: charge.ActorID, SourceService: charge.SourceService,
@@ -980,20 +1059,121 @@ func findTopUpReplay(ctx context.Context, repo repository.BillingRepository, req
 	if err != nil {
 		return nil, err
 	}
-	return topUpResultFromEntry(entry, req)
+	return topUpResultFromEntry(ctx, repo, entry, req)
 }
 
-func topUpResultFromEntry(entry *model.BillingWalletEntry, req TopUpRequest) (*TopUpResult, error) {
-	credits, ok := checkedBillingAdd(entry.PaidDelta, -entry.DebtDelta)
-	if !ok || entry.UserID != req.UserID || entry.EventKind != model.BillingWalletEventKindTopUp || credits != req.Credits ||
+func topUpResultFromEntry(ctx context.Context, repo repository.BillingRepository, entry *model.BillingWalletEntry, req TopUpRequest) (*TopUpResult, error) {
+	if entry == nil || entry.UserID != req.UserID || entry.EventKind != model.BillingWalletEventKindTopUp || entry.PaidDelta < 0 || entry.DebtDelta != 0 ||
+		entry.CatalogID != req.CatalogID || entry.RequestFingerprint != req.RequestFingerprint ||
 		entry.SourceType == nil || *entry.SourceType != req.ExternalSourceType || entry.SourceID == nil || *entry.SourceID != req.ExternalSourceID {
+		return nil, ErrBillingConflict
+	}
+	entries, err := listAllBillingEntries(ctx, repo, entry.UserID)
+	if err != nil {
+		return nil, err
+	}
+	debtRepaid := int64(0)
+	for _, candidate := range entries {
+		if candidate.EventKind != model.BillingWalletEventKindDebtRepayment || candidate.ResourceType != "topup" || candidate.ResourceID != entry.ID {
+			continue
+		}
+		if candidate.DebtDelta >= 0 || candidate.ChargeID == nil || candidate.CatalogID != entry.CatalogID ||
+			candidate.RequestFingerprint != entry.RequestFingerprint || candidate.DebtDelta == math.MinInt64 {
+			return nil, ErrBillingLedgerInvalid
+		}
+		var ok bool
+		if debtRepaid, ok = checkedBillingAdd(debtRepaid, -candidate.DebtDelta); !ok {
+			return nil, ErrBillingLedgerInvalid
+		}
+	}
+	credits, ok := checkedBillingAdd(entry.PaidDelta, debtRepaid)
+	if !ok || credits != req.Credits {
 		return nil, ErrBillingConflict
 	}
 	lotID := ""
 	if entry.LotID != nil {
 		lotID = *entry.LotID
 	}
-	return &TopUpResult{EntryID: entry.ID, LotID: lotID, DebtRepaid: -entry.DebtDelta, PaidAdded: entry.PaidDelta}, nil
+	return &TopUpResult{EntryID: entry.ID, LotID: lotID, DebtRepaid: debtRepaid, PaidAdded: entry.PaidDelta}, nil
+}
+
+type billingDebtPosition struct {
+	ChargeID    string
+	Outstanding int64
+	CreatedAt   time.Time
+	EntryID     string
+}
+
+func billingDebtPositions(ctx context.Context, repo repository.BillingRepository, userID string) ([]billingDebtPosition, int64, error) {
+	entries, err := listAllBillingEntries(ctx, repo, userID)
+	if err != nil {
+		return nil, 0, err
+	}
+	positions := make(map[string]*billingDebtPosition)
+	for _, entry := range entries {
+		if entry.DebtDelta > 0 {
+			if entry.EventKind != model.BillingWalletEventKindDebtCreated || entry.ChargeID == nil || strings.TrimSpace(*entry.ChargeID) == "" {
+				return nil, 0, ErrBillingLedgerInvalid
+			}
+			position := positions[*entry.ChargeID]
+			if position == nil {
+				position = &billingDebtPosition{ChargeID: *entry.ChargeID, CreatedAt: entry.CreatedAt, EntryID: entry.ID}
+				positions[*entry.ChargeID] = position
+			}
+			var ok bool
+			if position.Outstanding, ok = checkedBillingAdd(position.Outstanding, entry.DebtDelta); !ok {
+				return nil, 0, ErrBillingLedgerInvalid
+			}
+		}
+	}
+	for _, entry := range entries {
+		if entry.DebtDelta >= 0 {
+			continue
+		}
+		if (entry.EventKind != model.BillingWalletEventKindDebtRepayment && entry.EventKind != model.BillingWalletEventKindReversal) ||
+			entry.ChargeID == nil || entry.DebtDelta == math.MinInt64 {
+			return nil, 0, ErrBillingLedgerInvalid
+		}
+		position := positions[*entry.ChargeID]
+		amount := -entry.DebtDelta
+		if position == nil || position.Outstanding < amount {
+			return nil, 0, ErrBillingLedgerInvalid
+		}
+		position.Outstanding -= amount
+	}
+	ordered := make([]billingDebtPosition, 0, len(positions))
+	var total int64
+	for _, position := range positions {
+		if position.Outstanding == 0 {
+			continue
+		}
+		var ok bool
+		if total, ok = checkedBillingAdd(total, position.Outstanding); !ok {
+			return nil, 0, ErrBillingLedgerInvalid
+		}
+		ordered = append(ordered, *position)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].CreatedAt.Equal(ordered[j].CreatedAt) {
+			return ordered[i].EntryID < ordered[j].EntryID
+		}
+		return ordered[i].CreatedAt.Before(ordered[j].CreatedAt)
+	})
+	return ordered, total, nil
+}
+
+func listAllBillingEntries(ctx context.Context, repo repository.BillingRepository, userID string) ([]model.BillingWalletEntry, error) {
+	entries := make([]model.BillingWalletEntry, 0)
+	for offset := 0; ; offset += 500 {
+		page, err := repo.ListEntriesByUser(ctx, userID, offset, 500)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, page...)
+		if len(page) < 500 {
+			return entries, nil
+		}
+	}
 }
 
 func lockOrCreateBillingAccount(ctx context.Context, repo repository.BillingRepository, userID string) (*model.BillingWalletAccount, error) {
@@ -1035,7 +1215,7 @@ func (s *BillingWalletService) withTx(ctx context.Context, fn func(repository.Re
 	var err error
 	for attempt := 0; attempt < 20; attempt++ {
 		err = s.repo.WithTx(ctx, fn)
-		if err == nil || !isRetryableSQLiteError(err) {
+		if err == nil || !isRetryableBillingDBError(err) {
 			return err
 		}
 		timer := time.NewTimer(time.Duration(attempt+1) * time.Millisecond)

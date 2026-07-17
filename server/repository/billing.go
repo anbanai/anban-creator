@@ -18,6 +18,7 @@ const (
 	billingSettlementStatusProcessing = "processing"
 	billingSettlementStatusRetry      = "retry"
 	billingSettlementStatusProcessed  = "processed"
+	billingSettlementStatusFailed     = "failed"
 	billingSettlementClaimLease       = 5 * time.Minute
 )
 
@@ -77,6 +78,7 @@ type BillingRepository interface {
 	ClaimSettlements(ctx context.Context, now time.Time, limit int) ([]model.BillingSettlementOutbox, error)
 	MarkSettlementProcessed(ctx context.Context, settlementID string, attempts int, processedAt time.Time) error
 	MarkSettlementRetry(ctx context.Context, settlementID string, attempts int, nextAttemptAt time.Time, lastError string) error
+	MarkSettlementFailed(ctx context.Context, settlementID string, attempts int, failedAt time.Time, lastError string) error
 
 	CreateReferralIssue(ctx context.Context, issue *model.BillingReferralIssue) error
 	FindReferralIssue(ctx context.Context, inviteeUserID, programID string) (*model.BillingReferralIssue, error)
@@ -564,6 +566,20 @@ func (r *billingRepository) MarkSettlementRetry(ctx context.Context, settlementI
 		Updates(map[string]any{
 			"status":          billingSettlementStatusRetry,
 			"next_attempt_at": nextAttemptAt,
+			"last_error":      lastError,
+			"processed_at":    nil,
+		})
+	return billingRequireOneRow(result)
+}
+
+func (r *billingRepository) MarkSettlementFailed(ctx context.Context, settlementID string, attempts int, failedAt time.Time, lastError string) error {
+	result := r.db.WithContext(ctx).
+		Model(&model.BillingSettlementOutbox{}).
+		Where("id = ? AND status = ? AND attempts = ?", settlementID, billingSettlementStatusProcessing, attempts).
+		Updates(map[string]any{
+			"status":          billingSettlementStatusFailed,
+			"failed_at":       failedAt,
+			"next_attempt_at": nil,
 			"last_error":      lastError,
 			"processed_at":    nil,
 		})

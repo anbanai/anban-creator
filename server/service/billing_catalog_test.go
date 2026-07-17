@@ -107,6 +107,44 @@ func TestBillingCatalogQuoteReplayAndConflict(t *testing.T) {
 	}
 }
 
+func TestBillingCatalogQuoteReplaySurvivesLatestCatalogRollover(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	firstBundle := testBillingBundle()
+	firstNow := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	firstService := NewBillingCatalogService(repo, &firstBundle, BillingCatalogOptions{Now: func() time.Time { return firstNow }})
+	if _, err := firstService.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	req := QuoteRequest{
+		UserID: "u1", Operation: "task.article", RequestFingerprint: billingFingerprint("rollover"),
+		IdempotencyScope: "quote", IdempotencyKey: "rollover",
+	}
+	first, err := firstService.CreateQuote(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secondBundle := testBillingBundle()
+	secondBundle.Products.CatalogID = "retail-test-v2"
+	secondBundle.Products.SKUs[0].PriceCredits++
+	secondNow := firstNow.Add(time.Hour)
+	secondService := NewBillingCatalogService(repo, &secondBundle, BillingCatalogOptions{Now: func() time.Time { return secondNow }})
+	if _, err := secondService.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := secondService.CreateQuote(ctx, req)
+	if err != nil || replay.ID != first.ID || replay.CatalogID != firstBundle.Products.CatalogID {
+		t.Fatalf("rollover replay = %+v, %v; want original %+v", replay, err, first)
+	}
+
+	conflict := req
+	conflict.Route = "different-route"
+	if _, err := secondService.CreateQuote(ctx, conflict); !errors.Is(err, ErrBillingConflict) {
+		t.Fatalf("rollover parameter drift error = %v, want conflict", err)
+	}
+}
+
 func newBillingServiceRepository(t *testing.T) repository.Repository {
 	t.Helper()
 	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared&_busy_timeout=10000"

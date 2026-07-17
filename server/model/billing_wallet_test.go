@@ -544,6 +544,33 @@ func TestBillingWalletEntryTopUpSourceIdentityConstraints(t *testing.T) {
 	}
 }
 
+func TestBillingWalletEntryTopUpAuditIdentityConstraints(t *testing.T) {
+	tests := []struct {
+		name        string
+		catalogID   string
+		fingerprint string
+	}{
+		{name: "missing catalog", fingerprint: strings.Repeat("a", 64)},
+		{name: "missing fingerprint", catalogID: "retail-v1"},
+		{name: "short fingerprint", catalogID: "retail-v1", fingerprint: strings.Repeat("a", 63)},
+		{name: "long fingerprint", catalogID: "retail-v1", fingerprint: strings.Repeat("a", 65)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openBillingModelTestDB(t)
+			if err := db.AutoMigrate(&BillingWalletEntry{}); err != nil {
+				t.Fatalf("AutoMigrate: %v", err)
+			}
+			entry := validPersistedDebtOnlyTopUpEntry()
+			entry.CatalogID = tt.catalogID
+			entry.RequestFingerprint = tt.fingerprint
+			if err := db.Create(&entry).Error; err == nil {
+				t.Fatalf("top-up with catalog %q and fingerprint length %d unexpectedly persisted", tt.catalogID, len(tt.fingerprint))
+			}
+		})
+	}
+}
+
 func TestBillingReferralIssueIdentityConstraint(t *testing.T) {
 	db := openBillingModelTestDB(t)
 	if err := db.AutoMigrate(&BillingReferralIssue{}); err != nil {
@@ -676,14 +703,16 @@ func validPersistedReversalCharge(originalID string) BillingCharge {
 
 func validPersistedDebtOnlyTopUpEntry() BillingWalletEntry {
 	return BillingWalletEntry{
-		ID:               uuid.NewString(),
-		UserID:           uuid.NewString(),
-		EventKind:        BillingWalletEventKindTopUp,
-		DebtDelta:        -100,
-		SourceType:       stringPointer("wechatpay"),
-		SourceID:         stringPointer(uuid.NewString()),
-		IdempotencyScope: "top-up",
-		IdempotencyKey:   uuid.NewString(),
+		ID:                 uuid.NewString(),
+		UserID:             uuid.NewString(),
+		EventKind:          BillingWalletEventKindTopUp,
+		DebtDelta:          -100,
+		CatalogID:          "retail-v1",
+		RequestFingerprint: strings.Repeat("d", 64),
+		SourceType:         stringPointer("wechatpay"),
+		SourceID:           stringPointer(uuid.NewString()),
+		IdempotencyScope:   "top-up",
+		IdempotencyKey:     uuid.NewString(),
 	}
 }
 
