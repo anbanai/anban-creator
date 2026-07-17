@@ -570,7 +570,7 @@ func createBootstrapAsset(t *testing.T, repo repository.Repository, id, userID, 
 	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
 		ID: id, UserID: userID, Purpose: purpose, StagingKey: stagingKey,
 		FileName: fileName, ContentType: "image/png", Size: size,
-		Status: model.UploadSessionFinalized, ExpiresAt: now.Add(time.Hour), AssetID: id, FinalizedAt: &now,
+		Status: model.UploadSessionFinalized, ExpiresAt: now.Add(time.Hour), FinalizationETag: "etag-" + id, AssetID: id, FinalizedAt: &now,
 	}); err != nil {
 		t.Fatalf("create upload session: %v", err)
 	}

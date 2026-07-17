@@ -750,9 +750,11 @@ func main() {
 		go startLocalClaimFallback(reclaimCtx, taskSvc, log)
 	}
 	if repo != nil && store != nil && store.Name() == "oss" {
-		uploadCleanupCtx, uploadCleanupCancel := context.WithCancel(context.Background())
-		defer uploadCleanupCancel()
-		service.StartUploadSessionCleanup(uploadCleanupCtx, store, repo.UploadSessions(), 30*time.Minute, log)
+		if finalStore, ok := store.(service.DirectUploadFinalizationStorage); ok {
+			uploadCleanupCtx, uploadCleanupCancel := context.WithCancel(context.Background())
+			defer uploadCleanupCancel()
+			service.StartUploadSessionCleanup(uploadCleanupCtx, finalStore, repo, 30*time.Minute, log)
+		}
 	}
 
 	// 15.4 Start ilink inbound poller and terminal notification worker.

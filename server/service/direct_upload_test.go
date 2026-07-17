@@ -27,6 +27,7 @@ type fakeDirectUploadStore struct {
 	deleteErrs  map[string]error
 	objects     map[string]*storage.ObjectInfo
 	statErr     error
+	statHook    func(context.Context, string)
 	promoteHook func(sourceKey, finalKey string)
 	promoteErr  error
 	promoted    []string
@@ -80,7 +81,10 @@ func (s *fakeDirectUploadStore) Delete(_ context.Context, key string) error {
 	}
 	return s.deleteErr
 }
-func (s *fakeDirectUploadStore) StatObject(_ context.Context, key string) (*storage.ObjectInfo, error) {
+func (s *fakeDirectUploadStore) StatObject(ctx context.Context, key string) (*storage.ObjectInfo, error) {
+	if s.statHook != nil {
+		s.statHook(ctx, key)
+	}
 	if s.statErr != nil {
 		return nil, s.statErr
 	}
@@ -107,6 +111,14 @@ func (r *fakeUploadSessionRepo) FindByID(context.Context, string) (*model.Upload
 }
 
 func (r *fakeUploadSessionRepo) ClaimFinalization(context.Context, string, string, time.Time, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeUploadSessionRepo) RecordFinalizationETag(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeUploadSessionRepo) ClaimFinalizationRecovery(context.Context, string, string, time.Time, time.Time) (bool, error) {
 	return false, nil
 }
 
@@ -231,6 +243,12 @@ func TestFinalizeUploadSessionCompletesAfterCopyBeforeDatabaseFailure(t *testing
 	if _, err := FinalizeUploadSession(t.Context(), store, repo, req); err == nil {
 		t.Fatal("first finalization unexpectedly succeeded")
 	}
+	failed, err := baseRepo.UploadSessions().FindByID(t.Context(), session.ID)
+	if err != nil || failed.FinalizationETag != "etag-session-retry" {
+		t.Fatalf("failed finalization fingerprint = %#v, %v", failed, err)
+	}
+	delete(store.objects, session.StagingKey)
+	req.Now = now.Add(2 * time.Hour)
 	asset, err := FinalizeUploadSession(t.Context(), store, repo, req)
 	if err != nil {
 		t.Fatalf("retry FinalizeUploadSession: %v", err)
@@ -240,6 +258,116 @@ func TestFinalizeUploadSessionCompletesAfterCopyBeforeDatabaseFailure(t *testing
 	}
 	if len(store.promoted) != 1 {
 		t.Fatalf("successful promotions = %#v, want one immutable copy", store.promoted)
+	}
+	finalized, err := baseRepo.UploadSessions().FindByID(t.Context(), session.ID)
+	if err != nil || finalized.Status != model.UploadSessionFinalized || finalized.AssetID != session.ID || finalized.FinalizationETag != "etag-session-retry" {
+		t.Fatalf("recovered upload session = %#v, %v", finalized, err)
+	}
+}
+
+func TestFinalizeUploadSessionRejectsUnverifiedExistingFinalObject(t *testing.T) {
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name        string
+		fingerprint string
+	}{
+		{name: "missing persisted fingerprint"},
+		{name: "mismatched persisted fingerprint", fingerprint: "etag-other"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newDirectUploadTestRepository(t)
+			session := &model.UploadSession{
+				ID: "unverified-final", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
+				StagingKey: "uploads/pending/user-1/unverified-final/ref.png", FileName: "ref.png",
+				ContentType: "image/png", Size: 1024, Status: model.UploadSessionPending,
+				ExpiresAt: now.Add(time.Hour), FinalizationETag: tt.fingerprint,
+			}
+			seedUploadSession(t, repo, session)
+			store := matchingUploadSessionStore(session)
+			finalKey := "assets/users/user-1/unverified-final/ref.png"
+			store.objects[finalKey] = &storage.ObjectInfo{Key: finalKey, Size: session.Size, ContentType: session.ContentType, ETag: "etag-unverified-final"}
+
+			_, err := FinalizeUploadSession(t.Context(), store, repo, FinalizeUploadRequest{
+				SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: now,
+			})
+			if !errors.Is(err, ErrUploadSessionObjectInvalid) {
+				t.Fatalf("FinalizeUploadSession error = %v, want ErrUploadSessionObjectInvalid", err)
+			}
+			if _, err := repo.Assets().FindByID(t.Context(), session.ID); !errors.Is(err, model.ErrAssetNotFound) {
+				t.Fatalf("unverified final object was adopted: %v", err)
+			}
+		})
+	}
+}
+
+func TestCleanupExpiredUploadSessionsRecoversPromotedFinalObject(t *testing.T) {
+	now := time.Date(2026, 7, 18, 10, 30, 0, 0, time.UTC)
+	baseRepo := newDirectUploadTestRepository(t)
+	repo := &failFirstUploadFinalizationTx{Repository: baseRepo, fail: true}
+	session := &model.UploadSession{
+		ID: "cleanup-recovery", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
+		StagingKey: "uploads/pending/user-1/cleanup-recovery/ref.png", FileName: "ref.png",
+		ContentType: "image/png", Size: 1024, Status: model.UploadSessionPending,
+		ExpiresAt: now.Add(time.Hour),
+	}
+	seedUploadSession(t, repo, session)
+	store := matchingUploadSessionStore(session)
+	if _, err := FinalizeUploadSession(t.Context(), store, repo, FinalizeUploadRequest{
+		SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: now,
+	}); err == nil {
+		t.Fatal("first finalization unexpectedly succeeded")
+	}
+	delete(store.objects, session.StagingKey)
+	cleanupAt := now.Add(2 * time.Hour)
+	cleaned, err := CleanupExpiredUploadSessions(t.Context(), store, baseRepo, cleanupAt, 10)
+	if err != nil {
+		t.Fatalf("CleanupExpiredUploadSessions: %v", err)
+	}
+	if cleaned != 0 {
+		t.Fatalf("expired sessions cleaned = %d, want recovery instead", cleaned)
+	}
+	found, err := baseRepo.UploadSessions().FindByID(t.Context(), session.ID)
+	if err != nil || found.Status != model.UploadSessionFinalized || found.AssetID != session.ID || found.FinalizationETag != "etag-cleanup-recovery" {
+		t.Fatalf("cleanup recovery session = %#v, %v", found, err)
+	}
+	asset, err := baseRepo.Assets().FindByID(t.Context(), session.ID)
+	if err != nil || asset.StorageKey != "assets/users/user-1/cleanup-recovery/ref.png" || asset.ETag != found.FinalizationETag {
+		t.Fatalf("cleanup recovery asset = %#v, %v", asset, err)
+	}
+	for _, key := range store.deleted {
+		if key == asset.StorageKey {
+			t.Fatalf("cleanup deleted immutable final object %q", key)
+		}
+	}
+	if len(store.promoted) != 1 {
+		t.Fatalf("promotions = %#v, want one", store.promoted)
+	}
+}
+
+func TestFinalizeUploadSessionBoundsRemoteOperationBelowLease(t *testing.T) {
+	now := time.Date(2026, 7, 18, 11, 0, 0, 0, time.UTC)
+	repo := newDirectUploadTestRepository(t)
+	session := &model.UploadSession{
+		ID: "bounded-finalization", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
+		StagingKey: "uploads/pending/user-1/bounded-finalization/ref.png", FileName: "ref.png",
+		ContentType: "image/png", Size: 1024, Status: model.UploadSessionPending, ExpiresAt: now.Add(time.Hour),
+	}
+	seedUploadSession(t, repo, session)
+	store := matchingUploadSessionStore(session)
+	sawBoundedContext := false
+	store.statHook = func(ctx context.Context, _ string) {
+		deadline, ok := ctx.Deadline()
+		if ok && time.Until(deadline) > 0 && time.Until(deadline) <= 46*time.Second {
+			sawBoundedContext = true
+		}
+	}
+	if _, err := FinalizeUploadSession(t.Context(), store, repo, FinalizeUploadRequest{
+		SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: now,
+	}); err != nil {
+		t.Fatalf("FinalizeUploadSession: %v", err)
+	}
+	if !sawBoundedContext {
+		t.Fatal("remote finalization calls did not receive a deadline below the lease")
 	}
 }
 
@@ -308,7 +436,7 @@ func TestCleanupExpiredUploadSessionsNeverDeletesFinalAsset(t *testing.T) {
 		{ID: "pending", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference, StagingKey: "uploads/pending/user-1/pending/ref.png", FileName: "ref.png", ContentType: "image/png", Size: 1, Status: model.UploadSessionPending, ExpiresAt: now.Add(-time.Hour)},
 		{ID: "finalizing", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference, StagingKey: "uploads/pending/user-1/finalizing/ref.png", FileName: "ref.png", ContentType: "image/png", Size: 1, Status: model.UploadSessionFinalizing, ExpiresAt: now.Add(-time.Hour), FinalizationToken: "stale", FinalizationClaimedAt: &stale},
 		{ID: "expiring", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference, StagingKey: "uploads/pending/user-1/expiring/ref.png", FileName: "ref.png", ContentType: "image/png", Size: 1, Status: model.UploadSessionExpiring, ExpiresAt: now.Add(-time.Hour), CleanupClaimID: "stale", CleanupClaimedAt: &stale},
-		{ID: "finalized", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference, StagingKey: "uploads/pending/user-1/finalized/ref.png", FileName: "ref.png", ContentType: "image/png", Size: 1, Status: model.UploadSessionFinalized, ExpiresAt: now.Add(-time.Hour), AssetID: "finalized"},
+		{ID: "finalized", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference, StagingKey: "uploads/pending/user-1/finalized/ref.png", FileName: "ref.png", ContentType: "image/png", Size: 1, Status: model.UploadSessionFinalized, ExpiresAt: now.Add(-time.Hour), FinalizationETag: "etag-final", AssetID: "finalized"},
 	}
 	for _, session := range sessions {
 		seedUploadSession(t, repo, session)
@@ -319,7 +447,7 @@ func TestCleanupExpiredUploadSessionsNeverDeletesFinalAsset(t *testing.T) {
 	}
 	store := &fakeDirectUploadStore{}
 
-	cleaned, err := CleanupExpiredUploadSessions(t.Context(), store, repo.UploadSessions(), now, 100)
+	cleaned, err := CleanupExpiredUploadSessions(t.Context(), store, repo, now, 100)
 	if err != nil {
 		t.Fatalf("CleanupExpiredUploadSessions: %v", err)
 	}
@@ -717,7 +845,7 @@ func TestCleanupExpiredUploadSessionsReopensClaimWhenDeleteFails(t *testing.T) {
 	seedUploadSession(t, repo, session)
 	store := &fakeDirectUploadStore{deleteErr: errors.New("temporary delete failure")}
 
-	if _, err := CleanupExpiredUploadSessions(t.Context(), store, repo.UploadSessions(), now, 10); err == nil {
+	if _, err := CleanupExpiredUploadSessions(t.Context(), store, repo, now, 10); err == nil {
 		t.Fatal("cleanup delete failure was ignored")
 	}
 	found, err := repo.UploadSessions().FindByID(t.Context(), session.ID)

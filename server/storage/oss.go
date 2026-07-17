@@ -141,8 +141,8 @@ func (p *OSSProvider) UploadURL(_ context.Context, key string, contentType strin
 }
 
 // StatObject fetches object metadata without downloading the object body.
-func (p *OSSProvider) StatObject(_ context.Context, key string) (*ObjectInfo, error) {
-	meta, err := p.bucket.GetObjectDetailedMeta(key)
+func (p *OSSProvider) StatObject(ctx context.Context, key string) (*ObjectInfo, error) {
+	meta, err := p.bucket.GetObjectDetailedMeta(key, oss.WithContext(ctx))
 	if err != nil {
 		var serviceErr oss.ServiceError
 		if errors.As(err, &serviceErr) && (serviceErr.StatusCode == http.StatusNotFound || serviceErr.Code == "NoSuchKey") {
@@ -163,10 +163,11 @@ func (p *OSSProvider) StatObject(_ context.Context, key string) (*ObjectInfo, er
 }
 
 // PromoteObject conditionally copies an OSS object into an immutable final key.
-func (p *OSSProvider) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) error {
+func (p *OSSProvider) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) error {
 	_, err := p.bucket.CopyObject(sourceKey, finalKey,
 		oss.CopySourceIfMatch(expectedETag),
 		oss.ForbidOverWrite(true),
+		oss.WithContext(ctx),
 	)
 	if err == nil {
 		return nil
@@ -264,8 +265,8 @@ func (p *OSSProvider) readObject(ctx context.Context, key string, maxBytes int64
 }
 
 // Delete removes an object from the OSS bucket.
-func (p *OSSProvider) Delete(_ context.Context, key string) error {
-	if err := p.bucket.DeleteObject(key); err != nil {
+func (p *OSSProvider) Delete(ctx context.Context, key string) error {
+	if err := p.bucket.DeleteObject(key, oss.WithContext(ctx)); err != nil {
 		return fmt.Errorf("oss delete object %s: %w", key, err)
 	}
 

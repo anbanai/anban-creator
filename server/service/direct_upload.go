@@ -35,6 +35,8 @@ const (
 	defaultDirectUploadTTLSeconds = 15 * 60
 	uploadSessionCleanupLease     = 5 * time.Minute
 	uploadFinalizationLease       = time.Minute
+	uploadFinalizationTimeout     = 45 * time.Second
+	uploadFinalizationCleanupTTL  = 5 * time.Second
 )
 
 var (
@@ -301,6 +303,9 @@ func FinalizeUploadSession(ctx context.Context, store DirectUploadFinalizationSt
 	if req.Now.IsZero() {
 		req.Now = time.Now()
 	}
+	operationCtx, operationCancel := context.WithTimeout(ctx, uploadFinalizationTimeout)
+	defer operationCancel()
+	ctx = operationCtx
 
 	session, err := repo.UploadSessions().FindByID(ctx, req.SessionID)
 	if err != nil {
@@ -315,18 +320,41 @@ func FinalizeUploadSession(ctx context.Context, store DirectUploadFinalizationSt
 	if session.Status == model.UploadSessionFinalized {
 		return loadFinalizedUploadSessionAsset(ctx, store, repo, session)
 	}
-	if session.Status == model.UploadSessionExpired || session.Status == model.UploadSessionExpiring {
-		return nil, ErrUploadSessionExpired
+
+	finalKey, err := finalizedUploadSessionKey(session)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUploadSessionObjectInvalid, err)
 	}
-	if !session.ExpiresAt.After(req.Now) {
-		return nil, ErrUploadSessionExpired
-	}
-	if session.Status != model.UploadSessionPending && session.Status != model.UploadSessionFinalizing {
-		return nil, ErrUploadSessionStateConflict
+
+	finalInfo, statErr := store.StatObject(ctx, finalKey)
+	finalExists := statErr == nil
+	switch {
+	case finalExists:
+		if strings.TrimSpace(session.FinalizationETag) == "" {
+			return nil, fmt.Errorf("%w: final object has no persisted fingerprint", ErrUploadSessionObjectInvalid)
+		}
+		if err := validateFinalUploadSessionObject(session, finalKey, session.FinalizationETag, finalInfo); err != nil {
+			return nil, err
+		}
+	case errors.Is(statErr, storage.ErrObjectNotFound):
+	default:
+		return nil, fmt.Errorf("%w: stat final upload object: %v", ErrUploadSessionUnavailable, statErr)
 	}
 
 	token := uuid.NewString()
-	claimed, err := repo.UploadSessions().ClaimFinalization(ctx, session.ID, token, req.Now, req.Now.Add(-uploadFinalizationLease))
+	claimStaleBefore := req.Now.Add(-uploadFinalizationLease)
+	var claimed bool
+	if finalExists && !(session.Status == model.UploadSessionPending && session.ExpiresAt.After(req.Now)) {
+		claimed, err = repo.UploadSessions().ClaimFinalizationRecovery(ctx, session.ID, token, req.Now, claimStaleBefore)
+	} else {
+		if session.Status == model.UploadSessionExpired || session.Status == model.UploadSessionExpiring || !session.ExpiresAt.After(req.Now) {
+			return nil, ErrUploadSessionExpired
+		}
+		if session.Status != model.UploadSessionPending && session.Status != model.UploadSessionFinalizing {
+			return nil, ErrUploadSessionStateConflict
+		}
+		claimed, err = repo.UploadSessions().ClaimFinalization(ctx, session.ID, token, req.Now, claimStaleBefore)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: claim upload finalization: %v", ErrUploadSessionUnavailable, err)
 	}
@@ -339,34 +367,35 @@ func FinalizeUploadSession(ctx context.Context, store DirectUploadFinalizationSt
 	}
 	committed := false
 	defer func() {
-		if !committed {
-			_, _ = repo.UploadSessions().ReleaseFinalization(context.WithoutCancel(ctx), session.ID, token)
+		if committed {
+			return
 		}
+		releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(ctx), uploadFinalizationCleanupTTL)
+		defer releaseCancel()
+		_, _ = repo.UploadSessions().ReleaseFinalization(releaseCtx, session.ID, token)
 	}()
 
-	finalKey, err := finalizedUploadSessionKey(session)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUploadSessionObjectInvalid, err)
-	}
-	stagingInfo, err := statUploadSessionObject(ctx, store, session.StagingKey, "staging")
-	if err != nil {
-		return nil, err
-	}
-	if err := validateUploadSessionObjectInfo(session, session.StagingKey, stagingInfo); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(stagingInfo.ETag) == "" {
-		return nil, fmt.Errorf("%w: staging object has no ETag", ErrUploadSessionObjectInvalid)
-	}
-
-	finalInfo, statErr := store.StatObject(ctx, finalKey)
-	switch {
-	case statErr == nil:
-		if err := validateFinalUploadSessionObject(session, finalKey, stagingInfo.ETag, finalInfo); err != nil {
+	if !finalExists {
+		stagingInfo, err := statUploadSessionObject(ctx, store, session.StagingKey, "staging")
+		if err != nil {
 			return nil, err
 		}
-	case errors.Is(statErr, storage.ErrObjectNotFound):
-		if err := store.PromoteObject(ctx, session.StagingKey, finalKey, stagingInfo.ETag); err != nil {
+		if err := validateUploadSessionObjectInfo(session, session.StagingKey, stagingInfo); err != nil {
+			return nil, err
+		}
+		verifiedETag := strings.TrimSpace(stagingInfo.ETag)
+		if verifiedETag == "" {
+			return nil, fmt.Errorf("%w: staging object has no ETag", ErrUploadSessionObjectInvalid)
+		}
+		recorded, recordErr := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, token, verifiedETag)
+		if recordErr != nil {
+			return nil, fmt.Errorf("%w: record upload fingerprint: %v", ErrUploadSessionUnavailable, recordErr)
+		}
+		if !recorded {
+			return nil, ErrUploadSessionStateConflict
+		}
+		session.FinalizationETag = verifiedETag
+		if err := store.PromoteObject(ctx, session.StagingKey, finalKey, verifiedETag); err != nil {
 			switch {
 			case errors.Is(err, storage.ErrPromotionPreconditionFailed):
 				return nil, fmt.Errorf("%w: staging object changed during finalization", ErrUploadSessionObjectInvalid)
@@ -379,11 +408,9 @@ func FinalizeUploadSession(ctx context.Context, store DirectUploadFinalizationSt
 		if err != nil {
 			return nil, err
 		}
-		if err := validateFinalUploadSessionObject(session, finalKey, stagingInfo.ETag, finalInfo); err != nil {
+		if err := validateFinalUploadSessionObject(session, finalKey, session.FinalizationETag, finalInfo); err != nil {
 			return nil, err
 		}
-	default:
-		return nil, fmt.Errorf("%w: stat final upload object: %v", ErrUploadSessionUnavailable, statErr)
 	}
 
 	asset := &model.Asset{
@@ -421,7 +448,9 @@ func FinalizeUploadSession(ctx context.Context, store DirectUploadFinalizationSt
 		return nil, fmt.Errorf("%w: persist finalized upload: %v", ErrUploadSessionUnavailable, err)
 	}
 	committed = true
-	_ = store.Delete(context.WithoutCancel(ctx), session.StagingKey)
+	deleteCtx, deleteCancel := context.WithTimeout(context.WithoutCancel(ctx), uploadFinalizationCleanupTTL)
+	defer deleteCancel()
+	_ = store.Delete(deleteCtx, session.StagingKey)
 	return asset, nil
 }
 
@@ -452,7 +481,7 @@ func loadFinalizedUploadSessionAsset(ctx context.Context, store DirectUploadFina
 func verifyUploadSessionAsset(session *model.UploadSession, asset *model.Asset) error {
 	finalKey, err := finalizedUploadSessionKey(session)
 	if err != nil || asset == nil || asset.ID != session.ID || asset.UserID != session.UserID || asset.Purpose != session.Purpose ||
-		asset.StorageKey != finalKey || asset.FileName != session.FileName || normalizeDirectUploadContentType(asset.ContentType) != normalizeDirectUploadContentType(session.ContentType) || asset.Size != session.Size || strings.TrimSpace(asset.ETag) == "" {
+		asset.StorageKey != finalKey || asset.FileName != session.FileName || normalizeDirectUploadContentType(asset.ContentType) != normalizeDirectUploadContentType(session.ContentType) || asset.Size != session.Size || strings.TrimSpace(session.FinalizationETag) == "" || strings.TrimSpace(asset.ETag) != strings.TrimSpace(session.FinalizationETag) {
 		return ErrUploadSessionObjectInvalid
 	}
 	return nil
@@ -699,9 +728,7 @@ func directUploadPurposeAllowed(purpose string, allowed []string) bool {
 	return false
 }
 
-func CleanupExpiredUploadSessions(ctx context.Context, store interface {
-	Delete(context.Context, string) error
-}, repo repository.UploadSessionRepository, before time.Time, limit int) (int, error) {
+func CleanupExpiredUploadSessions(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, before time.Time, limit int) (int, error) {
 	if store == nil || repo == nil {
 		return 0, nil
 	}
@@ -709,7 +736,7 @@ func CleanupExpiredUploadSessions(ctx context.Context, store interface {
 		limit = 100
 	}
 	claimStaleBefore := before.Add(-uploadSessionCleanupLease)
-	sessions, err := repo.FindForCleanup(ctx, before, claimStaleBefore, limit)
+	sessions, err := repo.UploadSessions().FindForCleanup(ctx, before, claimStaleBefore, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -718,8 +745,29 @@ func CleanupExpiredUploadSessions(ctx context.Context, store interface {
 		if session == nil {
 			continue
 		}
+		if strings.TrimSpace(session.FinalizationETag) != "" {
+			finalKey, keyErr := finalizedUploadSessionKey(session)
+			if keyErr != nil {
+				return cleaned, fmt.Errorf("%w: %v", ErrUploadSessionObjectInvalid, keyErr)
+			}
+			statCtx, statCancel := context.WithTimeout(ctx, uploadFinalizationTimeout)
+			_, finalErr := store.StatObject(statCtx, finalKey)
+			statCancel()
+			switch {
+			case finalErr == nil:
+				if _, finalizeErr := FinalizeUploadSession(ctx, store, repo, FinalizeUploadRequest{
+					SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: before,
+				}); finalizeErr != nil {
+					return cleaned, finalizeErr
+				}
+				continue
+			case errors.Is(finalErr, storage.ErrObjectNotFound):
+			default:
+				return cleaned, fmt.Errorf("%w: stat final upload object during cleanup: %v", ErrUploadSessionUnavailable, finalErr)
+			}
+		}
 		claimID := uuid.NewString()
-		claimed, err := repo.ClaimExpiration(ctx, session.ID, claimID, before, claimStaleBefore)
+		claimed, err := repo.UploadSessions().ClaimExpiration(ctx, session.ID, claimID, before, claimStaleBefore)
 		if err != nil {
 			return cleaned, err
 		}
@@ -727,7 +775,7 @@ func CleanupExpiredUploadSessions(ctx context.Context, store interface {
 			continue
 		}
 		if err := store.Delete(ctx, session.StagingKey); err != nil {
-			reopened, reopenErr := repo.ReopenExpiration(ctx, session.ID, claimID)
+			reopened, reopenErr := repo.UploadSessions().ReopenExpiration(ctx, session.ID, claimID)
 			if reopenErr != nil {
 				return cleaned, fmt.Errorf("delete expired upload session staging object: %w; reopen cleanup claim: %v", err, reopenErr)
 			}
@@ -736,7 +784,7 @@ func CleanupExpiredUploadSessions(ctx context.Context, store interface {
 			}
 			return cleaned, err
 		}
-		completed, err := repo.CompleteExpiration(ctx, session.ID, claimID, before)
+		completed, err := repo.UploadSessions().CompleteExpiration(ctx, session.ID, claimID, before)
 		if err != nil {
 			return cleaned, err
 		}

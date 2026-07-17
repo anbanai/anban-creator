@@ -32,6 +32,7 @@ type UploadSession struct {
 	ExpiresAt             time.Time  `gorm:"index;not null" json:"expires_at"`
 	FinalizationToken     string     `gorm:"type:char(36);index" json:"-"`
 	FinalizationClaimedAt *time.Time `gorm:"index" json:"-"`
+	FinalizationETag      string     `gorm:"column:finalization_etag;type:varchar(255);not null;default:''" json:"-"`
 	AssetID               string     `gorm:"type:char(36);index" json:"asset_id,omitempty"`
 	FinalizedAt           *time.Time `json:"finalized_at,omitempty"`
 	CleanupClaimID        string     `gorm:"type:char(36);index" json:"-"`

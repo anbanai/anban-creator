@@ -38,6 +38,9 @@ func seedUploadSessions(t *testing.T, repo repository.Repository, sessions ...*m
 		if session.Status == model.UploadSessionFinalized && session.AssetID == "" {
 			session.AssetID = session.ID
 		}
+		if session.Status == model.UploadSessionFinalized && session.FinalizationETag == "" {
+			session.FinalizationETag = "etag-" + session.ID
+		}
 		if err := repo.UploadSessions().Create(t.Context(), session); err != nil {
 			t.Fatalf("create upload session %s: %v", session.ID, err)
 		}
@@ -45,7 +48,7 @@ func seedUploadSessions(t *testing.T, repo repository.Repository, sessions ...*m
 			if err := repo.Assets().Create(t.Context(), &model.Asset{
 				ID: session.AssetID, UserID: session.UserID, Purpose: session.Purpose,
 				StorageKey: path.Join("assets/users", session.UserID, session.ID, session.FileName),
-				FileName:   session.FileName, ContentType: session.ContentType, Size: session.Size, ETag: "etag-" + session.ID,
+				FileName:   session.FileName, ContentType: session.ContentType, Size: session.Size, ETag: session.FinalizationETag,
 			}); err != nil {
 				t.Fatalf("create asset %s: %v", session.ID, err)
 			}
@@ -56,11 +59,11 @@ func seedUploadSessions(t *testing.T, repo repository.Repository, sessions ...*m
 func assertFinalizedAsset(t *testing.T, repo repository.Repository, id, wantKey string) {
 	t.Helper()
 	session, err := repo.UploadSessions().FindByID(t.Context(), id)
-	if err != nil || session.Status != model.UploadSessionFinalized || session.AssetID != id {
+	if err != nil || session.Status != model.UploadSessionFinalized || session.AssetID != id || session.FinalizationETag == "" {
 		t.Fatalf("finalized upload session %s = %#v, %v", id, session, err)
 	}
 	asset, err := repo.Assets().FindByID(t.Context(), id)
-	if err != nil || asset.StorageKey != wantKey {
+	if err != nil || asset.StorageKey != wantKey || asset.ETag != session.FinalizationETag {
 		t.Fatalf("finalized asset %s = %#v, %v; want key %q", id, asset, err, wantKey)
 	}
 }

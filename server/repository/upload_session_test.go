@@ -169,6 +169,118 @@ func TestUploadSessionCleanupReclaimsStaleLeaseAtBoundary(t *testing.T) {
 	}
 }
 
+func TestUploadSessionRecordsFinalizationETagWithLeaseToken(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC)
+	session := uploadSessionFixture("record-finalization-etag", now)
+	session.Status = model.UploadSessionFinalizing
+	session.FinalizationToken = "lease-current"
+	session.FinalizationClaimedAt = &now
+	if err := repo.UploadSessions().Create(ctx, session); err != nil {
+		t.Fatalf("create upload session: %v", err)
+	}
+
+	if recorded, err := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, "lease-old", "etag-verified"); err != nil || recorded {
+		t.Fatalf("stale token record = %v, %v; want false, nil", recorded, err)
+	}
+	if recorded, err := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, "lease-current", "etag-verified"); err != nil || !recorded {
+		t.Fatalf("current token record = %v, %v; want true, nil", recorded, err)
+	}
+	if released, err := repo.UploadSessions().ReleaseFinalization(ctx, session.ID, "lease-current"); err != nil || !released {
+		t.Fatalf("release finalization = %v, %v", released, err)
+	}
+	found, err := repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("find upload session: %v", err)
+	}
+	if found.Status != model.UploadSessionPending || found.FinalizationETag != "etag-verified" {
+		t.Fatalf("released session = %#v; want pending with retained fingerprint", found)
+	}
+}
+
+func TestUploadSessionFinalizationRecoveryClaimCAS(t *testing.T) {
+	now := time.Date(2026, 7, 18, 9, 30, 0, 0, time.UTC)
+	staleBefore := now.Add(-time.Minute)
+	tests := []struct {
+		name      string
+		mutate    func(*model.UploadSession)
+		wantClaim bool
+	}{
+		{name: "expired status", mutate: func(s *model.UploadSession) {
+			s.Status = model.UploadSessionExpired
+			s.ExpiredAt = ptrTime(now.Add(-time.Hour))
+		}, wantClaim: true},
+		{name: "pending expiry boundary", mutate: func(s *model.UploadSession) {
+			s.ExpiresAt = now
+		}, wantClaim: true},
+		{name: "unexpired pending uses normal claim", mutate: func(s *model.UploadSession) {
+			s.ExpiresAt = now.Add(time.Nanosecond)
+		}},
+		{name: "stale finalizing boundary", mutate: func(s *model.UploadSession) {
+			s.Status = model.UploadSessionFinalizing
+			s.FinalizationToken = "lease-old"
+			s.FinalizationClaimedAt = ptrTime(staleBefore)
+		}, wantClaim: true},
+		{name: "active finalizing lease", mutate: func(s *model.UploadSession) {
+			s.Status = model.UploadSessionFinalizing
+			s.FinalizationToken = "lease-active"
+			s.FinalizationClaimedAt = ptrTime(staleBefore.Add(time.Nanosecond))
+		}},
+		{name: "missing fingerprint", mutate: func(s *model.UploadSession) {
+			s.ExpiresAt = now
+			s.FinalizationETag = ""
+		}},
+		{name: "active expiring cleanup lease", mutate: func(s *model.UploadSession) {
+			s.Status = model.UploadSessionExpiring
+			s.CleanupClaimID = "cleanup-active"
+			s.CleanupClaimedAt = ptrTime(now)
+		}},
+		{name: "stale expiring cleanup lease", mutate: func(s *model.UploadSession) {
+			s.Status = model.UploadSessionExpiring
+			s.CleanupClaimID = "cleanup-stale"
+			s.CleanupClaimedAt = ptrTime(staleBefore)
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			repo := New(db)
+			session := uploadSessionFixture("recovery", now)
+			session.FinalizationETag = "etag-verified"
+			tt.mutate(session)
+			if err := repo.UploadSessions().Create(t.Context(), session); err != nil {
+				t.Fatalf("create upload session: %v", err)
+			}
+
+			claimed, err := repo.UploadSessions().ClaimFinalizationRecovery(t.Context(), session.ID, "lease-recovery", now, staleBefore)
+			if err != nil || claimed != tt.wantClaim {
+				t.Fatalf("ClaimFinalizationRecovery = %v, %v; want %v, nil", claimed, err, tt.wantClaim)
+			}
+			found, err := repo.UploadSessions().FindByID(t.Context(), session.ID)
+			if err != nil {
+				t.Fatalf("find upload session: %v", err)
+			}
+			if !tt.wantClaim {
+				if found.Status != session.Status || found.FinalizationToken != session.FinalizationToken || found.CleanupClaimID != session.CleanupClaimID {
+					t.Fatalf("rejected recovery mutated session: before=%#v after=%#v", session, found)
+				}
+				return
+			}
+			if found.Status != model.UploadSessionFinalizing || found.FinalizationToken != "lease-recovery" || found.FinalizationClaimedAt == nil || !found.FinalizationClaimedAt.Equal(now) || found.ExpiredAt != nil || found.CleanupClaimID != "" || found.CleanupClaimedAt != nil {
+				t.Fatalf("recovery claim state = %#v", found)
+			}
+			if completed, err := repo.UploadSessions().CompleteFinalization(t.Context(), session.ID, "lease-old", session.ID, now); err != nil || completed {
+				t.Fatalf("old token completed recovery claim: %v, %v", completed, err)
+			}
+		})
+	}
+}
+
+func ptrTime(value time.Time) *time.Time { return &value }
+
 func uploadSessionFixture(id string, now time.Time) *model.UploadSession {
 	return &model.UploadSession{
 		ID:          id,

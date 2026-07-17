@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/rs/zerolog"
 )
 
 type unboundedOnlyProvider struct{}
@@ -211,6 +213,59 @@ func TestOSSProviderPromoteObjectClassifiesStructuredFailures(t *testing.T) {
 	}
 }
 
+func TestOSSProviderFinalizationOperationsHonorContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
+		switch r.Method {
+		case http.MethodHead:
+			w.Header().Set("Content-Length", "1")
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("ETag", "etag-object")
+		case http.MethodPut:
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<CopyObjectResult><ETag>etag-object</ETag><LastModified>2026-07-18T00:00:00.000Z</LastModified></CopyObjectResult>`))
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(server.Close)
+	provider := newTestOSSProvider(t, server.URL)
+
+	tests := []struct {
+		name string
+		call func(context.Context) error
+	}{
+		{name: "metadata", call: func(ctx context.Context) error {
+			_, err := provider.StatObject(ctx, "object.png")
+			return err
+		}},
+		{name: "copy", call: func(ctx context.Context) error {
+			return provider.PromoteObject(ctx, "source.png", "final.png", "etag-object")
+		}},
+		{name: "delete", call: func(ctx context.Context) error {
+			return provider.Delete(ctx, "object.png")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer cancel()
+			started := time.Now()
+			err := tt.call(ctx)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("operation error = %v, want context deadline exceeded", err)
+			}
+			if elapsed := time.Since(started); elapsed >= 150*time.Millisecond {
+				t.Fatalf("operation ignored cancellation for %s", elapsed)
+			}
+		})
+	}
+}
+
 func newTestOSSProvider(t *testing.T, endpoint string) *OSSProvider {
 	t.Helper()
 	client, err := oss.New(endpoint, "access-key", "secret", oss.UseCname(true))
@@ -221,5 +276,6 @@ func newTestOSSProvider(t *testing.T, endpoint string) *OSSProvider {
 	if err != nil {
 		t.Fatalf("Bucket: %v", err)
 	}
-	return &OSSProvider{bucket: bucket}
+	logger := zerolog.Nop()
+	return &OSSProvider{bucket: bucket, logger: &logger}
 }

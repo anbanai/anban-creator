@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -42,6 +43,32 @@ func (r *uploadSessionRepository) ClaimFinalization(ctx context.Context, id, tok
 			"status":                  model.UploadSessionFinalizing,
 			"finalization_token":      token,
 			"finalization_claimed_at": claimedAt,
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *uploadSessionRepository) RecordFinalizationETag(ctx context.Context, id, token, etag string) (bool, error) {
+	etag = strings.TrimSpace(etag)
+	if etag == "" {
+		return false, nil
+	}
+	result := r.db.WithContext(ctx).Model(&model.UploadSession{}).
+		Where("id = ? AND status = ? AND finalization_token = ?", id, model.UploadSessionFinalizing, token).
+		Update("finalization_etag", etag)
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *uploadSessionRepository) ClaimFinalizationRecovery(ctx context.Context, id, token string, claimedAt, claimStaleBefore time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.UploadSession{}).
+		Where("id = ? AND finalization_etag <> '' AND (status = ? OR (status = ? AND expires_at <= ?) OR (status = ? AND finalization_claimed_at <= ?))",
+			id, model.UploadSessionExpired, model.UploadSessionPending, claimedAt, model.UploadSessionFinalizing, claimStaleBefore).
+		Updates(map[string]any{
+			"status":                  model.UploadSessionFinalizing,
+			"finalization_token":      token,
+			"finalization_claimed_at": claimedAt,
+			"cleanup_claim_id":        "",
+			"cleanup_claimed_at":      nil,
+			"expired_at":              nil,
 		})
 	return result.RowsAffected == 1, result.Error
 }

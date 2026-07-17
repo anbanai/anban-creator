@@ -8,7 +8,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func StartUploadSessionCleanup(ctx context.Context, store directUploadStorage, repo repository.UploadSessionRepository, interval time.Duration, logger *zerolog.Logger) {
+func StartUploadSessionCleanup(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, interval time.Duration, logger *zerolog.Logger) {
 	if store == nil || repo == nil {
 		return
 	}
