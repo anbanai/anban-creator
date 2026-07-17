@@ -20,6 +20,10 @@ const (
 	billingSettlementClaimLease       = 5 * time.Minute
 )
 
+// ErrBillingClaimRequiresTransaction means a MySQL settlement claim was
+// attempted outside Repository.WithTx.
+var ErrBillingClaimRequiresTransaction = errors.New("mysql billing settlement claim requires caller transaction")
+
 // BillingRepository provides transaction-aware persistence for the fixed-price
 // wallet. Balance and overdraft decisions belong to the billing service.
 type BillingRepository interface {
@@ -61,6 +65,8 @@ type BillingRepository interface {
 
 	EnqueueSettlement(ctx context.Context, settlement *model.BillingSettlementOutbox) error
 	FindSettlementByKey(ctx context.Context, scope, key string) (*model.BillingSettlementOutbox, error)
+	// ClaimSettlements must be called on txRepo.Billing() for MySQL. SQLite uses
+	// an atomic UPDATE ... RETURNING statement and can also run on the root repo.
 	ClaimSettlements(ctx context.Context, now time.Time, limit int) ([]model.BillingSettlementOutbox, error)
 	MarkSettlementProcessed(ctx context.Context, settlementID string, attempts int, processedAt time.Time) error
 	MarkSettlementRetry(ctx context.Context, settlementID string, attempts int, nextAttemptAt time.Time, lastError string) error
@@ -72,11 +78,16 @@ type BillingRepository interface {
 }
 
 type billingRepository struct {
-	db *gorm.DB
+	db               *gorm.DB
+	transactionBound bool
 }
 
 func newBillingRepository(db *gorm.DB) BillingRepository {
 	return &billingRepository{db: db}
+}
+
+func newTxBillingRepository(db *gorm.DB) BillingRepository {
+	return &billingRepository{db: db, transactionBound: true}
 }
 
 func (r *billingRepository) FindAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error) {
@@ -377,6 +388,9 @@ func (r *billingRepository) ClaimSettlements(ctx context.Context, now time.Time,
 	if dialect == "sqlite" {
 		return r.claimSQLiteSettlements(ctx, now, limit)
 	}
+	if !r.transactionBound {
+		return nil, ErrBillingClaimRequiresTransaction
+	}
 
 	claim := func(tx *gorm.DB) ([]model.BillingSettlementOutbox, error) {
 		var candidates []model.BillingSettlementOutbox
@@ -425,18 +439,10 @@ func (r *billingRepository) ClaimSettlements(ctx context.Context, now time.Time,
 		return claimed, nil
 	}
 
-	// DryRun renders the MySQL locking contract without opening a real SQL
-	// transaction. Production calls always execute select-and-mark atomically.
-	if r.db.DryRun {
-		return claim(r.db)
-	}
-	var claimed []model.BillingSettlementOutbox
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		claimed, err = claim(tx)
-		return err
-	})
-	return claimed, err
+	// MySQL row locks are meaningful only inside the caller's transaction. This
+	// repository is transaction-bound by Repository.WithTx and must not create a
+	// nested transaction/savepoint of its own.
+	return claim(r.db)
 }
 
 // SQLite has no row-level FOR UPDATE/SKIP LOCKED. A single UPDATE ... RETURNING

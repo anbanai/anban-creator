@@ -471,7 +471,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
 		ilinkBindings:           newIlinkBindingRepository(tx),
 		ilinkNotifications:      newIlinkNotificationRepository(tx),
-		billing:                 newBillingRepository(tx),
+		billing:                 newTxBillingRepository(tx),
 	}
 }
 

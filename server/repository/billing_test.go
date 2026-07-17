@@ -492,10 +492,51 @@ func setupBillingConcurrentSQLiteDB(t *testing.T) *gorm.DB {
 
 func TestBillingRepositorySettlementOutboxMySQLUsesSkipLocked(t *testing.T) {
 	db, logs := openBillingMySQLDryRunDB(t)
-	_, _ = newBillingRepository(db).ClaimSettlements(context.Background(), time.Now(), 10)
+	_, _ = newTxBillingRepository(db).ClaimSettlements(context.Background(), time.Now(), 10)
 	sql := logs.String()
 	if !strings.Contains(sql, "FROM `billing_settlement_outbox`") || !strings.Contains(sql, "FOR UPDATE SKIP LOCKED") {
 		t.Fatalf("MySQL settlement claim SQL contract invalid:\n%s", sql)
+	}
+}
+
+func TestBillingRepositoryMySQLClaimUsesCallerTransactionWithoutSavepoint(t *testing.T) {
+	db, mock := openBillingMySQLMockDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	errRollback := errors.New("rollback outer transaction")
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `billing_settlement_outbox` .*FOR UPDATE SKIP LOCKED").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "attempts", "created_at", "updated_at"}).
+			AddRow("settlement-mysql", "pending", 0, now.Add(-time.Minute), now.Add(-time.Minute)))
+	mock.ExpectExec("UPDATE `billing_settlement_outbox` SET .* WHERE id = .*").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectRollback()
+
+	err := repo.WithTx(ctx, func(txRepo Repository) error {
+		claimed, err := txRepo.Billing().ClaimSettlements(ctx, now, 1)
+		if err != nil {
+			return err
+		}
+		if len(claimed) != 1 || claimed[0].ID != "settlement-mysql" || claimed[0].Attempts != 1 {
+			t.Fatalf("claimed rows = %+v", claimed)
+		}
+		return errRollback
+	})
+	if !errors.Is(err, errRollback) {
+		t.Fatalf("WithTx error = %v, want rollback sentinel", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("MySQL transaction expectations: %v", err)
+	}
+}
+
+func TestBillingRepositoryRootMySQLClaimRequiresCallerTransaction(t *testing.T) {
+	db, _ := openBillingMySQLDryRunDB(t)
+	_, err := newBillingRepository(db).ClaimSettlements(context.Background(), time.Now(), 1)
+	if err == nil || !strings.Contains(err.Error(), "caller transaction") {
+		t.Fatalf("root MySQL claim error = %v, want caller transaction contract", err)
 	}
 }
 
@@ -547,6 +588,20 @@ func openBillingMySQLDryRunDB(t *testing.T) (*gorm.DB, *bytes.Buffer) {
 		t.Fatal(err)
 	}
 	return db, &logs
+}
+
+func openBillingMySQLMockDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db, mock
 }
 
 func billingLot(id, userID string, kind model.BillingCreditLotKind, available int64, created time.Time, expires *time.Time) model.BillingCreditLot {
