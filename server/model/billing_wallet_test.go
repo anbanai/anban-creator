@@ -190,7 +190,7 @@ func TestBillingChargeValidation(t *testing.T) {
 	originalID := uuid.NewString()
 	valid := BillingCharge{
 		Kind: BillingChargeKindTask, Status: BillingChargeStatusPosted,
-		PriceCredits: 100, PaidCredits: 60, PromotionalCredits: 30, DebtCredits: 10,
+		PriceCredits: 100, PaidCredits: 60, PromotionalCredits: 40,
 	}
 	tests := []struct {
 		name    string
@@ -202,7 +202,7 @@ func TestBillingChargeValidation(t *testing.T) {
 			name: "posted reversal uses positive exact magnitudes and original identity",
 			charge: BillingCharge{
 				Kind: BillingChargeKindReversal, Status: BillingChargeStatusPosted,
-				PriceCredits: 100, PaidCredits: 60, PromotionalCredits: 30, DebtCredits: 10,
+				PriceCredits: 100, PaidCredits: 60, PromotionalCredits: 40,
 				ReversalOfID: &originalID,
 			},
 		},
@@ -254,6 +254,31 @@ func TestBillingChargeValidation(t *testing.T) {
 			charge:  BillingCharge{Kind: BillingChargeKindTask, Status: BillingChargeStatusPosted, PriceCredits: math.MaxInt64, PaidCredits: math.MaxInt64, PromotionalCredits: 1},
 			wantErr: true,
 		},
+		{
+			name: "accepted operation may contain debt",
+			charge: BillingCharge{
+				Kind: BillingChargeKindOperation, Policy: "accepted_task_operation", Status: BillingChargeStatusPosted,
+				PriceCredits: 100, DebtCredits: 100,
+			},
+		},
+		{
+			name:    "task charge cannot contain debt",
+			charge:  BillingCharge{Kind: BillingChargeKindTask, Policy: "task_admission", Status: BillingChargeStatusPosted, PriceCredits: 100, DebtCredits: 100},
+			wantErr: true,
+		},
+		{
+			name:    "standalone operation cannot contain debt",
+			charge:  BillingCharge{Kind: BillingChargeKindOperation, Policy: "standalone_operation", Status: BillingChargeStatusPosted, PriceCredits: 100, DebtCredits: 100},
+			wantErr: true,
+		},
+		{
+			name: "reversal cannot contain debt",
+			charge: BillingCharge{
+				Kind: BillingChargeKindReversal, Policy: "reversal", Status: BillingChargeStatusPosted,
+				PriceCredits: 100, DebtCredits: 100, ReversalOfID: &originalID,
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -278,6 +303,7 @@ func TestBillingModelTableNames(t *testing.T) {
 		{BillingQuote{}, "billing_quotes"},
 		{BillingCharge{}, "billing_charges"},
 		{BillingChargeAllocation{}, "billing_charge_allocations"},
+		{BillingDebtAllocation{}, "billing_debt_allocations"},
 		{BillingSettlementOutbox{}, "billing_settlement_outbox"},
 		{BillingReferralIssue{}, "billing_referral_issues"},
 	}
@@ -300,6 +326,7 @@ func TestBillingAutoMigrateCreatesExactTablesAndIndexes(t *testing.T) {
 		"billing_charge_allocations",
 		"billing_charges",
 		"billing_credit_lots",
+		"billing_debt_allocations",
 		"billing_quotes",
 		"billing_referral_issues",
 		"billing_settlement_outbox",
@@ -337,6 +364,87 @@ func TestBillingAutoMigrateCreatesExactTablesAndIndexes(t *testing.T) {
 	}
 	if want := []string{"task_id", "charge_kind"}; !reflect.DeepEqual(gotTaskIndexColumns, want) {
 		t.Fatalf("task charge unique index columns = %v, want %v", gotTaskIndexColumns, want)
+	}
+}
+
+func TestBillingDebtAllocationPersistenceConstraints(t *testing.T) {
+	db := openBillingModelTestDB(t)
+	if err := db.AutoMigrate(&BillingDebtAllocation{}); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+	valid := BillingDebtAllocation{
+		ID: uuid.NewString(), UserID: uuid.NewString(), ChargeID: uuid.NewString(), EntryID: uuid.NewString(),
+		SourceEntryID: uuid.NewString(), Kind: BillingDebtAllocationKindRepayment, Credits: 100, CreatedAt: time.Now().UTC(),
+	}
+	if err := db.Create(&valid).Error; err != nil {
+		t.Fatalf("create allocation: %v", err)
+	}
+	for _, mutate := range []struct {
+		name string
+		fn   func(*BillingDebtAllocation)
+	}{
+		{name: "zero credits", fn: func(row *BillingDebtAllocation) { row.Credits = 0 }},
+		{name: "invalid kind", fn: func(row *BillingDebtAllocation) { row.Kind = "other" }},
+		{name: "empty user", fn: func(row *BillingDebtAllocation) { row.UserID = "" }},
+		{name: "empty charge", fn: func(row *BillingDebtAllocation) { row.ChargeID = "" }},
+		{name: "empty entry", fn: func(row *BillingDebtAllocation) { row.EntryID = "" }},
+		{name: "empty source", fn: func(row *BillingDebtAllocation) { row.SourceEntryID = "" }},
+	} {
+		t.Run(mutate.name, func(t *testing.T) {
+			row := valid
+			row.ID = uuid.NewString()
+			row.EntryID = uuid.NewString()
+			row.SourceEntryID = uuid.NewString()
+			mutate.fn(&row)
+			if err := db.Create(&row).Error; err == nil {
+				t.Fatalf("invalid allocation persisted: %+v", row)
+			}
+		})
+	}
+	duplicateEntry := valid
+	duplicateEntry.ID = uuid.NewString()
+	duplicateEntry.SourceEntryID = uuid.NewString()
+	if err := db.Create(&duplicateEntry).Error; err == nil {
+		t.Fatal("duplicate allocation entry identity persisted")
+	}
+	duplicateSourceCharge := valid
+	duplicateSourceCharge.ID = uuid.NewString()
+	duplicateSourceCharge.EntryID = uuid.NewString()
+	if err := db.Create(&duplicateSourceCharge).Error; err == nil {
+		t.Fatal("duplicate source/charge/kind allocation persisted")
+	}
+	if got, want := billingIndexColumns(t, db, "idx_billing_debt_allocation_source_charge"), []string{"source_entry_id", "charge_id", "kind"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("source allocation unique index = %v, want %v", got, want)
+	}
+}
+
+func TestBillingSettlementReverseReasonConstraint(t *testing.T) {
+	db := openBillingModelTestDB(t)
+	if err := db.AutoMigrate(&BillingSettlementOutbox{}); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+	reverse := BillingSettlementOutbox{
+		ID: uuid.NewString(), Action: BillingSettlementActionReverseTask,
+		ResourceType: "task", ResourceID: uuid.NewString(), ChargeID: stringPointer(uuid.NewString()),
+		IdempotencyScope: "settlement", IdempotencyKey: uuid.NewString(), Status: "pending",
+		RequestFingerprint: strings.Repeat("a", 64),
+	}
+	if err := db.Create(&reverse).Error; err == nil {
+		t.Fatal("reverse settlement without reason persisted")
+	}
+	reverse.ID = uuid.NewString()
+	reverse.IdempotencyKey = uuid.NewString()
+	reverse.Reason = "provider_error"
+	if err := db.Create(&reverse).Error; err != nil {
+		t.Fatalf("reverse settlement with reason: %v", err)
+	}
+	charge := reverse
+	charge.ID = uuid.NewString()
+	charge.Action = BillingSettlementActionChargeOperation
+	charge.Reason = ""
+	charge.IdempotencyKey = uuid.NewString()
+	if err := db.Create(&charge).Error; err != nil {
+		t.Fatalf("operation settlement without reason: %v", err)
 	}
 }
 
@@ -484,6 +592,46 @@ func TestBillingChargeDatabaseRejectsUnbalancedComponents(t *testing.T) {
 	}
 }
 
+func TestBillingChargeDatabaseRestrictsDebtToAcceptedOperations(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		kind    BillingChargeKind
+		policy  string
+		wantErr bool
+	}{
+		{name: "accepted operation", kind: BillingChargeKindOperation, policy: "accepted_task_operation"},
+		{name: "task", kind: BillingChargeKindTask, policy: "task_admission", wantErr: true},
+		{name: "standalone", kind: BillingChargeKindOperation, policy: "standalone_operation", wantErr: true},
+		{name: "reversal", kind: BillingChargeKindReversal, policy: "reversal", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openBillingModelTestDB(t)
+			if err := db.AutoMigrate(&BillingCharge{}); err != nil {
+				t.Fatalf("AutoMigrate: %v", err)
+			}
+			charge := validPersistedBillingCharge(uuid.NewString())
+			charge.Kind = tt.kind
+			charge.Policy = tt.policy
+			charge.PaidCredits = 0
+			charge.DebtCredits = charge.PriceCredits
+			if tt.kind == BillingChargeKindReversal {
+				originalID := uuid.NewString()
+				charge.ReversalOfID = &originalID
+				charge.TaskID = nil
+			}
+			if tt.policy == "accepted_task_operation" {
+				operationTaskID, attemptID, toolCallID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+				charge.OperationTaskID, charge.AttemptID, charge.ToolCallID = &operationTaskID, &attemptID, &toolCallID
+				charge.TaskID = nil
+			}
+			err := db.Create(&charge).Error
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("persist debt charge error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestBillingWalletEntryNonTopUpAllowsAbsentExternalSourceIdentity(t *testing.T) {
 	db := openBillingModelTestDB(t)
 	if err := db.AutoMigrate(&BillingWalletEntry{}); err != nil {
@@ -595,7 +743,7 @@ func TestBillingModelsExcludeLegacyAndProviderCostContracts(t *testing.T) {
 	models := []any{
 		BillingWalletAccount{}, BillingCreditLot{}, BillingWalletEntry{},
 		BillingCatalogVersion{}, BillingSKU{}, BillingQuote{}, BillingCharge{},
-		BillingChargeAllocation{}, BillingSettlementOutbox{}, BillingReferralIssue{},
+		BillingChargeAllocation{}, BillingDebtAllocation{}, BillingSettlementOutbox{}, BillingReferralIssue{},
 	}
 	forbiddenFieldFragments := []string{
 		"hold", "reserved", "reservation", "capture", "release", "payment",

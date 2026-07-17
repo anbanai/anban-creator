@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -145,7 +146,124 @@ func TestBillingCatalogQuoteReplaySurvivesLatestCatalogRollover(t *testing.T) {
 	}
 }
 
+func TestBillingCatalogPublishUsesSemanticJSONAndCompleteSKUEvidence(t *testing.T) {
+	t.Run("semantic JSON normalization", func(t *testing.T) {
+		repo, db := newBillingServiceRepositoryWithDB(t)
+		bundle := testBillingBundle()
+		now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+		svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return now }})
+		if _, err := svc.Publish(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := repo.Billing().FindCatalogVersion(context.Background(), bundle.Products.CatalogID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var catalogJSON any
+		if err := json.Unmarshal(catalog.Snapshot, &catalogJSON); err != nil {
+			t.Fatal(err)
+		}
+		indentedCatalog, err := json.MarshalIndent(catalogJSON, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&model.BillingCatalogVersion{}).Where("catalog_id = ?", catalog.CatalogID).Update("snapshot", indentedCatalog).Error; err != nil {
+			t.Fatal(err)
+		}
+		skus, err := repo.Billing().ListSKUsByCatalog(context.Background(), catalog.CatalogID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sku := range skus {
+			var skuJSON any
+			if err := json.Unmarshal(sku.Snapshot, &skuJSON); err != nil {
+				t.Fatal(err)
+			}
+			indentedSKU, err := json.MarshalIndent(skuJSON, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&model.BillingSKU{}).Where("id = ?", sku.ID).Update("snapshot", indentedSKU).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := svc.Publish(context.Background()); err != nil {
+			t.Fatalf("semantic replay: %v", err)
+		}
+	})
+
+	for _, tt := range []struct {
+		name   string
+		mutate func(*testing.T, repository.Repository, *gorm.DB, billing.Bundle)
+	}{
+		{
+			name: "missing SKU",
+			mutate: func(t *testing.T, repo repository.Repository, db *gorm.DB, bundle billing.Bundle) {
+				skus, err := repo.Billing().ListSKUsByCatalog(context.Background(), bundle.Products.CatalogID)
+				if err != nil || len(skus) == 0 {
+					t.Fatalf("list SKUs = %+v, %v", skus, err)
+				}
+				if err := db.Delete(&model.BillingSKU{}, "id = ?", skus[0].ID).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "extra SKU",
+			mutate: func(t *testing.T, _ repository.Repository, db *gorm.DB, bundle billing.Bundle) {
+				extra := model.BillingSKU{
+					ID: uuid.NewString(), CatalogID: bundle.Products.CatalogID, SKUID: "extra.v1", Operation: "extra",
+					PriceCredits: 1, Policy: "task_admission", Delivery: "task", Snapshot: []byte(`{"ID":"extra.v1"}`),
+				}
+				if err := db.Create(&extra).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "drifted SKU",
+			mutate: func(t *testing.T, repo repository.Repository, db *gorm.DB, bundle billing.Bundle) {
+				skus, err := repo.Billing().ListSKUsByCatalog(context.Background(), bundle.Products.CatalogID)
+				if err != nil || len(skus) == 0 {
+					t.Fatalf("list SKUs = %+v, %v", skus, err)
+				}
+				if err := db.Model(&model.BillingSKU{}).Where("id = ?", skus[0].ID).Update("price_credits", skus[0].PriceCredits+1).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, db := newBillingServiceRepositoryWithDB(t)
+			bundle := testBillingBundle()
+			now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+			svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return now }})
+			if _, err := svc.Publish(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			tt.mutate(t, repo, db, bundle)
+			if _, err := svc.Publish(context.Background()); !errors.Is(err, ErrBillingConflict) {
+				t.Fatalf("evidence drift error = %v, want conflict", err)
+			}
+		})
+	}
+}
+
+func TestSameJSONSemanticPreservesIntegerPrecision(t *testing.T) {
+	left := []byte(`{"price_credits":9007199254740992}`)
+	right := []byte(`{"price_credits":9007199254740993}`)
+	if sameJSONSemantic(left, right) {
+		t.Fatal("distinct int64 JSON values compared equal")
+	}
+}
+
 func newBillingServiceRepository(t *testing.T) repository.Repository {
+	t.Helper()
+	repo, _ := newBillingServiceRepositoryWithDB(t)
+	return repo
+}
+
+func newBillingServiceRepositoryWithDB(t *testing.T) (repository.Repository, *gorm.DB) {
 	t.Helper()
 	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared&_busy_timeout=10000"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -157,7 +275,7 @@ func newBillingServiceRepository(t *testing.T) repository.Repository {
 	}
 	repo := repository.New(db)
 	t.Cleanup(func() { _ = repo.Close() })
-	return repo
+	return repo, db
 }
 
 func testBillingBundle() billing.Bundle {
@@ -168,6 +286,10 @@ func testBillingBundle() billing.Bundle {
 			AcceptedTask:  billing.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
 			TopUp:         billing.TopUpPolicy{RepayDebtFirst: true},
 			Promotions:    billing.PromotionsPolicy{MayRepayDebt: false},
+			TaskFailureReversal: billing.TaskFailureReversalPolicy{
+				Enabled: true,
+				Reasons: []string{"platform_error", "provider_error", "execution_timeout", "infrastructure_cancelled"},
+			},
 		},
 		Products: billing.ProductCatalog{
 			CatalogID: "retail-test-v1", Currency: "credits",

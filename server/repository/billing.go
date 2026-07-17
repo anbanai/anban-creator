@@ -36,6 +36,7 @@ var (
 type BillingRepository interface {
 	FindAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error)
 	LockAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error)
+	EnsureAccount(ctx context.Context, userID string) error
 	CreateAccount(ctx context.Context, account *model.BillingWalletAccount) error
 	UpdateAccount(ctx context.Context, account *model.BillingWalletAccount, expectedVersion int64) error
 
@@ -55,6 +56,7 @@ type BillingRepository interface {
 	FindCatalogVersion(ctx context.Context, catalogID string) (*model.BillingCatalogVersion, error)
 	FindLatestPublishedCatalog(ctx context.Context) (*model.BillingCatalogVersion, error)
 	CreateSKUs(ctx context.Context, skus []model.BillingSKU) error
+	ListSKUsByCatalog(ctx context.Context, catalogID string) ([]model.BillingSKU, error)
 	FindSKU(ctx context.Context, catalogID, skuID string) (*model.BillingSKU, error)
 	FindSKUByOperation(ctx context.Context, catalogID, operation, route string) (*model.BillingSKU, error)
 
@@ -70,6 +72,11 @@ type BillingRepository interface {
 	FindChargeByTask(ctx context.Context, taskID string) (*model.BillingCharge, error)
 	FindChargeByOperation(ctx context.Context, taskID, attemptID, toolCallID, catalogID, skuID string) (*model.BillingCharge, error)
 	FindReversal(ctx context.Context, originalChargeID string) (*model.BillingCharge, error)
+	CreateDebtAllocation(ctx context.Context, allocation *model.BillingDebtAllocation) error
+	ListOutstandingDebtCharges(ctx context.Context, userID string) ([]BillingOutstandingDebtCharge, error)
+	GetOutstandingDebtForCharge(ctx context.Context, userID, chargeID string) (int64, error)
+	ListDebtAllocationsBySourceEntryID(ctx context.Context, userID, sourceEntryID string) ([]model.BillingDebtAllocation, error)
+	SumDebtAllocationsBySourceEntryID(ctx context.Context, userID, sourceEntryID string) (int64, error)
 
 	EnqueueSettlement(ctx context.Context, settlement *model.BillingSettlementOutbox) error
 	FindSettlementByKey(ctx context.Context, scope, key string) (*model.BillingSettlementOutbox, error)
@@ -84,6 +91,12 @@ type BillingRepository interface {
 	FindReferralIssue(ctx context.Context, inviteeUserID, programID string) (*model.BillingReferralIssue, error)
 	UpdateReferralIssue(ctx context.Context, issue *model.BillingReferralIssue) error
 	CountIssuedReferrals(ctx context.Context, inviterUserID, programID string) (int64, error)
+}
+
+type BillingOutstandingDebtCharge struct {
+	ChargeID           string
+	OutstandingCredits int64
+	CreatedAt          time.Time
 }
 
 type billingRepository struct {
@@ -119,6 +132,15 @@ func (r *billingRepository) LockAccount(ctx context.Context, userID string) (*mo
 		return nil, err
 	}
 	return &account, nil
+}
+
+func (r *billingRepository) EnsureAccount(ctx context.Context, userID string) error {
+	if !r.transactionBound {
+		return ErrBillingRequiresTransaction
+	}
+	return r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&model.BillingWalletAccount{UserID: userID}).Error
 }
 
 func (r *billingRepository) CreateAccount(ctx context.Context, account *model.BillingWalletAccount) error {
@@ -291,6 +313,15 @@ func (r *billingRepository) CreateSKUs(ctx context.Context, skus []model.Billing
 	return r.db.WithContext(ctx).Create(&skus).Error
 }
 
+func (r *billingRepository) ListSKUsByCatalog(ctx context.Context, catalogID string) ([]model.BillingSKU, error) {
+	var skus []model.BillingSKU
+	err := r.db.WithContext(ctx).
+		Where("catalog_id = ?", catalogID).
+		Order("id ASC").
+		Find(&skus).Error
+	return skus, err
+}
+
 func (r *billingRepository) FindSKU(ctx context.Context, catalogID, skuID string) (*model.BillingSKU, error) {
 	var sku model.BillingSKU
 	if err := r.db.WithContext(ctx).
@@ -423,7 +454,70 @@ func (r *billingRepository) FindReversal(ctx context.Context, originalChargeID s
 	return &charge, nil
 }
 
+func (r *billingRepository) CreateDebtAllocation(ctx context.Context, allocation *model.BillingDebtAllocation) error {
+	if !r.transactionBound {
+		return ErrBillingRequiresTransaction
+	}
+	return r.db.WithContext(ctx).Create(allocation).Error
+}
+
+func (r *billingRepository) ListOutstandingDebtCharges(ctx context.Context, userID string) ([]BillingOutstandingDebtCharge, error) {
+	allocations := r.debtAllocationTotals(ctx, userID)
+	var rows []BillingOutstandingDebtCharge
+	err := r.db.WithContext(ctx).
+		Table("billing_charges AS charges").
+		Select("charges.id AS charge_id, charges.debt_credits - COALESCE(allocations.allocated_credits, 0) AS outstanding_credits, charges.created_at").
+		Joins("LEFT JOIN (?) AS allocations ON allocations.charge_id = charges.id", allocations).
+		Where("charges.user_id = ? AND charges.charge_kind = ? AND charges.policy = ?", userID, model.BillingChargeKindOperation, "accepted_task_operation").
+		Where("charges.debt_credits > COALESCE(allocations.allocated_credits, 0)").
+		Order("charges.created_at ASC, charges.id ASC").
+		Scan(&rows).Error
+	return rows, err
+}
+
+func (r *billingRepository) GetOutstandingDebtForCharge(ctx context.Context, userID, chargeID string) (int64, error) {
+	allocations := r.debtAllocationTotals(ctx, userID)
+	var row BillingOutstandingDebtCharge
+	err := r.db.WithContext(ctx).
+		Table("billing_charges AS charges").
+		Select("charges.id AS charge_id, charges.debt_credits - COALESCE(allocations.allocated_credits, 0) AS outstanding_credits, charges.created_at").
+		Joins("LEFT JOIN (?) AS allocations ON allocations.charge_id = charges.id", allocations).
+		Where("charges.user_id = ? AND charges.id = ? AND charges.charge_kind = ? AND charges.policy = ?", userID, chargeID, model.BillingChargeKindOperation, "accepted_task_operation").
+		Take(&row).Error
+	return row.OutstandingCredits, err
+}
+
+func (r *billingRepository) ListDebtAllocationsBySourceEntryID(ctx context.Context, userID, sourceEntryID string) ([]model.BillingDebtAllocation, error) {
+	var allocations []model.BillingDebtAllocation
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND source_entry_id = ?", userID, sourceEntryID).
+		Order("created_at ASC, id ASC").
+		Find(&allocations).Error
+	return allocations, err
+}
+
+func (r *billingRepository) SumDebtAllocationsBySourceEntryID(ctx context.Context, userID, sourceEntryID string) (int64, error) {
+	var total int64
+	err := r.db.WithContext(ctx).
+		Model(&model.BillingDebtAllocation{}).
+		Select("COALESCE(SUM(credits), 0)").
+		Where("user_id = ? AND source_entry_id = ?", userID, sourceEntryID).
+		Scan(&total).Error
+	return total, err
+}
+
+func (r *billingRepository) debtAllocationTotals(ctx context.Context, userID string) *gorm.DB {
+	return r.db.WithContext(ctx).
+		Model(&model.BillingDebtAllocation{}).
+		Select("charge_id, SUM(credits) AS allocated_credits").
+		Where("user_id = ?", userID).
+		Group("charge_id")
+}
+
 func (r *billingRepository) EnqueueSettlement(ctx context.Context, settlement *model.BillingSettlementOutbox) error {
+	if !r.transactionBound {
+		return ErrBillingRequiresTransaction
+	}
 	return r.db.WithContext(ctx).Create(settlement).Error
 }
 
@@ -479,7 +573,6 @@ func (r *billingRepository) ClaimSettlements(ctx context.Context, now time.Time,
 					"status":          billingSettlementStatusProcessing,
 					"attempts":        gorm.Expr("attempts + 1"),
 					"next_attempt_at": nil,
-					"last_error":      "",
 					"processed_at":    nil,
 					"updated_at":      now,
 				})
@@ -492,7 +585,6 @@ func (r *billingRepository) ClaimSettlements(ctx context.Context, now time.Time,
 			candidates[i].Status = billingSettlementStatusProcessing
 			candidates[i].Attempts++
 			candidates[i].NextAttemptAt = nil
-			candidates[i].LastError = ""
 			candidates[i].ProcessedAt = nil
 			candidates[i].UpdatedAt = now
 			claimed = append(claimed, candidates[i])
@@ -514,22 +606,21 @@ func (r *billingRepository) claimSQLiteSettlements(ctx context.Context, now time
 	staleBefore := now.Add(-billingSettlementClaimLease)
 	var claimed []model.BillingSettlementOutbox
 	err := r.db.WithContext(ctx).Raw(`
-UPDATE billing_settlement_outbox
-SET status = ?,
-    attempts = attempts + 1,
-    next_attempt_at = NULL,
-    last_error = '',
-    processed_at = NULL,
-    updated_at = ?
-WHERE id IN (
-    SELECT id
-    FROM billing_settlement_outbox
-    WHERE (status IN (?, ?) AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
-       OR (status = ? AND updated_at <= ?)
-    ORDER BY created_at ASC, id ASC
-    LIMIT ?
-)
-RETURNING *`,
+	UPDATE billing_settlement_outbox
+	SET status = ?,
+	    attempts = attempts + 1,
+	    next_attempt_at = NULL,
+	    processed_at = NULL,
+	    updated_at = ?
+	WHERE id IN (
+	    SELECT id
+	    FROM billing_settlement_outbox
+	    WHERE (status IN (?, ?) AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+	       OR (status = ? AND updated_at <= ?)
+	    ORDER BY created_at ASC, id ASC
+	    LIMIT ?
+	)
+	RETURNING *`,
 		billingSettlementStatusProcessing, now,
 		billingSettlementStatusPending, billingSettlementStatusRetry, now,
 		billingSettlementStatusProcessing, staleBefore, limit,

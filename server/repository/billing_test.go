@@ -66,6 +66,29 @@ func TestBillingRepositoryAccessorParity(t *testing.T) {
 	}
 }
 
+func TestBillingRepositoryEnsureAccountRequiresTransactionAndIsIdempotent(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	if err := repo.Billing().EnsureAccount(ctx, "u-ensure"); !errors.Is(err, ErrBillingRequiresTransaction) {
+		t.Fatalf("root EnsureAccount error = %v", err)
+	}
+	if err := repo.WithTx(ctx, func(tx Repository) error {
+		if err := tx.Billing().EnsureAccount(ctx, "u-ensure"); err != nil {
+			return err
+		}
+		if err := tx.Billing().EnsureAccount(ctx, "u-ensure"); err != nil {
+			return err
+		}
+		account, err := tx.Billing().LockAccount(ctx, "u-ensure")
+		if err != nil || account.UserID != "u-ensure" {
+			t.Fatalf("ensured account = %+v, %v", account, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBillingRepositoryLockingSQLContracts(t *testing.T) {
 	db, logs := openBillingMySQLDryRunDB(t)
 	repo := newTxBillingRepository(db)
@@ -489,6 +512,15 @@ func TestBillingRepositoryCatalogSKUAndQuotePersistence(t *testing.T) {
 	if err := repo.CreateSKUs(ctx, skus); err != nil {
 		t.Fatalf("CreateSKUs: %v", err)
 	}
+	listed, err := repo.ListSKUsByCatalog(ctx, catalog.CatalogID)
+	if err != nil || len(listed) != len(skus) {
+		t.Fatalf("ListSKUsByCatalog = %+v, %v", listed, err)
+	}
+	for i := range listed {
+		if listed[i].SKUID != skus[i].SKUID {
+			t.Fatalf("listed SKU %d = %+v, want %+v", i, listed[i], skus[i])
+		}
+	}
 	foundCatalog, err := repo.FindCatalogVersion(ctx, catalog.CatalogID)
 	if err != nil || foundCatalog.CatalogID != catalog.CatalogID {
 		t.Fatalf("FindCatalogVersion = %+v, %v", foundCatalog, err)
@@ -682,12 +714,14 @@ func TestBillingRepositoryChargeReplayAndDatabaseIdentities(t *testing.T) {
 
 func TestBillingRepositorySettlementOutboxClaimRetryAndProcessedState(t *testing.T) {
 	db := setupTestDB(t)
-	repo := New(db).Billing()
+	rootRepo := New(db)
+	repo := rootRepo.Billing()
 	ctx := context.Background()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 
 	due1 := billingSettlement("settlement-1", "key-1", "pending", nil, now.Add(-2*time.Minute))
 	due2 := billingSettlement("settlement-2", "key-2", "retry", ptrTime(now.Add(-time.Minute)), now.Add(-time.Minute))
+	due2.LastError = "previous transient error"
 	future := billingSettlement("settlement-future", "key-future", "retry", ptrTime(now.Add(time.Minute)), now)
 	staleProcessing := billingSettlement("settlement-stale", "key-stale", "processing", nil, now.Add(-6*time.Minute))
 	staleProcessing.Attempts = 1
@@ -695,11 +729,13 @@ func TestBillingRepositorySettlementOutboxClaimRetryAndProcessedState(t *testing
 	freshProcessing := billingSettlement("settlement-processing", "key-processing", "processing", nil, now.Add(-4*time.Minute))
 	freshProcessing.UpdatedAt = now.Add(-4 * time.Minute)
 	for _, row := range []*model.BillingSettlementOutbox{due2, future, due1, staleProcessing, freshProcessing} {
-		if err := repo.EnqueueSettlement(ctx, row); err != nil {
+		if err := rootRepo.WithTx(ctx, func(tx Repository) error { return tx.Billing().EnqueueSettlement(ctx, row) }); err != nil {
 			t.Fatalf("EnqueueSettlement(%s): %v", row.ID, err)
 		}
 	}
-	if err := repo.EnqueueSettlement(ctx, billingSettlement("settlement-duplicate", "key-1", "pending", nil, now)); err == nil {
+	if err := rootRepo.WithTx(ctx, func(tx Repository) error {
+		return tx.Billing().EnqueueSettlement(ctx, billingSettlement("settlement-duplicate", "key-1", "pending", nil, now))
+	}); err == nil {
 		t.Fatal("duplicate settlement idempotency key unexpectedly succeeded")
 	}
 	found, err := repo.FindSettlementByKey(ctx, "settlement", "key-1")
@@ -719,7 +755,11 @@ func TestBillingRepositorySettlementOutboxClaimRetryAndProcessedState(t *testing
 		if row.ID == staleProcessing.ID {
 			wantAttempts = 2
 		}
-		if row.Status != "processing" || row.Attempts != wantAttempts || row.NextAttemptAt != nil || row.LastError != "" {
+		wantLastError := ""
+		if row.ID == due2.ID {
+			wantLastError = "previous transient error"
+		}
+		if row.Status != "processing" || row.Attempts != wantAttempts || row.NextAttemptAt != nil || row.LastError != wantLastError {
 			t.Errorf("claimed row = %+v", row)
 		}
 	}
@@ -727,8 +767,8 @@ func TestBillingRepositorySettlementOutboxClaimRetryAndProcessedState(t *testing
 	if err := db.First(&claimedRetry, "id = ?", due2.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if claimedRetry.NextAttemptAt != nil {
-		t.Fatalf("claimed retry retained stale next_attempt_at: %+v", claimedRetry)
+	if claimedRetry.NextAttemptAt != nil || claimedRetry.LastError != "previous transient error" {
+		t.Fatalf("claimed retry processing state = %+v", claimedRetry)
 	}
 
 	retryAt := now.Add(5 * time.Minute)
@@ -764,13 +804,73 @@ func TestBillingRepositorySettlementOutboxClaimRetryAndProcessedState(t *testing
 	}
 }
 
+func TestBillingRepositoryEnqueueSettlementRequiresCallerTransaction(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	row := billingSettlement("settlement-tx-only", "key-tx-only", "pending", nil, time.Now().UTC())
+	if err := repo.Billing().EnqueueSettlement(ctx, row); !errors.Is(err, ErrBillingRequiresTransaction) {
+		t.Fatalf("root EnqueueSettlement error = %v", err)
+	}
+	if _, err := repo.Billing().FindSettlementByKey(ctx, row.IdempotencyScope, row.IdempotencyKey); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("root enqueue emitted SQL or persisted row: %v", err)
+	}
+	if err := repo.WithTx(ctx, func(tx Repository) error { return tx.Billing().EnqueueSettlement(ctx, row) }); err != nil {
+		t.Fatalf("transactional enqueue: %v", err)
+	}
+}
+
+func TestBillingRepositoryDebtAllocationsProvideIndexedOutstandingBalances(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	chargeA := billingOperationCharge("debt-charge-a", "task-a", "attempt-a", "call-a", "key-a")
+	chargeA.PaidCredits, chargeA.DebtCredits, chargeA.PriceCredits, chargeA.CreatedAt = 0, 100, 100, now
+	chargeB := billingOperationCharge("debt-charge-b", "task-b", "attempt-b", "call-b", "key-b")
+	chargeB.PaidCredits, chargeB.DebtCredits, chargeB.PriceCredits, chargeB.CreatedAt = 0, 200, 200, now.Add(time.Second)
+	if err := repo.WithTx(ctx, func(tx Repository) error {
+		if err := tx.Billing().CreateCharge(ctx, chargeA, nil); err != nil {
+			return err
+		}
+		if err := tx.Billing().CreateCharge(ctx, chargeB, nil); err != nil {
+			return err
+		}
+		return tx.Billing().CreateDebtAllocation(ctx, &model.BillingDebtAllocation{
+			ID: "allocation-a", UserID: "u1", ChargeID: chargeA.ID, EntryID: "repayment-entry-a",
+			SourceEntryID: "topup-entry", Kind: model.BillingDebtAllocationKindRepayment, Credits: 40, CreatedAt: now.Add(2 * time.Second),
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	outstanding, err := repo.Billing().ListOutstandingDebtCharges(ctx, "u1")
+	if err != nil || len(outstanding) != 2 || outstanding[0].ChargeID != chargeA.ID || outstanding[0].OutstandingCredits != 60 ||
+		outstanding[1].ChargeID != chargeB.ID || outstanding[1].OutstandingCredits != 200 {
+		t.Fatalf("outstanding debt = %+v, %v", outstanding, err)
+	}
+	amount, err := repo.Billing().GetOutstandingDebtForCharge(ctx, "u1", chargeA.ID)
+	if err != nil || amount != 60 {
+		t.Fatalf("GetOutstandingDebtForCharge = %d, %v", amount, err)
+	}
+	allocations, err := repo.Billing().ListDebtAllocationsBySourceEntryID(ctx, "u1", "topup-entry")
+	if err != nil || len(allocations) != 1 || allocations[0].Credits != 40 {
+		t.Fatalf("ListDebtAllocationsBySourceEntryID = %+v, %v", allocations, err)
+	}
+	sum, err := repo.Billing().SumDebtAllocationsBySourceEntryID(ctx, "u1", "topup-entry")
+	if err != nil || sum != 40 {
+		t.Fatalf("SumDebtAllocationsBySourceEntryID = %d, %v", sum, err)
+	}
+	if err := repo.Billing().CreateDebtAllocation(ctx, &model.BillingDebtAllocation{}); !errors.Is(err, ErrBillingRequiresTransaction) {
+		t.Fatalf("root CreateDebtAllocation error = %v", err)
+	}
+}
+
 func TestBillingRepositorySettlementOutboxFailedStateIsTerminalAndFenced(t *testing.T) {
 	db := setupTestDB(t)
-	repo := New(db).Billing()
+	rootRepo := New(db)
+	repo := rootRepo.Billing()
 	ctx := context.Background()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	row := billingSettlement("settlement-failed", "key-failed", "pending", nil, now.Add(-time.Minute))
-	if err := repo.EnqueueSettlement(ctx, row); err != nil {
+	if err := rootRepo.WithTx(ctx, func(tx Repository) error { return tx.Billing().EnqueueSettlement(ctx, row) }); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err := repo.ClaimSettlements(ctx, now, 1)
@@ -800,10 +900,13 @@ func TestBillingRepositorySettlementOutboxFailedStateIsTerminalAndFenced(t *test
 
 func TestBillingRepositorySettlementOutboxConcurrentClaimsDoNotDuplicate(t *testing.T) {
 	db := setupBillingConcurrentSQLiteDB(t)
-	repo := New(db).Billing()
+	rootRepo := New(db)
+	repo := rootRepo.Billing()
 	ctx := context.Background()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	if err := repo.EnqueueSettlement(ctx, billingSettlement("settlement-only", "only-key", "pending", nil, now)); err != nil {
+	if err := rootRepo.WithTx(ctx, func(tx Repository) error {
+		return tx.Billing().EnqueueSettlement(ctx, billingSettlement("settlement-only", "only-key", "pending", nil, now))
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -874,9 +977,9 @@ func TestBillingRepositoryMySQLClaimUsesCallerTransactionWithoutSavepoint(t *tes
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT .* FROM `billing_settlement_outbox` WHERE .*status IN .*next_attempt_at IS NULL OR next_attempt_at <= .*status = .*updated_at <= .*ORDER BY created_at ASC, id ASC LIMIT .* FOR UPDATE SKIP LOCKED").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "attempts", "created_at", "updated_at"}).
-			AddRow("settlement-mysql", "pending", 0, now.Add(-time.Minute), now.Add(-time.Minute)))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE `billing_settlement_outbox` SET `attempts`=attempts + 1,`last_error`=?,`next_attempt_at`=?,`processed_at`=?,`status`=?,`updated_at`=? WHERE id = ? AND ((status IN (?,?) AND (next_attempt_at IS NULL OR next_attempt_at <= ?)) OR (status = ? AND updated_at <= ?))")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "attempts", "last_error", "created_at", "updated_at"}).
+			AddRow("settlement-mysql", "retry", 0, "previous transient error", now.Add(-time.Minute), now.Add(-time.Minute)))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE `billing_settlement_outbox` SET `attempts`=attempts + 1,`next_attempt_at`=?,`processed_at`=?,`status`=?,`updated_at`=? WHERE id = ? AND ((status IN (?,?) AND (next_attempt_at IS NULL OR next_attempt_at <= ?)) OR (status = ? AND updated_at <= ?))")).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE `billing_settlement_outbox` SET `last_error`=?,`next_attempt_at`=?,`processed_at`=?,`status`=?,`updated_at`=? WHERE id = ? AND status = ? AND attempts = ?")).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -887,10 +990,10 @@ func TestBillingRepositoryMySQLClaimUsesCallerTransactionWithoutSavepoint(t *tes
 		if err != nil {
 			return err
 		}
-		if len(claimed) != 1 || claimed[0].ID != "settlement-mysql" || claimed[0].Attempts != 1 {
+		if len(claimed) != 1 || claimed[0].ID != "settlement-mysql" || claimed[0].Attempts != 1 || claimed[0].LastError != "previous transient error" {
 			t.Fatalf("claimed rows = %+v", claimed)
 		}
-		if err := txRepo.Billing().MarkSettlementRetry(ctx, claimed[0].ID, claimed[0].Attempts, now.Add(time.Minute), "retry"); err != nil {
+		if err := txRepo.Billing().MarkSettlementProcessed(ctx, claimed[0].ID, claimed[0].Attempts, now); err != nil {
 			return err
 		}
 		return errRollback

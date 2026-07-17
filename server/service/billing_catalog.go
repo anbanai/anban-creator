@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -95,7 +96,11 @@ func (s *BillingCatalogService) Publish(ctx context.Context) (*model.BillingCata
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		existing, findErr := tx.Billing().FindCatalogVersion(ctx, catalog.CatalogID)
 		if findErr == nil {
-			if !sameCatalog(existing, catalog) {
+			matches, evidenceErr := sameCatalogEvidence(ctx, tx.Billing(), existing, catalog, skus)
+			if evidenceErr != nil {
+				return evidenceErr
+			}
+			if !matches {
 				return ErrBillingConflict
 			}
 			catalog = existing
@@ -113,7 +118,11 @@ func (s *BillingCatalogService) Publish(ctx context.Context) (*model.BillingCata
 		// immutable snapshot and accept it only when it is byte-identical.
 		existing, findErr := s.repo.Billing().FindCatalogVersion(ctx, catalog.CatalogID)
 		if findErr == nil {
-			if sameCatalog(existing, catalog) {
+			matches, evidenceErr := sameCatalogEvidence(ctx, s.repo.Billing(), existing, catalog, skus)
+			if evidenceErr != nil {
+				return nil, evidenceErr
+			}
+			if matches {
 				return existing, nil
 			}
 			return nil, ErrBillingConflict
@@ -225,7 +234,50 @@ func retailCatalogSnapshot(bundle billing.Bundle) (datatypes.JSON, error) {
 
 func sameCatalog(left, right *model.BillingCatalogVersion) bool {
 	return left != nil && right != nil && left.CatalogID == right.CatalogID && left.Currency == right.Currency &&
-		left.Status == right.Status && string(left.Snapshot) == string(right.Snapshot)
+		left.Status == right.Status && sameJSONSemantic(left.Snapshot, right.Snapshot)
+}
+
+func sameCatalogEvidence(ctx context.Context, repo repository.BillingRepository, existing, expected *model.BillingCatalogVersion, expectedSKUs []model.BillingSKU) (bool, error) {
+	if !sameCatalog(existing, expected) {
+		return false, nil
+	}
+	persisted, err := repo.ListSKUsByCatalog(ctx, existing.CatalogID)
+	if err != nil {
+		return false, err
+	}
+	if len(persisted) != len(expectedSKUs) {
+		return false, nil
+	}
+	expectedByID := make(map[string]model.BillingSKU, len(expectedSKUs))
+	for _, sku := range expectedSKUs {
+		expectedByID[sku.SKUID] = sku
+	}
+	for _, sku := range persisted {
+		want, ok := expectedByID[sku.SKUID]
+		if !ok || sku.CatalogID != want.CatalogID || sku.Operation != want.Operation || sku.PriceCredits != want.PriceCredits ||
+			sku.Policy != want.Policy || sku.Route != want.Route || sku.Delivery != want.Delivery || !sameJSONSemantic(sku.Snapshot, want.Snapshot) {
+			return false, nil
+		}
+		delete(expectedByID, sku.SKUID)
+	}
+	return len(expectedByID) == 0, nil
+}
+
+func sameJSONSemantic(left, right []byte) bool {
+	if !json.Valid(left) || !json.Valid(right) {
+		return false
+	}
+	var leftValue, rightValue any
+	leftDecoder := json.NewDecoder(bytes.NewReader(left))
+	leftDecoder.UseNumber()
+	rightDecoder := json.NewDecoder(bytes.NewReader(right))
+	rightDecoder.UseNumber()
+	if leftDecoder.Decode(&leftValue) != nil || rightDecoder.Decode(&rightValue) != nil {
+		return false
+	}
+	leftCanonical, leftErr := json.Marshal(leftValue)
+	rightCanonical, rightErr := json.Marshal(rightValue)
+	return leftErr == nil && rightErr == nil && string(leftCanonical) == string(rightCanonical)
 }
 
 func quoteMatchesRequest(existing *model.BillingQuote, req QuoteRequest) bool {

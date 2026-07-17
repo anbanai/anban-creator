@@ -46,9 +46,12 @@ const (
 
 type BillingSettlementAction string
 
+type BillingDebtAllocationKind string
+
 const (
-	BillingSettlementActionChargeOperation BillingSettlementAction = "charge_operation"
-	BillingSettlementActionReverseTask     BillingSettlementAction = "reverse_task"
+	BillingSettlementActionChargeOperation BillingSettlementAction   = "charge_operation"
+	BillingSettlementActionReverseTask     BillingSettlementAction   = "reverse_task"
+	BillingDebtAllocationKindRepayment     BillingDebtAllocationKind = "repayment"
 )
 
 // BillingWalletAccount is a rebuildable projection of a user's wallet.
@@ -249,7 +252,7 @@ type BillingCharge struct {
 	PriceCredits       int64               `gorm:"not null;check:chk_billing_charge_conservation,price_credits >= 0 AND price_credits = paid_credits + promotional_credits + debt_credits" json:"price_credits"`
 	PaidCredits        int64               `gorm:"not null;check:chk_billing_charge_paid,paid_credits >= 0" json:"paid_credits"`
 	PromotionalCredits int64               `gorm:"not null;check:chk_billing_charge_promotional,promotional_credits >= 0" json:"promotional_credits"`
-	DebtCredits        int64               `gorm:"not null;check:chk_billing_charge_debt,debt_credits >= 0" json:"debt_credits"`
+	DebtCredits        int64               `gorm:"not null;check:chk_billing_charge_debt,debt_credits >= 0;check:chk_billing_charge_debt_policy,debt_credits = 0 OR (charge_kind = 'operation' AND policy = 'accepted_task_operation')" json:"debt_credits"`
 	TaskID             *string             `gorm:"type:char(36);index;uniqueIndex:idx_billing_charge_task_identity,priority:1" json:"task_id,omitempty"`
 	OperationTaskID    *string             `gorm:"type:char(36);index;uniqueIndex:idx_billing_charge_tool_identity,priority:1" json:"operation_task_id,omitempty"`
 	AttemptID          *string             `gorm:"type:char(36);index;uniqueIndex:idx_billing_charge_tool_identity,priority:2" json:"attempt_id,omitempty"`
@@ -290,6 +293,9 @@ func (c BillingCharge) Validate() error {
 	if total != c.PriceCredits {
 		return fmt.Errorf("charge components must equal price credits")
 	}
+	if c.DebtCredits > 0 && (c.Kind != BillingChargeKindOperation || c.Policy != "accepted_task_operation") {
+		return fmt.Errorf("debt is allowed only for accepted-task operation charges")
+	}
 	return nil
 }
 
@@ -304,16 +310,32 @@ type BillingChargeAllocation struct {
 
 func (BillingChargeAllocation) TableName() string { return "billing_charge_allocations" }
 
+// BillingDebtAllocation is append-only indexed evidence attributing a debt
+// repayment entry to the accepted-operation charge whose debt it reduced.
+type BillingDebtAllocation struct {
+	ID            string                    `gorm:"type:char(36);primaryKey;check:chk_billing_debt_allocation_identity,TRIM(id) <> '' AND TRIM(user_id) <> '' AND TRIM(charge_id) <> '' AND TRIM(entry_id) <> '' AND TRIM(source_entry_id) <> ''" json:"id"`
+	UserID        string                    `gorm:"type:char(36);index:idx_billing_debt_allocation_user_charge,priority:1;not null" json:"user_id"`
+	ChargeID      string                    `gorm:"type:char(36);index:idx_billing_debt_allocation_user_charge,priority:2;uniqueIndex:idx_billing_debt_allocation_source_charge,priority:2;not null" json:"charge_id"`
+	EntryID       string                    `gorm:"type:char(36);uniqueIndex:idx_billing_debt_allocation_entry;not null" json:"entry_id"`
+	SourceEntryID string                    `gorm:"type:char(36);index:idx_billing_debt_allocation_source,priority:1;uniqueIndex:idx_billing_debt_allocation_source_charge,priority:1;not null" json:"source_entry_id"`
+	Kind          BillingDebtAllocationKind `gorm:"type:varchar(20);index:idx_billing_debt_allocation_source,priority:2;uniqueIndex:idx_billing_debt_allocation_source_charge,priority:3;not null;check:chk_billing_debt_allocation_kind,kind = 'repayment'" json:"kind"`
+	Credits       int64                     `gorm:"not null;check:chk_billing_debt_allocation_credits,credits > 0" json:"credits"`
+	CreatedAt     time.Time                 `gorm:"index" json:"created_at"`
+}
+
+func (BillingDebtAllocation) TableName() string { return "billing_debt_allocations" }
+
 // BillingSettlementOutbox stores retryable settlement intent state.
 type BillingSettlementOutbox struct {
 	ID                 string                  `gorm:"type:char(36);primaryKey" json:"id"`
-	Action             BillingSettlementAction `gorm:"type:varchar(32);index;not null" json:"action"`
+	Action             BillingSettlementAction `gorm:"type:varchar(32);index;not null;check:chk_billing_settlement_reverse_reason,action <> 'reverse_task' OR TRIM(reason) <> ''" json:"action"`
 	ResourceType       string                  `gorm:"type:varchar(40);index:idx_billing_settlement_resource,priority:1;not null" json:"resource_type"`
 	ResourceID         string                  `gorm:"type:varchar(128);index:idx_billing_settlement_resource,priority:2;not null" json:"resource_id"`
 	TaskID             *string                 `gorm:"type:char(36);index" json:"task_id,omitempty"`
 	AttemptID          *string                 `gorm:"type:char(36);index" json:"attempt_id,omitempty"`
 	ToolCallID         *string                 `gorm:"type:varchar(128);index" json:"tool_call_id,omitempty"`
 	ChargeID           *string                 `gorm:"type:char(36);index" json:"charge_id,omitempty"`
+	Reason             string                  `gorm:"type:varchar(128)" json:"reason,omitempty"`
 	CatalogID          string                  `gorm:"type:varchar(128);index" json:"catalog_id,omitempty"`
 	SKUID              string                  `gorm:"type:varchar(128);index" json:"sku_id,omitempty"`
 	IdempotencyScope   string                  `gorm:"type:varchar(80);uniqueIndex:idx_billing_settlement_outbox_idempotency,priority:1;not null" json:"idempotency_scope"`
