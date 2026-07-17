@@ -173,6 +173,67 @@ func TestBuildKubernetesJobUsesTaskResourceProfile(t *testing.T) {
 	}
 }
 
+func TestBuildKubernetesJobUsesPersistedRuntimeImage(t *testing.T) {
+	execution := testExecution()
+	execution.RuntimeProfile = model.PlatformMontage
+	execution.RuntimeImage = "registry.example.com/montage@sha256:run"
+	job := buildKubernetesJob(testJobConfig(), execution, testTask())
+	if job.Spec.Template.Spec.InitContainers[0].Image != execution.RuntimeImage ||
+		job.Spec.Template.Spec.Containers[0].Image != execution.RuntimeImage {
+		t.Fatalf("job did not use persisted runtime image: init=%q main=%q", job.Spec.Template.Spec.InitContainers[0].Image, job.Spec.Template.Spec.Containers[0].Image)
+	}
+}
+
+func TestBuildKubernetesJobConfigHashIncludesPersistedRuntimeImage(t *testing.T) {
+	first := testExecution()
+	first.RuntimeImage = "registry.example.com/content@sha256:first"
+	second := *first
+	second.RuntimeImage = "registry.example.com/content@sha256:second"
+	firstJob := buildKubernetesJob(testJobConfig(), first, testTask())
+	secondJob := buildKubernetesJob(testJobConfig(), &second, testTask())
+	if firstJob.Annotations[kubernetesObjectConfigHashLabel] == secondJob.Annotations[kubernetesObjectConfigHashLabel] {
+		t.Fatal("persisted runtime image did not affect Kubernetes Job config hash")
+	}
+}
+
+func TestKubernetesDispatcherValidatesPersistedRuntimeIdentity(t *testing.T) {
+	t.Run("missing identity", func(t *testing.T) {
+		execution := testExecution()
+		execution.RuntimeProfile = ""
+		execution.RuntimeImage = ""
+		_, err := testDispatcher(fake.NewSimpleClientset()).Dispatch(context.Background(), execution, testTask())
+		if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "runtime identity is required") {
+			t.Fatalf("Dispatch error = %v, want permanent missing runtime identity", err)
+		}
+	})
+
+	t.Run("initial mismatch", func(t *testing.T) {
+		execution := testExecution()
+		execution.RuntimeImage = "registry.example.com/other@sha256:mismatch"
+		_, err := testDispatcher(fake.NewSimpleClientset()).Dispatch(context.Background(), execution, testTask())
+		if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "initial runtime identity mismatch") {
+			t.Fatalf("Dispatch error = %v, want permanent initial runtime mismatch", err)
+		}
+	})
+
+	t.Run("resume preserves parent digest", func(t *testing.T) {
+		execution := testExecution()
+		execution.Attempt = 2
+		execution.ParentExecutionID = "parent-execution"
+		execution.RuntimeProfile = model.PlatformMontage
+		execution.RuntimeImage = "registry.example.com/montage@sha256:parent"
+		cfg := testJobConfig()
+		client := fake.NewSimpleClientset(
+			buildProjectMemoryPVC(cfg, testTask().ProjectID),
+			buildTaskWorkspacePVC(cfg, testTask()),
+		)
+		dispatcher := &kubernetesJobDispatcher{config: cfg, kube: client}
+		if _, err := dispatcher.Dispatch(context.Background(), execution, testTask()); err != nil {
+			t.Fatalf("Dispatch resumed persisted runtime: %v", err)
+		}
+	})
+}
+
 func TestKubernetesFinalizationTimeoutIsBoundedByGraceAndDeadline(t *testing.T) {
 	tests := []struct {
 		grace    int
@@ -1101,7 +1162,10 @@ func testJobConfig() kubernetesJobConfig {
 }
 
 func testExecution() *model.TaskExecution {
-	return &model.TaskExecution{ID: "execution-1", TaskID: "task-1", Namespace: "anban", JobName: kubernetesJobName("execution-1")}
+	return &model.TaskExecution{
+		ID: "execution-1", TaskID: "task-1", Attempt: 1, Namespace: "anban", JobName: kubernetesJobName("execution-1"),
+		RuntimeProfile: "content", RuntimeImage: testJobConfig().AgentImage,
+	}
 }
 
 func testTask() *model.Task {

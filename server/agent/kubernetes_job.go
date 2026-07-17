@@ -56,6 +56,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	allowPrivilegeEscalation := false
 	tokenExpiration := projectedTokenExpiration(activeDeadline)
 	resources := cfg.ResourcesForTask(taskType(task))
+	runtimeImage := strings.TrimSpace(execution.RuntimeImage)
 
 	labels := kubernetesExecutionLabels(execution, task)
 	job := &batchv1.Job{
@@ -86,7 +87,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 					},
 					InitContainers: []corev1.Container{{
 						Name:            kubernetesWorkspaceInitContainerName,
-						Image:           cfg.AgentImage,
+						Image:           runtimeImage,
 						ImagePullPolicy: corev1.PullAlways,
 						Command:         []string{"/bin/sh", "-c"},
 						Args: []string{
@@ -116,7 +117,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 					}},
 					Containers: []corev1.Container{{
 						Name:            kubernetesAgentContainerName,
-						Image:           cfg.AgentImage,
+						Image:           runtimeImage,
 						ImagePullPolicy: corev1.PullAlways,
 						Env: []corev1.EnvVar{
 							{Name: "HOME", Value: kubernetesRuntimeHomePath},

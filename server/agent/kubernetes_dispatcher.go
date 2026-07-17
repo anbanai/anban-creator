@@ -97,6 +97,9 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 	if execution.TaskID != task.ID {
 		return nil, NewPermanentDispatchError(fmt.Errorf("execution task identity mismatch: execution has %q, task has %q", execution.TaskID, task.ID))
 	}
+	if err := d.validateRuntime(execution, task); err != nil {
+		return nil, NewPermanentDispatchError(err)
+	}
 
 	allowPVCCreation := execution.ParentExecutionID == ""
 	if err := d.ensurePVC(ctx, buildProjectMemoryPVC(d.config, task.ProjectID), "project memory", task.ProjectID, allowPVCCreation); err != nil {
@@ -129,6 +132,25 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 		}
 	}
 	return &KubernetesRuntimeIdentity{Namespace: desiredJob.Namespace, JobName: desiredJob.Name}, nil
+}
+
+func (d *kubernetesJobDispatcher) validateRuntime(execution *model.TaskExecution, task *model.Task) error {
+	profile := strings.TrimSpace(execution.RuntimeProfile)
+	image := strings.TrimSpace(execution.RuntimeImage)
+	if profile == "" || image == "" {
+		return fmt.Errorf("execution runtime identity is required")
+	}
+	if execution.Attempt > 1 || strings.TrimSpace(execution.ParentExecutionID) != "" {
+		return nil
+	}
+	configured := d.ResolveRuntime(task.Type)
+	if profile != strings.TrimSpace(configured.Profile) || image != strings.TrimSpace(configured.Image) {
+		return fmt.Errorf(
+			"initial runtime identity mismatch: execution has %q %q, configured runtime is %q %q",
+			profile, image, strings.TrimSpace(configured.Profile), strings.TrimSpace(configured.Image),
+		)
+	}
+	return nil
 }
 
 func (d *kubernetesJobDispatcher) ensurePVC(ctx context.Context, desired *corev1.PersistentVolumeClaim, kind, identity string, allowCreation bool) error {
