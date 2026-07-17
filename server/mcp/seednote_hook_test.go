@@ -37,7 +37,7 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 		if err := validateSeednoteFinalizationContract(agentBody); err != nil {
 			t.Error(err)
 		}
-		if err := validateSeednoteArchiveContract(agentBody); err != nil {
+		if err := validateSeednoteDeliveryContract(agentBody); err != nil {
 			t.Error(err)
 		}
 		if err := validateSeednoteTemplateSaveContract(agentBody); err != nil {
@@ -104,6 +104,177 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 	})
 }
 
+func TestSeednoteRuntimeDeliveryContracts(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(wd, "..", ".."))
+	paths := []string{
+		filepath.Join(root, "claudecode", "agents", "seednote.md"),
+		filepath.Join(root, "codex", "agents", "seednote.toml"),
+		filepath.Join(root, "openclaw", "skills", "seednote", "SKILL.md"),
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			body := string(raw)
+			if err := validateSeednoteRuntimeDocument(body); err != nil {
+				t.Fatal(err)
+			}
+			t.Run("duplicate feedback", func(t *testing.T) {
+				if err := validateSeednoteRuntimeDocument(body + "\nsubmit_agent_feedback(task_id=$TASK_ID)\n"); err == nil {
+					t.Fatal("duplicate feedback unexpectedly passed")
+				}
+			})
+			t.Run("feedback before final report", func(t *testing.T) {
+				reportHeading := regexp.MustCompile(`(?m)^#{2,4} (?:步骤 [0-9]+：)?最终报告\s*$`).FindString(body)
+				mutated := swapFirstOccurrences(body, reportHeading, "submit_agent_feedback(")
+				if err := validateSeednoteRuntimeDocument(mutated); err == nil {
+					t.Fatal("pre-report feedback unexpectedly passed")
+				}
+			})
+		})
+	}
+}
+
+func TestSeednoteRuntimeDeliveryContractRejectsMutations(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Clean(filepath.Join(wd, "..", "..", "claudecode", "agents", "seednote.md"))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	valid := string(raw)
+	if err := validateSeednoteRuntimeDocument(valid); err != nil {
+		t.Fatalf("valid Seednote runtime rejected: %v", err)
+	}
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "delivery title no longer locked", body: strings.Replace(valid, "第一行等于已接受 `$FINAL_TITLE`", "第一行读取标题", 1)},
+		{name: "duplicate exhaustion code removed", body: strings.Replace(valid, "duplicate_title_exhausted", "duplicate_title", 1)},
+		{name: "failure state deleted too early", body: strings.Replace(valid, "恢复执行仅在所有交付校验通过后、即将报告成功前删除", "恢复执行开始时删除", 1)},
+		{name: "template failure becomes blocking", body: strings.Replace(valid, "不阻塞", "会阻塞", 1)},
+		{name: "template tags omit JSON stringify", body: strings.Replace(valid, "JSON.stringify(template-meta.tags)", "template-meta.tags", 1)},
+		{name: "template adds unsupported structure", body: strings.Replace(valid, "style_prompt=", "structure=viral-template.json, style_prompt=", 1)},
+		{name: "feedback precedes final report", body: swapFirstOccurrences(valid, "#### 步骤 12：最终报告", "submit_agent_feedback(")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateSeednoteRuntimeDocument(tt.body); err == nil {
+				t.Fatal("mutated Seednote runtime contract unexpectedly passed")
+			}
+		})
+	}
+}
+
+func validateSeednoteRuntimeDocument(body string) error {
+	titleSections := regexp.MustCompile(`(?m)^#{3,4} .*标题终稿锁定.*$`).FindAllStringIndex(body, -1)
+	if len(titleSections) == 0 {
+		return fmt.Errorf("Seednote runtime missing title finalization section")
+	}
+	for _, bounds := range titleSections {
+		section := sectionUntilHeading(body, bounds[0], regexp.MustCompile(`(?m)^#{3,4} .*?(?:图片生成|生成图片).*$`))
+		for _, required := range []string{
+			"finalize_task_title",
+			"$DIR/failure-state.json",
+			"recoverable_failure",
+			"title_finalization",
+			"error_code",
+			"message",
+			"resume_from",
+			"finalize_title_failed",
+			"duplicate_title_exhausted",
+		} {
+			if !strings.Contains(section, required) {
+				return fmt.Errorf("Seednote title finalization section missing %q", required)
+			}
+		}
+	}
+
+	deliverySections := regexp.MustCompile(`(?m)^#{3,4} 步骤 [0-9]+：交付校验\s*$`).FindAllStringIndex(body, -1)
+	if len(deliverySections) == 0 {
+		return fmt.Errorf("Seednote runtime missing delivery validation section")
+	}
+	for _, bounds := range deliverySections {
+		section := sectionUntilHeading(body, bounds[0], regexp.MustCompile(`(?m)^#{2,4} .*$`))
+		for _, required := range []string{"content.md", "FINAL_TITLE", "第一行", "等于", "所有交付校验通过后", "即将报告成功前", "删除", "failure-state.json"} {
+			if !strings.Contains(section, required) {
+				return fmt.Errorf("Seednote delivery section missing %q", required)
+			}
+		}
+		validationAt := strings.Index(section, "逐项校验")
+		deleteAt := strings.Index(section, "删除")
+		if validationAt < 0 || deleteAt <= validationAt {
+			return fmt.Errorf("Seednote must delete resolved failure state after delivery validations")
+		}
+	}
+
+	templateHeading := regexp.MustCompile(`(?m)^#{3,4} .*模板保存.*$`).FindStringIndex(body)
+	if templateHeading == nil {
+		return fmt.Errorf("Seednote runtime missing template save section")
+	}
+	templateSection := sectionUntilHeading(body, templateHeading[0], regexp.MustCompile(`(?m)^#{2,4} .*$`))
+	if strings.Contains(templateSection, "structure=") {
+		return fmt.Errorf("Seednote template save must not pass unsupported structure")
+	}
+	for _, required := range []string{
+		"$DIR/viral-template.json",
+		"$DIR/template-meta.json",
+		"type=",
+		"name=",
+		"category=",
+		"style_prompt=",
+		"tags=JSON.stringify(template-meta.tags)",
+		"重复",
+		"resume",
+		"同一 template ID",
+		"created",
+		"existing",
+		"warning",
+		"不阻塞",
+	} {
+		if !strings.Contains(templateSection, required) {
+			return fmt.Errorf("Seednote template save section missing %q", required)
+		}
+	}
+
+	reportHeading := regexp.MustCompile(`(?m)^#{2,4} (?:步骤 [0-9]+：)?最终报告\s*$`).FindStringIndex(body)
+	if reportHeading == nil {
+		return fmt.Errorf("Seednote runtime missing final report section")
+	}
+	reportAt := reportHeading[0]
+	feedbackCalls := regexp.MustCompile(`submit_agent_feedback\s*\(`).FindAllStringIndex(body, -1)
+	if len(feedbackCalls) != 1 {
+		return fmt.Errorf("Seednote runtime has %d submit_agent_feedback calls, want exactly one", len(feedbackCalls))
+	}
+	if feedbackCalls[0][0] <= reportAt {
+		return fmt.Errorf("Seednote feedback must occur after the final report")
+	}
+	return nil
+}
+
+func sectionUntilHeading(body string, start int, next *regexp.Regexp) string {
+	rest := body[start:]
+	currentLineEnd := strings.Index(rest, "\n")
+	if currentLineEnd < 0 {
+		return rest
+	}
+	afterHeading := rest[currentLineEnd+1:]
+	if nextAt := next.FindStringIndex(afterHeading); nextAt != nil {
+		return rest[:currentLineEnd+1+nextAt[0]]
+	}
+	return rest
+}
+
 func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -118,8 +289,8 @@ func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 	if err := validateSeednoteFinalizationContract(valid); err != nil {
 		t.Fatalf("valid seednote contract rejected: %v", err)
 	}
-	if err := validateSeednoteArchiveContract(valid); err != nil {
-		t.Fatalf("valid seednote archive contract rejected: %v", err)
+	if err := validateSeednoteDeliveryContract(valid); err != nil {
+		t.Fatalf("valid seednote delivery contract rejected: %v", err)
 	}
 
 	finalize := `finalize_task_title` + `(task_id=$TASK_ID, title=$FINAL_TITLE)`
@@ -136,15 +307,15 @@ func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 			body: strings.Replace(valid, `"message":"<原始错误摘要>"`, `"detail":"<原始错误摘要>"`, 1),
 		},
 		{
-			name: "archive runtime script missing",
-			body: strings.Replace(valid, `${CLAUDE_PLUGIN_ROOT}/scripts/archive-seednote-workspace.sh`, "missing-archive-script", 1),
+			name: "canonical result directory missing",
+			body: strings.Replace(valid, "成果目录（`$DIR`）", "成果目录", 1),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			finalizationErr := validateSeednoteFinalizationContract(tt.body)
-			archiveErr := validateSeednoteArchiveContract(tt.body)
-			if finalizationErr == nil && archiveErr == nil {
+			deliveryErr := validateSeednoteDeliveryContract(tt.body)
+			if finalizationErr == nil && deliveryErr == nil {
 				t.Fatal("mutated seednote finalization contract unexpectedly passed")
 			}
 		})
@@ -197,7 +368,7 @@ func validateSeednoteFinalizationContract(body string) error {
 			return fmt.Errorf("seednote failure-state contract missing %s", field)
 		}
 	}
-	for _, downstream := range []string{"image-plan", "cover", "prompts", "review", "compliance", "archive"} {
+	for _, downstream := range []string{"image-plan", "cover", "prompts", "review", "compliance", "交付"} {
 		if !strings.Contains(titleStage, downstream) {
 			return fmt.Errorf("seednote accepted title contract missing downstream %q", downstream)
 		}
@@ -229,24 +400,29 @@ func indexAfter(body, needle string, after int) int {
 	return after + 1 + relativeAt
 }
 
-func validateSeednoteArchiveContract(body string) error {
-	archiveStage, err := markdownSection(body, "#### 步骤 10：归档工作目录", "#### 步骤 11：模板保存")
+func validateSeednoteDeliveryContract(body string) error {
+	deliveryStage, err := markdownSection(body, "#### 步骤 10：交付校验", "#### 步骤 11：模板保存")
 	if err != nil {
 		return err
 	}
-	for _, forbidden := range []string{`mv "$DIR"/*`, "2>/dev/null", "TAR_EXCLUDES", "build_manifest()", "archive_failure", `ARCHIVE_RESULT=$(`} {
-		if strings.Contains(archiveStage, forbidden) {
-			return fmt.Errorf("seednote archive stage contains unsafe command %q", forbidden)
+	for _, forbidden := range []string{"archive_workspace", "$ARCHIVE_DIR", "archive-seednote-workspace.sh", `mv "$DIR"/*`, "ARCHIVE_SUCCEEDED"} {
+		if strings.Contains(body, forbidden) {
+			return fmt.Errorf("seednote workflow contains legacy archive term %q", forbidden)
 		}
 	}
 	for _, required := range []string{
-		`${CLAUDE_PLUGIN_ROOT}/scripts/archive-seednote-workspace.sh`, "Bash tool 直接", "stdout JSON 原样", "退出码", "Bash tool result", "候选级 reservation", "不进行 TTL 抢占", "status", "code", "message", "archive_dir",
-		`"status":"recoverable_failure"`, `"stage":"archive"`, `"error_code":`, `"message":`, `"resume_from":"archive"`,
-		"非零", "保留 source", "停止", "不得执行步骤 11", "不得提交成功反馈",
+		"`$DIR/content.md`",
+		"逐项校验",
+		"verification.passed=true",
+		"failure-state.json",
+		"仅在所有交付校验通过后、即将报告成功前删除",
 	} {
-		if !strings.Contains(archiveStage, required) {
-			return fmt.Errorf("seednote archive protocol missing %q", required)
+		if !strings.Contains(deliveryStage, required) {
+			return fmt.Errorf("seednote delivery validation missing %q", required)
 		}
+	}
+	if !strings.Contains(body, "成果目录（`$DIR`）") {
+		return fmt.Errorf("seednote final report must identify 成果目录（`$DIR`）")
 	}
 	return nil
 }
@@ -264,10 +440,13 @@ func validateSeednoteTemplateSaveContract(body string) error {
 			return fmt.Errorf("seednote save_template missing schema field %q", field)
 		}
 	}
-	for _, phrase := range []string{"ARCHIVE_SUCCEEDED=true", "重复", "resume", "同一 template ID", "created", "existing"} {
+	for _, phrase := range []string{"`$DIR/viral-template.json`", "`$DIR/template-meta.json`", "重复", "resume", "同一 template ID", "created", "existing"} {
 		if !strings.Contains(templateStage, phrase) {
 			return fmt.Errorf("seednote template save contract missing %q", phrase)
 		}
+	}
+	if strings.Contains(templateStage, "ARCHIVE_SUCCEEDED") {
+		return fmt.Errorf("seednote template save must not depend on archive state")
 	}
 	return nil
 }

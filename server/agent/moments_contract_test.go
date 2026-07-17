@@ -19,7 +19,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		`list_projects(platform="moments")`,
 		`get_project_profile(project_id="$PROJECT_ID", scope="moments", task_id="$TASK_ID")`,
 		`prepare_workspace(content_type="moments", task_id=$TASK_ID)`,
-		`archive_workspace(content_type="moments"`,
+		"$DIR",
 		"material-analysis.md",
 		"content.md",
 		"quality-review.md",
@@ -28,7 +28,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 			t.Fatalf("claudecode moments agent missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card"} {
+	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card", "archive_workspace", "$ARCHIVE_DIR"} {
 		if strings.Contains(claudeAgent, forbidden) {
 			t.Fatalf("claudecode moments agent still contains removed visual handoff %q", forbidden)
 		}
@@ -42,13 +42,13 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		`list_projects(platform="moments")`,
 		`get_project_profile(project_id="$PROJECT_ID", scope="moments", task_id="$TASK_ID")`,
 		`prepare_workspace(content_type="moments", task_id=$TASK_ID)`,
-		`archive_workspace(content_type="moments"`,
+		"$DIR",
 	} {
 		if !strings.Contains(codexAgent, want) {
 			t.Fatalf("codex moments agent missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card"} {
+	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card", "archive_workspace", "$ARCHIVE_DIR"} {
 		if strings.Contains(codexAgent, forbidden) {
 			t.Fatalf("codex moments agent still contains removed visual handoff %q", forbidden)
 		}
@@ -97,13 +97,17 @@ func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 
 	openclawHooks := readRepoFile(t, filepath.Join(root, "openclaw", "src", "hooks", "handler.ts"))
 	for _, want := range []string{
-		`case "moments":`,
-		"summarizeMomentsDelivery",
-		"material-analysis.md",
-		"quality-review.md",
+		`case "publish_draft":`,
+		`case "draft":`,
+		"summarizePublish",
 	} {
 		if !strings.Contains(openclawHooks, want) {
-			t.Fatalf("openclaw hooks missing moments delivery term %q", want)
+			t.Fatalf("openclaw hooks missing publication summary term %q", want)
+		}
+	}
+	for _, forbidden := range []string{`case "moments":`, "summarizeMomentsDelivery", "summarizeArchive"} {
+		if strings.Contains(openclawHooks, forbidden) {
+			t.Fatalf("openclaw hooks still contain removed workspace summary term %q", forbidden)
 		}
 	}
 }

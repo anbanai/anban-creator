@@ -341,9 +341,9 @@ func TestSeednoteAgentsTreatImageFailuresAsRecoverableFailedState(t *testing.T) 
 		"failure-state.json",
 		"停止在图片阶段",
 		"不得提前删除",
-		"archive_workspace",
 	}
 	forbidden := []string{
+		"archive_workspace",
 		"单张内容图失败时重试一次，仍失败则跳过",
 		"单张内容图生成失败 | 重试一次，仍失败则跳过",
 		"封面失败两次后请求用户协助",

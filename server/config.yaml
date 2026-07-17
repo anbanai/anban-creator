@@ -479,7 +479,7 @@ claude:
   max_turns:
     moments: 25
     viral_analysis: 30
-    # 热门内容研究、多图生成与归档需要更完整的 Agent 工具调用预算。
+    # 热门内容研究、多图生成与交付需要更完整的 Agent 工具调用预算。
     seednote: 100
     article: 60
     videocreator: 80
