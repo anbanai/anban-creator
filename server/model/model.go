@@ -30,5 +30,15 @@ func AutoMigrate(db *gorm.DB) error {
 		&AgentFeedback{},
 		&IlinkBinding{},
 		&IlinkNotification{},
+		&BillingWalletAccount{},
+		&BillingCreditLot{},
+		&BillingWalletEntry{},
+		&BillingCatalogVersion{},
+		&BillingSKU{},
+		&BillingQuote{},
+		&BillingCharge{},
+		&BillingChargeAllocation{},
+		&BillingSettlementOutbox{},
+		&BillingReferralIssue{},
 	)
 }
