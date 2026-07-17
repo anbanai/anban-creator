@@ -281,7 +281,7 @@ func main() {
 	var viralAnalysisSvc *service.ViralAnalysisService
 	var posterSvc *service.PosterService
 	var asynqClient *scheduler.AsynqClient
-	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
+	workspaceSvc := service.NewWorkspaceService()
 	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalog)
 	videoCreditMultiplier := cfg.Billing.CreditsPerCNY
 	if videoCreditMultiplier <= 0 {
