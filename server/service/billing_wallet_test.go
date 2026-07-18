@@ -696,6 +696,184 @@ func TestBillingWalletConcurrentIdempotency(t *testing.T) {
 	}
 }
 
+func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
+	t.Run("task admission", func(t *testing.T) {
+		f := newBillingWalletFixture(t, 500, 0, 0)
+		quote := f.quote(t, "u1", "task.article", "", "post-lock-task")
+		req := taskChargeRequest(quote, "post-lock-task", "post-lock-task")
+		sku, err := f.repo.Billing().FindSKU(context.Background(), req.CatalogID, req.SKUID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		existing := newTaskCharge(req, sku, f.now)
+		existing.ID = "committed-task-charge"
+		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
+		raceRepo := &postLockCurrentReadRepository{Repository: f.repo, state: state}
+		var replay *model.BillingCharge
+		if err := raceRepo.WithTx(context.Background(), func(tx repository.Repository) error {
+			var callErr error
+			replay, callErr = f.wallet.ChargeTaskAdmissionInTx(context.Background(), tx, req)
+			if callErr != nil {
+				t.Errorf("post-lock task replay: %v", callErr)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if replay == nil || replay.ID != existing.ID || state.lockCalls < 2 {
+			t.Fatalf("post-lock task replay = %+v, lock calls %d", replay, state.lockCalls)
+		}
+		assertTaskChargeUnchanged(t, f, quote, req, 500)
+	})
+
+	t.Run("accepted operation", func(t *testing.T) {
+		f := newBillingWalletFixture(t, 1000, 0, 0)
+		req := acceptedOperationRequest("u1", "post-lock-operation", "post-lock-attempt", "post-lock-call", "post-lock-operation")
+		sku, err := f.repo.Billing().FindSKU(context.Background(), req.CatalogID, req.SKUID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		existing := newOperationCharge(req, sku, true, f.now)
+		existing.ID = "committed-operation-charge"
+		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
+		f.wallet.repo = &postLockCurrentReadRepository{Repository: f.repo, state: state}
+		replay, err := f.wallet.ChargeAcceptedOperation(context.Background(), req)
+		if err != nil || replay == nil || replay.ID != existing.ID || state.lockCalls < 2 {
+			t.Fatalf("post-lock operation replay = %+v, %v, lock calls %d", replay, err, state.lockCalls)
+		}
+		if got := f.account(t, "u1"); got.PaidCredits != 1000 || got.DebtCredits != 0 {
+			t.Fatalf("operation replay mutated account: %+v", got)
+		}
+	})
+
+	t.Run("standalone operation", func(t *testing.T) {
+		f := newBillingWalletFixture(t, 500, 0, 0)
+		quote := f.quote(t, "u1", "designer.generate_image", "image.designer", "post-lock-standalone")
+		req := OperationChargeRequest{
+			UserID: "u1", QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
+			ResourceType: "image", ResourceID: "post-lock-standalone", RequestFingerprint: quote.RequestFingerprint,
+			IdempotencyScope: "standalone-charge", IdempotencyKey: "post-lock-standalone",
+		}
+		sku, err := f.repo.Billing().FindSKU(context.Background(), req.CatalogID, req.SKUID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		existing := newOperationCharge(req, sku, false, f.now)
+		existing.ID = "committed-standalone-charge"
+		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
+		f.wallet.repo = &postLockCurrentReadRepository{Repository: f.repo, state: state}
+		replay, err := f.wallet.ChargeStandaloneOperation(context.Background(), req)
+		if err != nil || replay == nil || replay.ID != existing.ID || state.lockCalls < 2 {
+			t.Fatalf("post-lock standalone replay = %+v, %v, lock calls %d", replay, err, state.lockCalls)
+		}
+		assertOperationChargeUnchanged(t, f, quote, req, 500)
+	})
+
+	t.Run("reversal", func(t *testing.T) {
+		f := newBillingWalletFixture(t, 500, 0, 0)
+		quote := f.quote(t, "u1", "task.article", "", "post-lock-reversal")
+		original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "post-lock-reversal", "post-lock-reversal"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		existing := newReversalCharge(original, "post-lock-reversal", billingFingerprint(original.ID, "provider_error"), f.now)
+		existing.ID = "committed-reversal-charge"
+		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
+		f.wallet.repo = &postLockCurrentReadRepository{Repository: f.repo, state: state}
+		replay, err := f.wallet.Reverse(context.Background(), original.ID, "provider_error", "post-lock-reversal")
+		if err != nil || replay == nil || replay.ID != existing.ID || state.lockCalls < 2 {
+			t.Fatalf("post-lock reversal replay = %+v, %v, lock calls %d", replay, err, state.lockCalls)
+		}
+		if got := f.account(t, "u1"); got.PaidCredits != 0 {
+			t.Fatalf("reversal replay mutated account: %+v", got)
+		}
+		lot, err := f.repo.Billing().FindLotBySource(context.Background(), "fixture", "fixture-paid-u1")
+		if err != nil || lot.AvailableCredits != 0 || lot.ConsumedCredits != 500 {
+			t.Fatalf("reversal replay mutated lot: %+v, %v", lot, err)
+		}
+	})
+
+	t.Run("top up", func(t *testing.T) {
+		f := newBillingWalletFixture(t, 0, 0, 0)
+		req := TopUpRequest{
+			UserID: "u1", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "post-lock-topup", CatalogID: "retail-test-v1",
+			RequestFingerprint: billingFingerprint("post-lock-topup"), IdempotencyScope: "topup", IdempotencyKey: "post-lock-topup",
+		}
+		existing := &model.BillingWalletEntry{
+			ID: "committed-topup-entry", UserID: req.UserID, EventKind: model.BillingWalletEventKindTopUp,
+			PaidDelta: req.Credits, CatalogID: req.CatalogID, RequestFingerprint: req.RequestFingerprint,
+			SourceType: &req.ExternalSourceType, SourceID: &req.ExternalSourceID,
+			IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey,
+		}
+		state := &postLockCurrentReadState{keyEntry: existing, sourceEntry: existing}
+		f.wallet.repo = &postLockCurrentReadRepository{Repository: f.repo, state: state}
+		replay, err := f.wallet.TopUp(context.Background(), req)
+		if err != nil || replay == nil || replay.EntryID != existing.ID || state.lockCalls < 2 {
+			t.Fatalf("post-lock top-up replay = %+v, %v, lock calls %d", replay, err, state.lockCalls)
+		}
+		if got := f.account(t, "u1"); got.PaidCredits != 0 || got.DebtCredits != 0 {
+			t.Fatalf("top-up replay mutated account: %+v", got)
+		}
+	})
+}
+
+func TestBillingWalletPostLockCurrentReadConflictsAreTypedAndDoNotMutate(t *testing.T) {
+	t.Run("task caller commits conflict", func(t *testing.T) {
+		f := newBillingWalletFixture(t, 500, 0, 0)
+		quote := f.quote(t, "u1", "task.article", "", "post-lock-task-conflict")
+		req := taskChargeRequest(quote, "post-lock-task-conflict", "post-lock-task-conflict")
+		sku, err := f.repo.Billing().FindSKU(context.Background(), req.CatalogID, req.SKUID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		drift := newTaskCharge(req, sku, f.now)
+		drift.ID = "committed-drift-task-charge"
+		drift.ResourceID = "different-task"
+		state := &postLockCurrentReadState{keyCharge: drift, identityCharge: drift}
+		raceRepo := &postLockCurrentReadRepository{Repository: f.repo, state: state}
+		var callErr error
+		if err := raceRepo.WithTx(context.Background(), func(tx repository.Repository) error {
+			_, callErr = f.wallet.ChargeTaskAdmissionInTx(context.Background(), tx, req)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !errors.Is(callErr, ErrBillingConflict) || state.lockCalls != 2 {
+			t.Fatalf("post-lock task conflict = %v, lock calls %d", callErr, state.lockCalls)
+		}
+		assertTaskChargeUnchanged(t, f, quote, req, 500)
+	})
+
+	t.Run("charge identity split", func(t *testing.T) {
+		expected := &model.BillingCharge{
+			ID: "expected", UserID: "u1", CatalogID: "catalog", SKUID: "sku", ResourceType: "image", ResourceID: "resource",
+			Kind: model.BillingChargeKindOperation, Policy: "accepted_task_operation", Status: model.BillingChargeStatusPosted,
+			IdempotencyScope: "scope", IdempotencyKey: "key", RequestFingerprint: billingFingerprint("locked-conflict"),
+		}
+		byKey := *expected
+		byKey.ID = "by-key"
+		byIdentity := *expected
+		byIdentity.ID = "by-identity"
+		if _, err := resolveLockedChargeReplay(&byKey, nil, &byIdentity, nil, expected); !errors.Is(err, ErrBillingConflict) {
+			t.Fatalf("split charge identity error = %v", err)
+		}
+	})
+
+	t.Run("top-up identity split", func(t *testing.T) {
+		req := TopUpRequest{
+			UserID: "u1", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "source", CatalogID: "catalog",
+			RequestFingerprint: billingFingerprint("locked-topup-conflict"), IdempotencyScope: "topup", IdempotencyKey: "key",
+		}
+		byKey := &model.BillingWalletEntry{ID: "by-key"}
+		bySource := &model.BillingWalletEntry{ID: "by-source"}
+		state := &postLockCurrentReadState{accountLocked: true, keyEntry: byKey, sourceEntry: bySource}
+		repo := &postLockCurrentReadBillingRepository{state: state}
+		if _, err := findLockedTopUpReplay(context.Background(), repo, req); !errors.Is(err, ErrBillingConflict) {
+			t.Fatalf("split top-up identity error = %v", err)
+		}
+	})
+}
+
 func TestBillingWalletExpiresPromotionalCreditsAtBoundary(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 0)
 	f.addPromotion(t, "expired-before", 100, f.now.Add(-time.Second))
@@ -1223,6 +1401,109 @@ type ensureAccountBillingRepository struct {
 	userID string
 }
 
+type postLockCurrentReadState struct {
+	accountLocked   bool
+	lockCalls       int
+	keyCharge       *model.BillingCharge
+	identityCharge  *model.BillingCharge
+	keyEntry        *model.BillingWalletEntry
+	sourceEntry     *model.BillingWalletEntry
+	debtAllocations []model.BillingDebtAllocation
+}
+
+type postLockCurrentReadRepository struct {
+	repository.Repository
+	state *postLockCurrentReadState
+}
+
+func (r *postLockCurrentReadRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&postLockCurrentReadTxRepository{Repository: tx, state: r.state})
+	})
+}
+
+type postLockCurrentReadTxRepository struct {
+	repository.Repository
+	state *postLockCurrentReadState
+}
+
+func (r *postLockCurrentReadTxRepository) Billing() repository.BillingRepository {
+	return &postLockCurrentReadBillingRepository{BillingRepository: r.Repository.Billing(), state: r.state}
+}
+
+type postLockCurrentReadBillingRepository struct {
+	repository.BillingRepository
+	state *postLockCurrentReadState
+}
+
+func (r *postLockCurrentReadBillingRepository) LockAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error) {
+	account, err := r.BillingRepository.LockAccount(ctx, userID)
+	if err == nil {
+		r.state.accountLocked = true
+	}
+	return account, err
+}
+
+func (r *postLockCurrentReadBillingRepository) currentCharge(charge *model.BillingCharge) (*model.BillingCharge, error) {
+	if !r.state.accountLocked {
+		return nil, errors.New("current charge read occurred before account lock")
+	}
+	r.state.lockCalls++
+	if charge == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	copy := *charge
+	return &copy, nil
+}
+
+func (r *postLockCurrentReadBillingRepository) LockChargeByKey(context.Context, string, string) (*model.BillingCharge, error) {
+	return r.currentCharge(r.state.keyCharge)
+}
+
+func (r *postLockCurrentReadBillingRepository) LockChargeByTask(context.Context, string) (*model.BillingCharge, error) {
+	return r.currentCharge(r.state.identityCharge)
+}
+
+func (r *postLockCurrentReadBillingRepository) LockChargeByOperation(context.Context, string, string, string, string, string) (*model.BillingCharge, error) {
+	return r.currentCharge(r.state.identityCharge)
+}
+
+func (r *postLockCurrentReadBillingRepository) LockChargeByQuote(context.Context, string) (*model.BillingCharge, error) {
+	return r.currentCharge(r.state.identityCharge)
+}
+
+func (r *postLockCurrentReadBillingRepository) LockReversal(context.Context, string) (*model.BillingCharge, error) {
+	return r.currentCharge(r.state.identityCharge)
+}
+
+func (r *postLockCurrentReadBillingRepository) currentEntry(entry *model.BillingWalletEntry) (*model.BillingWalletEntry, error) {
+	if !r.state.accountLocked {
+		return nil, errors.New("current entry read occurred before account lock")
+	}
+	r.state.lockCalls++
+	if entry == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	copy := *entry
+	return &copy, nil
+}
+
+func (r *postLockCurrentReadBillingRepository) LockEntryByKey(context.Context, string, string) (*model.BillingWalletEntry, error) {
+	return r.currentEntry(r.state.keyEntry)
+}
+
+func (r *postLockCurrentReadBillingRepository) LockEntryBySource(context.Context, string, string) (*model.BillingWalletEntry, error) {
+	return r.currentEntry(r.state.sourceEntry)
+}
+
+func (r *postLockCurrentReadBillingRepository) LockDebtAllocationsBySourceEntryID(context.Context, string, string) ([]model.BillingDebtAllocation, error) {
+	if !r.state.accountLocked {
+		return nil, errors.New("current debt allocation read occurred before account lock")
+	}
+	r.state.lockCalls++
+	return append([]model.BillingDebtAllocation(nil), r.state.debtAllocations...), nil
+}
+
 func (r *ensureAccountBillingRepository) CreateAccount(ctx context.Context, account *model.BillingWalletAccount) error {
 	if account.UserID == r.userID {
 		return errors.New("direct account creation is not race safe")
@@ -1232,6 +1513,42 @@ func (r *ensureAccountBillingRepository) CreateAccount(ctx context.Context, acco
 
 func (r *noLedgerScanRepository) Billing() repository.BillingRepository {
 	return &noLedgerScanBillingRepository{BillingRepository: r.Repository.Billing(), calls: &r.listEntriesCalls}
+}
+
+func assertTaskChargeUnchanged(t *testing.T, f *billingWalletFixture, quote *model.BillingQuote, req TaskChargeRequest, paid int64) {
+	t.Helper()
+	if got := f.account(t, req.UserID); got.PaidCredits != paid || got.DebtCredits != 0 {
+		t.Fatalf("task replay mutated account: %+v", got)
+	}
+	persistedQuote, err := f.repo.Billing().FindQuoteByKey(context.Background(), quote.IdempotencyScope, quote.IdempotencyKey)
+	if err != nil || persistedQuote.ConsumedAt != nil {
+		t.Fatalf("task replay mutated quote: %+v, %v", persistedQuote, err)
+	}
+	lot, err := f.repo.Billing().FindLotBySource(context.Background(), "fixture", "fixture-paid-u1")
+	if err != nil || lot.AvailableCredits != paid || lot.ConsumedCredits != 0 {
+		t.Fatalf("task replay mutated lot: %+v, %v", lot, err)
+	}
+	if _, err := f.repo.Billing().FindChargeByKey(context.Background(), req.IdempotencyScope, req.IdempotencyKey); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("task replay persisted duplicate charge: %v", err)
+	}
+}
+
+func assertOperationChargeUnchanged(t *testing.T, f *billingWalletFixture, quote *model.BillingQuote, req OperationChargeRequest, paid int64) {
+	t.Helper()
+	if got := f.account(t, req.UserID); got.PaidCredits != paid || got.DebtCredits != 0 {
+		t.Fatalf("operation replay mutated account: %+v", got)
+	}
+	persistedQuote, err := f.repo.Billing().FindQuoteByKey(context.Background(), quote.IdempotencyScope, quote.IdempotencyKey)
+	if err != nil || persistedQuote.ConsumedAt != nil {
+		t.Fatalf("operation replay mutated quote: %+v, %v", persistedQuote, err)
+	}
+	lot, err := f.repo.Billing().FindLotBySource(context.Background(), "fixture", "fixture-paid-u1")
+	if err != nil || lot.AvailableCredits != paid || lot.ConsumedCredits != 0 {
+		t.Fatalf("operation replay mutated lot: %+v, %v", lot, err)
+	}
+	if _, err := f.repo.Billing().FindChargeByKey(context.Background(), req.IdempotencyScope, req.IdempotencyKey); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("operation replay persisted duplicate charge: %v", err)
+	}
 }
 
 func (r *noLedgerScanRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {

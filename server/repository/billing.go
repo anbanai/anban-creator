@@ -50,6 +50,8 @@ type BillingRepository interface {
 	AppendEntry(ctx context.Context, entry *model.BillingWalletEntry) error
 	FindEntryByKey(ctx context.Context, scope, key string) (*model.BillingWalletEntry, error)
 	FindEntryBySource(ctx context.Context, sourceType, sourceID string) (*model.BillingWalletEntry, error)
+	LockEntryByKey(ctx context.Context, scope, key string) (*model.BillingWalletEntry, error)
+	LockEntryBySource(ctx context.Context, sourceType, sourceID string) (*model.BillingWalletEntry, error)
 	ListEntriesByUser(ctx context.Context, userID string, offset, limit int) ([]model.BillingWalletEntry, error)
 
 	CreateCatalogVersion(ctx context.Context, catalog *model.BillingCatalogVersion) error
@@ -72,10 +74,16 @@ type BillingRepository interface {
 	FindChargeByTask(ctx context.Context, taskID string) (*model.BillingCharge, error)
 	FindChargeByOperation(ctx context.Context, taskID, attemptID, toolCallID, catalogID, skuID string) (*model.BillingCharge, error)
 	FindReversal(ctx context.Context, originalChargeID string) (*model.BillingCharge, error)
+	LockChargeByKey(ctx context.Context, scope, key string) (*model.BillingCharge, error)
+	LockChargeByTask(ctx context.Context, taskID string) (*model.BillingCharge, error)
+	LockChargeByOperation(ctx context.Context, taskID, attemptID, toolCallID, catalogID, skuID string) (*model.BillingCharge, error)
+	LockChargeByQuote(ctx context.Context, quoteID string) (*model.BillingCharge, error)
+	LockReversal(ctx context.Context, originalChargeID string) (*model.BillingCharge, error)
 	CreateDebtAllocation(ctx context.Context, allocation *model.BillingDebtAllocation) error
 	ListOutstandingDebtCharges(ctx context.Context, userID string) ([]BillingOutstandingDebtCharge, error)
 	GetOutstandingDebtForCharge(ctx context.Context, userID, chargeID string) (int64, error)
 	ListDebtAllocationsBySourceEntryID(ctx context.Context, userID, sourceEntryID string) ([]model.BillingDebtAllocation, error)
+	LockDebtAllocationsBySourceEntryID(ctx context.Context, userID, sourceEntryID string) ([]model.BillingDebtAllocation, error)
 	SumDebtAllocationsBySourceEntryID(ctx context.Context, userID, sourceEntryID string) (int64, error)
 
 	EnqueueSettlement(ctx context.Context, settlement *model.BillingSettlementOutbox) error
@@ -271,6 +279,34 @@ func (r *billingRepository) FindEntryBySource(ctx context.Context, sourceType, s
 	return &entry, nil
 }
 
+func (r *billingRepository) LockEntryByKey(ctx context.Context, scope, key string) (*model.BillingWalletEntry, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
+	var entry model.BillingWalletEntry
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("idempotency_scope = ? AND idempotency_key = ?", scope, key).
+		First(&entry).Error; err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+func (r *billingRepository) LockEntryBySource(ctx context.Context, sourceType, sourceID string) (*model.BillingWalletEntry, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
+	var entry model.BillingWalletEntry
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("source_type = ? AND source_id = ?", sourceType, sourceID).
+		First(&entry).Error; err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
 func (r *billingRepository) ListEntriesByUser(ctx context.Context, userID string, offset, limit int) ([]model.BillingWalletEntry, error) {
 	var entries []model.BillingWalletEntry
 	err := r.db.WithContext(ctx).
@@ -454,6 +490,76 @@ func (r *billingRepository) FindReversal(ctx context.Context, originalChargeID s
 	return &charge, nil
 }
 
+func (r *billingRepository) LockChargeByKey(ctx context.Context, scope, key string) (*model.BillingCharge, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
+	var charge model.BillingCharge
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("idempotency_scope = ? AND idempotency_key = ?", scope, key).
+		First(&charge).Error; err != nil {
+		return nil, err
+	}
+	return &charge, nil
+}
+
+func (r *billingRepository) LockChargeByTask(ctx context.Context, taskID string) (*model.BillingCharge, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
+	var charge model.BillingCharge
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("task_id = ? AND charge_kind = ?", taskID, model.BillingChargeKindTask).
+		First(&charge).Error; err != nil {
+		return nil, err
+	}
+	return &charge, nil
+}
+
+func (r *billingRepository) LockChargeByOperation(ctx context.Context, taskID, attemptID, toolCallID, catalogID, skuID string) (*model.BillingCharge, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
+	var charge model.BillingCharge
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("operation_task_id = ? AND attempt_id = ? AND tool_call_id = ? AND catalog_id = ? AND sku_id = ?", taskID, attemptID, toolCallID, catalogID, skuID).
+		First(&charge).Error; err != nil {
+		return nil, err
+	}
+	return &charge, nil
+}
+
+func (r *billingRepository) LockChargeByQuote(ctx context.Context, quoteID string) (*model.BillingCharge, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
+	var charge model.BillingCharge
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("quote_id = ? AND charge_kind = ?", quoteID, model.BillingChargeKindOperation).
+		First(&charge).Error; err != nil {
+		return nil, err
+	}
+	return &charge, nil
+}
+
+func (r *billingRepository) LockReversal(ctx context.Context, originalChargeID string) (*model.BillingCharge, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
+	var charge model.BillingCharge
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("reversal_of_id = ? AND charge_kind = ?", originalChargeID, model.BillingChargeKindReversal).
+		First(&charge).Error; err != nil {
+		return nil, err
+	}
+	return &charge, nil
+}
+
 func (r *billingRepository) CreateDebtAllocation(ctx context.Context, allocation *model.BillingDebtAllocation) error {
 	if !r.transactionBound {
 		return ErrBillingRequiresTransaction
@@ -490,6 +596,19 @@ func (r *billingRepository) GetOutstandingDebtForCharge(ctx context.Context, use
 func (r *billingRepository) ListDebtAllocationsBySourceEntryID(ctx context.Context, userID, sourceEntryID string) ([]model.BillingDebtAllocation, error) {
 	var allocations []model.BillingDebtAllocation
 	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND source_entry_id = ?", userID, sourceEntryID).
+		Order("created_at ASC, id ASC").
+		Find(&allocations).Error
+	return allocations, err
+}
+
+func (r *billingRepository) LockDebtAllocationsBySourceEntryID(ctx context.Context, userID, sourceEntryID string) ([]model.BillingDebtAllocation, error) {
+	if !r.transactionBound {
+		return nil, ErrBillingRequiresTransaction
+	}
+	var allocations []model.BillingDebtAllocation
+	err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("user_id = ? AND source_entry_id = ?", userID, sourceEntryID).
 		Order("created_at ASC, id ASC").
 		Find(&allocations).Error

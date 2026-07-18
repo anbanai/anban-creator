@@ -819,6 +819,104 @@ func TestBillingRepositoryEnqueueSettlementRequiresCallerTransaction(t *testing.
 	}
 }
 
+func TestBillingRepositoryCurrentReadsRequireCallerTransaction(t *testing.T) {
+	repo := New(setupTestDB(t)).Billing()
+	ctx := context.Background()
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{name: "charge key", call: func() error { _, err := repo.LockChargeByKey(ctx, "scope", "key"); return err }},
+		{name: "task charge", call: func() error { _, err := repo.LockChargeByTask(ctx, "task"); return err }},
+		{name: "operation charge", call: func() error {
+			_, err := repo.LockChargeByOperation(ctx, "task", "attempt", "call", "catalog", "sku")
+			return err
+		}},
+		{name: "quote charge", call: func() error { _, err := repo.LockChargeByQuote(ctx, "quote"); return err }},
+		{name: "reversal", call: func() error { _, err := repo.LockReversal(ctx, "charge"); return err }},
+		{name: "entry key", call: func() error { _, err := repo.LockEntryByKey(ctx, "scope", "key"); return err }},
+		{name: "entry source", call: func() error { _, err := repo.LockEntryBySource(ctx, "source", "id"); return err }},
+		{name: "debt allocations", call: func() error {
+			_, err := repo.LockDebtAllocationsBySourceEntryID(ctx, "user", "entry")
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.call(); !errors.Is(err, ErrBillingRequiresTransaction) {
+				t.Fatalf("current read error = %v", err)
+			}
+		})
+	}
+}
+
+func TestBillingRepositoryMySQLCurrentReadsUseForUpdate(t *testing.T) {
+	db, logs := openBillingMySQLDryRunDB(t)
+	repo := newTxBillingRepository(db)
+	ctx := context.Background()
+	tests := []struct {
+		name string
+		call func()
+	}{
+		{name: "charge key", call: func() { _, _ = repo.LockChargeByKey(ctx, "scope", "key") }},
+		{name: "task charge", call: func() { _, _ = repo.LockChargeByTask(ctx, "task") }},
+		{name: "operation charge", call: func() { _, _ = repo.LockChargeByOperation(ctx, "task", "attempt", "call", "catalog", "sku") }},
+		{name: "quote charge", call: func() { _, _ = repo.LockChargeByQuote(ctx, "quote") }},
+		{name: "reversal", call: func() { _, _ = repo.LockReversal(ctx, "charge") }},
+		{name: "entry key", call: func() { _, _ = repo.LockEntryByKey(ctx, "scope", "key") }},
+		{name: "entry source", call: func() { _, _ = repo.LockEntryBySource(ctx, "source", "id") }},
+		{name: "debt allocations", call: func() { _, _ = repo.LockDebtAllocationsBySourceEntryID(ctx, "user", "entry") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs.Reset()
+			tt.call()
+			if sql := logs.String(); !strings.Contains(sql, "FOR UPDATE") {
+				t.Fatalf("current read SQL missing FOR UPDATE:\n%s", sql)
+			}
+		})
+	}
+}
+
+func TestBillingRepositoryMySQLCurrentReadsUseCallerTransactionWithoutSavepoint(t *testing.T) {
+	db, mock := openBillingMySQLMockDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	rollbackErr := errors.New("rollback current reads")
+
+	mock.ExpectBegin()
+	for index := 0; index < 5; index++ {
+		mock.ExpectQuery("SELECT .* FROM `billing_charges` .* FOR UPDATE").
+			WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	}
+	for index := 0; index < 2; index++ {
+		mock.ExpectQuery("SELECT .* FROM `billing_wallet_entries` .* FOR UPDATE").
+			WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	}
+	mock.ExpectQuery("SELECT .* FROM `billing_debt_allocations` .* FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectRollback()
+
+	err := repo.WithTx(ctx, func(tx Repository) error {
+		billingRepo := tx.Billing()
+		_, _ = billingRepo.LockChargeByKey(ctx, "scope", "key")
+		_, _ = billingRepo.LockChargeByTask(ctx, "task")
+		_, _ = billingRepo.LockChargeByOperation(ctx, "task", "attempt", "call", "catalog", "sku")
+		_, _ = billingRepo.LockChargeByQuote(ctx, "quote")
+		_, _ = billingRepo.LockReversal(ctx, "charge")
+		_, _ = billingRepo.LockEntryByKey(ctx, "scope", "key")
+		_, _ = billingRepo.LockEntryBySource(ctx, "source", "id")
+		_, _ = billingRepo.LockDebtAllocationsBySourceEntryID(ctx, "user", "entry")
+		return rollbackErr
+	})
+	if !errors.Is(err, rollbackErr) {
+		t.Fatalf("caller transaction error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("current read transaction expectations: %v", err)
+	}
+}
+
 func TestBillingRepositoryDebtAllocationsProvideIndexedOutstandingBalances(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()

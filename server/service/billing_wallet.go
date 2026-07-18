@@ -184,6 +184,9 @@ func (s *BillingWalletService) ChargeTaskAdmissionInTx(ctx context.Context, tx r
 	if lockErr != nil {
 		return nil, lockErr
 	}
+	if replay, replayErr := findLockedTaskChargeReplay(ctx, billingRepo, expectedCharge); replayErr != nil || replay != nil {
+		return replay, replayErr
+	}
 	quote, lockErr := billingRepo.LockQuote(ctx, req.QuoteID)
 	if lockErr != nil {
 		return nil, lockErr
@@ -281,6 +284,10 @@ func (s *BillingWalletService) chargeOperation(ctx context.Context, req Operatio
 		account, lockErr := billingRepo.LockAccount(ctx, req.UserID)
 		if lockErr != nil {
 			return lockErr
+		}
+		if replay, replayErr := findLockedOperationChargeReplay(ctx, billingRepo, expectedCharge, accepted); replayErr != nil || replay != nil {
+			result = replay
+			return replayErr
 		}
 		now := s.now().UTC()
 		if !accepted {
@@ -451,6 +458,10 @@ func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*To
 		if err != nil {
 			return err
 		}
+		if replay, replayErr := findLockedTopUpReplay(ctx, billingRepo, req); replayErr != nil || replay != nil {
+			result = replay
+			return replayErr
+		}
 		now := s.now().UTC()
 		debtPositions, err := billingRepo.ListOutstandingDebtCharges(ctx, req.UserID)
 		if err != nil {
@@ -582,6 +593,11 @@ func (s *BillingWalletService) Reverse(ctx context.Context, chargeID, reason, ke
 		account, err := billingRepo.LockAccount(ctx, original.UserID)
 		if err != nil {
 			return err
+		}
+		expectedReversal := newReversalCharge(original, key, fingerprint, s.now().UTC())
+		if replay, replayErr := findLockedReversalChargeReplay(ctx, billingRepo, expectedReversal); replayErr != nil || replay != nil {
+			result = replay
+			return replayErr
 		}
 		allocations, err := billingRepo.ListChargeAllocations(ctx, original.ID)
 		if err != nil {
@@ -1112,6 +1128,59 @@ func findReversalChargeReplay(ctx context.Context, repo repository.BillingReposi
 	return findExpectedChargeReplay(ctx, repo, expected)
 }
 
+func findLockedTaskChargeReplay(ctx context.Context, repo repository.BillingRepository, expected *model.BillingCharge) (*model.BillingCharge, error) {
+	byKey, keyErr := repo.LockChargeByKey(ctx, expected.IdempotencyScope, expected.IdempotencyKey)
+	byTask, taskErr := repo.LockChargeByTask(ctx, *expected.TaskID)
+	return resolveLockedChargeReplay(byKey, keyErr, byTask, taskErr, expected)
+}
+
+func findLockedOperationChargeReplay(ctx context.Context, repo repository.BillingRepository, expected *model.BillingCharge, accepted bool) (*model.BillingCharge, error) {
+	byKey, keyErr := repo.LockChargeByKey(ctx, expected.IdempotencyScope, expected.IdempotencyKey)
+	var byIdentity *model.BillingCharge
+	var identityErr error
+	if accepted {
+		byIdentity, identityErr = repo.LockChargeByOperation(ctx, *expected.OperationTaskID, *expected.AttemptID, *expected.ToolCallID, expected.CatalogID, expected.SKUID)
+	} else {
+		byIdentity, identityErr = repo.LockChargeByQuote(ctx, *expected.QuoteID)
+	}
+	return resolveLockedChargeReplay(byKey, keyErr, byIdentity, identityErr, expected)
+}
+
+func findLockedReversalChargeReplay(ctx context.Context, repo repository.BillingRepository, expected *model.BillingCharge) (*model.BillingCharge, error) {
+	byKey, keyErr := repo.LockChargeByKey(ctx, expected.IdempotencyScope, expected.IdempotencyKey)
+	byOriginal, originalErr := repo.LockReversal(ctx, *expected.ReversalOfID)
+	return resolveLockedChargeReplay(byKey, keyErr, byOriginal, originalErr, expected)
+}
+
+func resolveLockedChargeReplay(byKey *model.BillingCharge, keyErr error, byIdentity *model.BillingCharge, identityErr error, expected *model.BillingCharge) (*model.BillingCharge, error) {
+	keyFound, err := billingCurrentReadFound(keyErr)
+	if err != nil {
+		return nil, err
+	}
+	identityFound, err := billingCurrentReadFound(identityErr)
+	if err != nil {
+		return nil, err
+	}
+	if !keyFound && !identityFound {
+		return nil, nil
+	}
+	if !keyFound || !identityFound || byKey == nil || byIdentity == nil || byKey.ID != byIdentity.ID ||
+		!sameChargeImmutableIdentity(byKey, expected) || !sameChargeImmutableIdentity(byIdentity, expected) {
+		return nil, ErrBillingConflict
+	}
+	return byKey, nil
+}
+
+func billingCurrentReadFound(err error) (bool, error) {
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return false, err
+}
+
 func sameChargeImmutableIdentity(left, right *model.BillingCharge) bool {
 	return left != nil && right != nil &&
 		left.UserID == right.UserID && left.CatalogID == right.CatalogID && left.SKUID == right.SKUID &&
@@ -1143,15 +1212,54 @@ func findTopUpReplay(ctx context.Context, repo repository.BillingRepository, req
 	return topUpResultFromEntry(ctx, repo, entry, req)
 }
 
+func findLockedTopUpReplay(ctx context.Context, repo repository.BillingRepository, req TopUpRequest) (*TopUpResult, error) {
+	byKey, keyErr := repo.LockEntryByKey(ctx, req.IdempotencyScope, req.IdempotencyKey)
+	bySource, sourceErr := repo.LockEntryBySource(ctx, req.ExternalSourceType, req.ExternalSourceID)
+	keyFound, err := billingCurrentReadFound(keyErr)
+	if err != nil {
+		return nil, err
+	}
+	sourceFound, err := billingCurrentReadFound(sourceErr)
+	if err != nil {
+		return nil, err
+	}
+	if !keyFound && !sourceFound {
+		return nil, nil
+	}
+	if !keyFound || !sourceFound || byKey == nil || bySource == nil || byKey.ID != bySource.ID {
+		return nil, ErrBillingConflict
+	}
+	allocations, err := repo.LockDebtAllocationsBySourceEntryID(ctx, byKey.UserID, byKey.ID)
+	if err != nil {
+		return nil, err
+	}
+	var debtRepaid int64
+	for _, allocation := range allocations {
+		var ok bool
+		if allocation.UserID != byKey.UserID || allocation.SourceEntryID != byKey.ID || allocation.Credits <= 0 {
+			return nil, ErrBillingLedgerInvalid
+		}
+		if debtRepaid, ok = checkedBillingAdd(debtRepaid, allocation.Credits); !ok {
+			return nil, ErrBillingLedgerInvalid
+		}
+	}
+	return topUpResultFromEntryWithDebt(byKey, req, debtRepaid)
+}
+
 func topUpResultFromEntry(ctx context.Context, repo repository.BillingRepository, entry *model.BillingWalletEntry, req TopUpRequest) (*TopUpResult, error) {
-	if entry == nil || entry.UserID != req.UserID || entry.EventKind != model.BillingWalletEventKindTopUp || entry.PaidDelta < 0 || entry.DebtDelta != 0 ||
-		entry.CatalogID != req.CatalogID || entry.RequestFingerprint != req.RequestFingerprint ||
-		entry.SourceType == nil || *entry.SourceType != req.ExternalSourceType || entry.SourceID == nil || *entry.SourceID != req.ExternalSourceID {
+	if !topUpEntryMatchesRequest(entry, req) {
 		return nil, ErrBillingConflict
 	}
 	debtRepaid, err := repo.SumDebtAllocationsBySourceEntryID(ctx, entry.UserID, entry.ID)
 	if err != nil {
 		return nil, err
+	}
+	return topUpResultFromEntryWithDebt(entry, req, debtRepaid)
+}
+
+func topUpResultFromEntryWithDebt(entry *model.BillingWalletEntry, req TopUpRequest, debtRepaid int64) (*TopUpResult, error) {
+	if !topUpEntryMatchesRequest(entry, req) {
+		return nil, ErrBillingConflict
 	}
 	if debtRepaid < 0 {
 		return nil, ErrBillingLedgerInvalid
@@ -1165,6 +1273,15 @@ func topUpResultFromEntry(ctx context.Context, repo repository.BillingRepository
 		lotID = *entry.LotID
 	}
 	return &TopUpResult{EntryID: entry.ID, LotID: lotID, DebtRepaid: debtRepaid, PaidAdded: entry.PaidDelta}, nil
+}
+
+func topUpEntryMatchesRequest(entry *model.BillingWalletEntry, req TopUpRequest) bool {
+	return entry != nil && entry.UserID == req.UserID && entry.EventKind == model.BillingWalletEventKindTopUp && entry.PaidDelta >= 0 && entry.DebtDelta == 0 &&
+		entry.CatalogID == req.CatalogID && entry.RequestFingerprint == req.RequestFingerprint &&
+		entry.IdempotencyScope == req.IdempotencyScope && entry.IdempotencyKey == req.IdempotencyKey &&
+		entry.ActorType == req.ActorType && entry.ActorID == req.ActorID && entry.SourceService == req.SourceService &&
+		entry.RequestID == req.RequestID && entry.CorrelationID == req.CorrelationID &&
+		entry.SourceType != nil && *entry.SourceType == req.ExternalSourceType && entry.SourceID != nil && *entry.SourceID == req.ExternalSourceID
 }
 
 func lockOrCreateBillingAccount(ctx context.Context, repo repository.BillingRepository, userID string) (*model.BillingWalletAccount, error) {
