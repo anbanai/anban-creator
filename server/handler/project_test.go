@@ -652,6 +652,39 @@ func TestProjectUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *
 	}
 }
 
+func TestProjectUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	base := repository.New(db)
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := base.Projects().Create(t.Context(), &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle,
+		Name: "before", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("UPDATE projects SET reference_image_asset_id = NULL WHERE id = ?", projectID).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
+	app := newProjectHandlerTestApp(base, store)
+
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID, userID, map[string]any{"name": "after"})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+	persisted, err := base.Projects().FindByID(t.Context(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Name != "after" || persisted.ReferenceImageAssetID != "" {
+		t.Fatalf("persisted project name=%q reference=%q", persisted.Name, persisted.ReferenceImageAssetID)
+	}
+	if len(store.signedKeys) != 0 {
+		t.Fatalf("empty reference signed keys=%#v", store.signedKeys)
+	}
+}
+
 func TestProjectHandler_UpdateFinalizesAvatarUploadSession(t *testing.T) {
 	app, repo := setupProjectDeleteHandlerTest(t)
 	ctx := context.Background()

@@ -103,9 +103,15 @@ func (r *gormProjectRepository) Update(ctx context.Context, project *model.Proje
 }
 
 func (r *gormProjectRepository) UpdateIfReferenceImageAssetID(ctx context.Context, project *model.Project, expectedID string) (bool, error) {
-	result := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Model(&model.Project{}).
-		Where("id = ? AND reference_image_asset_id = ?", project.ID, expectedID).
+		Where("id = ?", project.ID)
+	if expectedID == "" {
+		query = query.Where("(reference_image_asset_id = ? OR reference_image_asset_id IS NULL)", "")
+	} else {
+		query = query.Where("reference_image_asset_id = ?", expectedID)
+	}
+	result := query.
 		Select("*").
 		Updates(project)
 	return result.RowsAffected == 1, result.Error
