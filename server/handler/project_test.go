@@ -54,6 +54,39 @@ type projectReferenceStore struct {
 	downloadErr error
 }
 
+type hookedProjectRepository struct {
+	repository.ProjectRepository
+	findCalls  int
+	casCalls   int
+	beforeFind func(int)
+	beforeCAS  func(int)
+}
+
+func (r *hookedProjectRepository) FindByID(ctx context.Context, id string) (*model.Project, error) {
+	r.findCalls++
+	if r.beforeFind != nil {
+		r.beforeFind(r.findCalls)
+	}
+	return r.ProjectRepository.FindByID(ctx, id)
+}
+
+func (r *hookedProjectRepository) UpdateIfReferenceImageAssetID(ctx context.Context, project *model.Project, expectedID string) (bool, error) {
+	r.casCalls++
+	if r.beforeCAS != nil {
+		r.beforeCAS(r.casCalls)
+	}
+	return r.ProjectRepository.UpdateIfReferenceImageAssetID(ctx, project, expectedID)
+}
+
+type projectHandlerRepositoryOverride struct {
+	repository.Repository
+	projects repository.ProjectRepository
+}
+
+func (r projectHandlerRepositoryOverride) Projects() repository.ProjectRepository {
+	return r.projects
+}
+
 func (s *projectReferenceStore) DownloadURL(_ context.Context, key string, _ int) (string, error) {
 	s.signedKeys = append(s.signedKeys, key)
 	if s.downloadErr != nil {
@@ -80,10 +113,14 @@ func setupProjectHandlerTest(t *testing.T) (*fiber.App, repository.Repository, *
 	}
 
 	repo := repository.New(db)
+	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(repo.UploadSessions())}
+	return newProjectHandlerTestApp(repo, store), repo, store
+}
+
+func newProjectHandlerTestApp(repo repository.Repository, store *projectReferenceStore) *fiber.App {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	projectSvc := service.NewProjectService(repo, &logger)
 	h := NewProjectHandler(projectSvc, &logger)
-	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(repo.UploadSessions())}
 	h.SetStore(store)
 	h.SetUploadRepository(repo)
 	h.SetReferenceAssetService(service.NewReferenceAssetService(repo, store, time.Now))
@@ -100,7 +137,7 @@ func setupProjectHandlerTest(t *testing.T) (*fiber.App, repository.Repository, *
 	app.Get("/api/v1/projects/:id", injectUser, h.Get)
 	app.Post("/api/v1/projects", injectUser, h.Create)
 	app.Put("/api/v1/projects/:id", injectUser, h.Update)
-	return app, repo, store
+	return app
 }
 
 func setupProjectDeleteHandlerTest(t *testing.T) (*fiber.App, repository.Repository) {
@@ -492,6 +529,126 @@ func TestProjectUpdateSigningFailureDoesNotMutate(t *testing.T) {
 				t.Fatalf("signing failure mutated project: name=%q reference=%q", persisted.Name, persisted.ReferenceImageAssetID)
 			}
 		})
+	}
+}
+
+func TestProjectUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.T) {
+	base := repository.New(setupTaskHandlerTestDB(t))
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	for _, assetID := range []string{"asset-a", "asset-b"} {
+		if err := base.Assets().Create(t.Context(), &model.Asset{
+			ID: assetID, UserID: userID, Purpose: service.DirectUploadPurposeProjectReference,
+			StorageKey: "assets/users/" + userID + "/" + assetID + "/ref.png", FileName: "ref.png",
+			ContentType: "image/png", Size: 3, ETag: "etag-" + assetID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := base.Projects().Create(t.Context(), &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "before",
+		ReferenceImageAssetID: "asset-a", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hooked := &hookedProjectRepository{ProjectRepository: base.Projects()}
+	hooked.beforeFind = func(call int) {
+		if call != 2 {
+			return
+		}
+		project, err := base.Projects().FindByID(t.Context(), projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		project.ReferenceImageAssetID = "asset-b"
+		if err := base.Projects().Update(t.Context(), project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := projectHandlerRepositoryOverride{Repository: base, projects: hooked}
+	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
+	app := newProjectHandlerTestApp(repo, store)
+
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID, userID, map[string]any{"name": "after"})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"asset_id":"asset-b"`) || strings.Contains(string(body), `"asset_id":"asset-a"`) {
+		t.Fatalf("response does not match retried reference: %s", body)
+	}
+	wantSigned := []string{
+		"assets/users/" + userID + "/asset-a/ref.png",
+		"assets/users/" + userID + "/asset-b/ref.png",
+	}
+	if strings.Join(store.signedKeys, "|") != strings.Join(wantSigned, "|") {
+		t.Fatalf("signed keys=%#v want %#v", store.signedKeys, wantSigned)
+	}
+	persisted, err := base.Projects().FindByID(t.Context(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Name != "after" || persisted.ReferenceImageAssetID != "asset-b" {
+		t.Fatalf("persisted project name=%q reference=%q", persisted.Name, persisted.ReferenceImageAssetID)
+	}
+}
+
+func TestProjectUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *testing.T) {
+	base := repository.New(setupTaskHandlerTestDB(t))
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	assetIDs := []string{"asset-a", "asset-b", "asset-c", "asset-d"}
+	for _, assetID := range assetIDs {
+		if err := base.Assets().Create(t.Context(), &model.Asset{
+			ID: assetID, UserID: userID, Purpose: service.DirectUploadPurposeProjectReference,
+			StorageKey: "assets/users/" + userID + "/" + assetID + "/ref.png", FileName: "ref.png",
+			ContentType: "image/png", Size: 3, ETag: "etag-" + assetID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := base.Projects().Create(t.Context(), &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "before",
+		ReferenceImageAssetID: assetIDs[0], Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hooked := &hookedProjectRepository{ProjectRepository: base.Projects()}
+	hooked.beforeCAS = func(call int) {
+		project, err := base.Projects().FindByID(t.Context(), projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		project.ReferenceImageAssetID = assetIDs[call]
+		if err := base.Projects().Update(t.Context(), project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := projectHandlerRepositoryOverride{Repository: base, projects: hooked}
+	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
+	app := newProjectHandlerTestApp(repo, store)
+
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID, userID, map[string]any{"name": "must-not-write"})
+	if resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("status=%d want 409 body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+	if hooked.casCalls != 3 {
+		t.Fatalf("CAS calls=%d want 3", hooked.casCalls)
+	}
+	wantSigned := []string{
+		"assets/users/" + userID + "/asset-a/ref.png",
+		"assets/users/" + userID + "/asset-b/ref.png",
+		"assets/users/" + userID + "/asset-c/ref.png",
+	}
+	if strings.Join(store.signedKeys, "|") != strings.Join(wantSigned, "|") {
+		t.Fatalf("signed keys=%#v want %#v", store.signedKeys, wantSigned)
+	}
+	persisted, err := base.Projects().FindByID(t.Context(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Name != "before" || persisted.ReferenceImageAssetID != "asset-d" {
+		t.Fatalf("request mutated project name=%q reference=%q", persisted.Name, persisted.ReferenceImageAssetID)
 	}
 }
 

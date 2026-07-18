@@ -130,6 +130,23 @@ func (h *ProjectHandler) projectReferenceView(ctx context.Context, userID, asset
 	return h.referenceAssets.Present(ctx, userID, assetID, []string{service.DirectUploadPurposeProjectReference})
 }
 
+func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string, err error) error {
+	if errors.Is(err, service.ErrProjectNotFound) {
+		return Error(c, fiber.StatusNotFound, "project not found")
+	}
+	if errors.Is(err, service.ErrProjectOwnedByUser) {
+		return Forbidden(c, "you do not have access to this project")
+	}
+	if errors.Is(err, service.ErrProjectUpdateConflict) {
+		return Error(c, fiber.StatusConflict, "project reference changed concurrently; retry the update")
+	}
+	if errors.Is(err, service.ErrVideoModelUnavailable) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
+	return Error(c, fiber.StatusInternalServerError, "failed to update project")
+}
+
 // SetSeednoteClient injects the Seednote SDK client.
 func (h *ProjectHandler) SetSeednoteClient(client *seednote.Client) {
 	h.seednoteClient = client
@@ -478,14 +495,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 
 	current, _, err := h.service.Get(c.Context(), userID, projectID)
 	if err != nil {
-		if errors.Is(err, service.ErrProjectNotFound) {
-			return Error(c, fiber.StatusNotFound, "project not found")
-		}
-		if errors.Is(err, service.ErrProjectOwnedByUser) {
-			return Forbidden(c, "you do not have access to this project")
-		}
-		h.logger.Error().Err(err).Str("project_id", projectID).Msg("get project before update failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to update project")
+		return h.respondProjectUpdateError(c, projectID, err)
 	}
 	targetReferenceAssetID := current.ReferenceImageAssetID
 	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
@@ -509,19 +519,32 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	req.AvatarURL = rewriteFinalizedUploadURL(req.AvatarURL, rewrites)
 	ch.AvatarURL = req.AvatarURL
 
-	updated, err := h.service.Update(c.Context(), userID, projectID, ch)
+	var updated *model.Project
+	if req.ReferenceImageSet {
+		updated, err = h.service.Update(c.Context(), userID, projectID, ch)
+	} else {
+		const maxReferenceCASAttempts = 3
+		for attempt := 0; attempt < maxReferenceCASAttempts; attempt++ {
+			updated, err = h.service.UpdateIfReferenceImageAssetID(c.Context(), userID, projectID, ch, targetReferenceAssetID)
+			if !errors.Is(err, service.ErrProjectUpdateConflict) {
+				break
+			}
+			if attempt == maxReferenceCASAttempts-1 {
+				break
+			}
+			current, _, err = h.service.Get(c.Context(), userID, projectID)
+			if err != nil {
+				break
+			}
+			targetReferenceAssetID = current.ReferenceImageAssetID
+			referenceView, err = h.projectReferenceView(c.Context(), userID, targetReferenceAssetID)
+			if err != nil {
+				return respondReferenceAssetError(c, h.logger, err)
+			}
+		}
+	}
 	if err != nil {
-		if errors.Is(err, service.ErrProjectNotFound) {
-			return Error(c, fiber.StatusNotFound, "project not found")
-		}
-		if errors.Is(err, service.ErrProjectOwnedByUser) {
-			return Forbidden(c, "you do not have access to this project")
-		}
-		if errors.Is(err, service.ErrVideoModelUnavailable) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to update project")
+		return h.respondProjectUpdateError(c, projectID, err)
 	}
 
 	h.service.SanitizeProjectForResponse(updated)

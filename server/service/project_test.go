@@ -18,6 +18,23 @@ type projectMemoryLifecycleFake struct {
 	err error
 }
 
+type rejectingProjectCASRepository struct {
+	repository.ProjectRepository
+}
+
+func (r rejectingProjectCASRepository) UpdateIfReferenceImageAssetID(context.Context, *model.Project, string) (bool, error) {
+	return false, nil
+}
+
+type projectCASRepositoryOverride struct {
+	repository.Repository
+	projects repository.ProjectRepository
+}
+
+func (r projectCASRepositoryOverride) Projects() repository.ProjectRepository {
+	return r.projects
+}
+
 func (f *projectMemoryLifecycleFake) DeleteProjectMemory(_ context.Context, projectID string) error {
 	f.ids = append(f.ids, projectID)
 	return f.err
@@ -147,5 +164,34 @@ func TestProjectServiceDoesNotPersistLegacyReferenceImageURL(t *testing.T) {
 	}
 	if persisted.ReferenceImageURL != "" {
 		t.Fatalf("legacy URL was persisted on update: %q", persisted.ReferenceImageURL)
+	}
+}
+
+func TestProjectServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWriting(t *testing.T) {
+	base := repository.New(setupTaskTestDB(t))
+	repo := projectCASRepositoryOverride{
+		Repository: base,
+		projects:   rejectingProjectCASRepository{ProjectRepository: base.Projects()},
+	}
+	logger := zerolog.New(io.Discard)
+	svc := NewProjectService(repo, &logger)
+	project := &model.Project{
+		ID: uuid.NewString(), UserID: "user-1", Name: "before", Platform: model.PlatformArticle,
+		ReferenceImageAssetID: "asset-a", Status: model.ProjectStatusActive,
+	}
+	if err := base.Projects().Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.UpdateIfReferenceImageAssetID(t.Context(), project.UserID, project.ID, &model.Project{Name: "after"}, "asset-a")
+	if !errors.Is(err, ErrProjectUpdateConflict) {
+		t.Fatalf("error = %v, want ErrProjectUpdateConflict", err)
+	}
+	persisted, err := base.Projects().FindByID(t.Context(), project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Name != "before" || persisted.ReferenceImageAssetID != "asset-a" {
+		t.Fatalf("conflicting update modified project: name=%q reference=%q", persisted.Name, persisted.ReferenceImageAssetID)
 	}
 }

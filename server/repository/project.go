@@ -33,6 +33,7 @@ type ProjectRepository interface {
 	ListActiveProjects(ctx context.Context) ([]*model.Project, error)
 	FindByUserAndPlatform(ctx context.Context, userID, platform string) ([]*model.Project, error)
 	Update(ctx context.Context, project *model.Project) error
+	UpdateIfReferenceImageAssetID(ctx context.Context, project *model.Project, expectedID string) (bool, error)
 	UpdateStatus(ctx context.Context, id, status string) error
 	Delete(ctx context.Context, id string) error
 	GetStats(ctx context.Context, projectID string) (*ProjectStats, error)
@@ -99,6 +100,15 @@ func (r *gormProjectRepository) FindByUserAndPlatform(ctx context.Context, userI
 
 func (r *gormProjectRepository) Update(ctx context.Context, project *model.Project) error {
 	return r.db.WithContext(ctx).Save(project).Error
+}
+
+func (r *gormProjectRepository) UpdateIfReferenceImageAssetID(ctx context.Context, project *model.Project, expectedID string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Project{}).
+		Where("id = ? AND reference_image_asset_id = ?", project.ID, expectedID).
+		Select("*").
+		Updates(project)
+	return result.RowsAffected == 1, result.Error
 }
 
 func (r *gormProjectRepository) UpdateStatus(ctx context.Context, id, status string) error {
