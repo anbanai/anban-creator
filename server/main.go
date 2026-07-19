@@ -280,6 +280,7 @@ func main() {
 	var templateSvc *service.TemplateService
 	var viralAnalysisSvc *service.ViralAnalysisService
 	var posterSvc *service.PosterService
+	var referenceAssetSvc *service.ReferenceAssetService
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
 	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalog)
@@ -314,6 +315,11 @@ func main() {
 		}
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		if store != nil {
+			referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
+			planSvc.SetReferenceAssetService(referenceAssetSvc)
+			taskSvc.SetReferenceAssetService(referenceAssetSvc)
+		}
 		taskSvc.SetProjectMemoryManager(memoryMgr)
 		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
 		taskSvc.SetVideoBillingConfig(cfg.Billing)
@@ -416,6 +422,7 @@ func main() {
 	var aiEntrySvc *service.AIEntryService
 	if repo != nil && taskSvc != nil {
 		aiEntrySvc = service.NewAIEntryService(repo, taskSvc, writingLLMClient, log)
+		aiEntrySvc.SetReferenceAssetService(referenceAssetSvc)
 		if modelConfigSvc != nil {
 			aiEntrySvc.SetModelConfigService(modelConfigSvc, cfg.Writing.Timeout)
 		}
@@ -500,11 +507,13 @@ func main() {
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
+		planHandler.SetReferenceAssetService(referenceAssetSvc)
 		if store != nil {
 			planHandler.SetStore(store)
 		}
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
+		taskHandler.SetReferenceAssetService(referenceAssetSvc)
 		if store != nil {
 			taskHandler.SetStore(store)
 		}
@@ -528,7 +537,7 @@ func main() {
 		if store != nil {
 			projectHandler.SetStore(store)
 			projectHandler.SetUploadRepository(repo)
-			projectHandler.SetReferenceAssetService(service.NewReferenceAssetService(repo, store, time.Now))
+			projectHandler.SetReferenceAssetService(referenceAssetSvc)
 		}
 		projectHandler.SetSeednoteClient(seednoteClient)
 		projectHandler.SetSeednoteReadiness(seednoteMonitor)

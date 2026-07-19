@@ -40,12 +40,19 @@ type AIEntrySubmitter interface {
 }
 
 type AIEntryService struct {
-	repo           repository.Repository
-	taskSvc        *TaskService
-	llm            LLMClient
-	modelConfigSvc *ModelConfigService
-	llmTimeout     time.Duration
-	logger         *zerolog.Logger
+	repo            repository.Repository
+	taskSvc         *TaskService
+	llm             LLMClient
+	modelConfigSvc  *ModelConfigService
+	llmTimeout      time.Duration
+	logger          *zerolog.Logger
+	referenceAssets *ReferenceAssetService
+}
+
+func (s *AIEntryService) SetReferenceAssetService(referenceAssets *ReferenceAssetService) {
+	if s != nil {
+		s.referenceAssets = referenceAssets
+	}
 }
 
 type aiEntryIntent struct {
@@ -137,10 +144,24 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		InputAttachments: normalizeEntryAttachments(req.Attachments),
 		ExecutionTarget:  normalizeAIEntryExecutionTarget(req.ExecutionTarget),
 	}
+	var referenceView *model.AssetView
 
 	switch project.Platform {
 	case model.PlatformArticle, model.PlatformMoments:
-		params.ReferenceImageURL = firstImageAttachmentURL(req.Attachments)
+		if uploadSessionID := firstImageAttachmentUploadSessionID(req.Attachments); uploadSessionID != "" {
+			if s.referenceAssets == nil {
+				return aiEntryError("创建任务失败：参考图服务暂不可用。"), nil
+			}
+			assetID, err := s.referenceAssets.ResolveSelection(ctx, req.UserID, ReferenceImageSelection{UploadSessionID: uploadSessionID}, []string{DirectUploadPurposeAIEntryAttachment})
+			if err != nil {
+				return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
+			}
+			params.ReferenceImageAssetID = assetID
+			referenceView, err = s.referenceAssets.Present(ctx, req.UserID, assetID, []string{DirectUploadPurposeAIEntryAttachment})
+			if err != nil {
+				return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
+			}
+		}
 	case model.PlatformSeednote:
 		// Seednote uses InputAttachments as its only new per-run reference source.
 	case model.PlatformEcommerce:
@@ -193,6 +214,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if len(tasks) == 0 {
 		return aiEntryError("创建任务失败：未生成任务。"), nil
 	}
+	tasks[0].ReferenceImage = referenceView
 	return &AIEntrySubmitResult{
 		Status:  AIEntryStatusCreated,
 		Task:    tasks[0],
@@ -381,12 +403,10 @@ func normalizeAIEntryVideoDuration(duration int64) int64 {
 	return duration
 }
 
-func firstImageAttachmentURL(attachments []model.EntryAttachment) string {
-	for _, a := range attachments {
-		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "image" {
-			if source := entryAttachmentStorageSource(a); source != "" {
-				return source
-			}
+func firstImageAttachmentUploadSessionID(attachments []model.EntryAttachment) string {
+	for _, attachment := range attachments {
+		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "image" {
+			return strings.TrimSpace(attachment.UploadID)
 		}
 	}
 	return ""

@@ -39,11 +39,133 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		&model.Plan{}, &model.Task{}, &model.TaskExecution{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
 		&model.CreditTransaction{}, &model.TopicPool{}, &model.VideoGeneration{},
-		&model.IlinkBinding{}, &model.IlinkNotification{},
+		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
 	return db
+}
+
+func TestTaskCreateRejectsInvalidReferenceBeforePersistenceOrCredits(t *testing.T) {
+	tests := []struct {
+		name  string
+		asset *model.Asset
+		id    string
+		want  error
+	}{
+		{name: "missing", id: "missing", want: ErrReferenceAssetForbidden},
+		{name: "foreign", id: "foreign", asset: referenceAssetFixture("foreign", "other", DirectUploadPurposeTaskReference), want: ErrReferenceAssetForbidden},
+		{name: "wrong purpose", id: "purpose", asset: referenceAssetFixture("purpose", "user", DirectUploadPurposeProjectReference), want: ErrReferenceAssetPurposeMismatch},
+		{name: "invalid metadata", id: "metadata", asset: &model.Asset{ID: "metadata", UserID: "user", Purpose: DirectUploadPurposeTaskReference, StorageKey: "assets/users/user/metadata/ref.txt", FileName: "ref.txt", ContentType: "text/plain", Size: 3, ETag: "etag"}, want: ErrReferenceAssetInvalidMetadata},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskTestDB(t)
+			repo := repository.New(db)
+			logger := zerolog.New(io.Discard)
+			creditSvc := NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4000}}, &logger)
+			svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
+			svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+			ctx := context.Background()
+			userID := "user"
+			if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + tt.name, CreditsBalance: 10_000}); err != nil {
+				t.Fatalf("create user: %v", err)
+			}
+			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			if tt.asset != nil {
+				if tt.asset.UserID == "user" || tt.asset.UserID == "other" {
+					if err := repo.Assets().Create(ctx, tt.asset); err != nil {
+						t.Fatalf("create asset: %v", err)
+					}
+				}
+			}
+			beforeTx, _ := repo.Credits().CountByUserID(ctx, userID)
+			_, err := svc.CreateManual(ctx, CreateManualParams{UserID: userID, ProjectID: projectID, Prompt: "write", ReferenceImageAssetID: tt.id})
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("CreateManual error = %v, want %v", err, tt.want)
+			}
+			tasks, total, listErr := svc.List(ctx, userID, 0, 10, "", "", "")
+			if listErr != nil || total != 0 || len(tasks) != 0 {
+				t.Fatalf("tasks after invalid reference = %d/%d, %v", len(tasks), total, listErr)
+			}
+			afterTx, _ := repo.Credits().CountByUserID(ctx, userID)
+			if afterTx != beforeTx {
+				t.Fatalf("credit transactions = %d, want unchanged %d", afterTx, beforeTx)
+			}
+			user, _ := repo.Users().FindByID(ctx, userID)
+			if user.CreditsBalance != 10_000 {
+				t.Fatalf("balance = %d, want unchanged", user.CreditsBalance)
+			}
+		})
+	}
+}
+
+func TestTaskSnapshotAndPlanCopyReferenceAssetID(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture("asset-project", userID, DirectUploadPurposeProjectReference)
+	if err := repo.Assets().Create(ctx, asset); err != nil {
+		t.Fatalf("create project asset: %v", err)
+	}
+	project, _ := repo.Projects().FindByID(ctx, projectID)
+	project.ReferenceImageAssetID = asset.ID
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{UserID: userID, ProjectID: projectID, Prompt: "write"})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if got := tasks[0].ProjectSnapshot.Data().ReferenceImageAssetID; got != asset.ID {
+		t.Fatalf("snapshot asset = %q", got)
+	}
+
+	planAsset := referenceAssetFixture("asset-plan", userID, DirectUploadPurposeTaskReference)
+	if err := repo.Assets().Create(ctx, planAsset); err != nil {
+		t.Fatalf("create plan asset: %v", err)
+	}
+	plan := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Prompt: "planned", ReferenceImageAssetID: planAsset.ID}
+	task, err := svc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("CreateFromPlan: %v", err)
+	}
+	if task.ReferenceImageAssetID != planAsset.ID {
+		t.Fatalf("task asset = %q", task.ReferenceImageAssetID)
+	}
+}
+
+func TestTaskCloneValidatesReferenceBeforeCreditDeduction(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	creditSvc := NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4000}}, &logger)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "clone-user", CreditsBalance: 10_000}); err != nil {
+		t.Fatal(err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	src := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ReferenceImageAssetID: "corrupt"}
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	if !errors.Is(err, ErrReferenceAssetForbidden) {
+		t.Fatalf("Clone error = %v", err)
+	}
+	count, _ := repo.Credits().CountByUserID(ctx, userID)
+	if count != 0 {
+		t.Fatalf("credit transactions = %d, want 0", count)
+	}
+	user, _ := repo.Users().FindByID(ctx, userID)
+	if user.CreditsBalance != 10_000 {
+		t.Fatalf("balance = %d", user.CreditsBalance)
+	}
 }
 
 func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Repository) {
@@ -2607,6 +2729,9 @@ func TestTaskServiceCloneAppliesInputOverrides(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture("frozen-reference", userID, DirectUploadPurposeTaskReference)
+	seedReferenceAsset(t, repo, asset)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 	articleCover := false
 	articleContent := false
 	src := &model.Task{
@@ -2619,7 +2744,7 @@ func TestTaskServiceCloneAppliesInputOverrides(t *testing.T) {
 		ImageRatio:               "16:9",
 		ImageModelKey:            "frozen-image-model",
 		SkipReferenceImage:       true,
-		ReferenceImageURL:        "/api/v1/files/frozen-reference.png",
+		ReferenceImageAssetID:    asset.ID,
 		Watermark:                true,
 		HasContentImage:          false,
 		HasTailImage:             true,
@@ -2665,7 +2790,7 @@ func TestTaskServiceCloneAppliesInputOverrides(t *testing.T) {
 		!reflect.DeepEqual(clone.Overrides.Data(), src.Overrides.Data()) {
 		t.Fatalf("frozen structured config changed: snapshot=%#v overrides=%#v", clone.ProjectSnapshot.Data(), clone.Overrides.Data())
 	}
-	if clone.SkipReferenceImage != src.SkipReferenceImage || clone.ReferenceImageURL != src.ReferenceImageURL || clone.Watermark != src.Watermark || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode || clone.HasContentImage != src.HasContentImage || clone.HasTailImage != src.HasTailImage || *clone.ArticleWithCover || *clone.ArticleWithContentImages {
+	if clone.SkipReferenceImage != src.SkipReferenceImage || clone.ReferenceImageAssetID != src.ReferenceImageAssetID || clone.ReferenceImageURL != "" || clone.Watermark != src.Watermark || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode || clone.HasContentImage != src.HasContentImage || clone.HasTailImage != src.HasTailImage || *clone.ArticleWithCover || *clone.ArticleWithContentImages {
 		t.Fatalf("frozen image/goal config changed: clone=%#v source=%#v", clone, src)
 	}
 

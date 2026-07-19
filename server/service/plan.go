@@ -26,6 +26,7 @@ type PlanService struct {
 	videoCreditMultiplier int
 	videoBilling          srvconfig.BillingConfig
 	creditSvc             *CreditService
+	referenceAssets       *ReferenceAssetService
 }
 
 // NewPlanService creates a new PlanService.
@@ -46,6 +47,12 @@ func (s *PlanService) SetCreditService(creditSvc *CreditService) {
 		return
 	}
 	s.creditSvc = creditSvc
+}
+
+func (s *PlanService) SetReferenceAssetService(referenceAssets *ReferenceAssetService) {
+	if s != nil {
+		s.referenceAssets = referenceAssets
+	}
 }
 
 func (s *PlanService) SetVideoBillingConfig(billing srvconfig.BillingConfig) {
@@ -102,16 +109,16 @@ func (s *PlanService) videoBillingOptions(ctx context.Context, userID string) Vi
 // and prevents argument-order bugs on a signature that has grown past a dozen
 // positional params.
 type CreatePlanParams struct {
-	UserID             string
-	ProjectID          string
-	CronExpr           string
-	Prompt             string
-	ImageModelKey      string
-	SkipReferenceImage *bool
-	ReferenceImageURL  string
-	Watermark          *bool
-	Goal               string
-	GoalMode           bool
+	UserID                string
+	ProjectID             string
+	CronExpr              string
+	Prompt                string
+	ImageModelKey         string
+	SkipReferenceImage    *bool
+	ReferenceImageAssetID string
+	Watermark             *bool
+	Goal                  string
+	GoalMode              bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -156,6 +163,14 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	}
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
+	}
+	if p.ReferenceImageAssetID != "" {
+		if s.referenceAssets == nil {
+			return nil, ErrReferenceAssetUnavailable
+		}
+		if _, err := s.referenceAssets.RequireOwned(ctx, p.UserID, p.ReferenceImageAssetID, []string{DirectUploadPurposeTaskReference}); err != nil {
+			return nil, err
+		}
 	}
 	// Package-priced or one-off-only platforms can't back plans. Reject up front
 	// so API/MCP callers fail fast instead of creating schedules the task runner
@@ -217,7 +232,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		Status:                   model.PlanStatusActive,
 		NextRunAt:                nextRun,
 		ImageModelKey:            p.ImageModelKey,
-		ReferenceImageURL:        p.ReferenceImageURL,
+		ReferenceImageAssetID:    p.ReferenceImageAssetID,
 		SkipReferenceImage:       p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:                p.Watermark != nil && *p.Watermark,
 		Goal:                     p.Goal,
@@ -278,7 +293,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - ImageModelKey: nil = leave unchanged; &"" = clear to system default
 //     (use model.ImageModelKeySystemDefault / ImageModelKeyCustom for clarity)
 //   - SkipReferenceImage: nil = leave unchanged; &true/&false = set
-//   - ReferenceImageURL: nil = leave unchanged; &"" = clear; &"value" = set
+//   - ReferenceImageAssetID: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
@@ -292,7 +307,7 @@ type UpdatePlanParams struct {
 	Prompt                   string
 	ImageModelKey            *string
 	SkipReferenceImage       *bool
-	ReferenceImageURL        *string
+	ReferenceImageAssetID    *string
 	Watermark                *bool
 	Goal                     string
 	GoalMode                 *bool
@@ -315,8 +330,16 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 	}
 
 	plan.Prompt = p.Prompt
-	if p.ReferenceImageURL != nil {
-		plan.ReferenceImageURL = *p.ReferenceImageURL
+	if p.ReferenceImageAssetID != nil {
+		if *p.ReferenceImageAssetID != "" {
+			if s.referenceAssets == nil {
+				return nil, ErrReferenceAssetUnavailable
+			}
+			if _, err := s.referenceAssets.RequireOwned(ctx, plan.UserID, *p.ReferenceImageAssetID, []string{DirectUploadPurposeTaskReference}); err != nil {
+				return nil, err
+			}
+		}
+		plan.ReferenceImageAssetID = *p.ReferenceImageAssetID
 	}
 	plan.Goal = p.Goal
 	if p.ImageModelKey != nil {

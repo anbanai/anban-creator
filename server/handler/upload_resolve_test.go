@@ -199,7 +199,7 @@ func TestResolveAttachmentDownloadURLByOwner(t *testing.T) {
 		{name: "task attachment key", payload: fmt.Sprintf(`{"key":%q,"owner_type":"task","owner_id":%q}`, taskKey, taskID), wantStatus: fiber.StatusOK, wantKey: taskKey},
 		{name: "task owned legacy video URL", payload: fmt.Sprintf(`{"key":%q,"owner_type":"task","owner_id":%q}`, videoKey, taskID), wantStatus: fiber.StatusOK, wantKey: videoKey},
 		{name: "task video config reference", payload: fmt.Sprintf(`{"key":%q,"owner_type":"task","owner_id":%q}`, configKey, taskID), wantStatus: fiber.StatusOK, wantKey: configKey},
-		{name: "plan owned legacy reference URL", payload: fmt.Sprintf(`{"key":%q,"owner_type":"plan","owner_id":%q}`, planKey, planID), wantStatus: fiber.StatusOK, wantKey: planKey},
+		{name: "plan legacy reference URL ignored", payload: fmt.Sprintf(`{"key":%q,"owner_type":"plan","owner_id":%q}`, planKey, planID), wantStatus: fiber.StatusForbidden},
 		{name: "unrelated key", payload: fmt.Sprintf(`{"key":"uploads/finalized/unrelated.png","owner_type":"task","owner_id":%q}`, taskID), wantStatus: fiber.StatusForbidden},
 		{name: "external URL key not accepted", payload: fmt.Sprintf(`{"key":"public.png","owner_type":"task","owner_id":%q}`, taskID), wantStatus: fiber.StatusForbidden},
 		{name: "cross user owner", payload: fmt.Sprintf(`{"key":"uploads/finalized/other/secret.png","owner_type":"task","owner_id":%q}`, otherTask.ID), wantStatus: fiber.StatusForbidden},
@@ -271,8 +271,8 @@ func TestAttachmentAPIResponseEmitsOwnedKeysWithoutSigningOrMutation(t *testing.
 		if _, ok := attachments[1].(map[string]any)["key"]; ok {
 			t.Fatalf("%s external attachment gained key: %v", name, attachments[1])
 		}
-		if decoded["reference_image_key"] != ownedKey {
-			t.Fatalf("%s reference_image_key = %v", name, decoded["reference_image_key"])
+		if _, exists := decoded["reference_image_key"]; exists {
+			t.Fatalf("%s leaked legacy reference_image_key: %v", name, decoded["reference_image_key"])
 		}
 	}
 	taskRaw, _ := json.Marshal(task.InputAttachments.Data())

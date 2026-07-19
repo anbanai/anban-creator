@@ -81,8 +81,8 @@ func TestRespondUploadSessionFinalizeErrorClassifiesAndRedacts(t *testing.T) {
 
 func TestFinalizeUploadSessionURLCallersUseSharedResponder(t *testing.T) {
 	expectedCalls := map[string]int{
-		"task.go":     4,
-		"plan.go":     6,
+		"task.go":     3,
+		"plan.go":     4,
 		"project.go":  2,
 		"template.go": 2,
 	}

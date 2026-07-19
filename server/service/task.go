@@ -95,6 +95,7 @@ type TaskService struct {
 	memoryMgr         *projectmemory.ProjectMemoryManager
 	nasResumeEnabled  bool
 	taskWorkspace     TaskWorkspaceLifecycle
+	referenceAssets   *ReferenceAssetService
 }
 
 type TaskWorkspaceLifecycle interface {
@@ -170,6 +171,12 @@ func (s *TaskService) SetProjectMemoryManager(memoryMgr *projectmemory.ProjectMe
 
 func (s *TaskService) SetTaskWorkspaceLifecycle(workspace TaskWorkspaceLifecycle) {
 	s.taskWorkspace = workspace
+}
+
+func (s *TaskService) SetReferenceAssetService(referenceAssets *ReferenceAssetService) {
+	if s != nil {
+		s.referenceAssets = referenceAssets
+	}
 }
 
 func (s *TaskService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
@@ -412,14 +419,14 @@ type CreateManualParams struct {
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep billing and runtime configuration anchored to the source task instead
 	// of re-deriving them from a project or server policy that changed later.
-	FrozenTaskType       string
-	PreserveFrozenConfig bool
-	Prompt               string
-	Quantity             int
-	ImageRatio           string
-	ImageModelKey        string
-	SkipRefImage         *bool
-	ReferenceImageURL    string
+	FrozenTaskType        string
+	PreserveFrozenConfig  bool
+	Prompt                string
+	Quantity              int
+	ImageRatio            string
+	ImageModelKey         string
+	SkipRefImage          *bool
+	ReferenceImageAssetID string
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
@@ -476,6 +483,38 @@ type CreateManualParams struct {
 	ExecutionTarget string
 }
 
+func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot) error {
+	checks := []struct {
+		assetID string
+		allowed []string
+	}{
+		{assetID: taskAssetID, allowed: []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}},
+	}
+	if snapshot != nil {
+		checks = append(checks, struct {
+			assetID string
+			allowed []string
+		}{assetID: snapshot.ReferenceImageAssetID, allowed: []string{DirectUploadPurposeProjectReference}})
+	} else if project != nil {
+		checks = append(checks, struct {
+			assetID string
+			allowed []string
+		}{assetID: project.ReferenceImageAssetID, allowed: []string{DirectUploadPurposeProjectReference}})
+	}
+	for _, check := range checks {
+		if check.assetID == "" {
+			continue
+		}
+		if s.referenceAssets == nil {
+			return ErrReferenceAssetUnavailable
+		}
+		if _, err := s.referenceAssets.RequireOwned(ctx, userID, check.assetID, check.allowed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The Quantity field (1-5) determines how many tasks to create, each independently billed.
 // ImageModelKey optionally selects a per-task image model (validated upstream by the handler).
@@ -511,6 +550,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
+	}
+	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
+		return nil, err
 	}
 
 	taskType := project.Platform
@@ -689,7 +731,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Prompt:                   taskPrompt,
 			ImageRatio:               p.ImageRatio,
 			ImageModelKey:            effectiveImageModelKey,
-			ReferenceImageURL:        p.ReferenceImageURL,
+			ReferenceImageAssetID:    p.ReferenceImageAssetID,
 			InputSourceTaskID:        p.InputSourceTaskID,
 			SkipReferenceImage:       p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:                p.Watermark != nil && *p.Watermark,
@@ -1012,21 +1054,14 @@ func videoTaskSegmentsFromPlan(segments []VideoGenerationSegmentPlan) []model.Vi
 // reference image, watermark, goal, seednote image composition) flow to the task.
 // Project/account style config is frozen from the project into ProjectSnapshot.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("plan is required")
+	}
 	taskID := generateTaskID()
 
 	prompt := plan.Prompt
 	if prompt == "" {
 		prompt = plan.Title
-	}
-
-	// Try to claim a topic from the topic pool if no prompt is set.
-	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {
-		claimed, err := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ProjectID, taskID)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
-		} else if claimed != "" {
-			prompt = claimed
-		}
 	}
 
 	// Derive task type from the project if ProjectID is set.
@@ -1036,6 +1071,20 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		if found, err := s.repo.Projects().FindByID(ctx, plan.ProjectID); err == nil {
 			project = found
 			taskType = found.Platform
+		}
+	}
+	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil); err != nil {
+		return nil, err
+	}
+
+	// Claim topics only after every persisted reference identity has been
+	// validated, so an invalid plan cannot consume a topic early.
+	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {
+		claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ProjectID, taskID)
+		if claimErr != nil {
+			s.logger.Warn().Err(claimErr).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
+		} else if claimed != "" {
+			prompt = claimed
 		}
 	}
 	var planVideoInput *model.VideoInput
@@ -1097,7 +1146,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Status:                   model.TaskStatusPending,
 		Prompt:                   prompt,
 		ImageModelKey:            plan.ImageModelKey,
-		ReferenceImageURL:        plan.ReferenceImageURL,
+		ReferenceImageAssetID:    plan.ReferenceImageAssetID,
 		SkipReferenceImage:       plan.SkipReferenceImage,
 		Watermark:                plan.Watermark,
 		Goal:                     plan.Goal,

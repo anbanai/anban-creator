@@ -147,7 +147,7 @@ func TestBootstrapRejectsTextOnlyResponseWhenSafeLifetimeExpiresDuringBuild(t *t
 	}
 }
 
-func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testing.T) {
+func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +213,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 		paths[file.Path] = file
 	}
 	resumeAttachmentPath, _ := serveragent.ExecutionResumeAttachmentPath(executionID, "foo.pdf")
-	for _, path := range []string{".anban-creator/reference.png", ".anban-creator/input-attachments/01-brief.txt", ".anban-creator/input-attachments/02-input.png", ".anban-creator/input-attachments/03-key-first.png", ".anban-creator/input-attachments/index.json", resumeContextPath, resumeAttachmentPath} {
+	for _, path := range []string{".anban-creator/input-attachments/01-brief.txt", ".anban-creator/input-attachments/02-input.png", ".anban-creator/input-attachments/03-key-first.png", ".anban-creator/input-attachments/index.json", resumeContextPath, resumeAttachmentPath} {
 		if _, ok := paths[path]; !ok {
 			t.Fatalf("missing bootstrap path %q in %#v", path, first.Files)
 		}
@@ -221,7 +221,15 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 	if _, exists := paths[path.Join(path.Dir(resumeAttachmentPath), "05-foo.pdf")]; exists {
 		t.Fatal("bootstrap renamed persisted resume attachment")
 	}
-	if paths[".anban-creator/reference.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/02-input.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/03-key-first.png"].DownloadURL == "" {
+	if _, exists := paths[".anban-creator/reference.png"]; exists {
+		t.Fatal("legacy reference_image_url produced a bootstrap reference file")
+	}
+	for _, rawURL := range store.ownedChecks {
+		if strings.Contains(rawURL, "/inputs/reference.png") {
+			t.Fatalf("legacy reference_image_url reached storage URL ownership parsing: %q", rawURL)
+		}
+	}
+	if paths[".anban-creator/input-attachments/02-input.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/03-key-first.png"].DownloadURL == "" {
 		t.Fatal("private objects were not signed")
 	}
 	if !strings.Contains(paths[".anban-creator/settings.json"].Text, `"seednote"`) {

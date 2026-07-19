@@ -66,7 +66,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ImageRatio:               src.ImageRatio,
 		ImageModelKey:            src.ImageModelKey,
 		SkipRefImage:             &skipRef,
-		ReferenceImageURL:        src.ReferenceImageURL,
+		ReferenceImageAssetID:    src.ReferenceImageAssetID,
 		InputSourceTaskID:        inputSourceTaskID,
 		Overrides:                &overrides,
 		ProjectSnapshot:          &snapshot,

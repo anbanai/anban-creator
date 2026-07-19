@@ -22,11 +22,15 @@ type Plan struct {
 	CronExpr    string `gorm:"type:varchar(100)" json:"cron_expr"`
 	Prompt      string `gorm:"column:topic_hint;type:text" json:"prompt"`
 	Status      string `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
-	// ImageModelKey / ReferenceImageURL are per-plan image defaults copied to each
+	// ImageModelKey / ReferenceImageAssetID are per-plan image defaults copied to each
 	// spawned task (task-level values, when set, win). They are scheduling-adjacent
 	// "what to produce" params, not style/author/theme dimensions.
-	ImageModelKey      string `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
-	ReferenceImageURL  string `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
+	ImageModelKey         string     `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
+	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
+	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
+	// ReferenceImageURL is a Task 6 compile bridge for runtime consumers. Task 5
+	// business paths never read, write, persist, or serialize it.
+	ReferenceImageURL  string `gorm:"-" json:"-"`
 	SkipReferenceImage bool   `gorm:"default:false" json:"skip_reference_image,omitempty"`
 	Watermark          bool   `gorm:"default:false" json:"watermark,omitempty"`
 	// HasContentImage / HasTailImage are plan-level seednote image composition

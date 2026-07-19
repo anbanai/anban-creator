@@ -150,11 +150,6 @@ func enrichOwnedObjectKeys(resp map[string]any, store storage.Provider) {
 	if resp == nil || store == nil {
 		return
 	}
-	if rawURL, _ := resp["reference_image_url"].(string); rawURL != "" {
-		if key, ok := ownedStorageKey(store, rawURL); ok {
-			resp["reference_image_key"] = key
-		}
-	}
 	enrichOwnedObjectKeysValue(resp, store)
 }
 

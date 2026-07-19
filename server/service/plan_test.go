@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	appdraft "github.com/anbanai/anban-creator/app/draft"
 	"github.com/anbanai/anban-creator/app/wechat"
@@ -51,6 +52,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
+		&model.Asset{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
@@ -800,24 +802,26 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	}
 }
 
-func TestPlanService_Update_ReferenceImageURL(t *testing.T) {
+func TestPlanService_Update_ReferenceImageAssetID(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	initialRef := "https://example.com/ref.png"
+	initialRef := "asset-initial"
+	seedReferenceAsset(t, repo, referenceAssetFixture(initialRef, "user-1", DirectUploadPurposeTaskReference))
 	created, err := svc.Create(ctx, CreatePlanParams{
-		UserID:            "user-1",
-		ProjectID:         chID,
-		CronExpr:          "0 9 * * *",
-		Prompt:            "hint",
-		ReferenceImageURL: initialRef,
+		UserID:                "user-1",
+		ProjectID:             chID,
+		CronExpr:              "0 9 * * *",
+		Prompt:                "hint",
+		ReferenceImageAssetID: initialRef,
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
-	if created.ReferenceImageURL != initialRef {
-		t.Fatalf("expected initial reference_image_url %q, got %q", initialRef, created.ReferenceImageURL)
+	if created.ReferenceImageAssetID != initialRef {
+		t.Fatalf("expected initial reference asset %q, got %q", initialRef, created.ReferenceImageAssetID)
 	}
 
 	// nil = leave unchanged (this is the regression fix: editing a plan without
@@ -829,36 +833,37 @@ func TestPlanService_Update_ReferenceImageURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update with nil reference_image_url: %v", err)
 	}
-	if updated.ReferenceImageURL != initialRef {
-		t.Errorf("nil reference_image_url should leave unchanged; got %q, want %q", updated.ReferenceImageURL, initialRef)
+	if updated.ReferenceImageAssetID != initialRef {
+		t.Errorf("nil reference asset should leave unchanged; got %q, want %q", updated.ReferenceImageAssetID, initialRef)
 	}
 
 	// &"" = clear.
 	emptyRef := ""
 	updated, err = svc.Update(ctx, UpdatePlanParams{
-		ID:                created.ID,
-		Prompt:            "hint",
-		ReferenceImageURL: &emptyRef,
+		ID:                    created.ID,
+		Prompt:                "hint",
+		ReferenceImageAssetID: &emptyRef,
 	})
 	if err != nil {
 		t.Fatalf("update with empty reference_image_url: %v", err)
 	}
-	if updated.ReferenceImageURL != "" {
-		t.Errorf("empty &\"\" reference_image_url should clear; got %q, want empty", updated.ReferenceImageURL)
+	if updated.ReferenceImageAssetID != "" {
+		t.Errorf("empty reference asset should clear; got %q", updated.ReferenceImageAssetID)
 	}
 
 	// &"new" = set.
-	newRef := "https://example.com/new.png"
+	newRef := "asset-new"
+	seedReferenceAsset(t, repo, referenceAssetFixture(newRef, "user-1", DirectUploadPurposeTaskReference))
 	updated, err = svc.Update(ctx, UpdatePlanParams{
-		ID:                created.ID,
-		Prompt:            "hint",
-		ReferenceImageURL: &newRef,
+		ID:                    created.ID,
+		Prompt:                "hint",
+		ReferenceImageAssetID: &newRef,
 	})
 	if err != nil {
 		t.Fatalf("update with new reference_image_url: %v", err)
 	}
-	if updated.ReferenceImageURL != newRef {
-		t.Errorf("new reference_image_url should set; got %q, want %q", updated.ReferenceImageURL, newRef)
+	if updated.ReferenceImageAssetID != newRef {
+		t.Errorf("new reference asset should set; got %q, want %q", updated.ReferenceImageAssetID, newRef)
 	}
 }
 

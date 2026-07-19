@@ -5,11 +5,13 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type fakeAIEntryLLM struct {
@@ -74,8 +76,8 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	if found.Prompt != "写一篇新品发布公众号文章" {
 		t.Fatalf("task prompt = %q", found.Prompt)
 	}
-	if found.ReferenceImageURL != "https://cdn.example.com/ref.png" {
-		t.Fatalf("reference_image_url = %q", found.ReferenceImageURL)
+	if found.ReferenceImageAssetID != "" || found.ReferenceImageURL != "" {
+		t.Fatalf("URL-only attachment became a task reference: asset=%q url=%q", found.ReferenceImageAssetID, found.ReferenceImageURL)
 	}
 	attachments := found.InputAttachments.Data()
 	if len(attachments) != 1 || attachments[0].FileName != "ref.png" {
@@ -83,6 +85,60 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	}
 	if len(llm.calls) != 1 || !strings.Contains(llm.calls[0].user, "帮我写一篇新品发布公众号文章") {
 		t.Fatalf("llm calls = %#v", llm.calls)
+	}
+}
+
+func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
+	for _, platform := range []string{model.PlatformArticle, model.PlatformMoments} {
+		t.Run(platform, func(t *testing.T) {
+			taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, platform)
+			asset := referenceAssetFixture("entry-upload-"+platform, userID, DirectUploadPurposeAIEntryAttachment)
+			if err := repo.Assets().Create(ctx, asset); err != nil {
+				t.Fatalf("create asset: %v", err)
+			}
+			if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+				ID: asset.ID, UserID: userID, Purpose: DirectUploadPurposeAIEntryAttachment,
+				StagingKey: "uploads/pending/" + userID + "/" + asset.ID + "/" + asset.FileName,
+				FileName:   asset.FileName, ContentType: asset.ContentType, Size: asset.Size,
+				Status: model.UploadSessionFinalized, AssetID: asset.ID, FinalizationETag: asset.ETag,
+				ExpiresAt: time.Now().Add(time.Hour),
+			}); err != nil {
+				t.Fatalf("create upload session: %v", err)
+			}
+			store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{
+				asset.StorageKey: {Key: asset.StorageKey, Size: asset.Size, ContentType: asset.ContentType, ETag: asset.ETag},
+			}}
+			referenceSvc := NewReferenceAssetService(repo, store, time.Now)
+			taskSvc.SetReferenceAssetService(referenceSvc)
+			llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"write content"}`}}
+			logger := zerolog.New(io.Discard)
+			entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+			entrySvc.SetReferenceAssetService(referenceSvc)
+
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+				UserID: userID, ProjectID: projectID, Text: "write content",
+				Attachments: []model.EntryAttachment{{Type: "image", UploadID: asset.ID, URL: "https://staging.example.com/ref.png", FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size}},
+			})
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if result.Status != AIEntryStatusCreated || result.Task == nil || result.Task.ReferenceImage == nil {
+				t.Fatalf("result = %#v", result)
+			}
+			found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+			if err != nil {
+				t.Fatalf("find task: %v", err)
+			}
+			if found.ReferenceImageAssetID != asset.ID {
+				t.Fatalf("reference asset = %q", found.ReferenceImageAssetID)
+			}
+			if found.ReferenceImageURL != "" || result.Task.ReferenceImage.AssetID != asset.ID {
+				t.Fatalf("reference contract = persisted URL %q view %#v", found.ReferenceImageURL, result.Task.ReferenceImage)
+			}
+		})
 	}
 }
 
@@ -524,7 +580,7 @@ func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceImageURL(t *testing.T
 	}
 }
 
-func TestAIEntryArticleAndMomentsKeepFirstImageCompatibility(t *testing.T) {
+func TestAIEntryArticleAndMomentsDoNotPersistURLOnlyReference(t *testing.T) {
 	for _, platform := range []string{model.PlatformArticle, model.PlatformMoments} {
 		t.Run(platform, func(t *testing.T) {
 			taskSvc, repo := setupTaskServiceWithEnqueuer(t)
@@ -557,8 +613,8 @@ func TestAIEntryArticleAndMomentsKeepFirstImageCompatibility(t *testing.T) {
 			if err != nil {
 				t.Fatalf("find task: %v", err)
 			}
-			if found.ReferenceImageURL != "/api/v1/files/product.png" {
-				t.Fatalf("reference_image_url = %q", found.ReferenceImageURL)
+			if found.ReferenceImageAssetID != "" || found.ReferenceImageURL != "" {
+				t.Fatalf("URL-only reference persisted: asset=%q url=%q", found.ReferenceImageAssetID, found.ReferenceImageURL)
 			}
 		})
 	}

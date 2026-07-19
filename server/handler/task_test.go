@@ -713,37 +713,40 @@ func TestCreateTaskPersistsFinalReferenceAndEcommercePhotoURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 	refID, photoID := uuid.NewString(), uuid.NewString()
-	refURL := seedHandlerUploadSession(t, repo, userID, refID, service.DirectUploadPurposeTaskReference, "reference.png", "image/png")
+	seedHandlerUploadSession(t, repo, userID, refID, service.DirectUploadPurposeTaskReference, "reference.png", "image/png")
 	photoURL := seedHandlerUploadSession(t, repo, userID, photoID, service.DirectUploadPurposeEcommercePhoto, "product.png", "image/png")
-	store := uploadSessionStatStore(repo.UploadSessions())
+	store := &referencePresentationStore{fakeStorageProvider: uploadSessionStatStore(repo.UploadSessions())}
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
+	h.SetStore(store)
+	h.SetReferenceAssetService(referenceSvc)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return h.Create(c)
 	})
 
-	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","reference_image_url":"`+refURL+`","product_photos":["`+photoURL+`"],"selected_modules":{"main_images":1}}`)
+	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","reference_image":{"upload_session_id":"`+refID+`"},"product_photos":["`+photoURL+`"],"selected_modules":{"main_images":1}}`)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
 	}
-	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte("assets/users/")) {
+	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte(refID)) {
 		t.Fatalf("task response contains non-final upload URL: %s", body)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("persisted tasks = %#v, %v", tasks, err)
 	}
-	wantRef := "/api/v1/files/assets/users/" + userID + "/" + refID + "/reference.png"
 	wantPhoto := "/api/v1/files/assets/users/" + userID + "/" + photoID + "/product.png"
 	photos := tasks[0].Ecommerce.Data().ProductPhotos
-	if tasks[0].ReferenceImageURL != wantRef || len(photos) != 1 || photos[0] != wantPhoto {
-		t.Fatalf("persisted reference/photos = %q/%#v", tasks[0].ReferenceImageURL, photos)
+	if tasks[0].ReferenceImageAssetID != refID || len(photos) != 1 || photos[0] != wantPhoto {
+		t.Fatalf("persisted reference/photos = %q/%#v", tasks[0].ReferenceImageAssetID, photos)
 	}
 	for id, wantKey := range map[string]string{
 		refID:   "assets/users/" + userID + "/" + refID + "/reference.png",
@@ -974,7 +977,7 @@ func TestCreateTaskRejectsMalformedUploadSessionReferenceWithoutCreatingTask(t *
 	resp := postJSON(t, app, "/tasks", body)
 	defer resp.Body.Close()
 	responseBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != fiber.StatusBadRequest || !bytes.Contains(responseBody, []byte("pending upload URL is invalid")) {
+	if resp.StatusCode != fiber.StatusBadRequest || !bytes.Contains(responseBody, []byte("reference_image_url is no longer supported")) {
 		t.Fatalf("status/body = %d/%s", resp.StatusCode, responseBody)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
@@ -983,7 +986,7 @@ func TestCreateTaskRejectsMalformedUploadSessionReferenceWithoutCreatingTask(t *
 	}
 }
 
-func TestCreateTaskAllowsExternalStagingLikeReferencePath(t *testing.T) {
+func TestCreateTaskRejectsExternalLegacyReferencePath(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -1017,13 +1020,13 @@ func TestCreateTaskAllowsExternalStagingLikeReferencePath(t *testing.T) {
 	}`, projectID, "https://external.example.com/uploads/pending/user-1/external-id/ref.png")
 	resp := postJSON(t, app, "/tasks", body)
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
+	if resp.StatusCode != fiber.StatusBadRequest {
 		responseBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status/body = %d/%s, want 200", resp.StatusCode, responseBody)
+		t.Fatalf("status/body = %d/%s, want 400", resp.StatusCode, responseBody)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
-	if err != nil || len(tasks) != 1 {
-		t.Fatalf("tasks/error = %d/%v, want 1/nil", len(tasks), err)
+	if err != nil || len(tasks) != 0 {
+		t.Fatalf("tasks/error = %d/%v, want 0/nil", len(tasks), err)
 	}
 }
 

@@ -71,3 +71,13 @@ func respondReferenceAssetError(c fiber.Ctx, logger *zerolog.Logger, err error) 
 		return Error(c, fiber.StatusInternalServerError, "failed to resolve reference image")
 	}
 }
+
+func isReferenceAssetError(err error) bool {
+	return errors.Is(err, service.ErrReferenceImageSelectionInvalid) ||
+		errors.Is(err, service.ErrReferenceAssetPurposeMismatch) ||
+		errors.Is(err, service.ErrReferenceAssetInvalidMetadata) ||
+		errors.Is(err, service.ErrReferenceAssetForbidden) ||
+		errors.Is(err, service.ErrReferenceAssetConcurrentFinalization) ||
+		errors.Is(err, service.ErrReferenceAssetExpired) ||
+		errors.Is(err, service.ErrReferenceAssetUnavailable)
+}

@@ -17,6 +17,7 @@ type signFakeStore struct {
 	customDomain bool
 	ownedPrefix  string // IsOwnedURL true when rawURL starts with this
 	signErr      error
+	ownedChecks  []string
 }
 
 func (s *signFakeStore) Name() string { return "fake" }
@@ -41,6 +42,7 @@ func (s *signFakeStore) DownloadURL(_ context.Context, key string, _ int) (strin
 }
 func (s *signFakeStore) HasCustomDomain() bool { return s.customDomain }
 func (s *signFakeStore) IsOwnedURL(rawURL string) bool {
+	s.ownedChecks = append(s.ownedChecks, rawURL)
 	return s.ownedPrefix != "" && strings.HasPrefix(rawURL, s.ownedPrefix)
 }
 
