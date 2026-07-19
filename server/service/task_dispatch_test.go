@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	serverconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -31,6 +33,16 @@ type dispatchTestDispatcher struct {
 	sideEffectOnError bool
 	started           chan struct{}
 	release           chan struct{}
+}
+
+type cancelingReferenceAssetRepository struct {
+	repository.AssetRepository
+	cancel context.CancelFunc
+}
+
+func (r *cancelingReferenceAssetRepository) FindOwnedByID(context.Context, string, string) (*model.Asset, error) {
+	r.cancel()
+	return nil, context.Canceled
 }
 
 func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*agent.KubernetesRuntimeIdentity, error) {
@@ -530,6 +542,88 @@ func TestHandleExecutionFromPayloadWithoutDispatcherUsesSynchronousExecutor(t *t
 	}
 	if count != 0 {
 		t.Fatalf("TaskExecution rows = %d, want 0", count)
+	}
+}
+
+func TestHandleExecutionFromPayloadReferenceFailureFinalizesRunningTask(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID, CreditsBalance: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "missing"}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	creditSvc := NewCreditService(repo, &serverconfig.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 100}}, &logger)
+	if _, err := creditSvc.DeductForTaskCreation(ctx, userID, task.Type, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	if err := rdb.Set(ctx, projectRunningCountPrefix+projectID, 1, time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+
+	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
+		t.Fatalf("HandleExecutionFromPayload: %v", err)
+	}
+	if executor.opts != nil {
+		t.Fatalf("executor called after reference failure: %#v", executor.opts)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || !strings.Contains(found.ErrorMessage, "reference asset") {
+		t.Fatalf("task after reference failure = %#v", found)
+	}
+	user, err := repo.Users().FindByID(ctx, userID)
+	if err != nil || user.CreditsBalance != 1000 {
+		t.Fatalf("refunded user = %#v, err=%v", user, err)
+	}
+	if count, err := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int(); err != nil || count != 0 {
+		t.Fatalf("running slot count = %d, err=%v", count, err)
+	}
+}
+
+func TestHandleExecutionFromPayloadReferenceLookupCancellationFinalizesCancelled(t *testing.T) {
+	db := setupTaskTestDB(t)
+	baseRepo := repository.New(db)
+	ctx, cancel := context.WithCancel(context.Background())
+	userID := uuid.NewString()
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "asset-1"}
+	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	repo := &referenceAssetRepositoryOverride{
+		Repository: baseRepo,
+		assets:     &cancelingReferenceAssetRepository{AssetRepository: baseRepo.Assets(), cancel: cancel},
+	}
+	logger := zerolog.New(io.Discard)
+	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
+		t.Fatalf("HandleExecutionFromPayload: %v", err)
+	}
+	if executor.opts != nil {
+		t.Fatalf("executor called after cancellation: %#v", executor.opts)
+	}
+	found, err := baseRepo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.TaskStatusCancelled || found.CompletedAt == nil {
+		t.Fatalf("task after cancellation = %#v", found)
 	}
 }
 

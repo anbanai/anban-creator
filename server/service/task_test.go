@@ -1750,12 +1750,18 @@ func TestTaskServiceHandleExecutionRejectsInvalidReferenceBeforeExecutor(t *test
 	exec := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
 	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
 
-	err := svc.HandleExecution(ctx, task, nil)
-	if !errors.Is(err, ErrReferenceAssetForbidden) {
-		t.Fatalf("HandleExecution error = %v, want ErrReferenceAssetForbidden", err)
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
 	}
 	if exec.opts != nil {
 		t.Fatalf("executor started with invalid reference: %#v", exec.opts)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || !strings.Contains(found.ErrorMessage, ErrReferenceAssetForbidden.Error()) {
+		t.Fatalf("task after invalid reference = %#v", found)
 	}
 }
 
@@ -1778,12 +1784,18 @@ func TestTaskServiceHandleExecutionPreservesReferenceRepositoryFailureBeforeExec
 	exec := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
 	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
 
-	err := svc.HandleExecution(ctx, task, nil)
-	if !errors.Is(err, ErrReferenceAssetUnavailable) || !errors.Is(err, rootCause) {
-		t.Fatalf("HandleExecution error = %v, want unavailable and root cause", err)
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
 	}
 	if exec.opts != nil {
 		t.Fatalf("executor started after repository failure: %#v", exec.opts)
+	}
+	found, err := baseRepo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || !strings.Contains(found.ErrorMessage, rootCause.Error()) || !strings.Contains(found.ErrorMessage, ErrReferenceAssetUnavailable.Error()) {
+		t.Fatalf("task after repository failure = %#v", found)
 	}
 }
 

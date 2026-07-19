@@ -111,7 +111,16 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 	referenceAsset, err := resolveEffectiveReferenceAsset(execCtx, s.repo, task)
 	if err != nil {
-		return err
+		persistCtx, persistCancel := context.WithTimeout(context.Background(), s.persistTimeout)
+		defer persistCancel()
+		if execCtx.Err() != nil {
+			s.finalizeCancelledExecution(persistCtx, task, execCtx.Err())
+		} else {
+			wrapped := fmt.Errorf("resolve reference asset: %w", err)
+			s.logger.Error().Err(wrapped).Str("task_id", taskID).Msg("reference asset resolution failed")
+			_ = s.HandleExecutionFailure(persistCtx, task, wrapped)
+		}
+		return nil
 	}
 
 	// Execute via agent.
@@ -179,33 +188,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	// mark as cancelled rather than attempting retry or marking as failed.
 	// This handles both CancelAllRunning (shutdown) and Cancel (user-initiated).
 	if execCtx.Err() != nil {
-		errMsg := "task cancelled: " + execCtx.Err().Error()
-		s.logger.Info().Str("task_id", taskID).Msg(errMsg)
-		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndError(
-			persistCtx, taskID, model.TaskStatusRunning, model.TaskStatusCancelled, errMsg,
-		)
-		if swapped {
-			if err := s.repo.Tasks().SetCompletedAt(persistCtx, taskID); err != nil {
-				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on cancelled task")
-			}
-			// Re-read the task so refundTaskByMode sees the final status
-			// (goal-mode tasks skip refund; normal tasks full-refund).
-			if t, err := s.repo.Tasks().FindByID(persistCtx, taskID); err == nil {
-				s.refundTaskByMode(persistCtx, t, "取消")
-			} else {
-				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to reload task for refund")
-			}
-			// Notify the task owner's WeChat of the cancellation (best-effort).
-			s.notifyTerminal(persistCtx, task, model.TaskStatusCancelled, errMsg)
-			if task.ProjectID != "" && s.pubsub != nil {
-				s.pubsub.ReleaseSlot(persistCtx, task.ProjectID)
-			}
-			if task.ProjectID != "" {
-				if derr := s.DispatchPendingTasks(persistCtx, task.ProjectID); derr != nil {
-					s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after cancellation")
-				}
-			}
-		}
+		s.finalizeCancelledExecution(persistCtx, task, execCtx.Err())
 		return nil
 	}
 
@@ -397,6 +380,40 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	return nil
+}
+
+func (s *TaskService) finalizeCancelledExecution(ctx context.Context, task *model.Task, cause error) {
+	if task == nil || cause == nil {
+		return
+	}
+	taskID := task.ID
+	errMsg := "task cancelled: " + cause.Error()
+	s.logger.Info().Str("task_id", taskID).Msg(errMsg)
+	swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndError(
+		ctx, taskID, model.TaskStatusRunning, model.TaskStatusCancelled, errMsg,
+	)
+	if !swapped {
+		return
+	}
+	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on cancelled task")
+	}
+	// Re-read the task so refundTaskByMode sees the final status
+	// (goal-mode tasks skip refund; normal tasks full-refund).
+	if current, err := s.repo.Tasks().FindByID(ctx, taskID); err == nil {
+		s.refundTaskByMode(ctx, current, "取消")
+	} else {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to reload task for refund")
+	}
+	s.notifyTerminal(ctx, task, model.TaskStatusCancelled, errMsg)
+	if task.ProjectID != "" && s.pubsub != nil {
+		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
+	}
+	if task.ProjectID != "" {
+		if err := s.DispatchPendingTasks(ctx, task.ProjectID); err != nil {
+			s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after cancellation")
+		}
+	}
 }
 
 func (s *TaskService) validateVideoCompletionArtifacts(ctx context.Context, task *model.Task) (agent.ArtifactValidation, error) {

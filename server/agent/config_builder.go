@@ -26,7 +26,13 @@ import (
 // unbounded memory/disk usage. Mirrors the upload limit in handler/file.go.
 const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 
-const ReferenceImagePath = ".anban-creator/reference.png"
+const (
+	referenceImageDirName  = ".anban-creator"
+	referenceImageFileName = "reference.png"
+	ReferenceImagePath     = referenceImageDirName + "/" + referenceImageFileName
+)
+
+var referenceMaterializeBeforeCommitHook func() error
 
 const maxInputAttachmentBytes int64 = 50 << 20 // 50 MB
 
@@ -281,49 +287,7 @@ func MaterializeReferenceAsset(ctx context.Context, store storage.Provider, work
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	destDir := filepath.Join(workDir, appconfig.ConfigDir)
-	if err := os.MkdirAll(destDir, 0o700); err != nil {
-		return fmt.Errorf("create reference directory: %w", err)
-	}
-	if err := os.Chmod(destDir, 0o700); err != nil {
-		return fmt.Errorf("secure reference directory: %w", err)
-	}
-	destPath := filepath.Join(destDir, "reference.png")
-	return writeReferenceAssetAtomically(ctx, destDir, destPath, data)
-}
-
-func writeReferenceAssetAtomically(ctx context.Context, destDir, destPath string, data []byte) error {
-	tmp, err := os.CreateTemp(destDir, ".reference-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create reference temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-	}()
-	if err := tmp.Chmod(0o600); err != nil {
-		return fmt.Errorf("secure reference temp file: %w", err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		return fmt.Errorf("write reference temp file: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		return fmt.Errorf("sync reference temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close reference temp file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, 0o600); err != nil {
-		return fmt.Errorf("secure closed reference temp file: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		return fmt.Errorf("replace reference asset: %w", err)
-	}
-	return nil
+	return materializeReferenceAssetBytes(ctx, workDir, data)
 }
 
 // DownloadProductImages downloads each product photo URL into the workspace's
