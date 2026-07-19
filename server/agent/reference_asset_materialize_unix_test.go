@@ -71,3 +71,39 @@ func TestMaterializeReferenceAssetParentSwapBeforeCommitDoesNotEscape(t *testing
 		t.Fatalf("temporary files after parent swap = %#v, err=%v", temps, globErr)
 	}
 }
+
+func TestMaterializeReferenceAssetWorkspaceSwapBeforeCommitDoesNotEscape(t *testing.T) {
+	key := "assets/users/user-1/asset-1/ref.png"
+	store := &fakeStore{readData: map[string][]byte{key: []byte("image")}}
+	workDir := t.TempDir()
+	external := t.TempDir()
+	held := workDir + "-held"
+	referenceMaterializeBeforeCommitHook = func() error {
+		if err := os.Rename(workDir, held); err != nil {
+			return err
+		}
+		return os.Symlink(external, workDir)
+	}
+	t.Cleanup(func() {
+		referenceMaterializeBeforeCommitHook = nil
+		_ = os.Remove(workDir)
+		_ = os.RemoveAll(held)
+	})
+
+	err := MaterializeReferenceAsset(t.Context(), store, workDir, &model.Asset{StorageKey: key, Size: 5})
+	if err == nil {
+		t.Fatal("workspace swap was accepted")
+	}
+	for _, path := range []string{
+		filepath.Join(external, appconfig.ConfigDir, referenceImageFileName),
+		filepath.Join(held, appconfig.ConfigDir, referenceImageFileName),
+	} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("reference escaped to %q: %v", path, statErr)
+		}
+	}
+	temps, globErr := filepath.Glob(filepath.Join(held, appconfig.ConfigDir, ".reference-*.tmp"))
+	if globErr != nil || len(temps) != 0 {
+		t.Fatalf("temporary files after workspace swap = %#v, err=%v", temps, globErr)
+	}
+}

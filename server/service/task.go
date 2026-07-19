@@ -1640,16 +1640,20 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 		}()
 		fallbackCtx, cancel := context.WithTimeout(context.Background(), s.executionTimeout)
 		defer cancel()
+		referenceAsset, prepared, err := s.preparePendingExecution(fallbackCtx, task)
+		if err != nil {
+			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task preparation failed")
+			return
+		}
+		if !prepared {
+			return
+		}
 		// Set running status before execution to prevent plan checker from re-dispatching.
 		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
 		if !swapped {
-			// Task was cancelled or already running; release the reserved slot.
-			if s.pubsub != nil && s.pubsub.Available() && project != nil {
-				s.pubsub.ReleaseSlot(fallbackCtx, project.ID)
-			}
 			return
 		}
-		if err := s.HandleExecution(fallbackCtx, task, project); err != nil {
+		if err := s.handleExecution(fallbackCtx, task, project, referenceAsset, true); err != nil {
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task execution failed")
 		}
 	}()

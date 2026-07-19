@@ -6,6 +6,55 @@ import (
 	"testing"
 )
 
+func TestReferenceAssetRootRejectsWorkspaceSymlink(t *testing.T) {
+	external := t.TempDir()
+	workDir := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Symlink(external, workDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := materializeReferenceAssetWithRoot(t.Context(), workDir, []byte("image")); err == nil {
+		t.Fatal("Root materializer accepted a workspace symlink")
+	}
+	if _, err := os.Stat(filepath.Join(external, referenceImageDirName, referenceImageFileName)); !os.IsNotExist(err) {
+		t.Fatalf("external reference created through workspace symlink: %v", err)
+	}
+}
+
+func TestReferenceAssetRootCommitRejectsWorkspaceSwapWithoutEscaping(t *testing.T) {
+	workDir := t.TempDir()
+	external := t.TempDir()
+	held := workDir + "-held"
+	referenceMaterializeBeforeCommitHook = func() error {
+		if err := os.Rename(workDir, held); err != nil {
+			return err
+		}
+		return os.Symlink(external, workDir)
+	}
+	t.Cleanup(func() {
+		referenceMaterializeBeforeCommitHook = nil
+		_ = os.Remove(workDir)
+		_ = os.RemoveAll(held)
+	})
+
+	err := materializeReferenceAssetWithRoot(t.Context(), workDir, []byte("image"))
+	if err == nil {
+		t.Fatal("Root materializer accepted a swapped workspace")
+	}
+	for _, path := range []string{
+		filepath.Join(external, referenceImageDirName, referenceImageFileName),
+		filepath.Join(held, referenceImageDirName, referenceImageFileName),
+	} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("reference escaped to %q: %v", path, statErr)
+		}
+	}
+	temps, globErr := filepath.Glob(filepath.Join(held, referenceImageDirName, ".reference-*.tmp"))
+	if globErr != nil || len(temps) != 0 {
+		t.Fatalf("temporary files after workspace swap = %#v, err=%v", temps, globErr)
+	}
+}
+
 func TestReferenceAssetRootCommitRejectsParentSwapWithoutEscaping(t *testing.T) {
 	workDir := t.TempDir()
 	external := t.TempDir()

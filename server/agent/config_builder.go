@@ -262,7 +262,9 @@ func TaskToAgent(task *model.Task) string {
 }
 
 // MaterializeReferenceAsset reads only the repository-owned storage key. It
-// deliberately has no URL or HTTP fallback.
+// deliberately has no URL or HTTP fallback. Exact-size validation detects
+// truncated or extended reads; same-size mutation remains governed by finalized
+// object immutability and storage ACLs.
 func MaterializeReferenceAsset(ctx context.Context, store storage.Provider, workDir string, asset *model.Asset) error {
 	if asset == nil {
 		return nil
@@ -277,12 +279,18 @@ func MaterializeReferenceAsset(ctx context.Context, store storage.Provider, work
 	if key == "" {
 		return errors.New("reference asset storage key is empty")
 	}
+	if asset.Size <= 0 {
+		return errors.New("reference asset size is invalid")
+	}
 	if asset.Size > maxReferenceImageBytes {
 		return fmt.Errorf("reference asset: %w", storage.ErrObjectExceedsMaxSize)
 	}
 	data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes)
 	if err != nil {
 		return fmt.Errorf("read reference asset: %w", err)
+	}
+	if int64(len(data)) != asset.Size {
+		return fmt.Errorf("reference asset size mismatch: read %d bytes, expected %d", len(data), asset.Size)
 	}
 	if err := ctx.Err(); err != nil {
 		return err

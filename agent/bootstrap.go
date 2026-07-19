@@ -393,9 +393,11 @@ func bootstrapDownloadClient() *http.Client {
 }
 
 type preparedBootstrapFile struct {
-	file BootstrapFile
-	rel  string
-	mode os.FileMode
+	file         BootstrapFile
+	rel          string
+	mode         os.FileMode
+	expectedSize int64
+	maxBytes     int64
 }
 
 var bootstrapCommitHook func(string) error
@@ -418,7 +420,7 @@ func materializeBootstrap(ctx context.Context, workspace string, files []Bootstr
 
 func stageBootstrapSource(ctx context.Context, prepared preparedBootstrapFile, client *http.Client, target *os.File, total *int64) error {
 	remaining := int64(maxBootstrapTotalBytes) - *total
-	limit := int64(maxBootstrapFileBytes)
+	limit := prepared.maxBytes
 	if remaining < limit {
 		limit = remaining
 	}
@@ -458,6 +460,9 @@ func stageBootstrapSource(ctx context.Context, prepared preparedBootstrapFile, c
 	if written > limit {
 		return fmt.Errorf("bootstrap file %q exceeds size limit", prepared.rel)
 	}
+	if prepared.expectedSize > 0 && written != prepared.expectedSize {
+		return fmt.Errorf("bootstrap file %q size mismatch: read %d bytes, expected %d", prepared.rel, written, prepared.expectedSize)
+	}
 	*total += written
 	return nil
 }
@@ -490,6 +495,16 @@ func preflightBootstrapFiles(files []BootstrapFile, allowHTTPLoopback bool) ([]p
 		if (file.Text == "") == (strings.TrimSpace(file.DownloadURL) == "") {
 			return nil, fmt.Errorf("bootstrap file %q must have exactly one content source", rel)
 		}
+		if file.ExpectedSize < 0 || file.MaxBytes < 0 {
+			return nil, fmt.Errorf("bootstrap file %q has invalid size limits", rel)
+		}
+		maxBytes := file.MaxBytes
+		if maxBytes == 0 {
+			maxBytes = maxBootstrapFileBytes
+		}
+		if maxBytes > maxBootstrapFileBytes || (file.ExpectedSize > 0 && file.ExpectedSize > maxBytes) {
+			return nil, fmt.Errorf("bootstrap file %q has invalid size limits", rel)
+		}
 		mode := os.FileMode(file.Mode)
 		if file.Mode > 0o777 || mode&0o022 != 0 || mode&0o111 != 0 || file.Mode&0o7000 != 0 || (mode != 0o600 && mode != 0o644) {
 			return nil, fmt.Errorf("unsafe bootstrap file mode %#o", file.Mode)
@@ -508,7 +523,7 @@ func preflightBootstrapFiles(files []BootstrapFile, allowHTTPLoopback bool) ([]p
 				return nil, fmt.Errorf("unsafe bootstrap download URL for %q", rel)
 			}
 		}
-		prepared = append(prepared, preparedBootstrapFile{file: file, rel: rel, mode: mode})
+		prepared = append(prepared, preparedBootstrapFile{file: file, rel: rel, mode: mode, expectedSize: file.ExpectedSize, maxBytes: maxBytes})
 	}
 	for key, rel := range seen {
 		ancestor := key

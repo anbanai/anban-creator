@@ -449,6 +449,52 @@ func TestMaterializeBootstrapDownloadIsBoundedAndSendsNoAuthorization(t *testing
 	}
 }
 
+func TestMaterializeBootstrapEnforcesPerFileExpectedSizeAndLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		body         []byte
+		expectedSize int64
+		maxBytes     int64
+		wantErr      bool
+	}{
+		{name: "exact size", body: []byte("image"), expectedSize: 5, maxBytes: 10 << 20},
+		{name: "short", body: []byte("four"), expectedSize: 5, maxBytes: 10 << 20, wantErr: true},
+		{name: "long", body: []byte("sixsix"), expectedSize: 5, maxBytes: 10 << 20, wantErr: true},
+		{name: "over reference limit", body: make([]byte, (10<<20)+1), expectedSize: (10 << 20) + 1, maxBytes: 10 << 20, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(tc.body)
+			}))
+			defer server.Close()
+			root := t.TempDir()
+			file := BootstrapFile{Path: ".anban-creator/reference.png", DownloadURL: server.URL, Mode: 0o644, ExpectedSize: tc.expectedSize, MaxBytes: tc.maxBytes}
+			err := materializeBootstrap(context.Background(), root, []BootstrapFile{file}, bootstrapLoopbackTestDownloadClient())
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("materializeBootstrap error = %v, wantErr=%v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				if _, statErr := os.Stat(filepath.Join(root, ".anban-creator", "reference.png")); !os.IsNotExist(statErr) {
+					t.Fatalf("rejected file was committed: %v", statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestPreflightBootstrapFilesRejectsInvalidPerFileLimits(t *testing.T) {
+	for _, file := range []BootstrapFile{
+		{Path: "input.bin", Text: "x", Mode: 0o644, ExpectedSize: -1},
+		{Path: "input.bin", Text: "x", Mode: 0o644, MaxBytes: -1},
+		{Path: "input.bin", Text: "x", Mode: 0o644, ExpectedSize: 2, MaxBytes: 1},
+		{Path: "input.bin", Text: "x", Mode: 0o644, MaxBytes: (64 << 20) + 1},
+	} {
+		if _, err := preflightBootstrapFiles([]BootstrapFile{file}, false); err == nil {
+			t.Fatalf("invalid limits accepted: %#v", file)
+		}
+	}
+}
+
 func TestMaterializeBootstrapRejectsDownloadRedirects(t *testing.T) {
 	for _, crossOrigin := range []bool{false, true} {
 		t.Run(map[bool]string{false: "same origin", true: "cross origin"}[crossOrigin], func(t *testing.T) {

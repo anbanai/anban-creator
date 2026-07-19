@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -100,11 +101,21 @@ func TestBootstrapSignsOwnedReferenceAsset(t *testing.T) {
 	found := false
 	for _, file := range response.Files {
 		if file.Path == ".anban-creator/reference.png" && file.DownloadURL != "" {
+			if file.ExpectedSize != asset.Size || file.MaxBytes != 10<<20 {
+				t.Fatalf("reference limits = expected:%d max:%d, want %d and %d", file.ExpectedSize, file.MaxBytes, asset.Size, 10<<20)
+			}
 			found = true
 		}
 	}
 	if !found {
 		t.Fatalf("bootstrap files = %#v, want materialized reference", response.Files)
+	}
+	raw, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "storage_key") {
+		t.Fatalf("bootstrap response exposed storage key: %s", raw)
 	}
 }
 

@@ -254,6 +254,39 @@ func TestMaterializeReferenceAssetReadFailurePreservesExistingDestination(t *tes
 	}
 }
 
+func TestMaterializeReferenceAssetRejectsObjectSizeMismatchAndPreservesDestination(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data []byte
+		size int64
+	}{
+		{name: "short object", data: []byte("four"), size: 5},
+		{name: "long object", data: []byte("sixsix"), size: 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := "assets/users/user-1/asset-1/ref.png"
+			store := &fakeStore{readData: map[string][]byte{key: tc.data}}
+			workDir := t.TempDir()
+			dir := filepath.Join(workDir, appconfig.ConfigDir)
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			dest := filepath.Join(dir, "reference.png")
+			if err := os.WriteFile(dest, []byte("old"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := MaterializeReferenceAsset(t.Context(), store, workDir, &model.Asset{StorageKey: key, Size: tc.size}); err == nil {
+				t.Fatal("expected object size mismatch")
+			}
+			got, err := os.ReadFile(dest)
+			if err != nil || string(got) != "old" {
+				t.Fatalf("destination = %q, err=%v, want old", got, err)
+			}
+		})
+	}
+}
+
 func cancelledContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

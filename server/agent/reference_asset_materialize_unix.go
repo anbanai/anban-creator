@@ -69,6 +69,9 @@ func materializeReferenceAssetBytes(ctx context.Context, workDir string, data []
 			return err
 		}
 	}
+	if err := ensureReferenceWorkspaceLinked(workDir, rootFD); err != nil {
+		return err
+	}
 	if err := ensureReferenceDirectoryLinked(rootFD, dirFD); err != nil {
 		return err
 	}
@@ -80,6 +83,25 @@ func materializeReferenceAssetBytes(ctx context.Context, workDir string, data []
 	}
 	if err := unix.Fsync(dirFD); err != nil {
 		return fmt.Errorf("sync reference directory: %w", err)
+	}
+	return nil
+}
+
+func ensureReferenceWorkspaceLinked(workDir string, rootFD int) error {
+	currentFD, err := unix.Open(workDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("reopen reference workspace: %w", err)
+	}
+	defer unix.Close(currentFD)
+	var opened, current unix.Stat_t
+	if err := unix.Fstat(rootFD, &opened); err != nil {
+		return fmt.Errorf("inspect opened reference workspace: %w", err)
+	}
+	if err := unix.Fstat(currentFD, &current); err != nil {
+		return fmt.Errorf("inspect current reference workspace: %w", err)
+	}
+	if opened.Dev != current.Dev || opened.Ino != current.Ino {
+		return errors.New("reference workspace changed before commit")
 	}
 	return nil
 }

@@ -11,14 +11,15 @@ import (
 
 // materializeReferenceAssetWithRoot is the Windows commit path. os.Root keeps
 // every operation handle-relative so a junction or reparse-point swap cannot
-// redirect a temp write or rename outside workDir.
+// redirect a temp write or rename outside workDir. After this call returns,
+// workspace ACLs and single-writer ownership govern later same-user mutations.
 func materializeReferenceAssetWithRoot(ctx context.Context, workDir string, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	root, err := os.OpenRoot(workDir)
+	root, err := openValidatedReferenceWorkspaceRoot(workDir)
 	if err != nil {
-		return fmt.Errorf("open reference workspace root: %w", err)
+		return err
 	}
 	defer root.Close()
 	info, err := root.Lstat(referenceImageDirName)
@@ -67,6 +68,9 @@ func materializeReferenceAssetWithRoot(ctx context.Context, workDir string, data
 			return err
 		}
 	}
+	if err := ensureReferenceWorkspaceRootStillLinked(workDir, root); err != nil {
+		return err
+	}
 	if err := ensureReferenceRootStillLinked(root, dir); err != nil {
 		return err
 	}
@@ -75,6 +79,47 @@ func materializeReferenceAssetWithRoot(ctx context.Context, workDir string, data
 	}
 	if err := dir.Rename(tmpName, referenceImageFileName); err != nil {
 		return fmt.Errorf("replace reference asset: %w", err)
+	}
+	return nil
+}
+
+func openValidatedReferenceWorkspaceRoot(workDir string) (*os.Root, error) {
+	info, err := os.Lstat(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("inspect reference workspace root: %w", err)
+	}
+	if !safeReferenceDirectoryInfo(info) {
+		return nil, errors.New("reference workspace root is a symlink or reparse point")
+	}
+	root, err := os.OpenRoot(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("open reference workspace root: %w", err)
+	}
+	if err := ensureReferenceWorkspaceRootStillLinked(workDir, root); err != nil {
+		root.Close()
+		return nil, err
+	}
+	return root, nil
+}
+
+func ensureReferenceWorkspaceRootStillLinked(workDir string, root *os.Root) error {
+	pathInfo, err := os.Lstat(workDir)
+	if err != nil {
+		return fmt.Errorf("reinspect reference workspace root: %w", err)
+	}
+	if !safeReferenceDirectoryInfo(pathInfo) {
+		return errors.New("reference workspace root changed before commit")
+	}
+	pathInfo, err = os.Stat(workDir)
+	if err != nil {
+		return fmt.Errorf("stat reference workspace root: %w", err)
+	}
+	openedInfo, err := root.Stat(".")
+	if err != nil {
+		return fmt.Errorf("inspect opened reference workspace root: %w", err)
+	}
+	if !os.SameFile(pathInfo, openedInfo) {
+		return errors.New("reference workspace root changed before commit")
 	}
 	return nil
 }

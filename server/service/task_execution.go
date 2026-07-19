@@ -18,9 +18,15 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
+var ErrExecutionTerminalPersistence = errors.New("execution terminal persistence failed")
+
 // HandleExecution is called by the async worker to execute a task.
 // It calls the agent executor and updates status in the DB.
 func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, project *model.Project) error {
+	return s.handleExecution(ctx, task, project, nil, false)
+}
+
+func (s *TaskService) handleExecution(ctx context.Context, task *model.Task, project *model.Project, referenceAsset *model.Asset, referenceResolved bool) error {
 	taskID := task.ID
 	userID := task.UserID
 
@@ -109,7 +115,9 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		}
 		project = ch
 	}
-	referenceAsset, err := resolveEffectiveReferenceAsset(execCtx, s.repo, task)
+	if !referenceResolved {
+		referenceAsset, err = resolveEffectiveReferenceAsset(execCtx, s.repo, task)
+	}
 	if err != nil {
 		persistCtx, persistCancel := context.WithTimeout(context.Background(), s.persistTimeout)
 		defer persistCancel()
@@ -118,7 +126,10 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		} else {
 			wrapped := fmt.Errorf("resolve reference asset: %w", err)
 			s.logger.Error().Err(wrapped).Str("task_id", taskID).Msg("reference asset resolution failed")
-			_ = s.HandleExecutionFailure(persistCtx, task, wrapped)
+			failureErr := s.HandleExecutionFailure(persistCtx, task, wrapped)
+			if errors.Is(failureErr, ErrExecutionTerminalPersistence) {
+				return failureErr
+			}
 		}
 		return nil
 	}
@@ -627,6 +638,10 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 	if err != nil {
 		return fmt.Errorf("find task %s: %w", taskID, err)
 	}
+	referenceAsset, prepared, err := s.preparePendingExecution(ctx, task)
+	if err != nil || !prepared {
+		return err
+	}
 	if s.kubernetesDispatcher != nil {
 		return s.dispatchKubernetes(ctx, task)
 	}
@@ -638,14 +653,43 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 	}
 	if !swapped {
 		s.logger.Warn().Str("task_id", taskID).Str("status", task.Status).Msg("task not in pending state, skipping")
-		// Slot was reserved in EnqueueExecution but task won't run — release it.
-		if s.pubsub != nil && task.ProjectID != "" {
-			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
-		}
 		return nil
 	}
 
-	return s.HandleExecution(ctx, task, nil)
+	return s.handleExecution(ctx, task, nil, referenceAsset, true)
+}
+
+func (s *TaskService) preparePendingExecution(ctx context.Context, task *model.Task) (*model.Asset, bool, error) {
+	referenceAsset, err := resolveEffectiveReferenceAsset(ctx, s.repo, task)
+	if err == nil {
+		return referenceAsset, true, nil
+	}
+	wrapped := fmt.Errorf("resolve reference asset: %w", err)
+	persistCtx, cancel := context.WithTimeout(context.Background(), s.persistTimeout)
+	defer cancel()
+	swapped, failErr := s.repo.Tasks().FailPendingTask(persistCtx, task.ID, wrapped.Error())
+	if failErr != nil {
+		return nil, false, fmt.Errorf("fail pending task after reference resolution: %w", failErr)
+	}
+	if !swapped {
+		return nil, false, nil
+	}
+	s.logger.Error().Err(wrapped).Str("task_id", task.ID).Msg("pending task reference asset resolution failed")
+	s.finalizeFailedExecutionSideEffects(persistCtx, task, "execution_failed", wrapped.Error())
+	return nil, false, nil
+}
+
+func (s *TaskService) finalizeFailedExecutionSideEffects(ctx context.Context, task *model.Task, reason, errorMsg string) {
+	if task.ProjectID != "" && s.pubsub != nil {
+		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
+	}
+	s.refundTaskByMode(ctx, task, reason)
+	s.notifyTerminal(ctx, task, model.TaskStatusFailed, errorMsg)
+	if task.ProjectID != "" {
+		if err := s.DispatchPendingTasks(ctx, task.ProjectID); err != nil {
+			s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
+		}
+	}
 }
 
 // generateTaskID generates a unique task ID using UUID v4.
@@ -688,25 +732,14 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 		Err(execErr).
 		Str("task_id", taskID).
 		Msg("task failed; waiting for manual resume or clone")
-	if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
+	swapped, err := s.repo.Tasks().FailRunningTask(ctx, taskID, execErr.Error())
+	if err != nil {
+		return errors.Join(execErr, ErrExecutionTerminalPersistence, fmt.Errorf("fail running task: %w", err))
 	}
-	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
+	if !swapped {
+		return execErr
 	}
-
-	if task.ProjectID != "" && s.pubsub != nil {
-		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
-	}
-
-	s.refundTaskByMode(ctx, task, reason)
-	s.notifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
-
-	if task.ProjectID != "" {
-		if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
-			s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
-		}
-	}
+	s.finalizeFailedExecutionSideEffects(ctx, task, reason, execErr.Error())
 
 	return execErr
 }

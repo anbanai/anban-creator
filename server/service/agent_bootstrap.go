@@ -24,10 +24,12 @@ import (
 )
 
 type BootstrapFile struct {
-	Path        string `json:"path"`
-	Text        string `json:"text,omitempty"`
-	DownloadURL string `json:"download_url,omitempty"`
-	Mode        uint32 `json:"mode"`
+	Path         string `json:"path"`
+	Text         string `json:"text,omitempty"`
+	DownloadURL  string `json:"download_url,omitempty"`
+	Mode         uint32 `json:"mode"`
+	ExpectedSize int64  `json:"expected_size,omitempty"`
+	MaxBytes     int64  `json:"max_bytes,omitempty"`
 }
 
 type AgentBootstrapResponse struct {
@@ -219,7 +221,10 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		if err != nil {
 			return nil, fmt.Errorf("sign reference image: %w", err)
 		}
-		files = append(files, BootstrapFile{Path: serveragent.ReferenceImagePath, DownloadURL: signed, Mode: 0644})
+		files = append(files, BootstrapFile{
+			Path: serveragent.ReferenceImagePath, DownloadURL: signed, Mode: 0644,
+			ExpectedSize: referenceAsset.Size, MaxBytes: 10 << 20,
+		})
 	}
 	attachmentFiles, err := s.buildAttachmentFiles(ctx, execution.ID, task, attachments, credentialDeadline)
 	if err != nil {
