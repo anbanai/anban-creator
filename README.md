@@ -13,6 +13,10 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 ## Quick Start
 
 ```bash
+# Configure the required private billing top-up credential.
+cp .env.example .env
+# Set ANBAN_BILLING_ADMIN_API_KEY in .env before starting Compose.
+
 # Start infra and services with Docker Compose
 make docker-up
 
@@ -90,6 +94,8 @@ Important sections:
 - writing model defaults
 - WeChat auth and publishing settings
 - credits and invitation rules
+
+Docker Compose requires `ANBAN_BILLING_ADMIN_API_KEY` in the root `.env` file. Kubernetes deployments read the same variable from Secret `anban-billing-admin-api-key`, key `api-key`; do not put the credential directly in manifests or config files.
 
 Users can configure per-account platform credentials and per-user model settings from Studio.
 

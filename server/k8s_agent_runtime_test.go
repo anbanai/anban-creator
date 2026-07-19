@@ -38,12 +38,19 @@ type deploymentDoc struct {
 				Containers         []struct {
 					Name string `yaml:"name"`
 					Env  []struct {
-						Name  string `yaml:"name"`
-						Value string `yaml:"value"`
+						Name      string `yaml:"name"`
+						Value     string `yaml:"value"`
+						ValueFrom *struct {
+							SecretKeyRef struct {
+								Name string `yaml:"name"`
+								Key  string `yaml:"key"`
+							} `yaml:"secretKeyRef"`
+						} `yaml:"valueFrom"`
 					} `yaml:"env"`
 					VolumeMounts []struct {
 						Name      string `yaml:"name"`
 						MountPath string `yaml:"mountPath"`
+						SubPath   string `yaml:"subPath"`
 						ReadOnly  bool   `yaml:"readOnly"`
 					} `yaml:"volumeMounts"`
 				} `yaml:"containers"`
@@ -174,6 +181,23 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 			t.Fatalf("server deployment must not include obsolete value %q", forbidden)
 		}
 	}
+	container := deployment.Spec.Template.Spec.Containers[0]
+	configMounts := 0
+	for _, mount := range container.VolumeMounts {
+		if mount.MountPath == "/app/conf" {
+			t.Fatal("server config must not mount the whole /app/conf directory because it hides the image billing catalog")
+		}
+		if mount.MountPath == "/app/conf/config.yaml" {
+			configMounts++
+			if mount.SubPath != "config.yaml" || !mount.ReadOnly {
+				t.Fatalf("server config mount = %+v, want readOnly subPath config.yaml", mount)
+			}
+		}
+	}
+	if configMounts != 1 {
+		t.Fatalf("server config file mounts = %d, want exactly one", configMounts)
+	}
+	assertDeploymentSecretEnv(t, deployment, "ANBAN_BILLING_ADMIN_API_KEY", "anban-billing-admin-api-key", "api-key")
 	assertDeploymentTLSVolume(t, deployment, "anban-server-tls", "/var/run/secrets/anban-server-tls", "anban-server-tls", []string{"tls.crt", "tls.key"})
 	assertDeploymentTLSVolume(t, deployment, "anban-internal-ca", "/var/run/secrets/anban-internal-ca", "anban-internal-ca", []string{"ca.crt"})
 
@@ -221,6 +245,23 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 			t.Fatalf("server deployment missing TLS contract %q", want)
 		}
 	}
+}
+
+func assertDeploymentSecretEnv(t *testing.T, doc deploymentDoc, envName, secretName, secretKey string) {
+	t.Helper()
+	if len(doc.Spec.Template.Spec.Containers) != 1 {
+		t.Fatalf("server deployment containers = %d, want 1", len(doc.Spec.Template.Spec.Containers))
+	}
+	for _, env := range doc.Spec.Template.Spec.Containers[0].Env {
+		if env.Name != envName {
+			continue
+		}
+		if env.Value != "" || env.ValueFrom == nil || env.ValueFrom.SecretKeyRef.Name != secretName || env.ValueFrom.SecretKeyRef.Key != secretKey {
+			t.Fatalf("server env %s = %+v, want secret %s key %s", envName, env, secretName, secretKey)
+		}
+		return
+	}
+	t.Fatalf("server deployment missing secret env %s", envName)
 }
 
 func roleAllows(doc k8sManifestDoc, resource string, verbs ...string) bool {

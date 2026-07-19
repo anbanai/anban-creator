@@ -928,8 +928,13 @@ func (s *BillingWalletService) EnqueueSettlementInTx(ctx context.Context, tx rep
 }
 
 func (s *BillingWalletService) ProcessSettlementOutbox(ctx context.Context, limit int) (int, error) {
+	processed, _, err := s.processSettlementOutboxBatch(ctx, limit)
+	return processed, err
+}
+
+func (s *BillingWalletService) processSettlementOutboxBatch(ctx context.Context, limit int) (int, int, error) {
 	if limit <= 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 	now := s.now().UTC()
 	var claimed []model.BillingSettlementOutbox
@@ -938,14 +943,14 @@ func (s *BillingWalletService) ProcessSettlementOutbox(ctx context.Context, limi
 		claimed, err = tx.Billing().ClaimSettlements(ctx, now, limit)
 		return err
 	}); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	processed := 0
 	for _, settlement := range claimed {
 		settleErr := s.applySettlement(ctx, settlement)
 		if settleErr != nil {
 			if errors.Is(settleErr, context.Canceled) || errors.Is(settleErr, context.DeadlineExceeded) {
-				return processed, settleErr
+				return processed, len(claimed), settleErr
 			}
 			if isRetryableBillingDBError(settleErr) {
 				retryAt := now.Add(settlementRetryDelay(settlement.Attempts))
@@ -956,7 +961,7 @@ func (s *BillingWalletService) ProcessSettlementOutbox(ctx context.Context, limi
 					continue
 				}
 				if markErr != nil {
-					return processed, markErr
+					return processed, len(claimed), markErr
 				}
 				continue
 			}
@@ -967,7 +972,7 @@ func (s *BillingWalletService) ProcessSettlementOutbox(ctx context.Context, limi
 				continue
 			}
 			if markErr != nil {
-				return processed, markErr
+				return processed, len(claimed), markErr
 			}
 			processed++
 			continue
@@ -979,11 +984,11 @@ func (s *BillingWalletService) ProcessSettlementOutbox(ctx context.Context, limi
 			continue
 		}
 		if markErr != nil {
-			return processed, markErr
+			return processed, len(claimed), markErr
 		}
 		processed++
 	}
-	return processed, nil
+	return processed, len(claimed), nil
 }
 
 func (s *BillingWalletService) applySettlement(ctx context.Context, settlement model.BillingSettlementOutbox) error {

@@ -266,6 +266,10 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"apk add --no-cache ca-certificates ffmpeg tzdata",
 		"go build -ldflags=\"-s -w\" -o /anban-creator-server ./server/",
 		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
+		"COPY --from=builder /build/server/billing/policy.yaml /app/conf/billing/policy.yaml",
+		"COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml",
+		"COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml",
+		"COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml",
 		"addgroup -S -g 1000 anban",
 		"adduser -S -D -u 1000 -G anban -h /home/anban anban",
 		"chown -R 1000:1000 /app/data",
@@ -290,9 +294,32 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"mcporter",
 		"npx -y skills",
 		"claude plugin",
+		"COPY --from=builder /build/server/billing /app/conf/billing",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("%s must not contain Agent runtime dependency %q", path, forbidden)
+		}
+	}
+}
+
+func TestServerComposeInjectsBillingAdminKeyAndDocumentsIt(t *testing.T) {
+	root := repositoryRoot(t)
+	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
+	if !strings.Contains(compose, `ANBAN_BILLING_ADMIN_API_KEY: "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}"`) {
+		t.Fatal("docker-compose server must require and inject ANBAN_BILLING_ADMIN_API_KEY")
+	}
+	envExample := readTextFile(t, filepath.Join(root, ".env.example"))
+	if !strings.Contains(envExample, "ANBAN_BILLING_ADMIN_API_KEY=") {
+		t.Fatal(".env.example must declare ANBAN_BILLING_ADMIN_API_KEY without a secret value")
+	}
+	readme := readTextFile(t, filepath.Join(root, "README.md"))
+	if !strings.Contains(readme, "ANBAN_BILLING_ADMIN_API_KEY") {
+		t.Fatal("README must document the required billing admin key for Docker Compose")
+	}
+	for _, path := range []string{filepath.Join(root, ".gitignore"), filepath.Join(root, ".dockerignore")} {
+		body := readTextFile(t, path)
+		if !strings.Contains("\n"+body+"\n", "\n.env\n") {
+			t.Fatalf("%s must exclude the root .env secret file", path)
 		}
 	}
 }

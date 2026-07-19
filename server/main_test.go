@@ -133,7 +133,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		repo := newRepo(t)
 		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
 		runtime, err := buildBillingRuntime(t.Context(), repo, cfg, &logger)
-		if err != nil || runtime == nil || runtime.Handler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil {
+		if err != nil || runtime == nil || runtime.Handler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil {
 			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
 		}
 		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-17-v1"); err != nil {
@@ -150,10 +150,26 @@ func TestMainWiresRequiredBillingRuntime(t *testing.T) {
 	text := string(source)
 	for _, required := range []string{
 		"buildBillingRuntime(context.Background(), repo, cfg, log)",
+		"service.NewBillingMaintenanceWorker(wallet",
 		"BillingHandler:",
+		"go func() {",
+		"fixedBilling.Worker.Run(ctx)",
+		"billingWorkerWG.Wait()",
+		"signalCtx, stop := signal.NotifyContext",
+		"ctx, cancel := context.WithCancel(signalCtx)",
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("main billing wiring missing %q", required)
 		}
+	}
+	workerStart := strings.Index(text, "fixedBilling.Worker.Run(ctx)")
+	workerWait := strings.Index(text, "billingWorkerWG.Wait()")
+	repoClose := strings.Index(text, "repo.Close()")
+	if workerStart < 0 || workerWait <= workerStart || repoClose <= workerWait {
+		t.Fatalf("billing worker lifecycle order invalid: start=%d wait=%d repoClose=%d", workerStart, workerWait, repoClose)
+	}
+	listen := strings.Index(text, "app.Listen(addr, listenConfig)")
+	if listen < 0 || !strings.Contains(text[listen:], "cancel()") {
+		t.Fatal("main must cancel the shared lifecycle context when Listen returns")
 	}
 }

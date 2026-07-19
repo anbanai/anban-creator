@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -828,8 +829,19 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
 	// Use signal.NotifyContext for graceful shutdown.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
+
+	var billingWorkerWG sync.WaitGroup
+	if fixedBilling != nil && fixedBilling.Worker != nil {
+		billingWorkerWG.Add(1)
+		go func() {
+			defer billingWorkerWG.Done()
+			fixedBilling.Worker.Run(ctx)
+		}()
+	}
 
 	go seednoteMonitor.Run(ctx)
 	if ilinkMonitor != nil {
@@ -890,6 +902,7 @@ func main() {
 			taskSvc.Close()
 		}
 
+		billingWorkerWG.Wait()
 		if repo != nil {
 			if err := repo.Close(); err != nil {
 				log.Error().Err(err).Msg("failed to close repository")
@@ -916,6 +929,7 @@ func main() {
 	if err := app.Listen(addr, listenConfig); err != nil {
 		log.Error().Err(err).Msg("server listen error")
 	}
+	cancel()
 
 	// Wait for graceful shutdown to complete, with a timeout guard.
 	select {
@@ -1010,6 +1024,7 @@ type billingRuntimeServices struct {
 	Wallet    *service.BillingWalletService
 	Referrals *service.BillingReferralService
 	Handler   *handler.BillingHandler
+	Worker    *service.BillingMaintenanceWorker
 }
 
 func buildBillingRuntime(ctx context.Context, repo repository.Repository, cfg *config.Config, log *zerolog.Logger) (*billingRuntimeServices, error) {
@@ -1032,11 +1047,12 @@ func buildBillingRuntime(ctx context.Context, repo repository.Repository, cfg *c
 	}
 	wallet := service.NewBillingWalletService(repo, bundle, service.BillingWalletOptions{})
 	referrals := service.NewBillingReferralService(repo, wallet, bundle, service.BillingReferralOptions{})
+	worker := service.NewBillingMaintenanceWorker(wallet, service.BillingMaintenanceWorkerOptions{}, log)
 	billingHandler := handler.NewBillingHandler(repo, catalog, referrals, bundle, handler.BillingHandlerOptions{
 		AdminAPIKey:   cfg.BillingRuntime.AdminAPIKey,
 		InviteBaseURL: "https://creator.anbanai.com/register?invite=",
 	}, log)
-	return &billingRuntimeServices{Catalog: catalog, Wallet: wallet, Referrals: referrals, Handler: billingHandler}, nil
+	return &billingRuntimeServices{Catalog: catalog, Wallet: wallet, Referrals: referrals, Handler: billingHandler, Worker: worker}, nil
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
