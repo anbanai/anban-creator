@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
@@ -1541,6 +1542,37 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 		}
 	}
 
+	fallbackClaimToken := ""
+	fallbackClaimOwned := false
+	releaseFallbackClaim := func(releaseCtx context.Context) {
+		if !fallbackClaimOwned {
+			return
+		}
+		if _, err := s.pubsub.ReleaseFallbackClaim(releaseCtx, task.ID, fallbackClaimToken); err != nil {
+			s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("failed to release fallback dispatch claim")
+		}
+		fallbackClaimOwned = false
+	}
+	defer func() {
+		releaseFallbackClaim(context.Background())
+	}()
+	if s.enqueuer == nil && s.pubsub != nil && s.pubsub.Available() {
+		fallbackClaimToken = uuid.NewString()
+		claimTTL := s.executionTimeout + s.persistTimeout + time.Minute
+		if claimTTL <= 0 {
+			claimTTL = time.Minute
+		}
+		claimed, err := s.pubsub.TryClaimFallback(ctx, task.ID, fallbackClaimToken, claimTTL)
+		if err != nil {
+			return fmt.Errorf("claim fallback task dispatch: %w", err)
+		}
+		if !claimed {
+			s.logger.Info().Str("task_id", task.ID).Msg("fallback task dispatch already claimed")
+			return nil
+		}
+		fallbackClaimOwned = true
+	}
+
 	// Check per-project concurrency limit.
 	slotReserved := false
 	if project != nil {
@@ -1626,7 +1658,17 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 
 	// Fallback: run in goroutine if no enqueuer.
 	s.logger.Warn().Str("task_id", task.ID).Msg("no enqueuer available, running task in goroutine")
-	go func() {
+	goroutineClaimToken := fallbackClaimToken
+	goroutineOwnsClaim := fallbackClaimOwned
+	fallbackClaimOwned = false
+	go func(ownsFallbackClaim bool, claimToken string) {
+		if ownsFallbackClaim {
+			defer func() {
+				if _, err := s.pubsub.ReleaseFallbackClaim(context.Background(), task.ID, claimToken); err != nil {
+					s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("failed to release fallback dispatch claim")
+				}
+			}()
+		}
 		ownsSlot := slotReserved && s.pubsub != nil && s.pubsub.Available() && project != nil
 		releaseOwnedSlot := func(ctx context.Context) {
 			if !ownsSlot {
@@ -1692,7 +1734,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 		if err := s.handleExecution(fallbackCtx, task, project, referenceAsset, true); err != nil {
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task execution failed")
 		}
-	}()
+	}(goroutineOwnsClaim, goroutineClaimToken)
 	return nil
 }
 

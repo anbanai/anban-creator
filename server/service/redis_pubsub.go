@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,6 +19,9 @@ const (
 	// projectRunningCountPrefix is the Redis key prefix for per-project running task counters.
 	projectRunningCountPrefix = "anban:project:running:"
 	projectRunningCountTTL    = 1 * time.Hour
+
+	// fallbackDispatchClaimPrefix serializes in-process fallback dispatch for one task.
+	fallbackDispatchClaimPrefix = "anban:task:fallback-claim:"
 )
 
 // reserveSlotScript is a Lua script that atomically increments a project's running
@@ -34,6 +38,15 @@ if count > max then
 end
 redis.call('EXPIRE', key, ttl)
 return count
+`)
+
+// releaseFallbackClaimScript deletes a fallback claim only when its token still
+// owns the key. This prevents an expired owner from deleting a newer claim.
+var releaseFallbackClaimScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+	return redis.call('DEL', KEYS[1])
+end
+return 0
 `)
 
 // CancelEvent is published to Redis when a task is cancelled, allowing
@@ -212,6 +225,47 @@ func (ps *RedisPubSub) SubscribeProgress(ctx context.Context, taskID string) *Pr
 // Available returns true if Redis pub/sub is available.
 func (ps *RedisPubSub) Available() bool {
 	return ps.rdb != nil
+}
+
+// TryClaimFallback acquires the right to dispatch a task through the in-process
+// fallback. The claim expires so a crashed server cannot strand the task.
+func (ps *RedisPubSub) TryClaimFallback(ctx context.Context, taskID, token string, ttl time.Duration) (bool, error) {
+	if taskID == "" {
+		return false, errors.New("fallback claim task ID is required")
+	}
+	if token == "" {
+		return false, errors.New("fallback claim token is required")
+	}
+	if ttl <= 0 {
+		return false, errors.New("fallback claim TTL must be positive")
+	}
+	if ps.rdb == nil {
+		return true, nil
+	}
+	claimed, err := ps.rdb.SetNX(ctx, fallbackDispatchClaimPrefix+taskID, token, ttl).Result()
+	if err != nil {
+		return false, fmt.Errorf("claim fallback dispatch: %w", err)
+	}
+	return claimed, nil
+}
+
+// ReleaseFallbackClaim releases a fallback dispatch claim if token is still its
+// owner. A stale token is a successful no-op and returns false.
+func (ps *RedisPubSub) ReleaseFallbackClaim(ctx context.Context, taskID, token string) (bool, error) {
+	if taskID == "" {
+		return false, errors.New("fallback claim task ID is required")
+	}
+	if token == "" {
+		return false, errors.New("fallback claim token is required")
+	}
+	if ps.rdb == nil {
+		return false, nil
+	}
+	released, err := releaseFallbackClaimScript.Run(ctx, ps.rdb, []string{fallbackDispatchClaimPrefix + taskID}, token).Int64()
+	if err != nil {
+		return false, fmt.Errorf("release fallback dispatch claim: %w", err)
+	}
+	return released == 1, nil
 }
 
 // TryReserveSlot atomically increments the running count for a project and returns

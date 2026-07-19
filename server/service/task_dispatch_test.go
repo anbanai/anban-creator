@@ -1205,6 +1205,9 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 	}
 	entered := make(chan context.Context, 1)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseFallbacks := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseFallbacks)
 	tasks := &blockingRunningClaimTaskRepository{TaskRepository: baseRepo.Tasks(), entered: entered, release: release}
 	repo := &executionPreparationRepository{Repository: baseRepo, tasks: tasks, assets: baseRepo.Assets()}
 	mr := miniredis.RunT(t)
@@ -1222,19 +1225,26 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 	case <-time.After(2 * time.Second):
 		t.Fatal("fallback A did not reach running CAS")
 	}
+	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
+		t.Fatalf("EnqueueExecution duplicate: %v", err)
+	}
+	count, err := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
+	if err != nil || count != 1 {
+		t.Fatalf("slot count after duplicate fallback = %d, err=%v, want only A slot", count, err)
+	}
 	if err := svc.Cancel(ctx, task.ID); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
 	if _, ok, err := svc.pubsub.TryReserveSlot(ctx, projectID, 10); err != nil || !ok {
 		t.Fatalf("reserve replacement slot B: ok=%v err=%v", ok, err)
 	}
-	close(release)
+	releaseFallbacks()
 	select {
 	case <-fallbackCtx.Done():
 	case <-time.After(2 * time.Second):
 		t.Fatal("fallback A did not exit after losing CAS")
 	}
-	count, err := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
+	count, err = rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
 	if err != nil || count != 1 {
 		t.Fatalf("slot count after A exits = %d, err=%v, want replacement B slot", count, err)
 	}
