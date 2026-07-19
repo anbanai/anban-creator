@@ -426,6 +426,43 @@ func (s *BillingWalletService) consumeForCharge(ctx context.Context, repo reposi
 }
 
 func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*TopUpResult, error) {
+	var err error
+	req, err = s.normalizeTopUpRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	var result *TopUpResult
+	err = s.withTx(ctx, func(tx repository.Repository) error {
+		result, err = s.topUpInTx(ctx, tx, req)
+		return err
+	})
+	if err != nil {
+		if replay, replayErr := findTopUpReplay(ctx, s.repo.Billing(), req); replayErr != nil || replay != nil {
+			return replay, replayErr
+		}
+		if sourceEntry, sourceErr := s.repo.Billing().FindEntryBySource(ctx, req.ExternalSourceType, req.ExternalSourceID); sourceErr == nil {
+			return topUpResultFromEntry(ctx, s.repo.Billing(), sourceEntry, req)
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+// TopUpInTx applies a top-up inside the caller's transaction. The caller owns
+// commit or rollback, allowing top-up and acquisition rewards to be atomic.
+func (s *BillingWalletService) TopUpInTx(ctx context.Context, tx repository.Repository, req TopUpRequest) (*TopUpResult, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("%w: top-up transaction is required", ErrBillingInvalid)
+	}
+	var err error
+	req, err = s.normalizeTopUpRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	return s.topUpInTx(ctx, tx, req)
+}
+
+func (s *BillingWalletService) normalizeTopUpRequest(req TopUpRequest) (TopUpRequest, error) {
 	if req.ExternalSourceID == "" {
 		req.ExternalSourceID = req.ExternalRef
 	}
@@ -438,127 +475,105 @@ func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*To
 	if strings.TrimSpace(req.UserID) == "" || req.Credits <= 0 || strings.TrimSpace(req.ExternalSourceType) == "" ||
 		strings.TrimSpace(req.ExternalSourceID) == "" || strings.TrimSpace(req.CatalogID) == "" ||
 		!validBillingFingerprint(req.RequestFingerprint) || strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
-		return nil, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
 	}
-	var result *TopUpResult
-	err := s.withTx(ctx, func(tx repository.Repository) error {
-		billingRepo := tx.Billing()
-		if replay, replayErr := findTopUpReplay(ctx, billingRepo, req); replayErr != nil || replay != nil {
-			result = replay
-			return replayErr
-		}
-		if sourceEntry, sourceErr := billingRepo.FindEntryBySource(ctx, req.ExternalSourceType, req.ExternalSourceID); sourceErr == nil {
-			replay, replayErr := topUpResultFromEntry(ctx, billingRepo, sourceEntry, req)
-			result = replay
-			return replayErr
-		} else if !errors.Is(sourceErr, gorm.ErrRecordNotFound) {
-			return sourceErr
-		}
-		account, err := lockOrCreateBillingAccount(ctx, billingRepo, req.UserID)
-		if err != nil {
-			return err
-		}
-		if replay, replayErr := findLockedTopUpReplay(ctx, billingRepo, req); replayErr != nil || replay != nil {
-			result = replay
-			return replayErr
-		}
-		now := s.now().UTC()
-		debtPositions, err := billingRepo.ListOutstandingDebtCharges(ctx, req.UserID)
-		if err != nil {
-			return err
-		}
-		var attributedDebt int64
-		for _, position := range debtPositions {
-			var ok bool
-			if attributedDebt, ok = checkedBillingAdd(attributedDebt, position.OutstandingCredits); !ok {
-				return ErrBillingLedgerInvalid
-			}
-		}
-		if attributedDebt != account.DebtCredits {
-			return ErrBillingLedgerInvalid
-		}
-		debtRepaid := minInt64(req.Credits, account.DebtCredits)
-		paidAdded := req.Credits - debtRepaid
-		entry := &model.BillingWalletEntry{
-			ID: uuid.NewString(), UserID: req.UserID, EventKind: model.BillingWalletEventKindTopUp,
-			PaidDelta: paidAdded, CatalogID: req.CatalogID, RequestFingerprint: req.RequestFingerprint,
-			SourceType: stringPtr(req.ExternalSourceType), SourceID: stringPtr(req.ExternalSourceID),
-			IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey,
-			ActorType: req.ActorType, ActorID: req.ActorID, SourceService: req.SourceService,
-			RequestID: req.RequestID, CorrelationID: req.CorrelationID, CreatedAt: now,
-		}
-		lotID := ""
-		if paidAdded > 0 {
-			lotID = uuid.NewString()
-			lot := &model.BillingCreditLot{
-				ID: lotID, UserID: req.UserID, Kind: model.BillingCreditLotKindPaid,
-				SourceType: req.ExternalSourceType, SourceID: req.ExternalSourceID, CatalogID: req.CatalogID,
-				OriginalCredits: paidAdded, AvailableCredits: paidAdded, CreatedAt: now,
-			}
-			if err := lot.Validate(); err != nil {
-				return err
-			}
-			if err := billingRepo.CreateLot(ctx, lot); err != nil {
-				return err
-			}
-			entry.LotID = &lotID
-		}
-		account.DebtCredits -= debtRepaid
-		if account.PaidCredits > math.MaxInt64-paidAdded {
-			return ErrBillingLedgerInvalid
-		}
-		account.PaidCredits += paidAdded
-		if err := billingRepo.AppendEntry(ctx, entry); err != nil {
-			return err
-		}
-		remainingRepayment := debtRepaid
-		for index, position := range debtPositions {
-			if remainingRepayment == 0 {
-				break
-			}
-			repaid := minInt64(remainingRepayment, position.OutstandingCredits)
-			if repaid == 0 {
-				continue
-			}
-			repayment := &model.BillingWalletEntry{
-				ID: uuid.NewString(), UserID: req.UserID, EventKind: model.BillingWalletEventKindDebtRepayment,
-				DebtDelta: -repaid, CatalogID: req.CatalogID, RequestFingerprint: req.RequestFingerprint,
-				ChargeID: &position.ChargeID, ResourceType: "topup", ResourceID: entry.ID,
-				IdempotencyScope: "topup-repayment:" + entry.ID,
-				IdempotencyKey:   fmt.Sprintf("%06d:%s", index, position.ChargeID),
-				ActorType:        req.ActorType, ActorID: req.ActorID, SourceService: req.SourceService,
-				RequestID: req.RequestID, CorrelationID: req.CorrelationID, CreatedAt: now,
-			}
-			if err := billingRepo.AppendEntry(ctx, repayment); err != nil {
-				return err
-			}
-			if err := billingRepo.CreateDebtAllocation(ctx, &model.BillingDebtAllocation{
-				ID: uuid.NewString(), UserID: req.UserID, ChargeID: position.ChargeID, EntryID: repayment.ID,
-				SourceEntryID: entry.ID, Kind: model.BillingDebtAllocationKindRepayment, Credits: repaid, CreatedAt: now,
-			}); err != nil {
-				return err
-			}
-			remainingRepayment -= repaid
-		}
-		if remainingRepayment != 0 {
-			return ErrBillingLedgerInvalid
-		}
-		if err := updateBillingAccount(ctx, billingRepo, account); err != nil {
-			return err
-		}
-		result = &TopUpResult{EntryID: entry.ID, LotID: lotID, DebtRepaid: debtRepaid, PaidAdded: paidAdded}
-		return nil
-	})
+	return req, nil
+}
+
+func (s *BillingWalletService) topUpInTx(ctx context.Context, tx repository.Repository, req TopUpRequest) (*TopUpResult, error) {
+	billingRepo := tx.Billing()
+	account, err := lockOrCreateBillingAccount(ctx, billingRepo, req.UserID)
 	if err != nil {
-		if replay, replayErr := findTopUpReplay(ctx, s.repo.Billing(), req); replayErr != nil || replay != nil {
-			return replay, replayErr
-		}
-		if sourceEntry, sourceErr := s.repo.Billing().FindEntryBySource(ctx, req.ExternalSourceType, req.ExternalSourceID); sourceErr == nil {
-			return topUpResultFromEntry(ctx, s.repo.Billing(), sourceEntry, req)
-		}
 		return nil, err
 	}
-	return result, nil
+	if replay, replayErr := findLockedTopUpReplay(ctx, billingRepo, req); replayErr != nil || replay != nil {
+		return replay, replayErr
+	}
+	now := s.now().UTC()
+	debtPositions, err := billingRepo.ListOutstandingDebtCharges(ctx, req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	var attributedDebt int64
+	for _, position := range debtPositions {
+		var ok bool
+		if attributedDebt, ok = checkedBillingAdd(attributedDebt, position.OutstandingCredits); !ok {
+			return nil, ErrBillingLedgerInvalid
+		}
+	}
+	if attributedDebt != account.DebtCredits {
+		return nil, ErrBillingLedgerInvalid
+	}
+	debtRepaid := minInt64(req.Credits, account.DebtCredits)
+	paidAdded := req.Credits - debtRepaid
+	entry := &model.BillingWalletEntry{
+		ID: uuid.NewString(), UserID: req.UserID, EventKind: model.BillingWalletEventKindTopUp,
+		PaidDelta: paidAdded, CatalogID: req.CatalogID, RequestFingerprint: req.RequestFingerprint,
+		SourceType: stringPtr(req.ExternalSourceType), SourceID: stringPtr(req.ExternalSourceID),
+		IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey,
+		ActorType: req.ActorType, ActorID: req.ActorID, SourceService: req.SourceService,
+		RequestID: req.RequestID, CorrelationID: req.CorrelationID, CreatedAt: now,
+	}
+	lotID := ""
+	if paidAdded > 0 {
+		lotID = uuid.NewString()
+		lot := &model.BillingCreditLot{
+			ID: lotID, UserID: req.UserID, Kind: model.BillingCreditLotKindPaid,
+			SourceType: req.ExternalSourceType, SourceID: req.ExternalSourceID, CatalogID: req.CatalogID,
+			OriginalCredits: paidAdded, AvailableCredits: paidAdded, CreatedAt: now,
+		}
+		if err := lot.Validate(); err != nil {
+			return nil, err
+		}
+		if err := billingRepo.CreateLot(ctx, lot); err != nil {
+			return nil, err
+		}
+		entry.LotID = &lotID
+	}
+	account.DebtCredits -= debtRepaid
+	if account.PaidCredits > math.MaxInt64-paidAdded {
+		return nil, ErrBillingLedgerInvalid
+	}
+	account.PaidCredits += paidAdded
+	if err := billingRepo.AppendEntry(ctx, entry); err != nil {
+		return nil, err
+	}
+	remainingRepayment := debtRepaid
+	for index, position := range debtPositions {
+		if remainingRepayment == 0 {
+			break
+		}
+		repaid := minInt64(remainingRepayment, position.OutstandingCredits)
+		if repaid == 0 {
+			continue
+		}
+		repayment := &model.BillingWalletEntry{
+			ID: uuid.NewString(), UserID: req.UserID, EventKind: model.BillingWalletEventKindDebtRepayment,
+			DebtDelta: -repaid, CatalogID: req.CatalogID, RequestFingerprint: req.RequestFingerprint,
+			ChargeID: &position.ChargeID, ResourceType: "topup", ResourceID: entry.ID,
+			IdempotencyScope: "topup-repayment:" + entry.ID,
+			IdempotencyKey:   fmt.Sprintf("%06d:%s", index, position.ChargeID),
+			ActorType:        req.ActorType, ActorID: req.ActorID, SourceService: req.SourceService,
+			RequestID: req.RequestID, CorrelationID: req.CorrelationID, CreatedAt: now,
+		}
+		if err := billingRepo.AppendEntry(ctx, repayment); err != nil {
+			return nil, err
+		}
+		if err := billingRepo.CreateDebtAllocation(ctx, &model.BillingDebtAllocation{
+			ID: uuid.NewString(), UserID: req.UserID, ChargeID: position.ChargeID, EntryID: repayment.ID,
+			SourceEntryID: entry.ID, Kind: model.BillingDebtAllocationKindRepayment, Credits: repaid, CreatedAt: now,
+		}); err != nil {
+			return nil, err
+		}
+		remainingRepayment -= repaid
+	}
+	if remainingRepayment != 0 {
+		return nil, ErrBillingLedgerInvalid
+	}
+	if err := updateBillingAccount(ctx, billingRepo, account); err != nil {
+		return nil, err
+	}
+	return &TopUpResult{EntryID: entry.ID, LotID: lotID, DebtRepaid: debtRepaid, PaidAdded: paidAdded}, nil
 }
 
 func (s *BillingWalletService) Reverse(ctx context.Context, chargeID, reason, key string) (*model.BillingCharge, error) {

@@ -48,10 +48,14 @@ type BillingSettlementAction string
 
 type BillingDebtAllocationKind string
 
+type BillingReferralStatus string
+
 const (
 	BillingSettlementActionChargeOperation BillingSettlementAction   = "charge_operation"
 	BillingSettlementActionReverseTask     BillingSettlementAction   = "reverse_task"
 	BillingDebtAllocationKindRepayment     BillingDebtAllocationKind = "repayment"
+	BillingReferralStatusIssued            BillingReferralStatus     = "issued"
+	BillingReferralStatusCapped            BillingReferralStatus     = "capped"
 )
 
 // BillingWalletAccount is a rebuildable projection of a user's wallet.
@@ -355,17 +359,19 @@ func (BillingSettlementOutbox) TableName() string { return "billing_settlement_o
 
 // BillingReferralIssue tracks the paired reward for one invitee and program.
 type BillingReferralIssue struct {
-	ID            string     `gorm:"type:char(36);primaryKey" json:"id"`
-	ProgramID     string     `gorm:"type:varchar(128);uniqueIndex:idx_billing_referral_invitee_program,priority:2;not null" json:"program_id"`
-	CatalogID     string     `gorm:"type:varchar(128);index;not null" json:"catalog_id"`
-	InviteeUserID string     `gorm:"type:char(36);uniqueIndex:idx_billing_referral_invitee_program,priority:1;index;not null" json:"invitee_user_id"`
-	InviterUserID string     `gorm:"type:char(36);index;not null" json:"inviter_user_id"`
-	InviteeLotID  *string    `gorm:"type:char(36);uniqueIndex" json:"invitee_lot_id,omitempty"`
-	InviterLotID  *string    `gorm:"type:char(36);uniqueIndex" json:"inviter_lot_id,omitempty"`
-	Status        string     `gorm:"type:varchar(20);index;not null" json:"status"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	IssuedAt      *time.Time `json:"issued_at,omitempty"`
+	ID                     string                `gorm:"type:char(36);primaryKey;check:chk_billing_referral_identity,TRIM(id) <> '' AND TRIM(program_id) <> '' AND TRIM(catalog_id) <> '' AND TRIM(invitee_user_id) <> '' AND TRIM(inviter_user_id) <> '' AND TRIM(qualifying_top_up_entry_id) <> '' AND LENGTH(request_fingerprint) = 64" json:"id"`
+	ProgramID              string                `gorm:"type:varchar(128);uniqueIndex:idx_billing_referral_invitee_program,priority:2;not null" json:"program_id"`
+	CatalogID              string                `gorm:"type:varchar(128);index;not null" json:"catalog_id"`
+	InviteeUserID          string                `gorm:"type:char(36);uniqueIndex:idx_billing_referral_invitee_program,priority:1;index;not null;check:chk_billing_referral_distinct_users,invitee_user_id <> inviter_user_id" json:"invitee_user_id"`
+	InviterUserID          string                `gorm:"type:char(36);index;not null" json:"inviter_user_id"`
+	QualifyingTopUpEntryID string                `gorm:"type:char(36);uniqueIndex;not null" json:"qualifying_topup_entry_id"`
+	RequestFingerprint     string                `gorm:"type:char(64);not null" json:"request_fingerprint"`
+	InviteeLotID           *string               `gorm:"type:char(36);uniqueIndex" json:"invitee_lot_id,omitempty"`
+	InviterLotID           *string               `gorm:"type:char(36);uniqueIndex" json:"inviter_lot_id,omitempty"`
+	Status                 BillingReferralStatus `gorm:"type:varchar(20);index;not null;check:chk_billing_referral_status,status IN ('issued','capped');check:chk_billing_referral_lots,(status = 'issued' AND invitee_lot_id IS NOT NULL AND inviter_lot_id IS NOT NULL AND issued_at IS NOT NULL) OR (status = 'capped' AND invitee_lot_id IS NULL AND inviter_lot_id IS NULL AND issued_at IS NULL)" json:"status"`
+	CreatedAt              time.Time             `json:"created_at"`
+	UpdatedAt              time.Time             `json:"updated_at"`
+	IssuedAt               *time.Time            `json:"issued_at,omitempty"`
 }
 
 func (BillingReferralIssue) TableName() string { return "billing_referral_issues" }

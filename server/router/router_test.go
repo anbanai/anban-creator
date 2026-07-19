@@ -2,10 +2,12 @@ package router
 
 import (
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -183,6 +185,64 @@ func TestLegacyFileUploadRouteIsNotRegistered(t *testing.T) {
 		if route.Method == "POST" && route.Path == "/api/v1/files/"+"upload" {
 			t.Fatalf("legacy upload route is still registered: %+v", route)
 		}
+	}
+}
+
+func TestBillingRoutes(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	t.Cleanup(func() { _ = repo.Close() })
+	jwtSvc, err := auth.NewJWTService("billing-router-secret", "24h", "168h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config: &config.Config{Server: config.ServerConfig{Host: "0.0.0.0"}}, Logger: &logger,
+		Repo: repo, JWTService: jwtSvc, BillingHandler: &handler.BillingHandler{},
+	})
+	want := map[string]string{
+		"GET /api/billing/wallet":        "",
+		"GET /api/billing/transactions":  "",
+		"POST /api/billing/quotes":       "",
+		"GET /api/billing/referral":      "",
+		"POST /api/admin/billing/topups": "",
+	}
+	for _, route := range app.GetRoutes() {
+		delete(want, route.Method+" "+route.Path)
+	}
+	if len(want) != 0 {
+		t.Fatalf("billing routes missing: %#v", want)
+	}
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/billing/wallet"},
+		{http.MethodGet, "/api/billing/transactions"},
+		{http.MethodPost, "/api/billing/quotes"},
+		{http.MethodGet, "/api/billing/referral"},
+	} {
+		resp, err := app.Test(httptest.NewRequest(tc.method, tc.path, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != fiber.StatusUnauthorized {
+			t.Fatalf("%s %s status = %d, want 401", tc.method, tc.path, resp.StatusCode)
+		}
+	}
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/api/admin/billing/topups", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("admin billing route status = %d, want 401", resp.StatusCode)
 	}
 }
 

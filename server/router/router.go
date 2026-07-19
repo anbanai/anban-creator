@@ -46,6 +46,7 @@ type Services struct {
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	AgentHandler             *handler.AgentHandler
 	CreditHandler            *handler.CreditHandler
+	BillingHandler           *handler.BillingHandler
 	VideoHandler             *handler.VideoHandler
 	ProjectHandler           *handler.ProjectHandler
 	TimelineHandler          *handler.TimelineHandler
@@ -222,6 +223,16 @@ func NewRouter(svc *Services) *fiber.App {
 
 	authMiddleware := appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger)
 	rateLimiter := appmiddleware.RateLimit(svc.Redis, 100, 1*time.Minute)
+	if svc.BillingHandler != nil {
+		billingAPI := app.Group("/api/billing", authMiddleware, rateLimiter)
+		billingAPI.Get("/wallet", svc.BillingHandler.Wallet)
+		billingAPI.Get("/transactions", svc.BillingHandler.Transactions)
+		billingAPI.Post("/quotes", svc.BillingHandler.CreateQuote)
+		billingAPI.Get("/referral", svc.BillingHandler.Referral)
+
+		adminBillingLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
+		app.Post("/api/admin/billing/topups", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingHandler.AdminTopUp)
+	}
 
 	apiV1 := app.Group("/api/v1", authMiddleware, rateLimiter)
 

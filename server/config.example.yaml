@@ -356,7 +356,6 @@ billing:
   default_user_multiplier: 1.00
   minimum_charge_credits: 1
 
-# Optional until the fixed-SKU runtime is fully wired for production cutover.
 billing_runtime:
   config_dir: "./billing"
   admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"

@@ -865,13 +865,13 @@ func validPersistedDebtOnlyTopUpEntry() BillingWalletEntry {
 }
 
 func validPersistedBillingReferralIssue(inviteeUserID string) BillingReferralIssue {
+	inviteeLotID, inviterLotID := uuid.NewString(), uuid.NewString()
+	issuedAt := time.Now().UTC()
 	return BillingReferralIssue{
-		ID:            uuid.NewString(),
-		ProgramID:     "referral-first-topup-v1",
-		CatalogID:     "promotion-v1",
-		InviteeUserID: inviteeUserID,
-		InviterUserID: uuid.NewString(),
-		Status:        "pending",
+		ID: uuid.NewString(), ProgramID: "referral-first-topup-v1", CatalogID: "promotion-v1",
+		InviteeUserID: inviteeUserID, InviterUserID: uuid.NewString(), QualifyingTopUpEntryID: uuid.NewString(),
+		RequestFingerprint: strings.Repeat("e", 64), InviteeLotID: &inviteeLotID, InviterLotID: &inviterLotID,
+		Status: BillingReferralStatusIssued, IssuedAt: &issuedAt,
 	}
 }
 

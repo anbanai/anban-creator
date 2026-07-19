@@ -358,6 +358,10 @@ billing:
   default_user_multiplier: 1.00
   minimum_charge_credits: 1
 
+billing_runtime:
+  config_dir: "./billing"
+  admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"
+
 recharge_tiers:
   - key: "basic"
     label: "基础包"

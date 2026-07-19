@@ -1,0 +1,370 @@
+package handler
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/service"
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+)
+
+func TestBillingHandler(t *testing.T) {
+	t.Run("wallet absent is zero and read only", func(t *testing.T) {
+		f := newBillingHandlerFixture(t)
+		resp := f.publicRequest(t, http.MethodGet, "/api/billing/wallet", nil)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		data := billingResponseData(t, resp)
+		assertJSONNumbers(t, data, map[string]float64{"paid": 0, "promotional": 0, "debt": 0, "balance": 0})
+		if _, err := f.repo.Billing().FindAccount(context.Background(), f.inviteeID); !errorsIsRecordNotFound(err) {
+			t.Fatalf("wallet read created account or returned unexpected error: %v", err)
+		}
+	})
+
+	t.Run("wallet distinct buckets and invalid projection", func(t *testing.T) {
+		f := newBillingHandlerFixture(t)
+		if err := f.repo.Billing().CreateAccount(context.Background(), &model.BillingWalletAccount{
+			UserID: f.inviteeID, PaidCredits: 2_000, PromotionalCredits: 300, DebtCredits: 500,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		resp := f.publicRequest(t, http.MethodGet, "/api/billing/wallet", nil)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		assertJSONNumbers(t, billingResponseData(t, resp), map[string]float64{"paid": 2_000, "promotional": 300, "debt": 500, "balance": 1_800})
+
+		if err := f.db.Exec("PRAGMA ignore_check_constraints = ON").Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := f.db.Model(&model.BillingWalletAccount{}).Where("user_id = ?", f.inviteeID).
+			Updates(map[string]any{"paid_credits": int64(^uint64(0) >> 1), "promotional_credits": int64(1)}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := f.db.Exec("PRAGMA ignore_check_constraints = OFF").Error; err != nil {
+			t.Fatal(err)
+		}
+		resp = f.publicRequest(t, http.MethodGet, "/api/billing/wallet", nil)
+		assertBillingHTTP(t, resp, http.StatusInternalServerError, BillingCodeLedgerInvalid)
+	})
+
+	t.Run("quote is fixed and errors are typed", func(t *testing.T) {
+		f := newBillingHandlerFixture(t)
+		body := map[string]any{
+			"operation": "task.article", "request_fingerprint": strings.Repeat("a", 64),
+			"idempotency_scope": "quote", "idempotency_key": "quote-1",
+		}
+		resp := f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		data := billingResponseData(t, resp)
+		assertJSONNumbers(t, data, map[string]float64{"price_credits": 500})
+		for _, field := range []string{"id", "catalog_id", "sku_id", "sku_snapshot", "expires_at"} {
+			if _, ok := data[field]; !ok {
+				t.Fatalf("quote response missing %s: %#v", field, data)
+			}
+		}
+		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", map[string]any{"operation": "task.article"})
+		assertBillingHTTP(t, resp, http.StatusBadRequest, BillingCodeInvalid)
+		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", map[string]any{
+			"operation": "missing", "request_fingerprint": strings.Repeat("b", 64), "idempotency_scope": "quote", "idempotency_key": "missing",
+		})
+		assertBillingHTTP(t, resp, http.StatusNotFound, BillingCodeNotFound)
+		body["operation"] = "mcp.generate_image"
+		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
+		assertBillingHTTP(t, resp, http.StatusConflict, BillingCodeConflict)
+	})
+
+	t.Run("admin authentication topup replay transactions and referral summary", func(t *testing.T) {
+		f := newBillingHandlerFixture(t)
+		body := f.topUpBody("payment-1", 10_000)
+		resp := f.adminRequest(t, "", body)
+		assertBillingHTTP(t, resp, http.StatusUnauthorized, BillingCodeUnauthorized)
+		resp = f.adminRequest(t, "wrong", body)
+		assertBillingHTTP(t, resp, http.StatusUnauthorized, BillingCodeUnauthorized)
+		resp = f.adminRequest(t, f.adminKey, body)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		first := billingResponseData(t, resp)
+		resp = f.adminRequest(t, f.adminKey, body)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		second := billingResponseData(t, resp)
+		if first["entry_id"] != second["entry_id"] || first["referral_issue_id"] != second["referral_issue_id"] {
+			t.Fatalf("topup replay drifted: first=%#v second=%#v", first, second)
+		}
+		body["credits"] = float64(10_001)
+		resp = f.adminRequest(t, f.adminKey, body)
+		assertBillingHTTP(t, resp, http.StatusConflict, BillingCodeConflict)
+
+		resp = f.publicRequest(t, http.MethodGet, "/api/billing/referral", nil)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		referral := billingResponseData(t, resp)
+		if referral["invite_code"] != "INVITEE" || !strings.Contains(referral["invite_link"].(string), "INVITEE") {
+			t.Fatalf("referral link response = %#v", referral)
+		}
+		program := referral["program"].(map[string]any)
+		if program["id"] != "referral-handler-v1" || referral["status"] != "issued" {
+			t.Fatalf("referral summary = %#v", referral)
+		}
+
+		resp = f.publicRequest(t, http.MethodGet, "/api/billing/transactions?offset=0&limit=1", nil)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		page1 := billingResponseData(t, resp)
+		items1 := page1["items"].([]any)
+		if len(items1) != 1 || page1["limit"] != float64(1) || page1["total"].(float64) != 2 {
+			t.Fatalf("transaction page 1 = %#v", page1)
+		}
+		resp = f.publicRequest(t, http.MethodGet, "/api/billing/transactions?offset=1&limit=1", nil)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		items2 := billingResponseData(t, resp)["items"].([]any)
+		if items1[0].(map[string]any)["id"] == items2[0].(map[string]any)["id"] {
+			t.Fatalf("stable pages repeated entry: %#v %#v", items1, items2)
+		}
+		for _, query := range []string{"?offset=-1&limit=20", "?offset=0&limit=0", "?offset=0&limit=101"} {
+			resp = f.publicRequest(t, http.MethodGet, "/api/billing/transactions"+query, nil)
+			assertBillingHTTP(t, resp, http.StatusBadRequest, BillingCodeInvalid)
+		}
+	})
+
+	t.Run("capped referral summary is read only", func(t *testing.T) {
+		f := newBillingHandlerFixture(t)
+		if err := f.repo.Billing().CreateReferralIssue(context.Background(), &model.BillingReferralIssue{
+			ID: uuid.NewString(), ProgramID: "referral-handler-v1", CatalogID: "promotion-handler-v1",
+			InviteeUserID: f.inviteeID, InviterUserID: "inviter", QualifyingTopUpEntryID: uuid.NewString(),
+			RequestFingerprint: strings.Repeat("e", 64), Status: model.BillingReferralStatusCapped,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		resp := f.publicRequest(t, http.MethodGet, "/api/billing/referral", nil)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		if got := billingResponseData(t, resp)["status"]; got != "capped" {
+			t.Fatalf("referral status = %#v, want capped", got)
+		}
+		if _, err := f.repo.Billing().FindAccount(context.Background(), f.inviteeID); !errorsIsRecordNotFound(err) {
+			t.Fatalf("read-only referral created wallet: %v", err)
+		}
+		entries, err := f.repo.Billing().ListEntriesByUser(context.Background(), f.inviteeID, 0, 10)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("read-only referral entries = %+v, %v", entries, err)
+		}
+	})
+
+	t.Run("public DTOs contain no internal cost vocabulary", func(t *testing.T) {
+		f := newBillingHandlerFixture(t)
+		for _, endpoint := range []struct {
+			method string
+			path   string
+			body   any
+		}{
+			{http.MethodGet, "/api/billing/wallet", nil},
+			{http.MethodGet, "/api/billing/transactions?offset=0&limit=20", nil},
+			{http.MethodGet, "/api/billing/referral", nil},
+			{http.MethodPost, "/api/billing/quotes", map[string]any{"operation": "task.article", "request_fingerprint": strings.Repeat("c", 64), "idempotency_scope": "quote", "idempotency_key": "safe-dto"}},
+		} {
+			resp := f.publicRequest(t, endpoint.method, endpoint.path, endpoint.body)
+			assertBillingHTTP(t, resp, http.StatusOK, 0)
+			encoded := strings.ToLower(string(readResponseBody(t, resp)))
+			for _, forbidden := range []string{"provider_cost", "token", "model", "budget", "multiplier", "bonus", "total_cost_usd"} {
+				if strings.Contains(encoded, forbidden) {
+					t.Fatalf("%s %s leaked %q: %s", endpoint.method, endpoint.path, forbidden, encoded)
+				}
+			}
+		}
+		for _, dto := range []any{BillingWalletResponse{}, BillingTransactionResponse{}, BillingQuoteResponse{}} {
+			typeOf := reflect.TypeOf(dto)
+			for index := 0; index < typeOf.NumField(); index++ {
+				field := typeOf.Field(index)
+				name := strings.ToLower(field.Name + " " + field.Tag.Get("json"))
+				for _, forbidden := range []string{"provider", "cost", "token", "model", "budget", "multiplier", "bonus"} {
+					if strings.Contains(name, forbidden) {
+						t.Fatalf("public DTO %s field %s contains forbidden %q", typeOf.Name(), field.Name, forbidden)
+					}
+				}
+			}
+		}
+	})
+}
+
+type billingHandlerFixture struct {
+	repo      repository.Repository
+	db        *gorm.DB
+	handler   *BillingHandler
+	inviteeID string
+	adminKey  string
+	bundle    serverbilling.Bundle
+}
+
+func newBillingHandlerFixture(t *testing.T) *billingHandlerFixture {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared&_busy_timeout=10000"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	t.Cleanup(func() { _ = repo.Close() })
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	bundle := billingHandlerBundle()
+	catalog := service.NewBillingCatalogService(repo, &bundle, service.BillingCatalogOptions{Now: func() time.Time { return now }, QuoteTTL: 5 * time.Minute})
+	if _, err := catalog.Publish(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	wallet := service.NewBillingWalletService(repo, &bundle, service.BillingWalletOptions{Now: func() time.Time { return now }})
+	referrals := service.NewBillingReferralService(repo, wallet, &bundle, service.BillingReferralOptions{Now: func() time.Time { return now }})
+	for _, user := range []model.User{
+		{ID: "inviter", Email: "inviter@billing.test", Password: "x", InviteCode: "INVITER"},
+		{ID: "invitee", Email: "invitee@billing.test", Password: "x", InviteCode: "INVITEE", InvitedBy: "inviter"},
+	} {
+		user := user
+		if err := repo.Users().Create(context.Background(), &user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logger := zerolog.New(io.Discard)
+	const adminKey = "billing-handler-admin-secret"
+	return &billingHandlerFixture{
+		repo: repo, db: db, inviteeID: "invitee", adminKey: adminKey, bundle: bundle,
+		handler: NewBillingHandler(repo, catalog, referrals, &bundle, BillingHandlerOptions{
+			AdminAPIKey: adminKey, InviteBaseURL: "https://creator.anbanai.com/register?invite=",
+		}, &logger),
+	}
+}
+
+func billingHandlerBundle() serverbilling.Bundle {
+	return serverbilling.Bundle{
+		Policy: serverbilling.PolicyCatalog{
+			Version: "2026-07-19", CreditsPerCNY: 1_000,
+			TaskAdmission: serverbilling.TaskAdmissionPolicy{RequireZeroDebt: true, RequireFullPrice: true},
+			AcceptedTask:  serverbilling.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
+			TopUp:         serverbilling.TopUpPolicy{RepayDebtFirst: true}, Promotions: serverbilling.PromotionsPolicy{MayRepayDebt: false},
+		},
+		Products: serverbilling.ProductCatalog{CatalogID: "retail-handler-v1", Currency: "credits", SKUs: []serverbilling.SKUConfig{
+			{ID: "task.article.v1", Operation: "task.article", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
+			{ID: "image.cover.v1", Operation: "mcp.generate_image", Route: "image.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Delivery: "image"},
+		}},
+		Promotions: serverbilling.PromotionCatalog{CatalogID: "promotion-handler-v1", Programs: []serverbilling.ReferralProgram{{
+			ID: "referral-handler-v1", Trigger: "invitee_first_paid_topup", MinimumTopUpCNY: 10_000_000,
+			InviterCredits: 1_000, InviteeCredits: 1_000, ExpiresAfter: 30 * 24 * time.Hour, MaxInviterRewards: 10,
+		}}},
+	}
+}
+
+func (f *billingHandlerFixture) publicRequest(t *testing.T, method, path string, body any) *http.Response {
+	t.Helper()
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error { c.Locals("user_id", f.inviteeID); return c.Next() })
+	app.Get("/api/billing/wallet", f.handler.Wallet)
+	app.Get("/api/billing/transactions", f.handler.Transactions)
+	app.Post("/api/billing/quotes", f.handler.CreateQuote)
+	app.Get("/api/billing/referral", f.handler.Referral)
+	return billingTestRequest(t, app, method, path, body, "")
+}
+
+func (f *billingHandlerFixture) adminRequest(t *testing.T, key string, body any) *http.Response {
+	t.Helper()
+	app := fiber.New()
+	app.Post("/api/admin/billing/topups", f.handler.AdminAuth, f.handler.AdminTopUp)
+	return billingTestRequest(t, app, http.MethodPost, "/api/admin/billing/topups", body, key)
+}
+
+func (f *billingHandlerFixture) topUpBody(sourceID string, credits int64) map[string]any {
+	return map[string]any{
+		"user_id": f.inviteeID, "credits": credits, "external_source_type": "manual_api", "external_source_id": sourceID,
+		"catalog_id": f.bundle.Products.CatalogID, "request_fingerprint": strings.Repeat("d", 64),
+		"idempotency_scope": "admin-topup", "idempotency_key": sourceID,
+	}
+}
+
+func billingTestRequest(t *testing.T, app *fiber.App, method, path string, body any, adminKey string) *http.Response {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if adminKey != "" {
+		req.Header.Set("X-Admin-API-Key", adminKey)
+	}
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func assertBillingHTTP(t *testing.T, resp *http.Response, status, code int) {
+	t.Helper()
+	if resp.StatusCode != status {
+		body := readResponseBody(t, resp)
+		t.Fatalf("status = %d, want %d: %s", resp.StatusCode, status, body)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(readResponseBody(t, resp), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope["code"] != float64(code) {
+		t.Fatalf("code = %#v, want %d; response=%#v", envelope["code"], code, envelope)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(mustJSON(t, envelope)))
+}
+
+func billingResponseData(t *testing.T, resp *http.Response) map[string]any {
+	t.Helper()
+	var envelope map[string]any
+	if err := json.Unmarshal(readResponseBody(t, resp), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	data, ok := envelope["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("response data = %#v", envelope["data"])
+	}
+	return data
+}
+
+func readResponseBody(t *testing.T, resp *http.Response) []byte {
+	t.Helper()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
+func assertJSONNumbers(t *testing.T, data map[string]any, want map[string]float64) {
+	t.Helper()
+	for key, value := range want {
+		if data[key] != value {
+			t.Fatalf("%s = %#v, want %v; data=%#v", key, data[key], value, data)
+		}
+	}
+}
+
+func errorsIsRecordNotFound(err error) bool { return err == gorm.ErrRecordNotFound }

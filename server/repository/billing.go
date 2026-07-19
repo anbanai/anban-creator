@@ -53,6 +53,7 @@ type BillingRepository interface {
 	LockEntryByKey(ctx context.Context, scope, key string) (*model.BillingWalletEntry, error)
 	LockEntryBySource(ctx context.Context, sourceType, sourceID string) (*model.BillingWalletEntry, error)
 	ListEntriesByUser(ctx context.Context, userID string, offset, limit int) ([]model.BillingWalletEntry, error)
+	CountEntriesByUser(ctx context.Context, userID string) (int64, error)
 
 	CreateCatalogVersion(ctx context.Context, catalog *model.BillingCatalogVersion) error
 	FindCatalogVersion(ctx context.Context, catalogID string) (*model.BillingCatalogVersion, error)
@@ -316,6 +317,12 @@ func (r *billingRepository) ListEntriesByUser(ctx context.Context, userID string
 		Limit(limit).
 		Find(&entries).Error
 	return entries, err
+}
+
+func (r *billingRepository) CountEntriesByUser(ctx context.Context, userID string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.BillingWalletEntry{}).Where("user_id = ?", userID).Count(&count).Error
+	return count, err
 }
 
 func (r *billingRepository) CreateCatalogVersion(ctx context.Context, catalog *model.BillingCatalogVersion) error {

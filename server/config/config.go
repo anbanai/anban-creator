@@ -562,7 +562,7 @@ type BillingConfig struct {
 }
 
 // BillingRuntimeConfig points the server at the strict fixed-SKU billing
-// catalogs. It remains optional until the forward cutover publishes them.
+// catalogs required by server startup.
 type BillingRuntimeConfig struct {
 	ConfigDir   string `yaml:"config_dir" json:"config_dir"`
 	AdminAPIKey string `yaml:"admin_api_key" json:"-"`

@@ -22,6 +22,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/auth"
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/handler"
 	"github.com/anbanai/anban-creator/server/mcp"
@@ -126,6 +127,10 @@ func main() {
 	var repo repository.Repository
 	if mysqlDB != nil {
 		repo = repository.New(mysqlDB)
+	}
+	fixedBilling, err := buildBillingRuntime(context.Background(), repo, cfg, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to initialize fixed-SKU billing runtime")
 	}
 
 	// 7.1 Create storage provider.
@@ -786,6 +791,7 @@ func main() {
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		AgentHandler:             agentHandler,
 		CreditHandler:            creditHandler,
+		BillingHandler:           fixedBilling.Handler,
 		VideoHandler:             videoHandler,
 		TimelineHandler:          timelineHandler,
 		APIKeyHandler:            apiKeyHandler,
@@ -997,6 +1003,40 @@ func buildSeednoteAnalyticsHandler(repo repository.Repository, log *zerolog.Logg
 	}
 	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, log)
 	return handler.NewSeednoteAnalyticsHandler(trackingSvc, log)
+}
+
+type billingRuntimeServices struct {
+	Catalog   *service.BillingCatalogService
+	Wallet    *service.BillingWalletService
+	Referrals *service.BillingReferralService
+	Handler   *handler.BillingHandler
+}
+
+func buildBillingRuntime(ctx context.Context, repo repository.Repository, cfg *config.Config, log *zerolog.Logger) (*billingRuntimeServices, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("billing repository is required")
+	}
+	if cfg == nil || strings.TrimSpace(cfg.BillingRuntime.ConfigDir) == "" {
+		return nil, fmt.Errorf("billing_runtime.config_dir is required")
+	}
+	if strings.TrimSpace(cfg.BillingRuntime.AdminAPIKey) == "" {
+		return nil, fmt.Errorf("billing_runtime.admin_api_key is required")
+	}
+	bundle, err := serverbilling.LoadBundle(cfg.BillingRuntime.ConfigDir)
+	if err != nil {
+		return nil, fmt.Errorf("load billing bundle: %w", err)
+	}
+	catalog := service.NewBillingCatalogService(repo, bundle, service.BillingCatalogOptions{})
+	if _, err := catalog.Publish(ctx); err != nil {
+		return nil, fmt.Errorf("publish billing catalog: %w", err)
+	}
+	wallet := service.NewBillingWalletService(repo, bundle, service.BillingWalletOptions{})
+	referrals := service.NewBillingReferralService(repo, wallet, bundle, service.BillingReferralOptions{})
+	billingHandler := handler.NewBillingHandler(repo, catalog, referrals, bundle, handler.BillingHandlerOptions{
+		AdminAPIKey:   cfg.BillingRuntime.AdminAPIKey,
+		InviteBaseURL: "https://creator.anbanai.com/register?invite=",
+	}, log)
+	return &billingRuntimeServices{Catalog: catalog, Wallet: wallet, Referrals: referrals, Handler: billingHandler}, nil
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.

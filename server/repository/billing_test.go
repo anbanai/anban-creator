@@ -1115,9 +1115,13 @@ func TestBillingRepositoryRootMySQLClaimRequiresCallerTransaction(t *testing.T) 
 func TestBillingRepositoryReferralUniquenessAndLookup(t *testing.T) {
 	repo := New(setupTestDB(t)).Billing()
 	ctx := context.Background()
+	inviteeLotID, inviterLotID := "invitee-lot-1", "inviter-lot-1"
+	issuedAt := time.Now().UTC()
 	issue := &model.BillingReferralIssue{
 		ID: "referral-1", ProgramID: "program-v1", CatalogID: "promotion-v1",
-		InviteeUserID: "invitee-1", InviterUserID: "inviter-1", Status: "pending",
+		InviteeUserID: "invitee-1", InviterUserID: "inviter-1", QualifyingTopUpEntryID: "topup-entry-1",
+		RequestFingerprint: strings.Repeat("a", 64), InviteeLotID: &inviteeLotID, InviterLotID: &inviterLotID,
+		Status: model.BillingReferralStatusIssued, IssuedAt: &issuedAt,
 	}
 	if err := repo.CreateReferralIssue(ctx, issue); err != nil {
 		t.Fatalf("CreateReferralIssue: %v", err)
@@ -1132,9 +1136,6 @@ func TestBillingRepositoryReferralUniquenessAndLookup(t *testing.T) {
 	if err := repo.CreateReferralIssue(ctx, &duplicate); err == nil {
 		t.Fatal("duplicate invitee/program referral unexpectedly succeeded")
 	}
-	issuedAt := time.Now().UTC()
-	issue.Status = "issued"
-	issue.IssuedAt = &issuedAt
 	if err := repo.UpdateReferralIssue(ctx, issue); err != nil {
 		t.Fatalf("UpdateReferralIssue: %v", err)
 	}
