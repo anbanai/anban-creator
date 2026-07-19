@@ -1174,6 +1174,123 @@ func TestResultMessageOptionalFields(t *testing.T) {
 	}
 }
 
+func TestProcessLineResultMessageModelUsage(t *testing.T) {
+	parser := setupParserTest(t)
+	line := `{
+		"type":"result",
+		"subtype":"success",
+		"duration_ms":100,
+		"duration_api_ms":80,
+		"is_error":false,
+		"num_turns":2,
+		"session_id":"session-123",
+		"modelUsage":{
+			"claude-sonnet-4-5-20250929":{
+				"inputTokens":120,
+				"outputTokens":48,
+				"cacheReadInputTokens":900,
+				"cacheCreationInputTokens":75,
+				"costUSD":0.0125,
+				"contextWindow":200000
+			},
+			"claude-haiku-4-5-20251001":{
+				"inputTokens":30,
+				"outputTokens":12,
+				"cacheReadInputTokens":225,
+				"cacheCreationInputTokens":18,
+				"costUSD":0.00125,
+				"contextWindow":200000
+			}
+		}
+	}`
+
+	messages, err := parser.ProcessLine(line)
+	assertNoParseError(t, err)
+	assertMessageCount(t, messages, 1)
+
+	result := messages[0].(*shared.ResultMessage)
+	if len(result.ModelUsage) != 2 {
+		t.Fatalf("ModelUsage has %d models, want 2", len(result.ModelUsage))
+	}
+	sonnet := result.ModelUsage["claude-sonnet-4-5-20250929"]
+	if sonnet.InputTokens != 120 || sonnet.OutputTokens != 48 ||
+		sonnet.CacheReadInputTokens != 900 || sonnet.CacheCreationInputTokens != 75 {
+		t.Errorf("sonnet token usage = %#v", sonnet)
+	}
+	haiku := result.ModelUsage["claude-haiku-4-5-20251001"]
+	if haiku.InputTokens != 30 || haiku.OutputTokens != 12 ||
+		haiku.CacheReadInputTokens != 225 || haiku.CacheCreationInputTokens != 18 {
+		t.Errorf("haiku token usage = %#v", haiku)
+	}
+	if sonnet.CostUSD != 0.0125 || sonnet.ContextWindow != 200000 ||
+		haiku.CostUSD != 0.00125 || haiku.ContextWindow != 200000 {
+		t.Errorf("model metadata not preserved: sonnet=%#v haiku=%#v", sonnet, haiku)
+	}
+}
+
+func TestProcessLineResultMessageModelUsageOptional(t *testing.T) {
+	tests := []struct {
+		name       string
+		modelUsage string
+	}{
+		{name: "missing"},
+		{name: "null", modelUsage: `,"modelUsage":null`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parser := setupParserTest(t)
+			line := `{"type":"result","subtype":"success","duration_ms":1,"duration_api_ms":1,"is_error":false,"num_turns":1,"session_id":"session-123"` + test.modelUsage + `}`
+			messages, err := parser.ProcessLine(line)
+			assertNoParseError(t, err)
+			assertMessageCount(t, messages, 1)
+			result := messages[0].(*shared.ResultMessage)
+			if result.ModelUsage != nil {
+				t.Fatalf("ModelUsage = %#v, want nil", result.ModelUsage)
+			}
+		})
+	}
+}
+
+func TestProcessLineResultMessageModelUsageRejectsInvalidData(t *testing.T) {
+	tests := []struct {
+		name       string
+		modelUsage string
+	}{
+		{name: "non_object", modelUsage: `[]`},
+		{name: "invalid_token_type", modelUsage: `{"claude-sonnet":{"inputTokens":"many"}}`},
+		{name: "token_overflow", modelUsage: `{"claude-sonnet":{"inputTokens":9223372036854775808}}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parser := setupParserTest(t)
+			line := `{"type":"result","subtype":"success","duration_ms":1,"duration_api_ms":1,"is_error":false,"num_turns":1,"session_id":"session-123","modelUsage":` + test.modelUsage + `}`
+			messages, err := parser.ProcessLine(line)
+			if len(messages) != 0 {
+				t.Fatalf("messages = %#v, want none", messages)
+			}
+			assertParseError(t, err, "result message invalid modelUsage field")
+			if !shared.IsMessageParseError(err) {
+				t.Fatalf("error type = %T, want MessageParseError", err)
+			}
+		})
+	}
+}
+
+func TestProcessLineResultMessageModelUsageAllowsNegativeTokens(t *testing.T) {
+	parser := setupParserTest(t)
+	line := `{"type":"result","subtype":"success","duration_ms":1,"duration_api_ms":1,"is_error":false,"num_turns":1,"session_id":"session-123","modelUsage":{"claude-sonnet":{"inputTokens":-1,"outputTokens":-2,"cacheReadInputTokens":-3,"cacheCreationInputTokens":-4}}}`
+	messages, err := parser.ProcessLine(line)
+	assertNoParseError(t, err)
+	assertMessageCount(t, messages, 1)
+	usage := messages[0].(*shared.ResultMessage).ModelUsage["claude-sonnet"]
+	if usage.InputTokens != -1 || usage.OutputTokens != -2 ||
+		usage.CacheReadInputTokens != -3 || usage.CacheCreationInputTokens != -4 {
+		t.Fatalf("negative token usage = %#v", usage)
+	}
+}
+
 // TestContentBlockErrorConditions tests uncovered content block parsing paths
 func TestContentBlockErrorConditions(t *testing.T) {
 	parser := setupParserTest(t)

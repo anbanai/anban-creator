@@ -330,6 +330,24 @@ func (p *Parser) parseResultMessage(data map[string]any) (*shared.ResultMessage,
 		result.Usage = &usage
 	}
 
+	if modelUsageData, exists := data["modelUsage"]; exists && modelUsageData != nil {
+		encoded, err := json.Marshal(modelUsageData)
+		if err != nil {
+			return nil, shared.NewMessageParseError(
+				fmt.Sprintf("result message invalid modelUsage field: %v", err),
+				data,
+			)
+		}
+		var modelUsage map[string]shared.ModelUsage
+		if err := json.Unmarshal(encoded, &modelUsage); err != nil {
+			return nil, shared.NewMessageParseError(
+				fmt.Sprintf("result message invalid modelUsage field: %v", err),
+				data,
+			)
+		}
+		result.ModelUsage = modelUsage
+	}
+
 	if resultData, ok := data["result"]; ok {
 		if resultStr, ok := resultData.(string); ok {
 			result.Result = &resultStr
