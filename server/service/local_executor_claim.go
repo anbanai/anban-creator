@@ -190,18 +190,12 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 		return nil
 	}
 
-	// Persist the final result + token usage (same helper as the cloud path).
+	// Persist the final result and terminal provider-cost evidence.
 	if result != nil {
 		if err := s.UpdateExecutionResult(ctx, taskID, result); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: persist result")
 		}
 	}
-	if s.creditSvc != nil {
-		if err := s.creditSvc.SettleAgentRuntime(ctx, task, result); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: settle agent runtime billing")
-		}
-	}
-
 	// Failure → terminal-fail (no cloud retry). Local execution is an explicit
 	// user choice; silently re-running a failed local task on cloud would
 	// surprise the user and could double-bill. Mirrors the terminal branch of

@@ -17,6 +17,17 @@ type ProgressPayload struct {
 	Percent     int    `json:"percent,omitempty"`
 }
 
+// ModelTokenUsage is terminal per-model token evidence retained for provider
+// cost reconciliation. It never represents a user-wallet charge.
+type ModelTokenUsage struct {
+	Provider                 string `json:"provider"`
+	Model                    string `json:"model"`
+	InputTokens              int64  `json:"input_tokens"`
+	OutputTokens             int64  `json:"output_tokens"`
+	CacheReadInputTokens     int64  `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64  `json:"cache_creation_input_tokens"`
+}
+
 // EcommerceConfig carries the per-task inputs for an e-commerce image-generation
 // package (project platform = "ecommerce"): which deliverable modules the buyer
 // selected and in what quantity, the uploaded product photos, target platform,
@@ -130,6 +141,8 @@ type Task struct {
 	Progress                int                                   `gorm:"default:0" json:"progress,omitempty"`
 	LatestProgress          datatypes.JSONType[ProgressPayload]   `gorm:"type:json" json:"latest_progress"`
 	Result                  *string                               `gorm:"type:json" json:"result,omitempty"`
+	TerminalModelUsage      datatypes.JSONType[[]ModelTokenUsage] `gorm:"type:json" json:"terminal_model_usage"`
+	CostStatus              string                                `gorm:"type:varchar(20);default:'';index" json:"cost_status"`
 	InputTokens             *int64                                `json:"input_tokens,omitempty"`
 	OutputTokens            *int64                                `json:"output_tokens,omitempty"`
 	CacheReadTokens         *int64                                `json:"cache_read_tokens,omitempty"`

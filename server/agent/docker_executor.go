@@ -290,7 +290,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		}
 		if opts.LogWriter != nil {
 			opts.LogWriter.WriteError(result.Error)
-			opts.LogWriter.WriteResult(false, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
+			opts.LogWriter.WriteResult(false, result.DurationMs, result.NumTurns)
 		}
 		return result, nil
 	}
@@ -304,7 +304,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	result.Model = agentModel
 
 	if opts.LogWriter != nil {
-		opts.LogWriter.WriteResult(result.Success, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
+		opts.LogWriter.WriteResult(result.Success, result.DurationMs, result.NumTurns)
 	}
 
 	return result, nil

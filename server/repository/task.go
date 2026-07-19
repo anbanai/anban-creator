@@ -188,6 +188,16 @@ func (r *taskRepository) UpdateResult(ctx context.Context, id, result string) er
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("result", result).Error
 }
 
+// UpdateTerminalModelUsage persists provider-cost evidence without touching
+// the legacy aggregate token/cost columns or the user wallet.
+func (r *taskRepository) UpdateTerminalModelUsage(ctx context.Context, id string, usage []model.ModelTokenUsage, costStatus string) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).
+		Updates(map[string]any{
+			"terminal_model_usage": datatypes.NewJSONType(usage),
+			"cost_status":          costStatus,
+		}).Error
+}
+
 // Update saves the full task object.
 func (r *taskRepository) Update(ctx context.Context, task *model.Task) error {
 	return r.db.WithContext(ctx).Save(task).Error
@@ -581,18 +591,6 @@ func (r *taskRepository) UpdateWorkflowStatus(ctx context.Context, id string, wo
 
 func (r *taskRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Delete(&model.Task{}, "id = ?", id).Error
-}
-
-// UpdateTokenUsage writes denormalized token usage and cost columns for a task.
-func (r *taskRepository) UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"input_tokens":          inputTokens,
-			"output_tokens":         outputTokens,
-			"cache_read_tokens":     cacheReadTokens,
-			"cache_creation_tokens": cacheCreationTokens,
-			"total_cost_usd":        costUSD,
-		}).Error
 }
 
 func (r *taskRepository) UpdateBillingStatus(ctx context.Context, id, status string, shortfallCredits int) error {

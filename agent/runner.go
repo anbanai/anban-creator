@@ -41,8 +41,12 @@ func NewRunner(cfg *Config, reporter *Reporter, downloader *Downloader) *Runner 
 
 func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) {
 	result := &serveragent.ExecutionResult{
-		Success: false,
-		WorkDir: r.cfg.Workspace,
+		Success:    false,
+		WorkDir:    r.cfg.Workspace,
+		CostStatus: serveragent.CostStatusUnreconciled,
+		CostDiagnostics: []serveragent.CostDiagnostic{{
+			Code: serveragent.CostDiagnosticMissingTerminalModelUsage,
+		}},
 	}
 
 	sdkOpts, err := r.buildSDKOptions(ctx)
@@ -123,6 +127,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 					}
 				}
 			case *claudecode.ResultMessage:
+				serveragent.PopulateTerminalModelUsage(result, m, nil)
 				result.Success = !m.IsError
 				result.ResultSubtype = m.Subtype
 				result.LogText = resultText
@@ -136,13 +141,11 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				result.LastToolError = lastToolError
 				if m.IsError {
 					result.Error = serveragent.ResultMessageError(m, lastToolErrorTool, lastToolError)
-					serveragent.PopulateUsageFields(result, m)
 					return errors.New(result.Error)
 				}
 				if err := serveragent.ValidateManagedPluginResult(pluginInitValidated, m); err != nil {
 					return err
 				}
-				serveragent.PopulateUsageFields(result, m)
 				if toolUseCount == 0 {
 					result.AgentLikelyFailed = true
 				}

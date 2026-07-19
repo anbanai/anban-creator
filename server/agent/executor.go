@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -313,6 +314,7 @@ type LocalExecutor struct {
 	pluginDir         string
 	sandbox           bool
 	defaultModel      string // configured model; empty means use env vars
+	modelUsageAliases map[string]ModelUsageIdentity
 	keyProvider       UserKeyProvider
 	maxTurnsOverrides map[string]int
 	workspaceDir      string
@@ -333,6 +335,7 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 		pluginDir:         pluginDir,
 		sandbox:           sandbox,
 		defaultModel:      defaultModel,
+		modelUsageAliases: map[string]ModelUsageIdentity{},
 		keyProvider:       keyProvider,
 		maxTurnsOverrides: maxTurnsOverrides,
 		workspaceDir:      workspaceDir,
@@ -360,12 +363,31 @@ type ExecutionOptions struct {
 	MontagePipelineDefaults map[string]map[string]any
 }
 
-// TokenUsage captures LLM token consumption for a task execution.
-type TokenUsage struct {
-	InputTokens         int `json:"input_tokens,omitempty"`
-	OutputTokens        int `json:"output_tokens,omitempty"`
-	CacheReadTokens     int `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationTokens int `json:"cache_creation_input_tokens,omitempty"`
+const (
+	CostStatusReconciled   = "reconciled"
+	CostStatusUnreconciled = "unreconciled"
+
+	CostDiagnosticMissingTerminalModelUsage = "missing_terminal_model_usage"
+	CostDiagnosticUnmappedModelUsageAlias   = "unmapped_model_usage_alias"
+	CostDiagnosticInvalidModelUsageAlias    = "invalid_model_usage_alias"
+	CostDiagnosticInvalidModelUsageTokens   = "invalid_model_usage_tokens"
+	CostDiagnosticModelUsageTokenOverflow   = "model_usage_token_overflow"
+)
+
+// ModelUsageIdentity is an explicitly configured raw-to-canonical model mapping.
+// Unknown raw model names are never guessed.
+type ModelUsageIdentity struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+// ModelTokenUsage is authoritative terminal token evidence for one provider model.
+type ModelTokenUsage = model.ModelTokenUsage
+
+// CostDiagnostic records why terminal provider-cost evidence cannot reconcile.
+type CostDiagnostic struct {
+	Code     string `json:"code"`
+	RawModel string `json:"raw_model,omitempty"`
 }
 
 // ExecutionResult captures the outcome of an agent execution.
@@ -380,10 +402,10 @@ type ExecutionResult struct {
 	SessionID       string `json:"session_id,omitempty"`
 	DurationMs      int    `json:"duration_ms,omitempty"`
 
-	// LLM usage metrics (populated from SDK ResultMessage).
-	DurationAPIMs int         `json:"duration_api_ms,omitempty"`
-	TotalCostUSD  *float64    `json:"total_cost_usd,omitempty"`
-	TokenUsage    *TokenUsage `json:"token_usage,omitempty"`
+	DurationAPIMs   int               `json:"duration_api_ms,omitempty"`
+	ModelUsage      []ModelTokenUsage `json:"model_usage,omitempty"`
+	CostStatus      string            `json:"cost_status"`
+	CostDiagnostics []CostDiagnostic  `json:"cost_diagnostics,omitempty"`
 
 	// Post-execution diagnostics.
 	NoOutputFiles       bool           `json:"no_output_files,omitempty"`
@@ -873,32 +895,18 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 				if err := ValidateManagedPluginResult(pluginInitValidated, m); err != nil {
 					return err
 				}
-				// Log successful execution summary.
-				completeEvt := e.logger.Info().
+				// Log execution metadata only. Claude monetary and aggregate usage
+				// fields are non-authoritative and must not enter server logs.
+				e.logger.Info().
 					Str("task_id", opts.Task.ID).
 					Str("subtype", m.Subtype).
 					Int("duration_ms", m.DurationMs).
 					Int("num_turns", m.NumTurns).
 					Int("tool_use_count", toolUseCount).
-					Str("session_id", m.SessionID)
-				if m.TotalCostUSD != nil {
-					completeEvt = completeEvt.Float64("cost_usd", *m.TotalCostUSD)
-				}
-				if m.Usage != nil {
-					tu := ParseTokenUsage(*m.Usage)
-					if tu != nil {
-						completeEvt = completeEvt.
-							Int("input_tokens", tu.InputTokens).
-							Int("output_tokens", tu.OutputTokens)
-					}
-				}
-				completeEvt.Msg("agent execution completed")
+					Str("session_id", m.SessionID).
+					Msg("agent execution completed")
 				if opts.LogWriter != nil {
-					var tokenUsage *TokenUsage
-					if m.Usage != nil {
-						tokenUsage = ParseTokenUsage(*m.Usage)
-					}
-					opts.LogWriter.WriteResult(true, m.DurationMs, m.NumTurns, m.TotalCostUSD, tokenUsage)
+					opts.LogWriter.WriteResult(true, m.DurationMs, m.NumTurns)
 				}
 				// Warn if agent produced no tool calls - likely agent definition not loaded.
 				if toolUseCount == 0 {
@@ -918,31 +926,17 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		sdkOpts...,
 	)
 
-	if err != nil {
-		if opts.LogWriter != nil {
-			opts.LogWriter.WriteError(err.Error())
-			opts.LogWriter.WriteResult(false, 0, 0, nil, nil)
+	if err != nil || execErr != nil {
+		resultError := err
+		if execErr != nil {
+			resultError = execErr
 		}
-		return &ExecutionResult{
-			Success:           false,
-			Error:             err.Error(),
-			WorkDir:           workDir,
-			ToolUseCount:      toolUseCount,
-			ToolUseSummary:    toolUseSummary,
-			ToolErrorCount:    toolErrorCount,
-			LastToolErrorTool: lastToolErrorTool,
-			LastToolError:     lastToolError,
-			Model:             agentModel,
-		}, nil
-	}
-
-	if execErr != nil {
 		if opts.LogWriter != nil {
-			opts.LogWriter.WriteError(execErr.Error())
+			opts.LogWriter.WriteError(resultError.Error())
 		}
 		result := &ExecutionResult{
 			Success:           false,
-			Error:             execErr.Error(),
+			Error:             resultError.Error(),
 			WorkDir:           workDir,
 			LogText:           resultText,
 			ToolUseCount:      toolUseCount,
@@ -957,7 +951,10 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			result.NumTurns = resultMsg.NumTurns
 			result.SessionID = resultMsg.SessionID
 			result.DurationMs = resultMsg.DurationMs
-			populateUsageFields(result, resultMsg)
+		}
+		PopulateTerminalModelUsage(result, resultMsg, e.modelUsageAliases)
+		if opts.LogWriter != nil {
+			opts.LogWriter.WriteResult(false, result.DurationMs, result.NumTurns)
 		}
 		return result, nil
 	}
@@ -987,8 +984,8 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		result.NumTurns = resultMsg.NumTurns
 		result.SessionID = resultMsg.SessionID
 		result.DurationMs = resultMsg.DurationMs
-		populateUsageFields(result, resultMsg)
 	}
+	PopulateTerminalModelUsage(result, resultMsg, e.modelUsageAliases)
 	return result, nil
 }
 
@@ -1176,53 +1173,134 @@ func MarshalResultJSON(r *ExecutionResult) (string, error) {
 	return string(data), nil
 }
 
-// ParseTokenUsage extracts token counts from the SDK's raw usage map.
-// Returns nil if no meaningful data is found.
-func ParseTokenUsage(m map[string]any) *TokenUsage {
-	tu := &TokenUsage{
-		InputTokens:         jsonInt(m, "input_tokens"),
-		OutputTokens:        jsonInt(m, "output_tokens"),
-		CacheReadTokens:     jsonInt(m, "cache_read_input_tokens"),
-		CacheCreationTokens: jsonInt(m, "cache_creation_input_tokens"),
-	}
-	if tu.InputTokens == 0 && tu.OutputTokens == 0 {
-		return nil
-	}
-	return tu
-}
-
-// jsonInt safely extracts an int from a map[string]any,
-// handling both float64 (JSON numbers) and int types.
-func jsonInt(m map[string]any, key string) int {
-	v, ok := m[key]
-	if !ok {
-		return 0
-	}
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	}
-	return 0
-}
-
-// populateUsageFields fills the cost/token fields of an ExecutionResult
-// from a SDK ResultMessage.
-func populateUsageFields(result *ExecutionResult, resultMsg *claudecode.ResultMessage) {
-	if resultMsg == nil {
+// PopulateTerminalModelUsage updates cost evidence only for a terminal result
+// message. Assistant/system events and top-level aggregate usage are ignored.
+func PopulateTerminalModelUsage(result *ExecutionResult, message claudecode.Message, aliases map[string]ModelUsageIdentity) {
+	if result == nil {
 		return
 	}
-	result.DurationAPIMs = resultMsg.DurationAPIMs
-	result.TotalCostUSD = resultMsg.TotalCostUSD
-	if resultMsg.Usage != nil {
-		result.TokenUsage = ParseTokenUsage(*resultMsg.Usage)
+	if result.CostStatus == "" {
+		markMissingTerminalModelUsage(result)
+	}
+	resultMessage, ok := message.(*claudecode.ResultMessage)
+	if !ok {
+		return
+	}
+	result.DurationAPIMs = resultMessage.DurationAPIMs
+	if len(resultMessage.ModelUsage) == 0 {
+		markMissingTerminalModelUsage(result)
+		return
+	}
+
+	rawModels := make([]string, 0, len(resultMessage.ModelUsage))
+	for rawModel := range resultMessage.ModelUsage {
+		rawModels = append(rawModels, rawModel)
+	}
+	sort.Strings(rawModels)
+
+	merged := make(map[ModelUsageIdentity]ModelTokenUsage, len(rawModels))
+	invalidIdentities := make(map[ModelUsageIdentity]bool)
+	diagnostics := make([]CostDiagnostic, 0)
+	for _, rawModel := range rawModels {
+		usage := resultMessage.ModelUsage[rawModel]
+		if hasNegativeModelUsage(usage) {
+			diagnostics = append(diagnostics, CostDiagnostic{Code: CostDiagnosticInvalidModelUsageTokens, RawModel: rawModel})
+			continue
+		}
+
+		identity, mapped := aliases[rawModel]
+		if !mapped {
+			identity = ModelUsageIdentity{Model: rawModel}
+			diagnostics = append(diagnostics, CostDiagnostic{Code: CostDiagnosticUnmappedModelUsageAlias, RawModel: rawModel})
+		} else if strings.TrimSpace(identity.Provider) == "" || strings.TrimSpace(identity.Model) == "" {
+			identity = ModelUsageIdentity{Model: rawModel}
+			diagnostics = append(diagnostics, CostDiagnostic{Code: CostDiagnosticInvalidModelUsageAlias, RawModel: rawModel})
+		}
+		if invalidIdentities[identity] {
+			continue
+		}
+
+		candidate := ModelTokenUsage{
+			Provider:                 identity.Provider,
+			Model:                    identity.Model,
+			InputTokens:              usage.InputTokens,
+			OutputTokens:             usage.OutputTokens,
+			CacheReadInputTokens:     usage.CacheReadInputTokens,
+			CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		}
+		if existing, exists := merged[identity]; exists {
+			var overflow bool
+			candidate, overflow = checkedMergeModelUsage(existing, candidate)
+			if overflow {
+				delete(merged, identity)
+				invalidIdentities[identity] = true
+				diagnostics = append(diagnostics, CostDiagnostic{Code: CostDiagnosticModelUsageTokenOverflow, RawModel: rawModel})
+				continue
+			}
+		}
+		merged[identity] = candidate
+	}
+
+	modelUsage := make([]ModelTokenUsage, 0, len(merged))
+	for _, usage := range merged {
+		modelUsage = append(modelUsage, usage)
+	}
+	sort.Slice(modelUsage, func(i, j int) bool {
+		if modelUsage[i].Provider != modelUsage[j].Provider {
+			return modelUsage[i].Provider < modelUsage[j].Provider
+		}
+		return modelUsage[i].Model < modelUsage[j].Model
+	})
+	result.ModelUsage = modelUsage
+	result.CostDiagnostics = diagnostics
+	if len(diagnostics) == 0 {
+		result.CostStatus = CostStatusReconciled
+	} else {
+		result.CostStatus = CostStatusUnreconciled
 	}
 }
 
-// PopulateUsageFields fills the cost/token fields of an ExecutionResult from a SDK ResultMessage.
-func PopulateUsageFields(result *ExecutionResult, resultMsg *claudecode.ResultMessage) {
-	populateUsageFields(result, resultMsg)
+func markMissingTerminalModelUsage(result *ExecutionResult) {
+	result.ModelUsage = nil
+	result.CostStatus = CostStatusUnreconciled
+	result.CostDiagnostics = []CostDiagnostic{{Code: CostDiagnosticMissingTerminalModelUsage}}
+}
+
+func hasNegativeModelUsage(usage claudecode.ModelUsage) bool {
+	return usage.InputTokens < 0 || usage.OutputTokens < 0 ||
+		usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0
+}
+
+func checkedMergeModelUsage(a, b ModelTokenUsage) (ModelTokenUsage, bool) {
+	input, overflow := checkedAddInt64(a.InputTokens, b.InputTokens)
+	if overflow {
+		return ModelTokenUsage{}, true
+	}
+	output, overflow := checkedAddInt64(a.OutputTokens, b.OutputTokens)
+	if overflow {
+		return ModelTokenUsage{}, true
+	}
+	cacheRead, overflow := checkedAddInt64(a.CacheReadInputTokens, b.CacheReadInputTokens)
+	if overflow {
+		return ModelTokenUsage{}, true
+	}
+	cacheCreation, overflow := checkedAddInt64(a.CacheCreationInputTokens, b.CacheCreationInputTokens)
+	if overflow {
+		return ModelTokenUsage{}, true
+	}
+	return ModelTokenUsage{
+		Provider: a.Provider, Model: a.Model,
+		InputTokens: input, OutputTokens: output,
+		CacheReadInputTokens: cacheRead, CacheCreationInputTokens: cacheCreation,
+	}, false
+}
+
+func checkedAddInt64(a, b int64) (int64, bool) {
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if b > maxInt64-a {
+		return 0, true
+	}
+	return a + b, false
 }
 
 func fallbackAgentError(defaultMsg, toolName, toolError string) string {

@@ -233,7 +233,7 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 		}, nil
 	case model.TaskExecutionFinalizationTask:
 		return model.TaskExecutionFinalizationSettlement, func(ctx context.Context) error {
-			return s.settleCloudExecution(ctx, task, execution, result)
+			return s.settleCloudExecution(ctx, task, execution)
 		}, nil
 	case model.TaskExecutionFinalizationSettlement:
 		return model.TaskExecutionFinalizationSlot, func(ctx context.Context) error {
@@ -272,12 +272,9 @@ func (s *TaskService) syncCloudSlot(ctx context.Context, task *model.Task) error
 	return nil
 }
 
-func (s *TaskService) settleCloudExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
+func (s *TaskService) settleCloudExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) error {
 	if s.creditSvc == nil {
 		return nil
-	}
-	if err := s.creditSvc.SettleAgentRuntime(ctx, task, result); err != nil {
-		return fmt.Errorf("settle agent runtime: %w", err)
 	}
 	if execution.Status != model.TaskExecutionSucceeded && !task.GoalMode {
 		if err := s.creditSvc.RefundForTask(ctx, task.ID, execution.TerminalReason); err != nil {

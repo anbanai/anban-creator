@@ -165,31 +165,22 @@ func (s *TaskService) UpdateExecutionResult(ctx context.Context, taskID string, 
 	if result == nil {
 		return nil
 	}
+	if result.CostStatus == "" {
+		result.CostStatus = serveragent.CostStatusUnreconciled
+		result.CostDiagnostics = []serveragent.CostDiagnostic{{Code: serveragent.CostDiagnosticMissingTerminalModelUsage}}
+	}
 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("marshal execution result: %w", err)
 	}
-	if err := s.repo.Tasks().UpdateResult(ctx, taskID, string(resultJSON)); err != nil {
-		return fmt.Errorf("persist execution result: %w", err)
-	}
-
-	// Populate denormalized token/cost columns for efficient aggregation.
-	// Only write when we have usage data — skip to keep columns NULL for tasks without results.
-	if result.TokenUsage != nil {
-		var costUSD float64
-		if result.TotalCostUSD != nil {
-			costUSD = *result.TotalCostUSD
+	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		if err := txRepo.Tasks().UpdateResult(ctx, taskID, string(resultJSON)); err != nil {
+			return fmt.Errorf("persist execution result: %w", err)
 		}
-		if err := s.repo.Tasks().UpdateTokenUsage(ctx, taskID,
-			int64(result.TokenUsage.InputTokens),
-			int64(result.TokenUsage.OutputTokens),
-			int64(result.TokenUsage.CacheReadTokens),
-			int64(result.TokenUsage.CacheCreationTokens),
-			costUSD); err != nil {
-			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to update denormalized token usage columns")
+		if err := txRepo.Tasks().UpdateTerminalModelUsage(ctx, taskID, result.ModelUsage, result.CostStatus); err != nil {
+			return fmt.Errorf("persist terminal model usage: %w", err)
 		}
-	}
-
-	return nil
+		return nil
+	})
 }

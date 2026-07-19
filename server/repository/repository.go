@@ -101,6 +101,7 @@ type TaskRepository interface {
 	// including the longtext progress_log — would be wasteful.
 	GetTypeAndProgress(ctx context.Context, id string) (taskType string, progress int, err error)
 	UpdateResult(ctx context.Context, id, result string) error
+	UpdateTerminalModelUsage(ctx context.Context, id string, usage []model.ModelTokenUsage, costStatus string) error
 	Update(ctx context.Context, task *model.Task) error
 	UpdateInputAttachments(ctx context.Context, id string, attachments []model.EntryAttachment) error
 	UpdateTitle(ctx context.Context, id string, title string) error
@@ -159,7 +160,6 @@ type TaskRepository interface {
 	CompareAndSwapPublishApproval(ctx context.Context, id, expected, newState string, clearArticles bool) (bool, error)
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	Delete(ctx context.Context, id string) error
-	UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error
 	UpdateBillingStatus(ctx context.Context, id, status string, shortfallCredits int) error
 	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error)
 	AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error)
