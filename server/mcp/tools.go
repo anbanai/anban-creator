@@ -17,6 +17,8 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
+const referenceImageRuntimePath = ".anban-creator/reference.png"
+
 // ImageModelResolver selects one immutable provider/model descriptor before an
 // image request reaches billing or generation.
 type ImageModelResolver interface {
@@ -439,7 +441,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		"author_source":       r.AuthorSource,
 		"theme_source":        r.ThemeSource,
 	}
-	info["resolved_profile"] = map[string]any{
+	resolvedProfile := map[string]any{
 		"id":                    ch.ID,
 		"name":                  ch.Name,
 		"platform":              ch.Platform,
@@ -451,7 +453,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		"visual_style":          r.VisualStyle,
 		"creative_constraints":  creativeConstraintsForProfile(ch.Platform, r.VisualStyle),
 		"visual_style_label":    "图片视觉",
-		"reference_image_url":   ch.ReferenceImageURL,
 		"image_ratio":           ch.ImageRatio,
 		"uses_project_snapshot": usesProjectSnapshot,
 		"sources": map[string]any{
@@ -460,13 +461,20 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			"keywords":     profileSource(usesProjectSnapshot),
 		},
 	}
+	hasReference := service.EffectiveReferenceAssetID(task) != ""
+	if hasReference {
+		resolvedProfile["reference_image_path"] = referenceImageRuntimePath
+	}
+	info["resolved_profile"] = resolvedProfile
 
 	switch ch.Platform {
 	case "seednote":
 		// For seednote, style is a visual/image style description used for image prompt generation.
-		info["image_config"] = map[string]any{
-			"reference_image_url": ch.ReferenceImageURL,
+		imageConfig := map[string]any{}
+		if hasReference {
+			imageConfig["reference_image_path"] = referenceImageRuntimePath
 		}
+		info["image_config"] = imageConfig
 		if svcs.ImageModelResolver != nil {
 			imageModelKey := ""
 			if task != nil {
@@ -488,10 +496,11 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			}
 		}
 	case "moments":
-		info["image_config"] = map[string]any{
-			"reference_image_url": ch.ReferenceImageURL,
-			"default_ratio":       firstNonEmpty(ch.ImageRatio, "3:4"),
+		imageConfig := map[string]any{"default_ratio": firstNonEmpty(ch.ImageRatio, "3:4")}
+		if hasReference {
+			imageConfig["reference_image_path"] = referenceImageRuntimePath
 		}
+		info["image_config"] = imageConfig
 		info["moments"] = map[string]any{
 			"required_artifacts": []string{
 				"material-analysis.md",

@@ -478,6 +478,82 @@ func referenceAssetFixture(id, userID, purpose string) *model.Asset {
 	}
 }
 
+func TestEffectiveReferenceAssetID(t *testing.T) {
+	task := &model.Task{ReferenceImageAssetID: "task-asset", SkipReferenceImage: true}
+	task.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: "project-asset"})
+
+	if got := EffectiveReferenceAssetID(task); got != "task-asset" {
+		t.Fatalf("direct reference with skip = %q, want task-asset", got)
+	}
+	task.ReferenceImageAssetID = ""
+	if got := EffectiveReferenceAssetID(task); got != "" {
+		t.Fatalf("inherited reference with skip = %q, want empty", got)
+	}
+	task.SkipReferenceImage = false
+	if got := EffectiveReferenceAssetID(task); got != "project-asset" {
+		t.Fatalf("inherited reference = %q, want project-asset", got)
+	}
+	if got := EffectiveReferenceAssetID(nil); got != "" {
+		t.Fatalf("nil task reference = %q, want empty", got)
+	}
+}
+
+func TestResolveEffectiveReferenceAssetValidatesPurposeBySource(t *testing.T) {
+	tests := []struct {
+		name       string
+		direct     bool
+		purpose    string
+		wantErr    error
+		foreign    bool
+		missing    bool
+		badContent bool
+	}{
+		{name: "direct task reference", direct: true, purpose: DirectUploadPurposeTaskReference},
+		{name: "direct AI entry attachment", direct: true, purpose: DirectUploadPurposeAIEntryAttachment},
+		{name: "direct rejects project purpose", direct: true, purpose: DirectUploadPurposeProjectReference, wantErr: ErrReferenceAssetPurposeMismatch},
+		{name: "snapshot project reference", purpose: DirectUploadPurposeProjectReference},
+		{name: "snapshot rejects task purpose", purpose: DirectUploadPurposeTaskReference, wantErr: ErrReferenceAssetPurposeMismatch},
+		{name: "foreign is opaque", direct: true, purpose: DirectUploadPurposeTaskReference, foreign: true, wantErr: ErrReferenceAssetForbidden},
+		{name: "missing is opaque", direct: true, missing: true, wantErr: ErrReferenceAssetForbidden},
+		{name: "invalid metadata fails closed", direct: true, purpose: DirectUploadPurposeTaskReference, badContent: true, wantErr: ErrReferenceAssetInvalidMetadata},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newDirectUploadTestRepository(t)
+			owner := "user-1"
+			assetID := "asset-1"
+			if !tt.missing {
+				assetOwner := owner
+				if tt.foreign {
+					assetOwner = "user-2"
+				}
+				asset := referenceAssetFixture(assetID, assetOwner, tt.purpose)
+				if tt.badContent {
+					asset.FileName, asset.ContentType = "reference.txt", "text/plain"
+				}
+				seedReferenceAsset(t, repo, asset)
+			}
+			task := &model.Task{UserID: owner}
+			if tt.direct {
+				task.ReferenceImageAssetID = assetID
+			} else {
+				task.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: assetID})
+			}
+
+			asset, err := resolveEffectiveReferenceAsset(t.Context(), repo, task)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) || asset != nil {
+					t.Fatalf("resolve asset=%#v err=%v, want %v", asset, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || asset == nil || asset.ID != assetID {
+				t.Fatalf("resolve asset=%#v err=%v, want %s", asset, err, assetID)
+			}
+		})
+	}
+}
+
 func seedReferenceAsset(t *testing.T, repo repository.Repository, asset *model.Asset) {
 	t.Helper()
 	if err := repo.Assets().Create(t.Context(), asset); err != nil {

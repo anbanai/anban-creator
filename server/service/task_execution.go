@@ -109,12 +109,17 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		}
 		project = ch
 	}
+	referenceAsset, err := resolveEffectiveReferenceAsset(execCtx, s.repo, task)
+	if err != nil {
+		return err
+	}
 
 	// Execute via agent.
 	opts := &agent.ExecutionOptions{
-		Task:      task,
-		Project:   project,
-		LogWriter: taskLogWriter,
+		Task:           task,
+		Project:        project,
+		ReferenceAsset: referenceAsset,
+		LogWriter:      taskLogWriter,
 		OnProgress: func(id string, message string) {
 			if err := s.AppendProgressLog(ctx, id, message); err != nil {
 				s.logger.Error().Err(err).Str("task_id", id).Msg("failed to update progress log")

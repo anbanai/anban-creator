@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,7 +20,7 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-// fakeStore is a minimal storage.Provider for DownloadReferenceImage tests.
+// fakeStore is a minimal storage.Provider for runtime materialization tests.
 // It records the keys it was asked to Read and can be configured to return
 // a specific byte slice, error, or ownedURL predicate.
 type fakeStore struct {
@@ -114,73 +113,154 @@ func serveBytes(t *testing.T, status int, body []byte) string {
 	return srv.URL
 }
 
-func TestDownloadReferenceImage_NilStoreExternalURL(t *testing.T) {
-	body := []byte("external-image-bytes")
-	url := serveBytes(t, http.StatusOK, body)
-
+func TestMaterializeReferenceAssetUsesBoundedRepositoryKeyRead(t *testing.T) {
+	key := "assets/users/user-1/asset-1/ref.png"
+	store := &fakeStore{readData: map[string][]byte{key: []byte("image")}}
 	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), nil, nil, workDir, "user-1", url); err != nil {
-		t.Fatalf("DownloadReferenceImage: %v", err)
+	asset := &model.Asset{StorageKey: key, Size: 5}
+	dir := filepath.Join(workDir, appconfig.ConfigDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "reference.png"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
-	if err != nil {
-		t.Fatalf("read dest: %v", err)
+	if err := MaterializeReferenceAsset(context.Background(), store, workDir, asset); err != nil {
+		t.Fatalf("MaterializeReferenceAsset: %v", err)
 	}
-	if !bytes.Equal(got, body) {
-		t.Fatalf("dest = %q, want %q", got, body)
+	if len(store.readKeys) != 1 || store.readKeys[0] != key {
+		t.Fatalf("read keys = %#v, want [%s]", store.readKeys, key)
+	}
+	got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
+	if err != nil || string(got) != "image" {
+		t.Fatalf("materialized bytes = %q, err=%v", got, err)
+	}
+	info, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("reference mode = %v, want 0600", info.Mode().Perm())
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("reference directory mode = %v, want 0700", dirInfo.Mode().Perm())
 	}
 }
 
-func TestDownloadReferenceImage_OwnedStoreReadHitsDisk(t *testing.T) {
-	// HTTP server that must NEVER be hit when store.Read succeeds.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatalf("HTTP fallback should not be reached when store.Read succeeds")
-	}))
-	t.Cleanup(srv.Close)
-
-	body := []byte("oss-stored-image")
-	store := &fakeStore{
-		readData:  map[string][]byte{"uploads/references/u/pic.jpg": body},
-		ownedPred: func(u string) bool { return strings.HasPrefix(u, "https://oss.example.com/") },
+func TestMaterializeReferenceAssetFailsClosed(t *testing.T) {
+	asset := &model.Asset{StorageKey: "assets/users/user-1/asset-1/ref.png", Size: 5}
+	for _, tc := range []struct {
+		name  string
+		ctx   context.Context
+		store storage.Provider
+	}{
+		{name: "nil store", ctx: context.Background()},
+		{name: "missing", ctx: context.Background(), store: &fakeStore{readData: map[string][]byte{}}},
+		{name: "oversize", ctx: context.Background(), store: &boundedOnlyStore{fakeStore: &fakeStore{}, actualSize: maxReferenceImageBytes + 1}},
+		{name: "cancelled", ctx: cancelledContext(), store: &fakeStore{readData: map[string][]byte{asset.StorageKey: []byte("image")}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := MaterializeReferenceAsset(tc.ctx, tc.store, t.TempDir(), asset); err == nil {
+				t.Fatal("expected materialization error")
+			}
+		})
 	}
-	imageURL := "https://oss.example.com/uploads/references/u/pic.jpg"
+}
 
+func TestMaterializeReferenceAssetReplacesSymlinkWithoutWritingTarget(t *testing.T) {
+	key := "assets/users/user-1/asset-1/ref.png"
+	store := &fakeStore{readData: map[string][]byte{key: []byte("image")}}
 	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", imageURL); err != nil {
-		t.Fatalf("DownloadReferenceImage: %v", err)
+	dir := filepath.Join(workDir, appconfig.ConfigDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(target, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "reference.png")
+	if err := os.Symlink(target, dest); err != nil {
+		t.Fatal(err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
+	if err := MaterializeReferenceAsset(t.Context(), store, workDir, &model.Asset{StorageKey: key, Size: 5}); err != nil {
+		t.Fatal(err)
+	}
+	outside, err := os.ReadFile(target)
+	if err != nil || string(outside) != "outside" {
+		t.Fatalf("symlink target = %q, err=%v, want unchanged", outside, err)
+	}
+	info, err := os.Lstat(dest)
 	if err != nil {
-		t.Fatalf("read dest: %v", err)
+		t.Fatal(err)
 	}
-	if !bytes.Equal(got, body) {
-		t.Fatalf("dest = %q, want %q", got, body)
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("destination remains a symlink: mode=%v", info.Mode())
 	}
-	if len(store.readKeys) != 1 || store.readKeys[0] != "uploads/references/u/pic.jpg" {
-		t.Fatalf("readKeys = %#v, want [uploads/references/u/pic.jpg]", store.readKeys)
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "image" {
+		t.Fatalf("destination = %q, err=%v", got, err)
 	}
+}
+
+func TestMaterializeReferenceAssetRenameFailureCleansTempAndPreservesDestination(t *testing.T) {
+	key := "assets/users/user-1/asset-1/ref.png"
+	store := &fakeStore{readData: map[string][]byte{key: []byte("image")}}
+	workDir := t.TempDir()
+	dir := filepath.Join(workDir, appconfig.ConfigDir)
+	dest := filepath.Join(dir, "reference.png")
+	if err := os.MkdirAll(filepath.Join(dest, "marker"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	err := MaterializeReferenceAsset(t.Context(), store, workDir, &model.Asset{StorageKey: key, Size: 5})
+	if err == nil {
+		t.Fatal("expected rename failure for directory destination")
+	}
+	if _, statErr := os.Stat(filepath.Join(dest, "marker")); statErr != nil {
+		t.Fatalf("existing destination changed: %v", statErr)
+	}
+	temps, globErr := filepath.Glob(filepath.Join(dir, ".reference-*.tmp"))
+	if globErr != nil || len(temps) != 0 {
+		t.Fatalf("temporary files after failure = %#v, err=%v", temps, globErr)
+	}
+}
+
+func TestMaterializeReferenceAssetReadFailurePreservesExistingDestination(t *testing.T) {
+	key := "assets/users/user-1/asset-1/ref.png"
+	store := &fakeStore{readErr: errors.New("storage unavailable")}
+	workDir := t.TempDir()
+	dir := filepath.Join(workDir, appconfig.ConfigDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "reference.png")
+	if err := os.WriteFile(dest, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MaterializeReferenceAsset(t.Context(), store, workDir, &model.Asset{StorageKey: key, Size: 5}); err == nil {
+		t.Fatal("expected storage read failure")
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "old" {
+		t.Fatalf("destination = %q, err=%v, want old", got, err)
+	}
+}
+
+func cancelledContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
 }
 
 func TestDownloadKeyFirstSourcesReadStorageForSharedExecutors(t *testing.T) {
-	t.Run("reference image", func(t *testing.T) {
-		workDir := t.TempDir()
-		key := "uploads/finalized/user-1/reference/reference.png"
-		store := &fakeStore{readData: map[string][]byte{key: []byte("reference-bytes")}}
-
-		if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", key); err != nil {
-			t.Fatalf("DownloadReferenceImage: %v", err)
-		}
-		got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
-		if err != nil || string(got) != "reference-bytes" {
-			t.Fatalf("reference = %q, %v", got, err)
-		}
-		if len(store.readKeys) != 1 || store.readKeys[0] != key {
-			t.Fatalf("read keys = %#v", store.readKeys)
-		}
-	})
-
 	t.Run("product image", func(t *testing.T) {
 		workDir := t.TempDir()
 		key := "uploads/finalized/user-1/product/product.webp"
@@ -215,17 +295,6 @@ func TestDownloadKeyFirstSourcesReadStorageForSharedExecutors(t *testing.T) {
 }
 
 func TestRuntimeMaterializersRejectPendingDirectUploadKeys(t *testing.T) {
-	t.Run("reference image", func(t *testing.T) {
-		key := "uploads/pending/user-1/reference/reference.png"
-		store := &fakeStore{readData: map[string][]byte{key: []byte("mutable")}}
-		if err := DownloadReferenceImage(context.Background(), store, noopLogger(), t.TempDir(), "user-1", key); err == nil {
-			t.Fatal("pending reference image was materialized")
-		}
-		if len(store.readKeys) != 0 {
-			t.Fatalf("pending reference reached storage read: %#v", store.readKeys)
-		}
-	})
-
 	t.Run("product image", func(t *testing.T) {
 		key := "uploads/pending/user-1/product/product.webp"
 		store := &fakeStore{readData: map[string][]byte{key: []byte("mutable")}}
@@ -266,17 +335,6 @@ func TestRuntimeMaterializersRejectPendingDirectUploadKeys(t *testing.T) {
 }
 
 func TestRuntimeMaterializersRejectMismatchedFinalizedIdentity(t *testing.T) {
-	t.Run("reference user", func(t *testing.T) {
-		key := "uploads/finalized/user-2/reference/reference.png"
-		store := &fakeStore{readData: map[string][]byte{key: []byte("other-user")}}
-		if err := DownloadReferenceImage(context.Background(), store, noopLogger(), t.TempDir(), "user-1", key); err == nil {
-			t.Fatal("other user's finalized reference was materialized")
-		}
-		if len(store.readKeys) != 0 {
-			t.Fatalf("mismatched reference reached storage read: %#v", store.readKeys)
-		}
-	})
-
 	t.Run("product user", func(t *testing.T) {
 		key := "uploads/finalized/user-2/product/product.webp"
 		store := &fakeStore{readData: map[string][]byte{key: []byte("other-user")}}
@@ -301,23 +359,6 @@ func TestRuntimeMaterializersRejectMismatchedFinalizedIdentity(t *testing.T) {
 	})
 }
 
-func TestRuntimeMaterializerDoesNotFallbackPendingOwnedURLToHTTP(t *testing.T) {
-	hitHTTP := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hitHTTP = true
-		_, _ = w.Write([]byte("mutable"))
-	}))
-	t.Cleanup(srv.Close)
-	url := srv.URL + "/uploads/pending/user-1/reference/reference.png"
-	store := &fakeStore{ownedPred: func(raw string) bool { return raw == url }}
-	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), t.TempDir(), "user-1", url); err == nil {
-		t.Fatal("owned pending URL was accepted")
-	}
-	if hitHTTP {
-		t.Fatal("owned pending URL reached HTTP fallback")
-	}
-}
-
 func TestKeyFirstMaterializationUsesBoundedStorageReads(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -328,7 +369,7 @@ func TestKeyFirstMaterializationUsesBoundedStorageReads(t *testing.T) {
 		{
 			name: "reference image", maxBytes: maxReferenceImageBytes, wantErr: true,
 			run: func(ctx context.Context, store storage.Provider, workDir string) error {
-				return DownloadReferenceImage(ctx, store, noopLogger(), workDir, "user-1", "uploads/finalized/user-1/reference/image.png")
+				return MaterializeReferenceAsset(ctx, store, workDir, &model.Asset{StorageKey: "assets/users/user-1/reference/image.png", Size: maxReferenceImageBytes})
 			},
 		},
 		{
@@ -367,111 +408,6 @@ func TestKeyFirstMaterializationUsesBoundedStorageReads(t *testing.T) {
 				t.Fatalf("read boundary: unbounded=%v bounded=%#v, want only max=%d", store.unbounded, store.boundedCalls, tt.maxBytes)
 			}
 		})
-	}
-}
-
-func TestDownloadReferenceImage_LocalRelativePathReadsStore(t *testing.T) {
-	// Regression test for C1: local storage returns relative URLs like
-	// /api/v1/files/<key>. The HTTP path cannot fetch those (unsupported
-	// protocol scheme ""); store.Read must be used instead.
-	body := []byte("local-stored-image")
-	store := &fakeStore{
-		readData:  map[string][]byte{"uploads/references/u/pic.jpg": body},
-		ownedPred: func(u string) bool { return strings.HasPrefix(u, "/api/v1/files/") },
-	}
-	imageURL := "/api/v1/files/uploads/references/u/pic.jpg"
-
-	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", imageURL); err != nil {
-		t.Fatalf("DownloadReferenceImage: %v", err)
-	}
-
-	got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
-	if err != nil {
-		t.Fatalf("read dest: %v", err)
-	}
-	if !bytes.Equal(got, body) {
-		t.Fatalf("dest = %q, want %q", got, body)
-	}
-	if len(store.readKeys) != 1 || store.readKeys[0] != "uploads/references/u/pic.jpg" {
-		t.Fatalf("readKeys = %#v, want [uploads/references/u/pic.jpg]", store.readKeys)
-	}
-}
-
-func TestDownloadReferenceImage_OwnedStoreReadFailsFallsBackToHTTP(t *testing.T) {
-	body := []byte("fallback-via-http")
-	url := serveBytes(t, http.StatusOK, body)
-
-	store := &fakeStore{
-		readErr:   errors.New("oss internal error"),
-		ownedPred: func(u string) bool { return strings.HasPrefix(u, url) },
-	}
-	imageURL := url + "/uploads/references/u/pic.jpg"
-
-	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", imageURL); err != nil {
-		t.Fatalf("DownloadReferenceImage: %v", err)
-	}
-
-	got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
-	if err != nil {
-		t.Fatalf("read dest: %v", err)
-	}
-	if !bytes.Equal(got, body) {
-		t.Fatalf("dest = %q, want %q", got, body)
-	}
-	if len(store.readKeys) != 1 || store.readKeys[0] != "uploads/references/u/pic.jpg" {
-		t.Fatalf("expected 1 read attempt for the key, got %#v", store.readKeys)
-	}
-}
-
-func TestDownloadReferenceImage_NotOwnedTakesDirectHTTP(t *testing.T) {
-	body := []byte("external-link")
-	url := serveBytes(t, http.StatusOK, body)
-
-	store := &fakeStore{ownedPred: func(string) bool { return false }}
-
-	workDir := t.TempDir()
-	if err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", url); err != nil {
-		t.Fatalf("DownloadReferenceImage: %v", err)
-	}
-
-	if len(store.readKeys) != 0 {
-		t.Fatalf("store.Read should not be called for external URLs, got %#v", store.readKeys)
-	}
-	got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
-	if err != nil {
-		t.Fatalf("read dest: %v", err)
-	}
-	if !bytes.Equal(got, body) {
-		t.Fatalf("dest = %q, want %q", got, body)
-	}
-}
-
-func TestDownloadReferenceImage_HTTPNonOKReturnsError(t *testing.T) {
-	url := serveBytes(t, http.StatusForbidden, []byte("forbidden"))
-
-	workDir := t.TempDir()
-	err := DownloadReferenceImage(context.Background(), nil, nil, workDir, "user-1", url)
-	if err == nil || !strings.Contains(err.Error(), "HTTP 403") {
-		t.Fatalf("err = %v, want HTTP 403", err)
-	}
-	if _, statErr := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "reference.png")); !os.IsNotExist(statErr) {
-		t.Fatalf("expected no dest file on failure, statErr=%v", statErr)
-	}
-}
-
-func TestDownloadReferenceImage_OversizedStoreReadReturnsError(t *testing.T) {
-	oversized := bytes.Repeat([]byte("a"), int(maxReferenceImageBytes)+1)
-	store := &fakeStore{
-		readData:  map[string][]byte{"big": oversized},
-		ownedPred: func(string) bool { return true },
-	}
-
-	workDir := t.TempDir()
-	err := DownloadReferenceImage(context.Background(), store, noopLogger(), workDir, "user-1", "https://oss.example.com/big")
-	if err == nil || !strings.Contains(err.Error(), "too large") {
-		t.Fatalf("err = %v, want 'too large'", err)
 	}
 }
 

@@ -26,6 +26,8 @@ import (
 // unbounded memory/disk usage. Mirrors the upload limit in handler/file.go.
 const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 
+const ReferenceImagePath = ".anban-creator/reference.png"
+
 const maxInputAttachmentBytes int64 = 50 << 20 // 50 MB
 
 var unsafeAttachmentFilenameRunes = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -75,7 +77,7 @@ func EffectiveProject(ch *model.Project, task *model.Task) *model.Project {
 // the dimensions each platform's settings.json slot consumes are read here:
 // Article.Writer / Article.Author / Article.Theme and Seednote.VisualStyle,
 // each driven by the resolved value (not the raw project column).
-func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, skipRefImage bool, taskReferenceImageURL string) (*appconfig.Config, error) {
+func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, hasReference bool) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
 		Name:        ch.Name,
 		Positioning: ch.Instructions,
@@ -152,21 +154,15 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 		}
 	}
 
-	// Set reference image path for image generation (downloaded by executor).
-	// Task-level reference image takes priority over project brand image.
-	effectiveReferURL := taskReferenceImageURL
-	if effectiveReferURL == "" && !skipRefImage {
-		effectiveReferURL = ch.ReferenceImageURL
-	}
-	if effectiveReferURL != "" {
-		referPath := filepath.Join(appconfig.ConfigDir, "reference.png")
+	// Runtime reference assets always materialize at this fixed private path.
+	if hasReference {
 		switch ch.Platform {
 		case model.ScopeArticle:
-			cfg.Wechat.Article.Cover.Image.Refer = referPath
-			cfg.Wechat.Article.Content.Image.Refer = referPath
+			cfg.Wechat.Article.Cover.Image.Refer = ReferenceImagePath
+			cfg.Wechat.Article.Content.Image.Refer = ReferenceImagePath
 		case model.ScopeSeednote:
-			cfg.Seednote.Cover.Image.Refer = referPath
-			cfg.Seednote.Content.Image.Refer = referPath
+			cfg.Seednote.Cover.Image.Refer = ReferenceImagePath
+			cfg.Seednote.Content.Image.Refer = ReferenceImagePath
 		}
 	}
 
@@ -259,98 +255,73 @@ func TaskToAgent(task *model.Task) string {
 	return TaskTypeToAgent(task.Type)
 }
 
-// DownloadReferenceImage downloads a project's brand reference image to the
-// workspace's .anban-creator directory. The image is saved as reference.png for
-// use by both Claude Code visual context and image generation reference inputs.
-//
-// Resolution order:
-//  1. If store is non-nil and imageURL is server-owned (OSS or local storage),
-//     read bytes via store.Read. This works for both private OSS buckets
-//     (OSSProvider.Read signs the URL internally) and local files
-//     (LocalProvider.Read reads from disk), avoiding the 403 that the raw
-//     public URL stored in the database would hit on a private bucket.
-//  2. Otherwise (external URL, or store.Read failed), fall back to direct
-//     HTTP GET. imageURL must be an absolute http(s) URL in this path.
-//
-// logger may be nil; when non-nil, fallbacks from path (1) are logged at warn.
-func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID, imageURL string) error {
-	destDir := filepath.Join(workDir, appconfig.ConfigDir)
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-	destPath := filepath.Join(destDir, "reference.png")
-	if key, ok := explicitStorageObjectKey(imageURL); ok {
-		key, err := runtimeStorageObjectKey(key, userID, "", false)
-		if err != nil {
-			return err
-		}
-		if store == nil {
-			return fmt.Errorf("storage provider is required for object key %q", key)
-		}
-		data, err := readStorageObject(ctx, store, key, maxReferenceImageBytes)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(destPath, data, 0o644); err != nil {
-			return fmt.Errorf("write file: %w", err)
-		}
+// MaterializeReferenceAsset reads only the repository-owned storage key. It
+// deliberately has no URL or HTTP fallback.
+func MaterializeReferenceAsset(ctx context.Context, store storage.Provider, workDir string, asset *model.Asset) error {
+	if asset == nil {
 		return nil
 	}
-
-	if store != nil && store.IsOwnedURL(imageURL) {
-		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
-			key, err := runtimeStorageObjectKey(key, userID, "", false)
-			if err != nil {
-				return err
-			}
-			data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes)
-			if err == nil {
-				if err := os.WriteFile(destPath, data, 0o644); err != nil {
-					return fmt.Errorf("write file: %w", err)
-				}
-				return nil
-			}
-			if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
-				return fmt.Errorf("download: %w", err)
-			}
-			if logger != nil {
-				logger.Warn().Err(err).
-					Str("url", imageURL).
-					Str("key", key).
-					Msg("storage.Read failed for reference image, falling back to direct HTTP")
-			}
-		} else if logger != nil {
-			logger.Warn().
-				Str("url", imageURL).
-				Msg("could not extract storage key from owned URL, falling back to direct HTTP")
-		}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if store == nil {
+		return errors.New("storage provider is unavailable")
+	}
+	key := strings.TrimSpace(asset.StorageKey)
+	if key == "" {
+		return errors.New("reference asset storage key is empty")
+	}
+	if asset.Size > maxReferenceImageBytes {
+		return fmt.Errorf("reference asset: %w", storage.ErrObjectExceedsMaxSize)
+	}
+	data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("read reference asset: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	destDir := filepath.Join(workDir, appconfig.ConfigDir)
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
+		return fmt.Errorf("create reference directory: %w", err)
+	}
+	if err := os.Chmod(destDir, 0o700); err != nil {
+		return fmt.Errorf("secure reference directory: %w", err)
+	}
+	destPath := filepath.Join(destDir, "reference.png")
+	return writeReferenceAssetAtomically(ctx, destDir, destPath, data)
+}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+func writeReferenceAssetAtomically(ctx context.Context, destDir, destPath string, data []byte) error {
+	tmp, err := os.CreateTemp(destDir, ".reference-*.tmp")
 	if err != nil {
-		return fmt.Errorf("download: %w", err)
+		return fmt.Errorf("create reference temp file: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download: HTTP %d", resp.StatusCode)
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("secure reference temp file: %w", err)
 	}
-
-	f, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("create file: %w", err)
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write reference temp file: %w", err)
 	}
-	defer f.Close()
-
-	if _, err := io.Copy(f, io.LimitReader(resp.Body, maxReferenceImageBytes)); err != nil {
-		os.Remove(destPath)
-		return fmt.Errorf("write file: %w", err)
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync reference temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close reference temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("secure closed reference temp file: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return fmt.Errorf("replace reference asset: %w", err)
 	}
 	return nil
 }
@@ -360,12 +331,9 @@ func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger 
 // order with 1-indexed names (product_01.<ext>, product_02.<ext>, ...). It also
 // writes index.json listing the exact filenames so the agent can reference them
 // deterministically (extensions vary by upload). Returns the count successfully
-// materialized; per-image failures are logged and skipped (best-effort), matching
-// DownloadReferenceImage's non-fatal posture.
+// materialized; per-image failures are logged and skipped (best-effort).
 //
-// The resolution path mirrors DownloadReferenceImage (store.Read for URLs owned
-// by this backend — works on private OSS buckets; direct HTTP otherwise) so it
-// behaves identically under the local and docker executors.
+// Product-photo resolution retains its independent attachment URL contract.
 func DownloadProductImages(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID string, urls []string) int {
 	if len(urls) == 0 {
 		return 0
@@ -778,9 +746,8 @@ func inputAttachmentExt(contentType, rawURL string) string {
 
 // fetchImageBytes resolves an image URL to its bytes. For URLs owned by this
 // backend (OSS / local storage) it reads via the storage provider (works on
-// private buckets); otherwise it downloads via HTTP. Mirrors the resolution logic
-// inside DownloadReferenceImage, extracted here so the multi-file product-photo
-// flow can reuse it without touching the well-tested reference-image path.
+// private buckets); otherwise it downloads via HTTP. This remains isolated to
+// the product-photo URL contract.
 func fetchImageBytes(ctx context.Context, store storage.Provider, userID, imageURL string) ([]byte, error) {
 	if key, ok := explicitStorageObjectKey(imageURL); ok {
 		key, err := runtimeStorageObjectKey(key, userID, "", false)

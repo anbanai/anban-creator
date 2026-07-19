@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -75,6 +76,115 @@ func TestBootstrapSignedDownloadDoesNotCrossAbsoluteDeadlineAtSignerBoundary(t *
 	}
 }
 
+func TestBootstrapSignsOwnedReferenceAsset(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset := referenceAssetFixture("asset-bootstrap", "user-1", DirectUploadPurposeTaskReference)
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformSeednote, ReferenceImageAssetID: asset.ID}
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+
+	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("buildResponse: %v", err)
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
+		t.Fatalf("signed keys = %#v, want [%s]", store.signedKeys, asset.StorageKey)
+	}
+	found := false
+	for _, file := range response.Files {
+		if file.Path == ".anban-creator/reference.png" && file.DownloadURL != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("bootstrap files = %#v, want materialized reference", response.Files)
+	}
+}
+
+func TestBootstrapRejectsReferenceAssetOwnershipAndPurpose(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		owner   string
+		purpose string
+	}{
+		{name: "foreign", owner: "user-2", purpose: DirectUploadPurposeTaskReference},
+		{name: "wrong purpose", owner: "user-1", purpose: DirectUploadPurposeProjectReference},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := openBootstrapTestRepository(t)
+			store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+			tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+			asset := referenceAssetFixture("asset-bootstrap", tc.owner, tc.purpose)
+			if err := repo.Assets().Create(t.Context(), asset); err != nil {
+				t.Fatal(err)
+			}
+			task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformSeednote, ReferenceImageAssetID: asset.ID}
+			svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+			if _, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour)); err == nil {
+				t.Fatal("invalid reference asset was accepted")
+			}
+			if len(store.signedKeys) != 0 {
+				t.Fatalf("invalid reference reached signer: %#v", store.signedKeys)
+			}
+		})
+	}
+}
+
+func TestBootstrapSignsInheritedProjectReferenceAsset(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	asset := referenceAssetFixture("asset-project", "user-1", DirectUploadPurposeProjectReference)
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: "task-1", UserID: asset.UserID, ProjectID: "project-1", Type: model.PlatformSeednote}
+	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: task.Type, ReferenceImageAssetID: asset.ID})
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+
+	response, err := svc.buildResponse(t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
+		t.Fatalf("signed keys = %#v, want [%s]", store.signedKeys, asset.StorageKey)
+	}
+	for _, file := range response.Files {
+		if file.Path == ".anban-creator/reference.png" {
+			return
+		}
+	}
+	t.Fatalf("reference file missing from %#v", response.Files)
+}
+
+func TestBootstrapPreservesReferenceRepositoryFailureBeforeSigning(t *testing.T) {
+	baseRepo := openBootstrapTestRepository(t)
+	rootCause := errors.New("asset database unavailable")
+	repo := &referenceAssetRepositoryOverride{
+		Repository: baseRepo,
+		assets:     &failingReferenceAssetRepository{AssetRepository: baseRepo.Assets(), err: rootCause},
+	}
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformSeednote, ReferenceImageAssetID: "asset-1"}
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+
+	_, err := svc.buildResponse(t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	if !errors.Is(err, ErrReferenceAssetUnavailable) || !errors.Is(err, rootCause) {
+		t.Fatalf("buildResponse error = %v, want unavailable and root cause", err)
+	}
+	if len(store.signedKeys) != 0 {
+		t.Fatalf("repository failure reached signer: %#v", store.signedKeys)
+	}
+}
+
 func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second).Add(200 * time.Millisecond)
 	jobDeadline := now.Add(3700 * time.Millisecond)
@@ -82,11 +192,13 @@ func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
-	svc := NewAgentBootstrapService(nil, tokens, AgentBootstrapConfig{TokenTTL: 10 * time.Minute, SignedURLTTL: 600, Store: store}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: 10 * time.Minute, SignedURLTTL: 600, Store: store}, zerolog.Nop())
 	svc.now = func() time.Time { return now }
 	prefix := "uploads/users/user-1/projects/project-1/tasks/task-1"
-	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformEcommerce, Prompt: "topic", ReferenceImageURL: "https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/inputs/reference.png"}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformEcommerce, Prompt: "topic", ReferenceImageAssetID: "asset-bootstrap"}
+	createBootstrapAsset(t, repo, task.ReferenceImageAssetID, task.UserID, DirectUploadPurposeTaskReference, "reference.png", 10)
 	task.SetInputAttachments([]model.EntryAttachment{
 		{Type: "image", URL: "https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/inputs/attachment.png", FileName: "attachment.png"},
 		{Role: model.EntryAttachmentRoleResumeLatest, Text: "read attachments/resume.pdf"},
@@ -348,7 +460,7 @@ func TestBuildEcommerceProductBootstrapFilesFromKeyFirstAttachment(t *testing.T)
 	attachment := model.EntryAttachment{Type: "image", UploadID: "product-upload", Key: key, FileName: "product.png", ContentType: "image/png"}
 	task.SetInputAttachments([]model.EntryAttachment{attachment})
 	task.SetEcommerce(model.EcommerceConfig{ProductPhotos: []string{key}})
-	createBootstrapAsset(t, repo, attachment.UploadID, task.UserID, DirectUploadPurposeAIEntryAttachment, attachment.FileName, 0)
+	createBootstrapAsset(t, repo, attachment.UploadID, task.UserID, DirectUploadPurposeAIEntryAttachment, attachment.FileName, 1)
 
 	files, err := svc.buildProductFiles(context.Background(), task, time.Now().Add(time.Hour))
 	if err != nil {
@@ -372,9 +484,9 @@ func TestBuildResponseSignsKeyFirstReferenceImage(t *testing.T) {
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "write", Status: model.TaskStatusRunning}
 	key := "assets/users/user-1/reference-upload/reference.png"
 	attachment := model.EntryAttachment{Type: "image", UploadID: "reference-upload", Key: key, FileName: "reference.png", ContentType: "image/png"}
-	task.ReferenceImageURL = key
+	task.ReferenceImageAssetID = attachment.UploadID
 	task.SetInputAttachments([]model.EntryAttachment{attachment})
-	createBootstrapAsset(t, repo, attachment.UploadID, task.UserID, DirectUploadPurposeAIEntryAttachment, attachment.FileName, 0)
+	createBootstrapAsset(t, repo, attachment.UploadID, task.UserID, DirectUploadPurposeAIEntryAttachment, attachment.FileName, 1)
 
 	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, now.Add(time.Hour))
 	if err != nil {

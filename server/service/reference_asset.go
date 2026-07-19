@@ -64,6 +64,45 @@ func NewReferenceAssetService(repo repository.Repository, store storage.Provider
 	return &ReferenceAssetService{repo: repo, store: store, now: now}
 }
 
+// EffectiveReferenceAssetID applies the immutable runtime precedence. A direct
+// task asset always wins, including when inherited references are skipped.
+func EffectiveReferenceAssetID(task *model.Task) string {
+	id, _ := effectiveReferenceAssetSelection(task)
+	return id
+}
+
+func effectiveReferenceAssetSelection(task *model.Task) (string, []string) {
+	if task == nil {
+		return "", nil
+	}
+	if id := strings.TrimSpace(task.ReferenceImageAssetID); id != "" {
+		return id, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
+	}
+	if task.SkipReferenceImage {
+		return "", nil
+	}
+	id := strings.TrimSpace(task.ProjectSnapshot.Data().ReferenceImageAssetID)
+	if id == "" {
+		return "", nil
+	}
+	return id, []string{DirectUploadPurposeProjectReference}
+}
+
+func resolveEffectiveReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, error) {
+	id, allowed := effectiveReferenceAssetSelection(task)
+	if id == "" {
+		return nil, nil
+	}
+	if repo == nil || task == nil {
+		return nil, ErrReferenceAssetUnavailable
+	}
+	asset, err := NewReferenceAssetService(repo, nil, nil).RequireOwned(ctx, task.UserID, id, allowed)
+	if err != nil {
+		return nil, fmt.Errorf("resolve effective reference asset: %w", err)
+	}
+	return asset, nil
+}
+
 func (s *ReferenceAssetService) ResolveSelection(ctx context.Context, userID string, in ReferenceImageSelection, allowed []string) (string, error) {
 	if err := in.Validate(); err != nil {
 		return "", err

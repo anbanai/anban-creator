@@ -344,12 +344,13 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 
 // ExecutionOptions configures a single agent execution.
 type ExecutionOptions struct {
-	Task          *model.Task
-	Project       *model.Project
-	MaxTurns      int
-	OnProgress    func(taskID string, message string) // callback for SSE
-	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
-	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
+	Task           *model.Task
+	Project        *model.Project
+	ReferenceAsset *model.Asset
+	MaxTurns       int
+	OnProgress     func(taskID string, message string) // callback for SSE
+	HeartbeatFunc  func(taskID string)                 // periodic heartbeat for stuck-task detection
+	LogWriter      *TaskLogWriter                      // optional per-task log file writer; nil = no log file
 	// AutoMemoryDirectory is the Claude Code-visible memory directory for this task.
 	AutoMemoryDirectory string
 	// Montage runtime configuration is only used for montage tasks. Env
@@ -468,7 +469,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	if opts.Project != nil {
 		effectiveProject := EffectiveProject(opts.Project, opts.Task)
 		resolved = resolver.ResolveStyle(effectiveProject, opts.Task)
-		cfg, err := BuildAppConfig(effectiveProject, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
+		cfg, err := BuildAppConfig(effectiveProject, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.ReferenceAsset != nil)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -489,24 +490,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			opts.AutoMemoryDirectory = runtimeDir
 		}
 
-		// Download effective reference image.
-		// Task-level image takes priority over project brand image.
-		// SkipReferenceImage only controls the project brand image, not task-level.
-		if opts.Task.ReferenceImageURL != "" {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.UserID, opts.Task.ReferenceImageURL); err != nil {
-				e.logger.Warn().Err(err).
-					Str("task_id", opts.Task.ID).
-					Str("url", opts.Task.ReferenceImageURL).
-					Msg("failed to download task reference image, continuing without it")
-			}
-		} else if opts.Project.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.UserID, opts.Project.ReferenceImageURL); err != nil {
-				e.logger.Warn().Err(err).
-					Str("task_id", opts.Task.ID).
-					Str("url", opts.Project.ReferenceImageURL).
-					Msg("failed to download reference image, continuing without it")
-			}
-		}
+	}
+	if err := MaterializeReferenceAsset(ctx, e.store, workDir, opts.ReferenceAsset); err != nil {
+		return nil, fmt.Errorf("materialize reference asset: %w", err)
 	}
 
 	// E-commerce: materialize the task's product photos into the workspace so the

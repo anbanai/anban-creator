@@ -1710,6 +1710,83 @@ type fakeTaskExecutor struct {
 	opts   *agent.ExecutionOptions
 }
 
+func TestTaskServiceHandleExecutionResolvesReferenceAssetBeforeExecutor(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	asset := referenceAssetFixture("asset-runtime", userID, DirectUploadPurposeTaskReference)
+	if err := repo.Assets().Create(ctx, asset); err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning, ReferenceImageAssetID: asset.ID}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	exec := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: false, Error: "stop after options"}}
+	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	if exec.opts == nil || exec.opts.ReferenceAsset == nil || exec.opts.ReferenceAsset.ID != asset.ID {
+		t.Fatalf("executor reference asset = %#v, want %s", exec.opts, asset.ID)
+	}
+}
+
+func TestTaskServiceHandleExecutionRejectsInvalidReferenceBeforeExecutor(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning, ReferenceImageAssetID: "missing"}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	exec := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
+	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	err := svc.HandleExecution(ctx, task, nil)
+	if !errors.Is(err, ErrReferenceAssetForbidden) {
+		t.Fatalf("HandleExecution error = %v, want ErrReferenceAssetForbidden", err)
+	}
+	if exec.opts != nil {
+		t.Fatalf("executor started with invalid reference: %#v", exec.opts)
+	}
+}
+
+func TestTaskServiceHandleExecutionPreservesReferenceRepositoryFailureBeforeExecutor(t *testing.T) {
+	db := setupTaskTestDB(t)
+	baseRepo := repository.New(db)
+	rootCause := errors.New("asset database unavailable")
+	repo := &referenceAssetRepositoryOverride{
+		Repository: baseRepo,
+		assets:     &failingReferenceAssetRepository{AssetRepository: baseRepo.Assets(), err: rootCause},
+	}
+	logger := zerolog.New(io.Discard)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformSeednote)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning, ReferenceImageAssetID: "asset-1"}
+	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	exec := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
+	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	err := svc.HandleExecution(ctx, task, nil)
+	if !errors.Is(err, ErrReferenceAssetUnavailable) || !errors.Is(err, rootCause) {
+		t.Fatalf("HandleExecution error = %v, want unavailable and root cause", err)
+	}
+	if exec.opts != nil {
+		t.Fatalf("executor started after repository failure: %#v", exec.opts)
+	}
+}
+
 func (f *fakeTaskExecutor) Execute(ctx context.Context, opts *agent.ExecutionOptions) (*agent.ExecutionResult, error) {
 	f.opts = opts
 	return f.result, f.err

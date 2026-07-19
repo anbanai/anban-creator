@@ -187,8 +187,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("%w: Kubernetes Job has no positive bootstrap credential lifetime", ErrAgentBootstrapConflict)
 	}
 	effective := serveragent.EffectiveProject(project, task)
+	referenceAsset, err := resolveEffectiveReferenceAsset(ctx, s.repo, task)
+	if err != nil {
+		return nil, fmt.Errorf("resolve reference asset: %w", err)
+	}
 	files := []BootstrapFile{{Path: ".task-context", Text: "TASK_ID=" + task.ID + "\n", Mode: 0644}}
-	appCfg, err := serveragent.BuildAppConfig(effective, resolver.ResolveStyle(effective, task), s.cfg.ImageAPIConfig, task.ImageRatio, task.SkipReferenceImage, task.ReferenceImageURL)
+	appCfg, err := serveragent.BuildAppConfig(effective, resolver.ResolveStyle(effective, task), s.cfg.ImageAPIConfig, task.ImageRatio, referenceAsset != nil)
 	if err != nil {
 		return nil, fmt.Errorf("build runtime settings: %w", err)
 	}
@@ -210,19 +214,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		files = append(files, BootstrapFile{Path: "CLAUDE.md", Text: "# CLAUDE.md\n\n## 项目定位\n\n" + instructions, Mode: 0644})
 	}
 	attachments := task.InputAttachments.Data()
-	reference := strings.TrimSpace(task.ReferenceImageURL)
-	referencePurposes := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
-	if reference == "" && !task.SkipReferenceImage {
-		reference = strings.TrimSpace(effective.ReferenceImageURL)
-		referencePurposes = []string{DirectUploadPurposeProjectReference}
-	}
-	if reference != "" {
-		source := bootstrapSourceForStoredValue(reference, attachments, referencePurposes)
-		signed, err := s.signedDownloadURL(ctx, task, source, credentialDeadline)
+	if referenceAsset != nil {
+		signed, err := s.signedReferenceAssetURL(ctx, referenceAsset, credentialDeadline)
 		if err != nil {
 			return nil, fmt.Errorf("sign reference image: %w", err)
 		}
-		files = append(files, BootstrapFile{Path: ".anban-creator/reference.png", DownloadURL: signed, Mode: 0644})
+		files = append(files, BootstrapFile{Path: serveragent.ReferenceImagePath, DownloadURL: signed, Mode: 0644})
 	}
 	attachmentFiles, err := s.buildAttachmentFiles(ctx, execution.ID, task, attachments, credentialDeadline)
 	if err != nil {
@@ -266,6 +263,34 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("build Claude runtime environment: %w", err)
 	}
 	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, Env: s.montageEnv(task), Files: files}, nil
+}
+
+func (s *AgentBootstrapService) signedReferenceAssetURL(ctx context.Context, asset *model.Asset, credentialDeadline time.Time) (string, error) {
+	if s.cfg.Store == nil {
+		return "", fmt.Errorf("%w: storage provider is required for bootstrap downloads", ErrAgentBootstrapUnavailable)
+	}
+	if asset == nil || strings.TrimSpace(asset.StorageKey) == "" {
+		return "", fmt.Errorf("%w: reference asset storage key is unavailable", ErrAgentBootstrapConflict)
+	}
+	signingNow := s.currentTime()
+	ttl := int(credentialDeadline.Unix()-signingNow.Unix()) - 1
+	if s.cfg.SignedURLTTL > 0 && ttl > s.cfg.SignedURLTTL {
+		ttl = s.cfg.SignedURLTTL
+	}
+	if ttl <= 0 {
+		return "", fmt.Errorf("%w: no positive signed download lifetime remains", ErrAgentBootstrapConflict)
+	}
+	signed, err := s.cfg.Store.DownloadURL(ctx, asset.StorageKey, ttl)
+	if err != nil {
+		return "", fmt.Errorf("%w: sign reference asset: %w", ErrAgentBootstrapUnavailable, err)
+	}
+	if strings.TrimSpace(signed) == "" {
+		return "", fmt.Errorf("%w: storage returned an empty signed download URL", ErrAgentBootstrapUnavailable)
+	}
+	if s.currentTime().Unix()+int64(ttl) > credentialDeadline.Unix() {
+		return "", fmt.Errorf("%w: signed download crossed the credential deadline", ErrAgentBootstrapConflict)
+	}
+	return signed, nil
 }
 
 func (s *AgentBootstrapService) montageEnv(task *model.Task) map[string]string {

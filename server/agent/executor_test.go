@@ -76,7 +76,7 @@ func TestBuildAppConfig(t *testing.T) {
 		name         string
 		ch           *model.Project
 		wantErr      bool
-		skipRefImage bool
+		hasReference bool
 		check        func(t *testing.T, cfg map[string]any)
 	}{
 		{
@@ -120,38 +120,36 @@ func TestBuildAppConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "skip_reference_image omits refer path",
+			name: "no resolved reference omits refer path",
 			ch: &model.Project{
-				Platform:          model.ScopeSeednote,
-				Name:              "SkipRef Account",
-				ReferenceImageURL: "http://example.com/ref.png",
+				Platform: model.ScopeSeednote,
+				Name:     "SkipRef Account",
 			},
 			wantErr:      false,
-			skipRefImage: true,
+			hasReference: false,
 			check: func(t *testing.T, cfg map[string]any) {
 				sn := cfg["seednote"].(map[string]any)
 				cover := sn["cover"].(map[string]any)
 				img := cover["image"].(map[string]any)
 				if img["refer"] != nil {
-					t.Errorf("refer should be nil when skipRefImage=true, got %v", img["refer"])
+					t.Errorf("refer should be nil without an effective asset, got %v", img["refer"])
 				}
 			},
 		},
 		{
-			name: "reference_image sets refer path when not skipped",
+			name: "resolved reference sets fixed refer path",
 			ch: &model.Project{
-				Platform:          model.ScopeSeednote,
-				Name:              "WithRef Account",
-				ReferenceImageURL: "http://example.com/ref.png",
+				Platform: model.ScopeSeednote,
+				Name:     "WithRef Account",
 			},
 			wantErr:      false,
-			skipRefImage: false,
+			hasReference: true,
 			check: func(t *testing.T, cfg map[string]any) {
 				sn := cfg["seednote"].(map[string]any)
 				cover := sn["cover"].(map[string]any)
 				img := cover["image"].(map[string]any)
 				if img["refer"] == nil || img["refer"] == "" {
-					t.Errorf("refer should be set when skipRefImage=false and ReferenceImageURL is set")
+					t.Errorf("refer should be set when an effective asset is resolved")
 				}
 			},
 		},
@@ -159,7 +157,7 @@ func TestBuildAppConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.ch, resolver.ResolveStyle(tt.ch, nil), nil, "", tt.skipRefImage, "")
+			cfg, err := BuildAppConfig(tt.ch, resolver.ResolveStyle(tt.ch, nil), nil, "", tt.hasReference)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -246,7 +244,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 				Platform: tt.platform,
 				Name:     "Test",
 			}
-			cfg, err := BuildAppConfig(ch, resolver.ResolveStyle(ch, nil), tt.imageAPICfg, "", false, "")
+			cfg, err := BuildAppConfig(ch, resolver.ResolveStyle(ch, nil), tt.imageAPICfg, "", false)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -338,7 +336,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.project, resolver.ResolveStyle(tt.project, nil), tt.imageAPICfg, tt.taskImageRatio, false, "")
+			cfg, err := BuildAppConfig(tt.project, resolver.ResolveStyle(tt.project, nil), tt.imageAPICfg, tt.taskImageRatio, false)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
