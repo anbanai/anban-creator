@@ -44,6 +44,7 @@ type executionPreparationRepository struct {
 	repository.Repository
 	tasks  repository.TaskRepository
 	assets repository.AssetRepository
+	wrapTx func(repository.Repository) repository.Repository
 }
 
 func (r *executionPreparationRepository) Tasks() repository.TaskRepository {
@@ -54,12 +55,25 @@ func (r *executionPreparationRepository) Assets() repository.AssetRepository {
 	return r.assets
 }
 
-type failPendingOnceTaskRepository struct {
-	repository.TaskRepository
+func (r *executionPreparationRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(txRepo repository.Repository) error {
+		if r.wrapTx != nil {
+			txRepo = r.wrapTx(txRepo)
+		}
+		return fn(txRepo)
+	})
+}
+
+type failPendingOnceState struct {
 	err          error
 	mu           sync.Mutex
 	calls        int
 	firstFailure chan struct{}
+}
+
+type failPendingOnceTaskRepository struct {
+	repository.TaskRepository
+	state *failPendingOnceState
 }
 
 type failRunningTaskRepository struct {
@@ -75,28 +89,63 @@ func (r *losingFailPendingTaskRepository) FailPendingTask(context.Context, strin
 	return false, nil
 }
 
+type blockingRunningClaimTaskRepository struct {
+	repository.TaskRepository
+	entered chan context.Context
+	release <-chan struct{}
+}
+
+func (r *blockingRunningClaimTaskRepository) CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error) {
+	r.entered <- ctx
+	<-r.release
+	return r.TaskRepository.CompareAndSwapStatusAndStartedAt(ctx, taskID, expected, newStatus)
+}
+
 func (r *failRunningTaskRepository) FailRunningTask(context.Context, string, string) (bool, error) {
 	return false, r.err
 }
 
 func (r *failPendingOnceTaskRepository) FailPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error) {
-	r.mu.Lock()
-	r.calls++
-	call := r.calls
-	if call == 1 && r.firstFailure != nil {
-		close(r.firstFailure)
+	r.state.mu.Lock()
+	r.state.calls++
+	call := r.state.calls
+	if call == 1 && r.state.firstFailure != nil {
+		close(r.state.firstFailure)
 	}
-	r.mu.Unlock()
+	r.state.mu.Unlock()
 	if call == 1 {
-		return false, r.err
+		return false, r.state.err
 	}
 	return r.TaskRepository.FailPendingTask(ctx, taskID, errorMsg)
 }
 
 func (r *failPendingOnceTaskRepository) callCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.calls
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	return r.state.calls
+}
+
+func newFailPendingOnceRepository(base repository.Repository, state *failPendingOnceState, assets repository.AssetRepository) (*executionPreparationRepository, *failPendingOnceTaskRepository) {
+	tasks := &failPendingOnceTaskRepository{TaskRepository: base.Tasks(), state: state}
+	repo := &executionPreparationRepository{Repository: base, tasks: tasks, assets: assets}
+	repo.wrapTx = func(txRepo repository.Repository) repository.Repository {
+		return &executionPreparationRepository{
+			Repository: txRepo,
+			tasks:      &failPendingOnceTaskRepository{TaskRepository: txRepo.Tasks(), state: state},
+			assets:     txRepo.Assets(),
+		}
+	}
+	return repo, tasks
+}
+
+type contextCapturingAssetRepository struct {
+	repository.AssetRepository
+	contexts chan context.Context
+}
+
+func (r *contextCapturingAssetRepository) FindOwnedByID(ctx context.Context, id, userID string) (*model.Asset, error) {
+	r.contexts <- ctx
+	return r.AssetRepository.FindOwnedByID(ctx, id, userID)
 }
 
 func (r *cancelingReferenceAssetRepository) FindOwnedByID(context.Context, string, string) (*model.Asset, error) {
@@ -678,8 +727,8 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 		t.Fatal(err)
 	}
 	dbErr := errors.New("fail pending unavailable")
-	tasks := &failPendingOnceTaskRepository{TaskRepository: baseRepo.Tasks(), err: dbErr}
-	repo := &executionPreparationRepository{Repository: baseRepo, tasks: tasks, assets: baseRepo.Assets()}
+	state := &failPendingOnceState{err: dbErr}
+	repo, tasks := newFailPendingOnceRepository(baseRepo, state, baseRepo.Assets())
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
 	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
@@ -710,6 +759,82 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 	}
 	if executor.opts != nil || tasks.callCount() != 2 {
 		t.Fatalf("executor=%#v fail pending calls=%d", executor.opts, tasks.callCount())
+	}
+}
+
+func TestHandleExecutionFromPayloadPendingReferenceFailureAtomicallyRetriesRefund(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID, CreditsBalance: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "missing"}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	creditSvc := NewCreditService(repo, &serverconfig.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 100}}, &logger)
+	if _, err := creditSvc.DeductForTaskCreation(ctx, userID, task.Type, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	if err := rdb.Set(ctx, projectRunningCountPrefix+projectID, 1, time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_task_refund BEFORE INSERT ON credit_transactions
+		WHEN NEW.type = 'task_refund' BEGIN SELECT RAISE(ABORT, 'refund insert unavailable'); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+
+	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err == nil || !strings.Contains(err.Error(), "refund insert unavailable") {
+		t.Fatalf("first HandleExecutionFromPayload error = %v, want refund persistence failure", err)
+	}
+	assertPendingReferenceRefundState(t, db, repo, rdb, task, userID, 900, 0, 1)
+	if err := db.Exec("DROP TRIGGER fail_task_refund").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
+		t.Fatalf("retry HandleExecutionFromPayload: %v", err)
+	}
+	assertPendingReferenceRefundState(t, db, repo, rdb, task, userID, 1000, 1, 0)
+	if executor.opts != nil {
+		t.Fatalf("executor called after reference failure: %#v", executor.opts)
+	}
+}
+
+func assertPendingReferenceRefundState(t *testing.T, db *gorm.DB, repo repository.Repository, rdb *redis.Client, task *model.Task, userID string, wantBalance int, wantRefunds int64, wantSlots int) {
+	t.Helper()
+	ctx := t.Context()
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantStatus := model.TaskStatusPending
+	if wantRefunds > 0 {
+		wantStatus = model.TaskStatusFailed
+	}
+	if found.Status != wantStatus || (wantStatus == model.TaskStatusPending && found.CompletedAt != nil) || (wantStatus == model.TaskStatusFailed && found.CompletedAt == nil) {
+		t.Fatalf("task state = %#v, want status %s", found, wantStatus)
+	}
+	user, err := repo.Users().FindByID(ctx, userID)
+	if err != nil || user.CreditsBalance != wantBalance {
+		t.Fatalf("user = %#v, err=%v, want balance %d", user, err, wantBalance)
+	}
+	var refunds int64
+	if err := db.Model(&model.CreditTransaction{}).Where("task_id = ? AND type = ?", task.ID, model.CreditTypeTaskRefund).Count(&refunds).Error; err != nil || refunds != wantRefunds {
+		t.Fatalf("refund count = %d, err=%v, want %d", refunds, err, wantRefunds)
+	}
+	slots, err := rdb.Get(ctx, projectRunningCountPrefix+task.ProjectID).Int()
+	if err != nil || slots != wantSlots {
+		t.Fatalf("slot count = %d, err=%v, want %d", slots, err, wantSlots)
 	}
 }
 
@@ -956,8 +1081,10 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	tasks := &failPendingOnceTaskRepository{TaskRepository: baseRepo.Tasks(), err: errors.New("fail pending unavailable"), firstFailure: make(chan struct{})}
-	repo := &executionPreparationRepository{Repository: baseRepo, tasks: tasks, assets: baseRepo.Assets()}
+	assetContexts := make(chan context.Context, 2)
+	assets := &contextCapturingAssetRepository{AssetRepository: baseRepo.Assets(), contexts: assetContexts}
+	state := &failPendingOnceState{err: errors.New("database table is locked"), firstFailure: make(chan struct{})}
+	repo, tasks := newFailPendingOnceRepository(baseRepo, state, assets)
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
 	svc := NewTaskService(repo, executor, nil, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
@@ -965,38 +1092,55 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 		t.Fatalf("first EnqueueExecution: %v", err)
 	}
 	select {
-	case <-tasks.firstFailure:
+	case <-state.firstFailure:
 	case <-time.After(2 * time.Second):
 		t.Fatal("fallback did not attempt pending failure persistence")
 	}
-	waitForFallbackSlotCount(t, rdb, projectID, 0)
+	firstFallbackCtx := waitCapturedContext(t, assetContexts, "first fallback")
+	waitForContextDone(t, firstFallbackCtx, "first fallback")
 	found, err := baseRepo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	user, userErr := baseRepo.Users().FindByID(ctx, userID)
-	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || userErr != nil || user.CreditsBalance != 900 || executor.opts != nil {
-		t.Fatalf("state after preparation persistence error: task=%#v user=%#v userErr=%v executor=%#v", found, user, userErr, executor.opts)
+	slots, slotErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
+	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || userErr != nil || user.CreditsBalance != 900 || slotErr != nil || slots != 0 || executor.opts != nil {
+		t.Fatalf("state after preparation persistence error: task=%#v user=%#v userErr=%v slots=%d slotErr=%v executor=%#v", found, user, userErr, slots, slotErr, executor.opts)
 	}
 
 	if err := svc.DispatchPendingTasks(ctx, projectID); err != nil {
 		t.Fatalf("periodic DispatchPendingTasks: %v", err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		found, err = baseRepo.Tasks().FindByID(ctx, task.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if found.Status == model.TaskStatusFailed {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	secondFallbackCtx := waitCapturedContext(t, assetContexts, "second fallback")
+	waitForContextDone(t, secondFallbackCtx, "second fallback")
+	found, err = baseRepo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	waitForFallbackSlotCount(t, rdb, projectID, 0)
 	user, userErr = baseRepo.Users().FindByID(ctx, userID)
-	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || user.CreditsBalance != 1000 || executor.opts != nil || tasks.callCount() != 2 {
-		t.Fatalf("state after periodic retry: task=%#v user=%#v userErr=%v executor=%#v calls=%d", found, user, userErr, executor.opts, tasks.callCount())
+	slots, slotErr = rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
+	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || user.CreditsBalance != 1000 || slotErr != nil || slots != 0 || executor.opts != nil || tasks.callCount() != 2 {
+		t.Fatalf("state after periodic retry: task=%#v user=%#v userErr=%v slots=%d slotErr=%v executor=%#v calls=%d", found, user, userErr, slots, slotErr, executor.opts, tasks.callCount())
+	}
+}
+
+func waitForContextDone(t *testing.T, ctx context.Context, name string) {
+	t.Helper()
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s goroutine did not exit", name)
+	}
+}
+
+func waitCapturedContext(t *testing.T, contexts <-chan context.Context, name string) context.Context {
+	t.Helper()
+	select {
+	case ctx := <-contexts:
+		return ctx
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s did not begin asset resolution", name)
+		return nil
 	}
 }
 
@@ -1014,7 +1158,12 @@ func TestEnqueueExecutionFallbackReleasesOnlyOwnedSlotWhenPreparationCASLoses(t 
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	repo := &executionPreparationRepository{Repository: baseRepo, tasks: &losingFailPendingTaskRepository{TaskRepository: baseRepo.Tasks()}, assets: baseRepo.Assets()}
+	assetContexts := make(chan context.Context, 1)
+	assets := &contextCapturingAssetRepository{AssetRepository: baseRepo.Assets(), contexts: assetContexts}
+	repo := &executionPreparationRepository{Repository: baseRepo, tasks: &losingFailPendingTaskRepository{TaskRepository: baseRepo.Tasks()}, assets: assets}
+	repo.wrapTx = func(txRepo repository.Repository) repository.Repository {
+		return &executionPreparationRepository{Repository: txRepo, tasks: &losingFailPendingTaskRepository{TaskRepository: txRepo.Tasks()}, assets: txRepo.Assets()}
+	}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -1028,39 +1177,67 @@ func TestEnqueueExecutionFallbackReleasesOnlyOwnedSlotWhenPreparationCASLoses(t 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution: %v", err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	var found *model.Task
-	for time.Now().Before(deadline) {
-		found, err = baseRepo.Tasks().FindByID(ctx, task.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if found.Status == model.TaskStatusPending {
-			count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-			if countErr == nil && count == 1 {
-				break
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
+	fallbackCtx := waitCapturedContext(t, assetContexts, "CAS loser fallback")
+	waitForContextDone(t, fallbackCtx, "CAS loser fallback")
+	found, err := baseRepo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	waitForFallbackSlotCount(t, rdb, projectID, 1)
-	if found == nil || found.Status != model.TaskStatusPending || found.CompletedAt != nil || executor.opts != nil {
-		t.Fatalf("preparation CAS loser state: task=%#v executor=%#v", found, executor.opts)
+	count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
+	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || countErr != nil || count != 1 || executor.opts != nil {
+		t.Fatalf("preparation CAS loser state: task=%#v count=%d countErr=%v executor=%#v", found, count, countErr, executor.opts)
 	}
 }
 
-func waitForFallbackSlotCount(t *testing.T, rdb *redis.Client, projectID string, want int) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		count, err := rdb.Get(t.Context(), projectRunningCountPrefix+projectID).Int()
-		if err == nil && count == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t *testing.T) {
+	db := setupTaskTestDB(t)
+	baseRepo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
+	project, err := baseRepo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	count, err := rdb.Get(t.Context(), projectRunningCountPrefix+projectID).Int()
-	t.Fatalf("slot count = %d, err=%v, want %d", count, err, want)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending}
+	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan context.Context, 1)
+	release := make(chan struct{})
+	tasks := &blockingRunningClaimTaskRepository{TaskRepository: baseRepo.Tasks(), entered: entered, release: release}
+	repo := &executionPreparationRepository{Repository: baseRepo, tasks: tasks, assets: baseRepo.Assets()}
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	logger := zerolog.New(io.Discard)
+	svc := NewTaskService(repo, &fakeTaskExecutor{}, nil, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+
+	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
+		t.Fatalf("EnqueueExecution A: %v", err)
+	}
+	var fallbackCtx context.Context
+	select {
+	case fallbackCtx = <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fallback A did not reach running CAS")
+	}
+	if err := svc.Cancel(ctx, task.ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if _, ok, err := svc.pubsub.TryReserveSlot(ctx, projectID, 10); err != nil || !ok {
+		t.Fatalf("reserve replacement slot B: ok=%v err=%v", ok, err)
+	}
+	close(release)
+	select {
+	case <-fallbackCtx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("fallback A did not exit after losing CAS")
+	}
+	count, err := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
+	if err != nil || count != 1 {
+		t.Fatalf("slot count after A exits = %d, err=%v, want replacement B slot", count, err)
+	}
 }
 
 func TestDispatchCloudTaskKeepsProjectConcurrencySlot(t *testing.T) {

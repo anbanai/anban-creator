@@ -1635,6 +1635,22 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 			s.pubsub.ReleaseSlot(ctx, project.ID)
 			ownsSlot = false
 		}
+		releaseOwnedSlotIfNonTerminal := func(ctx context.Context) {
+			if !ownsSlot {
+				return
+			}
+			current, err := s.repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("could not resolve fallback slot ownership; leaving count for periodic reconciliation")
+				ownsSlot = false
+				return
+			}
+			if model.IsTerminalTaskStatus(current.Status) {
+				ownsSlot = false
+				return
+			}
+			releaseOwnedSlot(ctx)
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				s.logger.Error().
@@ -1659,7 +1675,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 			return
 		}
 		if preparation != pendingExecutionReady {
-			releaseOwnedSlot(fallbackCtx)
+			releaseOwnedSlotIfNonTerminal(fallbackCtx)
 			return
 		}
 		// Set running status before execution to prevent plan checker from re-dispatching.
@@ -1670,7 +1686,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 			return
 		}
 		if !swapped {
-			releaseOwnedSlot(fallbackCtx)
+			releaseOwnedSlotIfNonTerminal(fallbackCtx)
 			return
 		}
 		if err := s.handleExecution(fallbackCtx, task, project, referenceAsset, true); err != nil {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 var ErrExecutionTerminalPersistence = errors.New("execution terminal persistence failed")
@@ -675,23 +676,40 @@ func (s *TaskService) preparePendingExecution(ctx context.Context, task *model.T
 	wrapped := fmt.Errorf("resolve reference asset: %w", err)
 	persistCtx, cancel := context.WithTimeout(context.Background(), s.persistTimeout)
 	defer cancel()
-	swapped, failErr := s.repo.Tasks().FailPendingTask(persistCtx, task.ID, wrapped.Error())
-	if failErr != nil {
-		return nil, pendingExecutionSkipped, fmt.Errorf("fail pending task after reference resolution: %w", failErr)
+	swapped := false
+	if txErr := s.repo.WithTx(persistCtx, func(txRepo repository.Repository) error {
+		var failErr error
+		swapped, failErr = txRepo.Tasks().FailPendingTask(persistCtx, task.ID, wrapped.Error())
+		if failErr != nil {
+			return fmt.Errorf("fail pending task after reference resolution: %w", failErr)
+		}
+		if !swapped || s.creditSvc == nil || task.GoalMode {
+			return nil
+		}
+		if refundErr := s.creditSvc.refundForTask(persistCtx, txRepo, task.ID, "execution_failed"); refundErr != nil {
+			return fmt.Errorf("refund pending task after reference resolution: %w", refundErr)
+		}
+		return nil
+	}); txErr != nil {
+		return nil, pendingExecutionSkipped, txErr
 	}
 	if !swapped {
 		return nil, pendingExecutionSkipped, nil
 	}
 	s.logger.Error().Err(wrapped).Str("task_id", task.ID).Msg("pending task reference asset resolution failed")
-	s.finalizeFailedExecutionSideEffects(persistCtx, task, "execution_failed", wrapped.Error())
+	s.finalizeFailedExecutionPostCommit(persistCtx, task, wrapped.Error())
 	return nil, pendingExecutionTerminalized, nil
 }
 
 func (s *TaskService) finalizeFailedExecutionSideEffects(ctx context.Context, task *model.Task, reason, errorMsg string) {
+	s.refundTaskByMode(ctx, task, reason)
+	s.finalizeFailedExecutionPostCommit(ctx, task, errorMsg)
+}
+
+func (s *TaskService) finalizeFailedExecutionPostCommit(ctx context.Context, task *model.Task, errorMsg string) {
 	if task.ProjectID != "" && s.pubsub != nil {
 		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 	}
-	s.refundTaskByMode(ctx, task, reason)
 	s.notifyTerminal(ctx, task, model.TaskStatusFailed, errorMsg)
 	if task.ProjectID != "" {
 		if err := s.DispatchPendingTasks(ctx, task.ProjectID); err != nil {

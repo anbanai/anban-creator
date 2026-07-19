@@ -456,52 +456,58 @@ func (s *CreditService) DeductForTaskCreation(ctx context.Context, userID, taskT
 // The reason parameter controls the transaction description ("failed" or "cancel").
 func (s *CreditService) RefundForTask(ctx context.Context, taskID string, reason ...string) error {
 	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-		// Check for existing refund to prevent double-refund.
-		_, err := txRepo.Credits().FindRefundByTaskID(ctx, taskID)
-		if err == nil {
-			s.logger.Warn().Str("task_id", taskID).Msg("refund already exists, skipping")
+		return s.refundForTask(ctx, txRepo, taskID, reason...)
+	})
+}
+
+// refundForTask performs a refund inside the caller's transaction. The caller
+// owns commit/rollback and must pass the transaction-scoped repository.
+func (s *CreditService) refundForTask(ctx context.Context, txRepo repository.Repository, taskID string, reason ...string) error {
+	// Check for existing refund to prevent double-refund.
+	_, err := txRepo.Credits().FindRefundByTaskID(ctx, taskID)
+	if err == nil {
+		s.logger.Warn().Str("task_id", taskID).Msg("refund already exists, skipping")
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("check existing refund: %w", err)
+	}
+
+	deduction, err := txRepo.Credits().FindDeductionByTaskID(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			s.logger.Warn().Str("task_id", taskID).Msg("no deduction found for task, skipping refund")
 			return nil
 		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("check existing refund: %w", err)
-		}
+		return fmt.Errorf("find deduction: %w", err)
+	}
 
-		deduction, err := txRepo.Credits().FindDeductionByTaskID(ctx, taskID)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				s.logger.Warn().Str("task_id", taskID).Msg("no deduction found for task, skipping refund")
-				return nil
-			}
-			return fmt.Errorf("find deduction: %w", err)
-		}
+	refundAmount := -deduction.Amount
 
-		refundAmount := -deduction.Amount
+	newBalance, err := txRepo.Users().AdjustBalance(ctx, deduction.UserID, refundAmount)
+	if err != nil {
+		return fmt.Errorf("adjust balance: %w", err)
+	}
 
-		newBalance, err := txRepo.Users().AdjustBalance(ctx, deduction.UserID, refundAmount)
-		if err != nil {
-			return fmt.Errorf("adjust balance: %w", err)
-		}
+	taskIDCopy := taskID
+	desc := "任务失败退还"
+	if len(reason) > 0 && reason[0] == "cancel" {
+		desc = "任务取消退还"
+	}
+	tx := &model.CreditTransaction{
+		UserID:       deduction.UserID,
+		Type:         model.CreditTypeTaskRefund,
+		Amount:       refundAmount,
+		BalanceAfter: newBalance,
+		TaskID:       &taskIDCopy,
+		Description:  fmt.Sprintf("%s +%d", desc, refundAmount),
+	}
+	if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
+		return fmt.Errorf("create refund transaction: %w", err)
+	}
 
-		taskIDCopy := taskID
-		desc := "任务失败退还"
-		if len(reason) > 0 && reason[0] == "cancel" {
-			desc = "任务取消退还"
-		}
-		tx := &model.CreditTransaction{
-			UserID:       deduction.UserID,
-			Type:         model.CreditTypeTaskRefund,
-			Amount:       refundAmount,
-			BalanceAfter: newBalance,
-			TaskID:       &taskIDCopy,
-			Description:  fmt.Sprintf("%s +%d", desc, refundAmount),
-		}
-		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
-			return fmt.Errorf("create refund transaction: %w", err)
-		}
-
-		s.logger.Info().Str("task_id", taskID).Int("refund", refundAmount).Msg("credits refunded for task")
-		return nil
-	})
+	s.logger.Info().Str("task_id", taskID).Int("refund", refundAmount).Msg("credits refunded for task")
+	return nil
 }
 
 // DeductBatch deducts the total cost for multiple tasks in a single atomic transaction.
