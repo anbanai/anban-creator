@@ -201,17 +201,12 @@ func TestAIEntryPresentsInheritedProjectReferenceBeforeTaskCreation(t *testing.T
 	}
 }
 
-func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T) {
-	db := setupTaskTestDB(t)
-	repo := repository.New(db)
+func TestAIEntrySeednotePresentsInheritedProjectReferenceAndKeepsAttachments(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	logger := zerolog.New(io.Discard)
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "ai-entry-project-reference", CreditsBalance: 10_000}); err != nil {
-		t.Fatal(err)
-	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	asset := referenceAssetFixture("project-reference", userID, DirectUploadPurposeProjectReference)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	asset := referenceAssetFixture("seednote-project-reference", userID, DirectUploadPurposeProjectReference)
 	seedReferenceAsset(t, repo, asset)
 	project, err := repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
@@ -221,29 +216,89 @@ func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T
 	if err := repo.Projects().Update(ctx, project); err != nil {
 		t.Fatal(err)
 	}
-	store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}, downloadErr: errors.New("signer unavailable")}
-	creditSvc := NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4_000}}, &logger)
-	taskSvc := NewTaskService(repo, nil, &mockEnqueuer{}, store, creditSvc, &logger, "", nil, "", nil, nil)
+	store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}}
 	referenceSvc := NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
-	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, &logger)
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write seednote"}`}}, &logger)
 	entrySvc.SetReferenceAssetService(referenceSvc)
+	attachment := model.EntryAttachment{Type: "image", URL: "/api/v1/files/product.png", FileName: "product.png", ContentType: "image/png", Instruction: "keep logo"}
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write article"})
-	if result != nil || !errors.Is(err, ErrReferenceAssetUnavailable) {
-		t.Fatalf("result/error = %#v/%v, want unavailable", result, err)
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write seednote", Attachments: []model.EntryAttachment{attachment}})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
 	}
-	_, total, listErr := taskSvc.List(ctx, userID, 0, 10, "", "", "")
-	if listErr != nil || total != 0 {
-		t.Fatalf("tasks = %d, %v", total, listErr)
+	if result.Status != AIEntryStatusCreated || result.Task == nil || result.Task.ReferenceImage == nil || result.Task.ReferenceImage.AssetID != asset.ID {
+		t.Fatalf("result = %#v", result)
 	}
-	txCount, _ := repo.Credits().CountByUserID(ctx, userID)
-	if txCount != 0 {
-		t.Fatalf("credit transactions = %d", txCount)
+	persisted, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	user, _ := repo.Users().FindByID(ctx, userID)
-	if user.CreditsBalance != 10_000 {
-		t.Fatalf("balance = %d", user.CreditsBalance)
+	if persisted.ReferenceImageAssetID != "" || persisted.ProjectSnapshot.Data().ReferenceImageAssetID != asset.ID {
+		t.Fatalf("persisted reference = direct %q snapshot %#v", persisted.ReferenceImageAssetID, persisted.ProjectSnapshot.Data())
+	}
+	attachments := persisted.InputAttachments.Data()
+	if len(attachments) != 1 || attachments[0].URL != attachment.URL || attachments[0].Instruction != attachment.Instruction {
+		t.Fatalf("attachments changed: %#v", attachments)
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
+		t.Fatalf("signed keys = %#v", store.signedKeys)
+	}
+}
+
+func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T) {
+	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote} {
+		t.Run(platform, func(t *testing.T) {
+			base := repository.New(setupTaskTestDB(t))
+			ctx := context.Background()
+			userID := uuid.NewString()
+			logger := zerolog.New(io.Discard)
+			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "ai-entry-project-reference-" + platform, CreditsBalance: 10_000}); err != nil {
+				t.Fatal(err)
+			}
+			topics := &countingTopicPoolRepository{TopicPoolRepository: base.TopicPools()}
+			repo := &taskCreationRepositoryOverride{Repository: base, topicPools: topics}
+			projectID := createTestProject(t, repo, userID, platform)
+			asset := referenceAssetFixture("project-reference-"+platform, userID, DirectUploadPurposeProjectReference)
+			seedReferenceAsset(t, repo, asset)
+			project, err := repo.Projects().FindByID(ctx, projectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			project.ReferenceImageAssetID = asset.ID
+			if err := repo.Projects().Update(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}, downloadErr: errors.New("signer unavailable")}
+			creditSvc := NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{platform: 4_000}}, &logger)
+			taskSvc := NewTaskService(repo, nil, &mockEnqueuer{}, store, creditSvc, &logger, "", nil, "", nil, nil)
+			taskSvc.SetTopicPoolService(NewTopicPoolService(repo, &logger))
+			referenceSvc := NewReferenceAssetService(repo, store, time.Now)
+			taskSvc.SetReferenceAssetService(referenceSvc)
+			entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write content"}`}}, &logger)
+			entrySvc.SetReferenceAssetService(referenceSvc)
+
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write content"})
+			if result != nil || !errors.Is(err, ErrReferenceAssetUnavailable) {
+				t.Fatalf("result/error = %#v/%v, want unavailable", result, err)
+			}
+			if topics.claimWithTaskCalls != 0 {
+				t.Fatalf("topic claims = %d", topics.claimWithTaskCalls)
+			}
+			_, total, listErr := taskSvc.List(ctx, userID, 0, 10, "", "", "")
+			if listErr != nil || total != 0 {
+				t.Fatalf("tasks = %d, %v", total, listErr)
+			}
+			txCount, _ := repo.Credits().CountByUserID(ctx, userID)
+			if txCount != 0 {
+				t.Fatalf("credit transactions = %d", txCount)
+			}
+			user, _ := repo.Users().FindByID(ctx, userID)
+			if user.CreditsBalance != 10_000 {
+				t.Fatalf("balance = %d", user.CreditsBalance)
+			}
+		})
 	}
 }
 

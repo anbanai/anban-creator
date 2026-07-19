@@ -163,15 +163,6 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			if err != nil {
 				return nil, err
 			}
-		} else if project.ReferenceImageAssetID != "" {
-			if s.referenceAssets == nil {
-				return nil, ErrReferenceAssetUnavailable
-			}
-			var err error
-			referenceView, err = s.referenceAssets.Present(ctx, req.UserID, project.ReferenceImageAssetID, []string{DirectUploadPurposeProjectReference})
-			if err != nil {
-				return nil, err
-			}
 		}
 	case model.PlatformSeednote:
 		// Seednote uses InputAttachments as its only new per-run reference source.
@@ -216,6 +207,15 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		params.VideoEditorInput = &videoInput
 	default:
 		return aiEntryNeedsConfiguration("当前项目平台暂不支持 AI 入口创建任务。", "/projects/"+project.ID), nil
+	}
+	if referenceView == nil && project.ReferenceImageAssetID != "" {
+		if s.referenceAssets == nil {
+			return nil, ErrReferenceAssetUnavailable
+		}
+		referenceView, err = s.referenceAssets.Present(ctx, req.UserID, project.ReferenceImageAssetID, []string{DirectUploadPurposeProjectReference})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	tasks, err := s.taskSvc.CreateManual(ctx, params)
