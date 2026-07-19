@@ -176,27 +176,48 @@ func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, 
 	return nil
 }
 
-// UpdateExecutionResult stores the latest execution result JSON for a task.
-func (s *TaskService) UpdateExecutionResult(ctx context.Context, taskID string, result *serveragent.ExecutionResult) error {
+func marshalExecutionEvidence(result *serveragent.ExecutionResult) (string, error) {
 	if result == nil {
-		return fmt.Errorf("execution result is required")
+		return "", fmt.Errorf("execution result is required")
 	}
 	if result.CostStatus == "" {
 		result.CostStatus = serveragent.CostStatusUnreconciled
 		result.CostDiagnostics = []serveragent.CostDiagnostic{{Code: serveragent.CostDiagnosticMissingTerminalModelUsage}}
 	}
-
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("marshal execution result: %w", err)
+		return "", fmt.Errorf("marshal execution result: %w", err)
 	}
-	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-		if err := txRepo.Tasks().UpdateResult(ctx, taskID, string(resultJSON)); err != nil {
-			return fmt.Errorf("persist execution result: %w", err)
-		}
-		if err := txRepo.Tasks().UpdateTerminalModelUsage(ctx, taskID, result.ModelUsage, result.CostStatus); err != nil {
-			return fmt.Errorf("persist terminal model usage: %w", err)
-		}
-		return nil
-	})
+	return string(resultJSON), nil
+}
+
+// UpdateExecutionResult atomically stores result JSON and typed cost evidence.
+func (s *TaskService) UpdateExecutionResult(ctx context.Context, taskID string, result *serveragent.ExecutionResult) error {
+	resultJSON, err := marshalExecutionEvidence(result)
+	if err != nil {
+		return err
+	}
+	matched, err := s.repo.Tasks().UpdateExecutionEvidence(ctx, taskID, resultJSON, result.ModelUsage, result.CostStatus)
+	if err != nil {
+		return fmt.Errorf("persist execution evidence: %w", err)
+	}
+	if !matched {
+		return fmt.Errorf("persist execution evidence: task %s not found", taskID)
+	}
+	return nil
+}
+
+func (s *TaskService) updateExecutionResultForExecution(ctx context.Context, taskID, executionID string, result *serveragent.ExecutionResult) error {
+	resultJSON, err := marshalExecutionEvidence(result)
+	if err != nil {
+		return err
+	}
+	matched, err := s.repo.Tasks().UpdateExecutionEvidenceForExecution(ctx, taskID, executionID, resultJSON, result.ModelUsage, result.CostStatus)
+	if err != nil {
+		return fmt.Errorf("persist execution evidence for current attempt: %w", err)
+	}
+	if !matched {
+		return ErrStaleTaskExecution
+	}
+	return nil
 }

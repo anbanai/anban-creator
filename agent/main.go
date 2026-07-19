@@ -123,9 +123,6 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 		}
 	}
 
-	if reportErr := reporter.ReportResult(workCtx, result); reportErr != nil {
-		fmt.Fprintf(stderr, "failed to report result: %v\n", reportErr)
-	}
 	cancelWork()
 
 	// Signal terminal completion so the server can finalize the task. Safe in

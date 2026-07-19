@@ -79,9 +79,6 @@ func TestReporterIncludesExecutionIdentityForJobAndOmitsItForLocal(t *testing.T)
 	}{
 		{name: "progress", call: func(ctx context.Context, r *Reporter) error { return r.ReportProgress(ctx, "working") }},
 		{name: "heartbeat", call: func(ctx context.Context, r *Reporter) error { return r.ReportHeartbeat(ctx) }},
-		{name: "result", call: func(ctx context.Context, r *Reporter) error {
-			return r.ReportResult(ctx, &serveragent.ExecutionResult{Success: true})
-		}},
 		{name: "complete", call: func(ctx context.Context, r *Reporter) error {
 			return r.ReportComplete(ctx, &serveragent.ExecutionResult{Success: true})
 		}},

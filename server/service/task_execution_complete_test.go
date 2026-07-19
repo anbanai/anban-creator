@@ -112,6 +112,55 @@ func TestCompleteCloudExecutionCurrentAttemptAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestCompleteCloudExecutionFencesEvidenceWhenAttemptBecomesStale(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	ctx := context.Background()
+	next := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 2, Target: "kubernetes",
+		Status: model.TaskExecutionRunning, Started: true,
+	}
+	if err := repo.TaskExecutions().Create(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+
+	var switched bool
+	svc.finalizationAfterAdvance = func(stage string) error {
+		if stage != model.TaskExecutionFinalizationArtifacts || switched {
+			return nil
+		}
+		switched = true
+		won, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, next.ID)
+		if err != nil || !won {
+			t.Fatalf("switch current execution: won=%v err=%v", won, err)
+		}
+		return nil
+	}
+	result := &agent.ExecutionResult{
+		Success: true, RemoteArtifacts: true,
+		ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "stale-attempt", InputTokens: 31}},
+		CostStatus: agent.CostStatusReconciled,
+	}
+	err := svc.CompleteCloudExecution(ctx, execution.ID, result)
+	if !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("stale evidence finalization error = %v, want ErrStaleTaskExecution", err)
+	}
+
+	foundTask, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundTask.Result != nil || foundTask.CostStatus != "" || len(foundTask.TerminalModelUsage.Data()) != 0 {
+		t.Fatalf("stale execution wrote task evidence: result=%v cost_status=%q usage=%+v", foundTask.Result, foundTask.CostStatus, foundTask.TerminalModelUsage.Data())
+	}
+	foundExecution, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundExecution.FinalizationStatus != model.TaskExecutionFinalizationArtifacts {
+		t.Fatalf("stale execution finalization advanced to %q, want %q", foundExecution.FinalizationStatus, model.TaskExecutionFinalizationArtifacts)
+	}
+}
+
 func TestCompleteCloudExecutionRejectsSuccessWithoutManifest(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, false)
 	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {

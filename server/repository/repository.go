@@ -99,8 +99,9 @@ type TaskRepository interface {
 	// Used on hot paths (e.g. UpdateProgress) where loading the full row —
 	// including the longtext progress_log — would be wasteful.
 	GetTypeAndProgress(ctx context.Context, id string) (taskType string, progress int, err error)
-	UpdateResult(ctx context.Context, id, result string) error
-	UpdateTerminalModelUsage(ctx context.Context, id string, usage []model.ModelTokenUsage, costStatus string) error
+	UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	FinalizeLocalTask(ctx context.Context, id, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	Update(ctx context.Context, task *model.Task) error
 	UpdateInputAttachments(ctx context.Context, id string, attachments []model.EntryAttachment) error
 	UpdateTitle(ctx context.Context, id string, title string) error

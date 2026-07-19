@@ -46,10 +46,15 @@ type Reporter struct {
 	client *http.Client
 }
 
-type agentReportRequest struct {
+type agentProgressReportRequest struct {
+	TaskID      string `json:"task_id"`
+	ExecutionID string `json:"execution_id,omitempty"`
+	Message     string `json:"message,omitempty"`
+}
+
+type agentCompleteReportRequest struct {
 	TaskID      string                       `json:"task_id"`
 	ExecutionID string                       `json:"execution_id,omitempty"`
-	Message     string                       `json:"message,omitempty"`
 	Result      *serveragent.ExecutionResult `json:"result,omitempty"`
 }
 
@@ -67,18 +72,11 @@ func (r *Reporter) ReportProgress(ctx context.Context, message string) error {
 	if message == "" {
 		return nil
 	}
-	return r.postJSON(ctx, "/api/v1/agent/progress", agentReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID, Message: message})
+	return r.postJSON(ctx, "/api/v1/agent/progress", agentProgressReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID, Message: message})
 }
 
 func (r *Reporter) ReportHeartbeat(ctx context.Context) error {
-	return r.postJSON(ctx, "/api/v1/agent/progress", agentReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID})
-}
-
-func (r *Reporter) ReportResult(ctx context.Context, result *serveragent.ExecutionResult) error {
-	if result == nil {
-		return nil
-	}
-	return r.postJSON(ctx, "/api/v1/agent/progress", agentReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID, Result: result})
+	return r.postJSON(ctx, "/api/v1/agent/progress", agentProgressReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID})
 }
 
 func (r *Reporter) PrepareArtifactUpload(ctx context.Context, req ArtifactPrepareRequest) (*ArtifactPrepareResponse, error) {
@@ -113,12 +111,12 @@ func (r *Reporter) ReportComplete(ctx context.Context, result *serveragent.Execu
 	// blip, 5xx) would otherwise leave the task "running" until the stuck-task
 	// reaper force-fails + refunds it ~5 min later — the user sees a failed
 	// task despite a successful run. Retry with backoff; idempotent, so safe.
-	return r.postJSONWithRetry(ctx, "/api/v1/agent/complete", agentReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID, Result: result})
+	return r.postJSONWithRetry(ctx, "/api/v1/agent/complete", agentCompleteReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID, Result: result})
 }
 
 // postJSONWithRetry retries a terminal report a bounded number of times with
 // exponential backoff. Used only for the idempotent /complete call — progress
-// and result reports stay single-shot (a missed line is harmless). Terminal HTTP
+// reports stay single-shot (a missed line is harmless). Terminal HTTP
 // failures (non-retryable 4xx) bail immediately; network errors and 5xx back off
 // with ±25% jitter so concurrently-finishing agents don't retry in lockstep.
 func (r *Reporter) postJSONWithRetry(ctx context.Context, path string, payload any) error {

@@ -170,18 +170,55 @@ func (r *taskRepository) GetTypeAndProgress(ctx context.Context, id string) (str
 	return row.Type, row.Progress, nil
 }
 
-func (r *taskRepository) UpdateResult(ctx context.Context, id, result string) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("result", result).Error
-}
-
-// UpdateTerminalModelUsage persists provider-cost evidence without touching
-// the legacy aggregate token/cost columns or the user wallet.
-func (r *taskRepository) UpdateTerminalModelUsage(ctx context.Context, id string, usage []model.ModelTokenUsage, costStatus string) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).
+// UpdateExecutionEvidence persists the JSON result and its typed cost evidence
+// with one statement. RowsAffected distinguishes a missing task from success.
+func (r *taskRepository) UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ?", id).
 		Updates(map[string]any{
+			"result":               result,
 			"terminal_model_usage": datatypes.NewJSONType(usage),
 			"cost_status":          costStatus,
-		}).Error
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// UpdateExecutionEvidenceForExecution prevents a stale cloud attempt from
+// replacing the task evidence owned by the current durable execution.
+func (r *taskRepository) UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND current_execution_id = ?", id, executionID).
+		Updates(map[string]any{
+			"result":               result,
+			"terminal_model_usage": datatypes.NewJSONType(usage),
+			"cost_status":          costStatus,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// FinalizeLocalTask makes terminal ownership and terminal evidence one CAS.
+// Only the request that still owns a running local claim can write any field.
+func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND status = ? AND execution_target = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed).
+		Updates(map[string]any{
+			"status":               status,
+			"error_message":        errorMsg,
+			"completed_at":         time.Now(),
+			"result":               result,
+			"terminal_model_usage": datatypes.NewJSONType(usage),
+			"cost_status":          costStatus,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
 }
 
 // Update saves the full task object.

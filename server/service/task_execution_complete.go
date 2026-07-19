@@ -215,7 +215,7 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 		}, nil
 	case model.TaskExecutionFinalizationArtifacts:
 		return model.TaskExecutionFinalizationResult, func(ctx context.Context) error {
-			return s.UpdateExecutionResult(ctx, task.ID, result)
+			return s.updateExecutionResultForExecution(ctx, task.ID, execution.ID, result)
 		}, nil
 	case model.TaskExecutionFinalizationResult:
 		return model.TaskExecutionFinalizationWorkflow, func(ctx context.Context) error {

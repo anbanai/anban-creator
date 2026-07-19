@@ -345,6 +345,29 @@ func TestAgentAPIKeyProgressBehaviorIsPreserved(t *testing.T) {
 	}
 }
 
+func TestAgentProgressResultPayloadCannotWriteTerminalEvidence(t *testing.T) {
+	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentApp(t)
+	body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","message":"still running","result":{"success":true,"model_usage":[{"provider":"provider","model":"early","input_tokens":17}],"cost_status":"reconciled"}}`
+	req := agentJSONRequest("/agent/progress", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("progress status/body = %d/%s", resp.StatusCode, responseBody)
+	}
+
+	found, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Result != nil || found.CostStatus != "" || len(found.TerminalModelUsage.Data()) != 0 {
+		t.Fatalf("non-terminal progress persisted evidence: result=%v cost_status=%q usage=%+v", found.Result, found.CostStatus, found.TerminalModelUsage.Data())
+	}
+}
+
 func TestAgentAPIKeyCannotUseLegacyArtifactContractForCloudTask(t *testing.T) {
 	app, repo, task, _, _, rawAPIKey, store := setupExecutionScopedAgentApp(t)
 	for _, endpoint := range []struct{ path, body string }{
