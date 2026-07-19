@@ -20,11 +20,13 @@ import (
 )
 
 var (
-	ErrBillingConflict      = errors.New("billing idempotency conflict")
-	ErrBillingInvalid       = errors.New("invalid billing request")
-	ErrBillingSKUNotFound   = errors.New("billing SKU not found")
-	ErrBillingQuoteExpired  = errors.New("billing quote expired")
-	ErrBillingQuoteConsumed = errors.New("billing quote already consumed")
+	ErrBillingConflict        = errors.New("billing idempotency conflict")
+	ErrBillingInvalid         = errors.New("invalid billing request")
+	ErrBillingSKUNotFound     = errors.New("billing SKU not found")
+	ErrBillingCatalogNotFound = errors.New("billing catalog not found")
+	ErrBillingUserNotFound    = errors.New("billing user not found")
+	ErrBillingQuoteExpired    = errors.New("billing quote expired")
+	ErrBillingQuoteConsumed   = errors.New("billing quote already consumed")
 )
 
 const defaultBillingQuoteTTL = 5 * time.Minute
@@ -133,12 +135,17 @@ func (s *BillingCatalogService) Publish(ctx context.Context) (*model.BillingCata
 }
 
 func (s *BillingCatalogService) ResolveSKU(ctx context.Context, catalogID, operation, route string) (*model.BillingSKU, error) {
-	operation = strings.TrimSpace(operation)
-	route = strings.TrimSpace(route)
-	if operation == "" {
-		return nil, fmt.Errorf("%w: operation is required", ErrBillingInvalid)
+	var ok bool
+	if catalogID, ok = canonicalBillingText(catalogID, 128, false); !ok {
+		return nil, fmt.Errorf("%w: invalid SKU identity", ErrBillingInvalid)
 	}
-	if strings.TrimSpace(catalogID) == "" {
+	if operation, ok = canonicalBillingText(operation, 128, true); !ok {
+		return nil, fmt.Errorf("%w: invalid SKU identity", ErrBillingInvalid)
+	}
+	if route, ok = canonicalBillingText(route, 128, false); !ok {
+		return nil, fmt.Errorf("%w: invalid SKU identity", ErrBillingInvalid)
+	}
+	if catalogID == "" {
 		catalog, err := s.repo.Billing().FindLatestPublishedCatalog(ctx)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -148,7 +155,7 @@ func (s *BillingCatalogService) ResolveSKU(ctx context.Context, catalogID, opera
 		}
 		catalogID = catalog.CatalogID
 	}
-	sku, err := s.repo.Billing().FindSKUByOperation(ctx, strings.TrimSpace(catalogID), operation, route)
+	sku, err := s.repo.Billing().FindSKUByOperation(ctx, catalogID, operation, route)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrBillingSKUNotFound
 	}
@@ -156,9 +163,10 @@ func (s *BillingCatalogService) ResolveSKU(ctx context.Context, catalogID, opera
 }
 
 func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteRequest) (*model.BillingQuote, error) {
-	if strings.TrimSpace(req.UserID) == "" || !validBillingFingerprint(req.RequestFingerprint) ||
-		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
-		return nil, fmt.Errorf("%w: user, fingerprint, and idempotency identity are required", ErrBillingInvalid)
+	var err error
+	req, err = canonicalQuoteRequest(req)
+	if err != nil {
+		return nil, err
 	}
 	if existing, err := s.repo.Billing().FindQuoteByKey(ctx, req.IdempotencyScope, req.IdempotencyKey); err == nil {
 		if quoteMatchesRequest(existing, req) {
@@ -174,10 +182,10 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 	}
 	now := s.now().UTC()
 	quote := &model.BillingQuote{
-		ID: uuid.NewString(), UserID: strings.TrimSpace(req.UserID), CatalogID: sku.CatalogID,
+		ID: uuid.NewString(), UserID: req.UserID, CatalogID: sku.CatalogID,
 		SKUID: sku.SKUID, PriceCredits: sku.PriceCredits, RequestFingerprint: req.RequestFingerprint,
 		SKUSnapshot: append(datatypes.JSON(nil), sku.Snapshot...), ExpiresAt: now.Add(s.quoteTTL), CreatedAt: now,
-		IdempotencyScope: strings.TrimSpace(req.IdempotencyScope), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey,
 	}
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		existing, findErr := tx.Billing().FindQuoteByKey(ctx, quote.IdempotencyScope, quote.IdempotencyKey)
@@ -207,6 +215,33 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 		return nil, ErrBillingConflict
 	}
 	return nil, err
+}
+
+func canonicalQuoteRequest(req QuoteRequest) (QuoteRequest, error) {
+	var ok bool
+	if req.UserID, ok = canonicalBillingUUID(req.UserID); !ok {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
+	if req.CatalogID, ok = canonicalBillingText(req.CatalogID, 128, false); !ok {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
+	if req.Operation, ok = canonicalBillingText(req.Operation, 128, true); !ok {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
+	if req.Route, ok = canonicalBillingText(req.Route, 128, false); !ok {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
+	req.RequestFingerprint = strings.TrimSpace(req.RequestFingerprint)
+	if !validBillingFingerprint(req.RequestFingerprint) {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
+	if req.IdempotencyScope, ok = canonicalBillingText(req.IdempotencyScope, 80, true); !ok {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
+	if req.IdempotencyKey, ok = canonicalBillingText(req.IdempotencyKey, 128, true); !ok {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
+	return req, nil
 }
 
 func retailCatalogSnapshot(bundle billing.Bundle) (datatypes.JSON, error) {
@@ -300,6 +335,23 @@ func validBillingFingerprint(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
+}
+
+func canonicalBillingText(value string, maxLength int, required bool) (string, bool) {
+	value = strings.TrimSpace(value)
+	if (required && value == "") || len(value) > maxLength {
+		return "", false
+	}
+	return value, true
+}
+
+func canonicalBillingUUID(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	parsed, err := uuid.Parse(value)
+	if err != nil {
+		return "", false
+	}
+	return parsed.String(), true
 }
 
 func billingFingerprint(parts ...string) string {

@@ -50,6 +50,8 @@ func TestLoadBundleRejectsStrictYAMLErrors(t *testing.T) {
 		{name: "malformed model price", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `input: "6.00"`, `input: "1e3"`, 1)}, want: "models.provider/model.input"},
 		{name: "malformed promotion price", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, `"10.00"`, `"-10.00"`, 1)}, want: "minimum_topup_cny"},
 		{name: "zero promotion minimum", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, `"10.00"`, `"0.00"`, 1)}, want: "minimum_topup_cny: must be positive"},
+		{name: "zero inviter credits", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, "inviter_credits: 1000", "inviter_credits: 0", 1)}, want: "inviter_credits: must be positive"},
+		{name: "zero invitee credits", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, "invitee_credits: 1000", "invitee_credits: 0", 1)}, want: "invitee_credits: must be positive"},
 		{name: "missing currency reference", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `currency: "CNY"`, `currency: "EUR"`, 1)}, want: "references missing currency rate"},
 		{name: "CNY rate must be unit", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `CNY: "1.00"`, `CNY: "1.01"`, 1)}, want: "currency_rates.CNY: must equal 1.00"},
 		{name: "invalid charge policy", overrides: map[string]string{"products.yaml": strings.Replace(validProductsYAML, "task_admission", "runtime_usage", 1)}, want: "charge_policy"},

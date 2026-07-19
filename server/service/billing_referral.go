@@ -51,46 +51,70 @@ func NewBillingReferralService(repo repository.Repository, wallet *BillingWallet
 }
 
 // TopUp atomically applies the paid top-up and, when eligible, the fixed
-// first-top-up referral promotion. Invitation identity is resolved before the
-// transaction so both account rows can always be locked in stable order.
+// first-top-up referral promotion. User rows are always locked before wallet
+// rows so invitation identity and wallet mutation share one lock order.
 func (s *BillingReferralService) TopUp(ctx context.Context, req TopUpRequest) (*BillingReferralTopUpResult, error) {
 	if s == nil || s.repo == nil || s.wallet == nil {
 		return nil, fmt.Errorf("%w: referral service is not configured", ErrBillingInvalid)
 	}
-	if err := validateTopUpRequest(req); err != nil {
-		return nil, err
-	}
-
-	inviterID, err := s.resolveInviter(ctx, req.UserID)
+	var err error
+	req, err = CanonicalTopUpRequest(req)
 	if err != nil {
 		return nil, err
 	}
+
 	program, hasProgram := s.activeProgram()
 	qualifies := hasProgram && qualifiesReferralTopUp(req.Credits, program.MinimumTopUpCNY, s.bundle.Policy.CreditsPerCNY)
+	var candidate referralCandidate
+	var existing *model.BillingReferralIssue
+	if qualifies {
+		existing, err = s.findReferralIssueCandidate(ctx, req.UserID, program.ID)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			existing = nil
+			candidate, err = s.resolveReferralCandidate(ctx, req.UserID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	var result *BillingReferralTopUpResult
 	err = s.wallet.withTx(ctx, func(tx repository.Repository) error {
-		if inviterID != "" && hasProgram {
-			if err := lockReferralAccounts(ctx, tx.Billing(), req.UserID, inviterID); err != nil {
+		if !qualifies {
+			return s.topUpWithoutReferral(ctx, tx, req, &result)
+		}
+
+		if existing != nil {
+			return s.topUpWithExistingReferral(ctx, tx, req, program, existing, &result)
+		}
+
+		lockedUsers, err := lockReferralUsers(ctx, tx.Users(), req.UserID, candidate.InviterID)
+		if err != nil {
+			return err
+		}
+		invitee := lockedUsers[req.UserID]
+		if strings.TrimSpace(invitee.InvitedBy) != candidate.InvitedBy {
+			return ErrBillingConflict
+		}
+		if err := requirePublishedBillingCatalog(ctx, tx.Billing(), req.CatalogID); err != nil {
+			return err
+		}
+		if candidate.InviterID != "" {
+			if err := lockReferralAccounts(ctx, tx.Billing(), req.UserID, candidate.InviterID); err != nil {
 				return err
 			}
 		}
-		topUp, err := s.wallet.topUpInTx(ctx, tx, req)
+		topUp, err := s.wallet.topUpInTxAfterUserLock(ctx, tx, req)
 		if err != nil {
 			return err
 		}
 		result = &BillingReferralTopUpResult{TopUp: topUp}
-		if !qualifies {
+		if candidate.InviterID == "" {
 			return nil
 		}
-		if inviterID == "" {
-			if _, err := tx.Billing().FindReferralIssue(ctx, req.UserID, program.ID); err == nil {
-				return ErrBillingConflict
-			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
-			}
-			return nil
-		}
-		issue, err := s.issueOrReplay(ctx, tx.Billing(), req, topUp, inviterID, program)
+		issue, err := s.issueOrReplay(ctx, tx.Billing(), req, topUp, candidate.InviterID, program)
 		if err != nil {
 			return err
 		}
@@ -103,25 +127,94 @@ func (s *BillingReferralService) TopUp(ctx context.Context, req TopUpRequest) (*
 	return result, nil
 }
 
-func (s *BillingReferralService) resolveInviter(ctx context.Context, inviteeID string) (string, error) {
+func (s *BillingReferralService) findReferralIssueCandidate(ctx context.Context, inviteeID, programID string) (*model.BillingReferralIssue, error) {
+	var (
+		issue *model.BillingReferralIssue
+		err   error
+	)
+	for attempt := 0; attempt < 20; attempt++ {
+		issue, err = s.repo.Billing().FindReferralIssue(ctx, inviteeID, programID)
+		if err == nil || !isRetryableBillingDBError(err) {
+			return issue, err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, err
+}
+
+type referralCandidate struct {
+	InvitedBy string
+	InviterID string
+}
+
+func (s *BillingReferralService) resolveReferralCandidate(ctx context.Context, inviteeID string) (referralCandidate, error) {
 	invitee, err := s.repo.Users().FindByID(ctx, inviteeID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", nil
+			return referralCandidate{}, nil
 		}
-		return "", err
+		return referralCandidate{}, err
 	}
-	inviterID := strings.TrimSpace(invitee.InvitedBy)
-	if inviterID == "" || inviterID == inviteeID {
-		return "", nil
+	candidate := referralCandidate{InvitedBy: strings.TrimSpace(invitee.InvitedBy)}
+	if candidate.InvitedBy == "" || candidate.InvitedBy == inviteeID {
+		return candidate, nil
 	}
-	if _, err := s.repo.Users().FindByID(ctx, inviterID); err != nil {
+	if _, err := s.repo.Users().FindByID(ctx, candidate.InvitedBy); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", nil
+			return candidate, nil
 		}
-		return "", err
+		return referralCandidate{}, err
 	}
-	return inviterID, nil
+	candidate.InviterID = candidate.InvitedBy
+	return candidate, nil
+}
+
+func (s *BillingReferralService) topUpWithoutReferral(ctx context.Context, tx repository.Repository, req TopUpRequest, result **BillingReferralTopUpResult) error {
+	if _, err := tx.Users().LockByID(ctx, req.UserID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrBillingUserNotFound
+		}
+		return err
+	}
+	topUp, err := s.wallet.topUpInTxAfterUserLock(ctx, tx, req)
+	if err != nil {
+		return err
+	}
+	*result = &BillingReferralTopUpResult{TopUp: topUp}
+	return nil
+}
+
+func (s *BillingReferralService) topUpWithExistingReferral(ctx context.Context, tx repository.Repository, req TopUpRequest, program billing.ReferralProgram, existing *model.BillingReferralIssue, result **BillingReferralTopUpResult) error {
+	invitee, err := tx.Users().LockByID(ctx, req.UserID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrBillingUserNotFound
+		}
+		return err
+	}
+	if existing.InviteeUserID != req.UserID || existing.ProgramID != program.ID ||
+		existing.CatalogID != s.bundle.Promotions.CatalogID || existing.InviterUserID == req.UserID ||
+		strings.TrimSpace(invitee.InvitedBy) != existing.InviterUserID {
+		return ErrBillingConflict
+	}
+	topUp, err := s.wallet.topUpInTxAfterUserLock(ctx, tx, req)
+	if err != nil {
+		return err
+	}
+	if existing.QualifyingTopUpEntryID == topUp.EntryID {
+		wantFingerprint := referralFingerprint(req, topUp.EntryID, existing.InviterUserID, program.ID, s.bundle.Promotions.CatalogID)
+		if existing.RequestFingerprint != wantFingerprint {
+			return ErrBillingConflict
+		}
+	}
+	*result = &BillingReferralTopUpResult{TopUp: topUp, Referral: existing}
+	return nil
 }
 
 func (s *BillingReferralService) activeProgram() (billing.ReferralProgram, bool) {
@@ -259,6 +352,24 @@ func lockReferralAccounts(ctx context.Context, repo repository.BillingRepository
 		}
 	}
 	return nil
+}
+
+func lockReferralUsers(ctx context.Context, repo repository.UserRepository, inviteeID, inviterID string) (map[string]*model.User, error) {
+	users := make(map[string]*model.User, 2)
+	for _, userID := range orderedDistinctUserIDs(inviteeID, inviterID) {
+		user, err := repo.LockByID(ctx, userID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) && userID == inviteeID {
+				return nil, ErrBillingUserNotFound
+			}
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrBillingConflict
+			}
+			return nil, err
+		}
+		users[userID] = user
+	}
+	return users, nil
 }
 
 func orderedDistinctUserIDs(userIDs ...string) []string {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,88 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+const billingCatalogUserID = "40000000-0000-4000-8000-000000000001"
+
+func TestBillingCatalogCanonicalRequestValidationPrecedesSQL(t *testing.T) {
+	bundle := testBillingBundle()
+	validQuote := QuoteRequest{
+		UserID: billingCatalogUserID, CatalogID: bundle.Products.CatalogID, Operation: "task.article",
+		RequestFingerprint: billingFingerprint("canonical-quote"), IdempotencyScope: "quote", IdempotencyKey: "canonical-quote",
+	}
+	quoteCases := []struct {
+		name   string
+		mutate func(*QuoteRequest)
+	}{
+		{name: "invalid user UUID", mutate: func(req *QuoteRequest) { req.UserID = "not-a-uuid" }},
+		{name: "empty operation", mutate: func(req *QuoteRequest) { req.Operation = " " }},
+		{name: "operation too long", mutate: func(req *QuoteRequest) { req.Operation = strings.Repeat("o", 129) }},
+		{name: "route too long", mutate: func(req *QuoteRequest) { req.Route = strings.Repeat("r", 129) }},
+		{name: "catalog too long", mutate: func(req *QuoteRequest) { req.CatalogID = strings.Repeat("c", 129) }},
+		{name: "scope too long", mutate: func(req *QuoteRequest) { req.IdempotencyScope = strings.Repeat("s", 81) }},
+		{name: "key too long", mutate: func(req *QuoteRequest) { req.IdempotencyKey = strings.Repeat("k", 129) }},
+		{name: "invalid fingerprint", mutate: func(req *QuoteRequest) { req.RequestFingerprint = "not-a-fingerprint" }},
+	}
+	for _, tt := range quoteCases {
+		t.Run("quote "+tt.name, func(t *testing.T) {
+			guard := &billingCatalogAccessGuard{Repository: newBillingServiceRepository(t)}
+			svc := NewBillingCatalogService(guard, &bundle, BillingCatalogOptions{})
+			req := validQuote
+			tt.mutate(&req)
+			if _, err := svc.CreateQuote(context.Background(), req); !errors.Is(err, ErrBillingInvalid) {
+				t.Fatalf("CreateQuote error = %v, want ErrBillingInvalid", err)
+			}
+			if guard.calls != 0 {
+				t.Fatalf("invalid quote made %d billing repository calls", guard.calls)
+			}
+		})
+	}
+
+	resolveCases := []struct {
+		name      string
+		catalogID string
+		operation string
+		route     string
+	}{
+		{name: "empty operation", catalogID: bundle.Products.CatalogID, operation: " "},
+		{name: "operation too long", catalogID: bundle.Products.CatalogID, operation: strings.Repeat("o", 129)},
+		{name: "route too long", catalogID: bundle.Products.CatalogID, operation: "task.article", route: strings.Repeat("r", 129)},
+		{name: "catalog too long", catalogID: strings.Repeat("c", 129), operation: "task.article"},
+	}
+	for _, tt := range resolveCases {
+		t.Run("resolve "+tt.name, func(t *testing.T) {
+			guard := &billingCatalogAccessGuard{Repository: newBillingServiceRepository(t)}
+			svc := NewBillingCatalogService(guard, &bundle, BillingCatalogOptions{})
+			if _, err := svc.ResolveSKU(context.Background(), tt.catalogID, tt.operation, tt.route); !errors.Is(err, ErrBillingInvalid) {
+				t.Fatalf("ResolveSKU error = %v, want ErrBillingInvalid", err)
+			}
+			if guard.calls != 0 {
+				t.Fatalf("invalid SKU resolution made %d billing repository calls", guard.calls)
+			}
+		})
+	}
+}
+
+func TestBillingCatalogCanonicalQuoteTrimsPersistedIdentity(t *testing.T) {
+	repo := newBillingServiceRepository(t)
+	bundle := testBillingBundle()
+	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{})
+	if _, err := svc.Publish(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	quote, err := svc.CreateQuote(context.Background(), QuoteRequest{
+		UserID: "  " + billingCatalogUserID + "  ", CatalogID: "  " + bundle.Products.CatalogID + "  ",
+		Operation: "  task.article  ", Route: "  ", RequestFingerprint: "  " + billingFingerprint("trimmed") + "  ",
+		IdempotencyScope: "  quote  ", IdempotencyKey: "  trimmed  ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quote.UserID != billingCatalogUserID || quote.CatalogID != bundle.Products.CatalogID ||
+		quote.IdempotencyScope != "quote" || quote.IdempotencyKey != "trimmed" || quote.RequestFingerprint != billingFingerprint("trimmed") {
+		t.Fatalf("canonical quote = %+v", quote)
+	}
+}
 
 func TestBillingCatalogPublishesImmutableSnapshot(t *testing.T) {
 	ctx := context.Background()
@@ -86,7 +169,7 @@ func TestBillingCatalogQuoteReplayAndConflict(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 	req := QuoteRequest{
-		UserID: "u1", Operation: "task.article", Route: "", RequestFingerprint: billingFingerprint("quote-request"),
+		UserID: billingCatalogUserID, Operation: "task.article", Route: "", RequestFingerprint: billingFingerprint("quote-request"),
 		IdempotencyScope: "quote", IdempotencyKey: "quote-key-1",
 	}
 	first, err := svc.CreateQuote(ctx, req)
@@ -118,7 +201,7 @@ func TestBillingCatalogQuoteReplaySurvivesLatestCatalogRollover(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := QuoteRequest{
-		UserID: "u1", Operation: "task.article", RequestFingerprint: billingFingerprint("rollover"),
+		UserID: billingCatalogUserID, Operation: "task.article", RequestFingerprint: billingFingerprint("rollover"),
 		IdempotencyScope: "quote", IdempotencyKey: "rollover",
 	}
 	first, err := firstService.CreateQuote(ctx, req)
@@ -144,6 +227,35 @@ func TestBillingCatalogQuoteReplaySurvivesLatestCatalogRollover(t *testing.T) {
 	if _, err := secondService.CreateQuote(ctx, conflict); !errors.Is(err, ErrBillingConflict) {
 		t.Fatalf("rollover parameter drift error = %v, want conflict", err)
 	}
+}
+
+type billingCatalogAccessGuard struct {
+	repository.Repository
+	calls int
+}
+
+func (r *billingCatalogAccessGuard) Billing() repository.BillingRepository {
+	return &billingCatalogAccessGuardRepository{BillingRepository: r.Repository.Billing(), calls: &r.calls}
+}
+
+type billingCatalogAccessGuardRepository struct {
+	repository.BillingRepository
+	calls *int
+}
+
+func (r *billingCatalogAccessGuardRepository) FindQuoteByKey(ctx context.Context, scope, key string) (*model.BillingQuote, error) {
+	*r.calls++
+	return r.BillingRepository.FindQuoteByKey(ctx, scope, key)
+}
+
+func (r *billingCatalogAccessGuardRepository) FindLatestPublishedCatalog(ctx context.Context) (*model.BillingCatalogVersion, error) {
+	*r.calls++
+	return r.BillingRepository.FindLatestPublishedCatalog(ctx)
+}
+
+func (r *billingCatalogAccessGuardRepository) FindSKUByOperation(ctx context.Context, catalogID, operation, route string) (*model.BillingSKU, error) {
+	*r.calls++
+	return r.BillingRepository.FindSKUByOperation(ctx, catalogID, operation, route)
 }
 
 func TestBillingCatalogPublishUsesSemanticJSONAndCompleteSKUEvidence(t *testing.T) {

@@ -27,6 +27,8 @@ const (
 	BillingCodeUnauthorized              = 40101
 	BillingCodeResourceNotFound          = 40400
 	BillingCodeSKUNotFound               = 40401
+	BillingCodeCatalogNotFound           = 40402
+	BillingCodeUserNotFound              = 40403
 	BillingCodeChargeConflict            = 40901
 	BillingCodeQuoteConsumed             = 40902
 	BillingCodeQuoteMismatch             = 40903
@@ -218,11 +220,15 @@ func (h *BillingHandler) Referral(c fiber.Ctx) error {
 }
 
 func (h *BillingHandler) AdminAuth(c fiber.Ctx) error {
-	provided := strings.TrimSpace(c.Get("X-Admin-API-Key"))
-	if provided == "" {
-		provided = strings.TrimSpace(c.Get("Authorization"))
-		if len(provided) >= 7 && strings.EqualFold(provided[:7], "Bearer ") {
-			provided = strings.TrimSpace(provided[7:])
+	adminKey := strings.TrimSpace(c.Get("X-Admin-API-Key"))
+	authorization := strings.TrimSpace(c.Get("Authorization"))
+	provided := ""
+	if adminKey != "" && authorization == "" {
+		provided = adminKey
+	} else if adminKey == "" && len(authorization) > 7 && strings.EqualFold(authorization[:7], "Bearer ") {
+		candidate := authorization[7:]
+		if strings.TrimSpace(candidate) == candidate && !strings.ContainsAny(candidate, " \t\r\n") {
+			provided = candidate
 		}
 	}
 	expectedDigest := sha256.Sum256([]byte(h.adminAPIKey))
@@ -252,13 +258,17 @@ func (h *BillingHandler) AdminTopUp(c fiber.Ctx) error {
 		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
 		return billingErrorResponse(c, fiber.StatusBadRequest, BillingCodeInvalid, "billing_invalid")
 	}
-	result, err := h.referrals.TopUp(c.Context(), service.TopUpRequest{
+	topUpRequest, err := service.CanonicalTopUpRequest(service.TopUpRequest{
 		UserID: req.UserID, Credits: req.Credits, ExternalSourceType: req.ExternalSourceType, ExternalSourceID: req.ExternalSourceID,
 		CatalogID: req.CatalogID, RequestFingerprint: req.RequestFingerprint,
 		IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey,
 		ActorType: "admin", ActorID: "billing_api", SourceService: "billing-api",
 		RequestID: req.RequestID, CorrelationID: req.CorrelationID,
 	})
+	if err != nil {
+		return writeBillingServiceError(c, err)
+	}
+	result, err := h.referrals.TopUp(c.Context(), topUpRequest)
 	if err != nil {
 		return writeBillingServiceError(c, err)
 	}
@@ -305,6 +315,10 @@ func writeBillingServiceError(c fiber.Ctx, err error) error {
 		return billingErrorResponse(c, fiber.StatusPaymentRequired, BillingCodeInsufficientForStandalone, "billing_insufficient_for_standalone_operation")
 	case errors.Is(err, service.ErrBillingSKUNotFound):
 		return billingErrorResponse(c, fiber.StatusNotFound, BillingCodeSKUNotFound, "billing_sku_not_found")
+	case errors.Is(err, service.ErrBillingCatalogNotFound):
+		return billingErrorResponse(c, fiber.StatusNotFound, BillingCodeCatalogNotFound, "billing_catalog_not_found")
+	case errors.Is(err, service.ErrBillingUserNotFound):
+		return billingErrorResponse(c, fiber.StatusNotFound, BillingCodeUserNotFound, "billing_user_not_found")
 	case errors.Is(err, service.ErrBillingConflict):
 		return billingErrorResponse(c, fiber.StatusConflict, BillingCodeChargeConflict, "billing_charge_conflict")
 	case errors.Is(err, service.ErrBillingQuoteConsumed):

@@ -23,7 +23,48 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	billingHandlerInviterID = "30000000-0000-4000-8000-000000000001"
+	billingHandlerInviteeID = "30000000-0000-4000-8000-000000000002"
+)
+
 func TestBillingHandler(t *testing.T) {
+	t.Run("admin auth accepts exactly one canonical credential", func(t *testing.T) {
+		f := newBillingHandlerFixture(t)
+		tests := []struct {
+			name    string
+			headers map[string]string
+			status  int
+		}{
+			{name: "admin header", headers: map[string]string{"X-Admin-API-Key": f.adminKey}, status: http.StatusNoContent},
+			{name: "bearer", headers: map[string]string{"Authorization": "Bearer " + f.adminKey}, status: http.StatusNoContent},
+			{name: "raw authorization", headers: map[string]string{"Authorization": f.adminKey}, status: http.StatusUnauthorized},
+			{name: "basic authorization", headers: map[string]string{"Authorization": "Basic " + f.adminKey}, status: http.StatusUnauthorized},
+			{name: "empty bearer", headers: map[string]string{"Authorization": "Bearer"}, status: http.StatusUnauthorized},
+			{name: "double spaced bearer", headers: map[string]string{"Authorization": "Bearer  " + f.adminKey}, status: http.StatusUnauthorized},
+			{name: "both credentials", headers: map[string]string{"X-Admin-API-Key": f.adminKey, "Authorization": "Bearer " + f.adminKey}, status: http.StatusUnauthorized},
+			{name: "wrong admin header", headers: map[string]string{"X-Admin-API-Key": "wrong"}, status: http.StatusUnauthorized},
+			{name: "wrong bearer", headers: map[string]string{"Authorization": "Bearer wrong"}, status: http.StatusUnauthorized},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				app := fiber.New()
+				app.Get("/", f.handler.AdminAuth, func(c fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
+				for name, value := range tt.headers {
+					req.Header.Set(name, value)
+				}
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resp.StatusCode != tt.status {
+					t.Fatalf("status = %d, want %d", resp.StatusCode, tt.status)
+				}
+			})
+		}
+	})
+
 	t.Run("service errors keep exact public identities", func(t *testing.T) {
 		tests := []struct {
 			name   string
@@ -33,6 +74,8 @@ func TestBillingHandler(t *testing.T) {
 			msg    string
 		}{
 			{name: "SKU not found", err: service.ErrBillingSKUNotFound, status: http.StatusNotFound, code: 40401, msg: "billing_sku_not_found"},
+			{name: "catalog not found", err: service.ErrBillingCatalogNotFound, status: http.StatusNotFound, code: 40402, msg: "billing_catalog_not_found"},
+			{name: "user not found", err: service.ErrBillingUserNotFound, status: http.StatusNotFound, code: 40403, msg: "billing_user_not_found"},
 			{name: "charge conflict", err: service.ErrBillingConflict, status: http.StatusConflict, code: 40901, msg: "billing_charge_conflict"},
 			{name: "quote expired", err: service.ErrBillingQuoteExpired, status: http.StatusGone, code: 41001, msg: "billing_quote_expired"},
 			{name: "debt outstanding", err: service.ErrBillingDebtOutstanding, status: http.StatusPaymentRequired, code: 40201, msg: "billing_debt_outstanding"},
@@ -173,11 +216,79 @@ func TestBillingHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("admin topup rejects invalid provenance before wallet mutation", func(t *testing.T) {
+		const missingUserID = "30000000-0000-4000-8000-000000000099"
+		tests := []struct {
+			name    string
+			prepare func(*testing.T, *billingHandlerFixture, map[string]any)
+			status  int
+			code    int
+			msg     string
+		}{
+			{
+				name: "missing user", status: http.StatusNotFound, code: BillingCodeUserNotFound, msg: "billing_user_not_found",
+				prepare: func(_ *testing.T, _ *billingHandlerFixture, body map[string]any) { body["user_id"] = missingUserID },
+			},
+			{
+				name: "missing catalog", status: http.StatusNotFound, code: BillingCodeCatalogNotFound, msg: "billing_catalog_not_found",
+				prepare: func(_ *testing.T, _ *billingHandlerFixture, body map[string]any) {
+					body["catalog_id"] = "retail-missing-v1"
+				},
+			},
+			{
+				name: "unpublished catalog", status: http.StatusNotFound, code: BillingCodeCatalogNotFound, msg: "billing_catalog_not_found",
+				prepare: func(t *testing.T, f *billingHandlerFixture, body map[string]any) {
+					body["catalog_id"] = "retail-draft-v1"
+					if err := f.repo.Billing().CreateCatalogVersion(context.Background(), &model.BillingCatalogVersion{
+						CatalogID: "retail-draft-v1", Currency: "credits", Status: "draft", PublishedAt: time.Now().UTC(), Snapshot: []byte(`{}`), CreatedAt: time.Now().UTC(),
+					}); err != nil {
+						t.Fatal(err)
+					}
+				},
+			},
+			{
+				name: "invalid user UUID", status: http.StatusBadRequest, code: BillingCodeInvalid, msg: "billing_invalid",
+				prepare: func(_ *testing.T, _ *billingHandlerFixture, body map[string]any) { body["user_id"] = "not-a-uuid" },
+			},
+			{
+				name: "overlong source type", status: http.StatusBadRequest, code: BillingCodeInvalid, msg: "billing_invalid",
+				prepare: func(_ *testing.T, _ *billingHandlerFixture, body map[string]any) {
+					body["external_source_type"] = strings.Repeat("s", 41)
+				},
+			},
+			{
+				name: "overlong request ID", status: http.StatusBadRequest, code: BillingCodeInvalid, msg: "billing_invalid",
+				prepare: func(_ *testing.T, _ *billingHandlerFixture, body map[string]any) {
+					body["request_id"] = strings.Repeat("r", 129)
+				},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				f := newBillingHandlerFixture(t)
+				body := f.topUpBody("rejected-"+tt.name, 10_000)
+				tt.prepare(t, f, body)
+				resp := f.adminRequest(t, f.adminKey, body)
+				assertBillingHTTPMessage(t, resp, tt.status, tt.code, tt.msg)
+
+				for _, userID := range []string{f.inviteeID, missingUserID} {
+					if _, err := f.repo.Billing().FindAccount(context.Background(), userID); !errorsIsRecordNotFound(err) {
+						t.Fatalf("rejected topup created wallet for %s: %v", userID, err)
+					}
+					entries, err := f.repo.Billing().ListEntriesByUser(context.Background(), userID, 0, 10)
+					if err != nil || len(entries) != 0 {
+						t.Fatalf("rejected topup entries for %s = %+v, %v", userID, entries, err)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("capped referral summary is read only", func(t *testing.T) {
 		f := newBillingHandlerFixture(t)
 		if err := f.repo.Billing().CreateReferralIssue(context.Background(), &model.BillingReferralIssue{
 			ID: uuid.NewString(), ProgramID: "referral-handler-v1", CatalogID: "promotion-handler-v1",
-			InviteeUserID: f.inviteeID, InviterUserID: "inviter", QualifyingTopUpEntryID: uuid.NewString(),
+			InviteeUserID: f.inviteeID, InviterUserID: billingHandlerInviterID, QualifyingTopUpEntryID: uuid.NewString(),
 			RequestFingerprint: strings.Repeat("e", 64), Status: model.BillingReferralStatusCapped,
 		}); err != nil {
 			t.Fatal(err)
@@ -261,8 +372,8 @@ func newBillingHandlerFixture(t *testing.T) *billingHandlerFixture {
 	wallet := service.NewBillingWalletService(repo, &bundle, service.BillingWalletOptions{Now: func() time.Time { return now }})
 	referrals := service.NewBillingReferralService(repo, wallet, &bundle, service.BillingReferralOptions{Now: func() time.Time { return now }})
 	for _, user := range []model.User{
-		{ID: "inviter", Email: "inviter@billing.test", Password: "x", InviteCode: "INVITER"},
-		{ID: "invitee", Email: "invitee@billing.test", Password: "x", InviteCode: "INVITEE", InvitedBy: "inviter"},
+		{ID: billingHandlerInviterID, Email: "inviter@billing.test", Password: "x", InviteCode: "INVITER"},
+		{ID: billingHandlerInviteeID, Email: "invitee@billing.test", Password: "x", InviteCode: "INVITEE", InvitedBy: billingHandlerInviterID},
 	} {
 		user := user
 		if err := repo.Users().Create(context.Background(), &user); err != nil {
@@ -272,7 +383,7 @@ func newBillingHandlerFixture(t *testing.T) *billingHandlerFixture {
 	logger := zerolog.New(io.Discard)
 	const adminKey = "billing-handler-admin-secret"
 	return &billingHandlerFixture{
-		repo: repo, db: db, inviteeID: "invitee", adminKey: adminKey, bundle: bundle,
+		repo: repo, db: db, inviteeID: billingHandlerInviteeID, adminKey: adminKey, bundle: bundle,
 		handler: NewBillingHandler(repo, catalog, referrals, &bundle, BillingHandlerOptions{
 			AdminAPIKey: adminKey, InviteBaseURL: "https://creator.anbanai.com/register?invite=",
 		}, &logger),

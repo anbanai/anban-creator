@@ -519,8 +519,14 @@ func validatePromotions(raw rawPromotionCatalog) (PromotionCatalog, error) {
 		if err != nil || expiresAfter <= 0 {
 			return promotions, configError("promotions.yaml", field+".expires_after", errors.New("must be a positive duration"))
 		}
-		if rawProgram.InviterCredits < 0 || rawProgram.InviteeCredits < 0 || rawProgram.MaxInviterRewards < 0 {
-			return promotions, configError("promotions.yaml", field, errors.New("credit values and max_inviter_rewards must be non-negative"))
+		if rawProgram.InviterCredits <= 0 {
+			return promotions, configError("promotions.yaml", field+".inviter_credits", errors.New("must be positive"))
+		}
+		if rawProgram.InviteeCredits <= 0 {
+			return promotions, configError("promotions.yaml", field+".invitee_credits", errors.New("must be positive"))
+		}
+		if rawProgram.MaxInviterRewards < 0 {
+			return promotions, configError("promotions.yaml", field+".max_inviter_rewards", errors.New("must be non-negative"))
 		}
 		promotions.Programs = append(promotions.Programs, ReferralProgram{
 			ID: programID, Trigger: trigger, MinimumTopUpCNY: minimum,

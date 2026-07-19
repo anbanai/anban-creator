@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,11 @@ import (
 	"github.com/mattn/go-sqlite3"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+)
+
+const (
+	billingWalletUserID    = "10000000-0000-4000-8000-000000000001"
+	billingWalletNewUserID = "10000000-0000-4000-8000-000000000002"
 )
 
 func TestBillingTopUpRequiresCanonicalIdentity(t *testing.T) {
@@ -33,12 +39,25 @@ func TestBillingTopUpRequiresCanonicalIdentity(t *testing.T) {
 		{name: "request fingerprint", mutate: func(req *TopUpRequest) { req.RequestFingerprint = "" }},
 		{name: "idempotency scope", mutate: func(req *TopUpRequest) { req.IdempotencyScope = "" }},
 		{name: "idempotency key", mutate: func(req *TopUpRequest) { req.IdempotencyKey = "" }},
+		{name: "invalid user UUID", mutate: func(req *TopUpRequest) { req.UserID = "not-a-uuid" }},
+		{name: "source type too long", mutate: func(req *TopUpRequest) { req.ExternalSourceType = strings.Repeat("s", 41) }},
+		{name: "source ID too long", mutate: func(req *TopUpRequest) { req.ExternalSourceID = strings.Repeat("s", 129) }},
+		{name: "catalog ID too long", mutate: func(req *TopUpRequest) { req.CatalogID = strings.Repeat("c", 129) }},
+		{name: "scope too long", mutate: func(req *TopUpRequest) { req.IdempotencyScope = strings.Repeat("s", 81) }},
+		{name: "key too long", mutate: func(req *TopUpRequest) { req.IdempotencyKey = strings.Repeat("k", 129) }},
+		{name: "actor type too long", mutate: func(req *TopUpRequest) { req.ActorType = strings.Repeat("a", 41) }},
+		{name: "actor ID too long", mutate: func(req *TopUpRequest) { req.ActorID = strings.Repeat("a", 129) }},
+		{name: "source service too long", mutate: func(req *TopUpRequest) { req.SourceService = strings.Repeat("s", 81) }},
+		{name: "request ID too long", mutate: func(req *TopUpRequest) { req.RequestID = strings.Repeat("r", 129) }},
+		{name: "correlation ID too long", mutate: func(req *TopUpRequest) { req.CorrelationID = strings.Repeat("c", 129) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newBillingWalletFixture(t, 0, 0, 0)
+			guard := &rejectNestedTxRepository{Repository: f.repo}
+			f.wallet.repo = guard
 			req := TopUpRequest{
-				UserID: "u1", Credits: 1_000, ExternalSourceType: "payment", ExternalSourceID: "canonical-" + tt.name,
+				UserID: billingWalletUserID, Credits: 1_000, ExternalSourceType: "payment", ExternalSourceID: "canonical-" + tt.name,
 				CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("canonical", tt.name),
 				IdempotencyScope: "topup", IdempotencyKey: "canonical-" + tt.name,
 			}
@@ -46,14 +65,120 @@ func TestBillingTopUpRequiresCanonicalIdentity(t *testing.T) {
 			if _, err := f.wallet.TopUp(context.Background(), req); !errors.Is(err, ErrBillingInvalid) {
 				t.Fatalf("TopUp error = %v, want ErrBillingInvalid", err)
 			}
+			if guard.withTxCalls != 0 {
+				t.Fatalf("invalid TopUp opened %d transactions", guard.withTxCalls)
+			}
 		})
+	}
+	canonical, err := CanonicalTopUpRequest(TopUpRequest{
+		UserID: " " + billingWalletUserID + " ", Credits: 1_000,
+		ExternalSourceType: " payment ", ExternalSourceID: " source ", CatalogID: " retail-test-v1 ",
+		RequestFingerprint: " " + billingFingerprint("canonical-metadata") + " ",
+		IdempotencyScope:   " topup ", IdempotencyKey: " key ", ActorType: " admin ", ActorID: " actor ",
+		SourceService: " billing-api ", RequestID: " request ", CorrelationID: " correlation ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonical.ActorType != "admin" || canonical.ActorID != "actor" || canonical.SourceService != "billing-api" ||
+		canonical.RequestID != "request" || canonical.CorrelationID != "correlation" {
+		t.Fatalf("canonical metadata = %+v", canonical)
+	}
+}
+
+func TestBillingTopUpRequiresExistingUserAndPublishedCatalogBeforeMutation(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*testing.T, *billingWalletFixture, *TopUpRequest)
+		wantErr error
+	}{
+		{
+			name: "missing user",
+			prepare: func(_ *testing.T, _ *billingWalletFixture, req *TopUpRequest) {
+				req.UserID = "10000000-0000-4000-8000-000000000099"
+			},
+			wantErr: ErrBillingUserNotFound,
+		},
+		{
+			name: "missing catalog",
+			prepare: func(_ *testing.T, _ *billingWalletFixture, req *TopUpRequest) {
+				req.CatalogID = "retail-missing-v1"
+			},
+			wantErr: ErrBillingCatalogNotFound,
+		},
+		{
+			name: "unpublished catalog",
+			prepare: func(t *testing.T, f *billingWalletFixture, req *TopUpRequest) {
+				req.CatalogID = "retail-draft-v1"
+				if err := f.repo.Billing().CreateCatalogVersion(context.Background(), &model.BillingCatalogVersion{
+					CatalogID: req.CatalogID, Currency: "credits", Status: "draft", PublishedAt: f.now, Snapshot: []byte(`{}`), CreatedAt: f.now,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: ErrBillingCatalogNotFound,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newBillingWalletFixture(t, 0, 0, 0)
+			req := TopUpRequest{
+				UserID: billingWalletUserID, Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "provenance-" + tt.name,
+				CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("provenance", tt.name),
+				IdempotencyScope: "topup", IdempotencyKey: "provenance-" + tt.name,
+			}
+			tt.prepare(t, f, &req)
+			if _, err := f.wallet.TopUp(context.Background(), req); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("TopUp error = %v, want %v", err, tt.wantErr)
+			}
+			entries, err := f.repo.Billing().ListEntriesByUser(context.Background(), req.UserID, 0, 10)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("entries after rejected topup = %+v, %v", entries, err)
+			}
+			if _, err := f.repo.Billing().FindLotBySource(context.Background(), req.ExternalSourceType, req.ExternalSourceID); !errors.Is(err, gorm.ErrRecordNotFound) {
+				t.Fatalf("lot after rejected topup = %v", err)
+			}
+			if tt.name == "missing user" {
+				if _, err := f.repo.Billing().FindAccount(context.Background(), req.UserID); !errors.Is(err, gorm.ErrRecordNotFound) {
+					t.Fatalf("orphan wallet after missing user topup = %v", err)
+				}
+			} else if account := f.account(t, billingWalletUserID); account.Version != 0 || account.PaidCredits != 0 {
+				t.Fatalf("wallet mutated by rejected topup: %+v", account)
+			}
+		})
+	}
+}
+
+func TestBillingTopUpInTxCatalogFailureDoesNotPoisonCallerTransaction(t *testing.T) {
+	f := newBillingWalletFixture(t, 0, 0, 0)
+	req := TopUpRequest{
+		UserID: billingWalletUserID, Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "missing-catalog-in-tx",
+		CatalogID: "retail-missing-v1", RequestFingerprint: billingFingerprint("missing-catalog-in-tx"),
+		IdempotencyScope: "topup", IdempotencyKey: "missing-catalog-in-tx",
+	}
+	markerID := uuid.NewString()
+	if err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
+		if _, err := f.wallet.TopUpInTx(context.Background(), tx, req); !errors.Is(err, ErrBillingCatalogNotFound) {
+			t.Fatalf("TopUpInTx error = %v, want ErrBillingCatalogNotFound", err)
+		}
+		return tx.Tasks().Create(context.Background(), &model.Task{
+			ID: markerID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusPending,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.Tasks().FindByID(context.Background(), markerID); err != nil {
+		t.Fatalf("caller transaction marker missing: %v", err)
+	}
+	if account := f.account(t, billingWalletUserID); account.Version != 0 || account.PaidCredits != 0 {
+		t.Fatalf("wallet mutated by missing catalog: %+v", account)
 	}
 }
 
 func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.T) {
 	t.Run("debt", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 1)
-		quote := f.quote(t, "u1", "task.article", "", "task-debt")
+		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-debt")
 		_, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-debt", "charge-debt"))
 		if !errors.Is(err, ErrBillingDebtOutstanding) {
 			t.Fatalf("ChargeTaskAdmission error = %v, want ErrBillingDebtOutstanding", err)
@@ -62,7 +187,7 @@ func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.
 
 	t.Run("insufficient", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 499, 0, 0)
-		quote := f.quote(t, "u1", "task.article", "", "task-insufficient")
+		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-insufficient")
 		_, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-insufficient", "charge-insufficient"))
 		if !errors.Is(err, ErrBillingInsufficientForTask) {
 			t.Fatalf("ChargeTaskAdmission error = %v, want ErrBillingInsufficientForTask", err)
@@ -71,7 +196,7 @@ func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.
 
 	t.Run("replay and conflict", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, "u1", "task.article", "", "task-replay")
+		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-replay")
 		req := taskChargeRequest(quote, "task-replay", "charge-replay")
 		first, err := f.wallet.ChargeTaskAdmission(context.Background(), req)
 		if err != nil {
@@ -86,7 +211,7 @@ func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.
 		if _, err := f.wallet.ChargeTaskAdmission(context.Background(), conflict); !errors.Is(err, ErrBillingConflict) {
 			t.Fatalf("conflicting replay error = %v, want ErrBillingConflict", err)
 		}
-		account := f.account(t, "u1")
+		account := f.account(t, billingWalletUserID)
 		if account.PaidCredits != 0 || account.DebtCredits != 0 {
 			t.Fatalf("account after replay = %+v", account)
 		}
@@ -95,7 +220,7 @@ func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.
 
 func TestBillingWalletTaskAdmissionInTxRollsBackWithCaller(t *testing.T) {
 	f := newBillingWalletFixture(t, 500, 0, 0)
-	quote := f.quote(t, "u1", "task.article", "", "task-caller-tx")
+	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-caller-tx")
 	req := taskChargeRequest(quote, "task-caller-tx", "charge-caller-tx")
 	errRollback := errors.New("rollback caller transaction")
 	err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
@@ -119,18 +244,18 @@ func TestBillingWalletTaskAdmissionInTxRollsBackWithCaller(t *testing.T) {
 	if _, err := f.repo.Billing().FindChargeByKey(context.Background(), req.IdempotencyScope, req.IdempotencyKey); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("charge after rollback error = %v, want not found", err)
 	}
-	entries, err := f.repo.Billing().ListEntriesByUser(context.Background(), "u1", 0, 10)
+	entries, err := f.repo.Billing().ListEntriesByUser(context.Background(), billingWalletUserID, 0, 10)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("entries after rollback = %+v, %v", entries, err)
 	}
-	if got := f.account(t, "u1"); got.PaidCredits != 500 || got.Version != 0 {
+	if got := f.account(t, billingWalletUserID); got.PaidCredits != 500 || got.Version != 0 {
 		t.Fatalf("account after rollback = %+v", got)
 	}
 }
 
 func TestBillingWalletTaskAdmissionInTxInsufficientDoesNotPartiallyMutateCommittedCaller(t *testing.T) {
 	f := newBillingWalletFixture(t, 499, 0, 0)
-	quote := f.quote(t, "u1", "task.article", "", "task-insufficient-commit")
+	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-insufficient-commit")
 	req := taskChargeRequest(quote, "task-insufficient-commit", "charge-insufficient-commit")
 	markerID := uuid.NewString()
 	if err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
@@ -138,7 +263,7 @@ func TestBillingWalletTaskAdmissionInTxInsufficientDoesNotPartiallyMutateCommitt
 			t.Fatalf("admission error = %v, want insufficient", err)
 		}
 		return tx.Tasks().Create(context.Background(), &model.Task{
-			ID: markerID, UserID: "u1", Type: model.PlatformArticle, Status: model.TaskStatusPending,
+			ID: markerID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusPending,
 		})
 	}); err != nil {
 		t.Fatalf("commit caller transaction: %v", err)
@@ -150,7 +275,7 @@ func TestBillingWalletTaskAdmissionInTxInsufficientDoesNotPartiallyMutateCommitt
 	if err != nil || lot.AvailableCredits != 499 || lot.ConsumedCredits != 0 {
 		t.Fatalf("lot after committed insufficient admission = %+v, %v", lot, err)
 	}
-	if got := f.account(t, "u1"); got.PaidCredits != 499 || got.Version != 0 {
+	if got := f.account(t, billingWalletUserID); got.PaidCredits != 499 || got.Version != 0 {
 		t.Fatalf("account after committed insufficient admission = %+v", got)
 	}
 	persistedQuote, err := f.repo.Billing().FindQuoteByKey(context.Background(), quote.IdempotencyScope, quote.IdempotencyKey)
@@ -191,7 +316,7 @@ func TestBillingWalletRejectsQuoteWithMismatchedSKUSnapshot(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newBillingWalletFixture(t, 500, 0, 0)
-			valid := f.quote(t, "u1", tt.operation, tt.route, "snapshot-"+tt.name)
+			valid := f.quote(t, billingWalletUserID, tt.operation, tt.route, "snapshot-"+tt.name)
 			mismatch := *valid
 			mismatch.ID = uuid.NewString()
 			mismatch.IdempotencyKey += "-mismatch"
@@ -246,7 +371,7 @@ func TestBillingWalletDoesNotMapLotDatabaseErrorToInsufficient(t *testing.T) {
 			repo := repository.New(db)
 			t.Cleanup(func() { _ = repo.Close() })
 			f := newBillingWalletFixtureWithRepository(t, repo, 500, 0, 0)
-			quote := f.quote(t, "u1", tt.operation, tt.route, "db-error-"+tt.name)
+			quote := f.quote(t, billingWalletUserID, tt.operation, tt.route, "db-error-"+tt.name)
 			errInjected := errors.New("injected lot query failure")
 			if err := db.Callback().Query().Before("gorm:query").Register("billing_test:lot_error", func(tx *gorm.DB) {
 				if tx.Statement.Table == "billing_credit_lots" {
@@ -264,7 +389,7 @@ func TestBillingWalletDoesNotMapLotDatabaseErrorToInsufficient(t *testing.T) {
 
 func TestAcceptedTaskOperationMayCreateDebt(t *testing.T) {
 	f := newBillingWalletFixture(t, 100, 0, 0)
-	req := acceptedOperationRequest("u1", "task-1", "attempt-1", "call-1", "operation-1")
+	req := acceptedOperationRequest(billingWalletUserID, "task-1", "attempt-1", "call-1", "operation-1")
 	c, err := f.wallet.ChargeAcceptedOperation(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ChargeAcceptedOperation: %v", err)
@@ -272,7 +397,7 @@ func TestAcceptedTaskOperationMayCreateDebt(t *testing.T) {
 	if c.PriceCredits != 500 || c.PaidCredits != 100 || c.PromotionalCredits != 0 || c.DebtCredits != 400 {
 		t.Fatalf("charge = %+v", c)
 	}
-	if got := f.account(t, "u1"); got.PaidCredits != 0 || got.DebtCredits != 400 {
+	if got := f.account(t, billingWalletUserID); got.PaidCredits != 0 || got.DebtCredits != 400 {
 		t.Fatalf("account = %+v", got)
 	}
 	second, err := f.wallet.ChargeAcceptedOperation(context.Background(), req)
@@ -289,13 +414,13 @@ func TestAcceptedTaskOperationMayCreateDebt(t *testing.T) {
 func TestBillingWalletChargeReplayRejectsImmutableIdentityDrift(t *testing.T) {
 	t.Run("task identity", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 1000, 0, 0)
-		quote := f.quote(t, "u1", "task.article", "", "task-identity")
+		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-identity")
 		req := taskChargeRequest(quote, "task-identity", "task-identity-key")
 		if _, err := f.wallet.ChargeTaskAdmission(context.Background(), req); err != nil {
 			t.Fatal(err)
 		}
 		secondQuote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{
-			UserID: "u1", Operation: "task.article", RequestFingerprint: quote.RequestFingerprint,
+			UserID: billingWalletUserID, Operation: "task.article", RequestFingerprint: quote.RequestFingerprint,
 			IdempotencyScope: "quote", IdempotencyKey: "task-identity-second-quote",
 		})
 		if err != nil {
@@ -318,7 +443,7 @@ func TestBillingWalletChargeReplayRejectsImmutableIdentityDrift(t *testing.T) {
 
 	t.Run("accepted operation identity", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 1000, 0, 0)
-		req := acceptedOperationRequest("u1", "task-operation-identity", "attempt-operation-identity", "call-operation-identity", "operation-identity")
+		req := acceptedOperationRequest(billingWalletUserID, "task-operation-identity", "attempt-operation-identity", "call-operation-identity", "operation-identity")
 		if _, err := f.wallet.ChargeAcceptedOperation(context.Background(), req); err != nil {
 			t.Fatal(err)
 		}
@@ -347,7 +472,7 @@ func TestBillingWalletPromotionEligibilityAndExpiryBoundary(t *testing.T) {
 	f.wallet.promotionEligible = func(lot model.BillingCreditLot, sku model.BillingSKU) bool {
 		return lot.SourceID != "promo-ineligible"
 	}
-	quote := f.quote(t, "u1", "task.article", "", "task-promo-ineligible")
+	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-promo-ineligible")
 	charge, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-promo-ineligible", "charge-promo-ineligible"))
 	if err != nil || charge.PaidCredits != 500 || charge.PromotionalCredits != 0 {
 		t.Fatalf("ineligible promotion charge = %+v, %v", charge, err)
@@ -355,7 +480,7 @@ func TestBillingWalletPromotionEligibilityAndExpiryBoundary(t *testing.T) {
 
 	f2 := newBillingWalletFixture(t, 0, 0, 0)
 	f2.addPromotion(t, "promo-at-boundary", 500, f2.now)
-	quote2 := f2.quote(t, "u1", "task.article", "", "task-promo-expired")
+	quote2 := f2.quote(t, billingWalletUserID, "task.article", "", "task-promo-expired")
 	if _, err := f2.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote2, "task-promo-expired", "charge-promo-expired")); !errors.Is(err, ErrBillingInsufficientForTask) {
 		t.Fatalf("expiry boundary error = %v, want insufficient", err)
 	}
@@ -363,16 +488,16 @@ func TestBillingWalletPromotionEligibilityAndExpiryBoundary(t *testing.T) {
 
 func TestBillingWalletStandaloneOperationNeverOverdraws(t *testing.T) {
 	f := newBillingWalletFixture(t, 499, 0, 0)
-	quote := f.quote(t, "u1", "designer.generate_image", "image.designer", "standalone-1")
+	quote := f.quote(t, billingWalletUserID, "designer.generate_image", "image.designer", "standalone-1")
 	req := OperationChargeRequest{
-		UserID: "u1", QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
+		UserID: billingWalletUserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
 		ResourceType: "image", ResourceID: "image-1", RequestFingerprint: quote.RequestFingerprint,
 		IdempotencyScope: "standalone-charge", IdempotencyKey: "standalone-1",
 	}
 	if _, err := f.wallet.ChargeStandaloneOperation(context.Background(), req); !errors.Is(err, ErrBillingInsufficientForStandaloneOperation) {
 		t.Fatalf("standalone error = %v, want insufficient", err)
 	}
-	if got := f.account(t, "u1"); got.PaidCredits != 499 || got.DebtCredits != 0 {
+	if got := f.account(t, billingWalletUserID); got.PaidCredits != 499 || got.DebtCredits != 0 {
 		t.Fatalf("standalone changed wallet: %+v", got)
 	}
 }
@@ -381,41 +506,41 @@ func TestTopUpRepaysDebtBeforePaidBalance(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 400)
 	fingerprint := billingFingerprint("topup-1")
 	result, err := f.wallet.TopUp(context.Background(), TopUpRequest{
-		UserID: "u1", Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1",
+		UserID: billingWalletUserID, Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1",
 		CatalogID: "retail-test-v1", RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
 	})
 	if err != nil || result.DebtRepaid != 400 || result.PaidAdded != 600 {
 		t.Fatalf("TopUp = %+v, %v", result, err)
 	}
-	if got := f.account(t, "u1"); got.DebtCredits != 0 || got.PaidCredits != 600 {
+	if got := f.account(t, billingWalletUserID); got.DebtCredits != 0 || got.PaidCredits != 600 {
 		t.Fatalf("account = %+v", got)
 	}
 	replay, err := f.wallet.TopUp(context.Background(), TopUpRequest{
-		UserID: "u1", Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1",
+		UserID: billingWalletUserID, Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1",
 		CatalogID: "retail-test-v1", RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
 	})
 	if err != nil || replay.EntryID != result.EntryID {
 		t.Fatalf("topup replay = %+v, %v", replay, err)
 	}
 	if _, err := f.wallet.TopUp(context.Background(), TopUpRequest{
-		UserID: "u1", Credits: 999, ExternalSourceType: "payment", ExternalSourceID: "api-1",
+		UserID: billingWalletUserID, Credits: 999, ExternalSourceType: "payment", ExternalSourceID: "api-1",
 		CatalogID: "retail-test-v1", RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
 	}); !errors.Is(err, ErrBillingConflict) {
 		t.Fatalf("topup conflict error = %v", err)
 	}
 	if _, err := f.wallet.TopUp(context.Background(), TopUpRequest{
-		UserID: "u1", Credits: 999, ExternalSourceType: "payment", ExternalSourceID: "api-1",
+		UserID: billingWalletUserID, Credits: 999, ExternalSourceType: "payment", ExternalSourceID: "api-1",
 		CatalogID: "retail-test-v1", RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "different-key-same-source",
 	}); !errors.Is(err, ErrBillingConflict) {
 		t.Fatalf("external source conflict error = %v, want ErrBillingConflict", err)
 	}
 	for _, drift := range []TopUpRequest{
 		{
-			UserID: "u1", Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1", CatalogID: "retail-other",
+			UserID: billingWalletUserID, Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1", CatalogID: "retail-other",
 			RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
 		},
 		{
-			UserID: "u1", Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1",
+			UserID: billingWalletUserID, Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1",
 			CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("topup-drift"), IdempotencyScope: "topup", IdempotencyKey: "topup-1",
 		},
 	} {
@@ -428,7 +553,7 @@ func TestTopUpRepaysDebtBeforePaidBalance(t *testing.T) {
 func TestBillingWalletTopUpRequiresFingerprint(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 400)
 	_, err := f.wallet.TopUp(context.Background(), TopUpRequest{
-		UserID: "u1", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "missing-fingerprint",
+		UserID: billingWalletUserID, Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "missing-fingerprint",
 		CatalogID: "retail-test-v1", IdempotencyScope: "topup", IdempotencyKey: "missing-fingerprint",
 	})
 	if !errors.Is(err, ErrBillingInvalid) {
@@ -439,11 +564,11 @@ func TestBillingWalletTopUpRequiresFingerprint(t *testing.T) {
 func TestBillingWalletPromotionCannotRepayDebt(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 400)
 	f.addPromotion(t, "promo-debt", 1000, f.now.Add(time.Hour))
-	if got := f.account(t, "u1"); got.DebtCredits != 400 || got.PromotionalCredits != 1000 {
+	if got := f.account(t, billingWalletUserID); got.DebtCredits != 400 || got.PromotionalCredits != 1000 {
 		t.Fatalf("promotion repaid debt: %+v", got)
 	}
 	result, err := f.wallet.TopUp(context.Background(), TopUpRequest{
-		UserID: "u1", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "small",
+		UserID: billingWalletUserID, Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "small",
 		CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("small"), IdempotencyScope: "topup", IdempotencyKey: "small",
 	})
 	if err != nil || result.DebtRepaid != 100 || result.PaidAdded != 0 {
@@ -457,7 +582,7 @@ func TestBillingWalletPromotionCannotRepayDebt(t *testing.T) {
 		audit.RequestFingerprint != billingFingerprint("small") {
 		t.Fatalf("topup audit entry = %+v, %v", audit, err)
 	}
-	entries, err := f.repo.Billing().ListEntriesByUser(context.Background(), "u1", 0, 20)
+	entries, err := f.repo.Billing().ListEntriesByUser(context.Background(), billingWalletUserID, 0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +601,7 @@ func TestBillingWalletPromotionCannotRepayDebt(t *testing.T) {
 func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 	t.Run("allowlisted task failure", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, "u1", "task.article", "", "task-reversal-policy")
+		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-reversal-policy")
 		original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-reversal-policy", "charge-reversal-policy"))
 		if err != nil {
 			t.Fatal(err)
@@ -490,7 +615,7 @@ func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 	for _, reason := range []string{"user_cancel", "different_reason"} {
 		t.Run("reject reason "+reason, func(t *testing.T) {
 			f := newBillingWalletFixture(t, 500, 0, 0)
-			quote := f.quote(t, "u1", "task.article", "", "task-reject-"+reason)
+			quote := f.quote(t, billingWalletUserID, "task.article", "", "task-reject-"+reason)
 			original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-reject-"+reason, "charge-reject-"+reason))
 			if err != nil {
 				t.Fatal(err)
@@ -503,7 +628,7 @@ func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 
 	t.Run("disabled policy", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, "u1", "task.article", "", "task-reversal-disabled")
+		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-reversal-disabled")
 		original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-reversal-disabled", "charge-reversal-disabled"))
 		if err != nil {
 			t.Fatal(err)
@@ -516,14 +641,14 @@ func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 
 	t.Run("accepted operation", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 0, 0, 0)
-		original, err := f.wallet.ChargeAcceptedOperation(context.Background(), acceptedOperationRequest("u1", "task-operation-reverse", "attempt-operation-reverse", "call-operation-reverse", "operation-reverse"))
+		original, err := f.wallet.ChargeAcceptedOperation(context.Background(), acceptedOperationRequest(billingWalletUserID, "task-operation-reverse", "attempt-operation-reverse", "call-operation-reverse", "operation-reverse"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err := f.wallet.Reverse(context.Background(), original.ID, "provider_error", "reverse-operation"); !errors.Is(err, ErrBillingReversalNotAllowed) {
 			t.Fatalf("operation reversal error = %v", err)
 		}
-		if got := f.account(t, "u1"); got.DebtCredits != original.DebtCredits {
+		if got := f.account(t, billingWalletUserID); got.DebtCredits != original.DebtCredits {
 			t.Fatalf("operation reversal mutated debt = %+v", got)
 		}
 	})
@@ -531,14 +656,14 @@ func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 
 func TestBillingWalletTopUpAndReplayDoNotScanWalletLedger(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 0)
-	charge, err := f.wallet.ChargeAcceptedOperation(context.Background(), acceptedOperationRequest("u1", "task-indexed-debt", "attempt-indexed-debt", "call-indexed-debt", "indexed-debt"))
+	charge, err := f.wallet.ChargeAcceptedOperation(context.Background(), acceptedOperationRequest(billingWalletUserID, "task-indexed-debt", "attempt-indexed-debt", "call-indexed-debt", "indexed-debt"))
 	if err != nil || charge.DebtCredits != 500 {
 		t.Fatalf("debt charge = %+v, %v", charge, err)
 	}
 	guard := &noLedgerScanRepository{Repository: f.repo}
 	f.wallet.repo = guard
 	req := TopUpRequest{
-		UserID: "u1", Credits: 500, ExternalSourceType: "payment", ExternalSourceID: "indexed-topup",
+		UserID: billingWalletUserID, Credits: 500, ExternalSourceType: "payment", ExternalSourceID: "indexed-topup",
 		CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("indexed-topup"), IdempotencyScope: "topup", IdempotencyKey: "indexed-topup",
 	}
 	first, err := f.wallet.TopUp(context.Background(), req)
@@ -557,7 +682,7 @@ func TestBillingWalletTopUpAndReplayDoNotScanWalletLedger(t *testing.T) {
 func TestBillingWalletReversalDoesNotReviveExpiredPromotion(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 0)
 	f.addPromotion(t, "promo-reverse-expired", 500, f.now.Add(time.Minute))
-	quote := f.quote(t, "u1", "task.article", "", "task-promo-reverse")
+	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-promo-reverse")
 	original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-promo-reverse", "charge-promo-reverse"))
 	if err != nil || original.PromotionalCredits != 500 {
 		t.Fatalf("promotional task charge = %+v, %v", original, err)
@@ -573,7 +698,7 @@ func TestBillingWalletReversalDoesNotReviveExpiredPromotion(t *testing.T) {
 	if lot.AvailableCredits != 0 || lot.ConsumedCredits != 0 || lot.ExpiredCredits != 500 {
 		t.Fatalf("expired promotional lot revived: %+v", lot)
 	}
-	if got := f.account(t, "u1"); got.PromotionalCredits != 0 {
+	if got := f.account(t, billingWalletUserID); got.PromotionalCredits != 0 {
 		t.Fatalf("expired promotional projection revived: %+v", got)
 	}
 }
@@ -594,7 +719,7 @@ func TestBillingWalletReversalUsesCanonicalLotLockOrder(t *testing.T) {
 func TestBillingWalletConcurrentTopUpIdempotency(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 400)
 	req := TopUpRequest{
-		UserID: "u1", Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "concurrent-topup",
+		UserID: billingWalletUserID, Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "concurrent-topup",
 		CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("concurrent-topup"), IdempotencyScope: "topup", IdempotencyKey: "concurrent-topup",
 	}
 	var wg sync.WaitGroup
@@ -628,21 +753,26 @@ func TestBillingWalletConcurrentTopUpIdempotency(t *testing.T) {
 			t.Fatalf("top-up entry IDs differ: %s != %s", result.EntryID, entryID)
 		}
 	}
-	if got := f.account(t, "u1"); got.DebtCredits != 0 || got.PaidCredits != 600 {
+	if got := f.account(t, billingWalletUserID); got.DebtCredits != 0 || got.PaidCredits != 600 {
 		t.Fatalf("concurrent top-up applied twice: %+v", got)
 	}
 }
 
 func TestBillingWalletConcurrentFirstAccountTopUpsBothSucceed(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 0)
-	f.wallet.repo = &ensureAccountRepository{Repository: f.repo, userID: "new-user"}
+	if err := f.repo.Users().Create(context.Background(), &model.User{
+		ID: billingWalletNewUserID, Email: "new-wallet-user@example.test", Password: "fixture", InviteCode: "NEW-WALLET-USER",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.wallet.repo = &ensureAccountRepository{Repository: f.repo, userID: billingWalletNewUserID}
 	requests := []TopUpRequest{
 		{
-			UserID: "new-user", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "first-account-a",
+			UserID: billingWalletNewUserID, Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "first-account-a",
 			CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("first-account-a"), IdempotencyScope: "topup", IdempotencyKey: "first-account-a",
 		},
 		{
-			UserID: "new-user", Credits: 200, ExternalSourceType: "payment", ExternalSourceID: "first-account-b",
+			UserID: billingWalletNewUserID, Credits: 200, ExternalSourceType: "payment", ExternalSourceID: "first-account-b",
 			CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("first-account-b"), IdempotencyScope: "topup", IdempotencyKey: "first-account-b",
 		},
 	}
@@ -664,7 +794,7 @@ func TestBillingWalletConcurrentFirstAccountTopUpsBothSucceed(t *testing.T) {
 			t.Fatalf("concurrent first-account top-up: %v", err)
 		}
 	}
-	if got := f.account(t, "new-user"); got.PaidCredits != 300 || got.PromotionalCredits != 0 || got.DebtCredits != 0 {
+	if got := f.account(t, billingWalletNewUserID); got.PaidCredits != 300 || got.PromotionalCredits != 0 || got.DebtCredits != 0 {
 		t.Fatalf("first-account top-up projection = %+v", got)
 	}
 }
@@ -672,18 +802,18 @@ func TestBillingWalletConcurrentFirstAccountTopUpsBothSucceed(t *testing.T) {
 func TestBillingWalletRebuildProjection(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 0)
 	if _, err := f.wallet.TopUp(context.Background(), TopUpRequest{
-		UserID: "u1", Credits: 700, ExternalSourceType: "payment", ExternalSourceID: "rebuild",
+		UserID: billingWalletUserID, Credits: 700, ExternalSourceType: "payment", ExternalSourceID: "rebuild",
 		CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("rebuild"), IdempotencyScope: "topup", IdempotencyKey: "rebuild",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	account := f.account(t, "u1")
+	account := f.account(t, billingWalletUserID)
 	account.PaidCredits = 1
 	account.Version++
 	if err := f.repo.Billing().UpdateAccount(context.Background(), account, account.Version-1); err != nil {
 		t.Fatal(err)
 	}
-	rebuilt, err := f.wallet.RebuildProjection(context.Background(), "u1")
+	rebuilt, err := f.wallet.RebuildProjection(context.Background(), billingWalletUserID)
 	if err != nil || rebuilt.PaidCredits != 700 || rebuilt.PromotionalCredits != 0 || rebuilt.DebtCredits != 0 {
 		t.Fatalf("RebuildProjection = %+v, %v", rebuilt, err)
 	}
@@ -691,7 +821,7 @@ func TestBillingWalletRebuildProjection(t *testing.T) {
 
 func TestBillingWalletConcurrentIdempotency(t *testing.T) {
 	f := newBillingWalletFixture(t, 1000, 0, 0)
-	req := acceptedOperationRequest("u1", "task-c", "attempt-c", "call-c", "operation-c")
+	req := acceptedOperationRequest(billingWalletUserID, "task-c", "attempt-c", "call-c", "operation-c")
 	var wg sync.WaitGroup
 	results := make(chan *model.BillingCharge, 2)
 	errs := make(chan error, 2)
@@ -723,7 +853,7 @@ func TestBillingWalletConcurrentIdempotency(t *testing.T) {
 			t.Fatalf("charge IDs differ: %s != %s", charge.ID, id)
 		}
 	}
-	if got := f.account(t, "u1"); got.PaidCredits != 500 {
+	if got := f.account(t, billingWalletUserID); got.PaidCredits != 500 {
 		t.Fatalf("concurrent charge applied twice: %+v", got)
 	}
 }
@@ -731,7 +861,7 @@ func TestBillingWalletConcurrentIdempotency(t *testing.T) {
 func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 	t.Run("task admission", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, "u1", "task.article", "", "post-lock-task")
+		quote := f.quote(t, billingWalletUserID, "task.article", "", "post-lock-task")
 		req := taskChargeRequest(quote, "post-lock-task", "post-lock-task")
 		sku, err := f.repo.Billing().FindSKU(context.Background(), req.CatalogID, req.SKUID)
 		if err != nil {
@@ -760,7 +890,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 
 	t.Run("accepted operation", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 1000, 0, 0)
-		req := acceptedOperationRequest("u1", "post-lock-operation", "post-lock-attempt", "post-lock-call", "post-lock-operation")
+		req := acceptedOperationRequest(billingWalletUserID, "post-lock-operation", "post-lock-attempt", "post-lock-call", "post-lock-operation")
 		sku, err := f.repo.Billing().FindSKU(context.Background(), req.CatalogID, req.SKUID)
 		if err != nil {
 			t.Fatal(err)
@@ -773,16 +903,16 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil || replay == nil || replay.ID != existing.ID || state.lockCalls < 2 {
 			t.Fatalf("post-lock operation replay = %+v, %v, lock calls %d", replay, err, state.lockCalls)
 		}
-		if got := f.account(t, "u1"); got.PaidCredits != 1000 || got.DebtCredits != 0 {
+		if got := f.account(t, billingWalletUserID); got.PaidCredits != 1000 || got.DebtCredits != 0 {
 			t.Fatalf("operation replay mutated account: %+v", got)
 		}
 	})
 
 	t.Run("standalone operation", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, "u1", "designer.generate_image", "image.designer", "post-lock-standalone")
+		quote := f.quote(t, billingWalletUserID, "designer.generate_image", "image.designer", "post-lock-standalone")
 		req := OperationChargeRequest{
-			UserID: "u1", QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
+			UserID: billingWalletUserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
 			ResourceType: "image", ResourceID: "post-lock-standalone", RequestFingerprint: quote.RequestFingerprint,
 			IdempotencyScope: "standalone-charge", IdempotencyKey: "post-lock-standalone",
 		}
@@ -803,7 +933,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 
 	t.Run("reversal", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, "u1", "task.article", "", "post-lock-reversal")
+		quote := f.quote(t, billingWalletUserID, "task.article", "", "post-lock-reversal")
 		original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "post-lock-reversal", "post-lock-reversal"))
 		if err != nil {
 			t.Fatal(err)
@@ -816,7 +946,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil || replay == nil || replay.ID != existing.ID || state.lockCalls < 2 {
 			t.Fatalf("post-lock reversal replay = %+v, %v, lock calls %d", replay, err, state.lockCalls)
 		}
-		if got := f.account(t, "u1"); got.PaidCredits != 0 {
+		if got := f.account(t, billingWalletUserID); got.PaidCredits != 0 {
 			t.Fatalf("reversal replay mutated account: %+v", got)
 		}
 		lot, err := f.repo.Billing().FindLotBySource(context.Background(), "fixture", "fixture-paid-u1")
@@ -828,7 +958,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 	t.Run("top up", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 0, 0, 0)
 		req := TopUpRequest{
-			UserID: "u1", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "post-lock-topup", CatalogID: "retail-test-v1",
+			UserID: billingWalletUserID, Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "post-lock-topup", CatalogID: "retail-test-v1",
 			RequestFingerprint: billingFingerprint("post-lock-topup"), IdempotencyScope: "topup", IdempotencyKey: "post-lock-topup",
 		}
 		existing := &model.BillingWalletEntry{
@@ -843,7 +973,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil || replay == nil || replay.EntryID != existing.ID || state.lockCalls < 2 {
 			t.Fatalf("post-lock top-up replay = %+v, %v, lock calls %d", replay, err, state.lockCalls)
 		}
-		if got := f.account(t, "u1"); got.PaidCredits != 0 || got.DebtCredits != 0 {
+		if got := f.account(t, billingWalletUserID); got.PaidCredits != 0 || got.DebtCredits != 0 {
 			t.Fatalf("top-up replay mutated account: %+v", got)
 		}
 	})
@@ -852,7 +982,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 func TestBillingWalletPostLockCurrentReadConflictsAreTypedAndDoNotMutate(t *testing.T) {
 	t.Run("task caller commits conflict", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, "u1", "task.article", "", "post-lock-task-conflict")
+		quote := f.quote(t, billingWalletUserID, "task.article", "", "post-lock-task-conflict")
 		req := taskChargeRequest(quote, "post-lock-task-conflict", "post-lock-task-conflict")
 		sku, err := f.repo.Billing().FindSKU(context.Background(), req.CatalogID, req.SKUID)
 		if err != nil {
@@ -878,7 +1008,7 @@ func TestBillingWalletPostLockCurrentReadConflictsAreTypedAndDoNotMutate(t *test
 
 	t.Run("charge identity split", func(t *testing.T) {
 		expected := &model.BillingCharge{
-			ID: "expected", UserID: "u1", CatalogID: "catalog", SKUID: "sku", ResourceType: "image", ResourceID: "resource",
+			ID: "expected", UserID: billingWalletUserID, CatalogID: "catalog", SKUID: "sku", ResourceType: "image", ResourceID: "resource",
 			Kind: model.BillingChargeKindOperation, Policy: "accepted_task_operation", Status: model.BillingChargeStatusPosted,
 			IdempotencyScope: "scope", IdempotencyKey: "key", RequestFingerprint: billingFingerprint("locked-conflict"),
 		}
@@ -893,7 +1023,7 @@ func TestBillingWalletPostLockCurrentReadConflictsAreTypedAndDoNotMutate(t *test
 
 	t.Run("top-up identity split", func(t *testing.T) {
 		req := TopUpRequest{
-			UserID: "u1", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "source", CatalogID: "catalog",
+			UserID: billingWalletUserID, Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "source", CatalogID: "catalog",
 			RequestFingerprint: billingFingerprint("locked-topup-conflict"), IdempotencyScope: "topup", IdempotencyKey: "key",
 		}
 		byKey := &model.BillingWalletEntry{ID: "by-key"}
@@ -916,7 +1046,7 @@ func TestBillingWalletExpiresPromotionalCreditsAtBoundary(t *testing.T) {
 	if err != nil || count != 2 {
 		t.Fatalf("ExpirePromotionalCredits = %d, %v", count, err)
 	}
-	if got := f.account(t, "u1"); got.PromotionalCredits != 300 {
+	if got := f.account(t, billingWalletUserID); got.PromotionalCredits != 300 {
 		t.Fatalf("account after expiry = %+v", got)
 	}
 	if count, err := f.wallet.ExpirePromotionalCredits(context.Background(), f.now, 10); err != nil || count != 0 {
@@ -949,7 +1079,7 @@ func TestBillingWalletOwningResourceAndSettlementRollbackTogether(t *testing.T) 
 	rollbackErr := errors.New("rollback owning resource")
 	err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
 		if err := tx.Tasks().Create(context.Background(), &model.Task{
-			ID: taskID, UserID: "u1", Type: model.PlatformArticle, Status: model.TaskStatusPending,
+			ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusPending,
 		}); err != nil {
 			return err
 		}
@@ -973,7 +1103,7 @@ func TestBillingWalletSettlementOutboxRetryNoDuplicateAndFencing(t *testing.T) {
 	f := newBillingWalletFixture(t, 1000, 0, 0)
 	taskID := uuid.NewString()
 	if err := f.repo.Tasks().Create(context.Background(), &model.Task{
-		ID: taskID, UserID: "u1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+		ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1020,7 +1150,7 @@ func TestBillingWalletSettlementOutboxRetryNoDuplicateAndFencing(t *testing.T) {
 	if processed, err := f.wallet.ProcessSettlementOutbox(context.Background(), 10); err != nil || processed != 0 {
 		t.Fatalf("duplicate process = %d, %v", processed, err)
 	}
-	if got := f.account(t, "u1"); got.PaidCredits != 500 {
+	if got := f.account(t, billingWalletUserID); got.PaidCredits != 500 {
 		t.Fatalf("outbox charged more than once: %+v", got)
 	}
 }
@@ -1030,7 +1160,7 @@ func TestBillingWalletSettlementOutboxUsesSettlementIDForDownstreamIdentity(t *t
 	for index, scope := range []string{"settlement-a", "settlement-b"} {
 		taskID := uuid.NewString()
 		if err := f.repo.Tasks().Create(context.Background(), &model.Task{
-			ID: taskID, UserID: "u1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+			ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1051,7 +1181,7 @@ func TestBillingWalletSettlementOutboxUsesSettlementIDForDownstreamIdentity(t *t
 	if err != nil || processed != 2 {
 		t.Fatalf("ProcessSettlementOutbox = %d, %v", processed, err)
 	}
-	if got := f.account(t, "u1"); got.DebtCredits != 1000 {
+	if got := f.account(t, billingWalletUserID); got.DebtCredits != 1000 {
 		t.Fatalf("downstream identity collision account = %+v", got)
 	}
 	for _, scope := range []string{"settlement-a", "settlement-b"} {
@@ -1064,7 +1194,7 @@ func TestBillingWalletSettlementOutboxUsesSettlementIDForDownstreamIdentity(t *t
 
 func TestBillingWalletSettlementOutboxPersistsComparesAndAppliesReversalReason(t *testing.T) {
 	f := newBillingWalletFixture(t, 500, 0, 0)
-	quote := f.quote(t, "u1", "task.article", "", "task-outbox-reversal")
+	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-outbox-reversal")
 	original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-outbox-reversal", "charge-outbox-reversal"))
 	if err != nil {
 		t.Fatal(err)
@@ -1106,7 +1236,7 @@ func TestBillingWalletSettlementOutboxPersistsComparesAndAppliesReversalReason(t
 	if err != nil || processed != 1 {
 		t.Fatalf("process reversal = %d, %v", processed, err)
 	}
-	if got := f.account(t, "u1"); got.PaidCredits != 500 {
+	if got := f.account(t, billingWalletUserID); got.PaidCredits != 500 {
 		t.Fatalf("reversal reason not applied: %+v", got)
 	}
 }
@@ -1136,7 +1266,7 @@ func TestBillingWalletSettlementOutboxTerminatesPermanentFailure(t *testing.T) {
 		t.Fatalf("terminal row = %+v, %v", row, err)
 	}
 	if err := f.repo.Tasks().Create(context.Background(), &model.Task{
-		ID: missingTask, UserID: "u1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+		ID: missingTask, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1144,7 +1274,7 @@ func TestBillingWalletSettlementOutboxTerminatesPermanentFailure(t *testing.T) {
 	if err != nil || processed != 0 {
 		t.Fatalf("terminal settlement replay = %d, %v", processed, err)
 	}
-	if got := f.account(t, "u1"); got.DebtCredits != 0 {
+	if got := f.account(t, billingWalletUserID); got.DebtCredits != 0 {
 		t.Fatalf("terminal settlement mutated wallet = %+v", got)
 	}
 }
@@ -1323,17 +1453,26 @@ func newBillingWalletFixtureWithRepositoryAndOperationPrice(t *testing.T, repo r
 	bundle.Products.SKUs[1].PriceCredits = operationPrice
 	bundle.Products.SKUs[2].PriceCredits = 500
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.Users().FindByID(context.Background(), billingWalletUserID); errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := repo.Users().Create(context.Background(), &model.User{
+			ID: billingWalletUserID, Email: billingWalletUserID + "@billing.test", Password: "fixture", InviteCode: "WALLET01",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	} else if err != nil {
+		t.Fatal(err)
+	}
 	catalog := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return now }, QuoteTTL: time.Minute})
 	if _, err := catalog.Publish(context.Background()); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	account := &model.BillingWalletAccount{UserID: "u1", PaidCredits: paid, PromotionalCredits: promotional, DebtCredits: debt}
+	account := &model.BillingWalletAccount{UserID: billingWalletUserID, PaidCredits: paid, PromotionalCredits: promotional, DebtCredits: debt}
 	if err := repo.Billing().CreateAccount(context.Background(), account); err != nil {
 		t.Fatal(err)
 	}
 	if paid > 0 {
 		createBillingLot(t, repo, model.BillingCreditLot{
-			ID: uuid.NewString(), UserID: "u1", Kind: model.BillingCreditLotKindPaid,
+			ID: uuid.NewString(), UserID: billingWalletUserID, Kind: model.BillingCreditLotKindPaid,
 			SourceType: "fixture", SourceID: "fixture-paid-u1", CatalogID: bundle.Products.CatalogID,
 			OriginalCredits: paid, AvailableCredits: paid, CreatedAt: now.Add(-time.Hour),
 		})
@@ -1341,7 +1480,7 @@ func newBillingWalletFixtureWithRepositoryAndOperationPrice(t *testing.T, repo r
 	if promotional > 0 {
 		expires := now.Add(time.Hour)
 		createBillingLot(t, repo, model.BillingCreditLot{
-			ID: uuid.NewString(), UserID: "u1", Kind: model.BillingCreditLotKindPromotional,
+			ID: uuid.NewString(), UserID: billingWalletUserID, Kind: model.BillingCreditLotKindPromotional,
 			SourceType: "promotion", SourceID: uuid.NewString(), ProgramID: "fixture", CatalogID: bundle.Products.CatalogID,
 			OriginalCredits: promotional, AvailableCredits: promotional, ExpiresAt: &expires, CreatedAt: now.Add(-time.Hour),
 		})
@@ -1352,7 +1491,7 @@ func newBillingWalletFixtureWithRepositoryAndOperationPrice(t *testing.T, repo r
 		fingerprint := billingFingerprint("fixture-debt", chargeID)
 		if err := repo.WithTx(context.Background(), func(tx repository.Repository) error {
 			if err := tx.Billing().CreateCharge(context.Background(), &model.BillingCharge{
-				ID: chargeID, UserID: "u1", CatalogID: bundle.Products.CatalogID, SKUID: bundle.Products.SKUs[1].ID,
+				ID: chargeID, UserID: billingWalletUserID, CatalogID: bundle.Products.CatalogID, SKUID: bundle.Products.SKUs[1].ID,
 				ResourceType: "fixture", ResourceID: chargeID, Kind: model.BillingChargeKindOperation,
 				Policy: "accepted_task_operation", Status: model.BillingChargeStatusPosted,
 				PriceCredits: debt, DebtCredits: debt, OperationTaskID: &taskID, AttemptID: &attemptID, ToolCallID: &toolCallID,
@@ -1362,7 +1501,7 @@ func newBillingWalletFixtureWithRepositoryAndOperationPrice(t *testing.T, repo r
 				return err
 			}
 			return tx.Billing().AppendEntry(context.Background(), &model.BillingWalletEntry{
-				ID: uuid.NewString(), UserID: "u1", EventKind: model.BillingWalletEventKindDebtCreated,
+				ID: uuid.NewString(), UserID: billingWalletUserID, EventKind: model.BillingWalletEventKindDebtCreated,
 				DebtDelta: debt, ChargeID: &chargeID, CatalogID: bundle.Products.CatalogID,
 				RequestFingerprint: fingerprint, ResourceType: "fixture", ResourceID: chargeID,
 				IdempotencyScope: "fixture-debt", IdempotencyKey: chargeID, CreatedAt: now.Add(-time.Hour),
@@ -1646,11 +1785,11 @@ func (f *billingWalletFixture) account(t *testing.T, userID string) *model.Billi
 func (f *billingWalletFixture) addPromotion(t *testing.T, sourceID string, credits int64, expires time.Time) {
 	t.Helper()
 	createBillingLot(t, f.repo, model.BillingCreditLot{
-		ID: uuid.NewString(), UserID: "u1", Kind: model.BillingCreditLotKindPromotional,
+		ID: uuid.NewString(), UserID: billingWalletUserID, Kind: model.BillingCreditLotKindPromotional,
 		SourceType: "promotion", SourceID: sourceID, ProgramID: "program", CatalogID: "retail-test-v1",
 		OriginalCredits: credits, AvailableCredits: credits, ExpiresAt: &expires, CreatedAt: f.now.Add(-time.Minute),
 	})
-	account := f.account(t, "u1")
+	account := f.account(t, billingWalletUserID)
 	expected := account.Version
 	account.PromotionalCredits += credits
 	account.Version++

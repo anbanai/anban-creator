@@ -425,16 +425,21 @@ func (s *BillingWalletService) consumeForCharge(ctx context.Context, repo reposi
 }
 
 func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*TopUpResult, error) {
-	if err := validateTopUpRequest(req); err != nil {
+	var err error
+	req, err = CanonicalTopUpRequest(req)
+	if err != nil {
 		return nil, err
 	}
 	var result *TopUpResult
-	err := s.withTx(ctx, func(tx repository.Repository) error {
+	err = s.withTx(ctx, func(tx repository.Repository) error {
 		var topUpErr error
 		result, topUpErr = s.topUpInTx(ctx, tx, req)
 		return topUpErr
 	})
 	if err != nil {
+		if errors.Is(err, ErrBillingUserNotFound) {
+			return nil, err
+		}
 		if replay, replayErr := findTopUpReplay(ctx, s.repo.Billing(), req); replayErr != nil || replay != nil {
 			return replay, replayErr
 		}
@@ -452,23 +457,71 @@ func (s *BillingWalletService) TopUpInTx(ctx context.Context, tx repository.Repo
 	if tx == nil {
 		return nil, fmt.Errorf("%w: top-up transaction is required", ErrBillingInvalid)
 	}
-	if err := validateTopUpRequest(req); err != nil {
+	var err error
+	req, err = CanonicalTopUpRequest(req)
+	if err != nil {
 		return nil, err
 	}
 	return s.topUpInTx(ctx, tx, req)
 }
 
-func validateTopUpRequest(req TopUpRequest) error {
-	if strings.TrimSpace(req.UserID) == "" || req.Credits <= 0 || strings.TrimSpace(req.ExternalSourceType) == "" ||
-		strings.TrimSpace(req.ExternalSourceID) == "" || strings.TrimSpace(req.CatalogID) == "" ||
-		!validBillingFingerprint(req.RequestFingerprint) || strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
-		return fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+func CanonicalTopUpRequest(req TopUpRequest) (TopUpRequest, error) {
+	var ok bool
+	if req.UserID, ok = canonicalBillingUUID(req.UserID); !ok || req.Credits <= 0 {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
 	}
-	return nil
+	if req.ExternalSourceType, ok = canonicalBillingText(req.ExternalSourceType, 40, true); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	if req.ExternalSourceID, ok = canonicalBillingText(req.ExternalSourceID, 128, true); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	if req.CatalogID, ok = canonicalBillingText(req.CatalogID, 128, true); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	req.RequestFingerprint = strings.TrimSpace(req.RequestFingerprint)
+	if !validBillingFingerprint(req.RequestFingerprint) {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	if req.IdempotencyScope, ok = canonicalBillingText(req.IdempotencyScope, 80, true); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	if req.IdempotencyKey, ok = canonicalBillingText(req.IdempotencyKey, 128, true); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	if req.ActorType, ok = canonicalBillingText(req.ActorType, 40, false); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	if req.ActorID, ok = canonicalBillingText(req.ActorID, 128, false); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	if req.SourceService, ok = canonicalBillingText(req.SourceService, 80, false); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	if req.RequestID, ok = canonicalBillingText(req.RequestID, 128, false); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	if req.CorrelationID, ok = canonicalBillingText(req.CorrelationID, 128, false); !ok {
+		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+	}
+	return req, nil
 }
 
 func (s *BillingWalletService) topUpInTx(ctx context.Context, tx repository.Repository, req TopUpRequest) (*TopUpResult, error) {
+	if _, err := tx.Users().LockByID(ctx, req.UserID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrBillingUserNotFound
+		}
+		return nil, err
+	}
+	return s.topUpInTxAfterUserLock(ctx, tx, req)
+}
+
+func (s *BillingWalletService) topUpInTxAfterUserLock(ctx context.Context, tx repository.Repository, req TopUpRequest) (*TopUpResult, error) {
 	billingRepo := tx.Billing()
+	if err := requirePublishedBillingCatalog(ctx, billingRepo, req.CatalogID); err != nil {
+		return nil, err
+	}
 	account, err := lockOrCreateBillingAccount(ctx, billingRepo, req.UserID)
 	if err != nil {
 		return nil, err
@@ -561,6 +614,20 @@ func (s *BillingWalletService) topUpInTx(ctx context.Context, tx repository.Repo
 		return nil, err
 	}
 	return &TopUpResult{EntryID: entry.ID, LotID: lotID, DebtRepaid: debtRepaid, PaidAdded: paidAdded}, nil
+}
+
+func requirePublishedBillingCatalog(ctx context.Context, repo repository.BillingRepository, catalogID string) error {
+	catalog, err := repo.FindCatalogVersion(ctx, catalogID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrBillingCatalogNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if catalog.Status != "published" {
+		return ErrBillingCatalogNotFound
+	}
+	return nil
 }
 
 func (s *BillingWalletService) Reverse(ctx context.Context, chargeID, reason, key string) (*model.BillingCharge, error) {
