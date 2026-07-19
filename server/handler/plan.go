@@ -38,15 +38,22 @@ func (h *PlanHandler) presentPlanReference(ctx context.Context, userID string, p
 		}
 		return nil
 	}
-	if h.referenceAssets == nil {
-		return service.ErrReferenceAssetUnavailable
-	}
-	view, err := h.referenceAssets.Present(ctx, userID, plan.ReferenceImageAssetID, []string{service.DirectUploadPurposeTaskReference})
+	view, err := h.planReferenceView(ctx, userID, plan.ReferenceImageAssetID)
 	if err != nil {
 		return err
 	}
 	plan.ReferenceImage = view
 	return nil
+}
+
+func (h *PlanHandler) planReferenceView(ctx context.Context, userID, assetID string) (*model.AssetView, error) {
+	if assetID == "" {
+		return nil, nil
+	}
+	if h.referenceAssets == nil {
+		return nil, service.ErrReferenceAssetUnavailable
+	}
+	return h.referenceAssets.Present(ctx, userID, assetID, []string{service.DirectUploadPurposeTaskReference})
 }
 
 func (h *PlanHandler) presentPlanReferences(ctx context.Context, userID string, plans []*model.Plan) error {
@@ -379,15 +386,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 		referenceAssetID = &desiredReferenceID
 	}
-	var referenceView *model.AssetView
-	if desiredReferenceID != "" {
-		if h.referenceAssets == nil {
-			return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
-		}
-		referenceView, err = h.referenceAssets.Present(c.Context(), userID, desiredReferenceID, []string{service.DirectUploadPurposeTaskReference})
-		if err != nil {
-			return respondReferenceAssetError(c, h.logger, err)
-		}
+	referenceView, err := h.planReferenceView(c.Context(), userID, desiredReferenceID)
+	if err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
 	}
 
 	// Validate image_model_key against the caller's tier.
@@ -430,7 +431,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 	}
 
-	plan, err := h.service.Update(c.Context(), service.UpdatePlanParams{
+	updateParams := service.UpdatePlanParams{
 		ID:                       id,
 		CronExpr:                 req.CronExpr,
 		Prompt:                   req.Prompt,
@@ -448,10 +449,40 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		VideoCreatorInput:        req.VideoCreatorInput,
 		MontageInput:             req.MontageInput,
 		InputAttachments:         req.InputAttachments,
-	})
+	}
+	var plan *model.Plan
+	if req.ReferenceImageSet {
+		plan, err = h.service.Update(c.Context(), updateParams)
+	} else {
+		const maxReferenceCASAttempts = 3
+		for attempt := 0; attempt < maxReferenceCASAttempts; attempt++ {
+			plan, err = h.service.UpdateIfReferenceImageAssetID(c.Context(), updateParams, desiredReferenceID)
+			if !errors.Is(err, service.ErrPlanUpdateConflict) {
+				break
+			}
+			if attempt == maxReferenceCASAttempts-1 {
+				break
+			}
+			existing, err = h.service.GetByID(c.Context(), id)
+			if err != nil {
+				return Error(c, fiber.StatusNotFound, "plan not found")
+			}
+			if existing.UserID != userID {
+				return Forbidden(c, "you do not have access to this plan")
+			}
+			desiredReferenceID = existing.ReferenceImageAssetID
+			referenceView, err = h.planReferenceView(c.Context(), userID, desiredReferenceID)
+			if err != nil {
+				return respondReferenceAssetError(c, h.logger, err)
+			}
+		}
+	}
 	if err != nil {
 		if isReferenceAssetError(err) {
 			return respondReferenceAssetError(c, h.logger, err)
+		}
+		if errors.Is(err, service.ErrPlanUpdateConflict) {
+			return Error(c, fiber.StatusConflict, "plan changed concurrently; please retry")
 		}
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {

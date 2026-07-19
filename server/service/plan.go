@@ -16,7 +16,10 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
-var ErrUnsupportedPlanPlatform = errors.New("plans are not supported for this project platform")
+var (
+	ErrUnsupportedPlanPlatform = errors.New("plans are not supported for this project platform")
+	ErrPlanUpdateConflict      = errors.New("plan changed concurrently")
+)
 
 // PlanService handles plan CRUD and lifecycle operations.
 type PlanService struct {
@@ -324,6 +327,35 @@ type UpdatePlanParams struct {
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
 // changed, next_run_at is recomputed. See UpdatePlanParams for field semantics.
 func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Plan, error) {
+	plan, err := s.preparePlanUpdate(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.Plans().Update(ctx, plan); err != nil {
+		return nil, fmt.Errorf("update plan: %w", err)
+	}
+	return plan, nil
+}
+
+func (s *PlanService) UpdateIfReferenceImageAssetID(ctx context.Context, p UpdatePlanParams, expectedID string) (*model.Plan, error) {
+	plan, err := s.preparePlanUpdate(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if plan.ReferenceImageAssetID != expectedID {
+		return nil, ErrPlanUpdateConflict
+	}
+	won, err := s.repo.Plans().UpdateIfReferenceImageAssetID(ctx, plan, expectedID)
+	if err != nil {
+		return nil, fmt.Errorf("update plan: %w", err)
+	}
+	if !won {
+		return nil, ErrPlanUpdateConflict
+	}
+	return plan, nil
+}
+
+func (s *PlanService) preparePlanUpdate(ctx context.Context, p UpdatePlanParams) (*model.Plan, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, p.ID)
 	if err != nil {
 		return nil, fmt.Errorf("find plan: %w", err)
@@ -416,10 +448,6 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 			return nil, fmt.Errorf("compute next run: %w", err)
 		}
 		plan.NextRunAt = nextRun
-	}
-
-	if err := s.repo.Plans().Update(ctx, plan); err != nil {
-		return nil, fmt.Errorf("update plan: %w", err)
 	}
 
 	return plan, nil

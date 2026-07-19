@@ -19,6 +19,23 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
+type rejectingPlanCASRepository struct {
+	repository.PlanRepository
+}
+
+func (r rejectingPlanCASRepository) UpdateIfReferenceImageAssetID(context.Context, *model.Plan, string) (bool, error) {
+	return false, nil
+}
+
+type planCASRepositoryOverride struct {
+	repository.Repository
+	plans repository.PlanRepository
+}
+
+func (r planCASRepositoryOverride) Plans() repository.PlanRepository {
+	return r.plans
+}
+
 type stubDraftClient struct {
 	listDraftsErr    error
 	listPublishedErr error
@@ -864,6 +881,37 @@ func TestPlanService_Update_ReferenceImageAssetID(t *testing.T) {
 	}
 	if updated.ReferenceImageAssetID != newRef {
 		t.Errorf("new reference asset should set; got %q, want %q", updated.ReferenceImageAssetID, newRef)
+	}
+}
+
+func TestPlanServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWriting(t *testing.T) {
+	_, base := setupTestPlanService(t)
+	ctx := context.Background()
+	projectID := createTestProject(t, base, "user-1", model.PlatformSeednote)
+	plan := &model.Plan{
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID, Type: model.PlatformSeednote,
+		Prompt: "before", CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
+		ReferenceImageAssetID: "asset-a",
+	}
+	if err := base.Plans().Create(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	repo := planCASRepositoryOverride{
+		Repository: base,
+		plans:      rejectingPlanCASRepository{PlanRepository: base.Plans()},
+	}
+	svc := NewPlanService(repo, nil)
+
+	_, err := svc.UpdateIfReferenceImageAssetID(ctx, UpdatePlanParams{ID: plan.ID, Prompt: "after"}, "asset-a")
+	if !errors.Is(err, ErrPlanUpdateConflict) {
+		t.Fatalf("error = %v, want ErrPlanUpdateConflict", err)
+	}
+	persisted, err := base.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Prompt != "before" || persisted.ReferenceImageAssetID != "asset-a" {
+		t.Fatalf("conflict wrote plan = prompt %q reference %q", persisted.Prompt, persisted.ReferenceImageAssetID)
 	}
 }
 

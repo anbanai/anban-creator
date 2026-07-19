@@ -24,6 +24,17 @@ var (
 	errReferenceAssetEmptyDownloadURL       = errors.New("storage signer returned an empty download URL")
 )
 
+// IsReferenceAssetError reports whether err belongs to the public reference asset error contract.
+func IsReferenceAssetError(err error) bool {
+	return errors.Is(err, ErrReferenceImageSelectionInvalid) ||
+		errors.Is(err, ErrReferenceAssetPurposeMismatch) ||
+		errors.Is(err, ErrReferenceAssetInvalidMetadata) ||
+		errors.Is(err, ErrReferenceAssetForbidden) ||
+		errors.Is(err, ErrReferenceAssetConcurrentFinalization) ||
+		errors.Is(err, ErrReferenceAssetExpired) ||
+		errors.Is(err, ErrReferenceAssetUnavailable)
+}
+
 // ReferenceImageSelection identifies either an immutable asset or an upload
 // session that must be finalized before a business record is written.
 type ReferenceImageSelection struct {

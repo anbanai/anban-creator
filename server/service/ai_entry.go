@@ -220,6 +220,9 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 
 	tasks, err := s.taskSvc.CreateManual(ctx, params)
 	if err != nil {
+		if IsReferenceAssetError(err) {
+			return nil, err
+		}
 		return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
 	}
 	if len(tasks) == 0 {

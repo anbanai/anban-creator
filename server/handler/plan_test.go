@@ -19,6 +19,46 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 )
 
+type hookedPlanRepository struct {
+	repository.PlanRepository
+	casCalls  int
+	beforeCAS func(int)
+}
+
+func (r *hookedPlanRepository) UpdateIfReferenceImageAssetID(ctx context.Context, plan *model.Plan, expectedID string) (bool, error) {
+	r.casCalls++
+	if r.beforeCAS != nil {
+		r.beforeCAS(r.casCalls)
+	}
+	return r.PlanRepository.UpdateIfReferenceImageAssetID(ctx, plan, expectedID)
+}
+
+type planHandlerRepositoryOverride struct {
+	repository.Repository
+	plans repository.PlanRepository
+}
+
+func (r planHandlerRepositoryOverride) Plans() repository.PlanRepository {
+	return r.plans
+}
+
+func newPlanHandlerUpdateTestApp(repo repository.Repository, store *projectReferenceStore) *fiber.App {
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	planSvc := service.NewPlanService(repo, &logger)
+	referenceAssets := service.NewReferenceAssetService(repo, store, time.Now)
+	planSvc.SetReferenceAssetService(referenceAssets)
+	h := NewPlanHandler(planSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	h.SetReferenceAssetService(referenceAssets)
+	app := fiber.New()
+	app.Put("/api/v1/plans/:id", func(c fiber.Ctx) error {
+		c.Locals("user_id", c.Get("X-User-ID"))
+		return h.Update(c)
+	})
+	return app
+}
+
 // TestCreatePlan_ArticleImageTogglesPersist verifies the plan handler→service→
 // model→DB round-trip persists an explicit `false` for both article image
 // toggles. Same regression guard as TestCreateTask_ArticleImageTogglesPersist
@@ -686,5 +726,158 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	replacedAttachments := replaced.InputAttachments.Data()
 	if replacedAttachments[1].ContentType != "application/ogg" || replacedAttachments[4].ContentType != "application/csv" {
 		t.Fatalf("replacement canonical application MIME attachments = %#v", replacedAttachments)
+	}
+}
+
+func TestPlanUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.T) {
+	base := repository.New(setupTaskHandlerTestDB(t))
+	userID := uuid.NewString()
+	planID := uuid.NewString()
+	for _, assetID := range []string{"asset-a", "asset-b"} {
+		if err := base.Assets().Create(t.Context(), &model.Asset{
+			ID: assetID, UserID: userID, Purpose: service.DirectUploadPurposeTaskReference,
+			StorageKey: "assets/users/" + userID + "/" + assetID + "/ref.png", FileName: "ref.png",
+			ContentType: "image/png", Size: 3, ETag: "etag-" + assetID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := base.Plans().Create(t.Context(), &model.Plan{
+		ID: planID, UserID: userID, Type: model.PlatformArticle, Prompt: "before",
+		CronExpr: "0 9 * * *", ReferenceImageAssetID: "asset-a", Status: model.PlanStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hooked := &hookedPlanRepository{PlanRepository: base.Plans()}
+	hooked.beforeCAS = func(call int) {
+		if call != 1 {
+			return
+		}
+		plan, err := base.Plans().FindByID(t.Context(), planID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan.ReferenceImageAssetID = "asset-b"
+		if err := base.Plans().Update(t.Context(), plan); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := planHandlerRepositoryOverride{Repository: base, plans: hooked}
+	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
+	app := newPlanHandlerUpdateTestApp(repo, store)
+
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"prompt": "after"})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"asset_id":"asset-b"`) || strings.Contains(string(body), `"asset_id":"asset-a"`) {
+		t.Fatalf("response does not match retried reference: %s", body)
+	}
+	wantSigned := []string{
+		"assets/users/" + userID + "/asset-a/ref.png",
+		"assets/users/" + userID + "/asset-b/ref.png",
+	}
+	if strings.Join(store.signedKeys, "|") != strings.Join(wantSigned, "|") {
+		t.Fatalf("signed keys=%#v want %#v", store.signedKeys, wantSigned)
+	}
+	persisted, err := base.Plans().FindByID(t.Context(), planID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Prompt != "after" || persisted.ReferenceImageAssetID != "asset-b" {
+		t.Fatalf("persisted plan prompt=%q reference=%q", persisted.Prompt, persisted.ReferenceImageAssetID)
+	}
+}
+
+func TestPlanUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *testing.T) {
+	base := repository.New(setupTaskHandlerTestDB(t))
+	userID := uuid.NewString()
+	planID := uuid.NewString()
+	assetIDs := []string{"asset-a", "asset-b", "asset-c", "asset-d"}
+	for _, assetID := range assetIDs {
+		if err := base.Assets().Create(t.Context(), &model.Asset{
+			ID: assetID, UserID: userID, Purpose: service.DirectUploadPurposeTaskReference,
+			StorageKey: "assets/users/" + userID + "/" + assetID + "/ref.png", FileName: "ref.png",
+			ContentType: "image/png", Size: 3, ETag: "etag-" + assetID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := base.Plans().Create(t.Context(), &model.Plan{
+		ID: planID, UserID: userID, Type: model.PlatformArticle, Prompt: "before",
+		CronExpr: "0 9 * * *", ReferenceImageAssetID: assetIDs[0], Status: model.PlanStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hooked := &hookedPlanRepository{PlanRepository: base.Plans()}
+	hooked.beforeCAS = func(call int) {
+		plan, err := base.Plans().FindByID(t.Context(), planID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan.ReferenceImageAssetID = assetIDs[call]
+		if err := base.Plans().Update(t.Context(), plan); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := planHandlerRepositoryOverride{Repository: base, plans: hooked}
+	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
+	app := newPlanHandlerUpdateTestApp(repo, store)
+
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"prompt": "must-not-write"})
+	if resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("status=%d want 409 body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+	if hooked.casCalls != 3 {
+		t.Fatalf("CAS calls=%d want 3", hooked.casCalls)
+	}
+	wantSigned := []string{
+		"assets/users/" + userID + "/asset-a/ref.png",
+		"assets/users/" + userID + "/asset-b/ref.png",
+		"assets/users/" + userID + "/asset-c/ref.png",
+	}
+	if strings.Join(store.signedKeys, "|") != strings.Join(wantSigned, "|") {
+		t.Fatalf("signed keys=%#v want %#v", store.signedKeys, wantSigned)
+	}
+	persisted, err := base.Plans().FindByID(t.Context(), planID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Prompt != "before" || persisted.ReferenceImageAssetID != "asset-d" {
+		t.Fatalf("request mutated plan prompt=%q reference=%q", persisted.Prompt, persisted.ReferenceImageAssetID)
+	}
+}
+
+func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	base := repository.New(db)
+	userID := uuid.NewString()
+	planID := uuid.NewString()
+	if err := base.Plans().Create(t.Context(), &model.Plan{
+		ID: planID, UserID: userID, Type: model.PlatformArticle, Prompt: "before",
+		CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("UPDATE plans SET reference_image_asset_id = NULL WHERE id = ?", planID).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
+	app := newPlanHandlerUpdateTestApp(base, store)
+
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"prompt": "after"})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+	persisted, err := base.Plans().FindByID(t.Context(), planID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Prompt != "after" || persisted.ReferenceImageAssetID != "" {
+		t.Fatalf("persisted plan prompt=%q reference=%q", persisted.Prompt, persisted.ReferenceImageAssetID)
+	}
+	if len(store.signedKeys) != 0 {
+		t.Fatalf("empty reference signed keys=%#v", store.signedKeys)
 	}
 }

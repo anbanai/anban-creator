@@ -167,6 +167,25 @@ func TestReferenceImageSelectionValidate(t *testing.T) {
 	}
 }
 
+func TestIsReferenceAssetError(t *testing.T) {
+	for _, err := range []error{
+		ErrReferenceImageSelectionInvalid,
+		ErrReferenceAssetPurposeMismatch,
+		ErrReferenceAssetInvalidMetadata,
+		ErrReferenceAssetForbidden,
+		ErrReferenceAssetConcurrentFinalization,
+		ErrReferenceAssetExpired,
+		ErrReferenceAssetUnavailable,
+	} {
+		if !IsReferenceAssetError(fmt.Errorf("wrapped: %w", err)) {
+			t.Fatalf("IsReferenceAssetError(%v) = false", err)
+		}
+	}
+	if IsReferenceAssetError(errors.New("other")) {
+		t.Fatal("unknown error classified as reference asset error")
+	}
+}
+
 func TestReferenceAssetServiceResolveSelection(t *testing.T) {
 	now := time.Date(2026, 7, 17, 18, 0, 0, 0, time.UTC)
 	newService := func(t *testing.T) (*ReferenceAssetService, repository.Repository, *referenceAssetStore) {

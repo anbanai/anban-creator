@@ -243,10 +243,12 @@ func advancePlanNextRun(ctx context.Context, repo repository.Repository, plan *m
 	}
 
 	next := schedule.Next(base)
-	plan.NextRunAt = &next
-
-	if err := repo.Plans().Update(ctx, plan); err != nil {
+	won, err := repo.Plans().UpdateNextRunAtIf(ctx, plan.ID, &next, plan.NextRunAt)
+	if err != nil {
 		return nil, fmt.Errorf("update plan %s: %w", plan.ID, err)
+	}
+	if !won {
+		return nil, nil
 	}
 
 	return &next, nil

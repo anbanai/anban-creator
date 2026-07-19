@@ -25,6 +25,24 @@ type fakeAIEntryLLM struct {
 	}
 }
 
+type flakyAIEntryAssetRepository struct {
+	repository.AssetRepository
+	calls       int
+	secondAsset *model.Asset
+	secondErr   error
+}
+
+func (r *flakyAIEntryAssetRepository) FindOwnedByID(ctx context.Context, id, userID string) (*model.Asset, error) {
+	r.calls++
+	if r.calls == 1 {
+		return r.AssetRepository.FindOwnedByID(ctx, id, userID)
+	}
+	if r.secondErr != nil {
+		return nil, r.secondErr
+	}
+	return r.secondAsset, nil
+}
+
 func (f *fakeAIEntryLLM) Complete(_ context.Context, systemPrompt, userPrompt string) (string, error) {
 	f.calls = append(f.calls, struct {
 		system string
@@ -282,6 +300,89 @@ func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T
 			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write content"})
 			if result != nil || !errors.Is(err, ErrReferenceAssetUnavailable) {
 				t.Fatalf("result/error = %#v/%v, want unavailable", result, err)
+			}
+			if topics.claimWithTaskCalls != 0 {
+				t.Fatalf("topic claims = %d", topics.claimWithTaskCalls)
+			}
+			_, total, listErr := taskSvc.List(ctx, userID, 0, 10, "", "", "")
+			if listErr != nil || total != 0 {
+				t.Fatalf("tasks = %d, %v", total, listErr)
+			}
+			txCount, _ := repo.Credits().CountByUserID(ctx, userID)
+			if txCount != 0 {
+				t.Fatalf("credit transactions = %d", txCount)
+			}
+			user, _ := repo.Users().FindByID(ctx, userID)
+			if user.CreditsBalance != 10_000 {
+				t.Fatalf("balance = %d", user.CreditsBalance)
+			}
+		})
+	}
+}
+
+func TestAIEntryPreservesSecondReferenceValidationErrorsBeforeCreationOrBilling(t *testing.T) {
+	rootCause := errors.New("database shard secret")
+	for _, tt := range []struct {
+		name        string
+		secondAsset func(*model.Asset) *model.Asset
+		secondErr   error
+		want        error
+	}{
+		{name: "forbidden", secondErr: model.ErrAssetNotFound, want: ErrReferenceAssetForbidden},
+		{name: "purpose mismatch", secondAsset: func(asset *model.Asset) *model.Asset {
+			copy := *asset
+			copy.Purpose = DirectUploadPurposeTaskReference
+			return &copy
+		}, want: ErrReferenceAssetPurposeMismatch},
+		{name: "unavailable", secondErr: rootCause, want: ErrReferenceAssetUnavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			base := repository.New(setupTaskTestDB(t))
+			ctx := context.Background()
+			userID := uuid.NewString()
+			logger := zerolog.New(io.Discard)
+			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "ai-entry-second-reference-" + tt.name, CreditsBalance: 10_000}); err != nil {
+				t.Fatal(err)
+			}
+			topics := &countingTopicPoolRepository{TopicPoolRepository: base.TopicPools()}
+			asset := referenceAssetFixture("project-reference-"+tt.name, userID, DirectUploadPurposeProjectReference)
+			seedReferenceAsset(t, base, asset)
+			flakyAssets := &flakyAIEntryAssetRepository{AssetRepository: base.Assets(), secondErr: tt.secondErr}
+			if tt.secondAsset != nil {
+				flakyAssets.secondAsset = tt.secondAsset(asset)
+			}
+			repo := &referenceAssetRepositoryOverride{
+				Repository: base,
+				assets:     flakyAssets,
+			}
+			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			project, err := repo.Projects().FindByID(ctx, projectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			project.ReferenceImageAssetID = asset.ID
+			if err := repo.Projects().Update(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			repoWithTopics := &taskCreationRepositoryOverride{Repository: repo, topicPools: topics}
+			store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}}
+			creditSvc := NewCreditService(repoWithTopics, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4_000}}, &logger)
+			taskSvc := NewTaskService(repoWithTopics, nil, &mockEnqueuer{}, store, creditSvc, &logger, "", nil, "", nil, nil)
+			taskSvc.SetTopicPoolService(NewTopicPoolService(repoWithTopics, &logger))
+			referenceSvc := NewReferenceAssetService(repoWithTopics, store, time.Now)
+			taskSvc.SetReferenceAssetService(referenceSvc)
+			entrySvc := NewAIEntryService(repoWithTopics, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, &logger)
+			entrySvc.SetReferenceAssetService(referenceSvc)
+
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write article"})
+			if result != nil || !errors.Is(err, tt.want) {
+				t.Fatalf("result/error = %#v/%v, want %v", result, err, tt.want)
+			}
+			if tt.want == ErrReferenceAssetUnavailable && !errors.Is(err, rootCause) {
+				t.Fatalf("error = %v, want root cause preserved", err)
+			}
+			if flakyAssets.calls != 2 {
+				t.Fatalf("asset lookup calls = %d, want pre-present plus CreateManual validation", flakyAssets.calls)
 			}
 			if topics.claimWithTaskCalls != 0 {
 				t.Fatalf("topic claims = %d", topics.claimWithTaskCalls)

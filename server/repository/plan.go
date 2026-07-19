@@ -48,6 +48,37 @@ func (r *planRepository) Update(ctx context.Context, plan *model.Plan) error {
 	return r.db.WithContext(ctx).Save(plan).Error
 }
 
+func (r *planRepository) UpdateIfReferenceImageAssetID(ctx context.Context, plan *model.Plan, expectedID string) (bool, error) {
+	query := r.db.WithContext(ctx).
+		Model(&model.Plan{}).
+		Where("id = ?", plan.ID)
+	if expectedID == "" {
+		query = query.Where("(reference_image_asset_id = ? OR reference_image_asset_id IS NULL)", "")
+	} else {
+		query = query.Where("reference_image_asset_id = ?", expectedID)
+	}
+	result := query.
+		Select("*").
+		Updates(plan)
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *planRepository) UpdateNextRunAtIf(ctx context.Context, id string, nextRunAt, expectedNextRunAt *time.Time) (bool, error) {
+	query := r.db.WithContext(ctx).
+		Model(&model.Plan{}).
+		Where("id = ?", id)
+	if expectedNextRunAt == nil {
+		query = query.Where("next_run_at IS NULL")
+	} else {
+		query = query.Where("next_run_at = ?", *expectedNextRunAt)
+	}
+	result := query.Updates(map[string]interface{}{
+		"next_run_at": nextRunAt,
+		"updated_at":  time.Now(),
+	})
+	return result.RowsAffected == 1, result.Error
+}
+
 func (r *planRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Plan{}).Error
 }

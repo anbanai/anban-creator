@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -48,23 +49,37 @@ func TestAIEntryHandlerSubmitRequiresAuth(t *testing.T) {
 	}
 }
 
-func TestAIEntryHandlerMapsReferenceStorageFailure(t *testing.T) {
-	logger := zerolog.New(io.Discard)
-	h := NewAIEntryHandler(&fakeAIEntrySubmitter{err: service.ErrReferenceAssetUnavailable}, nil, nil, &logger)
-	app := fiber.New()
-	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
-		c.Locals("user_id", "user-1")
-		return h.Submit(c)
-	})
-	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"project_id":"project-1","text":"write"}`))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != fiber.StatusServiceUnavailable {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
+func TestAIEntryHandlerMapsAndRedactsReferenceErrors(t *testing.T) {
+	const rootText = "database shard secret"
+	for _, tt := range []struct {
+		name       string
+		class      error
+		wantStatus int
+		wantText   string
+	}{
+		{name: "forbidden", class: service.ErrReferenceAssetForbidden, wantStatus: fiber.StatusForbidden, wantText: "reference image is not accessible"},
+		{name: "purpose mismatch", class: service.ErrReferenceAssetPurposeMismatch, wantStatus: fiber.StatusBadRequest, wantText: "reference image purpose is not allowed"},
+		{name: "unavailable", class: service.ErrReferenceAssetUnavailable, wantStatus: fiber.StatusServiceUnavailable, wantText: "reference image storage is temporarily unavailable"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := zerolog.New(io.Discard)
+			h := NewAIEntryHandler(&fakeAIEntrySubmitter{err: fmt.Errorf("%w: %s", tt.class, rootText)}, nil, nil, &logger)
+			app := fiber.New()
+			app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+				c.Locals("user_id", "user-1")
+				return h.Submit(c)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"project_id":"project-1","text":"write"}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != tt.wantStatus || !strings.Contains(string(body), tt.wantText) || strings.Contains(string(body), rootText) {
+				t.Fatalf("status/body = %d/%s, want %d containing %q without root", resp.StatusCode, body, tt.wantStatus, tt.wantText)
+			}
+		})
 	}
 }
 
