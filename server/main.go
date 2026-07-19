@@ -315,11 +315,9 @@ func main() {
 		}
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
-		if store != nil {
-			referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
-			planSvc.SetReferenceAssetService(referenceAssetSvc)
-			taskSvc.SetReferenceAssetService(referenceAssetSvc)
-		}
+		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
+		planSvc.SetReferenceAssetService(referenceAssetSvc)
+		taskSvc.SetReferenceAssetService(referenceAssetSvc)
 		taskSvc.SetProjectMemoryManager(memoryMgr)
 		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
 		taskSvc.SetVideoBillingConfig(cfg.Billing)
@@ -522,6 +520,7 @@ func main() {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
+		projectHandler.SetReferenceAssetService(referenceAssetSvc)
 		if modelConfigSvc != nil {
 			projectHandler.SetModelConfigService(modelConfigSvc)
 		}
@@ -537,7 +536,6 @@ func main() {
 		if store != nil {
 			projectHandler.SetStore(store)
 			projectHandler.SetUploadRepository(repo)
-			projectHandler.SetReferenceAssetService(referenceAssetSvc)
 		}
 		projectHandler.SetSeednoteClient(seednoteClient)
 		projectHandler.SetSeednoteReadiness(seednoteMonitor)

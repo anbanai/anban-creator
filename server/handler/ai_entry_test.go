@@ -48,6 +48,26 @@ func TestAIEntryHandlerSubmitRequiresAuth(t *testing.T) {
 	}
 }
 
+func TestAIEntryHandlerMapsReferenceStorageFailure(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	h := NewAIEntryHandler(&fakeAIEntrySubmitter{err: service.ErrReferenceAssetUnavailable}, nil, nil, &logger)
+	app := fiber.New()
+	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.Submit(c)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"project_id":"project-1","text":"write"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusServiceUnavailable {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
+	}
+}
+
 func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	task := &model.Task{ID: uuid.NewString(), Type: model.PlatformArticle, Prompt: "写文章"}

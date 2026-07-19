@@ -62,6 +62,9 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 	}
 	result, err := h.submitter.Submit(c.Context(), req)
 	if err != nil {
+		if isReferenceAssetError(err) {
+			return respondReferenceAssetError(c, h.logger, err)
+		}
 		if h.logger != nil {
 			h.logger.Error().Err(err).Str("user_id", userID).Msg("ai entry submit failed")
 		}

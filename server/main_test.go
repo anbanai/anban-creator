@@ -72,3 +72,45 @@ func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 		t.Fatal("model migration errors must not log and continue startup")
 	}
 }
+
+func TestMainWiresReferenceAssetServiceEvenWithoutStorage(t *testing.T) {
+	raw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	src := string(raw)
+	serviceStart := strings.Index(src, "taskSvc = service.NewTaskService")
+	serviceEnd := strings.Index(src[serviceStart:], "taskSvc.SetProjectMemoryManager")
+	if serviceStart < 0 || serviceEnd < 0 {
+		t.Fatal("task service wiring section is missing")
+	}
+	serviceSection := src[serviceStart : serviceStart+serviceEnd]
+	constructAt := strings.Index(serviceSection, "referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)")
+	storeGuardAt := strings.Index(serviceSection, "if store != nil")
+	if constructAt < 0 || (storeGuardAt >= 0 && constructAt > storeGuardAt) {
+		t.Fatalf("reference asset service construction must be unconditional after repository setup:\n%s", serviceSection)
+	}
+	for _, want := range []string{
+		"planSvc.SetReferenceAssetService(referenceAssetSvc)",
+		"taskSvc.SetReferenceAssetService(referenceAssetSvc)",
+		"aiEntrySvc.SetReferenceAssetService(referenceAssetSvc)",
+		"planHandler.SetReferenceAssetService(referenceAssetSvc)",
+		"taskHandler.SetReferenceAssetService(referenceAssetSvc)",
+		"projectHandler.SetReferenceAssetService(referenceAssetSvc)",
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("main.go missing reference asset wiring %q", want)
+		}
+	}
+	projectStart := strings.Index(src, "projectHandler = handler.NewProjectHandler")
+	projectEnd := strings.Index(src[projectStart:], "projectHandler.SetSeednoteClient")
+	if projectStart < 0 || projectEnd < 0 {
+		t.Fatal("project handler wiring section is missing")
+	}
+	projectSection := src[projectStart : projectStart+projectEnd]
+	presentAt := strings.Index(projectSection, "projectHandler.SetReferenceAssetService(referenceAssetSvc)")
+	storeGuardAt = strings.Index(projectSection, "if store != nil")
+	if presentAt < 0 || (storeGuardAt >= 0 && presentAt > storeGuardAt) {
+		t.Fatalf("project handler reference service wiring must not depend on storage:\n%s", projectSection)
+	}
+}

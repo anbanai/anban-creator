@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
@@ -433,9 +434,9 @@ type CreateManualParams struct {
 	// Overrides is deprecated. New Studio/API flows do not set task-level style
 	// overrides; runtime style/account config comes from ProjectSnapshot.
 	Overrides *model.StyleOverrides
-	// ProjectSnapshot, when set, is copied verbatim. Clone uses this to preserve
-	// the original task's frozen config. New manual tasks leave it nil and snapshot
-	// the current project at creation time.
+	// ProjectSnapshot, when set, is copied verbatim. Clone preserves its original
+	// frozen config; HTTP/AI orchestration freezes the project used for reference
+	// preflight. Other callers leave it nil and snapshot the current project.
 	ProjectSnapshot *model.ProjectSnapshot
 	// InputAttachments stores the original AI-entry attachments on the task so
 	// executors can materialize them into the agent workspace.
@@ -481,6 +482,38 @@ type CreateManualParams struct {
 	// via ClaimLocalTask. Unclaimed tasks fall back to cloud after the deadline
 	// (ReclaimExpiredLocalTasks). Empty = cloud (default).
 	ExecutionTarget string
+}
+
+// ResolveTaskCreationProject loads the authoritative project once and applies
+// the ownership/status checks required before task side effects.
+func (s *TaskService) ResolveTaskCreationProject(ctx context.Context, userID, projectID string) (*model.Project, error) {
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("task repository is unavailable")
+	}
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %w", ErrProjectNotFound, err)
+		}
+		return nil, fmt.Errorf("find project: %w", err)
+	}
+	if err := validateTaskCreationProject(project, userID, projectID); err != nil {
+		return nil, err
+	}
+	return project, nil
+}
+
+func validateTaskCreationProject(project *model.Project, userID, projectID string) error {
+	if project == nil || project.ID != projectID {
+		return ErrProjectNotFound
+	}
+	if project.UserID != userID {
+		return ErrProjectOwnedByUser
+	}
+	if project.Status != model.ProjectStatusActive {
+		return fmt.Errorf("project is not active")
+	}
+	return nil
 }
 
 func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot) error {
@@ -540,16 +573,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		quantity = 5
 	}
 
-	// Load and validate project.
-	project, err := s.repo.Projects().FindByID(ctx, p.ProjectID)
+	project, err := s.ResolveTaskCreationProject(ctx, p.UserID, p.ProjectID)
 	if err != nil {
-		return nil, fmt.Errorf("find project: %w", err)
-	}
-	if project.UserID != p.UserID {
-		return nil, fmt.Errorf("project not owned by user")
-	}
-	if project.Status != model.ProjectStatusActive {
-		return nil, fmt.Errorf("project is not active")
+		return nil, err
 	}
 	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
 		return nil, err
@@ -1068,10 +1094,12 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	taskType := plan.Type
 	var project *model.Project
 	if plan.ProjectID != "" {
-		if found, err := s.repo.Projects().FindByID(ctx, plan.ProjectID); err == nil {
-			project = found
-			taskType = found.Platform
+		found, err := s.ResolveTaskCreationProject(ctx, plan.UserID, plan.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve plan project: %w", err)
 		}
+		project = found
+		taskType = found.Platform
 	}
 	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil); err != nil {
 		return nil, err

@@ -137,6 +137,118 @@ func TestTaskSnapshotAndPlanCopyReferenceAssetID(t *testing.T) {
 	}
 }
 
+type taskCreationRepositoryOverride struct {
+	repository.Repository
+	projects   repository.ProjectRepository
+	topicPools repository.TopicPoolRepository
+}
+
+func (r *taskCreationRepositoryOverride) Projects() repository.ProjectRepository {
+	if r.projects != nil {
+		return r.projects
+	}
+	return r.Repository.Projects()
+}
+
+func (r *taskCreationRepositoryOverride) TopicPools() repository.TopicPoolRepository {
+	if r.topicPools != nil {
+		return r.topicPools
+	}
+	return r.Repository.TopicPools()
+}
+
+type scriptedProjectRepository struct {
+	repository.ProjectRepository
+	find func(context.Context, string) (*model.Project, error)
+}
+
+func (r *scriptedProjectRepository) FindByID(ctx context.Context, id string) (*model.Project, error) {
+	return r.find(ctx, id)
+}
+
+type countingTopicPoolRepository struct {
+	repository.TopicPoolRepository
+	claimWithTaskCalls int
+}
+
+func (r *countingTopicPoolRepository) ClaimWithTask(ctx context.Context, userID, projectID, taskID string) (*model.TopicPool, error) {
+	r.claimWithTaskCalls++
+	return r.TopicPoolRepository.ClaimWithTask(ctx, userID, projectID, taskID)
+}
+
+func TestCreateFromPlanFailsClosedBeforeTopicClaimBillingOrTaskCreation(t *testing.T) {
+	rootCause := errors.New("project database unavailable")
+	tests := []struct {
+		name        string
+		projectFind func(repository.ProjectRepository, string) repository.ProjectRepository
+		wantErr     error
+	}{
+		{
+			name: "missing project",
+			projectFind: func(base repository.ProjectRepository, _ string) repository.ProjectRepository {
+				return base
+			},
+			wantErr: ErrProjectNotFound,
+		},
+		{
+			name: "repository error",
+			projectFind: func(base repository.ProjectRepository, _ string) repository.ProjectRepository {
+				return &scriptedProjectRepository{ProjectRepository: base, find: func(context.Context, string) (*model.Project, error) {
+					return nil, rootCause
+				}}
+			},
+			wantErr: rootCause,
+		},
+		{
+			name: "foreign project",
+			projectFind: func(base repository.ProjectRepository, projectID string) repository.ProjectRepository {
+				return &scriptedProjectRepository{ProjectRepository: base, find: func(context.Context, string) (*model.Project, error) {
+					return &model.Project{ID: projectID, UserID: "other-user", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}, nil
+				}}
+			},
+			wantErr: ErrProjectOwnedByUser,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := repository.New(setupTaskTestDB(t))
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := uuid.NewString()
+			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "plan-project-" + tt.name, CreditsBalance: 10_000}); err != nil {
+				t.Fatal(err)
+			}
+			topics := &countingTopicPoolRepository{TopicPoolRepository: base.TopicPools()}
+			repo := &taskCreationRepositoryOverride{Repository: base, projects: tt.projectFind(base.Projects(), projectID), topicPools: topics}
+			logger := zerolog.New(io.Discard)
+			creditSvc := NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4_000}}, &logger)
+			svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
+			svc.SetTopicPoolService(NewTopicPoolService(repo, &logger))
+			plan := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.PlanStatusActive}
+
+			_, err := svc.CreateFromPlan(ctx, plan)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("CreateFromPlan error = %v, want %v", err, tt.wantErr)
+			}
+			if topics.claimWithTaskCalls != 0 {
+				t.Fatalf("topic claims = %d, want 0", topics.claimWithTaskCalls)
+			}
+			_, total, listErr := svc.List(ctx, userID, 0, 10, "", "", "")
+			if listErr != nil || total != 0 {
+				t.Fatalf("tasks = %d, %v", total, listErr)
+			}
+			txCount, _ := base.Credits().CountByUserID(ctx, userID)
+			if txCount != 0 {
+				t.Fatalf("credit transactions = %d", txCount)
+			}
+			user, _ := base.Users().FindByID(ctx, userID)
+			if user.CreditsBalance != 10_000 {
+				t.Fatalf("balance = %d", user.CreditsBalance)
+			}
+		})
+	}
+}
+
 func TestTaskCloneValidatesReferenceBeforeCreditDeduction(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)

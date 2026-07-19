@@ -135,6 +135,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		return aiEntryNeedsConfiguration("请先描述你想创建的内容。", "/"), nil
 	}
 
+	projectSnapshot := model.SnapshotProject(project)
 	params := CreateManualParams{
 		UserID:           req.UserID,
 		ProjectID:        req.ProjectID,
@@ -143,6 +144,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		ImageRatio:       normalizeAIEntryImageRatio(intent.ImageRatio),
 		InputAttachments: normalizeEntryAttachments(req.Attachments),
 		ExecutionTarget:  normalizeAIEntryExecutionTarget(req.ExecutionTarget),
+		ProjectSnapshot:  &projectSnapshot,
 	}
 	var referenceView *model.AssetView
 
@@ -150,16 +152,25 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	case model.PlatformArticle, model.PlatformMoments:
 		if uploadSessionID := firstImageAttachmentUploadSessionID(req.Attachments); uploadSessionID != "" {
 			if s.referenceAssets == nil {
-				return aiEntryError("创建任务失败：参考图服务暂不可用。"), nil
+				return nil, ErrReferenceAssetUnavailable
 			}
 			assetID, err := s.referenceAssets.ResolveSelection(ctx, req.UserID, ReferenceImageSelection{UploadSessionID: uploadSessionID}, []string{DirectUploadPurposeAIEntryAttachment})
 			if err != nil {
-				return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
+				return nil, err
 			}
 			params.ReferenceImageAssetID = assetID
 			referenceView, err = s.referenceAssets.Present(ctx, req.UserID, assetID, []string{DirectUploadPurposeAIEntryAttachment})
 			if err != nil {
-				return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
+				return nil, err
+			}
+		} else if project.ReferenceImageAssetID != "" {
+			if s.referenceAssets == nil {
+				return nil, ErrReferenceAssetUnavailable
+			}
+			var err error
+			referenceView, err = s.referenceAssets.Present(ctx, req.UserID, project.ReferenceImageAssetID, []string{DirectUploadPurposeProjectReference})
+			if err != nil {
+				return nil, err
 			}
 		}
 	case model.PlatformSeednote:

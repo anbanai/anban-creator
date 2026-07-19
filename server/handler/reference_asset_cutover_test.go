@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -411,7 +412,7 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	h.SetReferenceAssetService(referenceSvc)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
-	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","prompt":"write"}`)
+	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","prompt":"write","execution_target":"local"}`)
 	if resp.StatusCode != fiber.StatusServiceUnavailable {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
@@ -423,6 +424,143 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	txCount, _ := repo.Credits().CountByUserID(ctx, userID)
 	if txCount != 0 {
 		t.Fatalf("credit transactions = %d, want 0", txCount)
+	}
+}
+
+type taskHandlerProjectRepository struct {
+	repository.ProjectRepository
+	findCalls int
+	find      func(context.Context, string) (*model.Project, error)
+}
+
+func (r *taskHandlerProjectRepository) FindByID(ctx context.Context, id string) (*model.Project, error) {
+	r.findCalls++
+	if r.find != nil {
+		return r.find(ctx, id)
+	}
+	return r.ProjectRepository.FindByID(ctx, id)
+}
+
+type taskHandlerRepositoryOverride struct {
+	repository.Repository
+	projects repository.ProjectRepository
+}
+
+func (r *taskHandlerRepositoryOverride) Projects() repository.ProjectRepository { return r.projects }
+
+func TestTaskCreateProjectLookupFailsClosedBeforeMutation(t *testing.T) {
+	rootCause := errors.New("project repository unavailable")
+	tests := []struct {
+		name          string
+		failOnDefense bool
+		find          func(string, string) (*model.Project, error)
+		wantStatus    int
+	}{
+		{name: "missing", find: func(string, string) (*model.Project, error) { return nil, gorm.ErrRecordNotFound }, wantStatus: fiber.StatusNotFound},
+		{name: "repository error", find: func(string, string) (*model.Project, error) { return nil, rootCause }, wantStatus: fiber.StatusInternalServerError},
+		{name: "foreign", find: func(projectID, _ string) (*model.Project, error) {
+			return &model.Project{ID: projectID, UserID: "other-user", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}, nil
+		}, wantStatus: fiber.StatusForbidden},
+		{name: "missing on service defense", failOnDefense: true, find: func(string, string) (*model.Project, error) { return nil, gorm.ErrRecordNotFound }, wantStatus: fiber.StatusNotFound},
+		{name: "repository error on service defense", failOnDefense: true, find: func(string, string) (*model.Project, error) { return nil, rootCause }, wantStatus: fiber.StatusInternalServerError},
+		{name: "foreign on service defense", failOnDefense: true, find: func(projectID, _ string) (*model.Project, error) {
+			return &model.Project{ID: projectID, UserID: "other-user", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}, nil
+		}, wantStatus: fiber.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := repository.New(setupTaskHandlerTestDB(t))
+			ctx := t.Context()
+			userID := uuid.NewString()
+			projectID := uuid.NewString()
+			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "project-lookup-" + tt.name, CreditsBalance: 10_000}); err != nil {
+				t.Fatal(err)
+			}
+			projects := &taskHandlerProjectRepository{ProjectRepository: base.Projects()}
+			projects.find = func(context.Context, string) (*model.Project, error) {
+				if tt.failOnDefense && projects.findCalls == 1 {
+					return &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Status: model.ProjectStatusActive}, nil
+				}
+				return tt.find(projectID, userID)
+			}
+			repo := &taskHandlerRepositoryOverride{Repository: base, projects: projects}
+			logger := zerolog.New(io.Discard)
+			creditSvc := service.NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4_000}}, &logger)
+			taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
+			taskSvc.SetReferenceAssetService(service.NewReferenceAssetService(repo, nil, time.Now))
+			h := NewTaskHandler(taskSvc, &logger)
+			h.SetRepository(repo)
+			h.SetReferenceAssetService(service.NewReferenceAssetService(repo, nil, time.Now))
+			app := fiber.New()
+			app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+
+			resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","prompt":"write"}`)
+			if resp.StatusCode != tt.wantStatus {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want %d", resp.StatusCode, body, tt.wantStatus)
+			}
+			wantCalls := 1
+			if tt.failOnDefense {
+				wantCalls = 2
+			}
+			if projects.findCalls != wantCalls {
+				t.Fatalf("project lookups = %d, want %d", projects.findCalls, wantCalls)
+			}
+			_, total, listErr := taskSvc.List(ctx, userID, 0, 10, "", "", "")
+			if listErr != nil || total != 0 {
+				t.Fatalf("tasks = %d, %v", total, listErr)
+			}
+			txCount, _ := base.Credits().CountByUserID(ctx, userID)
+			if txCount != 0 {
+				t.Fatalf("credit transactions = %d", txCount)
+			}
+			user, _ := base.Users().FindByID(ctx, userID)
+			if user.CreditsBalance != 10_000 {
+				t.Fatalf("balance = %d", user.CreditsBalance)
+			}
+		})
+	}
+}
+
+func TestTaskCreateInheritedProjectReferenceFreezesPreflightSnapshotAndAttachesView(t *testing.T) {
+	base := repository.New(setupTaskHandlerTestDB(t))
+	ctx := t.Context()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "single-project-lookup"}); err != nil {
+		t.Fatal(err)
+	}
+	asset := cutoverAsset("project-inherited", userID, service.DirectUploadPurposeProjectReference, "ref.png", "image/png")
+	if err := base.Assets().Create(ctx, asset); err != nil {
+		t.Fatal(err)
+	}
+	if err := base.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive, ReferenceImageAssetID: asset.ID}); err != nil {
+		t.Fatal(err)
+	}
+	projects := &taskHandlerProjectRepository{ProjectRepository: base.Projects()}
+	repo := &taskHandlerRepositoryOverride{Repository: base, projects: projects}
+	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceSvc)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	h.SetReferenceAssetService(referenceSvc)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+
+	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","prompt":"write","execution_target":"local"}`)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusOK || !strings.Contains(string(body), `"reference_image":{"asset_id":"`+asset.ID+`"`) {
+		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
+	}
+	if projects.findCalls != 2 {
+		t.Fatalf("project lookups = %d, want preflight plus service defense", projects.findCalls)
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
+		t.Fatalf("signed keys = %#v", store.signedKeys)
 	}
 }
 

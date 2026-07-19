@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -10,7 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
@@ -95,6 +98,18 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 			ctx := context.Background()
 			userID := uuid.NewString()
 			projectID := createTestProject(t, repo, userID, platform)
+			projectAsset := referenceAssetFixture("project-reference-"+platform, userID, DirectUploadPurposeProjectReference)
+			if err := repo.Assets().Create(ctx, projectAsset); err != nil {
+				t.Fatalf("create project asset: %v", err)
+			}
+			project, err := repo.Projects().FindByID(ctx, projectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			project.ReferenceImageAssetID = projectAsset.ID
+			if err := repo.Projects().Update(ctx, project); err != nil {
+				t.Fatal(err)
+			}
 			asset := referenceAssetFixture("entry-upload-"+platform, userID, DirectUploadPurposeAIEntryAttachment)
 			if err := repo.Assets().Create(ctx, asset); err != nil {
 				t.Fatalf("create asset: %v", err)
@@ -138,7 +153,97 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 			if found.ReferenceImageURL != "" || result.Task.ReferenceImage.AssetID != asset.ID {
 				t.Fatalf("reference contract = persisted URL %q view %#v", found.ReferenceImageURL, result.Task.ReferenceImage)
 			}
+			if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
+				t.Fatalf("signed keys = %#v, want direct attachment only", store.signedKeys)
+			}
 		})
+	}
+}
+
+func TestAIEntryPresentsInheritedProjectReferenceBeforeTaskCreation(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture("project-reference", userID, DirectUploadPurposeProjectReference)
+	seedReferenceAsset(t, repo, asset)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.ReferenceImageAssetID = asset.ID
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}}
+	referenceSvc := NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceSvc)
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, &logger)
+	entrySvc.SetReferenceAssetService(referenceSvc)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write article"})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || result.Task == nil || result.Task.ReferenceImage == nil || result.Task.ReferenceImage.AssetID != asset.ID {
+		t.Fatalf("result = %#v", result)
+	}
+	persisted, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ReferenceImageAssetID != "" || persisted.ProjectSnapshot.Data().ReferenceImageAssetID != asset.ID {
+		t.Fatalf("persisted reference = direct %q snapshot %#v", persisted.ReferenceImageAssetID, persisted.ProjectSnapshot.Data())
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
+		t.Fatalf("signed keys = %#v", store.signedKeys)
+	}
+}
+
+func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	logger := zerolog.New(io.Discard)
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "ai-entry-project-reference", CreditsBalance: 10_000}); err != nil {
+		t.Fatal(err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture("project-reference", userID, DirectUploadPurposeProjectReference)
+	seedReferenceAsset(t, repo, asset)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.ReferenceImageAssetID = asset.ID
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}, downloadErr: errors.New("signer unavailable")}
+	creditSvc := NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4_000}}, &logger)
+	taskSvc := NewTaskService(repo, nil, &mockEnqueuer{}, store, creditSvc, &logger, "", nil, "", nil, nil)
+	referenceSvc := NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceSvc)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, &logger)
+	entrySvc.SetReferenceAssetService(referenceSvc)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write article"})
+	if result != nil || !errors.Is(err, ErrReferenceAssetUnavailable) {
+		t.Fatalf("result/error = %#v/%v, want unavailable", result, err)
+	}
+	_, total, listErr := taskSvc.List(ctx, userID, 0, 10, "", "", "")
+	if listErr != nil || total != 0 {
+		t.Fatalf("tasks = %d, %v", total, listErr)
+	}
+	txCount, _ := repo.Credits().CountByUserID(ctx, userID)
+	if txCount != 0 {
+		t.Fatalf("credit transactions = %d", txCount)
+	}
+	user, _ := repo.Users().FindByID(ctx, userID)
+	if user.CreditsBalance != 10_000 {
+		t.Fatalf("balance = %d", user.CreditsBalance)
 	}
 }
 

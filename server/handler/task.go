@@ -257,6 +257,11 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
+	project, err := h.service.ResolveTaskCreationProject(c.Context(), userID, req.ProjectID)
+	if err != nil {
+		return respondTaskCreationProjectError(c, h.logger, err)
+	}
+	projectSnapshot := model.SnapshotProject(project)
 	var referenceAssetID string
 	var referenceView *model.AssetView
 	if req.ReferenceImage != nil {
@@ -273,18 +278,15 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
 	}
-	if referenceView == nil && (req.SkipReferenceImage == nil || !*req.SkipReferenceImage) && h.repo != nil {
-		project, findErr := h.repo.Projects().FindByID(c.Context(), req.ProjectID)
-		if findErr == nil && project.UserID == userID && project.ReferenceImageAssetID != "" {
-			if h.referenceAssets == nil {
-				return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
-			}
-			presented, presentErr := h.referenceAssets.Present(c.Context(), userID, project.ReferenceImageAssetID, []string{service.DirectUploadPurposeProjectReference})
-			if presentErr != nil {
-				return respondReferenceAssetError(c, h.logger, presentErr)
-			}
-			referenceView = presented
+	if referenceView == nil && (req.SkipReferenceImage == nil || !*req.SkipReferenceImage) && project.ReferenceImageAssetID != "" {
+		if h.referenceAssets == nil {
+			return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
 		}
+		presented, presentErr := h.referenceAssets.Present(c.Context(), userID, project.ReferenceImageAssetID, []string{service.DirectUploadPurposeProjectReference})
+		if presentErr != nil {
+			return respondReferenceAssetError(c, h.logger, presentErr)
+		}
+		referenceView = presented
 	}
 
 	var pending repository.Repository
@@ -351,7 +353,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)
-		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
+		if model.IsMontagePlatform(project.Platform) {
 			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
 				return respondUploadSessionFinalizeError(c, h.logger, err)
@@ -383,6 +385,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		ImageModelKey:            req.ImageModelKey,
 		SkipRefImage:             req.SkipReferenceImage,
 		ReferenceImageAssetID:    referenceAssetID,
+		ProjectSnapshot:          &projectSnapshot,
 		InputAttachments:         req.InputAttachments,
 		Watermark:                req.Watermark,
 		Goal:                     req.Goal,
@@ -400,6 +403,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		ExecutionTarget:          req.ExecutionTarget,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) || errors.Is(err, service.ErrProjectOwnedByUser) {
+			return respondTaskCreationProjectError(c, h.logger, err)
+		}
 		if isReferenceAssetError(err) {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
@@ -425,6 +431,20 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Success(c, taskAPIResponse(tasks[0], h.store))
 	}
 	return Success(c, taskAPIResponses(tasks, h.store))
+}
+
+func respondTaskCreationProjectError(c fiber.Ctx, logger *zerolog.Logger, err error) error {
+	switch {
+	case errors.Is(err, service.ErrProjectNotFound):
+		return Error(c, fiber.StatusNotFound, "project not found")
+	case errors.Is(err, service.ErrProjectOwnedByUser):
+		return Forbidden(c, "you do not have access to this project")
+	default:
+		if logger != nil {
+			logger.Error().Err(err).Msg("resolve task project failed")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to resolve project")
+	}
 }
 
 // List handles GET /api/v1/tasks.
