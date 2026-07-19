@@ -66,7 +66,7 @@ type repositoryFixture struct {
 	userID string
 }
 
-func seedRuntimeBillingTask(t *testing.T, repo repository.Repository, userID string, taskID string) *model.Task {
+func seedRuntimeBillingTask(t *testing.T, repo repository.Repository, userID string, taskID string, legacyShortfall ...int) *model.Task {
 	t.Helper()
 	task := &model.Task{
 		ID:        taskID,
@@ -74,6 +74,10 @@ func seedRuntimeBillingTask(t *testing.T, repo repository.Repository, userID str
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusRunning,
 		ProjectID: "project-runtime",
+	}
+	if len(legacyShortfall) > 0 {
+		task.BillingStatus = model.TaskBillingStatusPaymentRequired
+		task.BillingShortfallCredits = legacyShortfall[0]
 	}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatalf("seed task: %v", err)
@@ -159,10 +163,7 @@ func TestAdminGrantDoesNotMutateLegacyPaymentRequiredTask(t *testing.T) {
 	ctx := context.Background()
 	svc, fixture := newRuntimeBillingCreditService(t, 1000)
 	taskID := "task-runtime-admin-clears"
-	seedRuntimeBillingTask(t, fixture.repo, fixture.userID, taskID)
-	if err := fixture.repo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusPaymentRequired, 3200); err != nil {
-		t.Fatalf("mark payment required: %v", err)
-	}
+	seedRuntimeBillingTask(t, fixture.repo, fixture.userID, taskID, 3200)
 
 	if err := svc.AdminGrant(ctx, fixture.userID, 4000, "充值"); err != nil {
 		t.Fatalf("admin grant: %v", err)

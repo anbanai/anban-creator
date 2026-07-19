@@ -579,14 +579,6 @@ func (r *taskRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Delete(&model.Task{}, "id = ?", id).Error
 }
 
-func (r *taskRepository) UpdateBillingStatus(ctx context.Context, id, status string, shortfallCredits int) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"billing_status":            status,
-			"billing_shortfall_credits": shortfallCredits,
-		}).Error
-}
-
 // usageStatuses is the set of task statuses counted toward usage statistics.
 // Cancelled tasks are excluded because they may not have consumed meaningful
 // resources.

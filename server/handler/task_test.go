@@ -94,7 +94,7 @@ func mustMarshalTaskJSON(t *testing.T, value any) []byte {
 	return raw
 }
 
-func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
+func TestDownloadAndPreviewIgnoreLegacyPaymentRequiredColumns(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -118,16 +118,15 @@ func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ProjectID: uuid.New().String(),
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusCompleted,
+		ID:                      taskID,
+		UserID:                  userID,
+		ProjectID:               uuid.New().String(),
+		Type:                    model.PlatformArticle,
+		Status:                  model.TaskStatusCompleted,
+		BillingStatus:           model.TaskBillingStatusPaymentRequired,
+		BillingShortfallCredits: 3200,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
-	}
-	if err := repo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusPaymentRequired, 3200); err != nil {
-		t.Fatalf("set billing status: %v", err)
 	}
 	locked, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -159,19 +158,33 @@ func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 		c.Locals("user_id", userID)
 		return h.DownloadZip(c)
 	})
+	app.Get("/tasks/:id/preview", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.PreviewHTML(c)
+	})
 
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files/zip", nil))
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusPaymentRequired {
+	if resp.StatusCode != fiber.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 402 body=%s", resp.StatusCode, data)
+		t.Fatalf("zip status = %d, want 200 body=%s", resp.StatusCode, data)
+	}
+
+	preview, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/preview", nil))
+	if err != nil {
+		t.Fatalf("preview request: %v", err)
+	}
+	defer preview.Body.Close()
+	previewBody, _ := io.ReadAll(preview.Body)
+	if preview.StatusCode != fiber.StatusOK || !strings.Contains(string(previewBody), "<main>ok</main>") {
+		t.Fatalf("preview = status %d body=%s, want accessible HTML", preview.StatusCode, previewBody)
 	}
 }
 
-func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
+func TestGetFilesPreservesDeliveryURLsWithLegacyPaymentRequiredColumns(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -195,11 +208,13 @@ func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ProjectID: uuid.New().String(),
-		Type:      model.PlatformSeednote,
-		Status:    model.TaskStatusCompleted,
+		ID:                      taskID,
+		UserID:                  userID,
+		ProjectID:               uuid.New().String(),
+		Type:                    model.PlatformSeednote,
+		Status:                  model.TaskStatusCompleted,
+		BillingStatus:           model.TaskBillingStatusPaymentRequired,
+		BillingShortfallCredits: 3200,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -218,10 +233,6 @@ func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create task file: %v", err)
 	}
-	if err := repo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusPaymentRequired, 3200); err != nil {
-		t.Fatalf("set billing status: %v", err)
-	}
-
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -255,8 +266,8 @@ func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
 	if got.ID != fileID || got.FileName != "image_01.png" || got.MimeType != "image/png" || got.FileSize != upload.Size {
 		t.Fatalf("metadata = %+v, want file metadata preserved", got)
 	}
-	if got.URL != "" || got.MediaID != "" || got.WechatURL != "" {
-		t.Fatalf("delivery fields = url %q media_id %q wechat_url %q, want redacted", got.URL, got.MediaID, got.WechatURL)
+	if got.URL == "" || got.MediaID != "wechat-media-1" || got.WechatURL != "https://mmbiz.qpic.cn/wechat-media-1" {
+		t.Fatalf("delivery fields = url %q media_id %q wechat_url %q, want preserved", got.URL, got.MediaID, got.WechatURL)
 	}
 }
 
@@ -301,7 +312,7 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	}
 }
 
-func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
+func TestVideoProductionIgnoresLegacyPaymentRequiredColumns(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -316,18 +327,16 @@ func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ProjectID: uuid.New().String(),
-		Type:      model.PlatformVideoCreator,
-		Status:    model.TaskStatusCompleted,
+		ID:                      taskID,
+		UserID:                  userID,
+		ProjectID:               uuid.New().String(),
+		Type:                    model.PlatformVideoCreator,
+		Status:                  model.TaskStatusCompleted,
+		BillingStatus:           model.TaskBillingStatusPaymentRequired,
+		BillingShortfallCredits: 800,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := repo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusPaymentRequired, 800); err != nil {
-		t.Fatalf("set billing status: %v", err)
-	}
-
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -342,9 +351,62 @@ func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("request: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusPaymentRequired {
+	if resp.StatusCode != fiber.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 402 body=%s", resp.StatusCode, data)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, data)
+	}
+}
+
+func TestMarkPublishedIgnoresLegacyPaymentRequiredColumns(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, taskID := uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "publishlegacy"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+		BillingStatus: model.TaskBillingStatusPaymentRequired, BillingShortfallCredits: 1200,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
+	app := fiber.New()
+	app.Patch("/tasks/:id/published", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.MarkPublished(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPatch, "/tasks/"+taskID+"/published", strings.NewReader(`{"published":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, data)
+	}
+	found, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || !found.Published {
+		t.Fatalf("published task = %+v err=%v", found, err)
+	}
+}
+
+func TestTaskHandlerProductionDoesNotReferenceLegacyPaymentRequiredColumns(t *testing.T) {
+	raw, err := os.ReadFile("task.go")
+	if err != nil {
+		t.Fatalf("read task.go: %v", err)
+	}
+	for _, forbidden := range []string{
+		"TaskBillingStatusPaymentRequired", "BillingShortfallCredits", "taskBillingLocked", "ensureTaskBillingUnlocked",
+	} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Errorf("task.go still contains legacy delivery gate %q", forbidden)
+		}
 	}
 }
 
