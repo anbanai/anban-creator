@@ -12,6 +12,22 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
+const missingExecutionResultDiagnostic = "agent returned no execution result"
+
+func normalizeTerminalExecutionResult(result *serveragent.ExecutionResult) *serveragent.ExecutionResult {
+	if result != nil {
+		return result
+	}
+	return &serveragent.ExecutionResult{
+		Success:    false,
+		Error:      missingExecutionResultDiagnostic,
+		CostStatus: serveragent.CostStatusUnreconciled,
+		CostDiagnostics: []serveragent.CostDiagnostic{{
+			Code: serveragent.CostDiagnosticMissingTerminalModelUsage,
+		}},
+	}
+}
+
 // ValidateAgentTaskAccess loads a task and verifies that the authenticated agent
 // may act on its behalf. Empty authenticatedUserID means system/admin mode.
 func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authenticatedUserID string) (*model.Task, error) {
@@ -163,7 +179,7 @@ func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, 
 // UpdateExecutionResult stores the latest execution result JSON for a task.
 func (s *TaskService) UpdateExecutionResult(ctx context.Context, taskID string, result *serveragent.ExecutionResult) error {
 	if result == nil {
-		return nil
+		return fmt.Errorf("execution result is required")
 	}
 	if result.CostStatus == "" {
 		result.CostStatus = serveragent.CostStatusUnreconciled

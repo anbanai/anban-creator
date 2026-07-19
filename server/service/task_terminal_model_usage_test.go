@@ -101,3 +101,13 @@ func TestUpdateExecutionResultPersistsUnreconciledTerminalStatus(t *testing.T) {
 		t.Fatalf("terminal cost evidence = status %q usage %+v, want unreconciled/empty", found.CostStatus, found.TerminalModelUsage.Data())
 	}
 }
+
+func TestUpdateExecutionResultRejectsNilInsteadOfSilentlySkippingPersistence(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	logger := zerolog.New(io.Discard)
+	svc := NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.UpdateExecutionResult(context.Background(), uuid.NewString(), nil); err == nil {
+		t.Fatal("UpdateExecutionResult(nil) = nil, want explicit error")
+	}
+}

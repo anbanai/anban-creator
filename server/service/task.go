@@ -716,9 +716,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 					if refundErr := s.creditSvc.RefundForTask(ctx, deductedTaskIDs[j]); refundErr != nil {
 						s.logger.Error().Err(refundErr).Str("task_id", deductedTaskIDs[j]).Msg("failed to refund credits during rollback")
 					}
-					if refundErr := s.creditSvc.RefundAgentRuntimeReserve(ctx, deductedTaskIDs[j], "任务创建失败退还 Claude Code 运行预留"); refundErr != nil {
-						s.logger.Error().Err(refundErr).Str("task_id", deductedTaskIDs[j]).Msg("failed to refund runtime reserve during rollback")
-					}
 				}
 			}
 			// Release this iteration's pre-claimed topic back to the pool so it
@@ -1041,9 +1038,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
 				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits during plan task rollback")
 			}
-			if refundErr := s.creditSvc.RefundAgentRuntimeReserve(ctx, taskID, "计划任务创建失败退还 Claude Code 运行预留"); refundErr != nil {
-				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund runtime reserve during plan task rollback")
-			}
 		}
 		// Release the pre-claimed topic back to the pool so it isn't orphaned
 		// (a no-op when no topic was claimed for this task).
@@ -1220,11 +1214,6 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 	// Refund credits for the cancelled task (idempotent — double-refund protected).
 	if s.creditSvc != nil && task != nil {
 		s.refundTaskByMode(ctx, task, "取消")
-		if task.Status == model.TaskStatusPending {
-			if refundErr := s.creditSvc.RefundAgentRuntimeReserve(ctx, task.ID, "任务取消退还 Claude Code 运行预留"); refundErr != nil {
-				s.logger.Error().Err(refundErr).Str("task_id", task.ID).Msg("failed to refund runtime reserve for cancelled pending task")
-			}
-		}
 	}
 	if task != nil {
 		if err := s.repo.Tasks().SetCompletedAt(ctx, id); err != nil {

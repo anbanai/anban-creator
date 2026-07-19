@@ -190,19 +190,19 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 		return nil
 	}
 
+	result = normalizeTerminalExecutionResult(result)
+
 	// Persist the final result and terminal provider-cost evidence.
-	if result != nil {
-		if err := s.UpdateExecutionResult(ctx, taskID, result); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: persist result")
-		}
+	if err := s.UpdateExecutionResult(ctx, taskID, result); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: persist result")
 	}
 	// Failure → terminal-fail (no cloud retry). Local execution is an explicit
 	// user choice; silently re-running a failed local task on cloud would
 	// surprise the user and could double-bill. Mirrors the terminal branch of
 	// HandleExecutionFailure minus the retry-enqueue logic.
-	if result == nil || !result.Success {
+	if !result.Success {
 		errMsg := "local execution failed"
-		if result != nil && result.Error != "" {
+		if result.Error != "" {
 			errMsg = result.Error
 		}
 		return s.failLocalTask(ctx, task, errMsg)

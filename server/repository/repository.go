@@ -86,7 +86,6 @@ type TaskRepository interface {
 	FindByUserIDAndCreatedAtRange(ctx context.Context, userID string, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindRunning(ctx context.Context) ([]*model.Task, error)
 	FindRunningByUser(ctx context.Context, userID string, projectID string) ([]*model.Task, error)
-	FindPaymentRequiredByUser(ctx context.Context, userID string) ([]*model.Task, error)
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
 	UpdateProgressLog(ctx context.Context, id, log string) error

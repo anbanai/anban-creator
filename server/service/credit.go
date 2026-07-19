@@ -124,12 +124,6 @@ func creditOperationLabel(opType string) string {
 		return "海报生成"
 	case model.CreditTypeViralAnalysis:
 		return "爆文拆解"
-	case model.CreditTypeAgentRuntimeReserve:
-		return "Claude Code 运行预留"
-	case model.CreditTypeAgentRuntime:
-		return "Claude Code 运行成本"
-	case model.CreditTypeAgentRuntimeRefund:
-		return "Claude Code 运行预留退还"
 	default:
 		return opType
 	}
@@ -236,7 +230,6 @@ func (s *CreditService) SignIn(ctx context.Context, userID string) (int, error) 
 		return 0, err
 	}
 
-	s.settlePaymentRequiredBestEffort(ctx, userID)
 	if balance, err := s.GetBalance(ctx, userID); err == nil {
 		newBalance = balance
 	}
@@ -293,7 +286,6 @@ func (s *CreditService) AdminGrant(ctx context.Context, userID string, amount in
 	}); err != nil {
 		return err
 	}
-	s.settlePaymentRequiredBestEffort(ctx, userID)
 	return nil
 }
 
@@ -332,7 +324,6 @@ func (s *CreditService) GrantBonus(ctx context.Context, userID string, amount in
 	}); err != nil {
 		return err
 	}
-	s.settlePaymentRequiredBestEffort(ctx, userID)
 	return nil
 }
 
@@ -383,18 +374,6 @@ func (s *CreditService) DeductForTask(ctx context.Context, userID, taskType, tas
 
 	s.logger.Info().Str("user_id", userID).Str("task_id", taskID).Int("cost", totalCost).Int("multiplier", m).Int("balance", newBalance).Msg("credits deducted for task")
 	return newBalance, nil
-}
-
-func agentRuntimeReserveOperationID(taskID string) string {
-	return "agent_runtime_reserve:" + taskID
-}
-
-func agentRuntimeSettlementOperationID(taskID string) string {
-	return "agent_runtime:" + taskID
-}
-
-func agentRuntimeRefundOperationID(taskID string) string {
-	return "agent_runtime_refund:" + taskID
 }
 
 // DeductForTaskCreation deducts only the fixed task service fee.
@@ -825,114 +804,6 @@ func (s *CreditService) RefundForOperationByID(ctx context.Context, operationID 
 		s.logger.Info().Str("operation_id", operationID).Int("refund", refundAmount).Int("balance", newBalance).Msg("credits refunded for operation by ID")
 		return nil
 	})
-}
-
-func (s *CreditService) refundAgentRuntimeReserve(ctx context.Context, taskID, description string, metadata *model.CreditTransactionMetadata) error {
-	if s == nil || taskID == "" {
-		return nil
-	}
-	refundOpID := agentRuntimeRefundOperationID(taskID)
-	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-		if _, err := txRepo.Credits().FindByOperationID(ctx, refundOpID); err == nil {
-			return nil
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("check runtime reserve refund: %w", err)
-		}
-		reserveTx, err := txRepo.Credits().FindByOperationID(ctx, agentRuntimeReserveOperationID(taskID))
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
-			}
-			return fmt.Errorf("find runtime reserve: %w", err)
-		}
-		if reserveTx.Amount >= 0 {
-			return nil
-		}
-		refundAmount := -reserveTx.Amount
-		newBalance, err := txRepo.Users().AdjustBalance(ctx, reserveTx.UserID, refundAmount)
-		if err != nil {
-			return fmt.Errorf("refund runtime reserve: %w", err)
-		}
-		taskIDCopy := taskID
-		opIDCopy := refundOpID
-		var metadataJSON datatypes.JSON
-		if metadata != nil {
-			data, err := json.Marshal(metadata)
-			if err != nil {
-				return fmt.Errorf("marshal runtime refund metadata: %w", err)
-			}
-			metadataJSON = datatypes.JSON(data)
-		}
-		if description == "" {
-			description = fmt.Sprintf("Claude Code 运行预留退还积分%d", refundAmount)
-		}
-		tx := &model.CreditTransaction{
-			UserID:       reserveTx.UserID,
-			Type:         model.CreditTypeAgentRuntimeRefund,
-			Amount:       refundAmount,
-			BalanceAfter: newBalance,
-			TaskID:       &taskIDCopy,
-			OperationID:  &opIDCopy,
-			Description:  description,
-			Metadata:     metadataJSON,
-		}
-		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
-			return fmt.Errorf("create runtime reserve refund: %w", err)
-		}
-		return txRepo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusSettled, 0)
-	})
-}
-
-// RefundAgentRuntimeReserve refunds an old unconsumed Claude Code runtime
-// reserve when legacy rows exist. New tasks no longer create runtime reserves.
-func (s *CreditService) RefundAgentRuntimeReserve(ctx context.Context, taskID, description string) error {
-	return s.refundAgentRuntimeReserve(ctx, taskID, description, nil)
-}
-
-func priceSnapshotMap(snapshot config.PriceSnapshot) map[string]any {
-	data, err := json.Marshal(snapshot)
-	if err != nil {
-		return nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil
-	}
-	return out
-}
-
-func (s *CreditService) settlePaymentRequiredBestEffort(ctx context.Context, userID string) {
-	if s == nil || userID == "" {
-		return
-	}
-	if err := s.SettlePaymentRequiredTasks(ctx, userID); err != nil && s.logger != nil {
-		s.logger.Warn().Err(err).Str("user_id", userID).Msg("failed to auto-settle payment-required tasks")
-	}
-}
-
-// SettlePaymentRequiredTasks clears legacy runtime shortfall locks for a user.
-// Runtime cost is now platform-paid, so no credits are deducted here.
-func (s *CreditService) SettlePaymentRequiredTasks(ctx context.Context, userID string) error {
-	if s == nil || userID == "" {
-		return nil
-	}
-	tasks, err := s.repo.Tasks().FindPaymentRequiredByUser(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("find payment-required tasks: %w", err)
-	}
-	for _, task := range tasks {
-		if err := s.settlePaymentRequiredTask(ctx, task); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *CreditService) settlePaymentRequiredTask(ctx context.Context, task *model.Task) error {
-	if task == nil || task.BillingShortfallCredits <= 0 {
-		return nil
-	}
-	return s.repo.Tasks().UpdateBillingStatus(ctx, task.ID, model.TaskBillingStatusSettled, 0)
 }
 
 // DeductForTaskWithAmount deducts an explicit task_deduct amount for legacy or

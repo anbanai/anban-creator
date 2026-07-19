@@ -57,7 +57,7 @@ func TestHandleExecutionNilResultFailsTaskWithoutPanic(t *testing.T) {
 		},
 		{
 			name:         "missing result without error",
-			wantErrorMsg: "executor returned nil result without error",
+			wantErrorMsg: "agent returned no execution result",
 		},
 	}
 
@@ -106,6 +106,22 @@ func TestHandleExecutionNilResultFailsTaskWithoutPanic(t *testing.T) {
 			}
 			if !strings.Contains(found.ErrorMessage, tt.wantErrorMsg) {
 				t.Fatalf("error_message = %q, want it to contain %q", found.ErrorMessage, tt.wantErrorMsg)
+			}
+			if found.Result == nil {
+				t.Fatal("nil executor result was not normalized and persisted")
+			}
+			var persisted agent.ExecutionResult
+			if err := json.Unmarshal([]byte(*found.Result), &persisted); err != nil {
+				t.Fatalf("decode persisted result: %v", err)
+			}
+			if persisted.Success || persisted.Error != "agent returned no execution result" {
+				t.Fatalf("persisted nil result = %+v, want stable terminal failure", persisted)
+			}
+			if persisted.CostStatus != agent.CostStatusUnreconciled || found.CostStatus != agent.CostStatusUnreconciled {
+				t.Fatalf("cost status = result %q task %q, want unreconciled", persisted.CostStatus, found.CostStatus)
+			}
+			if len(persisted.ModelUsage) != 0 || len(found.TerminalModelUsage.Data()) != 0 {
+				t.Fatalf("nil terminal fabricated usage: result=%+v task=%+v", persisted.ModelUsage, found.TerminalModelUsage.Data())
 			}
 		})
 	}

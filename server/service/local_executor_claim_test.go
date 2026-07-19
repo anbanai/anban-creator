@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -482,6 +483,39 @@ func TestCompleteLocalTask_Failure(t *testing.T) {
 	}
 	if got.ErrorMessage == "" || got.CompletedAt == nil {
 		t.Fatalf("error/completed_at not recorded: err=%q completed_at=%v", got.ErrorMessage, got.CompletedAt)
+	}
+}
+
+func TestCompleteLocalTaskNilResultPersistsTerminalCostEvidence(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+
+	if err := svc.CompleteLocalTask(ctx, taskID, nil); err != nil {
+		t.Fatalf("CompleteLocalTask: %v", err)
+	}
+
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.Status != model.TaskStatusFailed || got.Result == nil {
+		t.Fatalf("local nil result = status %q result %v, want failed persisted result", got.Status, got.Result)
+	}
+	var persisted agent.ExecutionResult
+	if err := json.Unmarshal([]byte(*got.Result), &persisted); err != nil {
+		t.Fatalf("decode persisted result: %v", err)
+	}
+	if persisted.Success || persisted.Error != "agent returned no execution result" {
+		t.Fatalf("persisted nil result = %+v, want stable terminal failure", persisted)
+	}
+	if persisted.CostStatus != agent.CostStatusUnreconciled || got.CostStatus != agent.CostStatusUnreconciled {
+		t.Fatalf("cost status = result %q task %q, want unreconciled", persisted.CostStatus, got.CostStatus)
+	}
+	if len(persisted.ModelUsage) != 0 || len(got.TerminalModelUsage.Data()) != 0 {
+		t.Fatalf("nil terminal fabricated usage: result=%+v task=%+v", persisted.ModelUsage, got.TerminalModelUsage.Data())
 	}
 }
 

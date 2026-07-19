@@ -84,7 +84,8 @@ func (s *TaskService) currentExecution(ctx context.Context, executionID string) 
 func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) (string, string, *agent.ExecutionResult, error) {
 	failureReason := "execution_failed"
 	if result == nil {
-		result = &agent.ExecutionResult{Success: false, Error: "agent returned no execution result", RemoteArtifacts: true}
+		result = normalizeTerminalExecutionResult(nil)
+		result.RemoteArtifacts = true
 	}
 	if result.Success && agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
 		result.Success, result.Error = false, agent.NestedAgentDelegationError

@@ -133,6 +133,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	result, execErr := s.executor.Execute(execCtx, opts)
+	missingResult := result == nil
+	result = normalizeTerminalExecutionResult(result)
 
 	// Post-execution persistence uses a fresh, bounded context that is decoupled
 	// from the asynq execution ctx. If the pipeline overruns the asynq deadline,
@@ -199,8 +201,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		return nil
 	}
 
-	if result == nil && execErr == nil {
-		execErr = errors.New("executor returned nil result without error")
+	if missingResult && execErr == nil {
+		execErr = errors.New(result.Error)
 	}
 	if execErr != nil {
 		s.logger.Error().Err(execErr).Str("task_id", taskID).Msg("task execution failed")

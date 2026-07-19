@@ -2,12 +2,13 @@ package service
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
-	"gorm.io/gorm"
 )
 
 func runtimeBillingTestConfig() *srvconfig.Config {
@@ -82,17 +83,6 @@ func seedRuntimeBillingTask(t *testing.T, repo repository.Repository, userID str
 
 func assertNoRuntimeTransactions(t *testing.T, repo repository.Repository, taskID, userID string) {
 	t.Helper()
-	for _, operationID := range []string{
-		agentRuntimeReserveOperationID(taskID),
-		agentRuntimeSettlementOperationID(taskID),
-		agentRuntimeRefundOperationID(taskID),
-	} {
-		if _, err := repo.Credits().FindByOperationID(context.Background(), operationID); err == nil {
-			t.Fatalf("runtime transaction %q exists, want none", operationID)
-		} else if err != gorm.ErrRecordNotFound {
-			t.Fatalf("find runtime transaction %q: %v", operationID, err)
-		}
-	}
 	txs, err := repo.Credits().FindByTaskIDAndUserID(context.Background(), taskID, userID)
 	if err != nil {
 		t.Fatalf("find task transactions: %v", err)
@@ -165,7 +155,7 @@ func TestDeductBatchForTaskCreationDoesNotReserveAgentRuntime(t *testing.T) {
 	}
 }
 
-func TestAdminGrantClearsLegacyPaymentRequiredWithoutChargingShortfall(t *testing.T) {
+func TestAdminGrantDoesNotMutateLegacyPaymentRequiredTask(t *testing.T) {
 	ctx := context.Background()
 	svc, fixture := newRuntimeBillingCreditService(t, 1000)
 	taskID := "task-runtime-admin-clears"
@@ -189,8 +179,33 @@ func TestAdminGrantClearsLegacyPaymentRequiredWithoutChargingShortfall(t *testin
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.BillingStatus != model.TaskBillingStatusSettled || found.BillingShortfallCredits != 0 {
-		t.Fatalf("billing = %q shortfall %d, want settled/0", found.BillingStatus, found.BillingShortfallCredits)
+	if found.BillingStatus != model.TaskBillingStatusPaymentRequired || found.BillingShortfallCredits != 3200 {
+		t.Fatalf("billing = %q shortfall %d, want unchanged payment_required/3200", found.BillingStatus, found.BillingShortfallCredits)
 	}
 	assertNoRuntimeTransactions(t, fixture.repo, taskID, fixture.userID)
+}
+
+func TestProductionHasNoLegacyRuntimeReserveOrPaymentRequiredSettlementMethods(t *testing.T) {
+	files := map[string][]string{
+		"credit.go": {
+			"agentRuntimeReserveOperationID", "agentRuntimeSettlementOperationID", "agentRuntimeRefundOperationID",
+			"refundAgentRuntimeReserve", "RefundAgentRuntimeReserve",
+			"settlePaymentRequiredBestEffort", "SettlePaymentRequiredTasks", "settlePaymentRequiredTask",
+			"CreditTypeAgentRuntimeReserve", "CreditTypeAgentRuntime", "CreditTypeAgentRuntimeRefund",
+		},
+		"task.go":                     {"RefundAgentRuntimeReserve"},
+		"../repository/repository.go": {"FindPaymentRequiredByUser"},
+		"../repository/task.go":       {"FindPaymentRequiredByUser"},
+	}
+	for path, forbidden := range files {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		for _, symbol := range forbidden {
+			if strings.Contains(string(raw), symbol) {
+				t.Errorf("%s still contains legacy runtime symbol %q", path, symbol)
+			}
+		}
+	}
 }

@@ -113,20 +113,6 @@ func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string, p
 	return tasks, nil
 }
 
-func (r *taskRepository) FindPaymentRequiredByUser(ctx context.Context, userID string) ([]*model.Task, error) {
-	var tasks []*model.Task
-	err := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
-		Where("billing_status = ?", model.TaskBillingStatusPaymentRequired).
-		Where("billing_shortfall_credits > 0").
-		Order("completed_at ASC, created_at ASC").
-		Find(&tasks).Error
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
 func (r *taskRepository) UpdateStatus(ctx context.Context, id, status string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("status", status).Error
 }
