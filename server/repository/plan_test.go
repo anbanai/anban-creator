@@ -19,7 +19,7 @@ func TestPlanUpdateIfReferenceImageAssetID(t *testing.T) {
 
 	matched := *plan
 	matched.Prompt = "matched"
-	won, err := repo.Plans().UpdateIfReferenceImageAssetID(t.Context(), &matched, "asset-a")
+	won, err := repo.Plans().UpdateEditableIfReferenceImageAssetID(t.Context(), &matched, "asset-a", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestPlanUpdateIfReferenceImageAssetID(t *testing.T) {
 	mismatch := *got
 	mismatch.Prompt = "must-not-write"
 	mismatch.ReferenceImageAssetID = "asset-stale"
-	won, err = repo.Plans().UpdateIfReferenceImageAssetID(t.Context(), &mismatch, "asset-b")
+	won, err = repo.Plans().UpdateEditableIfReferenceImageAssetID(t.Context(), &mismatch, "asset-b", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestPlanUpdateIfReferenceImageAssetIDMatchesEmptyAndNull(t *testing.T) {
 				t.Fatal(err)
 			}
 			loaded.Prompt = "after"
-			won, err := repo.Plans().UpdateIfReferenceImageAssetID(t.Context(), loaded, "")
+			won, err := repo.Plans().UpdateEditableIfReferenceImageAssetID(t.Context(), loaded, "", false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,6 +97,93 @@ func TestPlanUpdateIfReferenceImageAssetIDMatchesEmptyAndNull(t *testing.T) {
 				t.Fatalf("persisted plan prompt=%q reference=%q", persisted.Prompt, persisted.ReferenceImageAssetID)
 			}
 		})
+	}
+}
+
+func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing.T) {
+	repo := New(setupTestDB(t))
+	createdAt := time.Now().Add(-24 * time.Hour).Truncate(time.Second)
+	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
+	schedulerNext := oldNext.Add(time.Hour)
+	plan := &model.Plan{
+		ID: "plan-editable", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle,
+		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
+		NextRunAt: &oldNext, CreatedAt: createdAt,
+	}
+	if err := repo.Plans().Create(t.Context(), plan); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := repo.Plans().FindByID(t.Context(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	won, err := repo.Plans().UpdateNextRunAtIf(t.Context(), plan.ID, &schedulerNext, &oldNext)
+	if err != nil || !won {
+		t.Fatalf("scheduler update = %v, %v", won, err)
+	}
+
+	stale.UserID = "must-not-write-user"
+	stale.ProjectID = "must-not-write-project"
+	stale.Type = model.PlatformSeednote
+	stale.Status = model.PlanStatusPaused
+	stale.CreatedAt = createdAt.Add(time.Hour)
+	stale.Prompt = "after"
+	if err := repo.Plans().UpdateEditable(t.Context(), stale, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Plans().FindByID(t.Context(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Prompt != "after" || got.UserID != "user-1" || got.ProjectID != "project-1" || got.Type != model.PlatformArticle || got.Status != model.PlanStatusActive || !got.CreatedAt.Equal(createdAt) {
+		t.Fatalf("editable update changed protected fields: %#v", got)
+	}
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(schedulerNext) || got.CronExpr != "0 * * * *" {
+		t.Fatalf("omitted schedule = cron %q next %v, want scheduler next %v", got.CronExpr, got.NextRunAt, schedulerNext)
+	}
+
+	cronNext := schedulerNext.Add(2 * time.Hour)
+	got.CronExpr = "0 */2 * * *"
+	got.NextRunAt = &cronNext
+	if err := repo.Plans().UpdateEditable(t.Context(), got, true); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repo.Plans().FindByID(t.Context(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CronExpr != "0 */2 * * *" || got.NextRunAt == nil || !got.NextRunAt.Equal(cronNext) {
+		t.Fatalf("explicit schedule = cron %q next %v", got.CronExpr, got.NextRunAt)
+	}
+}
+
+func TestPlanUpdateStatusAndNextRunAtDoesNotOverwriteEditableFields(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	next := time.Now().Add(time.Hour).Truncate(time.Second)
+	plan := &model.Plan{
+		ID: "plan-status", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle,
+		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
+		NextRunAt: &next,
+	}
+	if err := repo.Plans().Create(t.Context(), plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Plan{}).Where("id = ?", plan.ID).Updates(map[string]interface{}{
+		"topic_hint":               "concurrent prompt",
+		"reference_image_asset_id": "asset-b",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Plans().UpdateStatusAndNextRunAt(t.Context(), plan.ID, model.PlanStatusPaused, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Plans().FindByID(t.Context(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.PlanStatusPaused || got.NextRunAt != nil || got.Prompt != "concurrent prompt" || got.ReferenceImageAssetID != "asset-b" {
+		t.Fatalf("status update changed editable fields: %#v", got)
 	}
 }
 

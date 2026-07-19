@@ -327,25 +327,25 @@ type UpdatePlanParams struct {
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
 // changed, next_run_at is recomputed. See UpdatePlanParams for field semantics.
 func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Plan, error) {
-	plan, err := s.preparePlanUpdate(ctx, p)
+	plan, scheduleChanged, err := s.preparePlanUpdate(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.Plans().Update(ctx, plan); err != nil {
+	if err := s.repo.Plans().UpdateEditable(ctx, plan, scheduleChanged); err != nil {
 		return nil, fmt.Errorf("update plan: %w", err)
 	}
 	return plan, nil
 }
 
 func (s *PlanService) UpdateIfReferenceImageAssetID(ctx context.Context, p UpdatePlanParams, expectedID string) (*model.Plan, error) {
-	plan, err := s.preparePlanUpdate(ctx, p)
+	plan, scheduleChanged, err := s.preparePlanUpdate(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 	if plan.ReferenceImageAssetID != expectedID {
 		return nil, ErrPlanUpdateConflict
 	}
-	won, err := s.repo.Plans().UpdateIfReferenceImageAssetID(ctx, plan, expectedID)
+	won, err := s.repo.Plans().UpdateEditableIfReferenceImageAssetID(ctx, plan, expectedID, scheduleChanged)
 	if err != nil {
 		return nil, fmt.Errorf("update plan: %w", err)
 	}
@@ -355,12 +355,20 @@ func (s *PlanService) UpdateIfReferenceImageAssetID(ctx context.Context, p Updat
 	return plan, nil
 }
 
-func (s *PlanService) preparePlanUpdate(ctx context.Context, p UpdatePlanParams) (*model.Plan, error) {
+func (s *PlanService) preparePlanUpdate(ctx context.Context, p UpdatePlanParams) (*model.Plan, bool, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, p.ID)
 	if err != nil {
-		return nil, fmt.Errorf("find plan: %w", err)
+		return nil, false, fmt.Errorf("find plan: %w", err)
 	}
+	scheduleChanged := p.CronExpr != "" && p.CronExpr != plan.CronExpr
+	plan, err = s.applyPlanUpdate(ctx, plan, p, scheduleChanged)
+	if err != nil {
+		return nil, false, err
+	}
+	return plan, scheduleChanged, nil
+}
 
+func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p UpdatePlanParams, scheduleChanged bool) (*model.Plan, error) {
 	plan.Prompt = p.Prompt
 	if p.ReferenceImageAssetID != nil {
 		if *p.ReferenceImageAssetID != "" {
@@ -438,7 +446,7 @@ func (s *PlanService) preparePlanUpdate(ctx context.Context, p UpdatePlanParams)
 		plan.SetMontageInput(*p.MontageInput)
 	}
 	// If cron expression changed, validate and recompute next run.
-	if p.CronExpr != "" && p.CronExpr != plan.CronExpr {
+	if scheduleChanged {
 		if _, err := cron.ParseStandard(p.CronExpr); err != nil {
 			return nil, fmt.Errorf("invalid cron expression: %w", err)
 		}
@@ -468,10 +476,7 @@ func (s *PlanService) Pause(ctx context.Context, id string) error {
 		return fmt.Errorf("find plan: %w", err)
 	}
 
-	plan.Status = model.PlanStatusPaused
-	plan.NextRunAt = nil
-
-	if err := s.repo.Plans().Update(ctx, plan); err != nil {
+	if err := s.repo.Plans().UpdateStatusAndNextRunAt(ctx, plan.ID, model.PlanStatusPaused, nil); err != nil {
 		return fmt.Errorf("pause plan: %w", err)
 	}
 
@@ -485,14 +490,11 @@ func (s *PlanService) Resume(ctx context.Context, id string) error {
 		return fmt.Errorf("find plan: %w", err)
 	}
 
-	plan.Status = model.PlanStatusActive
 	nextRun, err := s.computeNextRun(plan.CronExpr)
 	if err != nil {
 		return fmt.Errorf("compute next run: %w", err)
 	}
-	plan.NextRunAt = nextRun
-
-	if err := s.repo.Plans().Update(ctx, plan); err != nil {
+	if err := s.repo.Plans().UpdateStatusAndNextRunAt(ctx, plan.ID, model.PlanStatusActive, nextRun); err != nil {
 		return fmt.Errorf("resume plan: %w", err)
 	}
 

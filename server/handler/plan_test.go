@@ -25,12 +25,12 @@ type hookedPlanRepository struct {
 	beforeCAS func(int)
 }
 
-func (r *hookedPlanRepository) UpdateIfReferenceImageAssetID(ctx context.Context, plan *model.Plan, expectedID string) (bool, error) {
+func (r *hookedPlanRepository) UpdateEditableIfReferenceImageAssetID(ctx context.Context, plan *model.Plan, expectedID string, scheduleChanged bool) (bool, error) {
 	r.casCalls++
 	if r.beforeCAS != nil {
 		r.beforeCAS(r.casCalls)
 	}
-	return r.PlanRepository.UpdateIfReferenceImageAssetID(ctx, plan, expectedID)
+	return r.PlanRepository.UpdateEditableIfReferenceImageAssetID(ctx, plan, expectedID, scheduleChanged)
 }
 
 type planHandlerRepositoryOverride struct {

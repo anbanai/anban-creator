@@ -23,8 +23,23 @@ type rejectingPlanCASRepository struct {
 	repository.PlanRepository
 }
 
-func (r rejectingPlanCASRepository) UpdateIfReferenceImageAssetID(context.Context, *model.Plan, string) (bool, error) {
+func (r rejectingPlanCASRepository) UpdateEditableIfReferenceImageAssetID(context.Context, *model.Plan, string, bool) (bool, error) {
 	return false, nil
+}
+
+type afterFindPlanRepository struct {
+	repository.PlanRepository
+	afterFind func(*model.Plan)
+}
+
+func (r *afterFindPlanRepository) FindByID(ctx context.Context, id string) (*model.Plan, error) {
+	plan, err := r.PlanRepository.FindByID(ctx, id)
+	if err == nil && r.afterFind != nil {
+		hook := r.afterFind
+		r.afterFind = nil
+		hook(plan)
+	}
+	return plan, err
 }
 
 type planCASRepositoryOverride struct {
@@ -913,6 +928,162 @@ func TestPlanServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWriting(t
 	if persisted.Prompt != "before" || persisted.ReferenceImageAssetID != "asset-a" {
 		t.Fatalf("conflict wrote plan = prompt %q reference %q", persisted.Prompt, persisted.ReferenceImageAssetID)
 	}
+}
+
+func TestPlanServiceUpdatesDoNotOverwriteSchedulerNextRun(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		desiredRef *string
+		useCAS     bool
+		wantRef    string
+	}{
+		{name: "omission CAS", useCAS: true, wantRef: "asset-a"},
+		{name: "explicit clear", desiredRef: stringPointer(""), wantRef: ""},
+		{name: "explicit replace", desiredRef: stringPointer("asset-b"), wantRef: "asset-b"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, base := setupTestPlanService(t)
+			ctx := context.Background()
+			projectID := createTestProject(t, base, "user-1", model.PlatformSeednote)
+			for _, assetID := range []string{"asset-a", "asset-b"} {
+				seedReferenceAsset(t, base, referenceAssetFixture(assetID, "user-1", DirectUploadPurposeTaskReference))
+			}
+			oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
+			schedulerNext := oldNext.Add(time.Hour)
+			plan := &model.Plan{
+				ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID, Type: model.PlatformSeednote,
+				Prompt: "before", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
+				ReferenceImageAssetID: "asset-a", NextRunAt: &oldNext,
+			}
+			if err := base.Plans().Create(ctx, plan); err != nil {
+				t.Fatal(err)
+			}
+			hookedPlans := &afterFindPlanRepository{PlanRepository: base.Plans()}
+			hookedPlans.afterFind = func(*model.Plan) {
+				won, err := base.Plans().UpdateNextRunAtIf(ctx, plan.ID, &schedulerNext, &oldNext)
+				if err != nil || !won {
+					t.Fatalf("scheduler update = %v, %v", won, err)
+				}
+			}
+			repo := planCASRepositoryOverride{Repository: base, plans: hookedPlans}
+			svc := NewPlanService(repo, nil)
+			svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+			params := UpdatePlanParams{ID: plan.ID, Prompt: "after", ReferenceImageAssetID: tt.desiredRef}
+			var err error
+			if tt.useCAS {
+				_, err = svc.UpdateIfReferenceImageAssetID(ctx, params, "asset-a")
+			} else {
+				_, err = svc.Update(ctx, params)
+			}
+			if err != nil {
+				t.Fatalf("update: %v", err)
+			}
+			persisted, err := base.Plans().FindByID(ctx, plan.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Prompt != "after" || persisted.ReferenceImageAssetID != tt.wantRef {
+				t.Fatalf("updated plan = prompt %q reference %q", persisted.Prompt, persisted.ReferenceImageAssetID)
+			}
+			if persisted.NextRunAt == nil || !persisted.NextRunAt.Equal(schedulerNext) {
+				t.Fatalf("next_run_at = %v, want scheduler value %v", persisted.NextRunAt, schedulerNext)
+			}
+		})
+	}
+}
+
+func TestPlanServiceExplicitCronChangeUpdatesSchedule(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	projectID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
+	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
+	plan := &model.Plan{
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID, Type: model.PlatformSeednote,
+		Prompt: "before", CronExpr: "0 * * * *", Status: model.PlanStatusActive, NextRunAt: &oldNext,
+	}
+	if err := repo.Plans().Create(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := svc.Update(ctx, UpdatePlanParams{ID: plan.ID, Prompt: "after", CronExpr: "0 */2 * * *"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.CronExpr != "0 */2 * * *" || updated.NextRunAt == nil || !updated.NextRunAt.After(time.Now()) {
+		t.Fatalf("updated schedule = cron %q next %v", updated.CronExpr, updated.NextRunAt)
+	}
+	persisted, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.CronExpr != updated.CronExpr || persisted.NextRunAt == nil || !persisted.NextRunAt.Equal(*updated.NextRunAt) {
+		t.Fatalf("persisted schedule = cron %q next %v", persisted.CronExpr, persisted.NextRunAt)
+	}
+}
+
+func TestPlanServicePauseResumeDoNotOverwriteConcurrentEditableFields(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		initial     string
+		apply       func(*PlanService, context.Context, string) error
+		wantStatus  string
+		wantNextNil bool
+	}{
+		{name: "pause", initial: model.PlanStatusActive, apply: func(svc *PlanService, ctx context.Context, id string) error {
+			return svc.Pause(ctx, id)
+		}, wantStatus: model.PlanStatusPaused, wantNextNil: true},
+		{name: "resume", initial: model.PlanStatusPaused, apply: func(svc *PlanService, ctx context.Context, id string) error {
+			return svc.Resume(ctx, id)
+		}, wantStatus: model.PlanStatusActive},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, base := setupTestPlanService(t)
+			ctx := context.Background()
+			next := time.Now().Add(time.Hour).Truncate(time.Second)
+			plan := &model.Plan{
+				ID: uuid.NewString(), UserID: "user-1", Type: model.PlatformArticle,
+				Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *",
+				Status: tt.initial, NextRunAt: &next,
+			}
+			if err := base.Plans().Create(ctx, plan); err != nil {
+				t.Fatal(err)
+			}
+			hookedPlans := &afterFindPlanRepository{PlanRepository: base.Plans()}
+			hookedPlans.afterFind = func(*model.Plan) {
+				current, err := base.Plans().FindByID(ctx, plan.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				current.Prompt = "concurrent prompt"
+				current.ReferenceImageAssetID = "asset-b"
+				if err := base.Plans().Update(ctx, current); err != nil {
+					t.Fatal(err)
+				}
+			}
+			repo := planCASRepositoryOverride{Repository: base, plans: hookedPlans}
+			svc := NewPlanService(repo, nil)
+			if err := tt.apply(svc, ctx, plan.ID); err != nil {
+				t.Fatal(err)
+			}
+			persisted, err := base.Plans().FindByID(ctx, plan.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Status != tt.wantStatus || persisted.Prompt != "concurrent prompt" || persisted.ReferenceImageAssetID != "asset-b" {
+				t.Fatalf("updated plan = status %q prompt %q reference %q", persisted.Status, persisted.Prompt, persisted.ReferenceImageAssetID)
+			}
+			if tt.wantNextNil && persisted.NextRunAt != nil {
+				t.Fatalf("paused next_run_at = %v, want nil", persisted.NextRunAt)
+			}
+			if !tt.wantNextNil && persisted.NextRunAt == nil {
+				t.Fatal("resumed next_run_at is nil")
+			}
+		})
+	}
+}
+
+func stringPointer(value string) *string {
+	return &value
 }
 
 func TestPlanService_Pause_Resume(t *testing.T) {

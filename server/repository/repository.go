@@ -70,7 +70,9 @@ type PlanRepository interface {
 	FindByID(ctx context.Context, id string) (*model.Plan, error)
 	FindByUserID(ctx context.Context, userID string, projectID string, offset, limit int) ([]*model.Plan, error)
 	Update(ctx context.Context, plan *model.Plan) error
-	UpdateIfReferenceImageAssetID(ctx context.Context, plan *model.Plan, expectedID string) (bool, error)
+	UpdateEditable(ctx context.Context, plan *model.Plan, scheduleChanged bool) error
+	UpdateEditableIfReferenceImageAssetID(ctx context.Context, plan *model.Plan, expectedID string, scheduleChanged bool) (bool, error)
+	UpdateStatusAndNextRunAt(ctx context.Context, id, status string, nextRunAt *time.Time) error
 	UpdateNextRunAtIf(ctx context.Context, id string, nextRunAt, expectedNextRunAt *time.Time) (bool, error)
 	Delete(ctx context.Context, id string) error
 	ListActive(ctx context.Context) ([]*model.Plan, error)
