@@ -20,6 +20,14 @@ import (
 
 var ErrExecutionTerminalPersistence = errors.New("execution terminal persistence failed")
 
+type pendingExecutionPreparation uint8
+
+const (
+	pendingExecutionSkipped pendingExecutionPreparation = iota
+	pendingExecutionReady
+	pendingExecutionTerminalized
+)
+
 // HandleExecution is called by the async worker to execute a task.
 // It calls the agent executor and updates status in the DB.
 func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, project *model.Project) error {
@@ -638,8 +646,8 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 	if err != nil {
 		return fmt.Errorf("find task %s: %w", taskID, err)
 	}
-	referenceAsset, prepared, err := s.preparePendingExecution(ctx, task)
-	if err != nil || !prepared {
+	referenceAsset, preparation, err := s.preparePendingExecution(ctx, task)
+	if err != nil || preparation != pendingExecutionReady {
 		return err
 	}
 	if s.kubernetesDispatcher != nil {
@@ -659,24 +667,24 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 	return s.handleExecution(ctx, task, nil, referenceAsset, true)
 }
 
-func (s *TaskService) preparePendingExecution(ctx context.Context, task *model.Task) (*model.Asset, bool, error) {
+func (s *TaskService) preparePendingExecution(ctx context.Context, task *model.Task) (*model.Asset, pendingExecutionPreparation, error) {
 	referenceAsset, err := resolveEffectiveReferenceAsset(ctx, s.repo, task)
 	if err == nil {
-		return referenceAsset, true, nil
+		return referenceAsset, pendingExecutionReady, nil
 	}
 	wrapped := fmt.Errorf("resolve reference asset: %w", err)
 	persistCtx, cancel := context.WithTimeout(context.Background(), s.persistTimeout)
 	defer cancel()
 	swapped, failErr := s.repo.Tasks().FailPendingTask(persistCtx, task.ID, wrapped.Error())
 	if failErr != nil {
-		return nil, false, fmt.Errorf("fail pending task after reference resolution: %w", failErr)
+		return nil, pendingExecutionSkipped, fmt.Errorf("fail pending task after reference resolution: %w", failErr)
 	}
 	if !swapped {
-		return nil, false, nil
+		return nil, pendingExecutionSkipped, nil
 	}
 	s.logger.Error().Err(wrapped).Str("task_id", task.ID).Msg("pending task reference asset resolution failed")
 	s.finalizeFailedExecutionSideEffects(persistCtx, task, "execution_failed", wrapped.Error())
-	return nil, false, nil
+	return nil, pendingExecutionTerminalized, nil
 }
 
 func (s *TaskService) finalizeFailedExecutionSideEffects(ctx context.Context, task *model.Task, reason, errorMsg string) {

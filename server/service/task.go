@@ -1542,10 +1542,10 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 	}
 
 	// Check per-project concurrency limit.
+	slotReserved := false
 	if project != nil {
 		maxConcurrent := s.effectiveProjectMaxConcurrent(project)
 
-		slotReserved := false
 		if s.pubsub != nil && s.pubsub.Available() {
 			// Atomic check-and-reserve via Redis to prevent TOCTOU races.
 			count, ok, err := s.pubsub.TryReserveSlot(ctx, project.ID, maxConcurrent)
@@ -1627,30 +1627,50 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 	// Fallback: run in goroutine if no enqueuer.
 	s.logger.Warn().Str("task_id", task.ID).Msg("no enqueuer available, running task in goroutine")
 	go func() {
+		ownsSlot := slotReserved && s.pubsub != nil && s.pubsub.Available() && project != nil
+		releaseOwnedSlot := func(ctx context.Context) {
+			if !ownsSlot {
+				return
+			}
+			s.pubsub.ReleaseSlot(ctx, project.ID)
+			ownsSlot = false
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				s.logger.Error().
 					Str("task_id", task.ID).
 					Interface("panic", r).
 					Msg("panic recovered in fallback task execution")
-				if s.pubsub != nil && s.pubsub.Available() && project != nil {
-					s.pubsub.ReleaseSlot(context.Background(), project.ID)
-				}
+				releaseOwnedSlot(context.Background())
 			}
 		}()
 		fallbackCtx, cancel := context.WithTimeout(context.Background(), s.executionTimeout)
 		defer cancel()
-		referenceAsset, prepared, err := s.preparePendingExecution(fallbackCtx, task)
+		referenceAsset, preparation, err := s.preparePendingExecution(fallbackCtx, task)
 		if err != nil {
-			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task preparation failed")
+			releaseOwnedSlot(fallbackCtx)
+			s.logger.Error().Err(err).
+				Str("task_id", task.ID).
+				Msg("fallback task preparation failed; task remains pending for periodic dispatch retry")
 			return
 		}
-		if !prepared {
+		if preparation == pendingExecutionTerminalized {
+			ownsSlot = false
+			return
+		}
+		if preparation != pendingExecutionReady {
+			releaseOwnedSlot(fallbackCtx)
 			return
 		}
 		// Set running status before execution to prevent plan checker from re-dispatching.
-		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
+		swapped, swapErr := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
+		if swapErr != nil {
+			releaseOwnedSlot(fallbackCtx)
+			s.logger.Error().Err(swapErr).Str("task_id", task.ID).Msg("fallback task running claim failed; task remains pending for periodic dispatch retry")
+			return
+		}
 		if !swapped {
+			releaseOwnedSlot(fallbackCtx)
 			return
 		}
 		if err := s.handleExecution(fallbackCtx, task, project, referenceAsset, true); err != nil {
