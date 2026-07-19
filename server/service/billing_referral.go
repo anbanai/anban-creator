@@ -57,9 +57,7 @@ func (s *BillingReferralService) TopUp(ctx context.Context, req TopUpRequest) (*
 	if s == nil || s.repo == nil || s.wallet == nil {
 		return nil, fmt.Errorf("%w: referral service is not configured", ErrBillingInvalid)
 	}
-	var err error
-	req, err = s.wallet.normalizeTopUpRequest(req)
-	if err != nil {
+	if err := validateTopUpRequest(req); err != nil {
 		return nil, err
 	}
 

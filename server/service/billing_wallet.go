@@ -82,7 +82,6 @@ type TopUpRequest struct {
 	Credits            int64
 	ExternalSourceType string
 	ExternalSourceID   string
-	ExternalRef        string
 	CatalogID          string
 	RequestFingerprint string
 	IdempotencyScope   string
@@ -426,15 +425,14 @@ func (s *BillingWalletService) consumeForCharge(ctx context.Context, repo reposi
 }
 
 func (s *BillingWalletService) TopUp(ctx context.Context, req TopUpRequest) (*TopUpResult, error) {
-	var err error
-	req, err = s.normalizeTopUpRequest(req)
-	if err != nil {
+	if err := validateTopUpRequest(req); err != nil {
 		return nil, err
 	}
 	var result *TopUpResult
-	err = s.withTx(ctx, func(tx repository.Repository) error {
-		result, err = s.topUpInTx(ctx, tx, req)
-		return err
+	err := s.withTx(ctx, func(tx repository.Repository) error {
+		var topUpErr error
+		result, topUpErr = s.topUpInTx(ctx, tx, req)
+		return topUpErr
 	})
 	if err != nil {
 		if replay, replayErr := findTopUpReplay(ctx, s.repo.Billing(), req); replayErr != nil || replay != nil {
@@ -454,30 +452,19 @@ func (s *BillingWalletService) TopUpInTx(ctx context.Context, tx repository.Repo
 	if tx == nil {
 		return nil, fmt.Errorf("%w: top-up transaction is required", ErrBillingInvalid)
 	}
-	var err error
-	req, err = s.normalizeTopUpRequest(req)
-	if err != nil {
+	if err := validateTopUpRequest(req); err != nil {
 		return nil, err
 	}
 	return s.topUpInTx(ctx, tx, req)
 }
 
-func (s *BillingWalletService) normalizeTopUpRequest(req TopUpRequest) (TopUpRequest, error) {
-	if req.ExternalSourceID == "" {
-		req.ExternalSourceID = req.ExternalRef
-	}
-	if req.ExternalSourceType == "" && req.ExternalSourceID != "" {
-		req.ExternalSourceType = "external"
-	}
-	if req.CatalogID == "" {
-		req.CatalogID = s.bundle.Products.CatalogID
-	}
+func validateTopUpRequest(req TopUpRequest) error {
 	if strings.TrimSpace(req.UserID) == "" || req.Credits <= 0 || strings.TrimSpace(req.ExternalSourceType) == "" ||
 		strings.TrimSpace(req.ExternalSourceID) == "" || strings.TrimSpace(req.CatalogID) == "" ||
 		!validBillingFingerprint(req.RequestFingerprint) || strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
-		return TopUpRequest{}, fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
+		return fmt.Errorf("%w: invalid top-up", ErrBillingInvalid)
 	}
-	return req, nil
+	return nil
 }
 
 func (s *BillingWalletService) topUpInTx(ctx context.Context, tx repository.Repository, req TopUpRequest) (*TopUpResult, error) {

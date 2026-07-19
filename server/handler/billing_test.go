@@ -24,6 +24,31 @@ import (
 )
 
 func TestBillingHandler(t *testing.T) {
+	t.Run("service errors keep exact public identities", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			err    error
+			status int
+			code   int
+			msg    string
+		}{
+			{name: "SKU not found", err: service.ErrBillingSKUNotFound, status: http.StatusNotFound, code: 40401, msg: "billing_sku_not_found"},
+			{name: "charge conflict", err: service.ErrBillingConflict, status: http.StatusConflict, code: 40901, msg: "billing_charge_conflict"},
+			{name: "quote expired", err: service.ErrBillingQuoteExpired, status: http.StatusGone, code: 41001, msg: "billing_quote_expired"},
+			{name: "debt outstanding", err: service.ErrBillingDebtOutstanding, status: http.StatusPaymentRequired, code: 40201, msg: "billing_debt_outstanding"},
+			{name: "task insufficient", err: service.ErrBillingInsufficientForTask, status: http.StatusPaymentRequired, code: 40202, msg: "billing_insufficient_for_task"},
+			{name: "standalone insufficient", err: service.ErrBillingInsufficientForStandaloneOperation, status: http.StatusPaymentRequired, code: 40203, msg: "billing_insufficient_for_standalone_operation"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				app := fiber.New()
+				app.Get("/", func(c fiber.Ctx) error { return writeBillingServiceError(c, tt.err) })
+				resp := billingTestRequest(t, app, http.MethodGet, "/", nil, "")
+				assertBillingHTTPMessage(t, resp, tt.status, tt.code, tt.msg)
+			})
+		}
+	})
+
 	t.Run("wallet absent is zero and read only", func(t *testing.T) {
 		f := newBillingHandlerFixture(t)
 		resp := f.publicRequest(t, http.MethodGet, "/api/billing/wallet", nil)
@@ -80,10 +105,10 @@ func TestBillingHandler(t *testing.T) {
 		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", map[string]any{
 			"operation": "missing", "request_fingerprint": strings.Repeat("b", 64), "idempotency_scope": "quote", "idempotency_key": "missing",
 		})
-		assertBillingHTTP(t, resp, http.StatusNotFound, BillingCodeNotFound)
+		assertBillingHTTP(t, resp, http.StatusNotFound, BillingCodeSKUNotFound)
 		body["operation"] = "mcp.generate_image"
 		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
-		assertBillingHTTP(t, resp, http.StatusConflict, BillingCodeConflict)
+		assertBillingHTTP(t, resp, http.StatusConflict, BillingCodeChargeConflict)
 	})
 
 	t.Run("admin authentication topup replay transactions and referral summary", func(t *testing.T) {
@@ -104,7 +129,7 @@ func TestBillingHandler(t *testing.T) {
 		}
 		body["credits"] = float64(10_001)
 		resp = f.adminRequest(t, f.adminKey, body)
-		assertBillingHTTP(t, resp, http.StatusConflict, BillingCodeConflict)
+		assertBillingHTTP(t, resp, http.StatusConflict, BillingCodeChargeConflict)
 
 		resp = f.publicRequest(t, http.MethodGet, "/api/billing/referral", nil)
 		assertBillingHTTP(t, resp, http.StatusOK, 0)
@@ -133,6 +158,18 @@ func TestBillingHandler(t *testing.T) {
 		for _, query := range []string{"?offset=-1&limit=20", "?offset=0&limit=0", "?offset=0&limit=101"} {
 			resp = f.publicRequest(t, http.MethodGet, "/api/billing/transactions"+query, nil)
 			assertBillingHTTP(t, resp, http.StatusBadRequest, BillingCodeInvalid)
+		}
+	})
+
+	t.Run("admin topup requires every canonical identity field", func(t *testing.T) {
+		for _, field := range []string{"external_source_type", "external_source_id", "catalog_id", "request_fingerprint", "idempotency_scope", "idempotency_key"} {
+			t.Run(field, func(t *testing.T) {
+				f := newBillingHandlerFixture(t)
+				body := f.topUpBody("missing-"+field, 10_000)
+				delete(body, field)
+				resp := f.adminRequest(t, f.adminKey, body)
+				assertBillingHTTPMessage(t, resp, http.StatusBadRequest, BillingCodeInvalid, "billing_invalid")
+			})
 		}
 	})
 
@@ -325,6 +362,21 @@ func assertBillingHTTP(t *testing.T, resp *http.Response, status, code int) {
 		t.Fatalf("code = %#v, want %d; response=%#v", envelope["code"], code, envelope)
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(mustJSON(t, envelope)))
+}
+
+func assertBillingHTTPMessage(t *testing.T, resp *http.Response, status, code int, msg string) {
+	t.Helper()
+	if resp.StatusCode != status {
+		body := readResponseBody(t, resp)
+		t.Fatalf("status = %d, want %d: %s", resp.StatusCode, status, body)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(readResponseBody(t, resp), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope["code"] != float64(code) || envelope["msg"] != msg {
+		t.Fatalf("response = %#v, want code=%d msg=%q", envelope, code, msg)
+	}
 }
 
 func billingResponseData(t *testing.T, resp *http.Response) map[string]any {

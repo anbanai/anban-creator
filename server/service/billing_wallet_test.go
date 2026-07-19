@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,37 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestBillingTopUpRequiresCanonicalIdentity(t *testing.T) {
+	if _, exists := reflect.TypeOf(TopUpRequest{}).FieldByName("ExternalRef"); exists {
+		t.Fatal("TopUpRequest still exposes legacy ExternalRef alias")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*TopUpRequest)
+	}{
+		{name: "external source type", mutate: func(req *TopUpRequest) { req.ExternalSourceType = "" }},
+		{name: "external source ID", mutate: func(req *TopUpRequest) { req.ExternalSourceID = "" }},
+		{name: "catalog ID", mutate: func(req *TopUpRequest) { req.CatalogID = "" }},
+		{name: "request fingerprint", mutate: func(req *TopUpRequest) { req.RequestFingerprint = "" }},
+		{name: "idempotency scope", mutate: func(req *TopUpRequest) { req.IdempotencyScope = "" }},
+		{name: "idempotency key", mutate: func(req *TopUpRequest) { req.IdempotencyKey = "" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newBillingWalletFixture(t, 0, 0, 0)
+			req := TopUpRequest{
+				UserID: "u1", Credits: 1_000, ExternalSourceType: "payment", ExternalSourceID: "canonical-" + tt.name,
+				CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("canonical", tt.name),
+				IdempotencyScope: "topup", IdempotencyKey: "canonical-" + tt.name,
+			}
+			tt.mutate(&req)
+			if _, err := f.wallet.TopUp(context.Background(), req); !errors.Is(err, ErrBillingInvalid) {
+				t.Fatalf("TopUp error = %v, want ErrBillingInvalid", err)
+			}
+		})
+	}
+}
 
 func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.T) {
 	t.Run("debt", func(t *testing.T) {
@@ -350,7 +382,7 @@ func TestTopUpRepaysDebtBeforePaidBalance(t *testing.T) {
 	fingerprint := billingFingerprint("topup-1")
 	result, err := f.wallet.TopUp(context.Background(), TopUpRequest{
 		UserID: "u1", Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1",
-		RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
+		CatalogID: "retail-test-v1", RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
 	})
 	if err != nil || result.DebtRepaid != 400 || result.PaidAdded != 600 {
 		t.Fatalf("TopUp = %+v, %v", result, err)
@@ -360,20 +392,20 @@ func TestTopUpRepaysDebtBeforePaidBalance(t *testing.T) {
 	}
 	replay, err := f.wallet.TopUp(context.Background(), TopUpRequest{
 		UserID: "u1", Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1",
-		RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
+		CatalogID: "retail-test-v1", RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
 	})
 	if err != nil || replay.EntryID != result.EntryID {
 		t.Fatalf("topup replay = %+v, %v", replay, err)
 	}
 	if _, err := f.wallet.TopUp(context.Background(), TopUpRequest{
 		UserID: "u1", Credits: 999, ExternalSourceType: "payment", ExternalSourceID: "api-1",
-		RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
+		CatalogID: "retail-test-v1", RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "topup-1",
 	}); !errors.Is(err, ErrBillingConflict) {
 		t.Fatalf("topup conflict error = %v", err)
 	}
 	if _, err := f.wallet.TopUp(context.Background(), TopUpRequest{
 		UserID: "u1", Credits: 999, ExternalSourceType: "payment", ExternalSourceID: "api-1",
-		RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "different-key-same-source",
+		CatalogID: "retail-test-v1", RequestFingerprint: fingerprint, IdempotencyScope: "topup", IdempotencyKey: "different-key-same-source",
 	}); !errors.Is(err, ErrBillingConflict) {
 		t.Fatalf("external source conflict error = %v, want ErrBillingConflict", err)
 	}
@@ -384,7 +416,7 @@ func TestTopUpRepaysDebtBeforePaidBalance(t *testing.T) {
 		},
 		{
 			UserID: "u1", Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "api-1",
-			RequestFingerprint: billingFingerprint("topup-drift"), IdempotencyScope: "topup", IdempotencyKey: "topup-1",
+			CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("topup-drift"), IdempotencyScope: "topup", IdempotencyKey: "topup-1",
 		},
 	} {
 		if _, err := f.wallet.TopUp(context.Background(), drift); !errors.Is(err, ErrBillingConflict) {
@@ -397,7 +429,7 @@ func TestBillingWalletTopUpRequiresFingerprint(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 400)
 	_, err := f.wallet.TopUp(context.Background(), TopUpRequest{
 		UserID: "u1", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "missing-fingerprint",
-		IdempotencyScope: "topup", IdempotencyKey: "missing-fingerprint",
+		CatalogID: "retail-test-v1", IdempotencyScope: "topup", IdempotencyKey: "missing-fingerprint",
 	})
 	if !errors.Is(err, ErrBillingInvalid) {
 		t.Fatalf("missing fingerprint error = %v, want ErrBillingInvalid", err)
@@ -412,7 +444,7 @@ func TestBillingWalletPromotionCannotRepayDebt(t *testing.T) {
 	}
 	result, err := f.wallet.TopUp(context.Background(), TopUpRequest{
 		UserID: "u1", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "small",
-		RequestFingerprint: billingFingerprint("small"), IdempotencyScope: "topup", IdempotencyKey: "small",
+		CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("small"), IdempotencyScope: "topup", IdempotencyKey: "small",
 	})
 	if err != nil || result.DebtRepaid != 100 || result.PaidAdded != 0 {
 		t.Fatalf("small topup = %+v, %v", result, err)
@@ -507,7 +539,7 @@ func TestBillingWalletTopUpAndReplayDoNotScanWalletLedger(t *testing.T) {
 	f.wallet.repo = guard
 	req := TopUpRequest{
 		UserID: "u1", Credits: 500, ExternalSourceType: "payment", ExternalSourceID: "indexed-topup",
-		RequestFingerprint: billingFingerprint("indexed-topup"), IdempotencyScope: "topup", IdempotencyKey: "indexed-topup",
+		CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("indexed-topup"), IdempotencyScope: "topup", IdempotencyKey: "indexed-topup",
 	}
 	first, err := f.wallet.TopUp(context.Background(), req)
 	if err != nil || first.DebtRepaid != 500 {
@@ -563,7 +595,7 @@ func TestBillingWalletConcurrentTopUpIdempotency(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 400)
 	req := TopUpRequest{
 		UserID: "u1", Credits: 1000, ExternalSourceType: "payment", ExternalSourceID: "concurrent-topup",
-		RequestFingerprint: billingFingerprint("concurrent-topup"), IdempotencyScope: "topup", IdempotencyKey: "concurrent-topup",
+		CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("concurrent-topup"), IdempotencyScope: "topup", IdempotencyKey: "concurrent-topup",
 	}
 	var wg sync.WaitGroup
 	results := make(chan *TopUpResult, 2)
@@ -607,11 +639,11 @@ func TestBillingWalletConcurrentFirstAccountTopUpsBothSucceed(t *testing.T) {
 	requests := []TopUpRequest{
 		{
 			UserID: "new-user", Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "first-account-a",
-			RequestFingerprint: billingFingerprint("first-account-a"), IdempotencyScope: "topup", IdempotencyKey: "first-account-a",
+			CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("first-account-a"), IdempotencyScope: "topup", IdempotencyKey: "first-account-a",
 		},
 		{
 			UserID: "new-user", Credits: 200, ExternalSourceType: "payment", ExternalSourceID: "first-account-b",
-			RequestFingerprint: billingFingerprint("first-account-b"), IdempotencyScope: "topup", IdempotencyKey: "first-account-b",
+			CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("first-account-b"), IdempotencyScope: "topup", IdempotencyKey: "first-account-b",
 		},
 	}
 	var wg sync.WaitGroup
@@ -641,7 +673,7 @@ func TestBillingWalletRebuildProjection(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 0)
 	if _, err := f.wallet.TopUp(context.Background(), TopUpRequest{
 		UserID: "u1", Credits: 700, ExternalSourceType: "payment", ExternalSourceID: "rebuild",
-		RequestFingerprint: billingFingerprint("rebuild"), IdempotencyScope: "topup", IdempotencyKey: "rebuild",
+		CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("rebuild"), IdempotencyScope: "topup", IdempotencyKey: "rebuild",
 	}); err != nil {
 		t.Fatal(err)
 	}

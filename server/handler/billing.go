@@ -20,12 +20,20 @@ import (
 )
 
 const (
-	BillingCodeInvalid       = 40001
-	BillingCodeUnauthorized  = 40101
-	BillingCodeNotFound      = 40401
-	BillingCodeConflict      = 40901
-	BillingCodeInternal      = 50000
-	BillingCodeLedgerInvalid = 50001
+	BillingCodeInvalid                   = 40001
+	BillingCodeDebtOutstanding           = 40201
+	BillingCodeInsufficientForTask       = 40202
+	BillingCodeInsufficientForStandalone = 40203
+	BillingCodeUnauthorized              = 40101
+	BillingCodeResourceNotFound          = 40400
+	BillingCodeSKUNotFound               = 40401
+	BillingCodeChargeConflict            = 40901
+	BillingCodeQuoteConsumed             = 40902
+	BillingCodeQuoteMismatch             = 40903
+	BillingCodeReversalNotAllowed        = 40904
+	BillingCodeQuoteExpired              = 41001
+	BillingCodeInternal                  = 50000
+	BillingCodeLedgerInvalid             = 50001
 )
 
 type BillingHandlerOptions struct {
@@ -289,10 +297,26 @@ func writeBillingServiceError(c fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrBillingInvalid):
 		return billingErrorResponse(c, fiber.StatusBadRequest, BillingCodeInvalid, "billing_invalid")
+	case errors.Is(err, service.ErrBillingDebtOutstanding):
+		return billingErrorResponse(c, fiber.StatusPaymentRequired, BillingCodeDebtOutstanding, "billing_debt_outstanding")
+	case errors.Is(err, service.ErrBillingInsufficientForTask):
+		return billingErrorResponse(c, fiber.StatusPaymentRequired, BillingCodeInsufficientForTask, "billing_insufficient_for_task")
+	case errors.Is(err, service.ErrBillingInsufficientForStandaloneOperation):
+		return billingErrorResponse(c, fiber.StatusPaymentRequired, BillingCodeInsufficientForStandalone, "billing_insufficient_for_standalone_operation")
+	case errors.Is(err, service.ErrBillingSKUNotFound):
+		return billingErrorResponse(c, fiber.StatusNotFound, BillingCodeSKUNotFound, "billing_sku_not_found")
 	case errors.Is(err, service.ErrBillingConflict):
-		return billingErrorResponse(c, fiber.StatusConflict, BillingCodeConflict, "billing_conflict")
-	case errors.Is(err, service.ErrBillingSKUNotFound), errors.Is(err, gorm.ErrRecordNotFound):
-		return billingErrorResponse(c, fiber.StatusNotFound, BillingCodeNotFound, "billing_not_found")
+		return billingErrorResponse(c, fiber.StatusConflict, BillingCodeChargeConflict, "billing_charge_conflict")
+	case errors.Is(err, service.ErrBillingQuoteConsumed):
+		return billingErrorResponse(c, fiber.StatusConflict, BillingCodeQuoteConsumed, "billing_quote_consumed")
+	case errors.Is(err, service.ErrBillingQuoteMismatch):
+		return billingErrorResponse(c, fiber.StatusConflict, BillingCodeQuoteMismatch, "billing_quote_mismatch")
+	case errors.Is(err, service.ErrBillingReversalNotAllowed):
+		return billingErrorResponse(c, fiber.StatusConflict, BillingCodeReversalNotAllowed, "billing_reversal_not_allowed")
+	case errors.Is(err, service.ErrBillingQuoteExpired):
+		return billingErrorResponse(c, fiber.StatusGone, BillingCodeQuoteExpired, "billing_quote_expired")
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return billingErrorResponse(c, fiber.StatusNotFound, BillingCodeResourceNotFound, "billing_resource_not_found")
 	case errors.Is(err, service.ErrBillingLedgerInvalid):
 		return billingErrorResponse(c, fiber.StatusInternalServerError, BillingCodeLedgerInvalid, "billing_ledger_invalid")
 	default:
