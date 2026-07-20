@@ -11,7 +11,7 @@ describe('ProjectsPage layout contracts', () => {
 
     const visualTemplateType = source.indexOf('visualTemplateType')
     const visualTemplatePicker = source.indexOf('<TemplatePicker type={visualTemplateType}')
-    const referenceUpload = source.indexOf('<ReferenceImageUpload')
+    const referenceUpload = source.indexOf('<ReferenceAssetUpload')
     const visualStyleField = source.indexOf('name="visual_style"')
 
     expect(visualTemplateType).toBeGreaterThan(-1)

@@ -1536,7 +1536,7 @@ describe('TaskDetailPage', () => {
         platform: 'article',
         visual_style: '柔光生活摄影',
         image_ratio: '16:9',
-        reference_image_url: 'https://cdn.example.com/ref.png',
+        reference_image_asset_id: '44444444-4444-4444-8444-444444444444',
         author: '安般',
         writer: 'dan-koe',
         theme: 'autumn-warm',

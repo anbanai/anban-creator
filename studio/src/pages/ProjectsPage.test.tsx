@@ -5,8 +5,14 @@ import { api } from '@/lib/api'
 import { render } from '@/test/test-utils'
 
 const { errorMock } = vi.hoisted(() => ({ errorMock: vi.fn() }))
+const uploadToOSSMock = vi.hoisted(() => vi.fn())
 
 vi.mock('sonner', () => ({ toast: { error: errorMock, success: vi.fn() } }))
+
+vi.mock('@/lib/direct-upload', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
+  return { ...actual, uploadToOSS: uploadToOSSMock }
+})
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -21,6 +27,8 @@ vi.mock('@/lib/api', async () => {
         list: vi.fn().mockResolvedValue(mockProjects),
         stats: vi.fn().mockResolvedValue({ 'ch-1': mockProjectDetail.stats }),
         platformConfigs: vi.fn().mockResolvedValue(mockPlatformConfigs),
+        create: vi.fn(),
+        update: vi.fn(),
         delete: vi.fn(),
       },
       imageModels: {
@@ -52,7 +60,6 @@ describe('ProjectsPage deletion feedback', () => {
       theme: '',
       author: '作者',
       template_id: '',
-      reference_image_url: '',
       image_ratio: '16:9',
       max_concurrent_tasks: 2,
       config: { wechat_app_id: 'wx123' },
@@ -73,7 +80,63 @@ describe('ProjectsPage deletion feedback', () => {
     })
     vi.mocked(api.projects.platformConfigs).mockResolvedValue([])
     vi.mocked(api.projects.delete).mockReset()
+    uploadToOSSMock.mockResolvedValue({
+      uploadSessionId: '11111111-1111-4111-8111-111111111111',
+      uploadId: 'upload-project-reference',
+      key: 'uploads/pending/project-reference.png',
+      publicUrl: 'https://staging.example/project-reference.png',
+      previewUrl: 'https://staging.example/project-reference.png',
+      contentType: 'image/png',
+      size: 9,
+    })
     window.history.pushState({}, '', '/projects')
+  })
+
+  it('creates a project with a reference session and no legacy URL field', async () => {
+    vi.mocked(api.projects.create).mockResolvedValueOnce({ project: {
+      ...(await vi.mocked(api.projects.list)())[0],
+      id: 'created-project',
+      platform: 'seednote',
+    } })
+    window.history.pushState({}, '', '/projects?create=true&type=seednote&intent=new')
+
+    render(<ProjectsPage />)
+
+    await screen.findByRole('dialog', { name: '新建项目' })
+    fireEvent.change(screen.getByLabelText('参考图文件'), {
+      target: { files: [new File(['reference'], 'reference.png', { type: 'image/png' })] },
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalled())
+    const payload = vi.mocked(api.projects.create).mock.calls[0][0]
+    expect(payload.reference_image).toEqual({
+      upload_session_id: '11111111-1111-4111-8111-111111111111',
+    })
+    expect(payload).not.toHaveProperty('reference_image_url')
+  })
+
+  it('keeps the uploaded selection open when server finalization fails', async () => {
+    vi.mocked(api.projects.create).mockRejectedValueOnce({
+      response: { data: { msg: '上传会话已过期，请重新上传参考图' } },
+    })
+    window.history.pushState({}, '', '/projects?create=true&type=seednote&intent=new')
+
+    render(<ProjectsPage />)
+
+    await screen.findByRole('dialog', { name: '新建项目' })
+    fireEvent.change(screen.getByLabelText('参考图文件'), {
+      target: { files: [new File(['reference'], 'reference.png', { type: 'image/png' })] },
+    })
+    const preview = await screen.findByRole('img', { name: '参考图' })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(errorMock).toHaveBeenCalledWith('上传会话已过期，请重新上传参考图'))
+    expect(screen.getByRole('dialog', { name: '新建项目' })).toBeInTheDocument()
+    expect(preview).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建' })).toBeEnabled()
   })
 
   it('shows the server archive guidance when deleting a project fails with associated work', async () => {

@@ -15,6 +15,17 @@ const goalSchema = z.string().refine(
   `目标条件不能超过 ${GOAL_TEXT_MAX_LENGTH} 个字符`,
 )
 
+const referenceImageSelectionSchema = z.union([
+  z.object({
+    asset_id: z.string().uuid(),
+    upload_session_id: z.never().optional(),
+  }),
+  z.object({
+    upload_session_id: z.string().uuid(),
+    asset_id: z.never().optional(),
+  }),
+])
+
 const inputAttachmentSchema = z.object({
   type: z.enum(["image", "audio", "video", "document", "text"]),
   url: z.string().optional(),
@@ -108,10 +119,7 @@ export const createTaskSchema = z.object({
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).default(""),
   image_model_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
-  reference_image_url: z.string().refine(
-    (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
-    { message: "请输入有效的图片 URL" },
-  ).optional(),
+  reference_image: referenceImageSelectionSchema.nullable().optional(),
   input_attachments: z.array(inputAttachmentSchema)
     .max(16, "最多添加 16 个附件")
     .default([]),
@@ -228,10 +236,7 @@ export const planSchema = z.object({
   prompt: promptSchema.optional(),
   image_model_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
-  reference_image_url: z.string().refine(
-    (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
-    { message: "请输入有效的图片 URL" },
-  ).optional(),
+  reference_image: referenceImageSelectionSchema.nullable().optional(),
   input_attachments: z.array(inputAttachmentSchema)
     .max(16, "最多添加 16 个附件")
     .default([]),
@@ -315,10 +320,7 @@ export const projectSchema = z.object({
     max_resolution: z.string().default("720p"),
     max_duration: z.number().int().min(1).max(600).default(120),
   }).optional(),
-  reference_image_url: z.string().refine(
-    (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
-    { message: "请输入有效的图片 URL" },
-  ).optional(),
+  reference_image: referenceImageSelectionSchema.nullable().optional(),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).optional(),
 }).refine((data) => {
   if (data.enable_publishing) {

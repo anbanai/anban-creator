@@ -117,7 +117,6 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       theme: '',
       author: '作者',
       template_id: '',
-      reference_image_url: '',
       image_ratio: '16:9',
       max_concurrent_tasks: 2,
       config: { wechat_app_id: 'wx123' },
@@ -220,7 +219,6 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       theme: '',
       author: '',
       template_id: '',
-      reference_image_url: '',
       image_ratio: '9:16',
       video_defaults: {
         purpose: 'planting',
@@ -320,7 +318,6 @@ describe('PlansPage Seednote reference snapshots', () => {
     theme: '',
     author: '',
     template_id: '',
-    reference_image_url: '',
     image_ratio: '3:4',
     max_concurrent_tasks: 2,
     config: {},
@@ -338,6 +335,14 @@ describe('PlansPage Seednote reference snapshots', () => {
     status: 'active',
     next_run_at: '2025-01-20T09:00:00Z',
     project_id: seednoteProject.id,
+    reference_image: {
+      asset_id: '22222222-2222-4222-8222-222222222222',
+      file_name: 'plan-reference.png',
+      content_type: 'image/png',
+      size: 9,
+      download_url: 'https://signed.example/plan-reference.png',
+      download_expires_at: '2026-07-17T12:00:00Z',
+    },
     input_attachments: [savedAttachment],
     created_at: '2025-01-10T00:00:00Z',
     updated_at: '2025-01-10T00:00:00Z',
@@ -389,6 +394,35 @@ describe('PlansPage Seednote reference snapshots', () => {
         }],
       }))
     })
+  })
+
+  it('omits an untouched plan reference asset from the update payload', async () => {
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    expect(await screen.findByRole('img', { name: '参考图' })).toHaveAttribute(
+      'src',
+      'https://signed.example/plan-reference.png',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
+    const payload = vi.mocked(api.plans.update).mock.calls[0][1]
+    expect(payload).not.toHaveProperty('reference_image')
+    expect(payload).not.toHaveProperty('reference_image_url')
+  })
+
+  it('sends null only when the plan reference is explicitly cleared', async () => {
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
+    const payload = vi.mocked(api.plans.update).mock.calls[0][1]
+    expect(payload.reference_image).toBeNull()
+    expect(payload).not.toHaveProperty('reference_image_url')
   })
 
   it('hydrates edit snapshots and preserves omit, clear, and replace update semantics', async () => {

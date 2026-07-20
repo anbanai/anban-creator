@@ -32,7 +32,6 @@ const fixtures = vi.hoisted(() => {
     theme: '',
     author: '',
     template_id: '',
-    reference_image_url: '',
     image_ratio: '16:9',
     max_concurrent_tasks: 1,
     config: {},
@@ -384,6 +383,46 @@ describe('TasksPage Seednote reference materials', () => {
         }],
       }))
     })
+  })
+
+  it('creates a task with a reference session and no legacy URL field', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
+    let resolveReferenceUpload!: (value: unknown) => void
+    uploadToOSSMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveReferenceUpload = resolve
+    }))
+
+    renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
+
+    await screen.findByRole('dialog', { name: '新建任务' })
+    fireEvent.change(screen.getByLabelText('参考图文件'), {
+      target: { files: [new File(['reference'], 'task-reference.png', { type: 'image/png' })] },
+    })
+    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+    fireEvent.submit(document.getElementById('task-create-form')!)
+    expect(api.tasks.create).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveReferenceUpload({
+        uploadSessionId: '33333333-3333-4333-8333-333333333333',
+        uploadId: 'upload-task-reference',
+        key: 'uploads/pending/task-reference.png',
+        publicUrl: 'https://staging.example/task-reference.png',
+        previewUrl: 'https://staging.example/task-reference.png',
+        contentType: 'image/png',
+        size: 9,
+      })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
+    const payload = vi.mocked(api.tasks.create).mock.calls[0][0]
+    expect(payload.reference_image).toEqual({
+      upload_session_id: '33333333-3333-4333-8333-333333333333',
+    })
+    expect(payload).not.toHaveProperty('reference_image_url')
   })
 
   it('guards native form submit until Seednote reference uploads finish', async () => {

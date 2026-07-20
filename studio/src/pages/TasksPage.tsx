@@ -56,6 +56,8 @@ import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { getProjectCreationDefaults, taskActionSignal, taskCreationCostPreview } from '@/lib/studio-ux'
 import type { PromptAttachment } from '@/types/input-attachment'
+import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
+import { referenceSelectionFromValue } from '@/lib/reference-image'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -96,6 +98,7 @@ export default function TasksPage() {
   const [articleWithContentImages, setArticleWithContentImages] = useState(true)
   const [goalText, setGoalText] = useState('')
   const [projectImageRatio, setProjectImageRatio] = useState('')
+  const [referenceUploading, setReferenceUploading] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   // Desktop local-executor integration: when the Tauri shell reports a
@@ -151,7 +154,7 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
+    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', reference_image: null, input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
   })
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
@@ -366,6 +369,7 @@ export default function TasksPage() {
       project_id: selectedIntentProject?.id ?? '',
       image_ratio: defaults.imageRatio as CreateTaskFormValues['image_ratio'],
       image_model_key: defaults.imageModelKey,
+      reference_image: null,
       input_attachments: [],
       product_photos: [],
       selected_modules: defaults.selectedModules,
@@ -378,6 +382,7 @@ export default function TasksPage() {
     })
     setQuantity(1)
     setWatermark(false)
+    setReferenceUploading(false)
     attachmentController.clear()
     setProjectImageRatio(defaults.imageRatio)
     setHasContentImage(true)
@@ -402,9 +407,10 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_creator_input: undefined, video_editor_input: undefined, montage_input: undefined })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', reference_image: null, input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_creator_input: undefined, video_editor_input: undefined, montage_input: undefined })
     setQuantity(1)
     setWatermark(false)
+    setReferenceUploading(false)
     attachmentController.clear()
     setGoalMode(false)
     setGoalText('')
@@ -440,6 +446,7 @@ export default function TasksPage() {
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
       image_model_key: values.image_model_key || undefined,
+      reference_image: referenceSelectionFromValue(values.reference_image) || undefined,
       watermark: watermark || undefined,
       goal_mode: values.type !== 'ecommerce' && goalMode ? true : undefined,
       goal: values.type !== 'ecommerce' && goalMode ? (goalText.trim() || undefined) : undefined,
@@ -461,11 +468,11 @@ export default function TasksPage() {
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
       // Route to the desktop local executor only when it is running and able to claim now.
       execution_target: values.type !== 'montage' && runThisTaskLocally ? 'local' : undefined,
-    }))
+    })).catch(() => {})
   }
 
   function handleCreateSubmit(event?: BaseSyntheticEvent) {
-    if (attachmentController.uploading || attachmentController.hasFailures) {
+    if (referenceUploading || attachmentController.uploading || attachmentController.hasFailures) {
       event?.preventDefault()
       return
     }
@@ -1018,6 +1025,23 @@ export default function TasksPage() {
                 </FormItem>
               )} />}
 
+              {!isVideoTask && !isMontageTask && (
+                <FormField control={form.control} name="reference_image" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>任务参考图</FormLabel>
+                    <FormControl>
+                      <ReferenceAssetUpload
+                        value={field.value ?? null}
+                        onChange={field.onChange}
+                        purpose="task_reference"
+                        onUploadingChange={setReferenceUploading}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              )}
+
               {isVideoTask && (
                 <VideoCreationPanel
                   form={form}
@@ -1358,7 +1382,7 @@ export default function TasksPage() {
               type="submit"
               form="task-create-form"
               loading={createMutation.isPending}
-              disabled={Boolean(creationBlocker) || attachmentController.uploading || attachmentController.hasFailures}
+              disabled={Boolean(creationBlocker) || referenceUploading || attachmentController.uploading || attachmentController.hasFailures}
             >
               {runLocally && !isMontageTask && localExecutorStatus?.state === 'ready_stopped'
                 ? '启动并创建'

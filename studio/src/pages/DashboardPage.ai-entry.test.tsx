@@ -22,7 +22,6 @@ const { articleProject, seednoteProject, ecommerceProject } = vi.hoisted(() => {
     theme: '',
     author: '',
     template_id: '',
-    reference_image_url: '',
     image_ratio: '',
     max_concurrent_tasks: 1,
     config: { enable_publishing: true },

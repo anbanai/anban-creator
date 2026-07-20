@@ -47,6 +47,8 @@ import { parseCreationIntent } from '@/lib/command-center'
 import { taskCostFor } from '@/lib/pricing'
 import type { PromptAttachment } from '@/types/input-attachment'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
+import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
+import { referenceSelectionFromValue } from '@/lib/reference-image'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -63,6 +65,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     prompt: plan.prompt || '',
     image_model_key: plan.image_model_key || '',
     skip_reference_image: plan.skip_reference_image || false,
+    reference_image: plan.reference_image ?? null,
     input_attachments: plan.input_attachments ?? [],
     watermark: plan.watermark || false,
     goal: plan.goal || '',
@@ -89,12 +92,14 @@ export default function PlansPage() {
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
   const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
+  const [referenceUploading, setReferenceUploading] = useState(false)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
   const highlightedPlanId = searchParams.get('highlight') || ''
   const planRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const attachmentsTouchedRef = useRef(false)
   const attachmentHydratingRef = useRef(false)
+  const referenceTouchedRef = useRef(false)
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
@@ -104,6 +109,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
+      reference_image: null,
       input_attachments: [],
       has_content_image: true,
       has_tail_image: false,
@@ -278,6 +284,8 @@ export default function PlansPage() {
       ? createIntent.type
       : 'seednote'
     setEditingPlan(null)
+    referenceTouchedRef.current = false
+    setReferenceUploading(false)
     setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -289,6 +297,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
+      reference_image: null,
       input_attachments: [],
       has_content_image: true,
       has_tail_image: false,
@@ -310,6 +319,8 @@ export default function PlansPage() {
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
     setAttachmentSubmitError('')
+    referenceTouchedRef.current = false
+    setReferenceUploading(false)
     form.reset(planToFormValues(plan))
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -330,6 +341,8 @@ export default function PlansPage() {
     setModalOpen(false)
     setShowDirtyDialog(false)
     setEditingPlan(null)
+    referenceTouchedRef.current = false
+    setReferenceUploading(false)
     setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -341,6 +354,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
+      reference_image: null,
       input_attachments: [],
       has_content_image: true,
       has_tail_image: false,
@@ -388,15 +402,21 @@ export default function PlansPage() {
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
+    const referenceImage = referenceSelectionFromValue(values.reference_image)
+
     if (editingPlan) {
-      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: payload }))
+      const updatePayload = referenceTouchedRef.current
+        ? { ...payload, reference_image: referenceImage }
+        : payload
+      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: updatePayload })).catch(() => {})
     } else {
-      await submit(async () => createMutation.mutateAsync(payload))
+      const createPayload = referenceImage ? { ...payload, reference_image: referenceImage } : payload
+      await submit(async () => createMutation.mutateAsync(createPayload)).catch(() => {})
     }
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
-    if (attachmentController.uploading || attachmentController.hasFailures) {
+    if (referenceUploading || attachmentController.uploading || attachmentController.hasFailures) {
       event?.preventDefault()
       return
     }
@@ -662,6 +682,27 @@ export default function PlansPage() {
                 </FormItem>
               )} />}
 
+              {!isVideoCreator(watchedType) && !isMontagePlan && (
+                <FormField control={form.control} name="reference_image" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>任务参考图</FormLabel>
+                    <FormControl>
+                      <ReferenceAssetUpload
+                        value={field.value ?? null}
+                        onChange={(value) => {
+                          referenceTouchedRef.current = true
+                          field.onChange(value)
+                        }}
+                        purpose="task_reference"
+                        onUploadingChange={setReferenceUploading}
+                      />
+                    </FormControl>
+                    <FormDescription>每次执行使用该参考图；留空则继承项目设置。</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              )}
+
               {isVideoCreator(watchedType) && (
                 <VideoCreationPanel
                   form={form}
@@ -878,7 +919,7 @@ export default function PlansPage() {
               type="submit"
               form="plan-form"
               loading={isSubmitting}
-              disabled={attachmentController.uploading || attachmentController.hasFailures}
+              disabled={referenceUploading || attachmentController.uploading || attachmentController.hasFailures}
             >
               {editingPlan ? '更新' : '创建'}
             </Button>

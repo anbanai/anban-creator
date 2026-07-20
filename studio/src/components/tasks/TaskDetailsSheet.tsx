@@ -361,6 +361,16 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
           </TabsContent>
           <TabsContent value="materials" className="min-h-0 overflow-y-auto p-4">
             <TaskDetailsSection label="参考素材详情" title="参考素材" icon={Images}>
+              {props.task.reference_image ? (
+                <div className="mb-4 space-y-2">
+                  <p className="text-xs text-muted-foreground">任务参考图</p>
+                  <img
+                    src={props.task.reference_image.download_url}
+                    alt="参考图"
+                    className="h-32 w-32 rounded-lg border border-border object-cover"
+                  />
+                </div>
+              ) : null}
               <ErrorBoundary
                 key={`task-details-materials-${props.task.id}`}
                 fallback={<CompactMaterialError />}

@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
-import { ReferenceImageUpload } from '@/components/projects/ReferenceImageUpload'
+import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
@@ -38,6 +38,7 @@ import { useImageModels } from '@/hooks/useImageModels'
 import { videoModelDisplayName } from '@/lib/video-display'
 import { createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { isVideoCreator, isVideoPlatform } from '@/lib/video-platforms'
+import { referenceSelectionFromValue } from '@/lib/reference-image'
 
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
@@ -88,7 +89,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
     max_resolution: '720p',
     max_duration: 120,
   },
-  reference_image_url: '',
+  reference_image: null,
   image_ratio: '',
   enable_publishing: false,
   require_publish_approval: false,
@@ -144,7 +145,7 @@ function projectToForm(ch: Project, configuredVideoModels: VideoModelSpec[] = []
     ecommerce_image_model_key: ch.ecommerce_defaults?.image_model_key || '',
     video_defaults: videoDefaults,
     video_model_policy: videoPolicy,
-    reference_image_url: ch.reference_image_url || '',
+    reference_image: ch.reference_image ?? null,
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
     enable_publishing: ch.config?.enable_publishing ?? false,
     require_publish_approval: ch.config?.require_publish_approval ?? false,
@@ -166,6 +167,8 @@ export default function ProjectsPage() {
   const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [analyzingStyle, setAnalyzingStyle] = useState(false)
+  const [referenceUploading, setReferenceUploading] = useState(false)
+  const [referenceAnalysisUrl, setReferenceAnalysisUrl] = useState('')
   // 导入模型：项目 Owns 自己的人设（视觉/写作风格/排版/作者）。selectedTemplate 仅
   // 用于 TemplatePicker 的高亮，标记"当前按哪个模板导入"——不写入表单，提交时也不发送
   // template_id（后端 Update 无条件清空，存量绑定项目保存即迁移为自有值）。
@@ -189,7 +192,7 @@ export default function ProjectsPage() {
   const supportsVisualReference = !!visualTemplateType || isMoments
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
-  const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
+  const referenceImage = useWatch({ control: form.control, name: 'reference_image' })
   const authorValue = useWatch({ control: form.control, name: 'author' })
   const writerValue = useWatch({ control: form.control, name: 'writer' })
   const themeValue = useWatch({ control: form.control, name: 'theme' })
@@ -292,16 +295,14 @@ export default function ProjectsPage() {
 
   // Auto-analyze reference image to fill visual style for image-based project types.
   useEffect(() => {
-    if (!modalOpen || !referenceImageUrl || !supportsVisualReference) return
+    if (!modalOpen || !referenceAnalysisUrl || !supportsVisualReference) return
     if (styleManuallyEditedRef.current) return
-    // Skip if URL matches the project's saved value — don't clobber existing style on edit
-    if (editingProject && referenceImageUrl === editingProject.reference_image_url) return
 
     let cancelled = false
     const timer = setTimeout(async () => {
       setAnalyzingStyle(true)
       try {
-        const result = await api.projects.analyzeImage(referenceImageUrl)
+        const result = await api.projects.analyzeImage(referenceAnalysisUrl)
         if (!cancelled && result.visual_style && !styleManuallyEditedRef.current) {
           form.setValue('visual_style', result.visual_style)
         }
@@ -315,7 +316,7 @@ export default function ProjectsPage() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [modalOpen, referenceImageUrl, supportsVisualReference, editingProject, form])
+  }, [modalOpen, referenceAnalysisUrl, supportsVisualReference, form])
 
   // Reset manual-edit flag when modal reopens
   useEffect(() => {
@@ -410,8 +411,8 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       resetModal()
     },
-    onError: () => {
-      toast.error('更新项目失败，请重试')
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '更新项目失败，请重试'))
     },
   })
 
@@ -460,6 +461,8 @@ export default function ProjectsPage() {
       platform: projectPlatformFromIntent(createIntent.type),
     })
     setSelectedTemplate(null)
+    setReferenceAnalysisUrl('')
+    setReferenceUploading(false)
     setModalOpen(true)
   }
 
@@ -471,6 +474,8 @@ export default function ProjectsPage() {
   function openEdit(project: Project) {
     setEditingProject(project)
     setProfileFetchHint(null)
+    setReferenceAnalysisUrl('')
+    setReferenceUploading(false)
     form.reset(projectToForm(project, configuredVideoModels))
     skipAutoFetchRef.current = true
     setSelectedTemplate(null)
@@ -508,6 +513,8 @@ export default function ProjectsPage() {
     setEditingProject(null)
     setProfileFetchHint(null)
     setSelectedTemplate(null)
+    setReferenceAnalysisUrl('')
+    setReferenceUploading(false)
     form.reset(CHANNEL_FORM_DEFAULTS)
     if (createIntent.shouldCreate) {
       setSearchParams({}, { replace: true })
@@ -535,7 +542,6 @@ export default function ProjectsPage() {
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
       // 导入模型：模板只用于填充视觉提示，不发送 template_id，不参与运行时解析。
-      reference_image_url: values.reference_image_url?.trim() || undefined,
       image_ratio: values.image_ratio || undefined,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
@@ -583,11 +589,24 @@ export default function ProjectsPage() {
       // config stays consistent (avoids a lingering require flag with no publishing).
       payload.require_publish_approval = false
     }
+    const referenceImage = referenceSelectionFromValue(values.reference_image)
     if (editingProject) {
-      await submit(async () => updateMutation.mutateAsync({ id: editingProject.id, data: payload }))
+      const updatePayload = form.formState.dirtyFields.reference_image
+        ? { ...payload, reference_image: referenceImage }
+        : payload
+      await submit(async () => updateMutation.mutateAsync({ id: editingProject.id, data: updatePayload })).catch(() => {})
     } else {
-      await submit(async () => createMutation.mutateAsync(payload))
+      const createPayload = referenceImage ? { ...payload, reference_image: referenceImage } : payload
+      await submit(async () => createMutation.mutateAsync(createPayload)).catch(() => {})
     }
+  }
+
+  function handleProjectSubmit(event?: React.BaseSyntheticEvent) {
+    if (referenceUploading) {
+      event?.preventDefault()
+      return
+    }
+    return form.handleSubmit(onSubmit)(event)
   }
 
   function handleDelete(id: string) {
@@ -687,7 +706,7 @@ export default function ProjectsPage() {
             <DialogTitle>{editingProject ? '编辑项目' : '新建项目'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
-            <form id="project-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
+            <form id="project-form" onSubmit={handleProjectSubmit} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="platform" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">平台</FormLabel>
@@ -920,11 +939,15 @@ export default function ProjectsPage() {
                         上传一张参考图，系统会尝试识别色彩、质感和构图。
                       </p>
                     </div>
-                    <ReferenceImageUpload
-                      value={referenceImageUrl}
-                      onChange={(url) => form.setValue('reference_image_url', url, { shouldDirty: true })}
-                      purpose="project"
-                      compact
+                    <ReferenceAssetUpload
+                      value={referenceImage ?? null}
+                      onChange={(value) => {
+                        form.setValue('reference_image', value, { shouldDirty: true, shouldValidate: true })
+                        if (!value) setReferenceAnalysisUrl('')
+                      }}
+                      purpose="project_reference"
+                      onUploadingChange={setReferenceUploading}
+                      onUploadedPreview={setReferenceAnalysisUrl}
                     />
                   </div>
 
@@ -1237,7 +1260,7 @@ export default function ProjectsPage() {
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="project-form" loading={isSubmitting}>
+            <Button type="submit" form="project-form" loading={isSubmitting} disabled={referenceUploading}>
               {editingProject ? '更新' : '创建'}
             </Button>
           </DialogFooter>

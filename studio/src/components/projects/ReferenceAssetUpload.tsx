@@ -15,6 +15,7 @@ interface ReferenceAssetUploadProps {
   onChange: (value: ReferenceImageSelection | null) => void
   purpose: ReferenceUploadPurpose
   onUploadingChange?: (uploading: boolean) => void
+  onUploadedPreview?: (previewUrl: string) => void
 }
 
 interface ActiveUpload {
@@ -32,6 +33,7 @@ export function ReferenceAssetUpload({
   onChange,
   purpose,
   onUploadingChange,
+  onUploadedPreview,
 }: ReferenceAssetUploadProps) {
   const [localPreviewUrl, setLocalPreviewUrl] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -44,6 +46,7 @@ export function ReferenceAssetUpload({
   const nextGenerationRef = useRef(0)
   const activeUploadRef = useRef<ActiveUpload | null>(null)
   const onChangeRef = useRef(onChange)
+  const onUploadedPreviewRef = useRef(onUploadedPreview)
 
   const assetId = value && typeof value.asset_id === 'string' ? value.asset_id : ''
   const sessionId = value && 'upload_session_id' in value && typeof value.upload_session_id === 'string'
@@ -53,6 +56,7 @@ export function ReferenceAssetUpload({
   const currentValueIdentityRef = useRef(valueIdentity)
   currentValueIdentityRef.current = valueIdentity
   onChangeRef.current = onChange
+  onUploadedPreviewRef.current = onUploadedPreview
   const assetPreviewUrl = value && 'download_url' in value ? value.download_url : ''
   const previewUrl = localPreviewUrl || assetPreviewUrl
 
@@ -137,6 +141,7 @@ export function ReferenceAssetUpload({
       ) return
       localSessionIdRef.current = result.uploadSessionId
       onChangeRef.current(referenceSelectionFromUpload(result))
+      onUploadedPreviewRef.current?.(result.previewUrl)
     } catch (error) {
       if (
         !mountedRef.current

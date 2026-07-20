@@ -1,6 +1,7 @@
 import type { VideoInput, VideoTaskConfig } from './video'
 import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
+import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 
 export type PlanType = 'seednote' | 'article' | 'videocreator' | 'montage'
 export type PlanStatus = 'active' | 'paused' | 'completed'
@@ -18,7 +19,7 @@ export interface Plan {
   project_id: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceAssetView | null
   input_attachments?: InputAttachment[]
   watermark?: boolean
   goal?: string
@@ -44,7 +45,7 @@ export interface CreatePlanRequest {
   project_id?: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceImageSelection | null
   input_attachments?: InputAttachment[]
   watermark?: boolean
   goal?: string
@@ -66,7 +67,7 @@ export interface UpdatePlanRequest {
   prompt?: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceImageSelection | null
   input_attachments?: InputAttachment[]
   watermark?: boolean
   goal?: string
