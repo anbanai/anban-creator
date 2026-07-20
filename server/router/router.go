@@ -47,6 +47,7 @@ type Services struct {
 	AgentHandler             *handler.AgentHandler
 	CreditHandler            *handler.CreditHandler
 	BillingHandler           *handler.BillingHandler
+	BillingAdminHandler      *handler.BillingAdminHandler
 	VideoHandler             *handler.VideoHandler
 	ProjectHandler           *handler.ProjectHandler
 	TimelineHandler          *handler.TimelineHandler
@@ -232,6 +233,11 @@ func NewRouter(svc *Services) *fiber.App {
 
 		adminBillingLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
 		app.Post("/api/admin/billing/topups", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingHandler.AdminTopUp)
+		if svc.BillingAdminHandler != nil {
+			app.Get("/api/admin/billing/costs", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Costs)
+			app.Get("/api/admin/billing/margins", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Margins)
+			app.Get("/api/admin/billing/reconciliation", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Reconciliation)
+		}
 	}
 
 	apiV1 := app.Group("/api/v1", authMiddleware, rateLimiter)

@@ -411,3 +411,76 @@ type BillingExecutionCostStatus struct {
 }
 
 func (BillingExecutionCostStatus) TableName() string { return "billing_execution_cost_status" }
+
+type BillingMarginFactKind string
+
+const (
+	BillingMarginFactRetailCharge   BillingMarginFactKind = "retail_charge"
+	BillingMarginFactRetailReversal BillingMarginFactKind = "retail_reversal"
+	BillingMarginFactTopUp          BillingMarginFactKind = "topup"
+	BillingMarginFactProviderCost   BillingMarginFactKind = "provider_cost"
+)
+
+// BillingMarginFact is an immutable accounting projection. SourceKind and
+// SourceID bind each fact to one durable wallet or provider-cost event.
+type BillingMarginFact struct {
+	ID                          string                `gorm:"type:char(36);primaryKey" json:"id"`
+	Kind                        BillingMarginFactKind `gorm:"type:varchar(24);index;not null" json:"kind"`
+	SourceKind                  string                `gorm:"type:varchar(32);uniqueIndex:idx_billing_margin_source,priority:1;not null" json:"source_kind"`
+	SourceID                    string                `gorm:"type:varchar(128);uniqueIndex:idx_billing_margin_source,priority:2;not null" json:"source_id"`
+	SourceFingerprint           string                `gorm:"type:char(64);not null" json:"source_fingerprint"`
+	UserID                      string                `gorm:"type:char(36);index" json:"user_id,omitempty"`
+	TaskID                      string                `gorm:"type:char(36);index" json:"task_id,omitempty"`
+	ExecutionID                 string                `gorm:"type:varchar(128);index" json:"execution_id,omitempty"`
+	CatalogID                   string                `gorm:"type:varchar(128);index" json:"catalog_id,omitempty"`
+	SKUID                       string                `gorm:"column:sku_id;type:varchar(128);index" json:"sku_id,omitempty"`
+	Provider                    string                `gorm:"type:varchar(80);index" json:"provider,omitempty"`
+	Model                       string                `gorm:"type:varchar(160);index" json:"model,omitempty"`
+	CashMicroCNY                int64                 `gorm:"not null" json:"cash_micro_cny"`
+	DeferredPaidMicroCNY        int64                 `gorm:"not null" json:"deferred_paid_micro_cny"`
+	RecognizedRevenueMicroCNY   int64                 `gorm:"not null" json:"recognized_revenue_micro_cny"`
+	PromotionMicroCNY           int64                 `gorm:"not null" json:"promotion_micro_cny"`
+	ReceivableCreatedMicroCNY   int64                 `gorm:"not null" json:"receivable_created_micro_cny"`
+	ReceivableCollectedMicroCNY int64                 `gorm:"not null" json:"receivable_collected_micro_cny"`
+	ProviderCostMicroCNY        int64                 `gorm:"not null" json:"provider_cost_micro_cny"`
+	ContributionMarginMicroCNY  int64                 `gorm:"not null" json:"contribution_margin_micro_cny"`
+	OccurredAt                  time.Time             `gorm:"index;not null" json:"occurred_at"`
+	CreatedAt                   time.Time             `gorm:"not null" json:"created_at"`
+}
+
+func (BillingMarginFact) TableName() string { return "billing_margin_facts" }
+
+func (f BillingMarginFact) Validate() error {
+	if strings.TrimSpace(f.ID) == "" || strings.TrimSpace(f.SourceKind) == "" || strings.TrimSpace(f.SourceID) == "" {
+		return fmt.Errorf("margin fact identity is required")
+	}
+	if len(f.SourceFingerprint) != 64 {
+		return fmt.Errorf("margin fact source fingerprint must be a SHA-256 digest")
+	}
+	if _, err := hex.DecodeString(f.SourceFingerprint); err != nil {
+		return fmt.Errorf("margin fact source fingerprint must be hexadecimal")
+	}
+	switch f.Kind {
+	case BillingMarginFactRetailCharge, BillingMarginFactRetailReversal, BillingMarginFactTopUp, BillingMarginFactProviderCost:
+	default:
+		return fmt.Errorf("unsupported margin fact kind %q", f.Kind)
+	}
+	margin, ok := checkedMarginSub(f.RecognizedRevenueMicroCNY, f.ProviderCostMicroCNY)
+	if !ok || margin != f.ContributionMarginMicroCNY {
+		return fmt.Errorf("margin fact contribution margin is inconsistent")
+	}
+	if f.OccurredAt.IsZero() || f.CreatedAt.IsZero() {
+		return fmt.Errorf("margin fact timestamps are required")
+	}
+	return nil
+}
+
+func checkedMarginSub(left, right int64) (int64, bool) {
+	if right > 0 && left < math.MinInt64+right {
+		return 0, false
+	}
+	if right < 0 && left > math.MaxInt64+right {
+		return 0, false
+	}
+	return left - right, true
+}

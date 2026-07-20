@@ -804,6 +804,7 @@ func main() {
 		AgentHandler:             agentHandler,
 		CreditHandler:            creditHandler,
 		BillingHandler:           fixedBilling.Handler,
+		BillingAdminHandler:      fixedBilling.AdminHandler,
 		VideoHandler:             videoHandler,
 		TimelineHandler:          timelineHandler,
 		APIKeyHandler:            apiKeyHandler,
@@ -1031,12 +1032,14 @@ func buildSeednoteAnalyticsHandler(repo repository.Repository, log *zerolog.Logg
 }
 
 type billingRuntimeServices struct {
-	Catalog   *service.BillingCatalogService
-	Wallet    *service.BillingWalletService
-	Referrals *service.BillingReferralService
-	Handler   *handler.BillingHandler
-	Worker    *service.BillingMaintenanceWorker
-	Cost      *service.ProviderCostService
+	Catalog      *service.BillingCatalogService
+	Wallet       *service.BillingWalletService
+	Referrals    *service.BillingReferralService
+	Handler      *handler.BillingHandler
+	Worker       *service.BillingMaintenanceWorker
+	Cost         *service.ProviderCostService
+	Margin       *service.MarginService
+	AdminHandler *handler.BillingAdminHandler
 }
 
 func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repository, cfg *config.Config, log *zerolog.Logger) (*billingRuntimeServices, error) {
@@ -1064,11 +1067,13 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 	referrals := service.NewBillingReferralService(repo, wallet, bundle, service.BillingReferralOptions{})
 	worker := service.NewBillingMaintenanceWorker(wallet, service.BillingMaintenanceWorkerOptions{}, log)
 	cost := service.NewProviderCostService(repository.NewBillingCostRepository(db), bundle)
+	margin := service.NewMarginService(repository.NewBillingMarginRepository(db), repo, bundle, service.MarginServiceOptions{})
 	billingHandler := handler.NewBillingHandler(repo, catalog, referrals, bundle, handler.BillingHandlerOptions{
 		AdminAPIKey:   cfg.BillingRuntime.AdminAPIKey,
 		InviteBaseURL: "https://creator.anbanai.com/register?invite=",
 	}, log)
-	return &billingRuntimeServices{Catalog: catalog, Wallet: wallet, Referrals: referrals, Handler: billingHandler, Worker: worker, Cost: cost}, nil
+	adminHandler := handler.NewBillingAdminHandler(margin)
+	return &billingRuntimeServices{Catalog: catalog, Wallet: wallet, Referrals: referrals, Handler: billingHandler, Worker: worker, Cost: cost, Margin: margin, AdminHandler: adminHandler}, nil
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.

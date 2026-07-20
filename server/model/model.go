@@ -43,5 +43,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&BillingReferralIssue{},
 		&BillingProviderCostEvent{},
 		&BillingExecutionCostStatus{},
+		&BillingMarginFact{},
 	)
 }

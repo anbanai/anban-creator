@@ -444,6 +444,16 @@ func TestLoadBundleRequiresAllFiles(t *testing.T) {
 	}
 }
 
+func TestLoadBundleRequiresExactMicroCNYCreditUnit(t *testing.T) {
+	dir := writeBundleFixture(t, map[string]string{
+		"policy.yaml": strings.Replace(validPolicyYAML, "credits_per_cny: 1000", "credits_per_cny: 3000", 1),
+	})
+	_, err := LoadBundle(dir)
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "must divide 1000000 exactly") {
+		t.Fatalf("LoadBundle error = %v, want exact micro-CNY conversion failure", err)
+	}
+}
+
 func writeBundleFixture(t *testing.T, overrides map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()

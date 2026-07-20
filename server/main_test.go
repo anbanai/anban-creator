@@ -135,7 +135,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		db, repo := newRepo(t)
 		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
 		runtime, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger)
-		if err != nil || runtime == nil || runtime.Handler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil {
+		if err != nil || runtime == nil || runtime.Handler == nil || runtime.AdminHandler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil || runtime.Cost == nil || runtime.Margin == nil {
 			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
 		}
 		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-20-v2"); err != nil {

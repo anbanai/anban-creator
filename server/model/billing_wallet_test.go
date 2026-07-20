@@ -308,6 +308,7 @@ func TestBillingModelTableNames(t *testing.T) {
 		{BillingReferralIssue{}, "billing_referral_issues"},
 		{BillingProviderCostEvent{}, "billing_provider_cost_events"},
 		{BillingExecutionCostStatus{}, "billing_execution_cost_status"},
+		{BillingMarginFact{}, "billing_margin_facts"},
 	}
 
 	for _, tt := range tests {
@@ -330,6 +331,7 @@ func TestBillingAutoMigrateCreatesExactTablesAndIndexes(t *testing.T) {
 		"billing_credit_lots",
 		"billing_debt_allocations",
 		"billing_execution_cost_status",
+		"billing_margin_facts",
 		"billing_provider_cost_events",
 		"billing_quotes",
 		"billing_referral_issues",
@@ -357,6 +359,7 @@ func TestBillingAutoMigrateCreatesExactTablesAndIndexes(t *testing.T) {
 	assertBillingIndex(t, db, &BillingReferralIssue{}, "idx_billing_referral_invitee_program")
 	assertBillingIndex(t, db, &BillingProviderCostEvent{}, "idx_billing_provider_cost_idempotency")
 	assertBillingIndex(t, db, &BillingProviderCostEvent{}, "idx_billing_provider_cost_base_identity")
+	assertBillingIndex(t, db, &BillingMarginFact{}, "idx_billing_margin_source")
 
 	var taskIndexColumns []struct {
 		Name string

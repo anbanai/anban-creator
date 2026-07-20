@@ -270,6 +270,9 @@ func validateBundle(bundle *Bundle) error {
 	if bundle.Policy.CreditsPerCNY <= 0 {
 		return configError("policy.yaml", "credits_per_cny", errors.New("must be positive"))
 	}
+	if 1_000_000%bundle.Policy.CreditsPerCNY != 0 {
+		return configError("policy.yaml", "credits_per_cny", errors.New("must divide 1000000 exactly for micro-CNY accounting"))
+	}
 	if !bundle.Policy.TaskAdmission.RequireZeroDebt {
 		return configError("policy.yaml", "task_admission.require_zero_debt", errors.New("must be true"))
 	}
