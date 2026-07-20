@@ -184,7 +184,12 @@ func marshalExecutionEvidence(result *serveragent.ExecutionResult) (string, erro
 		result.CostStatus = serveragent.CostStatusUnreconciled
 		result.CostDiagnostics = []serveragent.CostDiagnostic{{Code: serveragent.CostDiagnosticMissingTerminalModelUsage}}
 	}
-	resultJSON, err := json.Marshal(result)
+	publicResult := *result
+	publicResult.ModelUsage = nil
+	publicResult.CostStatus = ""
+	publicResult.CostDiagnostics = nil
+	publicResult.Model = ""
+	resultJSON, err := json.Marshal(&publicResult)
 	if err != nil {
 		return "", fmt.Errorf("marshal execution result: %w", err)
 	}

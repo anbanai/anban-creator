@@ -42,26 +42,6 @@ func setupDesignerHandlerTest() *fiber.App {
 				},
 			},
 		},
-		ModelPrices: srvconfig.ModelPricesConfig{
-			CurrencyRates: map[string]srvconfig.CurrencyRate{"USD": {ToCNY: 7.2}},
-			ImageGeneration: map[string]srvconfig.ImageGenerationPrice{
-				"wangcai_openai/gpt-image-2": {
-					PricingType:      srvconfig.ImagePricingTypeOpenAIUsage,
-					Currency:         "USD",
-					Unit:             1_000_000,
-					RequireUsage:     true,
-					TextInput:        5,
-					TextCachedInput:  1.25,
-					ImageInput:       8,
-					ImageCachedInput: 2,
-					ImageOutput:      30,
-					EstimateTable: map[string]map[string]srvconfig.FlexibleFloat{
-						"1024x1024": {"medium": srvconfig.FlexibleFloat(0.053)},
-					},
-				},
-			},
-		},
-		Billing: srvconfig.BillingConfig{CreditsPerCNY: 1000, MinimumChargeCredits: 1},
 		ImageAPI: srvconfig.ImageAPIConfig{
 			Designer: map[string]*appconfig.ImageAPI{
 				"test-openai": {

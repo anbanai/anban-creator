@@ -51,13 +51,6 @@
         </view>
       </view>
 
-      <view v-if="billingLocked" class="task-detail__billing-lock">
-        <text class="task-detail__billing-title">交付已锁定，需补扣 Claude Code 运行费用</text>
-        <text class="task-detail__billing-text">
-          待补积分 {{ billingShortfall.toLocaleString() }}。充值后系统会自动补扣并恢复下载、预览和发布。
-        </text>
-      </view>
-
       <!-- Next actions -->
       <view v-if="nextActions.length > 0" class="task-detail__section next-actions">
         <view class="section-header">
@@ -444,7 +437,7 @@ import { onLoad, onShareAppMessage, onUnload } from '@dcloudio/uni-app'
 import type { Project, SeednoteAnalytics, Task, TaskFile, TaskStatus, WorkflowStage, WorkflowReview, WorkflowWarning } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import { projectsApi } from '@/api/projects'
-import { taskStatusLabel, contentTypeLabel, progressStageLabel, formatUSD } from '@/utils/labels'
+import { taskStatusLabel, contentTypeLabel, progressStageLabel } from '@/utils/labels'
 import { formatDateTimeCN, formatFullDateTimeCN, sanitizeHtml } from '@/utils/format'
 import { usePolling } from '@/composables/usePolling'
 import AbBadge from '@/components/common/AbBadge.vue'
@@ -523,12 +516,6 @@ const errorMessage = computed(() => {
   const t = task.value
   if (!t) return ''
   return t.error_message || t.error || '任务执行失败'
-})
-
-const billingShortfall = computed(() => task.value?.billing_shortfall_credits || 0)
-const billingLocked = computed(() => {
-  const t = task.value
-  return Boolean(t && (t.billing_status === 'payment_required' || billingShortfall.value > 0))
 })
 
 const imageUrls = computed(() => {
@@ -626,7 +613,7 @@ const nextActions = computed<NextAction[]>(() => {
   if (t.status === 'running' || t.status === 'pending') {
     return [
       { key: 'copy-logs', label: '复制日志', desc: logs.value.length > 0 ? '带走当前执行输出' : '暂无日志可复制', tone: 'neutral' },
-      { key: 'cancel', label: '取消任务', desc: t.status === 'pending' ? '排队中可退还积分' : '停止后保留已完成费用', tone: 'danger' },
+      { key: 'cancel', label: '取消任务', desc: '固定任务费及已完成增值操作不退款', tone: 'danger' },
     ]
   }
   if (t.status === 'failed' || t.status === 'cancelled') {
@@ -639,15 +626,15 @@ const nextActions = computed<NextAction[]>(() => {
   if (t.status === 'completed') {
     const actions: NextAction[] = []
     if (availableFiles.value.length > 0) {
-      actions.push({ key: 'download-zip', label: '下载全部', desc: billingLocked.value ? '补扣后可下载' : `${availableFiles.value.length} 个文件打包`, tone: 'primary' })
+      actions.push({ key: 'download-zip', label: '下载全部', desc: `${availableFiles.value.length} 个文件打包`, tone: 'primary' })
     }
     if (t.type === 'article') {
-      actions.push({ key: 'preview', label: '预览 HTML', desc: billingLocked.value ? '补扣后可预览' : '检查公众号排版', tone: 'neutral' })
+      actions.push({ key: 'preview', label: '预览 HTML', desc: '检查公众号排版', tone: 'neutral' })
     }
     if (resultText.value) {
       actions.push({ key: 'copy-result', label: '复制内容', desc: '带走正文或任务要求', tone: 'neutral' })
     }
-    actions.push({ key: 'published', label: t.published ? '取消发布标记' : '标记已发布', desc: billingLocked.value ? '补扣后可更新' : '同步内容状态', tone: 'warning' })
+    actions.push({ key: 'published', label: t.published ? '取消发布标记' : '标记已发布', desc: '同步内容状态', tone: 'warning' })
     actions.push({ key: 'share', label: '分享结果', desc: '通过微信菜单转发', tone: 'neutral' })
     actions.push({ key: 'follow-up', label: '基于结果再创作', desc: '复用产出生成新任务', tone: 'primary' })
     return actions
@@ -814,27 +801,15 @@ function previewFile(file: TaskFile) {
 }
 
 function downloadFile(file: TaskFile) {
-  if (billingLocked.value) {
-    uni.showToast({ title: '请先补扣运行费用', icon: 'none' })
-    return
-  }
   downloadByUrl(tasksApi.fileDownloadUrl(taskId.value, file.id), file.file_name)
 }
 
 function downloadZip() {
-  if (billingLocked.value) {
-    uni.showToast({ title: '请先补扣运行费用', icon: 'none' })
-    return
-  }
   downloadByUrl(tasksApi.zipDownloadUrl(taskId.value), `task_${taskId.value}_files.zip`)
 }
 
 async function onPreviewArticle() {
   if (!taskId.value) return
-  if (billingLocked.value) {
-    uni.showToast({ title: '请先补扣运行费用', icon: 'none' })
-    return
-  }
   // Open the overlay first (better perceived latency), then fetch HTML.
   previewVisible.value = true
   previewLoading.value = true
@@ -931,11 +906,7 @@ watch(
 async function onCancel() {
   const t = task.value
   if (!t) return
-  const refundHint = t.status === 'pending'
-    ? '此任务尚未开始执行，取消后将全额退还已扣积分，不会产生任何费用。'
-    : (t.total_cost_usd && t.total_cost_usd > 0
-        ? `已完成步骤已消耗约 ${formatUSD(t.total_cost_usd)}，不予退还；其余将退还。`
-        : '已完成步骤（如 AI 写作、图片生成）的费用不予退还，其余将退还。')
+  const refundHint = '用户取消不退还固定任务费；已经成功交付的图片、视频等增值操作也不退款。'
 
   uni.showModal({
     title: '确定取消此任务？',
@@ -989,10 +960,6 @@ async function onDelete() {
 
 async function onTogglePublished() {
   if (!task.value) return
-  if (billingLocked.value) {
-    uni.showToast({ title: '请先补扣运行费用', icon: 'none' })
-    return
-  }
   actionLoading.value = true
   try {
     const newPublished = !task.value.published

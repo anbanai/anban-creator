@@ -111,7 +111,7 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	dispatcher := &dispatchTestDispatcher{}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	svc.SetKubernetesDispatcher(dispatcher)
 	task := &model.Task{
 		ID:        uuid.NewString(),
@@ -593,7 +593,7 @@ func TestHandleExecutionFromPayloadWithoutDispatcherUsesSynchronousExecutor(t *t
 	}
 	executor := &fakeTaskExecutor{err: errors.New("synchronous executor called")}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
 	}

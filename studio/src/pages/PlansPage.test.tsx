@@ -42,14 +42,18 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.projects,
         list: vi.fn().mockResolvedValue(mockProjects),
       },
-      credits: {
-        ...actual.api.credits,
-        pricing: vi.fn().mockResolvedValue({
-          task_costs: {},
-          model_costs: {},
-          income: { daily_sign_in: 0, register_bonus: 0, invite_reward: 0 },
+      billing: {
+        ...actual.api.billing,
+        catalog: vi.fn().mockResolvedValue({
+          catalog_id: 'retail-test-v1',
+          currency: 'credits',
+          skus: [
+            { id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+            { id: 'task.seednote.v1', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.montage.v1', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+          ],
         }),
-        balance: vi.fn().mockResolvedValue({ balance: 0 }),
+        wallet: vi.fn().mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 }),
       },
       videoCreator: {
         ...actual.api.videoCreator,
@@ -62,10 +66,6 @@ vi.mock('@/lib/api', async () => {
             ratio: '9:16',
             duration: 10,
           },
-          estimated_credits: 2480,
-          balance: 200000,
-          min_balance: 0,
-          meets_min_balance: true,
         }),
       },
     },
@@ -114,18 +114,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       created_at: '2025-01-01T00:00:00Z',
       updated_at: '2025-01-01T00:00:00Z',
     }])
-    vi.mocked(api.credits.pricing).mockResolvedValue({
-      task_costs: {},
-      agent_runtime_reserve: { article: 4000 },
-      model_costs: {},
-      recharge_tiers: [
-        { key: 'basic', label: '基础包', price_cny: 10, credits: 10000, bonus_credits: 0, enabled: true },
-        { key: 'standard', label: '标准包', price_cny: 50, credits: 52000, bonus_credits: 2000, enabled: true },
-        { key: 'pro', label: '进阶包', price_cny: 100, credits: 110000, bonus_credits: 10000, enabled: true },
-      ],
-      income: { daily_sign_in: 100, register_bonus: 1000, invite_reward: 1000 },
-    })
-    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 0 })
+    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 })
   })
 
   it('shows an error toast when pausing a plan fails (was previously silent)', async () => {
@@ -249,15 +238,16 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
   })
 
-  it('uses backend-matching fallback pricing for article plans when pricing omits task costs', async () => {
-    vi.mocked(api.credits.balance).mockResolvedValueOnce({ balance: 5000 })
+  it('uses the active catalog price for article plan runs', async () => {
+    vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
 
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByText(/每次执行基础任务费：4000 =/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/余额：5,000 →/)).toBeInTheDocument()
+    const price = await within(dialog).findByText('6,000 积分')
+    expect(price.parentElement).toHaveTextContent('当前每次执行固定价：6,000 积分')
+    expect(within(dialog).getByText(/余额：7,000 →/)).toBeInTheDocument()
     expect(within(dialog).getByText('1,000')).toBeInTheDocument()
     expect(within(dialog).queryByText(/运行预留/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/积分不足/)).not.toBeInTheDocument()
@@ -329,7 +319,7 @@ describe('PlansPage Seednote reference snapshots', () => {
     vi.mocked(api.plans.list).mockResolvedValue({ items: [seednotePlan], total: 1 })
     vi.mocked(api.plans.create).mockResolvedValue(seednotePlan)
     vi.mocked(api.plans.update).mockResolvedValue(seednotePlan)
-    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
   })
 
   it('creates a Seednote plan with the current reference snapshot', async () => {
@@ -473,7 +463,7 @@ describe('PlansPage Montage input', () => {
     vi.mocked(api.plans.list).mockResolvedValue({ items: [], total: 0 })
     vi.mocked(api.plans.create).mockResolvedValue(savedMontagePlan)
     vi.mocked(api.plans.update).mockResolvedValue(savedMontagePlan)
-    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
   })
 
   it('inherits project defaults and creates a plan with complete Montage input', async () => {

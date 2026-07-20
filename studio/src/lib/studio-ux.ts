@@ -1,5 +1,4 @@
-import type { CreditPricing } from '@/types/credits'
-import type { Project, ProjectStats, Task, TaskType } from '@/types'
+import type { BillingCatalog, Project, ProjectStats, Task, TaskType } from '@/types'
 import { projectsReturnHref } from '@/lib/command-center'
 import { platformDefaultRatio } from '@/lib/labels'
 import { taskCostFor } from '@/lib/pricing'
@@ -78,37 +77,36 @@ export function getProjectCreationDefaults(project?: Project | null): ProjectCre
 }
 
 export interface CreationCostPreview {
+  priceAvailable: boolean
   baseCost: number
   billableQuantity: number
-  multiplier: number
   totalCost: number
   remaining: number
   insufficient: boolean
 }
 
 export function taskCreationCostPreview({
-  pricing,
+  catalog,
   type,
   quantity,
-  goalMode,
   balance,
 }: {
-  pricing?: CreditPricing
+  catalog?: BillingCatalog
   type: string
   quantity: number
-  goalMode: boolean
   balance: number
 }): CreationCostPreview {
   const isEcommerce = type === 'ecommerce'
-  const baseCost = taskCostFor(pricing, type)
+  const resolvedPrice = taskCostFor(catalog, type)
+  const priceAvailable = resolvedPrice !== undefined
+  const baseCost = resolvedPrice ?? 0
   const billableQuantity = isEcommerce ? 1 : quantity
-  const multiplier = isEcommerce ? 1 : goalMode ? 3 : 1
-  const totalCost = baseCost * billableQuantity * multiplier
+  const totalCost = baseCost * billableQuantity
   const remaining = balance - totalCost
   return {
+    priceAvailable,
     baseCost,
     billableQuantity,
-    multiplier,
     totalCost,
     remaining,
     insufficient: remaining < 0,

@@ -98,11 +98,10 @@ func TestCreatePlan_VideoPlanAllowsLowBalanceWithoutLegacyMinimumGate(t *testing
 	userID := uuid.New().String()
 	projectID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          "video-plan-balance@example.com",
-		Password:       "hashed",
-		InviteCode:     "videoplanbalance",
-		CreditsBalance: 99_999,
+		ID:         userID,
+		Email:      "video-plan-balance@example.com",
+		Password:   "hashed",
+		InviteCode: "videoplanbalance",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -134,10 +133,8 @@ func TestCreatePlan_VideoPlanAllowsLowBalanceWithoutLegacyMinimumGate(t *testing
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	creditSvc := service.NewCreditService(repo, nil, &logger)
 	planSvc := service.NewPlanService(repo, &logger)
-	planSvc.SetCreditService(creditSvc)
-	planSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)
+	planSvc.SetVideoCatalog(service.DefaultVideoModelCatalog())
 	h := NewPlanHandler(planSvc, &logger)
 
 	app := fiber.New()

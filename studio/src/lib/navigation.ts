@@ -42,7 +42,7 @@ export const assetItems: NavItem[] = [
 ]
 
 export const businessItems: NavItem[] = [
-  { to: '/credits', label: '积分', icon: Coins },
+  { to: '/billing', label: '钱包', icon: Coins },
   { to: '/usage', label: '用量', icon: Activity },
 ]
 

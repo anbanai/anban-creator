@@ -28,7 +28,7 @@ func setupCloudCompletionTest(t *testing.T, withArtifact bool, startedOverride .
 	}
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	task := &model.Task{ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusRunning}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
@@ -170,9 +170,6 @@ func TestStaleCloudFinalizerStopsBeforeTaskAndSettlementSideEffects(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	seedDeduction(t, repo, task.UserID, task.ID, 100)
-	svc.creditSvc = newTestCreditService(repo)
-
 	terminalResult := &agent.ExecutionResult{Success: false, Error: "old attempt failed", RemoteArtifacts: true}
 	encoded, err := json.Marshal(terminalResult)
 	if err != nil {
@@ -220,9 +217,6 @@ func TestStaleCloudFinalizerStopsBeforeTaskAndSettlementSideEffects(t *testing.T
 	}
 	if foundOld.FinalizationStatus != model.TaskExecutionFinalizationResult || foundOld.PublishingStatus != "" {
 		t.Fatalf("stale finalizer advanced execution: stage=%q publishing=%q", foundOld.FinalizationStatus, foundOld.PublishingStatus)
-	}
-	if _, err := repo.Credits().FindRefundByTaskID(ctx, task.ID); err == nil {
-		t.Fatal("stale finalizer refunded the old attempt")
 	}
 }
 
@@ -409,7 +403,7 @@ func TestFinalizationDispatchReplayDoesNotDuplicateQueueOrInflateSlot(t *testing
 	t.Cleanup(func() { _ = rdb.Close() })
 	logger := zerolog.New(io.Discard)
 	enqueuer := &replaySafeEnqueuer{}
-	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, nil, enqueuer, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 	injected := false
 	svc.finalizationAfterStage = func(stage string) error {
 		if stage == model.TaskExecutionFinalizationDispatch && !injected {
@@ -546,7 +540,7 @@ func TestCloudPublishingAmbiguityNeverCallsProviderTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	publisher := &ambiguousPublishFake{}
 	svc.cloudPublisher = publisher
 	svc.finalizationAfterEffect = func(stage string) error {

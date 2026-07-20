@@ -11,7 +11,6 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 
-	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -20,12 +19,9 @@ var ErrUnsupportedPlanPlatform = errors.New("plans are not supported for this pr
 
 // PlanService handles plan CRUD and lifecycle operations.
 type PlanService struct {
-	repo                  repository.Repository
-	logger                *zerolog.Logger
-	videoCatalog          VideoModelCatalog
-	videoCreditMultiplier int
-	videoBilling          srvconfig.BillingConfig
-	creditSvc             *CreditService
+	repo         repository.Repository
+	logger       *zerolog.Logger
+	videoCatalog VideoModelCatalog
 }
 
 // NewPlanService creates a new PlanService.
@@ -33,26 +29,11 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 	return &PlanService{repo: repo, logger: logger}
 }
 
-func (s *PlanService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
+func (s *PlanService) SetVideoCatalog(catalog VideoModelCatalog) {
 	if s == nil {
 		return
 	}
 	s.videoCatalog = catalog
-	s.videoCreditMultiplier = creditMultiplier
-}
-
-func (s *PlanService) SetCreditService(creditSvc *CreditService) {
-	if s == nil {
-		return
-	}
-	s.creditSvc = creditSvc
-}
-
-func (s *PlanService) SetVideoBillingConfig(billing srvconfig.BillingConfig) {
-	if s == nil {
-		return
-	}
-	s.videoBilling = billing
 }
 
 func (s *PlanService) resolvedVideoCatalog() VideoModelCatalog {
@@ -98,9 +79,8 @@ type CreatePlanParams struct {
 // time, and persists the plan. The task type is derived from the project's platform.
 // ImageModelKey optionally selects a per-plan image model (validated upstream by the handler).
 //
-// Goal and GoalMode propagate to tasks spawned from this plan; when GoalMode is
-// true, spawned tasks charge ×GoalMultiplier upfront and evaluate the goal
-// after each execution.
+// Goal and GoalMode propagate to spawned tasks. Goal mode changes execution
+// behavior but does not alter the fixed task SKU.
 //
 // HasContentImage / HasTailImage control seednote image composition on spawned
 // tasks. nil falls back to the model's column defaults (content on, tail off).
@@ -323,7 +303,6 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 			return nil, fmt.Errorf("%w: video_creator_input can only be set on videocreator plans", ErrVideoTaskInput)
 		}
 		plan.SetVideoInput(*p.VideoCreatorInput)
-		plan.VideoEstimatedCredits = 0
 	} else if p.VideoCreatorConfig != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
 		if err != nil {
@@ -333,7 +312,6 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 			return nil, fmt.Errorf("%w: video_creator_config can only be set on videocreator plans", ErrVideoTaskInput)
 		}
 		plan.SetVideoInput(videoInputFromTaskConfig(plan.Prompt, p.VideoCreatorConfig))
-		plan.VideoEstimatedCredits = 0
 	}
 	if p.MontageInput != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)

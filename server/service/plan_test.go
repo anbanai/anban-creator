@@ -70,7 +70,7 @@ func setupTestPlanService(t *testing.T) (*PlanService, repository.Repository) {
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
 	svc := NewPlanService(repo, &logger)
-	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1000)
+	svc.SetVideoCatalog(DefaultVideoModelCatalog())
 	return svc, repo
 }
 
@@ -619,9 +619,6 @@ func TestPlanService_UpdateVideoConfigStoresVideoInputOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create video plan: %v", err)
 	}
-	if created.VideoEstimatedCredits != 0 {
-		t.Fatalf("initial estimated credits = %d, want 0 before MCP video_gen", created.VideoEstimatedCredits)
-	}
 	watermark := true
 	updated, err := svc.Update(ctx, UpdatePlanParams{
 		ID:     created.ID,
@@ -651,9 +648,6 @@ func TestPlanService_UpdateVideoConfigStoresVideoInputOnly(t *testing.T) {
 	}
 	if vc := updated.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should stay empty before agent/MCP execution, got %#v", vc)
-	}
-	if updated.VideoEstimatedCredits != 0 {
-		t.Fatalf("estimated credits = %d, want 0 before MCP video_gen", updated.VideoEstimatedCredits)
 	}
 }
 
@@ -709,15 +703,12 @@ func TestPlanService_CreateRejectsVideoEditorPlans(t *testing.T) {
 func TestPlanService_CreateVideoPlanDoesNotRequireLegacyMinimumBalance(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
-	creditSvc := newPricedCreditService(repo)
-	svc.SetCreditService(creditSvc)
 	userID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		InviteCode:     "invite-" + userID[:8],
-		CreditsBalance: 99_999,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "invite-" + userID[:8],
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -731,9 +722,6 @@ func TestPlanService_CreateVideoPlanDoesNotRequireLegacyMinimumBalance(t *testin
 	})
 	if err != nil {
 		t.Fatalf("Create video plan: %v", err)
-	}
-	if created.VideoEstimatedCredits != 0 {
-		t.Fatalf("video plan estimated credits = %d, want 0 before MCP video_gen", created.VideoEstimatedCredits)
 	}
 	vi := created.VideoInput.Data()
 	if vi.Brief != "计划生成视频" {

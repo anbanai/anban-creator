@@ -85,6 +85,12 @@ type BillingQuoteResponse struct {
 	ExpiresAt    time.Time      `json:"expires_at"`
 }
 
+type BillingCatalogResponse struct {
+	CatalogID string                    `json:"catalog_id"`
+	Currency  string                    `json:"currency"`
+	SKUs      []serverbilling.SKUConfig `json:"skus"`
+}
+
 func NewBillingHandler(repo repository.Repository, catalog *service.BillingCatalogService, referrals *service.BillingReferralService, bundle *serverbilling.Bundle, opts BillingHandlerOptions, logger *zerolog.Logger) *BillingHandler {
 	var snapshot serverbilling.Bundle
 	if bundle != nil {
@@ -117,6 +123,15 @@ func (h *BillingHandler) Wallet(c fiber.Ctx) error {
 	}
 	return Success(c, BillingWalletResponse{
 		Paid: account.PaidCredits, Promotional: account.PromotionalCredits, Debt: account.DebtCredits, Balance: balance,
+	})
+}
+
+func (h *BillingHandler) Catalog(c fiber.Ctx) error {
+	skus := append([]serverbilling.SKUConfig(nil), h.bundle.Products.SKUs...)
+	return Success(c, BillingCatalogResponse{
+		CatalogID: h.bundle.Products.CatalogID,
+		Currency:  h.bundle.Products.Currency,
+		SKUs:      skus,
 	})
 }
 

@@ -7,7 +7,6 @@ import {
   Images,
   Pause,
   Play,
-  ReceiptText,
   RefreshCw,
   ScrollText,
   Settings2,
@@ -49,9 +48,6 @@ export interface TaskDetailsSheetProps {
   task: Task
   project?: Project
   files: TaskFile[]
-  netConsumedCredits: number
-  showCreditDetails: boolean
-  onOpenCreditDetails: () => void
   logs: string[]
   sseError: string | null
   autoScrollLogs: boolean
@@ -64,9 +60,6 @@ export interface TaskDetailsSheetProps {
 interface TaskOverviewDetailsProps {
   task: Task
   project?: Project
-  netConsumedCredits: number
-  showCreditDetails: boolean
-  onOpenCreditDetails: () => void
 }
 
 interface TaskLogDetailsProps {
@@ -130,9 +123,6 @@ function DetailRows({ rows }: { rows: Array<[string, string]> }) {
 function TaskOverviewDetails({
   task,
   project,
-  netConsumedCredits,
-  showCreditDetails,
-  onOpenCreditDetails,
 }: TaskOverviewDetailsProps) {
   const hasSnapshot = Boolean(task.project_snapshot?.platform)
   const projectName = hasSnapshot
@@ -154,24 +144,11 @@ function TaskOverviewDetails({
       >
         <DetailRows rows={timingRows} />
       </TaskDetailsSection>
-      <TaskDetailsSection label="项目与积分" title="项目与积分" icon={FolderKanban}>
-        <div className="flex flex-col gap-3">
-          <DetailRows rows={[['项目', projectName]]} />
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-col gap-1">
-              <p className="text-xs text-muted-foreground">积分消耗</p>
-              <p className="text-sm font-medium tabular-nums">
-                {netConsumedCredits.toLocaleString()}
-              </p>
-            </div>
-            {showCreditDetails ? (
-              <Button size="sm" variant="ghost" onClick={onOpenCreditDetails}>
-                <ReceiptText data-icon="inline-start" />
-                查看明细
-              </Button>
-            ) : null}
-          </div>
-        </div>
+      <TaskDetailsSection label="项目与价格" title="项目与价格" icon={FolderKanban}>
+        <DetailRows rows={[
+          ['项目', projectName],
+          ['任务固定价', `${task.billing_price_credits.toLocaleString()} 积分`],
+        ]} />
       </TaskDetailsSection>
     </div>
   )
@@ -349,9 +326,6 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
             <TaskOverviewDetails
               task={props.task}
               project={props.project}
-              netConsumedCredits={props.netConsumedCredits}
-              showCreditDetails={props.showCreditDetails}
-              onOpenCreditDetails={props.onOpenCreditDetails}
             />
           </TabsContent>
           <TabsContent value="configuration" className="min-h-0 overflow-y-auto p-4">

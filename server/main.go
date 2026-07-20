@@ -279,7 +279,6 @@ func main() {
 	var planSvc *service.PlanService
 	var taskSvc *service.TaskService
 	var projectSvc *service.ProjectService
-	var creditSvc *service.CreditService
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
 	var seednoteTrackingSvc *service.SeednoteTrackingService
@@ -289,20 +288,12 @@ func main() {
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
 	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalog)
-	videoCreditMultiplier := cfg.Billing.CreditsPerCNY
-	if videoCreditMultiplier <= 0 {
-		videoCreditMultiplier = cfg.VideoAPI.CreditMultiplierOrDefault()
-	}
 
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
-		planSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
-		planSvc.SetVideoBillingConfig(cfg.Billing)
+		planSvc.SetVideoCatalog(videoCatalog)
 		projectSvc = service.NewProjectService(repo, log)
 		projectSvc.SetVideoCatalog(videoCatalog)
-		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
-		creditSvc.SetFullConfig(cfg)
-		planSvc.SetCreditService(creditSvc)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
 		templateSvc = service.NewTemplateService(repo, log)
@@ -319,12 +310,12 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 		taskSvc.SetProviderCostService(fixedBilling.Cost)
 		taskSvc.SetBillingWalletService(fixedBilling.Wallet)
+		taskSvc.SetBillingCatalogService(fixedBilling.Catalog)
 		taskSvc.SetProjectMemoryManager(memoryMgr)
-		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
-		taskSvc.SetVideoBillingConfig(cfg.Billing)
+		taskSvc.SetVideoCatalog(videoCatalog)
 		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		// Wire executor defaults so local-executor claim responses carry the same
@@ -436,7 +427,7 @@ func main() {
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("SeedNote tracking service initialized")
 		if taskSvc != nil {
 			viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
-			viralAnalysisSvc.SetCreditService(creditSvc)
+			viralAnalysisSvc.SetBillingServices(fixedBilling.Catalog, fixedBilling.Wallet)
 			taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
 			log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("Viral analysis service initialized")
 		}
@@ -470,15 +461,7 @@ func main() {
 		}
 	}
 
-	// Goal-mode configuration is purely a credit multiplier now — the actual
-	// evaluation loop runs inside Claude Code's built-in /goal mechanism.
-	if taskSvc != nil {
-		log.Info().
-			Int("multiplier", cfg.Credits.EffectiveGoalModeMultiplier()).
-			Msg("goal mode configured (uses Claude Code native /goal)")
-	}
-	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
-	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits, rdb)
+	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, rdb)
 
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
@@ -487,7 +470,6 @@ func main() {
 	var agentHandler *handler.AgentHandler
 	var projectHandler *handler.ProjectHandler
 	var timelineHandler *handler.TimelineHandler
-	var creditHandler *handler.CreditHandler
 	var videoHandler *handler.VideoHandler
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
@@ -541,16 +523,12 @@ func main() {
 		projectHandler.SetSeednoteClient(seednoteClient)
 		projectHandler.SetSeednoteReadiness(seednoteMonitor)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
-		if creditSvc != nil {
-			creditHandler = handler.NewCreditHandler(creditSvc, cfg, cfg.Credits.AdminAPIKey, log)
-		}
-		videoHandler = handler.NewVideoHandler(repo, creditSvc, videoCatalog, videoCreditMultiplier, log)
-		videoHandler.SetBillingConfig(cfg.Billing)
+		videoHandler = handler.NewVideoHandler(repo, videoCatalog, log)
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
-		agentHandler.SetAdminAPIKey(cfg.Credits.AdminAPIKey)
+		agentHandler.SetAdminAPIKey(cfg.BillingRuntime.AdminAPIKey)
 		if executionTokens != nil {
 			agentHandler.SetExecutionTokenService(executionTokens)
 			agentHandler.SetBootstrap(kubeVerifier, bootstrapSvc)
@@ -610,7 +588,7 @@ func main() {
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
 	var mcpHandler http.Handler
-	if projectSvc != nil && taskSvc != nil && creditSvc != nil && planSvc != nil {
+	if projectSvc != nil && taskSvc != nil && planSvc != nil {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
 		var videoSvc *service.VideoService
@@ -689,33 +667,31 @@ func main() {
 		}
 
 		mcp.SetServices(&mcp.Services{
-			ProjectSvc:            projectSvc,
-			Store:                 store,
-			TaskSvc:               taskSvc,
-			CreditSvc:             creditSvc,
-			PlanSvc:               planSvc,
-			ImageSvc:              imageSvc,
-			ImageModelResolver:    modelConfigSvc,
-			ImageGenerator:        imageSvc,
-			ImageGenerationBiller: mcp.NewImageGenerationBiller(),
-			ProviderCostSvc:       fixedBilling.Cost,
-			BillingCatalogSvc:     fixedBilling.Catalog,
-			GenerateImageTimeout:  cfg.MCP.ToolTimeouts.GenerateImage,
-			VideoSvc:              videoSvc,
-			AudioASRSvc:           audioASRSvc,
-			WritingSvc:            writingSvc,
-			PublishingSvc:         publishingSvc,
-			WorkspaceSvc:          workspaceSvc,
-			TemplateSvc:           templateSvc,
-			LiveSliceSvc:          liveSliceSvc,
-			SeednoteClient:        seednoteClient,
-			SeednoteReadiness:     seednoteMonitor,
-			TopicPoolSvc:          topicPoolSvc,
-			AgentFeedbackSvc:      agentFeedbackSvc,
-			TingWuConfigured:      cfg.TingWu.Complete(),
-			FunASRConfigured:      cfg.FunASR.Complete(),
+			ProjectSvc:           projectSvc,
+			Store:                store,
+			TaskSvc:              taskSvc,
+			PlanSvc:              planSvc,
+			ImageSvc:             imageSvc,
+			ImageModelResolver:   modelConfigSvc,
+			ImageGenerator:       imageSvc,
+			ProviderCostSvc:      fixedBilling.Cost,
+			BillingCatalogSvc:    fixedBilling.Catalog,
+			GenerateImageTimeout: cfg.MCP.ToolTimeouts.GenerateImage,
+			VideoSvc:             videoSvc,
+			AudioASRSvc:          audioASRSvc,
+			WritingSvc:           writingSvc,
+			PublishingSvc:        publishingSvc,
+			WorkspaceSvc:         workspaceSvc,
+			TemplateSvc:          templateSvc,
+			LiveSliceSvc:         liveSliceSvc,
+			SeednoteClient:       seednoteClient,
+			SeednoteReadiness:    seednoteMonitor,
+			TopicPoolSvc:         topicPoolSvc,
+			AgentFeedbackSvc:     agentFeedbackSvc,
+			TingWuConfigured:     cfg.TingWu.Complete(),
+			FunASRConfigured:     cfg.FunASR.Complete(),
 		})
-		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
+		mcp.SetBillingServices(modelConfigSvc, cfg)
 		mcp.SetLogger(log)
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc))
 		log.Info().
@@ -796,13 +772,11 @@ func main() {
 		Executor:                 agentExecutor,
 		PlanService:              planSvc,
 		TaskService:              taskSvc,
-		CreditService:            creditSvc,
 		ProjectHandler:           projectHandler,
 		PlanHandler:              planHandler,
 		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		AgentHandler:             agentHandler,
-		CreditHandler:            creditHandler,
 		BillingHandler:           fixedBilling.Handler,
 		BillingAdminHandler:      fixedBilling.AdminHandler,
 		VideoHandler:             videoHandler,

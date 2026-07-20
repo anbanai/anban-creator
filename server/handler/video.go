@@ -7,42 +7,26 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
 type VideoHandler struct {
-	repo             repository.Repository
-	creditSvc        *service.CreditService
-	catalog          service.VideoModelCatalog
-	creditMultiplier int
-	billing          srvconfig.BillingConfig
-	logger           *zerolog.Logger
+	repo    repository.Repository
+	catalog service.VideoModelCatalog
+	logger  *zerolog.Logger
 }
 
-func NewVideoHandler(repo repository.Repository, creditSvc *service.CreditService, catalog service.VideoModelCatalog, creditMultiplier int, logger *zerolog.Logger) *VideoHandler {
+func NewVideoHandler(repo repository.Repository, catalog service.VideoModelCatalog, logger *zerolog.Logger) *VideoHandler {
 	if catalog == nil {
 		catalog = service.VideoModelCatalog{}
 	}
-	if creditMultiplier <= 0 {
-		creditMultiplier = 1000
-	}
 	return &VideoHandler{
-		repo:             repo,
-		creditSvc:        creditSvc,
-		catalog:          catalog,
-		creditMultiplier: creditMultiplier,
-		logger:           logger,
+		repo:    repo,
+		catalog: catalog,
+		logger:  logger,
 	}
-}
-
-func (h *VideoHandler) SetBillingConfig(billing srvconfig.BillingConfig) {
-	if h == nil {
-		return
-	}
-	h.billing = billing
 }
 
 type videoEstimateRequest struct {

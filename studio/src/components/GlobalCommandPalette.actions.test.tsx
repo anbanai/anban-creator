@@ -70,10 +70,9 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.plans,
         list: vi.fn().mockResolvedValue({ items: [], total: 0 }),
       },
-      credits: {
-        ...actual.api.credits,
-        balance: vi.fn().mockResolvedValue({ balance: 80 }),
-        signInStatus: vi.fn().mockResolvedValue({ signed_in_today: false }),
+      billing: {
+        ...actual.api.billing,
+        wallet: vi.fn().mockResolvedValue({ paid: 80, promotional: 0, debt: 0, balance: 80 }),
       },
       apiKeys: {
         ...actual.api.apiKeys,

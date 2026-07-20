@@ -33,7 +33,7 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	repo := repository.New(db)
 	logger := zerolog.Nop()
 	projectSvc := service.NewProjectService(repo, &logger)
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 	planSvc := service.NewPlanService(repo, &logger)
 	templateSvc := service.NewTemplateService(repo, &logger)
 
@@ -1129,7 +1129,7 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	defer cleanup()
 	oldBillSvc := billSvc
 	defer func() { billSvc = oldBillSvc }()
-	SetBillingServices(nil, nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{
+	SetBillingServices(nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{
 		Env: map[string]string{
 			"NEW_PROVIDER_TOKEN": "future-secret",
 			"RUNWAY_API_KEY":     "",
@@ -1255,7 +1255,7 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 func TestBuildMontageProfileBlockReturnsEmptyObjectsForUnsetRuntimeConfig(t *testing.T) {
 	oldBillSvc := billSvc
 	defer func() { billSvc = oldBillSvc }()
-	SetBillingServices(nil, nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{}})
+	SetBillingServices(nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{}})
 
 	block := buildMontageProfileBlock(&model.Project{Platform: model.PlatformMontage}, &model.Task{Type: model.PlatformMontage})
 	for _, key := range []string{"env", "tool_policy", "pipeline_defaults"} {

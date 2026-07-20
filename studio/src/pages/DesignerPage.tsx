@@ -613,7 +613,6 @@ export default function DesignerPage() {
             estimatedCost: currentGeneration.estimated_cost,
             finalCost: currentGeneration.final_cost,
             billingStatus: currentGeneration.billing_status,
-            totalTokens: currentGeneration.total_tokens,
             createdAt: currentGeneration.created_at,
           }}
           canInpaint={canInpaint}

@@ -113,22 +113,16 @@ vi.mock('@/lib/api', async () => {
             result: null,
             published: false,
             published_at: null,
+            billing_price_credits: 6000,
             created_at: '2026-07-07T00:00:00.000Z',
             started_at: '',
             completed_at: '',
           },
         }),
       },
-      credits: {
-        ...actual.api.credits,
-        balance: vi.fn().mockResolvedValue({ balance: 800 }),
-        signInStatus: vi.fn().mockResolvedValue({ signed_in_today: false }),
-        pricing: vi.fn().mockResolvedValue({
-          task_costs: {},
-          model_costs: {},
-          recharge_tiers: [],
-          income: { daily_sign_in: 100, register_bonus: 1000, invite_reward: 1000 },
-        }),
+      billing: {
+        ...actual.api.billing,
+        wallet: vi.fn().mockResolvedValue({ paid: 800, promotional: 0, debt: 0, balance: 800 }),
       },
       plans: {
         ...actual.api.plans,

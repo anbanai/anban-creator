@@ -89,6 +89,7 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 	}
 	if result.Success && agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
 		result.Success, result.Error = false, agent.NestedAgentDelegationError
+		result.TerminalReason = model.TaskBillingTerminalPlatformError
 		failureReason = "nested_agent_delegation"
 	}
 	if result.Success {
@@ -112,6 +113,7 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 		}
 		if !validation.Valid {
 			result.Success, result.Error = false, validation.Error()
+			result.TerminalReason = model.TaskBillingTerminalPlatformError
 			failureReason = "deliverable_validation_failed"
 		}
 	}
@@ -120,6 +122,9 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 	}
 	if strings.TrimSpace(result.Error) == "" {
 		result.Error = "execution returned unsuccessful result"
+	}
+	if !approvedTaskBillingTerminalReason(result.TerminalReason) {
+		result.TerminalReason = model.TaskBillingTerminalProviderError
 	}
 	return model.TaskExecutionFailed, failureReason, result, nil
 }
@@ -311,14 +316,6 @@ func (s *TaskService) syncCloudSlot(ctx context.Context, task *model.Task) error
 }
 
 func (s *TaskService) settleCloudExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) error {
-	if s.creditSvc == nil {
-		return nil
-	}
-	if execution.Status != model.TaskExecutionSucceeded && !task.GoalMode {
-		if err := s.creditSvc.RefundForTask(ctx, task.ID, execution.TerminalReason); err != nil {
-			return fmt.Errorf("refund terminal cloud task: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -573,15 +570,26 @@ func (s *TaskService) advanceExecutionFinalization(ctx context.Context, id, toke
 
 func (s *TaskService) finalizeExecutionTaskStatus(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
 	target, errMsg := taskTerminalFromExecution(execution, result)
-	won, err := s.repo.Tasks().FinalizeTaskForExecution(ctx, task.ID, execution.ID, target, errMsg)
+	reason := terminalBillingReason(execution, result)
+	durableDelivery, err := s.taskHasDurableDelivery(ctx, task.ID)
 	if err != nil {
-		return fmt.Errorf("finalize task status: %w", err)
+		return fmt.Errorf("inspect durable task delivery: %w", err)
 	}
-	if !won {
-		latest, findErr := s.repo.Tasks().FindByID(ctx, task.ID)
-		if findErr != nil || latest.CurrentExecutionID == nil || *latest.CurrentExecutionID != execution.ID || latest.Status != target {
-			return ErrStaleTaskExecution
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		won, finalizeErr := tx.Tasks().FinalizeTaskForExecution(ctx, task.ID, execution.ID, target, errMsg)
+		if finalizeErr != nil {
+			return fmt.Errorf("finalize task status: %w", finalizeErr)
 		}
+		if !won {
+			latest, findErr := tx.Tasks().FindByID(ctx, task.ID)
+			if findErr != nil || latest.CurrentExecutionID == nil || *latest.CurrentExecutionID != execution.ID || latest.Status != target {
+				return ErrStaleTaskExecution
+			}
+		}
+		return s.persistTerminalBillingInTx(ctx, tx, task, execution, reason, durableDelivery)
+	})
+	if err != nil {
+		return err
 	}
 	task.Status = target
 	return nil

@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -21,15 +20,13 @@ var billSvc *billingServices
 var mcpLog *zerolog.Logger
 
 type billingServices struct {
-	creditSvc      *service.CreditService
 	modelConfigSvc *service.ModelConfigService
 	config         *config.Config
 }
 
 // SetBillingServices initializes billing dependencies. Called from MCP setup.
-func SetBillingServices(creditSvc *service.CreditService, modelConfigSvc *service.ModelConfigService, cfg *config.Config) {
+func SetBillingServices(modelConfigSvc *service.ModelConfigService, cfg *config.Config) {
 	billSvc = &billingServices{
-		creditSvc:      creditSvc,
 		modelConfigSvc: modelConfigSvc,
 		config:         cfg,
 	}
@@ -40,26 +37,13 @@ func SetLogger(log *zerolog.Logger) {
 	mcpLog = log
 }
 
-// maybeDeduct handles model operation billing with these rules:
-// 1. Missing/system/admin auth -> skip
-// 2. BYOK actually used for this call -> skip
-// 3. Unpriced operation -> skip
-// 4. Otherwise -> deduct by model pricing from config
-func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, count int, taskID ...string) error {
-	task := ""
-	if len(taskID) > 0 {
-		task = taskID[0]
-	}
-	return maybeDeductForResolvedModel(ctx, userID, opType, provider, mdl, count, task, "")
-}
-
 func understandingBillingRoute(opType string) (string, string, error) {
 	var provider, modelName string
 	switch opType {
-	case model.CreditTypeImageUnderstanding:
+	case model.OperationImageUnderstanding:
 		provider = billSvc.config.ImageUnderstanding.ProviderKey
 		modelName = billSvc.config.ImageUnderstanding.Model
-	case model.CreditTypeVideoUnderstanding:
+	case model.OperationVideoUnderstanding:
 		provider = billSvc.config.VideoUnderstanding.ProviderKey
 		modelName = billSvc.config.VideoUnderstanding.Model
 	default:
@@ -88,7 +72,7 @@ func recordUnderstandingProviderCost(ctx context.Context, taskID, opType, provid
 	}
 	if usage == nil || usage.TotalTokens <= 0 {
 		mediaKind := "image"
-		if opType == model.CreditTypeVideoUnderstanding {
+		if opType == model.OperationVideoUnderstanding {
 			mediaKind = "video"
 		}
 		_, err = svcs.ProviderCostSvc.RecordMediaUnreconciled(ctx, service.RecordMediaUnreconciledRequest{
@@ -112,61 +96,6 @@ func recordUnderstandingProviderCost(ctx context.Context, taskID, opType, provid
 	}
 }
 
-func maybeDeductForResolvedModel(ctx context.Context, userID, opType, provider, mdl string, count int, taskID, modelSource string) error {
-	if billSvc == nil || billSvc.creditSvc == nil {
-		logBillingSkip(userID, opType, "no_credit_service")
-		return nil
-	}
-	if userID == "" {
-		logBillingSkip(userID, opType, "admin_static_key")
-		return nil
-	}
-	if userID == "system" {
-		logBillingSkip(userID, opType, "system_user")
-		return nil
-	}
-	if isAdminCall(ctx) {
-		logBillingSkip(userID, opType, "admin_static_key")
-		return nil
-	}
-	if isByok(ctx, userID, opType, provider, mdl, modelSource) {
-		logBillingSkip(userID, opType, "byok")
-		return nil
-	}
-	if billSvc.config == nil {
-		logBillingSkip(userID, opType, "unpriced")
-		return nil
-	}
-
-	var cost int
-	if opType == model.CreditTypeImageGen {
-		cost = imageGenCredits(provider, mdl)
-	} else if opType == model.CreditTypeVideoGen {
-		cost = videoGenCredits()
-	} else {
-		var ok bool
-		cost, ok = billSvc.config.Credits.ModelCost(opType, provider, mdl)
-		if !ok {
-			logBillingSkip(userID, opType, "unpriced")
-			return nil // no pricing configured = free
-		}
-	}
-	if cost == 0 {
-		logBillingSkip(userID, opType, "unpriced")
-		return nil
-	}
-
-	opArgs := []string{""}
-	if taskID != "" {
-		if err := validateBillingTask(ctx, userID, taskID); err != nil {
-			return err
-		}
-		opArgs = append(opArgs, taskID)
-	}
-	_, err := billSvc.creditSvc.DeductForMCPOperation(ctx, userID, opType, cost*count, opArgs...)
-	return err
-}
-
 func validateBillingTask(ctx context.Context, userID, taskID string) error {
 	if taskID == "" {
 		return nil
@@ -181,78 +110,7 @@ func validateBillingTask(ctx context.Context, userID, taskID string) error {
 		}
 		return nil
 	}
-	if billSvc != nil && billSvc.creditSvc != nil {
-		return billSvc.creditSvc.ValidateTaskOwnership(ctx, userID, taskID)
-	}
 	return nil
-}
-
-func logBillingSkip(userID, opType, reason string) {
-	if mcpLog == nil {
-		return
-	}
-	mcpLog.Debug().
-		Str("user_id", userID).
-		Str("op_type", opType).
-		Str("reason", reason).
-		Msg("MCP billing skipped")
-}
-
-func videoGenCredits() int {
-	return 0
-}
-
-// imageGenCredits looks up per-image credit cost from ImageAPI configs.
-func imageGenCredits(provider, mdl string) int {
-	if billSvc == nil || billSvc.config == nil {
-		return 0
-	}
-	cfg := billSvc.config.ImageAPI
-	if cfg.Cover != nil && cfg.Cover.Provider == provider && cfg.Cover.Model == mdl {
-		return cfg.Cover.Credits
-	}
-	if cfg.Content != nil && cfg.Content.Provider == provider && cfg.Content.Model == mdl {
-		return cfg.Content.Credits
-	}
-	for _, d := range cfg.Designer {
-		if d != nil && d.Provider == provider && d.Model == mdl {
-			return d.Credits
-		}
-	}
-	if cost, ok := billSvc.config.Credits.ModelCost(model.CreditTypeImageGen, provider, mdl); ok {
-		return cost
-	}
-	return 0
-}
-
-// isByok checks if the user has their own model configured (BYOK).
-func isByok(ctx context.Context, userID, opType, provider, mdl, modelSource string) bool {
-	if billSvc.modelConfigSvc == nil {
-		return false
-	}
-	switch opType {
-	case model.CreditTypeImageGen:
-		if modelSource != "" {
-			return modelSource == "user_custom"
-		}
-		cfg := billSvc.modelConfigSvc.GetEffectiveImageConfig(ctx, userID)
-		if cfg == nil {
-			return false
-		}
-		if cfg.Cover != nil && cfg.Cover.Provider == provider && cfg.Cover.Model == mdl {
-			return true
-		}
-		return cfg.Content != nil && cfg.Content.Provider == provider && cfg.Content.Model == mdl
-	case model.CreditTypeVideoGen:
-		return false
-	case model.CreditTypeArticleWrite, model.CreditTypeConvert,
-		model.CreditTypeTopicResearch,
-		model.CreditTypeSEO, model.CreditTypeOutline:
-		// GetEffectiveWritingConfig already checks all required fields (base_url + api_key + model).
-		_, _, configuredModel, ok := billSvc.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID)
-		return ok && configuredModel == mdl
-	}
-	return false
 }
 
 // resolveImageModel returns the effective image provider/model for a user.
@@ -284,49 +142,6 @@ func resolveImageModelWithSource(ctx context.Context, userID string) (provider, 
 	return "", "", ""
 }
 
-// resolveImageBillingModel is deliberately a pure descriptor reader. The
-// resolver owns all task-key, tier, capability, and image-slot decisions; billing
-// must never independently resolve a model and diverge from generation.
-func resolveImageBillingModel(resolved *service.ResolvedImageModel) (provider, mdl, source string, err error) {
-	if resolved == nil || resolved.Provider == "" || resolved.Model == "" {
-		return "", "", "", fmt.Errorf("resolved image model is incomplete")
-	}
-	return resolved.Provider, resolved.Model, resolved.Source, nil
-}
-
-type imageGenerationBiller struct{}
-
-// NewImageGenerationBiller returns the concrete MCP image biller. It relies on
-// the billing services installed through SetBillingServices, matching the rest
-// of the MCP billing helpers while accepting only a resolved descriptor.
-func NewImageGenerationBiller() ImageGenerationBiller {
-	return imageGenerationBiller{}
-}
-
-func (imageGenerationBiller) PrepareImageGeneration(
-	ctx context.Context,
-	userID, taskID, imageType string,
-	resolved *service.ResolvedImageModel,
-) (ImageGenerationBillingDecision, error) {
-	provider, modelID, source, err := resolveImageBillingModel(resolved)
-	if err != nil {
-		return ImageGenerationBillingDecision{}, err
-	}
-	decision := ImageGenerationBillingDecision{
-		Provider: provider,
-		Model:    modelID,
-		Source:   source,
-	}
-	decision.DynamicProvider, decision.DynamicModel, decision.DynamicRoute, decision.Dynamic = resolveDynamicImageGenerationBillingRoute(imageType, modelID, source)
-	if decision.Dynamic {
-		return decision, nil
-	}
-	if err := maybeDeductForResolvedModel(ctx, userID, model.CreditTypeImageGen, provider, modelID, 1, taskID, source); err != nil {
-		return decision, err
-	}
-	return decision, nil
-}
-
 // resolveEcommerceImageProvider returns the provider/model the agent's
 // generate_image calls will actually use for this e-commerce task, so the agent
 // can adapt its reference-image strategy to the provider's capability rather
@@ -354,43 +169,9 @@ func resolveEcommerceImageProvider(ctx context.Context, userID string, task *mod
 	return resolveImageModel(ctx, userID)
 }
 
-// resolveTextModel returns the effective text model for a user.
-func resolveTextModel(ctx context.Context, userID string) (provider, mdl string) {
-	provider, mdl, _ = resolveWritingBillingModel(ctx, userID)
-	return provider, mdl
-}
-
-func resolveWritingBillingModel(ctx context.Context, userID string) (provider, mdl, source string) {
-	if billSvc == nil || billSvc.config == nil {
-		return "", "", ""
-	}
-	if billSvc.modelConfigSvc != nil {
-		if _, _, m, ok := billSvc.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID); ok {
-			if mcpLog != nil {
-				mcpLog.Info().
-					Str("user_id", userID).
-					Str("model", m).
-					Str("source", "user_override").
-					Msg("MCP tool using user custom text model")
-			}
-			return "", m, "user_custom"
-		}
-	}
-	route := billSvc.config.ModelRoutes.Writing
-	if route.Provider != "" || route.Model != "" {
-		return route.Provider, route.Model, "system_default"
-	}
-	return "", billSvc.config.Writing.Model, "system_default"
-}
-
-// billingError converts an ErrInsufficientCredits into an MCP error result.
-// If mcpLog is set, it also logs the error for diagnostics.
 func billingError(opType string, err error) *mcp.CallToolResult {
-	if mcpLog != nil && !errors.Is(err, service.ErrInsufficientCredits) {
+	if mcpLog != nil {
 		mcpLog.Error().Err(err).Str("tool", opType).Msg("MCP tool failed")
-	}
-	if errors.Is(err, service.ErrInsufficientCredits) {
-		return errorResult("积分不足，请前往 https://creator.anbanai.com 充值")
 	}
 	return errorResult(opType + ": " + err.Error())
 }

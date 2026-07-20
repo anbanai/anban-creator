@@ -165,7 +165,7 @@
     <!-- E-commerce package (ecommerce only): product photos + delivery modules -->
     <view class="task-create__section" v-if="isEcommerce">
       <text class="field-label">电商素材包</text>
-      <text class="field-hint">上传产品图，选择交付模块。创建只扣基础任务费，后续图片生成和理解按实际用量结算。</text>
+      <text class="field-hint">上传产品图并选择交付模块。创建按固定任务 SKU 计价。</text>
 
       <!-- Product photos (required) -->
       <view class="field-spacer">
@@ -205,7 +205,6 @@
               <view class="module-row__head">
                 <text class="module-row__label">{{ mod.label }}</text>
                 <text class="module-row__ratio">{{ mod.ratio }}</text>
-                <text v-if="modulePrice(mod.key) != null" class="module-row__price">{{ modulePrice(mod.key) }} 积分/{{ mod.qtyLabel }}</text>
               </view>
               <text class="module-row__hint">{{ mod.hint }}</text>
             </view>
@@ -337,11 +336,9 @@
       <view class="credit-info">
         <view class="credit-info__row">
           <text class="credit-info__label">基础任务费</text>
-          <text class="credit-info__value credit-info__value--cost">约 {{ estimatedCost }} 积分</text>
-        </view>
-        <view class="credit-info__row">
-          <text class="credit-info__label">Claude运行预留</text>
-          <text class="credit-info__value credit-info__value--cost">约 {{ runtimeReserve }} 积分</text>
+          <text class="credit-info__value credit-info__value--cost">
+            {{ priceAvailable ? `${estimatedCost.toLocaleString()} 积分` : '暂不可用' }}
+          </text>
         </view>
         <view class="credit-info__row">
           <text class="credit-info__label">当前余额</text>
@@ -350,9 +347,9 @@
           </text>
         </view>
       </view>
-      <text class="field-hint">Claude Code 运行预留会在执行完成后按实际 token 多退少补。</text>
-      <text v-if="!isEcommerce" class="field-hint">模型、图片、视频等 MCP 操作费用按实际用量另计。</text>
-      <text v-else class="field-hint">交付模块会影响后续图片生成和理解操作用量，最终以交易明细汇总为准。</text>
+      <text class="field-hint">创建时锁定固定任务 SKU；任务内成功交付的图片、视频等增值操作按固定 SKU 结算，允许产生欠费。</text>
+      <text v-if="!priceAvailable" class="field-error">固定价格目录暂不可用，请稍后重试</text>
+      <text v-if="debt > 0" class="field-error">当前有欠费，请先充值补齐</text>
       <text v-if="balance > 0 && balance < creationCost" class="field-error">积分不足，请先充值</text>
     </view>
 
@@ -375,11 +372,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import type { Project, CreditPricing, Template, ResourceEntry } from '@/types'
+import type { BillingCatalog, Project, Template, ResourceEntry } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import { templatesApi } from '@/api/templates'
 import { resourcesApi } from '@/api/resources'
-import { creditsApi } from '@/api/credits'
+import { billingApi } from '@/api/billing'
 import { projectsApi } from '@/api/projects'
 import { TASK_QUANTITIES, IMAGE_RATIOS } from '@/utils/constants'
 import {
@@ -405,18 +402,10 @@ const inspirations = [
 
 const TARGET_PLATFORM_LABELS = ecommerceTargetPlatformOptions.map((o) => o.label)
 const LANGUAGE_LABELS = ecommerceLanguageOptions.map((o) => o.label)
-const DEFAULT_TASK_COSTS: Record<string, number> = {
-  article: 4000,
-  seednote: 3600,
-  ecommerce: 3000,
-  videocreator: 2000,
-  videoeditor: 2000,
-  viral_analysis: 1200,
-}
-
 const selectedProject = ref<Project | null>(null)
 const balance = ref(0)
-const pricing = ref<CreditPricing | null>(null)
+const debt = ref(0)
+const catalog = ref<BillingCatalog | null>(null)
 const submitting = ref(false)
 const inspirationIndex = ref(0)
 const requestedType = ref('')
@@ -473,10 +462,6 @@ const billableGoalMode = computed(() => !isEcommerce.value && form.goal_mode)
 
 // ---- E-commerce: product photos + delivery modules ----
 const uploadingPhoto = ref(false)
-
-function modulePrice(key: string): number | undefined {
-  return pricing.value?.ecommerce_module_prices?.[key]
-}
 
 function moduleQty(key: string): number {
   return form.selected_modules[key] ?? 0
@@ -542,32 +527,26 @@ const selectedThemeName = computed(() => {
   return t?.display_name || t?.name || form.theme || ''
 })
 
+const resolvedTaskPrice = computed(() => {
+  if (!selectedProject.value) return undefined
+  const operation = `task.${selectedProject.value.platform}`
+  return catalog.value?.skus.find((sku) => sku.operation === operation && sku.charge_policy === 'task_admission')?.price_credits
+})
+
+const priceAvailable = computed(() => resolvedTaskPrice.value !== undefined)
+
 const estimatedCost = computed(() => {
-  if (!selectedProject.value) return 0
-  const costPerTask = pricing.value?.task_costs?.[selectedProject.value.platform]
-    ?? DEFAULT_TASK_COSTS[selectedProject.value.platform]
-    ?? 3600
-  const multiplier = billableGoalMode.value ? 3 : 1
+  const costPerTask = resolvedTaskPrice.value ?? 0
   const billableQuantity = isEcommerce.value ? 1 : form.quantity
-  return costPerTask * billableQuantity * multiplier
+  return costPerTask * billableQuantity
 })
 
-const runtimeReserve = computed(() => {
-  if (!selectedProject.value) return 0
-  const reservePerTask = pricing.value?.agent_runtime_reserve?.[selectedProject.value.platform]
-    ?? DEFAULT_TASK_COSTS[selectedProject.value.platform]
-    ?? 0
-  const multiplier = billableGoalMode.value ? 3 : 1
-  const billableQuantity = isEcommerce.value ? 1 : form.quantity
-  return reservePerTask * billableQuantity * multiplier
-})
-
-const creationCost = computed(() => estimatedCost.value + runtimeReserve.value)
+const creationCost = computed(() => estimatedCost.value)
 
 const canSubmit = computed(() => {
   if (!form.project_id || !form.prompt.trim()) return false
   if (billableGoalMode.value && !form.goal.trim()) return false
-  if (balance.value < creationCost.value) return false
+  if (!priceAvailable.value || debt.value > 0 || balance.value < creationCost.value) return false
   return !submitting.value
 })
 
@@ -762,6 +741,14 @@ function validate(): boolean {
       return false
     }
   }
+  if (debt.value > 0) {
+    uni.showToast({ title: '请先充值补齐欠费', icon: 'none' })
+    return false
+  }
+  if (!priceAvailable.value) {
+    uni.showToast({ title: '固定价格目录不可用', icon: 'none' })
+    return false
+  }
   if (balance.value < creationCost.value) {
     uni.showToast({ title: '积分不足，请先充值', icon: 'none' })
     return false
@@ -823,18 +810,20 @@ async function onSubmit() {
 
 async function loadBalance() {
   try {
-    const res = await creditsApi.balance()
+    const res = await billingApi.wallet()
     balance.value = res.balance ?? 0
+    debt.value = res.debt ?? 0
   } catch {
     balance.value = 0
+    debt.value = 0
   }
 }
 
 async function loadPricing() {
   try {
-    pricing.value = await creditsApi.pricing()
+    catalog.value = await billingApi.catalog()
   } catch {
-    // Pricing is non-critical
+    catalog.value = null
   }
 }
 

@@ -28,6 +28,14 @@ type localCompletionRaceRepository struct {
 	tasks *localCompletionRaceTaskRepository
 }
 
+func (r *localCompletionRaceRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		wrapped := &localCompletionRaceRepository{Repository: tx}
+		wrapped.tasks = &localCompletionRaceTaskRepository{TaskRepository: tx.Tasks(), race: r.tasks.race}
+		return fn(wrapped)
+	})
+}
+
 func newLocalCompletionRaceRepository(base repository.Repository) *localCompletionRaceRepository {
 	race := &localCompletionRace{
 		readsReady:      make(chan struct{}),
@@ -40,13 +48,25 @@ func newLocalCompletionRaceRepository(base repository.Repository) *localCompleti
 }
 
 func (r *localCompletionRaceTaskRepository) FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	return r.finalizeLocalTask(ctx, false, id, executionID, status, errorMsg, result, usage, costStatus)
+}
+
+func (r *localCompletionRaceTaskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	return r.finalizeLocalTask(ctx, true, id, executionID, status, errorMsg, result, usage, costStatus)
+}
+
+func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Context, inTx bool, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	finalize := r.TaskRepository.FinalizeLocalTask
+	if inTx {
+		finalize = r.TaskRepository.FinalizeLocalTaskInTx
+	}
 	switch r.race.finalizeCalls.Add(1) {
 	case 1:
 		if len(usage) > 0 {
 			r.race.winnerModel = usage[0].Model
 		}
 		<-r.race.secondFinalize
-		won, err := r.TaskRepository.FinalizeLocalTask(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+		won, err := finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
 		if won {
 			close(r.race.winnerCommitted)
 		}
@@ -56,7 +76,7 @@ func (r *localCompletionRaceTaskRepository) FinalizeLocalTask(ctx context.Contex
 		<-r.race.winnerCommitted
 		return false, nil
 	}
-	return r.TaskRepository.FinalizeLocalTask(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+	return finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
 }
 
 func (r *localCompletionRaceRepository) Tasks() repository.TaskRepository { return r.tasks }
@@ -579,8 +599,8 @@ func TestCompleteLocalTaskNilResultPersistsTerminalCostEvidence(t *testing.T) {
 	if persisted.Success || persisted.Error != "agent returned no execution result" {
 		t.Fatalf("persisted nil result = %+v, want stable terminal failure", persisted)
 	}
-	if persisted.CostStatus != agent.CostStatusUnreconciled || got.CostStatus != agent.CostStatusUnreconciled {
-		t.Fatalf("cost status = result %q task %q, want unreconciled", persisted.CostStatus, got.CostStatus)
+	if persisted.CostStatus != "" || got.CostStatus != agent.CostStatusUnreconciled {
+		t.Fatalf("cost status = public result %q internal task %q", persisted.CostStatus, got.CostStatus)
 	}
 	if len(persisted.ModelUsage) != 0 || len(got.TerminalModelUsage.Data()) != 0 {
 		t.Fatalf("nil terminal fabricated usage: result=%+v task=%+v", persisted.ModelUsage, got.TerminalModelUsage.Data())
@@ -706,8 +726,8 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 				t.Fatal(err)
 			}
 			usage := got.TerminalModelUsage.Data()
-			if len(persisted.ModelUsage) != 1 || len(usage) != 1 || persisted.ModelUsage[0].Model != raceRepo.tasks.race.winnerModel || usage[0].Model != raceRepo.tasks.race.winnerModel {
-				t.Fatalf("terminal evidence belongs to losing request: winner=%q result=%+v typed=%+v", raceRepo.tasks.race.winnerModel, persisted.ModelUsage, usage)
+			if len(persisted.ModelUsage) != 0 || len(usage) != 1 || usage[0].Model != raceRepo.tasks.race.winnerModel {
+				t.Fatalf("terminal evidence/public result mismatch: winner=%q result=%+v typed=%+v", raceRepo.tasks.race.winnerModel, persisted.ModelUsage, usage)
 			}
 			if !success && got.ErrorMessage != persisted.Error {
 				t.Fatalf("failure error/result split across requests: task error=%q result error=%q", got.ErrorMessage, persisted.Error)

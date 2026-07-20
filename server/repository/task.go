@@ -264,43 +264,48 @@ func jsonValuesEqual(left, right string) bool {
 func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
 	var won bool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		now := time.Now()
-		res := tx.Model(&model.Task{}).
-			Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
-			Updates(map[string]any{
-				"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
-				"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
-			})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return nil
-		}
-		executionStatus := model.TaskExecutionFailed
-		if status == model.TaskStatusCompleted {
-			executionStatus = model.TaskExecutionSucceeded
-		} else if status == model.TaskStatusCancelled {
-			executionStatus = model.TaskExecutionCancelled
-		}
-		executionResult := datatypes.JSON([]byte(result))
-		execRes := tx.Model(&model.TaskExecution{}).
-			Where("id = ? AND task_id = ? AND target = ? AND status = ?", executionID, id, model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning).
-			Updates(map[string]any{
-				"status": executionStatus, "terminal_reason": errorMsg, "result": executionResult,
-				"completed_at": now, "finalization_status": model.TaskExecutionFinalizationDone,
-				"cleanup_status": model.TaskExecutionCleanupDone,
-			})
-		if execRes.Error != nil {
-			return execRes.Error
-		}
-		if execRes.RowsAffected != 1 {
-			return fmt.Errorf("local task execution %s is missing or not running", executionID)
-		}
-		won = true
-		return nil
+		var err error
+		won, err = (&taskRepository{db: tx}).FinalizeLocalTaskInTx(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+		return err
 	})
 	return won, err
+}
+
+func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	now := time.Now()
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
+		Updates(map[string]any{
+			"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
+			"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return false, nil
+	}
+	executionStatus := model.TaskExecutionFailed
+	if status == model.TaskStatusCompleted {
+		executionStatus = model.TaskExecutionSucceeded
+	} else if status == model.TaskStatusCancelled {
+		executionStatus = model.TaskExecutionCancelled
+	}
+	executionResult := datatypes.JSON([]byte(result))
+	execRes := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
+		Where("id = ? AND task_id = ? AND target = ? AND status = ?", executionID, id, model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning).
+		Updates(map[string]any{
+			"status": executionStatus, "terminal_reason": errorMsg, "result": executionResult,
+			"completed_at": now, "finalization_status": model.TaskExecutionFinalizationDone,
+			"cleanup_status": model.TaskExecutionCleanupDone,
+		})
+	if execRes.Error != nil {
+		return false, execRes.Error
+	}
+	if execRes.RowsAffected != 1 {
+		return false, fmt.Errorf("local task execution %s is missing or not running", executionID)
+	}
+	return true, nil
 }
 
 func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error) {
@@ -315,6 +320,10 @@ func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, execu
 		return false, res.Error
 	}
 	return res.RowsAffected == 1, nil
+}
+
+func (r *taskRepository) UpdateBillingTerminalReason(ctx context.Context, id, reason string) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("billing_terminal_reason", reason).Error
 }
 
 // Update saves the full task object.
@@ -723,15 +732,14 @@ var usageStatuses = []string{
 	model.TaskStatusFailed,
 }
 
-// AggregateUsageByUser returns SQL-level SUM aggregates for token usage and cost.
-func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error) {
+// AggregateUsageByUser returns SQL-level SUM aggregates for token usage.
+func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, err error) {
 	type row struct {
 		Tasks        int64
 		Input        int64
 		Output       int64
 		CacheRead    int64
 		CacheCreated int64
-		Cost         float64
 	}
 	var r2 row
 	q := r.db.WithContext(ctx).Model(&model.Task{}).
@@ -741,7 +749,6 @@ func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string
 			"COALESCE(SUM(output_tokens), 0) AS output",
 			"COALESCE(SUM(cache_read_tokens), 0) AS cache_read",
 			"COALESCE(SUM(cache_creation_tokens), 0) AS cache_created",
-			"COALESCE(SUM(total_cost_usd), 0) AS cost",
 		).
 		Where("user_id = ?", userID).
 		Where("created_at >= ? AND created_at <= ?", from, to).
@@ -752,7 +759,7 @@ func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string
 	if err = q.Scan(&r2).Error; err != nil {
 		return
 	}
-	return r2.Tasks, r2.Input, r2.Output, r2.CacheRead, r2.CacheCreated, r2.Cost, nil
+	return r2.Tasks, r2.Input, r2.Output, r2.CacheRead, r2.CacheCreated, nil
 }
 
 // TypeUsageRow holds per-type aggregated usage data from a SQL GROUP BY query.
@@ -763,10 +770,9 @@ type TypeUsageRow struct {
 	OutputTokens        int64
 	CacheReadTokens     int64
 	CacheCreationTokens int64
-	CostUSD             float64
 }
 
-// AggregateUsageByType returns per-type token usage and cost via SQL GROUP BY.
+// AggregateUsageByType returns per-type token usage via SQL GROUP BY.
 func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error) {
 	var rows []TypeUsageRow
 	q := r.db.WithContext(ctx).Model(&model.Task{}).
@@ -777,7 +783,6 @@ func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string
 			"COALESCE(SUM(output_tokens), 0) AS output_tokens",
 			"COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens",
 			"COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens",
-			"COALESCE(SUM(total_cost_usd), 0) AS cost_usd",
 		).
 		Where("user_id = ?", userID).
 		Where("created_at >= ? AND created_at <= ?", from, to).

@@ -182,7 +182,7 @@ func (s *BillingWalletService) ChargeTaskAdmissionInTx(ctx context.Context, tx r
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return nil, findErr
 	}
-	account, lockErr := billingRepo.LockAccount(ctx, req.UserID)
+	account, lockErr := lockOrCreateBillingAccount(ctx, billingRepo, req.UserID)
 	if lockErr != nil {
 		return nil, lockErr
 	}

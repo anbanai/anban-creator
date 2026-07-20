@@ -37,7 +37,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.TaskExecution{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
-		&model.CreditTransaction{}, &model.TopicPool{}, &model.VideoGeneration{},
+		&model.TopicPool{}, &model.VideoGeneration{},
 		&model.IlinkBinding{}, &model.IlinkNotification{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
@@ -56,9 +56,9 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 	})
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
-	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1000)
+	svc.SetVideoCatalog(DefaultVideoModelCatalog())
 	return svc, repo
 }
 
@@ -66,7 +66,7 @@ func TestTaskService_ResumeRequiresNASCapability(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -79,22 +79,6 @@ func TestTaskService_ResumeRequiresNASCapability(t *testing.T) {
 	if !errors.Is(err, ErrTaskResumeUnavailable) {
 		t.Fatalf("Resume error = %v, want ErrTaskResumeUnavailable", err)
 	}
-}
-
-func setupTaskServiceWithCredits(t *testing.T, creditSvc *CreditService) (*TaskService, repository.Repository) {
-	t.Helper()
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
-	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1000)
-	return svc, repo
 }
 
 // mockEnqueuer captures enqueued tasks without executing them.
@@ -633,53 +617,6 @@ func TestTaskService_ListFiltersByPlanID(t *testing.T) {
 	}
 }
 
-func TestTaskService_CreateManualEcommerceTaskChargesOnlyBaseFee(t *testing.T) {
-	repoForCredits := setupCreditTestRepo(t)
-	creditSvc := newPricedCreditService(repoForCredits)
-	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
-	creditSvc.repo = repo
-	ctx := context.Background()
-	userID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-ecommerce-base", CreditsBalance: 100_000}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
-
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
-		UserID:    userID,
-		ProjectID: projectID,
-		Prompt:    "做一组咖啡杯电商图",
-		Quantity:  3,
-		Ecommerce: &model.EcommerceConfig{
-			SelectedModules: map[string]int{
-				"main_images": 5,
-				"detail_page": 10,
-			},
-			ProductPhotos: []string{"https://cdn.example.com/cup.png"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateManual: %v", err)
-	}
-	if len(tasks) != 1 {
-		t.Fatalf("created tasks = %d, want 1 ecommerce package task", len(tasks))
-	}
-	bal, err := creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if bal != 100_000-3000 {
-		t.Fatalf("balance = %d, want base fee %d", bal, 100_000-3000)
-	}
-	tx, err := repo.Credits().FindDeductionByTaskID(ctx, tasks[0].ID)
-	if err != nil {
-		t.Fatalf("find task deduction: %v", err)
-	}
-	if tx.Amount != -3000 || tx.Type != model.CreditTypeTaskDeduct {
-		t.Fatalf("deduction = type %s amount %d, want task_deduct -3000", tx.Type, tx.Amount)
-	}
-}
-
 func TestTaskService_CreateManualEcommerceTaskForcesSinglePackageWithoutCreditService(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -707,15 +644,11 @@ func TestTaskService_CreateManualEcommerceTaskForcesSinglePackageWithoutCreditSe
 	}
 }
 
-func TestTaskService_CreateManualVideoTaskStoresInputAndChargesOnlyBaseFee(t *testing.T) {
-	repoForCredits := setupCreditTestRepo(t)
-	creditSvc := newPricedCreditService(repoForCredits)
-	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
-	// Use the same repository for service data and credits.
-	creditSvc.repo = repo
+func TestTaskService_CreateManualVideoTaskStoresInput(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-video", CreditsBalance: 200_000}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-video"}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	project := &model.Project{
@@ -782,16 +715,6 @@ func TestTaskService_CreateManualVideoTaskStoresInputAndChargesOnlyBaseFee(t *te
 	if vc := found.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should be empty at creation, got %+v", vc)
 	}
-	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits = estimated %d charged %d, want zero before MCP video_gen", found.VideoEstimatedCredits, found.VideoCreditsCharged)
-	}
-	bal, err := creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if bal != 200_000-2000 {
-		t.Fatalf("balance = %d, want base fee %d", bal, 200_000-2000)
-	}
 }
 
 func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T) {
@@ -846,13 +769,10 @@ func TestTaskServiceCreateManualRejectsMontageInputForOtherPlatforms(t *testing.
 }
 
 func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
-	repoForCredits := setupCreditTestRepo(t)
-	creditSvc := newPricedCreditService(repoForCredits)
-	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
-	creditSvc.repo = repo
+	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-refs", InviteCode: "invite-" + userID, CreditsBalance: 200_000}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-refs", InviteCode: "invite-" + userID}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	project := &model.Project{
@@ -963,212 +883,12 @@ func TestTaskService_CreateManualVideoEditorRequiresSourceVideo(t *testing.T) {
 	}
 }
 
-func TestTaskService_CreateManualVideoTaskOnlyRequiresBaseFeeBalance(t *testing.T) {
-	repoForCredits := setupCreditTestRepo(t)
-	creditSvc := newPricedCreditService(repoForCredits)
-	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
-	creditSvc.repo = repo
+func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInput(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetVideoCatalog(DefaultVideoModelCatalog())
 	ctx := context.Background()
 	userID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-min-balance", InviteCode: "invite-" + userID, CreditsBalance: 99_999}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	project := &model.Project{
-		ID:       uuid.New().String(),
-		UserID:   userID,
-		Platform: model.PlatformVideoCreator,
-		Name:     "视频项目",
-		Status:   model.ProjectStatusActive,
-	}
-	watermark := false
-	project.SetVideoDefaults(model.VideoDefaults{
-		Purpose:    VideoPurposePlanting,
-		ModelKey:   "seedance-2.0-mini",
-		Resolution: "720p",
-		Ratio:      "16:9",
-		Duration:   5,
-		Watermark:  &watermark,
-		Preflight:  true,
-	})
-	project.SetVideoModelPolicy(model.VideoModelPolicy{
-		AllowedModels: []string{"seedance-2.0-mini"},
-		DefaultModel:  "seedance-2.0-mini",
-		MaxResolution: "720p",
-		MaxDuration:   15,
-	})
-	if err := repo.Projects().Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
-		UserID:    userID,
-		ProjectID: project.ID,
-		Prompt:    "生成一条咖啡杯种草视频",
-	})
-	if err != nil {
-		t.Fatalf("CreateManual: %v", err)
-	}
-	if len(tasks) != 1 {
-		t.Fatalf("created tasks = %d, want 1", len(tasks))
-	}
-	bal, err := creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if bal != 99_999-2000 {
-		t.Fatalf("balance = %d, want base fee %d", bal, 99_999-2000)
-	}
-}
-
-func TestTaskService_CreateManualVideoTaskUsesConfiguredCreditMultiplier(t *testing.T) {
-	repoForCredits := setupCreditTestRepo(t)
-	creditSvc := newPricedCreditService(repoForCredits)
-	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
-	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1200)
-	creditSvc.repo = repo
-	ctx := context.Background()
-	userID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-multiplier", InviteCode: "invite-" + userID, CreditsBalance: 200_000}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	project := &model.Project{
-		ID:       uuid.New().String(),
-		UserID:   userID,
-		Platform: model.PlatformVideoCreator,
-		Name:     "视频项目",
-		Status:   model.ProjectStatusActive,
-	}
-	watermark := false
-	project.SetVideoDefaults(model.VideoDefaults{
-		Purpose:    VideoPurposePlanting,
-		ModelKey:   "seedance-2.0-mini",
-		Resolution: "720p",
-		Ratio:      "16:9",
-		Duration:   5,
-		Watermark:  &watermark,
-		Preflight:  true,
-	})
-	project.SetVideoModelPolicy(model.VideoModelPolicy{
-		AllowedModels: []string{"seedance-2.0-mini"},
-		DefaultModel:  "seedance-2.0-mini",
-		MaxResolution: "720p",
-		MaxDuration:   15,
-	})
-	if err := repo.Projects().Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
-		UserID:    userID,
-		ProjectID: project.ID,
-		Prompt:    "生成一条咖啡杯种草视频",
-		Quantity:  1,
-	})
-	if err != nil {
-		t.Fatalf("CreateManual: %v", err)
-	}
-	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits = estimated %d charged %d, want zero before MCP video_gen", found.VideoEstimatedCredits, found.VideoCreditsCharged)
-	}
-	if vi := found.VideoInput.Data(); vi.Brief != "生成一条咖啡杯种草视频" {
-		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
-	}
-	if vc := found.VideoConfig.Data(); vc.ModelKey != "" {
-		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
-	}
-	bal, err := creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if bal != 200_000-2000 {
-		t.Fatalf("balance = %d, want base fee %d", bal, 200_000-2000)
-	}
-}
-
-func TestTaskService_CreateManualVideoTaskAppliesUserBillingMultiplier(t *testing.T) {
-	repoForCredits := setupCreditTestRepo(t)
-	creditSvc := newPricedCreditService(repoForCredits)
-	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
-	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1200)
-	creditSvc.repo = repo
-	ctx := context.Background()
-	userID := uuid.New().String()
-	multiplier := 0.5
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-user-multiplier", InviteCode: "invite-" + userID, CreditsBalance: 200_000, BillingMultiplier: &multiplier}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	project := &model.Project{
-		ID:       uuid.New().String(),
-		UserID:   userID,
-		Platform: model.PlatformVideoCreator,
-		Name:     "视频项目",
-		Status:   model.ProjectStatusActive,
-	}
-	watermark := false
-	project.SetVideoDefaults(model.VideoDefaults{
-		Purpose:    VideoPurposePlanting,
-		ModelKey:   "seedance-2.0-mini",
-		Resolution: "720p",
-		Ratio:      "16:9",
-		Duration:   5,
-		Watermark:  &watermark,
-		Preflight:  true,
-	})
-	project.SetVideoModelPolicy(model.VideoModelPolicy{
-		AllowedModels: []string{"seedance-2.0-mini"},
-		DefaultModel:  "seedance-2.0-mini",
-		MaxResolution: "720p",
-		MaxDuration:   15,
-	})
-	if err := repo.Projects().Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
-		UserID:    userID,
-		ProjectID: project.ID,
-		Prompt:    "生成一条咖啡杯种草视频",
-		Quantity:  1,
-	})
-	if err != nil {
-		t.Fatalf("CreateManual: %v", err)
-	}
-	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits = estimated %d charged %d, want zero before MCP video_gen", found.VideoEstimatedCredits, found.VideoCreditsCharged)
-	}
-	if vi := found.VideoInput.Data(); vi.Brief != "生成一条咖啡杯种草视频" {
-		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
-	}
-	if vc := found.VideoConfig.Data(); vc.ModelKey != "" {
-		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
-	}
-	bal, err := creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if bal != 200_000-2000 {
-		t.Fatalf("balance = %d, want base fee %d", bal, 200_000-2000)
-	}
-}
-
-func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInputAndChargesOnlyBaseFee(t *testing.T) {
-	repoForCredits := setupCreditTestRepo(t)
-	creditSvc := newPricedCreditService(repoForCredits)
-	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
-	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1200)
-	creditSvc.repo = repo
-	ctx := context.Background()
-	userID := uuid.New().String()
-	multiplier := 0.5
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-plan-reprice", InviteCode: "invite-" + userID, CreditsBalance: 200_000, BillingMultiplier: &multiplier}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-plan", InviteCode: "invite-" + userID}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	project := &model.Project{
@@ -1226,9 +946,6 @@ func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInputAndChargesOnlyBaseFe
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits = estimated %d charged %d, want zero before MCP video_gen", found.VideoEstimatedCredits, found.VideoCreditsCharged)
-	}
 	vi := found.VideoInput.Data()
 	if vi.Brief != "计划里的咖啡杯视频" || vi.HardConstraints.Ratio != "9:16" || vi.HardConstraints.Duration != 12 {
 		t.Fatalf("video input = %+v", vi)
@@ -1238,13 +955,6 @@ func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInputAndChargesOnlyBaseFe
 	}
 	if vc := found.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
-	}
-	bal, err := creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if bal != 200_000-2000 {
-		t.Fatalf("balance = %d, want base fee %d", bal, 200_000-2000)
 	}
 }
 
@@ -1403,7 +1113,7 @@ func TestTaskServiceHandleExecutionPassesMontageRuntimeConfig(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	exec := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: false, Error: "stop after options"}}
-	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	svc.SetMontageConfig(config.MontageConfig{
 		Enabled:                true,
 		SubmodulePath:          "third_party/OpenMontage",
@@ -1482,7 +1192,7 @@ func TestTaskService_ExecuteDoesNotExtractTitleFromWorkspace(t *testing.T) {
 	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
 		Success: true,
 		WorkDir: workDir,
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -1533,7 +1243,7 @@ func TestTaskService_HandleExecutionRejectsNestedAgentOnlyResult(t *testing.T) {
 		Success:        true,
 		WorkDir:        workDir,
 		ToolUseSummary: map[string]int{"Agent": 1},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -1578,7 +1288,7 @@ func TestTaskService_HandleExecutionRejectsSeednoteWithoutWorkDir(t *testing.T) 
 	}
 	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
 		Success: true,
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -1613,15 +1323,13 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFile(t *tes
 		t.Fatalf("write input manifest: %v", err)
 	}
 	task := &model.Task{
-		ID:                    uuid.New().String(),
-		UserID:                userID,
-		ProjectID:             projectID,
-		Type:                  model.PlatformVideoCreator,
-		Status:                model.TaskStatusRunning,
-		VideoEstimatedCredits: 2400,
-		VideoCreditsCharged:   2400,
-		MaxRetries:            model.DefaultRetries,
-		RetryCount:            model.DefaultRetries,
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		ProjectID:  projectID,
+		Type:       model.PlatformVideoCreator,
+		Status:     model.TaskStatusRunning,
+		MaxRetries: model.DefaultRetries,
+		RetryCount: model.DefaultRetries,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -1633,7 +1341,7 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFile(t *tes
 			"Write":                    1,
 			"register_video_reference": 1,
 		},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -1691,7 +1399,7 @@ func TestTaskServiceHandleExecutionRejectsVideoCreatorWithPlainVideoFileOnly(t *
 		ToolUseSummary: map[string]int{
 			"Write": 1,
 		},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -1722,15 +1430,13 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFileWhenWor
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	task := &model.Task{
-		ID:                    uuid.New().String(),
-		UserID:                userID,
-		ProjectID:             projectID,
-		Type:                  model.PlatformVideoCreator,
-		Status:                model.TaskStatusRunning,
-		VideoEstimatedCredits: 2400,
-		VideoCreditsCharged:   2400,
-		MaxRetries:            model.DefaultRetries,
-		RetryCount:            model.DefaultRetries,
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		ProjectID:  projectID,
+		Type:       model.PlatformVideoCreator,
+		Status:     model.TaskStatusRunning,
+		MaxRetries: model.DefaultRetries,
+		RetryCount: model.DefaultRetries,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -1741,7 +1447,7 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFileWhenWor
 			"create_video_generation_job": 1,
 			"query_video_generation_job":  1,
 		},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -1772,15 +1478,13 @@ func TestTaskServiceHandleExecutionRejectsGeneratedVideoTaskWithOnlyInputVideoRe
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	task := &model.Task{
-		ID:                    uuid.New().String(),
-		UserID:                userID,
-		ProjectID:             projectID,
-		Type:                  model.PlatformVideoCreator,
-		Status:                model.TaskStatusRunning,
-		VideoEstimatedCredits: 2400,
-		VideoCreditsCharged:   2400,
-		MaxRetries:            model.DefaultRetries,
-		RetryCount:            model.DefaultRetries,
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		ProjectID:  projectID,
+		Type:       model.PlatformVideoCreator,
+		Status:     model.TaskStatusRunning,
+		MaxRetries: model.DefaultRetries,
+		RetryCount: model.DefaultRetries,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -1803,7 +1507,7 @@ func TestTaskServiceHandleExecutionRejectsGeneratedVideoTaskWithOnlyInputVideoRe
 			"create_video_generation_job": 1,
 			"query_video_generation_job":  1,
 		},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -1836,14 +1540,12 @@ func TestTaskServiceHandleExecutionAcceptsRegisteredFinalVideoFile(t *testing.T)
 	generationID := uuid.New().String()
 	fileID := uuid.New().String()
 	task := &model.Task{
-		ID:                    uuid.New().String(),
-		UserID:                userID,
-		ProjectID:             projectID,
-		Type:                  model.PlatformVideoCreator,
-		Status:                model.TaskStatusRunning,
-		VideoGenerationID:     generationID,
-		VideoEstimatedCredits: 2400,
-		VideoCreditsCharged:   2400,
+		ID:                uuid.New().String(),
+		UserID:            userID,
+		ProjectID:         projectID,
+		Type:              model.PlatformVideoCreator,
+		Status:            model.TaskStatusRunning,
+		VideoGenerationID: generationID,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -1876,7 +1578,7 @@ func TestTaskServiceHandleExecutionAcceptsRegisteredFinalVideoFile(t *testing.T)
 			"query_video_generation_job":        1,
 			"download_video_generation_results": 1,
 		},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -1930,7 +1632,7 @@ func TestTaskServiceHandleExecutionRejectsVideoEditorWithoutRequiredDeliverables
 			"generate_image": 1,
 			"download_image": 1,
 		},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -2000,7 +1702,7 @@ func TestTaskServiceHandleExecutionAcceptsVideoEditorEDLAndPreview(t *testing.T)
 			"create_video_asr_task": 1,
 			"Write":                 2,
 		},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -2012,8 +1714,8 @@ func TestTaskServiceHandleExecutionAcceptsVideoEditorEDLAndPreview(t *testing.T)
 	if found.Status != model.TaskStatusCompleted {
 		t.Fatalf("status = %q error=%q, want completed with editor deliverables", found.Status, found.ErrorMessage)
 	}
-	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 || found.VideoGenerationID != "" {
-		t.Fatalf("editor task should not carry video_gen billing state: estimated=%d charged=%d generation=%q", found.VideoEstimatedCredits, found.VideoCreditsCharged, found.VideoGenerationID)
+	if found.VideoGenerationID != "" {
+		t.Fatalf("editor task should not carry video generation state: generation=%q", found.VideoGenerationID)
 	}
 }
 
@@ -2069,7 +1771,7 @@ func TestTaskServiceHandleExecutionAcceptsVideoEditorCapCutDraftPackage(t *testi
 		ToolUseSummary: map[string]int{
 			"Write": 2,
 		},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -2081,8 +1783,8 @@ func TestTaskServiceHandleExecutionAcceptsVideoEditorCapCutDraftPackage(t *testi
 	if found.Status != model.TaskStatusCompleted {
 		t.Fatalf("status = %q error=%q, want completed with CapCut draft package", found.Status, found.ErrorMessage)
 	}
-	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 || found.VideoGenerationID != "" {
-		t.Fatalf("editor task should not carry video_gen billing state: estimated=%d charged=%d generation=%q", found.VideoEstimatedCredits, found.VideoCreditsCharged, found.VideoGenerationID)
+	if found.VideoGenerationID != "" {
+		t.Fatalf("editor task should not carry video generation state: generation=%q", found.VideoGenerationID)
 	}
 }
 
@@ -2125,7 +1827,7 @@ func TestTaskServiceHandleExecutionRejectsVideoEditorPartialCapCutDraft(t *testi
 		ToolUseSummary: map[string]int{
 			"Write": 1,
 		},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -2182,7 +1884,7 @@ func TestTaskServiceHandleExecutionRejectsMontageWithoutDeliveryManifest(t *test
 	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
 		Success:         true,
 		RemoteArtifacts: true,
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -2250,7 +1952,7 @@ func TestTaskServiceHandleExecutionAcceptsMontageRemoteArtifacts(t *testing.T) {
 	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
 		Success:         true,
 		RemoteArtifacts: true,
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -2309,7 +2011,7 @@ func TestTaskService_HandleExecutionCompletesWithSeednoteDeliverables(t *testing
 		Success:        true,
 		WorkDir:        workDir,
 		ToolUseSummary: map[string]int{"generate_image": 2, "Bash": 3},
-	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -2337,7 +2039,7 @@ func TestTaskService_HandleExecutionFailure_PermanentAuthErrorDoesNotRetry(t *te
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
-	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, enqueuer, nil, &logger, "", nil, "", nil, nil)
 
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -2397,7 +2099,7 @@ func TestTaskService_HandleExecutionFailure_DoesNotAutoRetry(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
-	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, enqueuer, nil, &logger, "", nil, "", nil, nil)
 
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -2576,7 +2278,7 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
 	store := &resumeTestStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, nil, enqueuer, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, enqueuer, store, &logger, "", nil, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -2741,7 +2443,7 @@ func TestTaskService_ResumePersistsFilesWithoutResultOrLocalWorkspace(t *testing
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
 	store := &fakeAudioASRStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, nil, enqueuer, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, enqueuer, store, &logger, "", nil, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -2816,7 +2518,7 @@ func TestTaskService_ResumeStorageFailureCleansPartialUploads(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &resumeTestStorage{files: map[string][]byte{}, failUploadAt: 2}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -2868,7 +2570,7 @@ func TestTaskService_ResumeRejectsNonPortableFilenameAndCleansPartialUploads(t *
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &resumeTestStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -2908,7 +2610,7 @@ func TestTaskService_ResumeDeletesSupersededResumeFilesAfterCAS(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &resumeTestStorage{files: map[string][]byte{"resume/old.txt": []byte("old")}}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -2944,7 +2646,7 @@ func TestTaskService_ResumeEnqueueFailureReturnsTaskToFailed(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	ctx, cancel := context.WithCancel(context.Background())
-	svc := NewTaskService(repo, nil, cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}, nil, &logger, "", nil, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -2985,7 +2687,7 @@ func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := newConcurrentResumeStorage()
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -3332,42 +3034,6 @@ func TestTaskService_CreateManual(t *testing.T) {
 	}
 	if task.Prompt != "Test topic" {
 		t.Errorf("Prompt = %q, want %q", task.Prompt, "Test topic")
-	}
-}
-
-func TestTaskService_CreateManualMomentsTaskDerivesTypeAndChargesDefaultCost(t *testing.T) {
-	svc, repo := setupTaskServiceWithEnqueuer(t)
-	logger := zerolog.New(io.Discard)
-	creditSvc := NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.ScopeMoments: 3000}}, &logger)
-	svc.creditSvc = creditSvc
-	ctx := context.Background()
-	userID := createCreditTestUser(t, repo, 10_000)
-	projectID := createTestProject(t, repo, userID, model.PlatformMoments)
-
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
-		UserID:    userID,
-		ProjectID: projectID,
-		Prompt:    "把这段活动素材写成朋友圈",
-	})
-	if err != nil {
-		t.Fatalf("CreateManual moments: %v", err)
-	}
-	if len(tasks) != 1 {
-		t.Fatalf("created tasks = %d, want 1", len(tasks))
-	}
-	if tasks[0].Type != model.PlatformMoments {
-		t.Fatalf("task type = %q, want moments", tasks[0].Type)
-	}
-	snap := tasks[0].ProjectSnapshot.Data()
-	if snap.Platform != model.PlatformMoments {
-		t.Fatalf("task snapshot platform = %q, want moments", snap.Platform)
-	}
-	tx, err := repo.Credits().FindDeductionByTaskID(ctx, tasks[0].ID)
-	if err != nil {
-		t.Fatalf("find moments deduction: %v", err)
-	}
-	if tx.Amount != -3000 || tx.Description != "生成朋友圈扣除积分3000" {
-		t.Fatalf("moments deduction = amount %d description %q", tx.Amount, tx.Description)
 	}
 }
 

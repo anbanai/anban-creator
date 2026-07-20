@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
@@ -49,29 +50,6 @@ func (f *fakeImageModelResolver) ResolveImageModelForGeneration(
 	f.imageType = imageType
 	f.referenceCount = referenceCount
 	return f.resolved, f.err
-}
-
-type fakeImageGenerationBiller struct {
-	decision  ImageGenerationBillingDecision
-	err       error
-	calls     int
-	userID    string
-	taskID    string
-	imageType string
-	resolved  *service.ResolvedImageModel
-}
-
-func (f *fakeImageGenerationBiller) PrepareImageGeneration(
-	_ context.Context,
-	userID, taskID, imageType string,
-	resolved *service.ResolvedImageModel,
-) (ImageGenerationBillingDecision, error) {
-	f.calls++
-	f.userID = userID
-	f.taskID = taskID
-	f.imageType = imageType
-	f.resolved = resolved
-	return f.decision, f.err
 }
 
 type fakeImageGenerator struct {
@@ -168,7 +146,7 @@ func setupTimedGenerateImageHandlerTest(t *testing.T) (context.Context, string, 
 		"output_path": "output/cover.png",
 		"image_type": "cover"
 	}`, projectID, taskID))}}
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 	return ctx, userID, request, resolver, taskSvc, installImageFixedBilling(t, repo, taskSvc, taskID)
 }
 
@@ -179,8 +157,8 @@ func TestGenerateImageHandlerReturnsOperationTimeout(t *testing.T) {
 	generator := &fakeImageGenerator{waitForContext: true}
 	svcs = &Services{
 		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
-		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
-		ImageGenerator: generator, GenerateImageTimeout: 500 * time.Millisecond,
+		ImageModelResolver: resolver,
+		ImageGenerator:     generator, GenerateImageTimeout: 500 * time.Millisecond,
 		BillingCatalogSvc: catalog,
 	}
 	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
@@ -200,8 +178,8 @@ func TestGenerateImageHandlerClassifiesCallerCancellation(t *testing.T) {
 	generator := &fakeImageGenerator{waitForContext: true, started: started}
 	svcs = &Services{
 		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
-		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
-		ImageGenerator: generator, GenerateImageTimeout: time.Minute,
+		ImageModelResolver: resolver,
+		ImageGenerator:     generator, GenerateImageTimeout: time.Minute,
 		BillingCatalogSvc: catalog,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -226,8 +204,8 @@ func TestGenerateImageHandlerRejectsLateProviderSuccess(t *testing.T) {
 	}
 	svcs = &Services{
 		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
-		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
-		ImageGenerator: generator, GenerateImageTimeout: 500 * time.Millisecond,
+		ImageModelResolver: resolver,
+		ImageGenerator:     generator, GenerateImageTimeout: 500 * time.Millisecond,
 		BillingCatalogSvc: catalog,
 	}
 	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
@@ -243,8 +221,8 @@ func TestGenerateImageHandlerReturnsProviderTimeout(t *testing.T) {
 	generator := &fakeImageGenerator{err: context.DeadlineExceeded}
 	svcs = &Services{
 		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
-		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
-		ImageGenerator: generator, GenerateImageTimeout: time.Minute,
+		ImageModelResolver: resolver,
+		ImageGenerator:     generator, GenerateImageTimeout: time.Minute,
 		BillingCatalogSvc: catalog,
 	}
 	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
@@ -327,9 +305,6 @@ func TestGenerateImageResolvesModelOnce(t *testing.T) {
 		SelectionReason:    "reference_compatible_fallback",
 	}
 	resolver := &fakeImageModelResolver{resolved: resolved}
-	biller := &fakeImageGenerationBiller{decision: ImageGenerationBillingDecision{
-		Provider: "must-not-drive-response", Model: "must-not-drive-response", Source: "must-not-drive-response",
-	}}
 	store, err := storage.NewLocalProvider(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -339,14 +314,13 @@ func TestGenerateImageResolvesModelOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	generator := &fakeImageGenerator{result: &service.ImageResult{FilePath: "output/cover.png", LocalFilePath: generatedPath, OutputMIME: "image/png"}}
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
 	svcs = &Services{
-		TaskSvc:               taskSvc,
-		ImageSvc:              &service.ImageService{},
-		ImageModelResolver:    resolver,
-		ImageGenerationBiller: biller,
-		ImageGenerator:        generator,
-		BillingCatalogSvc:     installImageFixedBilling(t, repo, taskSvc, taskID),
+		TaskSvc:            taskSvc,
+		ImageSvc:           &service.ImageService{},
+		ImageModelResolver: resolver,
+		ImageGenerator:     generator,
+		BillingCatalogSvc:  installImageFixedBilling(t, repo, taskSvc, taskID),
 	}
 	var logBuffer bytes.Buffer
 	log := zerolog.New(&logBuffer)
@@ -377,8 +351,8 @@ func TestGenerateImageResolvesModelOnce(t *testing.T) {
 	if resolver.userID != userID || resolver.imageModelKey != "preferred-key" || resolver.imageType != "cover" || resolver.referenceCount != 2 {
 		t.Fatalf("resolver args = user %q key %q type %q refs %d", resolver.userID, resolver.imageModelKey, resolver.imageType, resolver.referenceCount)
 	}
-	if biller.calls != 0 || generator.calls != 1 {
-		t.Fatalf("legacy biller/generator calls = %d/%d, want 0/1", biller.calls, generator.calls)
+	if generator.calls != 1 {
+		t.Fatalf("generator calls = %d, want 1", generator.calls)
 	}
 	if generator.resolved != resolved {
 		t.Fatalf("descriptor pointer was not shared: resolver=%p generator=%p", resolved, generator.resolved)
@@ -430,7 +404,6 @@ func TestGenerateImageUsesMultiReferenceArrayAsAuthoritativeInput(t *testing.T) 
 	}
 	resolved := &service.ResolvedImageModel{Provider: "openai", Model: "gpt-image-2", SupportsReference: true, MaxReferenceImages: 16}
 	resolver := &fakeImageModelResolver{resolved: resolved}
-	biller := &fakeImageGenerationBiller{}
 	store, err := storage.NewLocalProvider(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -440,13 +413,12 @@ func TestGenerateImageUsesMultiReferenceArrayAsAuthoritativeInput(t *testing.T) 
 		t.Fatal(err)
 	}
 	generator := &fakeImageGenerator{result: &service.ImageResult{FilePath: "output/generated.png", LocalFilePath: generatedPath, OutputMIME: "image/png"}}
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
 	svcs = &Services{
-		TaskSvc:               taskSvc,
-		ImageModelResolver:    resolver,
-		ImageGenerationBiller: biller,
-		ImageGenerator:        generator,
-		BillingCatalogSvc:     installImageFixedBilling(t, repo, taskSvc, taskID),
+		TaskSvc:            taskSvc,
+		ImageModelResolver: resolver,
+		ImageGenerator:     generator,
+		BillingCatalogSvc:  installImageFixedBilling(t, repo, taskSvc, taskID),
 	}
 
 	legacyRef := filepath.Join(t.TempDir(), "legacy.png")
@@ -510,13 +482,11 @@ func TestGenerateImageValidatesVisionPreconditionsBeforeBillingOrGeneration(t *t
 				t.Fatalf("create task: %v", err)
 			}
 			resolver := &fakeImageModelResolver{resolved: &service.ResolvedImageModel{Provider: "openai", Model: "gpt-image-2"}}
-			biller := &fakeImageGenerationBiller{}
 			generator := &fakeImageGenerator{result: &service.ImageResult{DownloadURL: "https://example.com/generated.png"}}
 			svcs = &Services{
-				TaskSvc:               service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil),
-				ImageModelResolver:    resolver,
-				ImageGenerationBiller: biller,
-				ImageGenerator:        generator,
+				TaskSvc:            service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil),
+				ImageModelResolver: resolver,
+				ImageGenerator:     generator,
 			}
 			args, err := json.Marshal(map[string]any{
 				"project_id":          projectID,
@@ -537,8 +507,8 @@ func TestGenerateImageValidatesVisionPreconditionsBeforeBillingOrGeneration(t *t
 			if res == nil || !res.IsError || !strings.Contains(callToolText(res), tt.wantError) {
 				t.Fatalf("result = %#v (%s), want error containing %q", res, callToolText(res), tt.wantError)
 			}
-			if resolver.calls != 0 || biller.calls != 0 || generator.calls != 0 {
-				t.Fatalf("resolver/biller/generator calls = %d/%d/%d, want 0/0/0", resolver.calls, biller.calls, generator.calls)
+			if resolver.calls != 0 || generator.calls != 0 {
+				t.Fatalf("resolver/generator calls = %d/%d, want 0/0", resolver.calls, generator.calls)
 			}
 		})
 	}
@@ -602,7 +572,7 @@ func TestGenerateImageReplaysFinalSanitizedSettlementResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &countingImageStorage{Provider: local}
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
 	taskSvc.SetBillingWalletService(walletSvc)
 	imageSvc := service.NewImageService(nil, store, repo, &logger)
 	vision := &fakeMCPWritingLLM{response: `{"overall_pass":true,"relevance_score":"high","missing_entities":[],"notes":"secret raw note"}`}
@@ -698,14 +668,12 @@ func TestGenerateImageReturnsActualReferenceLimit(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	resolver := &fakeImageModelResolver{err: &service.ImageReferenceLimitError{Requested: 17, MaxReferenceImages: 16}}
-	biller := &fakeImageGenerationBiller{}
 	generator := &fakeImageGenerator{}
 	svcs = &Services{
-		TaskSvc:               service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil),
-		ImageSvc:              &service.ImageService{},
-		ImageModelResolver:    resolver,
-		ImageGenerationBiller: biller,
-		ImageGenerator:        generator,
+		TaskSvc:            service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil),
+		ImageSvc:           &service.ImageService{},
+		ImageModelResolver: resolver,
+		ImageGenerator:     generator,
 	}
 
 	refs := make([]string, 17)
@@ -736,8 +704,8 @@ func TestGenerateImageReturnsActualReferenceLimit(t *testing.T) {
 	if resolver.calls != 1 || resolver.referenceCount != 17 {
 		t.Fatalf("resolver calls/count = %d/%d, want 1/17", resolver.calls, resolver.referenceCount)
 	}
-	if biller.calls != 0 || generator.calls != 0 {
-		t.Fatalf("biller/generator must not run after preflight failure: %d/%d", biller.calls, generator.calls)
+	if generator.calls != 0 {
+		t.Fatalf("generator must not run after preflight failure: %d", generator.calls)
 	}
 }
 
@@ -1214,7 +1182,7 @@ func TestValidateImageToolTaskAccessRejectsForeignTask(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)}
+	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)}
 
 	res := validateImageToolTaskAccess(ctx, userID, taskID, "")
 	if res == nil || !res.IsError {
@@ -1258,7 +1226,7 @@ func TestValidateImageToolTaskAccessRejectsProjectMismatch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)}
+	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)}
 
 	res := validateImageToolTaskAccess(ctx, userID, taskID, otherProjectID)
 	if res == nil || !res.IsError {
@@ -1290,7 +1258,7 @@ func TestResolveTaskWorkspaceReadablePathRestoresTaskFileWhenWorkspaceMissing(t 
 		t.Fatalf("create task: %v", err)
 	}
 	store := &fakeVideoReferenceStorage{files: map[string][]byte{"user/task/output/cover.png": tinyPNGBytes()}}
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, t.TempDir(), nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, t.TempDir(), nil, nil)
 	svcs = &Services{TaskSvc: taskSvc, Store: store}
 	if _, err := repo.TaskFiles().Upsert(ctx, &model.TaskFile{
 		TaskID:          taskID,
@@ -1582,7 +1550,7 @@ func tinyPNGBytes() []byte {
 	return data
 }
 
-func TestRunImageVerificationDoesNotChargeUserWallet(t *testing.T) {
+func TestRunImageVerificationRecordsProviderCostWithoutUserWallet(t *testing.T) {
 	oldSvcs := svcs
 	oldBillSvc := billSvc
 	t.Cleanup(func() {
@@ -1597,12 +1565,11 @@ func TestRunImageVerificationDoesNotChargeUserWallet(t *testing.T) {
 	projectID := "image-understanding-task-project"
 	taskID := "image-understanding-task"
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		InviteCode:     "imgtask",
-		Tier:           model.TierFree,
-		CreditsBalance: 10_000,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "imgtask",
+		Tier:       model.TierFree,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -1631,27 +1598,8 @@ func TestRunImageVerificationDoesNotChargeUserWallet(t *testing.T) {
 			ProviderKey: "moonshot",
 			Model:       "kimi-k2.7-code-highspeed",
 		},
-		Billing: srvconfig.BillingConfig{
-			CreditsPerCNY: 1000,
-			TierMultipliers: map[string]float64{
-				"free": 1,
-			},
-			MinimumChargeCredits: 1,
-		},
-		ModelPrices: srvconfig.ModelPricesConfig{
-			TokenModels: map[string]srvconfig.TokenModelPrice{
-				"moonshot/kimi-k2.7-code-highspeed": {
-					Currency: "CNY",
-					Unit:     1_000,
-					Input:    srvconfig.FlexibleFloat(1),
-					Output:   srvconfig.FlexibleFloat(1),
-				},
-			},
-		},
-		Credits: srvconfig.CreditsConfig{},
 	}
 	logger := zerolog.New(io.Discard)
-	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
 	writingSvc := service.NewWritingService(repo, nil, "", 0, &logger)
 	writingSvc.SetImageUnderstandingClient(&fakeMCPWritingLLM{
 		response: `{"overall_pass":true}`,
@@ -1661,25 +1609,34 @@ func TestRunImageVerificationDoesNotChargeUserWallet(t *testing.T) {
 			TotalTokens:  200,
 		},
 	})
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
-	svcs = &Services{WritingSvc: writingSvc, TaskSvc: taskSvc}
-	billSvc = &billingServices{creditSvc: creditSvc, config: cfg}
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	bundle, err := serverbilling.LoadBundle("../billing")
+	if err != nil {
+		t.Fatalf("load billing bundle: %v", err)
+	}
+	svcs = &Services{
+		WritingSvc: writingSvc, TaskSvc: taskSvc,
+		ProviderCostSvc: service.NewProviderCostService(repository.NewBillingCostRepository(db), bundle),
+	}
+	billSvc = &billingServices{config: cfg}
 
 	imagePath := filepath.Join(t.TempDir(), "verified.png")
 	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), 0o644); err != nil {
 		t.Fatalf("write image: %v", err)
 	}
-	_, err := runImageVerification(ctx, userID, taskID, &service.ImageResult{FilePath: imagePath}, "verify")
+	_, err = runImageVerification(ctx, userID, taskID, &service.ImageResult{FilePath: imagePath}, "verify")
 	if err != nil {
 		t.Fatalf("runImageVerification: %v", err)
 	}
-
-	txs, _, err := creditSvc.ListTransactions(ctx, userID, 0, 10)
-	if err != nil {
-		t.Fatalf("list transactions: %v", err)
+	var event model.BillingProviderCostEvent
+	if err := db.First(&event).Error; err != nil {
+		t.Fatalf("find provider cost event: %v", err)
 	}
-	if len(txs) != 0 {
-		t.Fatalf("understanding provider usage mutated user wallet: %#v", txs)
+	if event.TaskID != taskID || event.Provider != "moonshot" || event.Model != "kimi-k2.7-code-highspeed" || event.CostMicroCNY <= 0 {
+		t.Fatalf("provider cost event = %#v", event)
+	}
+	if _, err := repo.Billing().FindAccount(ctx, userID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("image verification created user wallet: %v", err)
 	}
 }
 
@@ -1703,20 +1660,18 @@ func TestAnalyzeImagePreflightsForeignTaskBeforeCallingVision(t *testing.T) {
 	foreignTaskID := "task-analyze-preflight-other"
 	for _, user := range []*model.User{
 		{
-			ID:             userID,
-			Email:          userID + "@example.com",
-			Password:       "hashed",
-			InviteCode:     "invite-" + userID,
-			Tier:           model.TierFree,
-			CreditsBalance: 10_000,
+			ID:         userID,
+			Email:      userID + "@example.com",
+			Password:   "hashed",
+			InviteCode: "invite-" + userID,
+			Tier:       model.TierFree,
 		},
 		{
-			ID:             otherUserID,
-			Email:          otherUserID + "@example.com",
-			Password:       "hashed",
-			InviteCode:     "invite-" + otherUserID,
-			Tier:           model.TierFree,
-			CreditsBalance: 10_000,
+			ID:         otherUserID,
+			Email:      otherUserID + "@example.com",
+			Password:   "hashed",
+			InviteCode: "invite-" + otherUserID,
+			Tier:       model.TierFree,
 		},
 	} {
 		if err := repo.Users().Create(ctx, user); err != nil {
@@ -1759,24 +1714,7 @@ func TestAnalyzeImagePreflightsForeignTaskBeforeCallingVision(t *testing.T) {
 			ProviderKey: "moonshot",
 			Model:       "kimi-k2.7-code-highspeed",
 		},
-		Billing: srvconfig.BillingConfig{
-			CreditsPerCNY:         1000,
-			TierMultipliers:       map[string]float64{"free": 1},
-			DefaultUserMultiplier: 1,
-			MinimumChargeCredits:  1,
-		},
-		ModelPrices: srvconfig.ModelPricesConfig{
-			TokenModels: map[string]srvconfig.TokenModelPrice{
-				"moonshot/kimi-k2.7-code-highspeed": {
-					Currency: "CNY",
-					Unit:     1_000,
-					Input:    srvconfig.FlexibleFloat(1),
-					Output:   srvconfig.FlexibleFloat(1),
-				},
-			},
-		},
 	}
-	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
 	visionClient := &fakeMCPWritingLLM{
 		response: `{"overall_pass":true}`,
 		usage: srvconfig.TokenUsage{
@@ -1789,9 +1727,9 @@ func TestAnalyzeImagePreflightsForeignTaskBeforeCallingVision(t *testing.T) {
 	writingSvc.SetImageUnderstandingClient(visionClient)
 	svcs = &Services{
 		WritingSvc: writingSvc,
-		TaskSvc:    service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil),
+		TaskSvc:    service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil),
 	}
-	billSvc = &billingServices{creditSvc: creditSvc, config: cfg}
+	billSvc = &billingServices{config: cfg}
 
 	imagePath := filepath.Join(t.TempDir(), "analyze.png")
 	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), 0o644); err != nil {

@@ -19,7 +19,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
@@ -94,7 +93,7 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "analyze_image",
-		Description: "Analyze an image using the configured image-understanding model route. Accepts a remote image URL (https://) or a server-local file path (from generate_image/download_image file_path). Returns the AI's analysis, token usage, and charged credits. Use this for: identifying entities in line art, evaluating coloring quality, auditing cross-image color consistency, verifying line art preservation. file_path analysis is limited to 10MB; for larger images compress_image first or upload_image and retry with image_url.",
+		Description: "Analyze an image using the configured image-understanding model route. Accepts a remote image URL (https://) or a server-local file path (from generate_image/download_image file_path). Returns the AI analysis. Provider usage is recorded only in the platform's internal cost ledger. Use this for: identifying entities in line art, evaluating coloring quality, auditing cross-image color consistency, verifying line art preservation. file_path analysis is limited to 10MB; for larger images compress_image first or upload_image and retry with image_url.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -1236,13 +1235,13 @@ func runImageVerification(ctx context.Context, userID, taskID string, result *se
 		return nil, fmt.Errorf("no accessible image source for verification (need file_path or download_url)")
 	}
 
-	providerRequestID := newUnderstandingProviderRequestID(model.CreditTypeImageUnderstanding)
+	providerRequestID := newUnderstandingProviderRequestID(model.OperationImageUnderstanding)
 	analysis, err := svcs.WritingSvc.AnalyzeImageDetailed(ctx, userID, imageSource, prompt)
 	if err != nil {
-		recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeImageUnderstanding, providerRequestID, nil)
+		recordUnderstandingProviderCost(ctx, taskID, model.OperationImageUnderstanding, providerRequestID, nil)
 		return nil, fmt.Errorf("analyze image: %w", err)
 	}
-	recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeImageUnderstanding, providerRequestID, &analysis.Usage)
+	recordUnderstandingProviderCost(ctx, taskID, model.OperationImageUnderstanding, providerRequestID, &analysis.Usage)
 	return parseVisionVerificationJSON(analysis.Text), nil
 }
 
@@ -1428,7 +1427,7 @@ func generateImageInputSchema() map[string]any {
 			"ref_image_paths":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Server-local reference image paths relevant to this output (optional). Pass only the original images selected for this image; the server automatically chooses a capable model, validates its reference capacity, and returns the actual accessible limit when exceeded. Use file_path returned by generate_image/download_image."},
 			"task_id":             map[string]any{"type": "string", "description": "Task ID. The server resolves the image model from this task; agents must not pass model keys."},
 			"watermark":           map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
-			"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities/matches the chapter content. The image-understanding call is billed by actual usage and associated with task_id.", "default": false},
+			"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities or matches the chapter content. Provider usage is internal cost evidence only.", "default": false},
 			"verification_prompt": map[string]any{"type": "string", "description": "Prompt for the post-generation vision check (required when verify_with_vision=true). Should ask the vision model to verify required entities are present and return JSON {all_entities_present, missing_entities, relevance_entities, relevance_score, overall_pass}."},
 			"upload_to_cdn":       map[string]any{"type": "boolean", "description": "When true (requires output_path), upload the saved image to the project's CDN in the same call and return wechat_url + media_id on the result. For article projects this uploads to the WeChat material library. Upload runs only after a passing vision check (or when verify_with_vision is false), so rejected images are never uploaded. On upload failure the result carries upload_error instead; retry upload_image with task_id when the workspace file is visible, or use download_url as the durable generated asset.", "default": false},
 		},
@@ -1525,83 +1524,17 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		imageSource = fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
 	}
 
-	providerRequestID := newUnderstandingProviderRequestID(model.CreditTypeImageUnderstanding)
+	providerRequestID := newUnderstandingProviderRequestID(model.OperationImageUnderstanding)
 	result, err := svcs.WritingSvc.AnalyzeImageDetailed(ctx, userID, imageSource, prompt)
 	if err != nil {
-		recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeImageUnderstanding, providerRequestID, nil)
+		recordUnderstandingProviderCost(ctx, taskID, model.OperationImageUnderstanding, providerRequestID, nil)
 		return errorResult(fmt.Sprintf("analyze image: %v", err)), nil
 	}
-	recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeImageUnderstanding, providerRequestID, &result.Usage)
+	recordUnderstandingProviderCost(ctx, taskID, model.OperationImageUnderstanding, providerRequestID, &result.Usage)
 	return textResult(map[string]any{
 		"analysis": result.Text,
 		"usage":    result.Usage,
 	})
-}
-
-func resolveDynamicImageGenerationBillingRoute(imageType, modelName, billingSource string) (providerKey, resolvedModel, routeName string, ok bool) {
-	if billSvc == nil || billSvc.config == nil {
-		return "", "", "", false
-	}
-	var route srvconfig.ImageGenerationRouteConfig
-	switch {
-	case strings.HasPrefix(billingSource, "preset:"):
-		presetKey := strings.TrimPrefix(billingSource, "preset:")
-		for _, preset := range billSvc.config.ImagePresets {
-			if preset.Key != presetKey || preset.ProviderRoute == "" {
-				continue
-			}
-			var found bool
-			route, found = imageGenerationRouteByPathForMCP(preset.ProviderRoute)
-			if !found {
-				return "", "", "", false
-			}
-			routeName = strings.TrimPrefix(strings.TrimSpace(preset.ProviderRoute), "model_routes.")
-			break
-		}
-	case billingSource == "system_default" || billingSource == "":
-		if imageType == "cover" {
-			route = billSvc.config.ModelRoutes.ImageGeneration.Cover
-			routeName = "image_generation.cover"
-		} else {
-			route = billSvc.config.ModelRoutes.ImageGeneration.Content
-			routeName = "image_generation.content"
-		}
-	default:
-		return "", "", "", false
-	}
-	if route.Provider == "" {
-		return "", "", "", false
-	}
-	if route.Model == "" {
-		route.Model = modelName
-	}
-	if route.Model == "" {
-		return "", "", "", false
-	}
-	price, exists := billSvc.config.ModelPrices.ImageGeneration[route.Provider+"/"+route.Model]
-	if !exists || price.PricingType != srvconfig.ImagePricingTypeOpenAIUsage {
-		return "", "", "", false
-	}
-	return route.Provider, route.Model, routeName, true
-}
-
-func imageGenerationRouteByPathForMCP(path string) (srvconfig.ImageGenerationRouteConfig, bool) {
-	if billSvc == nil || billSvc.config == nil {
-		return srvconfig.ImageGenerationRouteConfig{}, false
-	}
-	path = strings.TrimPrefix(strings.TrimSpace(path), "model_routes.")
-	switch path {
-	case "image_generation.cover":
-		return billSvc.config.ModelRoutes.ImageGeneration.Cover, true
-	case "image_generation.content":
-		return billSvc.config.ModelRoutes.ImageGeneration.Content, true
-	}
-	const designerPrefix = "image_generation.designer."
-	if strings.HasPrefix(path, designerPrefix) {
-		route, ok := billSvc.config.ModelRoutes.ImageGeneration.Designer[strings.TrimPrefix(path, designerPrefix)]
-		return route, ok
-	}
-	return srvconfig.ImageGenerationRouteConfig{}, false
 }
 
 // downloadHTTPSImage downloads an image from a public HTTPS URL.

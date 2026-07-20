@@ -19,7 +19,6 @@ type Repository interface {
 	TaskFiles() TaskFileRepository
 	PendingUploads() PendingUploadRepository
 	Projects() ProjectRepository
-	Credits() CreditRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
 	ModelConfigs() ModelConfigRepository
@@ -49,8 +48,6 @@ type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	Update(ctx context.Context, user *model.User) error
 	IncrementInviteCount(ctx context.Context, userID string, maxCount int) (bool, error)
-	AdjustBalance(ctx context.Context, userID string, delta int) (int, error)
-	DeductCredits(ctx context.Context, userID string, amount int) (int, bool, error)
 }
 
 // SessionRepository provides access to the login_sessions table.
@@ -103,7 +100,9 @@ type TaskRepository interface {
 	UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error)
+	UpdateBillingTerminalReason(ctx context.Context, id, reason string) error
 	Update(ctx context.Context, task *model.Task) error
 	UpdateInputAttachments(ctx context.Context, id string, attachments []model.EntryAttachment) error
 	UpdateTitle(ctx context.Context, id string, title string) error
@@ -162,7 +161,7 @@ type TaskRepository interface {
 	CompareAndSwapPublishApproval(ctx context.Context, id, expected, newState string, clearArticles bool) (bool, error)
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	Delete(ctx context.Context, id string) error
-	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error)
+	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, err error)
 	AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error)
 }
 
@@ -299,7 +298,6 @@ type repository struct {
 	files                   TaskFileRepository
 	pendingUploads          PendingUploadRepository
 	projects                ProjectRepository
-	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
 	modelConfigs            ModelConfigRepository
@@ -327,7 +325,6 @@ func New(db *gorm.DB) Repository {
 	files := newTaskFileRepository(db)
 	pendingUploads := newPendingUploadRepository(db)
 	projects := newProjectRepository(db)
-	credits := newCreditRepository(db)
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
 	modelConfigs := newModelConfigRepository(db)
@@ -354,7 +351,6 @@ func New(db *gorm.DB) Repository {
 		files:                   files,
 		pendingUploads:          pendingUploads,
 		projects:                projects,
-		credits:                 credits,
 		apiKeys:                 apiKeys,
 		feedbacks:               feedbacks,
 		modelConfigs:            modelConfigs,
@@ -381,7 +377,6 @@ func (r *repository) TaskExecutions() TaskExecutionRepository       { return r.t
 func (r *repository) TaskFiles() TaskFileRepository                 { return r.files }
 func (r *repository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
 func (r *repository) Projects() ProjectRepository                   { return r.projects }
-func (r *repository) Credits() CreditRepository                     { return r.credits }
 func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *repository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
 func (r *repository) ModelConfigs() ModelConfigRepository           { return r.modelConfigs }
@@ -441,7 +436,6 @@ type txRepository struct {
 	files                   TaskFileRepository
 	pendingUploads          PendingUploadRepository
 	projects                ProjectRepository
-	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
 	modelConfigs            ModelConfigRepository
@@ -470,7 +464,6 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		files:                   newTaskFileRepository(tx),
 		pendingUploads:          newPendingUploadRepository(tx),
 		projects:                newProjectRepository(tx),
-		credits:                 newCreditRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
 		feedbacks:               newFeedbackRepository(tx),
 		modelConfigs:            newModelConfigRepository(tx),
@@ -497,7 +490,6 @@ func (r *txRepository) TaskExecutions() TaskExecutionRepository       { return r
 func (r *txRepository) TaskFiles() TaskFileRepository                 { return r.files }
 func (r *txRepository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
 func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
-func (r *txRepository) Credits() CreditRepository                     { return r.credits }
 func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *txRepository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
 func (r *txRepository) ModelConfigs() ModelConfigRepository           { return r.modelConfigs }

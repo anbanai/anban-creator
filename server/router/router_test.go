@@ -65,11 +65,11 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 
 		planSvc := service.NewPlanService(repo, &logger)
 		agentExecutor := agent.NewLocalExecutor(&logger, nil, nil, "", false, "", nil, nil, nil, "", "", nil, nil)
-		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, nil, &logger, "", nil, "", nil, nil)
+		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, &logger, "", nil, "", nil, nil)
 		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
-		authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil, nil, nil)
+		authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil)
 		planHandler := handler.NewPlanHandler(planSvc, &logger)
 		taskHandler := handler.NewTaskHandler(taskSvc, &logger)
 		seednoteAnalyticsHandler := handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, &logger)
@@ -208,11 +208,11 @@ func TestBillingRoutes(t *testing.T) {
 		Repo: repo, JWTService: jwtSvc, BillingHandler: &handler.BillingHandler{},
 	})
 	want := map[string]string{
-		"GET /api/billing/wallet":        "",
-		"GET /api/billing/transactions":  "",
-		"POST /api/billing/quotes":       "",
-		"GET /api/billing/referral":      "",
-		"POST /api/admin/billing/topups": "",
+		"GET /api/v1/billing/wallet":       "",
+		"GET /api/v1/billing/transactions": "",
+		"POST /api/v1/billing/quotes":      "",
+		"GET /api/v1/billing/referral":     "",
+		"POST /api/admin/billing/topups":   "",
 	}
 	for _, route := range app.GetRoutes() {
 		delete(want, route.Method+" "+route.Path)
@@ -224,10 +224,10 @@ func TestBillingRoutes(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/api/billing/wallet"},
-		{http.MethodGet, "/api/billing/transactions"},
-		{http.MethodPost, "/api/billing/quotes"},
-		{http.MethodGet, "/api/billing/referral"},
+		{http.MethodGet, "/api/v1/billing/wallet"},
+		{http.MethodGet, "/api/v1/billing/transactions"},
+		{http.MethodPost, "/api/v1/billing/quotes"},
+		{http.MethodGet, "/api/v1/billing/referral"},
 	} {
 		resp, err := app.Test(httptest.NewRequest(tc.method, tc.path, nil))
 		if err != nil {

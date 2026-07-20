@@ -364,11 +364,8 @@ func TestResolveVideoGenerationPlanAutoDowngradesResolutionWhenPolicyAllows(t *t
 	}
 }
 
-func TestVideoAPIConfigUsesCatalogAndMultiplierNotBusinessDefaults(t *testing.T) {
+func TestVideoAPIConfigUsesCatalogNotBusinessDefaults(t *testing.T) {
 	cfg := config.VideoAPIConfig{}
-	if cfg.CreditMultiplierOrDefault() != 1000 {
-		t.Fatalf("default multiplier = %d, want 1000", cfg.CreditMultiplierOrDefault())
-	}
 	if len(VideoModelCatalogFromConfig(cfg.ModelCatalog)) != 0 {
 		t.Fatalf("empty video model config must not expose default models")
 	}
@@ -381,7 +378,7 @@ func TestVideoModelCatalogFromConfigEmptyConfigExposesNoModels(t *testing.T) {
 	}
 }
 
-func TestVideoModelCatalogFromConfigMergesConfiguredModelIDWithDefaultPricing(t *testing.T) {
+func TestVideoModelCatalogFromConfigMergesConfiguredModelIDWithDefaultCapabilities(t *testing.T) {
 	catalog := VideoModelCatalogFromConfig([]config.VideoModelCatalogEntry{{
 		Key:     "seedance-2.0-mini",
 		ModelID: "custom-mini-model",
@@ -390,8 +387,8 @@ func TestVideoModelCatalogFromConfigMergesConfiguredModelIDWithDefaultPricing(t 
 	if spec.ModelID != "custom-mini-model" {
 		t.Fatalf("model id = %q", spec.ModelID)
 	}
-	if !spec.SupportsVideoInput || len(spec.NoInputPricePerSecond) == 0 || spec.NoInputPricePerSecond["720p"] == 0 {
-		t.Fatalf("default capabilities/pricing were not preserved: %#v", spec)
+	if !spec.SupportsVideoInput || len(spec.SupportedResolutions) == 0 {
+		t.Fatalf("default capabilities were not preserved: %#v", spec)
 	}
 }
 
@@ -404,9 +401,6 @@ func TestVideoModelCatalogFromConfigOnlyExposesConfiguredModelsWhenProvided(t *t
 		SupportedRatios:      []string{"9:16"},
 		MinDuration:          1,
 		MaxDuration:          15,
-		NoInputPricePerSecond: map[string]float64{
-			"720p": 1,
-		},
 	}})
 
 	if _, ok := catalog["configured-video"]; !ok {
@@ -439,9 +433,6 @@ func TestResolveVideoGenerationPlanRejectsAllowedModelMissingFromCatalog(t *test
 			SupportedRatios:      []string{"9:16"},
 			MinDuration:          1,
 			MaxDuration:          15,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "video model missing-model is not configured") {

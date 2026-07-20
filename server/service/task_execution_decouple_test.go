@@ -89,7 +89,7 @@ func TestHandleExecutionNilResultFailsTaskWithoutPanic(t *testing.T) {
 				t.Fatalf("create task: %v", err)
 			}
 
-			svc := NewTaskService(repo, &fakeTaskExecutor{err: tt.execErr}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+			svc := NewTaskService(repo, &fakeTaskExecutor{err: tt.execErr}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 			if err := svc.HandleExecution(ctx, task, project); err != nil {
 				t.Fatalf("HandleExecution: %v", err)
 			}
@@ -117,8 +117,8 @@ func TestHandleExecutionNilResultFailsTaskWithoutPanic(t *testing.T) {
 			if persisted.Success || persisted.Error != "agent returned no execution result" {
 				t.Fatalf("persisted nil result = %+v, want stable terminal failure", persisted)
 			}
-			if persisted.CostStatus != agent.CostStatusUnreconciled || found.CostStatus != agent.CostStatusUnreconciled {
-				t.Fatalf("cost status = result %q task %q, want unreconciled", persisted.CostStatus, found.CostStatus)
+			if persisted.CostStatus != "" || found.CostStatus != agent.CostStatusUnreconciled {
+				t.Fatalf("cost status = public result %q internal task %q", persisted.CostStatus, found.CostStatus)
 			}
 			if len(persisted.ModelUsage) != 0 || len(found.TerminalModelUsage.Data()) != 0 {
 				t.Fatalf("nil terminal fabricated usage: result=%+v task=%+v", persisted.ModelUsage, found.TerminalModelUsage.Data())
@@ -160,7 +160,7 @@ func TestHandleExecutionCancellationTakesPrecedenceOverNilResult(t *testing.T) {
 			}
 			project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle}
 			exec := &cancelingExecutor{parentCancel: cancel, err: tt.execErr}
-			svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+			svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 			if err := svc.HandleExecution(ctx, task, project); err != nil {
 				t.Fatalf("HandleExecution: %v", err)
@@ -216,7 +216,7 @@ func TestHandleExecutionPersistsPartialResultBeforeExecutorFailure(t *testing.T)
 	svc := NewTaskService(repo, &fakeTaskExecutor{
 		result: result,
 		err:    errors.New("executor failed after producing output"),
-	}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	}, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, project); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -229,8 +229,8 @@ func TestHandleExecutionPersistsPartialResultBeforeExecutorFailure(t *testing.T)
 	if found.Status != model.TaskStatusFailed {
 		t.Fatalf("status = %q, want %q", found.Status, model.TaskStatusFailed)
 	}
-	if found.Result == nil || !strings.Contains(*found.Result, `"model":"partial-model"`) {
-		t.Fatalf("result = %v, want persisted partial execution result", found.Result)
+	if found.Result == nil || strings.Contains(*found.Result, `"model":"partial-model"`) {
+		t.Fatalf("result = %v, want persisted partial result without internal model identity", found.Result)
 	}
 	if !strings.Contains(found.ErrorMessage, "executor failed after producing output") {
 		t.Fatalf("error_message = %q, want executor error", found.ErrorMessage)
@@ -288,7 +288,7 @@ func TestHandleExecution_PersistsOutcomeOnExpiredContext(t *testing.T) {
 		parentCancel: cancel,
 		result:       &agent.ExecutionResult{Success: true, WorkDir: workDir},
 	}
-	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(execCtx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -342,7 +342,7 @@ func TestHandleExecutionRemoteArtifactsSkipsHostWorkspaceUpload(t *testing.T) {
 		WorkDir:         workDir,
 		RemoteArtifacts: true,
 		ToolUseSummary:  map[string]int{"Bash": 1},
-	}}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -405,7 +405,7 @@ func TestHandleExecutionRemoteSeednoteValidatesTaskFilesWithoutWorkDir(t *testin
 		Success:         true,
 		RemoteArtifacts: true,
 		ToolUseSummary:  map[string]int{"generate_image": 2, "Bash": 1},
-	}}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -463,7 +463,7 @@ func TestHandleExecutionRemoteArticleApprovalReadsDraftFromTaskFiles(t *testing.
 		Success:         true,
 		RemoteArtifacts: true,
 		ToolUseSummary:  map[string]int{"Bash": 1},
-	}}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, pubSvc)
+	}}, &mockEnqueuer{}, store, &logger, "", nil, "", nil, pubSvc)
 
 	if err := svc.HandleExecution(ctx, task, nil); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -521,7 +521,8 @@ func TestHandleExecutionRemoteArtifactsMergesRemoteProjectMemory(t *testing.T) {
 		RemoteArtifacts:     true,
 		RemoteMemoryArchive: memoryArchive,
 		ToolUseSummary:      map[string]int{"Bash": 1},
-	}}, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	}}, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+
 	svc.SetProjectMemoryManager(projectmemory.NewProjectMemoryManager(store, config.MemoryConfig{
 		Enabled:         true,
 		OSSPrefix:       "claude-memory/projects",

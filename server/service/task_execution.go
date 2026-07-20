@@ -180,12 +180,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 			if err := s.repo.Tasks().SetCompletedAt(persistCtx, taskID); err != nil {
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on cancelled task")
 			}
-			// Re-read the task so refundTaskByMode sees the final status
-			// (goal-mode tasks skip refund; normal tasks full-refund).
-			if t, err := s.repo.Tasks().FindByID(persistCtx, taskID); err == nil {
-				s.refundTaskByMode(persistCtx, t, "取消")
-			} else {
-				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to reload task for refund")
+			if err := s.repo.Tasks().UpdateBillingTerminalReason(persistCtx, taskID, model.TaskBillingTerminalUserCancelled); err != nil {
+				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to record cancellation billing reason")
 			}
 			// Notify the task owner's WeChat of the cancellation (best-effort).
 			s.notifyTerminal(persistCtx, task, model.TaskStatusCancelled, errMsg)
@@ -654,27 +650,18 @@ func isPermanentAuthError(err error) bool {
 func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Task, execErr error) error {
 	taskID := task.ID
 
-	reason := "execution_failed"
-	if isPermanentAuthError(execErr) {
-		reason = "auth_error"
-	}
-
 	s.logger.Error().
 		Err(execErr).
 		Str("task_id", taskID).
 		Msg("task failed; waiting for manual resume or clone")
-	if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
-	}
-	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
+	if _, err := s.failRunningTaskWithBilling(ctx, taskID, model.TaskBillingTerminalProviderError, execErr.Error()); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to finalize task and billing outcome")
 	}
 
 	if task.ProjectID != "" && s.pubsub != nil {
 		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 	}
 
-	s.refundTaskByMode(ctx, task, reason)
 	s.notifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
 
 	if task.ProjectID != "" {

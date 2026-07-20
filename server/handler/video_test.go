@@ -12,23 +12,21 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
-func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T) {
+func TestVideoCreatorEstimateReturnsConfiguredAllowedModels(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          "video-estimate@example.com",
-		Password:       "hashed",
-		InviteCode:     "videoestimate",
-		CreditsBalance: 120_000,
+		ID:         userID,
+		Email:      "video-estimate@example.com",
+		Password:   "hashed",
+		InviteCode: "videoestimate",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -61,8 +59,7 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	creditSvc := service.NewCreditService(repo, nil, &logger)
-	h := NewVideoHandler(repo, creditSvc, service.VideoModelCatalog{
+	h := NewVideoHandler(repo, service.VideoModelCatalog{
 		"configured-video": {
 			Key:                  "configured-video",
 			DisplayName:          "Configured Video",
@@ -72,13 +69,8 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 			MinDuration:          1,
 			MaxDuration:          15,
 			SupportsVideoInput:   true,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
-			VideoInput5sMinPrice: map[string]float64{"720p": 5},
-			VideoInput5sMaxPrice: map[string]float64{"720p": 10},
 		},
-	}, 1000, &logger)
+	}, &logger)
 
 	app := fiber.New()
 	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
@@ -146,15 +138,9 @@ func TestVideoCreatorEstimateDoesNotExposeDynamicRetailPricing(t *testing.T) {
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	multiplier := 0.5
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:                userID,
-		Email:             "video-estimate-billing@example.com",
-		Password:          "hashed",
-		InviteCode:        "videoestimatebilling",
-		Tier:              model.TierFree,
-		CreditsBalance:    120_000,
-		BillingMultiplier: &multiplier,
+		ID: userID, Email: "video-estimate-billing@example.com", Password: "hashed",
+		InviteCode: "videoestimatebilling", Tier: model.TierFree,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -187,8 +173,7 @@ func TestVideoCreatorEstimateDoesNotExposeDynamicRetailPricing(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	creditSvc := service.NewCreditService(repo, nil, &logger)
-	h := NewVideoHandler(repo, creditSvc, service.VideoModelCatalog{
+	h := NewVideoHandler(repo, service.VideoModelCatalog{
 		"configured-video": {
 			Key:                  "configured-video",
 			DisplayName:          "Configured Video",
@@ -197,17 +182,8 @@ func TestVideoCreatorEstimateDoesNotExposeDynamicRetailPricing(t *testing.T) {
 			SupportedRatios:      []string{"9:16"},
 			MinDuration:          1,
 			MaxDuration:          15,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
 		},
-	}, 1000, &logger)
-	h.SetBillingConfig(srvconfig.BillingConfig{
-		CreditsPerCNY:         1600,
-		TierMultipliers:       map[string]float64{"free": 1.35},
-		DefaultUserMultiplier: 1,
-		MinimumChargeCredits:  1,
-	})
+	}, &logger)
 
 	app := fiber.New()
 	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
@@ -241,11 +217,10 @@ func TestVideoCreatorEstimateAllowsEmptyPromptForConfigurationPreview(t *testing
 	ctx := context.Background()
 	userID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          "video-empty-estimate@example.com",
-		Password:       "hashed",
-		InviteCode:     "videoemptyestimate",
-		CreditsBalance: 120_000,
+		ID:         userID,
+		Email:      "video-empty-estimate@example.com",
+		Password:   "hashed",
+		InviteCode: "videoemptyestimate",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -276,7 +251,7 @@ func TestVideoCreatorEstimateAllowsEmptyPromptForConfigurationPreview(t *testing
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(repo, service.NewCreditService(repo, nil, &logger), service.VideoModelCatalog{
+	h := NewVideoHandler(repo, service.VideoModelCatalog{
 		"configured-video": {
 			Key:                  "configured-video",
 			DisplayName:          "Configured Video",
@@ -285,11 +260,8 @@ func TestVideoCreatorEstimateAllowsEmptyPromptForConfigurationPreview(t *testing
 			SupportedRatios:      []string{"9:16"},
 			MinDuration:          1,
 			MaxDuration:          15,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
 		},
-	}, 1000, &logger)
+	}, &logger)
 
 	app := fiber.New()
 	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
@@ -310,7 +282,7 @@ func TestVideoCreatorEstimateAllowsEmptyPromptForConfigurationPreview(t *testing
 
 func TestVideoCreatorPlaybooksReturnsSeedanceBusinessScenarios(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(nil, nil, nil, 1000, &logger)
+	h := NewVideoHandler(nil, nil, &logger)
 
 	app := fiber.New()
 	app.Get("/videocreator/playbooks", func(c fiber.Ctx) error {
@@ -377,11 +349,10 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          "video-production-estimate@example.com",
-		Password:       "hashed",
-		InviteCode:     "videoproductionestimate",
-		CreditsBalance: 120_000,
+		ID:         userID,
+		Email:      "video-production-estimate@example.com",
+		Password:   "hashed",
+		InviteCode: "videoproductionestimate",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -412,7 +383,7 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(repo, service.NewCreditService(repo, nil, &logger), service.VideoModelCatalog{
+	h := NewVideoHandler(repo, service.VideoModelCatalog{
 		"configured-video": {
 			Key:                  "configured-video",
 			DisplayName:          "Configured Video",
@@ -422,13 +393,8 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 			MinDuration:          1,
 			MaxDuration:          15,
 			SupportsVideoInput:   true,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
-			VideoInput5sMinPrice: map[string]float64{"720p": 5},
-			VideoInput5sMaxPrice: map[string]float64{"720p": 10},
 		},
-	}, 1000, &logger)
+	}, &logger)
 
 	app := fiber.New()
 	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
@@ -491,13 +457,13 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 
 func TestVideoCreatorModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(nil, nil, service.VideoModelCatalog{
+	h := NewVideoHandler(nil, service.VideoModelCatalog{
 		"configured-video": {
 			Key:         "configured-video",
 			DisplayName: "Configured Video",
 			ModelID:     "provider-configured-video",
 		},
-	}, 1000, &logger)
+	}, &logger)
 
 	app := fiber.New()
 	app.Get("/videocreator/models", func(c fiber.Ctx) error {
@@ -529,7 +495,7 @@ func TestVideoCreatorModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
 
 func TestVideoCreatorModelsReturnsEmptyWhenCatalogUnconfigured(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(nil, nil, nil, 1000, &logger)
+	h := NewVideoHandler(nil, nil, &logger)
 
 	app := fiber.New()
 	app.Get("/videocreator/models", func(c fiber.Ctx) error {

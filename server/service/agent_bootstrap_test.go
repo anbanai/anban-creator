@@ -311,7 +311,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 	if _, err := svc.Bootstrap(ctx, &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-2", PodUID: "pod-uid-2", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID}); err == nil {
 		t.Fatal("different Pod stole running execution")
 	}
-	taskSvc := NewTaskService(repo, nil, nil, nil, nil, nil, "", nil, "", nil, nil)
+	taskSvc := NewTaskService(repo, nil, nil, nil, nil, "", nil, "", nil, nil)
 	if err := taskSvc.ValidateAgentExecutionAccess(ctx, userID, projectID, taskID, executionID); err != nil {
 		t.Fatalf("current execution rejected: %v", err)
 	}

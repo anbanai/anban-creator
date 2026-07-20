@@ -168,7 +168,8 @@ All routes are registered in `server/router/router.go`. Everything under `/api/v
 - `/api/v1/tasks` — Task CRUD + cancel/retry, bulk-cancel/retry/delete, stream (SSE), preview, files/zip/download, publish-approve/publish-reject (approval gate), seednote-analytics
 - `/api/v1/ilink/*` — ilink 微信助手 binding + commands + task terminal notifications
 - `/api/v1/timeline`, `/api/v1/usage/stats` — Timeline view, usage stats
-- `/api/v1/credits` — Balance, sign-in, transactions, pricing
+- `/api/v1/billing/*` — Wallet, immutable SKU catalog, quotes, transactions, and referral status
+- `/api/admin/billing/*` — Manual API top-ups and internal cost/margin/reconciliation reports
 - `/api/v1/api-keys`, `/api/v1/feedback` — API key management, feedback
 - `/api/v1/files/*` — Local file serving (local storage mode) / OSS redirect
 - `/mcp` — MCP endpoint (API key or JWT auth, configured in plugin `.mcp.json` files)

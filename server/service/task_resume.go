@@ -102,10 +102,8 @@ func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params 
 		}
 		recoveryCtx, cancel := context.WithTimeout(context.Background(), recoveryTimeout)
 		defer cancel()
-		if swapped, updateErr := s.repo.Tasks().FailPendingTask(recoveryCtx, task.ID, errMsg); updateErr != nil {
+		if updateErr := s.failPendingAdmittedTask(recoveryCtx, task, model.TaskBillingTerminalPlatformError, errMsg); updateErr != nil {
 			s.logger.Error().Err(updateErr).Str("task_id", task.ID).Msg("failed to recover unqueued resumed task")
-		} else if !swapped {
-			s.logger.Warn().Str("task_id", task.ID).Msg("unqueued resumed task was no longer pending during recovery")
 		}
 		if task.ProjectID != "" && s.pubsub != nil {
 			s.pubsub.ReleaseSlot(recoveryCtx, task.ProjectID)

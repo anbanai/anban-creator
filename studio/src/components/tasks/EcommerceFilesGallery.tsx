@@ -33,13 +33,9 @@ function moduleKeyOf(name: string): string | null {
 export function EcommerceFilesGallery({
   files,
   taskId,
-  accessLocked = false,
-  lockedMessage = '交付已锁定，充值后可恢复下载、预览和发布。',
 }: {
   files: TaskFile[]
   taskId: string
-  accessLocked?: boolean
-  lockedMessage?: string
 }) {
   const images = files.filter((f) => f.mime_type?.startsWith('image/'))
   const nonImages = files.filter((f) => !f.mime_type?.startsWith('image/'))
@@ -48,7 +44,6 @@ export function EcommerceFilesGallery({
   // 整包下载：复用通用 zip 端点（与 TaskDetailPage 一致）。叶子组件不引 toast，
   // 失败静默（画廊本身是 best-effort 视图）。
   const handleDownloadAll = async () => {
-    if (accessLocked) return
     setDownloading(true)
     try {
       const blob = await api.tasks.downloadZipBlob(taskId)
@@ -86,7 +81,7 @@ export function EcommerceFilesGallery({
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button variant="outline" size="sm" onClick={handleDownloadAll} loading={downloading} disabled={files.length === 0 || accessLocked}>
+        <Button variant="outline" size="sm" onClick={handleDownloadAll} loading={downloading} disabled={files.length === 0}>
           <Download className="h-3.5 w-3.5" />
           整包下载
         </Button>
@@ -103,8 +98,6 @@ export function EcommerceFilesGallery({
               files={grp.files}
               taskId={taskId}
               inlineItemClassName="shrink-0 snap-start"
-              accessLocked={accessLocked}
-              lockedMessage={lockedMessage}
             />
           </div>
         </div>
@@ -124,8 +117,6 @@ export function EcommerceFilesGallery({
             <FilePreviewGallery
               files={nonImages}
               taskId={taskId}
-              accessLocked={accessLocked}
-              lockedMessage={lockedMessage}
             />
           </div>
         </div>

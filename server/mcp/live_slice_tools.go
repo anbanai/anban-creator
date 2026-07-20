@@ -6,7 +6,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -411,16 +410,10 @@ func recognizeLiveSubjectsHandler(ctx context.Context, req *mcp.CallToolRequest)
 	if svcs == nil || svcs.LiveSliceSvc == nil {
 		return errorResult("live slice service not available"), nil
 	}
-	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-	taskID, _ := args["task_id"].(string)
 	sentences, err := parseLiveSentences(args)
 	if err != nil {
 		return errorResult(err.Error()), nil
-	}
-	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeTopicResearch, provider, mdl, 1, taskID); err != nil {
-		return billingError("recognize live subjects", err), nil
 	}
 	subjects, err := svcs.LiveSliceSvc.RecognizeLiveSubjects(ctx, sentences)
 	if err != nil {
@@ -433,16 +426,10 @@ func recognizeLiveInvalidSentencesHandler(ctx context.Context, req *mcp.CallTool
 	if svcs == nil || svcs.LiveSliceSvc == nil {
 		return errorResult("live slice service not available"), nil
 	}
-	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-	taskID, _ := args["task_id"].(string)
 	sentences, err := parseLiveSentences(args)
 	if err != nil {
 		return errorResult(err.Error()), nil
-	}
-	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeTopicResearch, provider, mdl, 1, taskID); err != nil {
-		return billingError("recognize live invalid sentences", err), nil
 	}
 	invalid, err := svcs.LiveSliceSvc.RecognizeLiveInvalidSentences(ctx, sentences)
 	if err != nil {
@@ -455,18 +442,12 @@ func recognizeLiveSegmentsHandler(ctx context.Context, req *mcp.CallToolRequest)
 	if svcs == nil || svcs.LiveSliceSvc == nil {
 		return errorResult("live slice service not available"), nil
 	}
-	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-	taskID, _ := args["task_id"].(string)
 	sentences, err := parseLiveSentences(args)
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
 	ask, _ := args["ask"].(string)
-	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeTopicResearch, provider, mdl, 1, taskID); err != nil {
-		return billingError("recognize live segments", err), nil
-	}
 	segments, err := svcs.LiveSliceSvc.RecognizeLiveSegments(ctx, sentences, ask)
 	if err != nil {
 		return billingError("recognize live segments", err), nil
@@ -478,9 +459,7 @@ func completeLiveSubjectHandler(ctx context.Context, req *mcp.CallToolRequest) (
 	if svcs == nil || svcs.LiveSliceSvc == nil {
 		return errorResult("live slice service not available"), nil
 	}
-	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-	taskID, _ := args["task_id"].(string)
 	sentences, err := parseLiveSentences(args)
 	if err != nil {
 		return errorResult(err.Error()), nil
@@ -488,10 +467,6 @@ func completeLiveSubjectHandler(ctx context.Context, req *mcp.CallToolRequest) (
 	ask, _ := args["ask"].(string)
 	subject, _ := args["subject"].(string)
 	thoughts, _ := args["thoughts"].(string)
-	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeTopicResearch, provider, mdl, 1, taskID); err != nil {
-		return billingError("complete live subject", err), nil
-	}
 	completion, err := svcs.LiveSliceSvc.CompleteLiveSubject(ctx, sentences, ask, subject, thoughts)
 	if err != nil {
 		return billingError("complete live subject", err), nil

@@ -282,7 +282,7 @@ func setupMCPVideoProject(t *testing.T) (context.Context, repository.Repository,
 	projectSvc := service.NewProjectService(repo, &logger)
 	projectSvc.SetVideoCatalog(service.DefaultVideoModelCatalog())
 	svcs = &Services{ProjectSvc: projectSvc}
-	SetBillingServices(nil, nil, &config.Config{VideoAPI: config.VideoAPIConfig{
+	SetBillingServices(nil, &config.Config{VideoAPI: config.VideoAPIConfig{
 		ModelCatalog: defaultMCPVideoModelCatalogEntries(),
 	}})
 	ctx := context.Background()
@@ -300,8 +300,8 @@ func setupMCPVideoProjectWithServices(t *testing.T, store storage.Provider) (con
 	t.Helper()
 	ctx, repo, userID, projectID := setupMCPVideoProject(t)
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
-	taskSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
+	taskSvc.SetVideoCatalog(service.DefaultVideoModelCatalog())
 	svcs.TaskSvc = taskSvc
 	svcs.Store = store
 	return ctx, repo, userID, projectID
@@ -710,12 +710,11 @@ func TestAnalyzeVideoReferenceReportsUsageWithoutChargingWallet(t *testing.T) {
 	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
 	userID := uuid.NewString()
 	if err := repo.Users().Create(context.Background(), &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		Tier:           model.TierFree,
-		InviteCode:     strings.ToUpper(userID[:8]),
-		CreditsBalance: 10_000,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		Tier:       model.TierFree,
+		InviteCode: strings.ToUpper(userID[:8]),
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -734,31 +733,12 @@ func TestAnalyzeVideoReferenceReportsUsageWithoutChargingWallet(t *testing.T) {
 	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
 	writingSvc.SetVideoUnderstandingClient(vision)
 	svcs.WritingSvc = writingSvc
-	creditSvc := service.NewCreditService(repo, &config.CreditsConfig{}, &logger)
-	SetBillingServices(creditSvc, nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoUnderstanding: config.VideoUnderstandingRuntimeConfig{
 			UnderstandingRuntimeConfig: config.UnderstandingRuntimeConfig{
 				ProviderKey: "moonshot",
 				Model:       "kimi-k2.7-code-highspeed",
 			},
-		},
-		ModelPrices: config.ModelPricesConfig{
-			CurrencyRates: map[string]config.CurrencyRate{"USD": {ToCNY: 7.2}},
-			TokenModels: map[string]config.TokenModelPrice{
-				"moonshot/kimi-k2.7-code-highspeed": {
-					Currency:    "USD",
-					Unit:        1_000_000,
-					CachedInput: 0.38,
-					Input:       1.90,
-					Output:      8.00,
-				},
-			},
-		},
-		Billing: config.BillingConfig{
-			CreditsPerCNY:         1000,
-			TierMultipliers:       map[string]float64{"free": 1.30},
-			DefaultUserMultiplier: 1.0,
-			MinimumChargeCredits:  1,
 		},
 	})
 
@@ -777,12 +757,8 @@ func TestAnalyzeVideoReferenceReportsUsageWithoutChargingWallet(t *testing.T) {
 	if strings.Contains(text, `"credits_charged"`) || !strings.Contains(text, `"total_tokens":11000`) {
 		t.Fatalf("response leaked retail usage billing or omitted provider usage: %s", text)
 	}
-	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
-	if err != nil {
-		t.Fatalf("find task transactions: %v", err)
-	}
-	if len(txs) != 0 {
-		t.Fatalf("understanding provider usage mutated user wallet: %#v", txs)
+	if _, err := repo.Billing().FindAccount(ctx, userID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("video understanding created user wallet: %v", err)
 	}
 }
 
@@ -793,20 +769,18 @@ func TestAnalyzeVideoReferencePreflightsForeignTaskBeforeCallingVision(t *testin
 	otherUserID := uuid.NewString()
 	for _, user := range []*model.User{
 		{
-			ID:             userID,
-			Email:          userID + "@example.com",
-			Password:       "hashed",
-			Tier:           model.TierFree,
-			InviteCode:     strings.ToUpper(userID[:8]),
-			CreditsBalance: 10_000,
+			ID:         userID,
+			Email:      userID + "@example.com",
+			Password:   "hashed",
+			Tier:       model.TierFree,
+			InviteCode: strings.ToUpper(userID[:8]),
 		},
 		{
-			ID:             otherUserID,
-			Email:          otherUserID + "@example.com",
-			Password:       "hashed",
-			Tier:           model.TierFree,
-			InviteCode:     strings.ToUpper(otherUserID[:8]),
-			CreditsBalance: 10_000,
+			ID:         otherUserID,
+			Email:      otherUserID + "@example.com",
+			Password:   "hashed",
+			Tier:       model.TierFree,
+			InviteCode: strings.ToUpper(otherUserID[:8]),
 		},
 	} {
 		if err := repo.Users().Create(ctx, user); err != nil {
@@ -827,28 +801,12 @@ func TestAnalyzeVideoReferencePreflightsForeignTaskBeforeCallingVision(t *testin
 	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
 	writingSvc.SetVideoUnderstandingClient(vision)
 	svcs.WritingSvc = writingSvc
-	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoUnderstanding: config.VideoUnderstandingRuntimeConfig{
 			UnderstandingRuntimeConfig: config.UnderstandingRuntimeConfig{
 				ProviderKey: "moonshot",
 				Model:       "kimi-k2.7-code-highspeed",
 			},
-		},
-		ModelPrices: config.ModelPricesConfig{
-			TokenModels: map[string]config.TokenModelPrice{
-				"moonshot/kimi-k2.7-code-highspeed": {
-					Currency: "CNY",
-					Unit:     1_000,
-					Input:    config.FlexibleFloat(1),
-					Output:   config.FlexibleFloat(1),
-				},
-			},
-		},
-		Billing: config.BillingConfig{
-			CreditsPerCNY:         1000,
-			TierMultipliers:       map[string]float64{"free": 1},
-			DefaultUserMultiplier: 1.0,
-			MinimumChargeCredits:  1,
 		},
 	})
 
@@ -1190,7 +1148,7 @@ func TestGetProjectVideoProfileFiltersUnconfiguredPolicyModels(t *testing.T) {
 	if err := repo.Projects().Update(ctx, project); err != nil {
 		t.Fatalf("update project: %v", err)
 	}
-	SetBillingServices(nil, nil, &config.Config{VideoAPI: config.VideoAPIConfig{ModelCatalog: []config.VideoModelCatalogEntry{{
+	SetBillingServices(nil, &config.Config{VideoAPI: config.VideoAPIConfig{ModelCatalog: []config.VideoModelCatalogEntry{{
 		Key:                  "seedance-2.0",
 		DisplayName:          "Configured Seedance",
 		ModelID:              "doubao-seedance-2-0-260128",
@@ -2027,11 +1985,10 @@ func TestCreateVideoGenerationJobPinsSegmentRetailSKUBeforeProviderDispatch(t *t
 	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
 	userID := uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		InviteCode:     strings.ToUpper(userID[:8]),
-		CreditsBalance: 100_000,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: strings.ToUpper(userID[:8]),
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -2044,8 +2001,7 @@ func TestCreateVideoGenerationJobPinsSegmentRetailSKUBeforeProviderDispatch(t *t
 		t.Fatalf("update project owner: %v", err)
 	}
 	ctx = withMCPUserID(ctx, userID)
-	logger := zerolog.New(io.Discard)
-	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoAPI: config.VideoAPIConfig{ModelCatalog: defaultMCPVideoModelCatalogEntries()},
 		ModelRoutes: config.ModelRoutesConfig{
 			VideoGeneration: config.VideoGenerationRouteConfig{Provider: "volcengine_ark"},
@@ -2087,9 +2043,6 @@ func TestCreateVideoGenerationJobPinsSegmentRetailSKUBeforeProviderDispatch(t *t
 	if gen.TaskID != taskID || gen.ProjectID != projectID || gen.Status != "submitted" {
 		t.Fatalf("generation linkage/status = %#v", gen)
 	}
-	if breakdown := gen.PricingBreakdown.Data(); gen.CreditsCharged != 0 || breakdown.CNY != 0 || len(breakdown.Segments) != 0 {
-		t.Fatalf("generation retained legacy dynamic pricing: %#v", gen)
-	}
 	resolved := gen.ResolvedParams.Data()
 	if resolved.ModelKey != "seedance-2.0-mini" || resolved.Model != modelIDForVideoKey(t, "seedance-2.0-mini") {
 		t.Fatalf("generation model = %s/%s, want task-bound seedance-2.0-mini/%s", resolved.ModelKey, resolved.Model, modelIDForVideoKey(t, "seedance-2.0-mini"))
@@ -2101,7 +2054,7 @@ func TestCreateVideoGenerationJobPinsSegmentRetailSKUBeforeProviderDispatch(t *t
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if task.VideoGenerationID != gen.ID || task.VideoEstimatedCredits != 0 || task.VideoCreditsCharged != 0 {
+	if task.VideoGenerationID != gen.ID {
 		t.Fatalf("task video snapshot not linked: %#v generation=%#v", task, gen)
 	}
 	segments, err := repo.VideoGenerations().ListSegments(ctx, gen.ID)
@@ -2112,12 +2065,12 @@ func TestCreateVideoGenerationJobPinsSegmentRetailSKUBeforeProviderDispatch(t *t
 	if pinned.CatalogID != "retail-2026-07-20-v2" || pinned.SKUID != "video.seedance-2-0-mini.720p.1-5.no-input.v1" || pinned.PriceCredits != 4000 || pinned.InputMode != "no_input" {
 		t.Fatalf("pinned segment retail SKU = %+v", pinned)
 	}
-	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	entries, err := repo.Billing().ListEntriesByUser(ctx, userID, 0, 10)
 	if err != nil {
-		t.Fatalf("find task transactions: %v", err)
+		t.Fatalf("list wallet entries: %v", err)
 	}
-	if len(txs) != 0 {
-		t.Fatalf("provider submission charged before durable output: %+v", txs)
+	if len(entries) != 0 {
+		t.Fatalf("provider submission charged before durable output: %+v", entries)
 	}
 }
 
@@ -2129,11 +2082,10 @@ func TestCreateVideoGenerationJobPinsSegmentsButDoesNotChargeAfterPartialProvide
 	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, nil)
 	userID := uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		InviteCode:     strings.ToUpper(userID[:8]),
-		CreditsBalance: 100_000,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: strings.ToUpper(userID[:8]),
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -2161,8 +2113,7 @@ func TestCreateVideoGenerationJobPinsSegmentsButDoesNotChargeAfterPartialProvide
 		t.Fatalf("update project: %v", err)
 	}
 	ctx = withMCPUserID(ctx, userID)
-	logger := zerolog.New(io.Discard)
-	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoAPI: config.VideoAPIConfig{ModelCatalog: defaultMCPVideoModelCatalogEntries()},
 		ModelRoutes: config.ModelRoutesConfig{
 			VideoGeneration: config.VideoGenerationRouteConfig{Provider: "volcengine_ark"},
@@ -2210,12 +2161,12 @@ func TestCreateVideoGenerationJobPinsSegmentsButDoesNotChargeAfterPartialProvide
 	if postCount < 2 {
 		t.Fatalf("provider POST calls = %d, want first success then later failure", postCount)
 	}
-	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	entries, err := repo.Billing().ListEntriesByUser(ctx, userID, 0, 10)
 	if err != nil {
-		t.Fatalf("find task transactions: %v", err)
+		t.Fatalf("list wallet entries: %v", err)
 	}
-	if len(txs) != 0 {
-		t.Fatalf("provider submission created legacy credit transactions: %+v", txs)
+	if len(entries) != 0 {
+		t.Fatalf("provider submission created wallet entries: %+v", entries)
 	}
 	gen, err := repo.VideoGenerations().FindLatestByTaskID(ctx, taskID)
 	if err != nil {
@@ -2235,11 +2186,10 @@ func TestCreateVideoGenerationJobPinsFailedFirstSegmentWithoutChargeOrRefund(t *
 	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, nil)
 	userID := uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		InviteCode:     strings.ToUpper(userID[:8]),
-		CreditsBalance: 100_000,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: strings.ToUpper(userID[:8]),
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -2267,8 +2217,7 @@ func TestCreateVideoGenerationJobPinsFailedFirstSegmentWithoutChargeOrRefund(t *
 		t.Fatalf("update project: %v", err)
 	}
 	ctx = withMCPUserID(ctx, userID)
-	logger := zerolog.New(io.Discard)
-	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoAPI: config.VideoAPIConfig{ModelCatalog: defaultMCPVideoModelCatalogEntries()},
 		ModelRoutes: config.ModelRoutesConfig{
 			VideoGeneration: config.VideoGenerationRouteConfig{Provider: "volcengine_ark"},
@@ -2307,33 +2256,23 @@ func TestCreateVideoGenerationJobPinsFailedFirstSegmentWithoutChargeOrRefund(t *
 	if !result.IsError {
 		t.Fatal("expected provider error before first submission")
 	}
-	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	entries, err := repo.Billing().ListEntriesByUser(ctx, userID, 0, 10)
 	if err != nil {
-		t.Fatalf("find task transactions: %v", err)
+		t.Fatalf("list wallet entries: %v", err)
 	}
-	if len(txs) != 0 {
-		t.Fatalf("provider rejection created legacy charge/refund transactions: %+v", txs)
-	}
-	user, err := repo.Users().FindByID(ctx, userID)
-	if err != nil {
-		t.Fatalf("find user: %v", err)
-	}
-	if user.CreditsBalance != 100_000 {
-		t.Fatalf("balance = %d, want refunded original 100000", user.CreditsBalance)
+	if len(entries) != 0 {
+		t.Fatalf("provider rejection created wallet entries: %+v", entries)
 	}
 	task, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if task.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits charged = %d, want cleared after refunded submission failure", task.VideoCreditsCharged)
-	}
 	gen, err := repo.VideoGenerations().FindByID(ctx, task.VideoGenerationID)
 	if err != nil {
 		t.Fatalf("find generation: %v", err)
 	}
-	if gen.CreditsCharged != 0 || gen.Status != "failed" {
-		t.Fatalf("generation charge/status = %d/%s, want cleared failed generation", gen.CreditsCharged, gen.Status)
+	if gen.Status != "failed" {
+		t.Fatalf("generation status = %s, want failed", gen.Status)
 	}
 	segments, err := repo.VideoGenerations().ListSegments(ctx, gen.ID)
 	if err != nil || len(segments) != 1 || segments[0].Status != "failed" || segments[0].RetailSKU.Data().SKUID == "" {

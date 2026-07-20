@@ -44,61 +44,38 @@ type ImageGenerator interface {
 	) (*service.ImageResult, error)
 }
 
-type ImageGenerationBillingDecision struct {
-	Provider        string
-	Model           string
-	Source          string
-	Dynamic         bool
-	DynamicProvider string
-	DynamicModel    string
-	DynamicRoute    string
-}
-
-// ImageGenerationBiller performs static pre-generation charging or records the
-// dynamic route that must be charged from the provider's returned usage.
-type ImageGenerationBiller interface {
-	PrepareImageGeneration(
-		ctx context.Context,
-		userID, taskID, imageType string,
-		resolved *service.ResolvedImageModel,
-	) (ImageGenerationBillingDecision, error)
-}
-
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ProjectSvc            *service.ProjectService
-	Store                 storage.Provider
-	TaskSvc               *service.TaskService
-	CreditSvc             *service.CreditService
-	PlanSvc               *service.PlanService
-	ImageSvc              *service.ImageService
-	ImageModelResolver    ImageModelResolver
-	ImageGenerator        ImageGenerator
-	ImageGenerationBiller ImageGenerationBiller
-	ProviderCostSvc       *service.ProviderCostService
-	BillingCatalogSvc     *service.BillingCatalogService
-	GenerateImageTimeout  time.Duration
-	VideoSvc              *service.VideoService
-	AudioASRSvc           *service.AudioASRService
-	VideoASRSvc           *service.VideoASRService
-	WritingSvc            *service.WritingService
-	PublishingSvc         *service.PublishingService
-	WorkspaceSvc          *service.WorkspaceService
-	TemplateSvc           *service.TemplateService
-	LiveSliceSvc          *service.LiveSliceService
-	SeednoteClient        *seednote.Client
-	SeednoteReadiness     service.Readiness
-	TopicPoolSvc          *service.TopicPoolService
-	AgentFeedbackSvc      *service.AgentFeedbackService
-	TingWuConfigured      bool
-	FunASRConfigured      bool
+	ProjectSvc           *service.ProjectService
+	Store                storage.Provider
+	TaskSvc              *service.TaskService
+	PlanSvc              *service.PlanService
+	ImageSvc             *service.ImageService
+	ImageModelResolver   ImageModelResolver
+	ImageGenerator       ImageGenerator
+	ProviderCostSvc      *service.ProviderCostService
+	BillingCatalogSvc    *service.BillingCatalogService
+	GenerateImageTimeout time.Duration
+	VideoSvc             *service.VideoService
+	AudioASRSvc          *service.AudioASRService
+	VideoASRSvc          *service.VideoASRService
+	WritingSvc           *service.WritingService
+	PublishingSvc        *service.PublishingService
+	WorkspaceSvc         *service.WorkspaceService
+	TemplateSvc          *service.TemplateService
+	LiveSliceSvc         *service.LiveSliceService
+	SeednoteClient       *seednote.Client
+	SeednoteReadiness    service.Readiness
+	TopicPoolSvc         *service.TopicPoolService
+	AgentFeedbackSvc     *service.AgentFeedbackService
+	TingWuConfigured     bool
+	FunASRConfigured     bool
 }
 
 // RegisterTools registers all MCP tools on the server.
 func RegisterTools(server *mcp.Server) {
 	registerProjectTools(server)
 	registerTaskTools(server)
-	registerCreditTools(server)
 	registerPlanTools(server)
 	registerImageTools(server)
 	registerVideoTools(server)
@@ -269,17 +246,6 @@ func registerTaskTools(server *mcp.Server) {
 			"required": []any{"task_id"},
 		},
 	}, taskFilesHandler)
-}
-
-func registerCreditTools(server *mcp.Server) {
-	server.AddTool(&mcp.Tool{
-		Name:        "get_credit_balance",
-		Description: "Get the authenticated user's current credit balance.",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, creditsGetHandler)
 }
 
 func registerPlanTools(server *mcp.Server) {
@@ -896,15 +862,6 @@ func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult(fmt.Sprintf("get task files: %v", err)), nil
 	}
 	return textResult(map[string]any{"files": files, "count": len(files)})
-}
-
-func creditsGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	userID := getUserID(ctx)
-	balance, err := svcs.CreditSvc.GetBalance(context.Background(), userID)
-	if err != nil {
-		return errorResult(fmt.Sprintf("get credits: %v", err)), nil
-	}
-	return textResult(map[string]any{"balance": balance})
 }
 
 func planListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

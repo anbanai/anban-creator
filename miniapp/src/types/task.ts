@@ -2,7 +2,7 @@ export type TaskType = 'seednote' | 'article' | 'ecommerce'
 
 // E-commerce package config carried on a task (mirrors server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection
-// affects later MCP image/vision usage; creation billing uses task_costs.ecommerce.
+// affects later MCP image/vision operations; task admission uses one fixed SKU.
 export interface EcommerceTaskConfig {
   selected_modules?: Record<string, number>
   product_photos?: string[]
@@ -52,10 +52,10 @@ export interface Task {
   persona_avatar?: string
   // E-commerce package config (only present for platform=ecommerce tasks)
   ecommerce?: EcommerceTaskConfig
-  // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）
-  total_cost_usd?: number | null
-  billing_status?: 'settled' | 'payment_required' | string
-  billing_shortfall_credits?: number
+  billing_catalog_id?: string
+  billing_sku_id?: string
+  billing_charge_id?: string | null
+  billing_price_credits?: number
   created_at: string
   started_at: string | null
   completed_at: string | null

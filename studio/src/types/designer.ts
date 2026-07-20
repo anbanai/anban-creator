@@ -126,14 +126,6 @@ export interface ImageGeneration {
   output_format?: string
   status: 'generating' | 'completed' | 'failed'
   error?: string
-  input_tokens?: number
-  output_tokens?: number
-  text_input_tokens?: number
-  text_cached_input_tokens?: number
-  image_input_tokens?: number
-  image_cached_input_tokens?: number
-  image_output_tokens?: number
-  total_tokens?: number
   estimated_cost?: number
   final_cost?: number
   billing_mode?: string

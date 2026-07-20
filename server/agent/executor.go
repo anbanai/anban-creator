@@ -390,6 +390,7 @@ type ExecutionResult struct {
 	Success         bool   `json:"success"`
 	Error           string `json:"error,omitempty"`
 	ResultSubtype   string `json:"result_subtype,omitempty"`
+	TerminalReason  string `json:"terminal_reason,omitempty"`
 	WorkDir         string `json:"work_dir,omitempty"`
 	RemoteArtifacts bool   `json:"remote_artifacts,omitempty"`
 	LogText         string `json:"log_text,omitempty"`
@@ -399,7 +400,7 @@ type ExecutionResult struct {
 
 	DurationAPIMs   int               `json:"duration_api_ms,omitempty"`
 	ModelUsage      []ModelTokenUsage `json:"model_usage,omitempty"`
-	CostStatus      string            `json:"cost_status"`
+	CostStatus      string            `json:"cost_status,omitempty"`
 	CostDiagnostics []CostDiagnostic  `json:"cost_diagnostics,omitempty"`
 
 	// Post-execution diagnostics.

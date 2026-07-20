@@ -1,10 +1,10 @@
 import { http, HttpResponse } from 'msw'
 import type {
   User,
-  CreditBalance,
-  SignInStatus,
+  BillingCatalog,
+  BillingTransactions,
+  BillingWallet,
   PaginatedResponse,
-  CreditTransaction,
   Plan,
   Task,
   Project,
@@ -21,7 +21,6 @@ export const mockUser: User = {
   phone: '',
   nickname: '测试用户',
   avatar: '',
-  credits_balance: 10000,
   tier: 'pro',
   max_concurrent_limit: 5,
   invite_code: 'AB2C4D6E',
@@ -32,22 +31,32 @@ export const mockUser: User = {
   updated_at: '2025-01-01T00:00:00Z',
 }
 
-export const mockBalance: CreditBalance = { balance: 10000 }
-export const mockSignInStatus: SignInStatus = { signed_in_today: false }
+export const mockBillingWallet: BillingWallet = { paid: 10000, promotional: 0, debt: 0, balance: 10000 }
+export const mockBillingCatalog: BillingCatalog = {
+  catalog_id: 'retail-test-v1',
+  currency: 'credits',
+  skus: [
+    { id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+    { id: 'task.seednote.v1', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+    { id: 'task.moments.v1', operation: 'task.moments', charge_policy: 'task_admission', price_credits: 3000, delivery: 'moments_artifacts_verified' },
+    { id: 'task.viral-analysis.v1', operation: 'task.viral_analysis', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+  ],
+}
 
-export const mockTransactions: PaginatedResponse<CreditTransaction> = {
+export const mockBillingTransactions: BillingTransactions = {
   items: [
     {
-      id: 1,
-      user_id: '1',
-      type: 'sign_in',
-      amount: 100,
-      balance_after: 10100,
-      description: '每日签到',
+      id: 'entry-1',
+      event_kind: 'topup',
+      paid_delta: 10000,
+      promotional_delta: 0,
+      debt_delta: 0,
       created_at: '2025-01-15T08:00:00Z',
     },
   ],
   total: 1,
+  offset: 0,
+  limit: 20,
 }
 
 export const mockPlans: PaginatedResponse<Plan> = {
@@ -82,6 +91,7 @@ export const mockTasks: PaginatedResponse<Task> = {
       result: null,
       published: false,
       published_at: null,
+      billing_price_credits: 6000,
       created_at: '2025-01-15T10:00:00Z',
       started_at: '2025-01-15T10:00:05Z',
       completed_at: '2025-01-15T10:05:00Z',
@@ -214,51 +224,34 @@ export const handlers = [
     return HttpResponse.json({ code: 0, msg: 'ok', data: { msg: '验证码已发送' } })
   }),
 
-  // Credits
-  http.get('/api/v1/credits/balance', async () => {
-    return HttpResponse.json({ code: 0, msg: 'ok', data: mockBalance })
+  // Fixed-SKU billing
+  http.get('/api/v1/billing/wallet', async () => {
+    return HttpResponse.json({ code: 0, msg: 'ok', data: mockBillingWallet })
   }),
 
-  http.get('/api/v1/credits/sign-in/status', async () => {
-    return HttpResponse.json({ code: 0, msg: 'ok', data: mockSignInStatus })
+  http.get('/api/v1/billing/catalog', async () => {
+    return HttpResponse.json({ code: 0, msg: 'ok', data: mockBillingCatalog })
   }),
 
-  http.post('/api/v1/credits/sign-in', async () => {
-    return HttpResponse.json({ code: 0, msg: 'ok', data: { balance: 2048 } })
-  }),
-
-  http.get('/api/v1/credits/transactions', async ({ request }) => {
+  http.get('/api/v1/billing/transactions', async ({ request }) => {
     const url = new URL(request.url)
-    const page = url.searchParams.get('page') || '1'
+    const offset = Number(url.searchParams.get('offset') || '0')
     return HttpResponse.json({
       code: 0,
       msg: 'ok',
-      data: { ...mockTransactions, items: page === '1' ? mockTransactions.items : [] },
+      data: { ...mockBillingTransactions, offset, items: offset === 0 ? mockBillingTransactions.items : [] },
     })
   }),
 
-  http.get('/api/v1/credits/pricing', async () => {
+  http.get('/api/v1/billing/referral', async () => {
     return HttpResponse.json({
       code: 0,
       msg: 'ok',
       data: {
-        task_costs: {
-          article: 4000,
-          seednote: 3600,
-          moments: 3000,
-          viral_analysis: 1200,
-        },
-        model_costs: {},
-        recharge_tiers: [
-          { key: 'basic', label: '基础包', price_cny: 10, credits: 10000, bonus_credits: 0, enabled: true },
-          { key: 'standard', label: '标准包', price_cny: 50, credits: 52000, bonus_credits: 2000, enabled: true },
-          { key: 'pro', label: '进阶包', price_cny: 100, credits: 110000, bonus_credits: 10000, enabled: true },
-        ],
-        income: {
-          daily_sign_in: 100,
-          register_bonus: 1000,
-          invite_reward: 1000,
-        },
+        invite_code: 'AB2C4D6E',
+        invite_link: 'https://example.com/register?invite=AB2C4D6E',
+        status: 'not_issued',
+        program: null,
       },
     })
   }),

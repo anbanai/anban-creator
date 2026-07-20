@@ -23,7 +23,6 @@ func TestAutoMigrateCreatesVideoGenerationSegments(t *testing.T) {
 		Index:             1,
 		Status:            "submitted",
 		Duration:          15,
-		EstimatedCredits:  7440,
 	}
 	if err := db.Create(segment).Error; err != nil {
 		t.Fatalf("create segment: %v", err)

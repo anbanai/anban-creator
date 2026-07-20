@@ -109,7 +109,7 @@ func TestQueryVideoGenerationJobRecordsSegmentCostAndCostFailureIsNonfatal(t *te
 			ark := newArkTaskServer(t)
 			defer ark.Close()
 			svcs = &Services{
-				TaskSvc:         service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil),
+				TaskSvc:         service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil),
 				VideoSvc:        service.NewVideoService(&config.VideoAPIConfig{Key: "test", BaseURL: ark.URL, Timeout: time.Second}),
 				ProviderCostSvc: service.NewProviderCostService(costRepo, bundle),
 			}

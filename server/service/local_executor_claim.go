@@ -233,11 +233,15 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 		if result.Error != "" {
 			errMsg = result.Error
 		}
-		return s.failLocalTask(ctx, task, result, errMsg)
+		reason := result.TerminalReason
+		if !approvedTaskBillingTerminalReason(reason) {
+			reason = model.TaskBillingTerminalProviderError
+		}
+		return s.failLocalTask(ctx, task, result, reason, errMsg)
 	}
 
 	if agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
-		return s.failLocalTask(ctx, task, result, agent.NestedAgentDelegationError)
+		return s.failLocalTask(ctx, task, result, model.TaskBillingTerminalPlatformError, agent.NestedAgentDelegationError)
 	}
 
 	var artifactValidation agent.ArtifactValidation
@@ -267,7 +271,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 			Int("meaningful_files", artifactValidation.MeaningfulFileCount).
 			Strs("missing_files", artifactValidation.Missing).
 			Msg(errMsg)
-		return s.failLocalTask(ctx, task, result, errMsg)
+		return s.failLocalTask(ctx, task, result, model.TaskBillingTerminalPlatformError, errMsg)
 	}
 
 	// Success. Publishing model for local: the desktop agent publishes via the
@@ -297,7 +301,16 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 	if task.CurrentExecutionID == nil {
 		return fmt.Errorf("finalize local task as completed: durable execution identity is required")
 	}
-	swapped, err := s.repo.Tasks().FinalizeLocalTask(ctx, taskID, *task.CurrentExecutionID, model.TaskStatusCompleted, "", resultJSON, result.ModelUsage, result.CostStatus)
+	execution := &model.TaskExecution{ID: *task.CurrentExecutionID, Status: model.TaskExecutionSucceeded}
+	var swapped bool
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		var finalizeErr error
+		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskInTx(ctx, taskID, execution.ID, model.TaskStatusCompleted, "", resultJSON, result.ModelUsage, result.CostStatus)
+		if finalizeErr != nil || !swapped {
+			return finalizeErr
+		}
+		return s.persistTerminalBillingInTx(ctx, tx, task, execution, model.TaskBillingTerminalCompleted, true)
+	})
 	if err != nil {
 		return fmt.Errorf("finalize local task as completed: %w", err)
 	}
@@ -312,9 +325,10 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 	return nil
 }
 
-func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, result *agent.ExecutionResult, errMsg string) error {
+func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, result *agent.ExecutionResult, reason, errMsg string) error {
 	result.Success = false
 	result.Error = errMsg
+	result.TerminalReason = reason
 	resultJSON, err := marshalExecutionEvidence(result)
 	if err != nil {
 		return err
@@ -322,7 +336,20 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, resul
 	if task.CurrentExecutionID == nil {
 		return fmt.Errorf("finalize local task as failed: durable execution identity is required")
 	}
-	swapped, err := s.repo.Tasks().FinalizeLocalTask(ctx, task.ID, *task.CurrentExecutionID, model.TaskStatusFailed, errMsg, resultJSON, result.ModelUsage, result.CostStatus)
+	durableDelivery, err := s.taskHasDurableDelivery(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("inspect durable local task delivery: %w", err)
+	}
+	execution := &model.TaskExecution{ID: *task.CurrentExecutionID, Status: model.TaskExecutionFailed, TerminalReason: reason}
+	var swapped bool
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		var finalizeErr error
+		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskInTx(ctx, task.ID, execution.ID, model.TaskStatusFailed, errMsg, resultJSON, result.ModelUsage, result.CostStatus)
+		if finalizeErr != nil || !swapped {
+			return finalizeErr
+		}
+		return s.persistTerminalBillingInTx(ctx, tx, task, execution, reason, durableDelivery)
+	})
 	if err != nil {
 		return fmt.Errorf("finalize local task as failed: %w", err)
 	}
@@ -330,10 +357,6 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, resul
 		return nil // already terminal (e.g. reaped meanwhile)
 	}
 	s.recordTerminalProviderCost(ctx, task, result)
-	// Re-read so refundTaskByMode sees the final (failed) status.
-	if t, err := s.repo.Tasks().FindByID(ctx, task.ID); err == nil {
-		s.refundTaskByMode(ctx, t, "local_executor_failed")
-	}
 	s.releaseSlotAndDispatch(ctx, task)
 	s.logger.Warn().Str("task_id", task.ID).Str("error", errMsg).Msg("local task failed")
 	return nil

@@ -43,7 +43,6 @@ type Plan struct {
 	VideoInput               datatypes.JSONType[VideoInput]        `gorm:"type:json" json:"video_input"`
 	MontageInput             datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
 	VideoConfig              datatypes.JSONType[VideoTaskConfig]   `gorm:"type:json" json:"video_config"`
-	VideoEstimatedCredits    int                                   `gorm:"default:0" json:"video_estimated_credits,omitempty"`
 
 	// Legacy style/author/theme columns. New code no longer writes or reads these;
 	// task runtime config is frozen from the owning project into Task.ProjectSnapshot.

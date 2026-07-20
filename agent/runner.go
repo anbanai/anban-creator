@@ -51,6 +51,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 
 	sdkOpts, err := r.buildSDKOptions(ctx)
 	if err != nil {
+		result.TerminalReason = model.TaskBillingTerminalPlatformError
 		return result, err
 	}
 
@@ -140,6 +141,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				result.LastToolErrorTool = lastToolErrorTool
 				result.LastToolError = lastToolError
 				if m.IsError {
+					result.TerminalReason = model.TaskBillingTerminalProviderError
 					result.Error = serveragent.ResultMessageError(m, lastToolErrorTool, lastToolError)
 					return errors.New(result.Error)
 				}
@@ -154,6 +156,11 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		}
 	}, sdkOpts...)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			result.TerminalReason = model.TaskBillingTerminalExecutionTimeout
+		} else if result.TerminalReason == "" {
+			result.TerminalReason = model.TaskBillingTerminalProviderError
+		}
 		if result.Error == "" {
 			result.Error = err.Error()
 		}

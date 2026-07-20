@@ -116,7 +116,6 @@ export default function PlansPage() {
   }, [modalOpen, form])
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
-  const watchedGoalMode = useWatch({ control: form.control, name: 'goal_mode' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   const watchedInputAttachments = useWatch({ control: form.control, name: 'input_attachments' })
   const isMontagePlan = watchedType === 'montage'
@@ -167,16 +166,14 @@ export default function PlansPage() {
   }, [allProjects])
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
 
-  // 每次执行（单次触发）的基础服务费。计划是定时单任务生成器，无 quantity；
-  // 仅强目标模式 ×3。缺定价时回落后端默认价格。
-  const { data: pricing } = useQuery({
-    queryKey: ['credits', 'pricing'],
-    queryFn: () => api.credits.pricing(),
+  const { data: billingCatalog } = useQuery({
+    queryKey: ['billing', 'catalog'],
+    queryFn: () => api.billing.catalog(),
     staleTime: 60_000,
   })
-  const { data: creditsBalance } = useQuery({
-    queryKey: ['credits', 'balance'],
-    queryFn: () => api.credits.balance(),
+  const { data: billingWallet } = useQuery({
+    queryKey: ['billing', 'wallet'],
+    queryFn: () => api.billing.wallet(),
     staleTime: 30_000,
   })
 
@@ -829,31 +826,30 @@ export default function PlansPage() {
                 </FormItem>
               )} />}
 
-              {/* 每次执行（每次触发）的基础服务费。计划无 quantity，仅强目标 ×3。
-                  模型、图片、视频等额外 MCP 操作按实际用量结算。 */}
+              {/* Each scheduled run resolves the active immutable task SKU at admission. */}
               {(() => {
-                const cost = taskCostFor(pricing, watchedType as string)
-                const multiplier = !isMontagePlan && watchedGoalMode ? 3 : 1
-                const perRun = cost * multiplier
-                const balance = creditsBalance?.balance ?? 0
-                const remaining = balance - perRun
+                const perRun = taskCostFor(billingCatalog, watchedType as string)
+                const balance = billingWallet?.balance ?? 0
+                const remaining = perRun === undefined ? undefined : balance - perRun
                 return (
                   <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                     <p className="text-muted-foreground">
-                      每次执行基础任务费：{cost}{multiplier > 1 ? ` × ${multiplier}` : ''} ={' '}
-                      <span className="font-medium text-foreground">{perRun.toLocaleString()}</span> 积分
-                      {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
-                    </p>
-                    <p className="text-xs text-muted-foreground">云端 Claude Code 运行成本由平台承担，不额外预留或补扣。</p>
-                    <p className="text-xs text-muted-foreground">模型、图片、视频等 MCP 操作费用按实际用量另计。</p>
-                    <p className="text-muted-foreground">
-                      余额：{balance.toLocaleString()} →{' '}
-                      <span className={`font-medium ${remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
-                        {remaining.toLocaleString()}
+                      当前每次执行固定价：<span className="font-medium text-foreground">
+                        {perRun === undefined ? '暂不可用' : `${perRun.toLocaleString()} 积分`}
                       </span>
                     </p>
-                    {remaining < 0 && (
-                      <p className="text-sm font-medium text-red-500">积分不足，将无法触发执行</p>
+                    <p className="text-xs text-muted-foreground">每次触发时按当时生效的 SKU 计价；Claude Code token 不向用户计费。</p>
+                    <p className="text-xs text-muted-foreground">任务内成功交付的图片、视频等增值操作使用各自固定 SKU。</p>
+                    {remaining !== undefined && (
+                      <p className="text-muted-foreground">
+                        余额：{balance.toLocaleString()} →{' '}
+                        <span className={`font-medium ${remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
+                          {remaining.toLocaleString()}
+                        </span>
+                      </p>
+                    )}
+                    {((billingWallet?.debt ?? 0) > 0 || (remaining !== undefined && remaining < 0)) && (
+                      <p className="text-sm font-medium text-red-500">当前钱包无法准入新一次执行，请先充值。</p>
                     )}
                   </div>
                 )

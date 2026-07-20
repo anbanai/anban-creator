@@ -94,7 +94,7 @@ func mustMarshalTaskJSON(t *testing.T, value any) []byte {
 	return raw
 }
 
-func TestDownloadAndPreviewIgnoreLegacyPaymentRequiredColumns(t *testing.T) {
+func TestDownloadAndPreviewRemainAvailableForCompletedTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -118,22 +118,10 @@ func TestDownloadAndPreviewIgnoreLegacyPaymentRequiredColumns(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:                      taskID,
-		UserID:                  userID,
-		ProjectID:               uuid.New().String(),
-		Type:                    model.PlatformArticle,
-		Status:                  model.TaskStatusCompleted,
-		BillingStatus:           model.TaskBillingStatusPaymentRequired,
-		BillingShortfallCredits: 3200,
+		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
+		Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
-	}
-	locked, err := repo.Tasks().FindByID(ctx, taskID)
-	if err != nil {
-		t.Fatalf("reload task: %v", err)
-	}
-	if locked.BillingStatus != model.TaskBillingStatusPaymentRequired || locked.BillingShortfallCredits != 3200 {
-		t.Fatalf("reloaded billing = %q/%d", locked.BillingStatus, locked.BillingShortfallCredits)
 	}
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
 		ID:              fileID,
@@ -151,7 +139,7 @@ func TestDownloadAndPreviewIgnoreLegacyPaymentRequiredColumns(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files/zip", func(c fiber.Ctx) error {
@@ -184,7 +172,7 @@ func TestDownloadAndPreviewIgnoreLegacyPaymentRequiredColumns(t *testing.T) {
 	}
 }
 
-func TestGetFilesPreservesDeliveryURLsWithLegacyPaymentRequiredColumns(t *testing.T) {
+func TestGetFilesPreservesDeliveryURLs(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -208,13 +196,8 @@ func TestGetFilesPreservesDeliveryURLsWithLegacyPaymentRequiredColumns(t *testin
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:                      taskID,
-		UserID:                  userID,
-		ProjectID:               uuid.New().String(),
-		Type:                    model.PlatformSeednote,
-		Status:                  model.TaskStatusCompleted,
-		BillingStatus:           model.TaskBillingStatusPaymentRequired,
-		BillingShortfallCredits: 3200,
+		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
+		Type: model.PlatformSeednote, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -234,7 +217,7 @@ func TestGetFilesPreservesDeliveryURLsWithLegacyPaymentRequiredColumns(t *testin
 		t.Fatalf("create task file: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
@@ -289,7 +272,7 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
+	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -312,7 +295,7 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	}
 }
 
-func TestVideoProductionIgnoresLegacyPaymentRequiredColumns(t *testing.T) {
+func TestVideoProductionRemainsAvailableForCompletedTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -327,18 +310,13 @@ func TestVideoProductionIgnoresLegacyPaymentRequiredColumns(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:                      taskID,
-		UserID:                  userID,
-		ProjectID:               uuid.New().String(),
-		Type:                    model.PlatformVideoCreator,
-		Status:                  model.TaskStatusCompleted,
-		BillingStatus:           model.TaskBillingStatusPaymentRequired,
-		BillingShortfallCredits: 800,
+		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
+		Type: model.PlatformVideoCreator, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/video-production", func(c fiber.Ctx) error {
@@ -357,7 +335,7 @@ func TestVideoProductionIgnoresLegacyPaymentRequiredColumns(t *testing.T) {
 	}
 }
 
-func TestMarkPublishedIgnoresLegacyPaymentRequiredColumns(t *testing.T) {
+func TestMarkPublishedWorksForCompletedTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -367,12 +345,11 @@ func TestMarkPublishedIgnoresLegacyPaymentRequiredColumns(t *testing.T) {
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
 		ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
-		BillingStatus: model.TaskBillingStatusPaymentRequired, BillingShortfallCredits: 1200,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
+	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Patch("/tasks/:id/published", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -435,7 +412,7 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	handler := NewTaskHandler(taskSvc, &logger)
 
 	app := fiber.New()
@@ -506,7 +483,7 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetImagePresets(presets)
 	h.SetRepository(repo)
@@ -598,7 +575,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 
 	app := fiber.New()
@@ -664,7 +641,7 @@ func TestCreateTaskMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error {
@@ -719,7 +696,7 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error {
@@ -790,7 +767,7 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 	app := fiber.New()
@@ -861,7 +838,7 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 	app := fiber.New()
@@ -909,7 +886,7 @@ func TestCreateTaskRejectsMalformedPendingReferenceWithoutCreatingTask(t *testin
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 	app := fiber.New()
@@ -952,7 +929,7 @@ func TestCreateTaskAllowsExternalPendingLikeReferencePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 	h.SetStore(&fakeStorageProvider{})
@@ -1015,7 +992,7 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 
@@ -1088,7 +1065,7 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -1171,7 +1148,7 @@ func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -1251,7 +1228,7 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, workspaceRoot, nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -1269,81 +1246,6 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 	}
 	if resp.StatusCode != fiber.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-}
-
-func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          "video-task-balance@example.com",
-		Password:       "hashed",
-		InviteCode:     "videotaskbalance",
-		CreditsBalance: 99_999,
-	}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	project := &model.Project{
-		ID:       projectID,
-		UserID:   userID,
-		Platform: model.PlatformVideoCreator,
-		Name:     "Video",
-		Status:   model.ProjectStatusActive,
-	}
-	watermark := false
-	project.SetVideoDefaults(model.VideoDefaults{
-		Purpose:    service.VideoPurposePlanting,
-		ModelKey:   "seedance-2.0-mini",
-		Resolution: "720p",
-		Ratio:      "9:16",
-		Duration:   5,
-		Watermark:  &watermark,
-		Preflight:  true,
-	})
-	project.SetVideoModelPolicy(model.VideoModelPolicy{
-		AllowedModels: []string{"seedance-2.0-mini"},
-		DefaultModel:  "seedance-2.0-mini",
-		MaxResolution: "720p",
-		MaxDuration:   15,
-	})
-	if err := repo.Projects().Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	creditSvc := service.NewCreditService(repo, &config.CreditsConfig{
-		TaskCosts: map[string]int{model.PlatformVideoCreator: 2000},
-	}, &logger)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
-	taskSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-
-	app := fiber.New()
-	app.Post("/tasks", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Create(c)
-	})
-
-	req := httptest.NewRequest("POST", "/tasks", strings.NewReader(`{"project_id":"`+projectID+`","prompt":"生成视频"}`))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	bal, err := creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if bal != 99_999-2000 {
-		t.Fatalf("balance = %d, want base fee %d", bal, 99_999-2000)
 	}
 }
 
@@ -1372,7 +1274,7 @@ func TestCreateTask_VideoSplitInputsAndResponseFields(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 
@@ -1440,84 +1342,42 @@ func TestCreateTask_VideoSplitInputsAndResponseFields(t *testing.T) {
 	})
 }
 
-func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
+func TestGetTaskByIDIncludesFixedBillingIdentity(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := uuid.New().String()
-	taskID := uuid.New().String()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	taskID := uuid.NewString()
+	chargeID := uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:         userID,
-		Email:      "task-credits@example.com",
-		Password:   "hashed",
-		InviteCode: "taskcredits",
+		ID: userID, Email: "task-billing@example.com", Password: "hashed", InviteCode: "taskbilling",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Projects().Create(ctx, &model.Project{
-		ID:       projectID,
-		UserID:   userID,
-		Platform: model.PlatformArticle,
-		Name:     "Article",
-		Status:   model.ProjectStatusActive,
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusCompleted,
-		Prompt:    "详情扣分展示",
+		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusCompleted, Prompt: "详情固定价格展示",
+		BillingQuoteID: "quote-v1", BillingCatalogID: "retail-v1", BillingSKUID: "task.article.standard.v1",
+		BillingChargeID: &chargeID, BillingPriceCredits: 6000,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := repo.Credits().CreateTransaction(ctx, &model.CreditTransaction{
-		UserID:       userID,
-		Type:         model.CreditTypeTaskDeduct,
-		Amount:       -120,
-		BalanceAfter: 880,
-		TaskID:       &taskID,
-		Description:  "任务扣除 -120",
-	}); err != nil {
-		t.Fatalf("create credit transaction: %v", err)
-	}
-	if err := repo.Credits().CreateTransaction(ctx, &model.CreditTransaction{
-		UserID:       userID,
-		Type:         model.CreditTypeImageGen,
-		Amount:       -80,
-		BalanceAfter: 800,
-		TaskID:       &taskID,
-		Description:  "操作扣费 (image_gen) -80",
-	}); err != nil {
-		t.Fatalf("create operation transaction: %v", err)
-	}
-	if err := repo.Credits().CreateTransaction(ctx, &model.CreditTransaction{
-		UserID:       userID,
-		Type:         model.CreditTypeTaskRefund,
-		Amount:       20,
-		BalanceAfter: 820,
-		TaskID:       &taskID,
-		Description:  "任务取消退还 +20",
-	}); err != nil {
-		t.Fatalf("create refund transaction: %v", err)
-	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-
+	h := NewTaskHandler(service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return h.GetByID(c)
 	})
 
-	req := httptest.NewRequest("GET", "/tasks/"+taskID, nil)
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID, nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -1526,37 +1386,22 @@ func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
 	}
 	var body struct {
 		Data struct {
-			ID             string `json:"id"`
-			CreditsCharged int    `json:"credits_charged"`
-			CreditsSummary struct {
-				TaskConsumed      int `json:"task_consumed"`
-				OperationConsumed int `json:"operation_consumed"`
-				Refunded          int `json:"refunded"`
-				NetConsumed       int `json:"net_consumed"`
-			} `json:"credits_summary"`
-			CreditTransactions []model.CreditTransaction `json:"credit_transactions"`
+			ID                  string  `json:"id"`
+			BillingCatalogID    string  `json:"billing_catalog_id"`
+			BillingSKUID        string  `json:"billing_sku_id"`
+			BillingChargeID     *string `json:"billing_charge_id"`
+			BillingPriceCredits int64   `json:"billing_price_credits"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Data.ID != taskID {
-		t.Fatalf("id = %q, want %q", body.Data.ID, taskID)
-	}
-	if body.Data.CreditsCharged != 120 {
-		t.Fatalf("credits_charged = %d, want 120", body.Data.CreditsCharged)
-	}
-	if body.Data.CreditsSummary.TaskConsumed != 120 ||
-		body.Data.CreditsSummary.OperationConsumed != 80 ||
-		body.Data.CreditsSummary.Refunded != 20 ||
-		body.Data.CreditsSummary.NetConsumed != 180 {
-		t.Fatalf("credits_summary = %+v, want task=120 operation=80 refunded=20 net=180", body.Data.CreditsSummary)
-	}
-	if len(body.Data.CreditTransactions) != 3 {
-		t.Fatalf("credit_transactions len = %d, want 3", len(body.Data.CreditTransactions))
+	if body.Data.ID != taskID || body.Data.BillingCatalogID != "retail-v1" ||
+		body.Data.BillingSKUID != "task.article.standard.v1" || body.Data.BillingChargeID == nil ||
+		*body.Data.BillingChargeID != chargeID || body.Data.BillingPriceCredits != 6000 {
+		t.Fatalf("task billing identity = %#v", body.Data)
 	}
 }
-
 func setupSeednoteTaskCreateHandler(t *testing.T) (*fiber.App, repository.Repository, context.Context, string, string) {
 	t.Helper()
 	db := setupTaskHandlerTestDB(t)
@@ -1583,7 +1428,7 @@ func setupSeednoteTaskCreateHandler(t *testing.T) (*fiber.App, repository.Reposi
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	handler := NewTaskHandler(taskSvc, &logger)
 	handler.SetRepository(repo)
 	app := fiber.New()

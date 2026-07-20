@@ -2,12 +2,10 @@ package config
 
 import (
 	"fmt"
-	"math"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -39,17 +37,13 @@ type Config struct {
 	Vision             VisionConfig                    `yaml:"vision"`
 	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
 	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
-	ModelPrices        ModelPricesConfig               `yaml:"model_prices"`
-	Billing            BillingConfig                   `yaml:"billing"`
 	BillingRuntime     BillingRuntimeConfig            `yaml:"billing_runtime" json:"billing_runtime"`
 	BillingBundle      *serverbilling.Bundle           `yaml:"-" json:"-"`
-	RechargeTiers      []RechargeTierConfig            `yaml:"recharge_tiers"`
 	ImageUnderstanding UnderstandingRuntimeConfig      `yaml:"-"`
 	VideoUnderstanding VideoUnderstandingRuntimeConfig `yaml:"-"`
 	TingWu             TingWuConfig                    `yaml:"tingwu"`
 	FunASR             FunASRConfig                    `yaml:"funasr"`
 	Claude             ClaudeConfig                    `yaml:"claude"`
-	Credits            CreditsConfig                   `yaml:"credits"`
 	CORS               CORSConfig                      `yaml:"cors"`
 	Asynq              AsynqConfig                     `yaml:"asynq"`
 	Email              EmailConfig                     `yaml:"email"`
@@ -216,27 +210,23 @@ const DefaultVideoAPIBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 // Business defaults live on Project.VideoDefaults/VideoModelPolicy so plans and
 // tasks can snapshot them.
 type VideoAPIConfig struct {
-	Key              string                   `yaml:"key"`
-	BaseURL          string                   `yaml:"base_url"`
-	Timeout          time.Duration            `yaml:"timeout"`
-	CreditMultiplier int                      `yaml:"credit_multiplier"`
-	ModelCatalog     []VideoModelCatalogEntry `yaml:"model_catalog"`
+	Key          string                   `yaml:"key"`
+	BaseURL      string                   `yaml:"base_url"`
+	Timeout      time.Duration            `yaml:"timeout"`
+	ModelCatalog []VideoModelCatalogEntry `yaml:"model_catalog"`
 }
 
 type VideoModelCatalogEntry struct {
-	Key                   string             `yaml:"key"`
-	DisplayName           string             `yaml:"display_name"`
-	Model                 string             `yaml:"model"`
-	ModelID               string             `yaml:"model_id"`
-	SupportedResolutions  []string           `yaml:"supported_resolutions"`
-	SupportedRatios       []string           `yaml:"supported_ratios"`
-	MinDuration           int64              `yaml:"min_duration"`
-	MaxDuration           int64              `yaml:"max_duration"`
-	SupportsVideoInput    bool               `yaml:"supports_video_input"`
-	Supports4K            bool               `yaml:"supports_4k"`
-	NoInputPricePerSecond map[string]float64 `yaml:"no_input_price_per_second"`
-	VideoInput5sMinPrice  map[string]float64 `yaml:"video_input_5s_min_price"`
-	VideoInput5sMaxPrice  map[string]float64 `yaml:"video_input_5s_max_price"`
+	Key                  string   `yaml:"key"`
+	DisplayName          string   `yaml:"display_name"`
+	Model                string   `yaml:"model"`
+	ModelID              string   `yaml:"model_id"`
+	SupportedResolutions []string `yaml:"supported_resolutions"`
+	SupportedRatios      []string `yaml:"supported_ratios"`
+	MinDuration          int64    `yaml:"min_duration"`
+	MaxDuration          int64    `yaml:"max_duration"`
+	SupportsVideoInput   bool     `yaml:"supports_video_input"`
+	Supports4K           bool     `yaml:"supports_4k"`
 }
 
 type MontageConfig struct {
@@ -250,7 +240,6 @@ type MontageConfig struct {
 	TimeoutMinutes         int                                    `yaml:"timeout_minutes"`
 	ExecutionTargets       []string                               `yaml:"execution_targets"`
 	DefaultExecutionTarget string                                 `yaml:"default_execution_target"`
-	CreditCost             int                                    `yaml:"credit_cost"`
 	Env                    map[string]string                      `yaml:"env"`
 	ToolPolicy             map[string]MontageToolCapabilityPolicy `yaml:"tool_policy"`
 	PipelineDefaults       map[string]map[string]any              `yaml:"pipeline_defaults"`
@@ -306,9 +295,6 @@ func (c *MontageConfig) ApplyDefaults() {
 	}
 	if c.DefaultExecutionTarget == "" {
 		c.DefaultExecutionTarget = "cloud"
-	}
-	if c.CreditCost <= 0 {
-		c.CreditCost = 2000
 	}
 	if c.Env == nil {
 		c.Env = map[string]string{}
@@ -473,94 +459,6 @@ type VideoUnderstandingRuntimeConfig struct {
 	MaxRecommendedResolution string
 }
 
-type FlexibleFloat float64
-
-func (f *FlexibleFloat) UnmarshalYAML(value *yaml.Node) error {
-	var raw any
-	if err := value.Decode(&raw); err != nil {
-		return err
-	}
-	switch v := raw.(type) {
-	case int:
-		*f = FlexibleFloat(v)
-	case int64:
-		*f = FlexibleFloat(v)
-	case float64:
-		*f = FlexibleFloat(v)
-	case string:
-		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-		if err != nil {
-			return fmt.Errorf("parse float %q: %w", v, err)
-		}
-		*f = FlexibleFloat(parsed)
-	default:
-		return fmt.Errorf("unsupported numeric value %T", raw)
-	}
-	return nil
-}
-
-func (f FlexibleFloat) Float64() float64 { return float64(f) }
-
-type CurrencyRate struct {
-	ToCNY FlexibleFloat `yaml:"to_cny" json:"to_cny"`
-}
-
-type TokenModelPrice struct {
-	Currency           string        `yaml:"currency" json:"currency"`
-	Unit               int64         `yaml:"unit" json:"unit"`
-	CachedInput        FlexibleFloat `yaml:"cached_input" json:"cached_input"`
-	CacheReadInput     FlexibleFloat `yaml:"cache_read_input" json:"cache_read_input,omitempty"`
-	CacheCreationInput FlexibleFloat `yaml:"cache_creation_input" json:"cache_creation_input,omitempty"`
-	Input              FlexibleFloat `yaml:"input" json:"input"`
-	Output             FlexibleFloat `yaml:"output" json:"output"`
-}
-
-type UnitModelPrice struct {
-	Currency string        `yaml:"currency" json:"currency"`
-	Unit     string        `yaml:"unit" json:"unit"`
-	Price    FlexibleFloat `yaml:"price" json:"price"`
-}
-
-const (
-	ImagePricingTypePerImage    = "per_image"
-	ImagePricingTypeOpenAIUsage = "openai_image_usage"
-)
-
-type ImageGenerationPrice struct {
-	PricingType      string                              `yaml:"pricing_type" json:"pricing_type"`
-	Currency         string                              `yaml:"currency" json:"currency"`
-	Unit             any                                 `yaml:"unit" json:"unit"`
-	Price            FlexibleFloat                       `yaml:"price" json:"price,omitempty"`
-	TextInput        FlexibleFloat                       `yaml:"text_input" json:"text_input,omitempty"`
-	TextCachedInput  FlexibleFloat                       `yaml:"text_cached_input" json:"text_cached_input,omitempty"`
-	ImageInput       FlexibleFloat                       `yaml:"image_input" json:"image_input,omitempty"`
-	ImageCachedInput FlexibleFloat                       `yaml:"image_cached_input" json:"image_cached_input,omitempty"`
-	ImageOutput      FlexibleFloat                       `yaml:"image_output" json:"image_output,omitempty"`
-	RequireUsage     bool                                `yaml:"require_usage" json:"require_usage"`
-	EstimateTable    map[string]map[string]FlexibleFloat `yaml:"estimate_table" json:"estimate_table,omitempty"`
-}
-
-type VideoGenerationPrice struct {
-	Currency              string             `yaml:"currency" json:"currency"`
-	NoInputPricePerSecond map[string]float64 `yaml:"no_input_price_per_second" json:"no_input_price_per_second"`
-	VideoInput5sMinPrice  map[string]float64 `yaml:"video_input_5s_min_price" json:"video_input_5s_min_price"`
-	VideoInput5sMaxPrice  map[string]float64 `yaml:"video_input_5s_max_price" json:"video_input_5s_max_price"`
-}
-
-type ModelPricesConfig struct {
-	CurrencyRates   map[string]CurrencyRate         `yaml:"currency_rates" json:"currency_rates"`
-	TokenModels     map[string]TokenModelPrice      `yaml:"token_models" json:"token_models"`
-	ImageGeneration map[string]ImageGenerationPrice `yaml:"image_generation" json:"image_generation"`
-	VideoGeneration map[string]VideoGenerationPrice `yaml:"video_generation" json:"video_generation"`
-}
-
-type BillingConfig struct {
-	CreditsPerCNY         int                `yaml:"credits_per_cny" json:"credits_per_cny"`
-	TierMultipliers       map[string]float64 `yaml:"tier_multipliers" json:"tier_multipliers"`
-	DefaultUserMultiplier float64            `yaml:"default_user_multiplier" json:"default_user_multiplier"`
-	MinimumChargeCredits  int                `yaml:"minimum_charge_credits" json:"minimum_charge_credits"`
-}
-
 // BillingRuntimeConfig points the server at the strict fixed-SKU billing
 // catalogs required by server startup.
 type BillingRuntimeConfig struct {
@@ -594,15 +492,6 @@ func (c *BillingRuntimeConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-type RechargeTierConfig struct {
-	Key          string `yaml:"key" json:"key"`
-	Label        string `yaml:"label" json:"label"`
-	PriceCNY     int    `yaml:"price_cny" json:"price_cny"`
-	Credits      int    `yaml:"credits" json:"credits"`
-	BonusCredits int    `yaml:"bonus_credits" json:"bonus_credits"`
-	Enabled      bool   `yaml:"enabled" json:"enabled"`
-}
-
 type TokenUsage struct {
 	InputTokens              int64 `json:"input_tokens"`
 	CachedInputTokens        int64 `json:"cached_input_tokens,omitempty"`
@@ -610,388 +499,6 @@ type TokenUsage struct {
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
 	OutputTokens             int64 `json:"output_tokens"`
 	TotalTokens              int64 `json:"total_tokens"`
-}
-
-type PriceSnapshot struct {
-	Provider           string  `json:"provider"`
-	Model              string  `json:"model"`
-	Currency           string  `json:"currency"`
-	Unit               int64   `json:"unit"`
-	CurrencyToCNY      float64 `json:"currency_to_cny"`
-	CreditsPerCNY      int     `json:"credits_per_cny"`
-	CachedInput        float64 `json:"cached_input"`
-	CacheReadInput     float64 `json:"cache_read_input,omitempty"`
-	CacheCreationInput float64 `json:"cache_creation_input,omitempty"`
-	Input              float64 `json:"input"`
-	Output             float64 `json:"output"`
-	PricingType        string  `json:"pricing_type,omitempty"`
-	Price              float64 `json:"price,omitempty"`
-	TextInput          float64 `json:"text_input,omitempty"`
-	TextCachedInput    float64 `json:"text_cached_input,omitempty"`
-	ImageInput         float64 `json:"image_input,omitempty"`
-	ImageCachedInput   float64 `json:"image_cached_input,omitempty"`
-	ImageOutput        float64 `json:"image_output,omitempty"`
-	Size               string  `json:"size,omitempty"`
-	Quality            string  `json:"quality,omitempty"`
-	Count              int     `json:"count,omitempty"`
-	OfficialEstimate   float64 `json:"official_estimate,omitempty"`
-}
-
-type TokenCreditCost struct {
-	BaseCredits    int           `json:"base_credits"`
-	FinalCredits   int           `json:"final_credits"`
-	TierMultiplier float64       `json:"tier_multiplier"`
-	UserMultiplier float64       `json:"user_multiplier"`
-	Usage          TokenUsage    `json:"usage"`
-	PriceSnapshot  PriceSnapshot `json:"price_snapshot"`
-}
-
-type ImageGenerationUsage struct {
-	Size                   string `json:"size"`
-	Quality                string `json:"quality"`
-	Count                  int    `json:"count"`
-	TextInputTokens        int64  `json:"text_input_tokens,omitempty"`
-	TextCachedInputTokens  int64  `json:"text_cached_input_tokens,omitempty"`
-	ImageInputTokens       int64  `json:"image_input_tokens,omitempty"`
-	ImageCachedInputTokens int64  `json:"image_cached_input_tokens,omitempty"`
-	ImageOutputTokens      int64  `json:"image_output_tokens,omitempty"`
-	TotalTokens            int64  `json:"total_tokens,omitempty"`
-	ReferenceImageCount    int    `json:"reference_image_count,omitempty"`
-}
-
-type ImageGenerationCreditCost struct {
-	BaseCredits    int                  `json:"base_credits"`
-	FinalCredits   int                  `json:"final_credits"`
-	TierMultiplier float64              `json:"tier_multiplier"`
-	UserMultiplier float64              `json:"user_multiplier"`
-	Usage          ImageGenerationUsage `json:"usage"`
-	Estimated      bool                 `json:"estimated"`
-	PriceSnapshot  PriceSnapshot        `json:"price_snapshot"`
-}
-
-func (c VideoAPIConfig) CreditMultiplierOrDefault() int {
-	if c.CreditMultiplier > 0 {
-		return c.CreditMultiplier
-	}
-	return 1000
-}
-
-func (c *Config) CalculateTokenModelCredits(provider, modelName string, usage TokenUsage, tier string, userMultiplier float64) (TokenCreditCost, error) {
-	if c == nil {
-		return TokenCreditCost{}, fmt.Errorf("config is nil")
-	}
-	key := provider + "/" + modelName
-	price, ok := c.ModelPrices.TokenModels[key]
-	if !ok {
-		return TokenCreditCost{}, fmt.Errorf("token model price not configured for %s", key)
-	}
-	unit := price.Unit
-	if unit <= 0 {
-		unit = 1_000_000
-	}
-	currency := strings.ToUpper(strings.TrimSpace(price.Currency))
-	if currency == "" {
-		currency = "CNY"
-	}
-	rate := 1.0
-	if currency != "CNY" {
-		r, ok := c.ModelPrices.CurrencyRates[currency]
-		if !ok || r.ToCNY.Float64() <= 0 {
-			return TokenCreditCost{}, fmt.Errorf("currency rate not configured for %s", currency)
-		}
-		rate = r.ToCNY.Float64()
-	}
-	creditsPerCNY := c.Billing.CreditsPerCNY
-	if creditsPerCNY <= 0 {
-		creditsPerCNY = 1000
-	}
-	minCharge := c.Billing.MinimumChargeCredits
-	if minCharge <= 0 {
-		minCharge = 1
-	}
-	tierMultiplier := c.Billing.DefaultUserMultiplier
-	if tierMultiplier <= 0 {
-		tierMultiplier = 1
-	}
-	if m, ok := c.Billing.TierMultipliers[strings.ToLower(strings.TrimSpace(tier))]; ok && m > 0 {
-		tierMultiplier = m
-	}
-	if userMultiplier <= 0 {
-		userMultiplier = 1
-	}
-	cacheReadTokens := usage.CacheReadInputTokens
-	if cacheReadTokens == 0 && usage.CachedInputTokens > 0 {
-		cacheReadTokens = usage.CachedInputTokens
-	}
-	cacheReadPrice := price.CacheReadInput.Float64()
-	if cacheReadPrice <= 0 {
-		cacheReadPrice = price.CachedInput.Float64()
-	}
-	cacheCreationPrice := price.CacheCreationInput.Float64()
-	if cacheCreationPrice <= 0 {
-		cacheCreationPrice = price.Input.Float64()
-	}
-	inputTokens := usage.InputTokens
-	if usage.CacheReadInputTokens == 0 && usage.CacheCreationInputTokens == 0 && usage.CachedInputTokens > 0 {
-		inputTokens = usage.InputTokens - usage.CachedInputTokens
-		if inputTokens < 0 {
-			inputTokens = 0
-		}
-	}
-	totalTokens := usage.TotalTokens
-	if totalTokens <= 0 {
-		totalTokens = usage.InputTokens + usage.OutputTokens + cacheReadTokens + usage.CacheCreationInputTokens
-		usage.TotalTokens = totalTokens
-	}
-	costInCurrency := (float64(inputTokens)*price.Input.Float64() +
-		float64(cacheReadTokens)*cacheReadPrice +
-		float64(usage.CacheCreationInputTokens)*cacheCreationPrice +
-		float64(usage.OutputTokens)*price.Output.Float64()) / float64(unit)
-	baseCredits := int(math.Ceil(costInCurrency * rate * float64(creditsPerCNY)))
-	if totalTokens > 0 && baseCredits < minCharge {
-		baseCredits = minCharge
-	}
-	finalCredits := int(math.Ceil(float64(baseCredits) * tierMultiplier * userMultiplier))
-	if totalTokens > 0 && finalCredits < minCharge {
-		finalCredits = minCharge
-	}
-	return TokenCreditCost{
-		BaseCredits:    baseCredits,
-		FinalCredits:   finalCredits,
-		TierMultiplier: tierMultiplier,
-		UserMultiplier: userMultiplier,
-		Usage:          usage,
-		PriceSnapshot: PriceSnapshot{
-			Provider:           provider,
-			Model:              modelName,
-			Currency:           currency,
-			Unit:               unit,
-			CurrencyToCNY:      rate,
-			CreditsPerCNY:      creditsPerCNY,
-			CachedInput:        price.CachedInput.Float64(),
-			CacheReadInput:     cacheReadPrice,
-			CacheCreationInput: cacheCreationPrice,
-			Input:              price.Input.Float64(),
-			Output:             price.Output.Float64(),
-		},
-	}, nil
-}
-
-func (c *Config) EnabledRechargeTiers() []RechargeTierConfig {
-	if c == nil || len(c.RechargeTiers) == 0 {
-		return nil
-	}
-	tiers := make([]RechargeTierConfig, 0, len(c.RechargeTiers))
-	for _, tier := range c.RechargeTiers {
-		if tier.Enabled {
-			tiers = append(tiers, tier)
-		}
-	}
-	return tiers
-}
-
-func (c *Config) CalculateImageGenerationEstimateCredits(provider, modelName string, usage ImageGenerationUsage, tier string, userMultiplier float64) (ImageGenerationCreditCost, error) {
-	return c.calculateImageGenerationCredits(provider, modelName, usage, tier, userMultiplier, true)
-}
-
-func (c *Config) CalculateImageGenerationUsageCredits(provider, modelName string, usage ImageGenerationUsage, tier string, userMultiplier float64) (ImageGenerationCreditCost, error) {
-	return c.calculateImageGenerationCredits(provider, modelName, usage, tier, userMultiplier, false)
-}
-
-func (c *Config) calculateImageGenerationCredits(provider, modelName string, usage ImageGenerationUsage, tier string, userMultiplier float64, estimate bool) (ImageGenerationCreditCost, error) {
-	if c == nil {
-		return ImageGenerationCreditCost{}, fmt.Errorf("config is nil")
-	}
-	key := provider + "/" + modelName
-	price, ok := c.ModelPrices.ImageGeneration[key]
-	if !ok {
-		return ImageGenerationCreditCost{}, fmt.Errorf("image generation price not configured for %s", key)
-	}
-	pricingType := strings.TrimSpace(price.PricingType)
-	if pricingType == "" {
-		if strings.EqualFold(strings.TrimSpace(price.UnitString()), "image") {
-			pricingType = ImagePricingTypePerImage
-		}
-	}
-	if usage.Count <= 0 {
-		usage.Count = 1
-	}
-	currency, rate, err := c.priceCurrencyRate(price.Currency)
-	if err != nil {
-		return ImageGenerationCreditCost{}, err
-	}
-	creditsPerCNY, minCharge, tierMultiplier, userMultiplier := c.billingInputs(tier, userMultiplier)
-
-	var costInCurrency float64
-	var estimated bool
-	var officialEstimate float64
-	unit := price.UnitInt64()
-	if unit <= 0 {
-		unit = 1_000_000
-	}
-	switch pricingType {
-	case ImagePricingTypePerImage:
-		if price.Price.Float64() <= 0 {
-			return ImageGenerationCreditCost{}, fmt.Errorf("per-image price must be positive for %s", key)
-		}
-		costInCurrency = price.Price.Float64() * float64(usage.Count)
-		unit = 0
-	case ImagePricingTypeOpenAIUsage:
-		if estimate {
-			size := strings.TrimSpace(usage.Size)
-			quality := normalizeImageQuality(usage.Quality)
-			if size == "" || strings.EqualFold(size, "auto") {
-				return ImageGenerationCreditCost{}, fmt.Errorf("resolved image size is required for %s estimate", key)
-			}
-			byQuality, ok := price.EstimateTable[size]
-			if !ok {
-				return ImageGenerationCreditCost{}, fmt.Errorf("estimate table missing size %s for %s", size, key)
-			}
-			estimatePrice, ok := byQuality[quality]
-			if !ok || estimatePrice.Float64() <= 0 {
-				return ImageGenerationCreditCost{}, fmt.Errorf("estimate table missing quality %s for %s size %s", quality, key, size)
-			}
-			usage.Quality = quality
-			officialEstimate = estimatePrice.Float64()
-			costInCurrency = officialEstimate * float64(usage.Count)
-			estimated = true
-		} else {
-			if usage.TotalTokens <= 0 || usage.ImageOutputTokens <= 0 {
-				return ImageGenerationCreditCost{}, fmt.Errorf("%s usage is required for billing", modelName)
-			}
-			textInput := usage.TextInputTokens - usage.TextCachedInputTokens
-			if textInput < 0 {
-				textInput = 0
-			}
-			imageInput := usage.ImageInputTokens - usage.ImageCachedInputTokens
-			if imageInput < 0 {
-				imageInput = 0
-			}
-			costInCurrency = (float64(textInput)*price.TextInput.Float64() +
-				float64(usage.TextCachedInputTokens)*price.TextCachedInput.Float64() +
-				float64(imageInput)*price.ImageInput.Float64() +
-				float64(usage.ImageCachedInputTokens)*price.ImageCachedInput.Float64() +
-				float64(usage.ImageOutputTokens)*price.ImageOutput.Float64()) / float64(unit)
-		}
-	default:
-		return ImageGenerationCreditCost{}, fmt.Errorf("unsupported image pricing_type %q for %s", price.PricingType, key)
-	}
-
-	baseCredits := int(math.Ceil(costInCurrency * rate * float64(creditsPerCNY)))
-	if baseCredits < minCharge {
-		baseCredits = minCharge
-	}
-	finalCredits := int(math.Ceil(float64(baseCredits) * tierMultiplier * userMultiplier))
-	if finalCredits < minCharge {
-		finalCredits = minCharge
-	}
-	return ImageGenerationCreditCost{
-		BaseCredits:    baseCredits,
-		FinalCredits:   finalCredits,
-		TierMultiplier: tierMultiplier,
-		UserMultiplier: userMultiplier,
-		Usage:          usage,
-		Estimated:      estimated,
-		PriceSnapshot: PriceSnapshot{
-			Provider:         provider,
-			Model:            modelName,
-			Currency:         currency,
-			Unit:             unit,
-			CurrencyToCNY:    rate,
-			CreditsPerCNY:    creditsPerCNY,
-			PricingType:      pricingType,
-			Price:            price.Price.Float64(),
-			TextInput:        price.TextInput.Float64(),
-			TextCachedInput:  price.TextCachedInput.Float64(),
-			ImageInput:       price.ImageInput.Float64(),
-			ImageCachedInput: price.ImageCachedInput.Float64(),
-			ImageOutput:      price.ImageOutput.Float64(),
-			Size:             usage.Size,
-			Quality:          usage.Quality,
-			Count:            usage.Count,
-			OfficialEstimate: officialEstimate,
-		},
-	}, nil
-}
-
-func (p ImageGenerationPrice) UnitString() string {
-	switch v := p.Unit.(type) {
-	case string:
-		return strings.TrimSpace(v)
-	case int:
-		return strconv.Itoa(v)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case float64:
-		if v == math.Trunc(v) {
-			return strconv.FormatInt(int64(v), 10)
-		}
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	default:
-		return ""
-	}
-}
-
-func (p ImageGenerationPrice) UnitInt64() int64 {
-	switch v := p.Unit.(type) {
-	case int:
-		return int64(v)
-	case int64:
-		return v
-	case float64:
-		return int64(v)
-	case string:
-		n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
-		return n
-	default:
-		return 0
-	}
-}
-
-func normalizeImageQuality(quality string) string {
-	quality = strings.ToLower(strings.TrimSpace(quality))
-	if quality == "" || quality == "auto" {
-		return "medium"
-	}
-	return quality
-}
-
-func (c *Config) priceCurrencyRate(currencyValue string) (string, float64, error) {
-	currency := strings.ToUpper(strings.TrimSpace(currencyValue))
-	if currency == "" {
-		currency = "CNY"
-	}
-	if currency == "CNY" {
-		return currency, 1, nil
-	}
-	r, ok := c.ModelPrices.CurrencyRates[currency]
-	if !ok || r.ToCNY.Float64() <= 0 {
-		return "", 0, fmt.Errorf("currency rate not configured for %s", currency)
-	}
-	return currency, r.ToCNY.Float64(), nil
-}
-
-func (c *Config) billingInputs(tier string, userMultiplier float64) (creditsPerCNY int, minCharge int, tierMultiplier float64, normalizedUserMultiplier float64) {
-	creditsPerCNY = c.Billing.CreditsPerCNY
-	if creditsPerCNY <= 0 {
-		creditsPerCNY = 1000
-	}
-	minCharge = c.Billing.MinimumChargeCredits
-	if minCharge <= 0 {
-		minCharge = 1
-	}
-	tierMultiplier = c.Billing.DefaultUserMultiplier
-	if tierMultiplier <= 0 {
-		tierMultiplier = 1
-	}
-	if m, ok := c.Billing.TierMultipliers[strings.ToLower(strings.TrimSpace(tier))]; ok && m > 0 {
-		tierMultiplier = m
-	}
-	normalizedUserMultiplier = userMultiplier
-	if normalizedUserMultiplier <= 0 {
-		normalizedUserMultiplier = 1
-	}
-	return creditsPerCNY, minCharge, tierMultiplier, normalizedUserMultiplier
 }
 
 // StorageConfig holds file storage configuration.
@@ -1450,61 +957,6 @@ type MemoryConfig struct {
 	LockTTL         time.Duration `yaml:"lock_ttl"`
 }
 
-// CreditsConfig holds credits/points system configuration.
-type CreditsConfig struct {
-	DailySignIn         int                       `yaml:"daily_sign_in"`                                      // credits awarded per daily sign-in (default 100)
-	RegisterBonus       int                       `yaml:"register_bonus"`                                     // credits awarded on registration (default 1000)
-	InviteReward        int                       `yaml:"invite_reward"`                                      // credits awarded to inviter when invitee registers (default 1000)
-	TaskCosts           map[string]int            `yaml:"task_costs"`                                         // base service fees by task type, e.g. {"article": 4000, "seednote": 3600, "ecommerce": 3000, "videocreator": 2000, "videoeditor": 2000}
-	AgentRuntimeReserve map[string]int            `yaml:"agent_runtime_reserve" json:"agent_runtime_reserve"` // legacy/ignored; Claude Code runtime is platform-paid
-	ModelCosts          map[string]map[string]int `yaml:"model_costs"`                                        // per-model costs, key format: "provider/model"
-	AdminAPIKey         string                    `yaml:"admin_api_key"`                                      // API key for admin credit grant endpoint
-
-	// E-commerce deliverable module pricing for delivery-scale estimates only.
-	// Creation billing uses TaskCosts["ecommerce"]; actual model/media work is
-	// charged through MCP operation transactions.
-	EcommerceModulePrices map[string]int `yaml:"ecommerce_module_prices"`
-
-	// Goal mode pricing.
-	// GoalModeMultiplier is the upfront credit multiplier applied when a task is
-	// created with goal_mode=true (default 3). The goal loop runs entirely
-	// inside Claude Code's /goal mechanism; the server cannot tell how many
-	// turns were consumed, so the upfront charge is never refunded.
-	GoalModeMultiplier int `yaml:"goal_mode_multiplier"`
-}
-
-// EffectiveGoalModeMultiplier returns the configured goal-mode credit multiplier,
-// defaulting to 3 when unset or invalid.
-func (c *CreditsConfig) EffectiveGoalModeMultiplier() int {
-	if c == nil || c.GoalModeMultiplier <= 0 {
-		return 3
-	}
-	return c.GoalModeMultiplier
-}
-
-// ModelCost returns the per-operation cost for a specific model.
-// Returns (0, false) if no pricing is configured for this operation/model pair.
-func (c *CreditsConfig) ModelCost(opType, provider, model string) (int, bool) {
-	if c.ModelCosts == nil {
-		return 0, false
-	}
-	models, ok := c.ModelCosts[opType]
-	if !ok {
-		return 0, false
-	}
-	// Try with provider prefix first: "provider/model"
-	if provider != "" {
-		if cost, ok := models[provider+"/"+model]; ok {
-			return cost, true
-		}
-	}
-	// Try with just model name
-	if cost, ok := models[model]; ok {
-		return cost, true
-	}
-	return 0, false
-}
-
 // CORSConfig holds Cross-Origin Resource Sharing configuration.
 // When AllowedOrigins is empty, only localhost origins are permitted (development default).
 type CORSConfig struct {
@@ -1610,14 +1062,10 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"image_presets":   true,
 		"model_providers": true,
 		"model_routes":    true,
-		"model_prices":    true,
-		"billing":         true,
 		"billing_runtime": true,
-		"recharge_tiers":  true,
 		"tingwu":          true,
 		"funasr":          true,
 		"claude":          true,
-		"credits":         true,
 		"cors":            true,
 		"asynq":           true,
 		"email":           true,
@@ -1629,11 +1077,6 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 	for key := range top {
 		if !known[key] {
 			return fmt.Errorf("unknown top-level config key %s", key)
-		}
-	}
-	if credits, ok := top["credits"].(map[string]any); ok {
-		if _, ok := credits["model_costs"]; ok {
-			return fmt.Errorf("deprecated config key credits.model_costs; use model_prices and billing")
 		}
 	}
 	if modelRoutes, ok := top["model_routes"].(map[string]any); ok {
@@ -1732,9 +1175,6 @@ func (c *Config) applyDefaults() {
 	if c.VideoAPI.Timeout == 0 {
 		c.VideoAPI.Timeout = 10 * time.Minute
 	}
-	if c.VideoAPI.CreditMultiplier == 0 {
-		c.VideoAPI.CreditMultiplier = 1000
-	}
 	if c.MCP.ToolTimeouts.GenerateImage == 0 {
 		c.MCP.ToolTimeouts.GenerateImage = 10 * time.Minute
 	}
@@ -1751,84 +1191,6 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	c.Montage.ApplyDefaults()
-	if c.ModelPrices.CurrencyRates == nil {
-		c.ModelPrices.CurrencyRates = map[string]CurrencyRate{}
-	}
-	if c.ModelPrices.CurrencyRates["USD"].ToCNY.Float64() <= 0 {
-		c.ModelPrices.CurrencyRates["USD"] = CurrencyRate{ToCNY: FlexibleFloat(7.2)}
-	}
-	if c.ModelPrices.CurrencyRates["CNY"].ToCNY.Float64() <= 0 {
-		c.ModelPrices.CurrencyRates["CNY"] = CurrencyRate{ToCNY: FlexibleFloat(1)}
-	}
-	if c.Billing.CreditsPerCNY == 0 {
-		c.Billing.CreditsPerCNY = 1600
-	}
-	if c.Billing.TierMultipliers == nil {
-		c.Billing.TierMultipliers = map[string]float64{
-			"free":       1.35,
-			"pro":        1.20,
-			"enterprise": 1.05,
-		}
-	}
-	if c.Billing.DefaultUserMultiplier == 0 {
-		c.Billing.DefaultUserMultiplier = 1
-	}
-	if c.Billing.MinimumChargeCredits == 0 {
-		c.Billing.MinimumChargeCredits = 1
-	}
-
-	// Credits defaults.
-	if c.Credits.DailySignIn == 0 {
-		c.Credits.DailySignIn = 100
-	}
-	if c.Credits.RegisterBonus == 0 {
-		c.Credits.RegisterBonus = 1000
-	}
-	if c.Credits.InviteReward == 0 {
-		c.Credits.InviteReward = 1000
-	}
-	defaultTaskCosts := map[string]int{
-		"article":        4000,
-		"seednote":       3600,
-		"moments":        3000,
-		"ecommerce":      3000,
-		"videocreator":   2000,
-		"videoeditor":    2000,
-		"montage":        2000,
-		"viral_analysis": 1200,
-	}
-	if c.Credits.TaskCosts == nil {
-		c.Credits.TaskCosts = defaultTaskCosts
-	} else {
-		for taskType, cost := range defaultTaskCosts {
-			if _, ok := c.Credits.TaskCosts[taskType]; !ok {
-				c.Credits.TaskCosts[taskType] = cost
-			}
-		}
-	}
-	if c.Credits.AgentRuntimeReserve == nil {
-		c.Credits.AgentRuntimeReserve = map[string]int{}
-	}
-	if c.Credits.GoalModeMultiplier <= 0 {
-		c.Credits.GoalModeMultiplier = 3
-	}
-	if c.Credits.EcommerceModulePrices == nil {
-		c.Credits.EcommerceModulePrices = map[string]int{
-			"main_images":  1500, // 主图套（默认5张，CTR之战）
-			"detail_page":  3000, // 详情页商详（默认8-12节，FABE叙事）
-			"cover_banner": 600,  // 封面/类目 banner，每张
-			"share_image":  400,  // 分享图，每张
-			"sku_images":   300,  // SKU 变体图，每张
-		}
-	}
-	if c.RechargeTiers == nil {
-		c.RechargeTiers = []RechargeTierConfig{
-			{Key: "basic", Label: "基础包", PriceCNY: 10, Credits: 10000, Enabled: true},
-			{Key: "standard", Label: "标准包", PriceCNY: 50, Credits: 52000, BonusCredits: 2000, Enabled: true},
-			{Key: "pro", Label: "进阶包", PriceCNY: 100, Credits: 110000, BonusCredits: 10000, Enabled: true},
-		}
-	}
-
 	// Asynq defaults.
 	if c.Asynq.Concurrency == 0 {
 		c.Asynq.Concurrency = 3
@@ -2058,12 +1420,6 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 			if c.VideoAPI.ModelCatalog[i].ModelID == "" {
 				c.VideoAPI.ModelCatalog[i].ModelID = c.VideoAPI.ModelCatalog[i].Model
 			}
-			priceKey := c.ModelRoutes.VideoGeneration.Provider + "/" + c.VideoAPI.ModelCatalog[i].ModelID
-			if price, ok := c.ModelPrices.VideoGeneration[priceKey]; ok {
-				c.VideoAPI.ModelCatalog[i].NoInputPricePerSecond = price.NoInputPricePerSecond
-				c.VideoAPI.ModelCatalog[i].VideoInput5sMinPrice = price.VideoInput5sMinPrice
-				c.VideoAPI.ModelCatalog[i].VideoInput5sMaxPrice = price.VideoInput5sMaxPrice
-			}
 		}
 	}
 	return nil
@@ -2178,26 +1534,7 @@ func (c *Config) imageAPIFromRoute(routeName string, route ImageGenerationRouteC
 		TimeoutSec:     int(route.Timeout / time.Second),
 		ResponseFormat: route.ResponseFormat,
 	}
-	if price, ok := c.ModelPrices.ImageGeneration[route.Provider+"/"+route.Model]; ok {
-		pricingType := strings.TrimSpace(price.PricingType)
-		if pricingType == "" && strings.EqualFold(price.UnitString(), "image") {
-			pricingType = ImagePricingTypePerImage
-		}
-		if isGPTImageModelName(route.Model) && pricingType != ImagePricingTypeOpenAIUsage {
-			return nil, fmt.Errorf("%s model %s requires pricing_type %s; fixed per-image pricing is not allowed", routeName, route.Model, ImagePricingTypeOpenAIUsage)
-		}
-		if pricingType == ImagePricingTypePerImage {
-			cfg.Credits = int(math.Ceil(price.Price.Float64() * c.currencyToCNY(price.Currency) * float64(c.creditsPerCNY())))
-		}
-	} else if isGPTImageModelName(route.Model) {
-		return nil, fmt.Errorf("%s model %s requires model_prices.image_generation entry with pricing_type %s", routeName, route.Model, ImagePricingTypeOpenAIUsage)
-	}
 	return cfg, nil
-}
-
-func isGPTImageModelName(modelName string) bool {
-	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	return strings.HasPrefix(modelName, "gpt-image-") || modelName == "chatgpt-image-latest"
 }
 
 func providerKind(providerKey string) string {
@@ -2212,24 +1549,6 @@ func providerKind(providerKey string) string {
 	default:
 		return providerKey
 	}
-}
-
-func (c *Config) currencyToCNY(currency string) float64 {
-	currency = strings.ToUpper(strings.TrimSpace(currency))
-	if currency == "" || currency == "CNY" {
-		return 1
-	}
-	if rate, ok := c.ModelPrices.CurrencyRates[currency]; ok && rate.ToCNY.Float64() > 0 {
-		return rate.ToCNY.Float64()
-	}
-	return 1
-}
-
-func (c *Config) creditsPerCNY() int {
-	if c.Billing.CreditsPerCNY > 0 {
-		return c.Billing.CreditsPerCNY
-	}
-	return 1000
 }
 
 // AgentServerURL returns the server URL as reachable from the agent's network
@@ -2446,33 +1765,6 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	for _, route := range []struct {
-		name     string
-		provider string
-		model    string
-	}{
-		{
-			name:     "model_routes.image_understanding",
-			provider: c.ModelRoutes.ImageUnderstanding.Provider,
-			model:    c.ModelRoutes.ImageUnderstanding.Model,
-		},
-		{
-			name:     "model_routes.video_understanding",
-			provider: c.ModelRoutes.VideoUnderstanding.Provider,
-			model:    c.ModelRoutes.VideoUnderstanding.Model,
-		},
-	} {
-		provider := strings.TrimSpace(route.provider)
-		modelName := strings.TrimSpace(route.model)
-		if provider == "" || modelName == "" {
-			continue
-		}
-		priceKey := provider + "/" + modelName
-		if _, ok := c.ModelPrices.TokenModels[priceKey]; !ok {
-			errs = append(errs, fmt.Sprintf("%s requires model_prices.token_models.%s", route.name, priceKey))
-		}
-	}
-
 	switch c.Claude.Executor {
 	case "local", "docker", "kubernetes":
 	default:
@@ -2583,15 +1875,6 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Credits.DailySignIn < 0 {
-		errs = append(errs, "credits.daily_sign_in must not be negative")
-	}
-	if c.Credits.RegisterBonus < 0 {
-		errs = append(errs, "credits.register_bonus must not be negative")
-	}
-	if c.Credits.InviteReward < 0 {
-		errs = append(errs, "credits.invite_reward must not be negative")
-	}
 	if c.Claude.Executor == "local" {
 		if strings.TrimSpace(c.Claude.PluginDir) == "" {
 			errs = append(errs, "claude.plugin_dir is required for agent execution (set it in config.yaml, or ensure agents/ exists in a parent directory)")

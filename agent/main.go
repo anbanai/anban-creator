@@ -12,6 +12,7 @@ import (
 	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/urfave/cli/v3"
 )
 
@@ -230,8 +231,9 @@ func serverExecutionFailure(workspace string, err error) *serveragent.ExecutionR
 		msg = err.Error()
 	}
 	return &serveragent.ExecutionResult{
-		Success: false,
-		Error:   msg,
-		WorkDir: workspace,
+		Success:        false,
+		Error:          msg,
+		TerminalReason: model.TaskBillingTerminalPlatformError,
+		WorkDir:        workspace,
 	}
 }

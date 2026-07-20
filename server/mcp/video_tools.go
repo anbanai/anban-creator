@@ -472,13 +472,13 @@ func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, re
 		purposeHint = ref.ReferenceRole
 	}
 	prompt := buildVideoUnderstandingPrompt(ref.ReferenceRole, purposeHint, "Extract the full reference timeline, surface facts, deep intent, business intent, latent subtext, joke or reversal structure, visual beats, camera, action, expression, rhythm, must_keep, must_keep_meaning, can_change, can_adapt_meaning, must_not_change, and must_not_break_meaning for reference-timeline.json and shot-plan.md.")
-	providerRequestID := newUnderstandingProviderRequestID(model.CreditTypeVideoUnderstanding)
+	providerRequestID := newUnderstandingProviderRequestID(model.OperationVideoUnderstanding)
 	analysis, err := svcs.WritingSvc.AnalyzeVideoURLDetailed(ctx, userID, ref.URL, prompt)
 	if err != nil {
-		recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeVideoUnderstanding, providerRequestID, nil)
+		recordUnderstandingProviderCost(ctx, taskID, model.OperationVideoUnderstanding, providerRequestID, nil)
 		return videoUnderstandingContractFile{}, fmt.Errorf("analyze video reference during preparation: %w", err)
 	}
-	recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeVideoUnderstanding, providerRequestID, &analysis.Usage)
+	recordUnderstandingProviderCost(ctx, taskID, model.OperationVideoUnderstanding, providerRequestID, &analysis.Usage)
 	understanding := normalizeVideoUnderstanding(analysis.Text)
 	understanding["metadata"] = map[string]any{"source_url": ref.URL}
 	understanding["model"] = analysis.Model
@@ -738,15 +738,15 @@ func analyzeVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest)
 		return errorResult(err.Error()), nil
 	}
 	prompt := buildVideoUnderstandingPrompt(referenceRole, purposeHint, analysisPrompt)
-	providerRequestID := newUnderstandingProviderRequestID(model.CreditTypeVideoUnderstanding)
+	providerRequestID := newUnderstandingProviderRequestID(model.OperationVideoUnderstanding)
 	analysis, err := svcs.WritingSvc.AnalyzeVideoURLDetailed(ctx, userID, videoURL, prompt)
 	analysisMode := "native_video"
 	metadata := map[string]any{"source_url": videoURL}
 	if err != nil {
-		recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeVideoUnderstanding, providerRequestID, nil)
+		recordUnderstandingProviderCost(ctx, taskID, model.OperationVideoUnderstanding, providerRequestID, nil)
 		return errorResult("analyze video reference: " + err.Error()), nil
 	}
-	recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeVideoUnderstanding, providerRequestID, &analysis.Usage)
+	recordUnderstandingProviderCost(ctx, taskID, model.OperationVideoUnderstanding, providerRequestID, &analysis.Usage)
 	understanding := normalizeVideoUnderstanding(analysis.Text)
 	understanding["metadata"] = metadata
 	understanding["model"] = analysis.Model
@@ -1105,8 +1105,6 @@ func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReque
 			EndSecond:         seg.EndSecond,
 			Duration:          seg.Duration,
 			RetailSKU:         datatypes.NewJSONType(pinnedSKU),
-			EstimatedCredits:  0,
-			CreditsCharged:    0,
 		}
 		if err := repo.CreateSegment(ctx, segment); err != nil {
 			gen.Status = "failed"
@@ -2186,14 +2184,12 @@ func persistVideoGenerationJobPlanned(ctx context.Context, projectID, userID, ta
 		})
 	}
 	gen := &model.VideoGeneration{
-		UserID:           userID,
-		ProjectID:        projectID,
-		TaskID:           taskID,
-		Status:           "planned",
-		ResolvedParams:   datatypes.NewJSONType(cfg),
-		References:       datatypes.JSON(references),
-		PricingBreakdown: datatypes.NewJSONType(model.VideoPricingBreakdown{}),
-		CreditsCharged:   0,
+		UserID:         userID,
+		ProjectID:      projectID,
+		TaskID:         taskID,
+		Status:         "planned",
+		ResolvedParams: datatypes.NewJSONType(cfg),
+		References:     datatypes.JSON(references),
 	}
 	if err := repo.VideoGenerations().Create(ctx, gen); err != nil {
 		return nil, err
@@ -2203,8 +2199,6 @@ func persistVideoGenerationJobPlanned(ctx context.Context, projectID, userID, ta
 		if err == nil {
 			task.VideoGenerationID = gen.ID
 			task.SetVideoConfig(cfg)
-			task.VideoEstimatedCredits = 0
-			task.VideoCreditsCharged = 0
 			if updateErr := repo.Tasks().Update(ctx, task); updateErr != nil {
 				return nil, updateErr
 			}

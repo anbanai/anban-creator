@@ -4,7 +4,6 @@ export interface User {
   phone: string
   nickname: string
   avatar: string
-  credits_balance: number
   tier: string
   max_concurrent_limit: number
   invite_code: string

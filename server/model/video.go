@@ -70,15 +70,15 @@ type VideoTaskConfig struct {
 }
 
 type VideoTaskSegmentConfig struct {
-	Index            int    `json:"index"`
-	StartSecond      int64  `json:"start_second"`
-	EndSecond        int64  `json:"end_second"`
-	Duration         int64  `json:"duration"`
-	Prompt           string `json:"prompt,omitempty"`
-	ModelKey         string `json:"model_key,omitempty"`
-	Model            string `json:"model,omitempty"`
-	Resolution       string `json:"resolution,omitempty"`
-	Ratio            string `json:"ratio,omitempty"`
+	Index       int    `json:"index"`
+	StartSecond int64  `json:"start_second"`
+	EndSecond   int64  `json:"end_second"`
+	Duration    int64  `json:"duration"`
+	Prompt      string `json:"prompt,omitempty"`
+	ModelKey    string `json:"model_key,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Resolution  string `json:"resolution,omitempty"`
+	Ratio       string `json:"ratio,omitempty"`
 }
 
 // VideoReferenceAsset is a Studio/API-facing reference saved on
@@ -98,29 +98,4 @@ type VideoReferenceAsset struct {
 	MimeType             string   `json:"mime_type,omitempty"`
 	FileSize             int64    `json:"file_size,omitempty"`
 	InputDurationSeconds float64  `json:"input_duration_seconds,omitempty"`
-}
-
-// VideoPricingBreakdown records the resolved official-price estimate used for
-// task billing.
-type VideoPricingBreakdown struct {
-	CNY              float64                        `json:"cny"`
-	CreditMultiplier int                            `json:"credit_multiplier"`
-	CreditsPerCNY    int                            `json:"credits_per_cny"`
-	TierMultiplier   float64                        `json:"tier_multiplier,omitempty"`
-	UserMultiplier   float64                        `json:"user_multiplier,omitempty"`
-	InputVideo       bool                           `json:"input_video"`
-	InputSeconds     float64                        `json:"input_seconds,omitempty"`
-	OutputSeconds    int64                          `json:"output_seconds"`
-	SegmentCount     int                            `json:"segment_count,omitempty"`
-	Resolution       string                         `json:"resolution"`
-	Ratio            string                         `json:"ratio"`
-	ModelKey         string                         `json:"model_key"`
-	Segments         []VideoPricingSegmentBreakdown `json:"segments,omitempty"`
-}
-
-type VideoPricingSegmentBreakdown struct {
-	Index   int     `json:"index"`
-	Seconds int64   `json:"seconds"`
-	CNY     float64 `json:"cny"`
-	Credits int     `json:"credits"`
 }

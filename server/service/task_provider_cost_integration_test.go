@@ -29,7 +29,7 @@ func setupLocalProviderCostTest(t *testing.T) (*TaskService, repository.Reposito
 	}
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	return svc, repo, repository.NewBillingCostRepository(db)
 }
 

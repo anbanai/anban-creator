@@ -813,37 +813,6 @@ describe('TaskDetailPage', () => {
     expect(analyticsHeading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('disables delivery controls for payment-required tasks', async () => {
-    mockTask(taskWith({
-      status: 'completed',
-      billing_status: 'payment_required',
-      billing_shortfall_credits: 3200,
-      result: null,
-    }))
-    vi.mocked(api.tasks.files).mockResolvedValue([
-      {
-        id: 'file-1',
-        task_id: 'task-1',
-        role: 'output',
-        file_name: 'article.html',
-        mime_type: 'text/html',
-        file_size: 1024,
-        url: '/api/v1/files/file-1',
-        created_at: '2026-07-06T03:00:00Z',
-      },
-    ])
-
-    render(<TaskDetailPage />)
-
-    expect(await screen.findByText('生成文件 (1)')).toBeInTheDocument()
-    expect(screen.getByText('交付已锁定')).toBeInTheDocument()
-    const zipButton = screen.getByRole('button', { name: /下载全部/ })
-    expect(zipButton).toBeDisabled()
-    expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /下载 article\.html/ })).toBeDisabled()
-    expect(api.tasks.videoProduction).not.toHaveBeenCalled()
-  })
-
   it('lets completed tasks be cloned as a fresh task', async () => {
     mockTask(taskWith({
       id: 'task-1',
@@ -1039,46 +1008,7 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
-      credits_charged: 128,
-      credits_summary: {
-        task_consumed: 128,
-        operation_consumed: 80,
-        refunded: 20,
-        net_consumed: 188,
-      },
-      credit_transactions: [
-        {
-          id: 1,
-          user_id: 'user-1',
-          type: 'task_deduct',
-          amount: -128,
-          balance_after: 872,
-          task_id: 'task-1',
-          description: '任务消耗 (article) -128',
-          created_at: '2026-07-03T08:00:00Z',
-        },
-        {
-          id: 2,
-          user_id: 'user-1',
-          type: 'image_gen',
-          amount: -80,
-          balance_after: 792,
-          task_id: 'task-1',
-          description: '操作扣费 (image_gen) -80',
-          created_at: '2026-07-03T08:01:00Z',
-        },
-        {
-          id: 3,
-          user_id: 'user-1',
-          type: 'task_refund',
-          amount: 20,
-          balance_after: 812,
-          task_id: 'task-1',
-          description: '任务取消退还 +20',
-          created_at: '2026-07-03T08:02:00Z',
-        },
-      ],
-      total_cost_usd: 1.23,
+      billing_price_credits: 6000,
       result: null,
       project_snapshot: {
         project_name: '快照项目',
@@ -1114,30 +1044,7 @@ describe('TaskDetailPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '概览' }))
     expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('积分消耗')).toBeInTheDocument()
-    expect(screen.queryByText('操作消耗')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '查看明细' }))
-    await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: '任务详情' })).not.toBeInTheDocument()
-    })
-    const creditDialogTitle = await screen.findByRole('heading', { name: '积分明细' })
-    const creditDialog = creditDialogTitle.closest('[data-slot="dialog-content"]') as HTMLElement
-    expect(within(creditDialog).getByText('积分明细')).toBeInTheDocument()
-    expect(within(creditDialog).getAllByText('积分消耗').length).toBeGreaterThan(0)
-    expect(within(creditDialog).getByText('操作消耗')).toBeInTheDocument()
-    expect(within(creditDialog).getByText('退还积分')).toBeInTheDocument()
-    expect(within(creditDialog).getByText('净消耗')).toBeInTheDocument()
-    expect(screen.getAllByText('188').length).toBeGreaterThan(0)
-    expect(screen.getByText('图片生成')).toBeInTheDocument()
-    expect(screen.getByText('-80')).toBeInTheDocument()
-    expect(screen.getByText('生成公众号文章扣除积分128')).toBeInTheDocument()
-    expect(screen.getByText('AI 生图扣除积分80')).toBeInTheDocument()
-    expect(screen.queryByText('执行成本')).not.toBeInTheDocument()
-    expect(screen.queryByText('$1.23')).not.toBeInTheDocument()
-
-    fireEvent.click(within(creditDialog).getByRole('button', { name: 'Close' }))
-    expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('任务固定价').parentElement).toHaveTextContent('6,000 积分')
   })
 
   it('shows generated video files in the files list and opens the video result in a dialog', async () => {
@@ -1146,8 +1053,6 @@ describe('TaskDetailPage', () => {
       status: 'completed',
       prompt: '做一条办公室个人 IP 种草视频',
       video_generation_id: 'vg-1',
-      video_estimated_credits: 7440,
-      video_credits_charged: 7440,
       video_creator_input: {
         brief: '做一条办公室个人 IP 种草视频',
         references: [{ type: 'video_url', url: 'https://cdn.example.com/ref.mp4' }],
@@ -1163,7 +1068,6 @@ describe('TaskDetailPage', () => {
         resolution: '720p',
         ratio: '9:16',
         duration: 15,
-        estimated_credits: 7440,
         references: [{ type: 'video_url', url: 'https://cdn.example.com/ref.mp4', reference_role: 'rhythm', input_duration_seconds: 60 }],
       },
       result: null,
@@ -1212,7 +1116,8 @@ describe('TaskDetailPage', () => {
     expect(within(videoDialog).getByText('创作参数')).toBeInTheDocument()
     expect(within(videoDialog).getByText('生成任务 ID')).toBeInTheDocument()
     expect(within(videoDialog).getByText('参考素材')).toBeInTheDocument()
-    expect(within(videoDialog).getByText(/已消耗 7,440/)).toBeInTheDocument()
+    expect(within(videoDialog).getByText('任务固定价').parentElement).toHaveTextContent('6,000 积分')
+    expect(within(videoDialog).queryByText(/已消耗/)).not.toBeInTheDocument()
   })
 
   it('shows only user video input before agent resolves execution params', async () => {

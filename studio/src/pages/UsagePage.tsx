@@ -1,22 +1,14 @@
-import { useState, useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import StatsCardSkeleton from '@/components/StatsCardSkeleton'
-import QueryErrorState from '@/components/QueryErrorState'
-import { api } from '@/lib/api'
-import { queryKeys } from '@/lib/query-keys'
-import { formatUSD } from '@/lib/utils'
-import { contentTypeLabel } from '@/lib/labels'
-import { formatDateYMD } from '@/lib/labels'
-import { Card } from '@/components/ui/card'
-import StatsCard from '@/components/StatsCard'
 import PageHeader from '@/components/layout/PageHeader'
-import type { UsageStats, TypeStatEntry } from '@/types'
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return n.toLocaleString()
-}
+import QueryErrorState from '@/components/QueryErrorState'
+import StatsCard from '@/components/StatsCard'
+import StatsCardSkeleton from '@/components/StatsCardSkeleton'
+import { Card } from '@/components/ui/card'
+import { api } from '@/lib/api'
+import { contentTypeLabel, formatDateYMD } from '@/lib/labels'
+import { queryKeys } from '@/lib/query-keys'
+import type { UsageStats } from '@/types'
 
 type DateRange = '7d' | '30d' | '90d' | 'this_month'
 
@@ -30,84 +22,45 @@ const dateRangeOptions: { value: DateRange; label: string }[] = [
 function getDateRange(range: DateRange): { from: string; to: string } {
   const now = new Date()
   const to = formatDateYMD(now)
-  switch (range) {
-    case '7d': {
-      const from = new Date(now)
-      from.setDate(now.getDate() - 6)
-      return { from: formatDateYMD(from), to }
-    }
-    case '30d': {
-      const from = new Date(now)
-      from.setDate(now.getDate() - 29)
-      return { from: formatDateYMD(from), to }
-    }
-    case '90d': {
-      const from = new Date(now)
-      from.setDate(now.getDate() - 89)
-      return { from: formatDateYMD(from), to }
-    }
-    case 'this_month': {
-      const from = new Date(now.getFullYear(), now.getMonth(), 1)
-      return { from: formatDateYMD(from), to }
-    }
+  if (range === 'this_month') {
+    return { from: formatDateYMD(new Date(now.getFullYear(), now.getMonth(), 1)), to }
   }
+  const days = range === '7d' ? 7 : range === '90d' ? 90 : 30
+  const from = new Date(now)
+  from.setDate(now.getDate() - days + 1)
+  return { from: formatDateYMD(from), to }
 }
 
 export default function UsagePage() {
   const [dateRange, setDateRange] = useState<DateRange>('30d')
-
-  const { from, to } = useMemo(() => getDateRange(dateRange), [dateRange])
-
-  const { data: stats, isLoading, isError, refetch } = useQuery({
-    queryKey: queryKeys.usage.stats({ from, to }),
-    queryFn: () => api.usage.stats({ from, to }),
+  const params = useMemo(() => getDateRange(dateRange), [dateRange])
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: queryKeys.usage.stats(params),
+    queryFn: () => api.usage.stats(params),
   })
 
   if (isError) {
     return (
       <div className="space-y-6">
-        <PageHeader title="用量统计" description="查看你的 LLM 资源消耗和费用。" />
+        <PageHeader title="任务用量" description="查看各类创作任务数量。" />
         <QueryErrorState onRetry={() => refetch()} />
       </div>
     )
   }
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title="用量统计" description="查看你的 LLM 资源消耗和费用。" />
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => <StatsCardSkeleton key={i} />)}
-        </div>
-      </div>
-    )
-  }
-
-  const s: UsageStats = stats ?? {
-    total_tasks: 0,
-    total_input_tokens: 0,
-    total_output_tokens: 0,
-    total_cache_read_tokens: 0,
-    total_cache_creation_tokens: 0,
-    total_cost_usd: 0,
-    by_type: {},
-  }
-
-  const byTypeEntries = Object.entries(s.by_type ?? {})
+  const stats: UsageStats = data ?? { total_tasks: 0, by_type: {} }
+  const byType = Object.entries(stats.by_type ?? {}).sort((a, b) => b[1].count - a[1].count)
 
   return (
     <div className="space-y-6">
-      <PageHeader title="用量统计" description="查看你的 LLM 资源消耗和费用。">
-
+      <PageHeader title="任务用量" description="查看各类创作任务数量。">
         <div className="flex items-center gap-1 rounded-lg border border-border p-0.5">
           {dateRangeOptions.map(({ value, label }) => (
             <button
               key={value}
               onClick={() => setDateRange(value)}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                dateRange === value
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
+                dateRange === value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {label}
@@ -116,73 +69,31 @@ export default function UsagePage() {
         </div>
       </PageHeader>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <StatsCard
-          title="总输入 Tokens"
-          value={formatTokenCount(s.total_input_tokens)}
-          description="发送到模型的 token 数"
-        />
-        <StatsCard
-          title="总输出 Tokens"
-          value={formatTokenCount(s.total_output_tokens)}
-          description="模型生成的 token 数"
-        />
-        <StatsCard
-          title="缓存读取"
-          value={formatTokenCount(s.total_cache_read_tokens)}
-          description="从缓存读取的 token 数"
-        />
-        <StatsCard
-          title="缓存创建"
-          value={formatTokenCount(s.total_cache_creation_tokens)}
-          description="写入缓存的 token 数"
-        />
-        <StatsCard
-          title="总费用"
-          value={formatUSD(s.total_cost_usd)}
-          description={`共 ${s.total_tasks} 个任务`}
-        />
-      </div>
-
-      {/* Per-type breakdown */}
-      {byTypeEntries.length > 0 && (
-        <Card>
-          <div className="border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold text-foreground">按类型分组</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                  <th className="px-4 py-3 font-medium">类型</th>
-                  <th className="px-4 py-3 font-medium">任务数</th>
-                  <th className="px-4 py-3 font-medium">输入 Tokens</th>
-                  <th className="px-4 py-3 font-medium">输出 Tokens</th>
-                  <th className="px-4 py-3 font-medium">缓存读取</th>
-                  <th className="px-4 py-3 font-medium">缓存创建</th>
-                  <th className="px-4 py-3 font-medium">费用</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byTypeEntries.map(([type, entry]: [string, TypeStatEntry]) => (
-                  <tr key={type} className="border-b border-border transition-colors duration-150 hover:bg-accent">
-                    <td className="px-4 py-3 font-medium">
-                      {contentTypeLabel[type as keyof typeof contentTypeLabel] ?? type}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">{entry.count}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatTokenCount(entry.input_tokens)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatTokenCount(entry.output_tokens)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatTokenCount(entry.cache_read_tokens)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatTokenCount(entry.cache_creation_tokens)}</td>
-                    <td className="px-4 py-3 font-medium">{formatUSD(entry.cost_usd)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+      {isLoading ? <StatsCardSkeleton /> : (
+        <div className="max-w-sm">
+          <StatsCard title="任务数" value={stats.total_tasks.toLocaleString()} description="按创建时间统计" />
+        </div>
       )}
+
+      <Card>
+        <div className="border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold text-foreground">按类型分组</h2>
+        </div>
+        {isLoading ? (
+          <div className="p-4 text-sm text-muted-foreground">加载中...</div>
+        ) : byType.length === 0 ? (
+          <div className="p-8 text-center text-sm text-muted-foreground">当前时间范围内暂无任务</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {byType.map(([type, entry]) => (
+              <div key={type} className="flex items-center justify-between px-4 py-3 text-sm">
+                <span className="font-medium">{contentTypeLabel[type as keyof typeof contentTypeLabel] ?? type}</span>
+                <span className="tabular-nums text-muted-foreground">{entry.count.toLocaleString()} 个</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   )
 }

@@ -149,13 +149,6 @@ type bulkTasksResponse struct {
 	Results   []bulkTaskResult `json:"results"`
 }
 
-type taskCreditsSummary struct {
-	TaskConsumed      int `json:"task_consumed"`
-	OperationConsumed int `json:"operation_consumed"`
-	Refunded          int `json:"refunded"`
-	NetConsumed       int `json:"net_consumed"`
-}
-
 type videoProductionResponse struct {
 	TaskID         string                             `json:"task_id"`
 	ScenarioKey    string                             `json:"scenario_key,omitempty"`
@@ -318,10 +311,10 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if errors.Is(err, service.ErrInsufficientCredits) {
+		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
-				"code": 40200,
-				"msg":  "insufficient_credits",
+				"code": 40202,
+				"msg":  "billing_task_admission_rejected",
 			})
 		}
 		return Error(c, fiber.StatusInternalServerError, "failed to create task")
@@ -389,45 +382,7 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 	}
 
 	resp := taskAPIResponse(task)
-	if h.repo != nil {
-		if tx, err := h.repo.Credits().FindDeductionByTaskID(c.Context(), task.ID); err == nil && tx != nil && tx.Amount < 0 {
-			charged := -tx.Amount
-			resp["credits_charged"] = charged
-		}
-		if transactions, err := h.repo.Credits().FindByTaskIDAndUserID(c.Context(), task.ID, userID); err == nil {
-			resp["credit_transactions"] = transactions
-			summary := summarizeTaskCredits(transactions)
-			resp["credits_summary"] = summary
-		}
-	}
-
 	return Success(c, resp)
-}
-
-func summarizeTaskCredits(transactions []*model.CreditTransaction) taskCreditsSummary {
-	var summary taskCreditsSummary
-	for _, tx := range transactions {
-		if tx == nil {
-			continue
-		}
-		if tx.Amount < 0 {
-			consumed := -tx.Amount
-			if tx.Type == model.CreditTypeTaskDeduct {
-				summary.TaskConsumed += consumed
-			} else {
-				summary.OperationConsumed += consumed
-			}
-			continue
-		}
-		if tx.Amount > 0 {
-			summary.Refunded += tx.Amount
-		}
-	}
-	summary.NetConsumed = summary.TaskConsumed + summary.OperationConsumed - summary.Refunded
-	if summary.NetConsumed < 0 {
-		summary.NetConsumed = 0
-	}
-	return summary
 }
 
 // Cancel handles POST /api/v1/tasks/:id/cancel.
@@ -500,10 +455,10 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if errors.Is(err, service.ErrInsufficientCredits) {
+		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
-				"code": 40200,
-				"msg":  "insufficient_credits",
+				"code": 40202,
+				"msg":  "billing_task_admission_rejected",
 			})
 		}
 		return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
@@ -823,8 +778,8 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 		}
 		newTask, err := h.service.Clone(c.Context(), id)
 		if err != nil {
-			if errors.Is(err, service.ErrInsufficientCredits) {
-				results = append(results, bulkTaskResult{ID: id, Reason: "insufficient_credits"})
+			if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
+				results = append(results, bulkTaskResult{ID: id, Reason: "billing_task_admission_rejected"})
 				continue
 			}
 			h.logger.Error().Err(err).Str("task_id", id).Msg("bulk clone: task failed")
@@ -1550,8 +1505,7 @@ func validateUUIDParam(c fiber.Ctx, paramName string) (string, error) {
 	return val, nil
 }
 
-// UsageStats handles GET /api/v1/usage/stats.
-// Returns aggregated LLM token usage and cost statistics for the authenticated user.
+// UsageStats handles GET /api/v1/usage/stats and returns task activity only.
 func (h *TaskHandler) UsageStats(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {

@@ -57,6 +57,7 @@ const fixtures = vi.hoisted(() => {
     result: null,
     published: false,
     published_at: null,
+    billing_price_credits: 6000,
     created_at: '2026-07-06T01:00:00.000Z',
     started_at: '',
     completed_at: '',
@@ -73,6 +74,7 @@ const fixtures = vi.hoisted(() => {
     result: null,
     published: false,
     published_at: null,
+    billing_price_credits: 6000,
     publish_approval_state: 'pending',
     workflow_status: {
       version: 'creation_workflow_v1',
@@ -107,20 +109,18 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.projects,
         list: vi.fn().mockResolvedValue([fixtures.project]),
       },
-      credits: {
-        ...actual.api.credits,
-        balance: vi.fn().mockResolvedValue({ balance: 1000 }),
-        pricing: vi.fn().mockResolvedValue({
-          task_costs: {},
-          agent_runtime_reserve: { article: 4000, ecommerce: 3000 },
-          model_costs: {},
-          ecommerce_module_prices: {},
-          recharge_tiers: [
-            { key: 'basic', label: '基础包', price_cny: 10, credits: 10000, bonus_credits: 0, enabled: true },
-            { key: 'standard', label: '标准包', price_cny: 50, credits: 52000, bonus_credits: 2000, enabled: true },
-            { key: 'pro', label: '进阶包', price_cny: 100, credits: 110000, bonus_credits: 10000, enabled: true },
+      billing: {
+        ...actual.api.billing,
+        wallet: vi.fn().mockResolvedValue({ paid: 1000, promotional: 0, debt: 0, balance: 1000 }),
+        catalog: vi.fn().mockResolvedValue({
+          catalog_id: 'retail-test-v1',
+          currency: 'credits',
+          skus: [
+            { id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+            { id: 'task.seednote.v1', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.ecommerce.v1', operation: 'task.ecommerce', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
+            { id: 'task.montage.v1', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
           ],
-          income: { daily_sign_in: 100, register_bonus: 1000, invite_reward: 1000 },
         }),
       },
       videoCreator: {
@@ -181,16 +181,27 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect((await screen.findAllByText('审核后放行到公众号草稿箱')).length).toBeGreaterThan(0)
   })
 
-  it('uses backend-matching fallback pricing for article tasks when pricing omits task costs', async () => {
-    vi.mocked(api.credits.balance).mockResolvedValueOnce({ balance: 5000 })
+  it('uses the active catalog price for article tasks', async () => {
+    vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
-    expect(await screen.findByText(/基础任务费：4000 × 1 =/)).toBeInTheDocument()
-    expect(screen.getByText(/余额：5,000 →/)).toBeInTheDocument()
+    expect(await screen.findByText(/固定任务价：6,000 × 1 =/)).toBeInTheDocument()
+    expect(screen.getByText(/余额：7,000 →/)).toBeInTheDocument()
     expect(screen.getByText('1,000')).toBeInTheDocument()
     expect(screen.queryByText(/运行预留/)).not.toBeInTheDocument()
-    expect(screen.queryByText('积分不足，补充积分后再创建。')).not.toBeInTheDocument()
+    expect(screen.queryByText(/充值后再创建/)).not.toBeInTheDocument()
+  })
+
+  it('blocks creation instead of treating an unavailable catalog price as zero', async () => {
+    vi.mocked(api.billing.catalog).mockRejectedValueOnce(new Error('catalog unavailable'))
+    vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
+    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
+
+    expect(await screen.findByText('固定任务价暂不可用')).toBeInTheDocument()
+    expect(screen.getByText('固定价格目录暂不可用，请稍后重试。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+    expect(screen.queryByText(/固定任务价：0/)).not.toBeInTheDocument()
   })
 
   it('shows ecommerce creation as a base task fee instead of a module package charge', async () => {
@@ -204,9 +215,9 @@ describe('TasksPage URL-driven recovery filters', () => {
     renderTasksPage('/tasks?create=true&type=ecommerce&project_id=project-ecommerce&intent=new')
 
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
-    expect(await screen.findByText(/基础任务费：3000 × 1 =/)).toBeInTheDocument()
+    expect(await screen.findByText(/固定任务价：3,000 × 1 =/)).toBeInTheDocument()
     expect(screen.queryByText(/模块套餐预估/)).not.toBeInTheDocument()
-    expect(screen.getByText(/所选交付模块会影响后续图片生成和理解操作用量/)).toBeInTheDocument()
+    expect(screen.getByText(/成功交付的图片、视频等增值操作/)).toBeInTheDocument()
   })
 })
 
@@ -231,7 +242,7 @@ describe('TasksPage Seednote reference materials', () => {
     vi.clearAllMocks()
     referenceMaterialInputHarness.props = undefined
     vi.mocked(api.tasks.list).mockResolvedValue({ items: [], total: 0 })
-    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
     vi.mocked(api.tasks.create).mockResolvedValue({
       ...fixtures.failedTask,
       id: 'created-seednote-task',
@@ -333,7 +344,7 @@ describe('TasksPage Montage creation', () => {
     referenceMaterialInputHarness.props = undefined
     vi.mocked(api.tasks.list).mockResolvedValue({ items: [], total: 0 })
     vi.mocked(api.projects.list).mockResolvedValue([montageProject])
-    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 10000 })
+    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
     vi.mocked(api.tasks.create).mockResolvedValue({
       ...fixtures.failedTask,
       id: 'created-montage-task',

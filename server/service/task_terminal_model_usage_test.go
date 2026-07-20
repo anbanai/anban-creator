@@ -38,7 +38,7 @@ func TestUpdateExecutionResultPersistsAllEvidenceWithOneUpdate(t *testing.T) {
 	t.Cleanup(func() { _ = db.Callback().Update().Remove(callbackName) })
 
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 	result := &agent.ExecutionResult{
 		Success:    true,
 		ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "winner", InputTokens: 7}},
@@ -53,9 +53,9 @@ func TestUpdateExecutionResultPersistsAllEvidenceWithOneUpdate(t *testing.T) {
 }
 
 func TestUpdateExecutionResultReturnsErrorForMissingTask(t *testing.T) {
-	repo := setupCreditTestRepo(t)
+	repo := repository.New(setupTaskTestDB(t))
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 
 	err := svc.UpdateExecutionResult(context.Background(), uuid.NewString(), &agent.ExecutionResult{Success: true})
 	if err == nil {
@@ -67,7 +67,7 @@ func TestUpdateExecutionResultPersistsTerminalModelUsageForEveryOutcome(t *testi
 	for _, success := range []bool{true, false} {
 		t.Run(map[bool]string{true: "success", false: "failure"}[success], func(t *testing.T) {
 			ctx := context.Background()
-			repo := setupCreditTestRepo(t)
+			repo := repository.New(setupTaskTestDB(t))
 			task := &model.Task{
 				ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle,
 				Status: model.TaskStatusRunning,
@@ -76,7 +76,7 @@ func TestUpdateExecutionResultPersistsTerminalModelUsageForEveryOutcome(t *testi
 				t.Fatalf("create task: %v", err)
 			}
 			logger := zerolog.New(io.Discard)
-			svc := NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+			svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 			usage := []agent.ModelTokenUsage{
 				{
 					Provider: "volcengine_ark", Model: "doubao-seed-2-1-turbo-260628",
@@ -104,9 +104,9 @@ func TestUpdateExecutionResultPersistsTerminalModelUsageForEveryOutcome(t *testi
 			if !reflect.DeepEqual(found.TerminalModelUsage.Data(), []model.ModelTokenUsage(usage)) {
 				t.Fatalf("TerminalModelUsage = %#v, want %#v", found.TerminalModelUsage.Data(), usage)
 			}
-			if found.InputTokens != nil || found.OutputTokens != nil || found.CacheReadTokens != nil || found.CacheCreationTokens != nil || found.TotalCostUSD != nil {
-				t.Fatalf("legacy usage columns were written: input=%v output=%v cache_read=%v cache_creation=%v cost=%v",
-					found.InputTokens, found.OutputTokens, found.CacheReadTokens, found.CacheCreationTokens, found.TotalCostUSD)
+			if found.InputTokens != nil || found.OutputTokens != nil || found.CacheReadTokens != nil || found.CacheCreationTokens != nil {
+				t.Fatalf("legacy usage columns were written: input=%v output=%v cache_read=%v cache_creation=%v",
+					found.InputTokens, found.OutputTokens, found.CacheReadTokens, found.CacheCreationTokens)
 			}
 			if found.Result == nil {
 				t.Fatal("execution result JSON was not persisted")
@@ -115,8 +115,8 @@ func TestUpdateExecutionResultPersistsTerminalModelUsageForEveryOutcome(t *testi
 			if err := json.Unmarshal([]byte(*found.Result), &persisted); err != nil {
 				t.Fatalf("decode persisted result: %v", err)
 			}
-			if !reflect.DeepEqual(persisted.ModelUsage, usage) || persisted.CostStatus != agent.CostStatusReconciled {
-				t.Fatalf("persisted execution result = %+v, want terminal usage", persisted)
+			if len(persisted.ModelUsage) != 0 || persisted.CostStatus != "" {
+				t.Fatalf("public execution result leaked internal cost evidence: %+v", persisted)
 			}
 		})
 	}
@@ -124,7 +124,7 @@ func TestUpdateExecutionResultPersistsTerminalModelUsageForEveryOutcome(t *testi
 
 func TestUpdateExecutionResultPersistsUnreconciledTerminalStatus(t *testing.T) {
 	ctx := context.Background()
-	repo := setupCreditTestRepo(t)
+	repo := repository.New(setupTaskTestDB(t))
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle,
 		Status: model.TaskStatusFailed,
@@ -133,7 +133,7 @@ func TestUpdateExecutionResultPersistsUnreconciledTerminalStatus(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 	result := &agent.ExecutionResult{
 		Success: false, CostStatus: agent.CostStatusUnreconciled,
 		CostDiagnostics: []agent.CostDiagnostic{{Code: agent.CostDiagnosticMissingTerminalModelUsage}},
@@ -152,9 +152,9 @@ func TestUpdateExecutionResultPersistsUnreconciledTerminalStatus(t *testing.T) {
 }
 
 func TestUpdateExecutionResultRejectsNilInsteadOfSilentlySkippingPersistence(t *testing.T) {
-	repo := setupCreditTestRepo(t)
+	repo := repository.New(setupTaskTestDB(t))
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.UpdateExecutionResult(context.Background(), uuid.NewString(), nil); err == nil {
 		t.Fatal("UpdateExecutionResult(nil) = nil, want explicit error")

@@ -31,14 +31,14 @@ type ImageGeneration struct {
 	Watermark              bool                    `gorm:"default:false" json:"watermark,omitempty"`
 	Status                 string                  `gorm:"type:varchar(16);index;not null;default:'generating'" json:"status"`
 	Error                  string                  `gorm:"type:text" json:"error,omitempty"`
-	InputTokens            int                     `json:"input_tokens,omitempty"`
-	OutputTokens           int                     `json:"output_tokens,omitempty"`
-	TextInputTokens        int64                   `json:"text_input_tokens,omitempty"`
-	TextCachedInputTokens  int64                   `json:"text_cached_input_tokens,omitempty"`
-	ImageInputTokens       int64                   `json:"image_input_tokens,omitempty"`
-	ImageCachedInputTokens int64                   `json:"image_cached_input_tokens,omitempty"`
-	ImageOutputTokens      int64                   `json:"image_output_tokens,omitempty"`
-	TotalTokens            int64                   `json:"total_tokens,omitempty"`
+	InputTokens            int                     `json:"-"`
+	OutputTokens           int                     `json:"-"`
+	TextInputTokens        int64                   `json:"-"`
+	TextCachedInputTokens  int64                   `json:"-"`
+	ImageInputTokens       int64                   `json:"-"`
+	ImageCachedInputTokens int64                   `json:"-"`
+	ImageOutputTokens      int64                   `json:"-"`
+	TotalTokens            int64                   `json:"-"`
 	ReferenceFiles         string                  `gorm:"type:text" json:"reference_files,omitempty"`
 	MaskFileID             string                  `gorm:"type:char(36)" json:"mask_file_id,omitempty"`
 	Cost                   int                     `gorm:"default:0" json:"cost,omitempty"`

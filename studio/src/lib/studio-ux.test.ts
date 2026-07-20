@@ -48,6 +48,7 @@ function task(overrides: Partial<Task> = {}): Task {
     result: null,
     published: false,
     published_at: null,
+    billing_price_credits: 6000,
     created_at: '2026-07-01T00:00:00.000Z',
     started_at: '',
     completed_at: '',
@@ -111,27 +112,45 @@ describe('studio business UX helpers', () => {
     })
   })
 
-  it('calculates creation cost with goal multiplier and ignores legacy runtime reserve pricing', () => {
+  it('calculates batch creation cost from the immutable task SKU', () => {
     expect(
       taskCreationCostPreview({
-        pricing: {
-          task_costs: { article: 4000 },
-          model_costs: {},
-          recharge_tiers: [],
-          income: { daily_sign_in: 100, register_bonus: 1000, invite_reward: 1000 },
-          agent_runtime_reserve: { article: 500 },
+        catalog: {
+          catalog_id: 'retail-v1',
+          currency: 'credits',
+          skus: [{
+            id: 'task.article.v1',
+            operation: 'task.article',
+            charge_policy: 'task_admission',
+            price_credits: 6000,
+            delivery: 'article_artifacts_verified',
+          }],
         },
         type: 'article',
         quantity: 2,
-        goalMode: true,
         balance: 30000,
       }),
     ).toMatchObject({
-      baseCost: 4000,
+      priceAvailable: true,
+      baseCost: 6000,
       billableQuantity: 2,
-      multiplier: 3,
-      totalCost: 24000,
-      remaining: 6000,
+      totalCost: 12000,
+      remaining: 18000,
+      insufficient: false,
+    })
+  })
+
+  it('marks task creation pricing unavailable when no active SKU can be resolved', () => {
+    expect(taskCreationCostPreview({
+      catalog: undefined,
+      type: 'article',
+      quantity: 1,
+      balance: 30000,
+    })).toMatchObject({
+      priceAvailable: false,
+      baseCost: 0,
+      totalCost: 0,
+      remaining: 30000,
       insufficient: false,
     })
   })

@@ -55,6 +55,7 @@ const articleTask: Task = {
   result: null,
   published: false,
   published_at: null,
+  billing_price_credits: 6000,
   created_at: '2026-07-15T01:02:03.000Z',
   started_at: '2026-07-15T01:03:04.000Z',
   completed_at: '2026-07-15T01:08:09.000Z',
@@ -73,9 +74,6 @@ function createSheetProps(overrides: Partial<TaskDetailsSheetProps> = {}): TaskD
     task: articleTask,
     project,
     files: [],
-    netConsumedCredits: 188,
-    showCreditDetails: true,
-    onOpenCreditDetails: vi.fn(),
     logs: ['## 阶段日志', '- 已完成选题'],
     sseError: null,
     autoScrollLogs: true,
@@ -129,7 +127,7 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('已完成')).toBeInTheDocument()
   })
 
-  it('opens on Overview with semantic task values and credit details action', () => {
+  it('opens on Overview with semantic task values and fixed price', () => {
     const props = createSheetProps()
 
     render(<ControlledTaskDetailsSheet {...props} />)
@@ -138,18 +136,14 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('手动创建')).toBeInTheDocument()
     expect(within(screen.getByRole('tabpanel')).getByText('创建时项目名称')).toBeInTheDocument()
-    expect(screen.getByText('188')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '查看明细' }))
-    expect(props.onOpenCreditDetails).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('6,000 积分')).toBeInTheDocument()
   })
 
-  it('groups Overview into timing and project-credit surfaces', () => {
+  it('groups Overview into timing and project-price surfaces', () => {
     render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
 
     expect(screen.getByRole('region', { name: '任务时间与来源' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '项目与积分' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '查看明细' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '项目与价格' })).toBeInTheDocument()
   })
 
   it('places configuration, materials, and logs in named grouped surfaces', () => {
@@ -510,7 +504,6 @@ describe('TaskConfigurationDetails', () => {
         preflight: true,
         retake_budget: 2,
         delivery_targets: ['final_video', 'quality_review'],
-        estimated_credits: 7440,
         segments: [{
           index: 1,
           start_second: 0,
@@ -520,7 +513,6 @@ describe('TaskConfigurationDetails', () => {
           model_key: 'seedance-2.0-mini',
           resolution: '720p',
           ratio: '9:16',
-          estimated_credits: 3600,
         }],
         references: [{
           type: 'video_url',
@@ -529,8 +521,6 @@ describe('TaskConfigurationDetails', () => {
           input_duration_seconds: 60,
         }],
       },
-      video_estimated_credits: 7600,
-      video_credits_charged: 7550,
     }
 
     render(<TaskConfigurationDetails task={videoTask} project={project} />)
@@ -548,8 +538,7 @@ describe('TaskConfigurationDetails', () => {
     expect(screen.getByText('30 岁效率博主，黑色衬衫')).toBeInTheDocument()
     expect(screen.getByText('职场新人')).toBeInTheDocument()
     expect(screen.getByText('把会议记录变成行动清单')).toBeInTheDocument()
-    expect(screen.getByText('7,600')).toBeInTheDocument()
-    expect(screen.getByText('7,550')).toBeInTheDocument()
+    expect(screen.getByText('6,000 积分')).toBeInTheDocument()
     expect(screen.getByText('office_story')).toBeInTheDocument()
     expect(screen.getByText('sequence')).toBeInTheDocument()
     expect(screen.getByText('ai_planned')).toBeInTheDocument()
@@ -559,7 +548,7 @@ describe('TaskConfigurationDetails', () => {
     expect(screen.getByText('final_video、quality_review')).toBeInTheDocument()
     expect(screen.getByText('#1 · 0–8s · 时长 8s')).toBeInTheDocument()
     expect(screen.getByText('办公室开场并展示行动清单')).toBeInTheDocument()
-    expect(screen.getByText(/豆包 Seedance 2\.0 Mini（轻量） · 720p · 9:16 · 3,600 积分/)).toBeInTheDocument()
+    expect(screen.getByText(/豆包 Seedance 2\.0 Mini（轻量） · 720p · 9:16/)).toBeInTheDocument()
     expect(screen.getByText('节奏参考 · https://cdn.example.com/ref.mp4')).toBeInTheDocument()
     expect(screen.getByText('输入时长 60s')).toBeInTheDocument()
   })
@@ -595,7 +584,7 @@ describe('TaskConfigurationDetails', () => {
     expect(screen.getByText('预检').parentElement).toHaveTextContent('关闭')
   })
 
-  it('renders authoritative pricing and complete resolved reference audit data', () => {
+  it('renders fixed task price and complete resolved reference audit data', () => {
     const pricedVideoTask: Task = {
       ...articleTask,
       id: 'priced-video-task',
@@ -603,24 +592,10 @@ describe('TaskConfigurationDetails', () => {
       image_model_key: undefined,
       project_snapshot: { platform: 'videocreator' },
       video_creator_config: {
-        pricing_breakdown: {
-          cny: 0,
-          credits_per_cny: 100,
-          credit_multiplier: 0,
-          tier_multiplier: 1.25,
-          user_multiplier: 0.8,
-          input_video: false,
-          input_seconds: 0,
-          output_seconds: 12,
-          segment_count: 2,
-          resolution: '1080p',
-          ratio: '16:9',
-          model_key: 'seedance-2.0-fast',
-          segments: [
-            { index: 1, seconds: 0, cny: 0, credits: 0 },
-            { index: 2, seconds: 12, cny: 2.5, credits: 250 },
-          ],
-        },
+        resolution: '1080p',
+        ratio: '16:9',
+        duration: 12,
+        model_key: 'seedance-2.0-fast',
         references: [
           {
             type: 'video_url',
@@ -648,17 +623,7 @@ describe('TaskConfigurationDetails', () => {
 
     expect(screen.getByText('豆包 Seedance 2.0 Fast（快速）')).toBeInTheDocument()
     expect(screen.getByText('1080p · 16:9 · 12s')).toBeInTheDocument()
-    expect(screen.getByText('计价金额').parentElement).toHaveTextContent('0 CNY')
-    expect(screen.getByText('每元积分').parentElement).toHaveTextContent('100')
-    expect(screen.getByText('积分倍率').parentElement).toHaveTextContent('0')
-    expect(screen.getByText('档位倍率').parentElement).toHaveTextContent('1.25')
-    expect(screen.getByText('用户倍率').parentElement).toHaveTextContent('0.8')
-    expect(screen.getByText('输入视频').parentElement).toHaveTextContent('关闭')
-    expect(screen.getByText('计价输入时长').parentElement).toHaveTextContent('0s')
-    expect(screen.getByText('计价输出时长').parentElement).toHaveTextContent('12s')
-    expect(screen.getByText('计价分段数').parentElement).toHaveTextContent('2')
-    expect(screen.getByText('#1 · 0s · 0 CNY · 0 积分')).toBeInTheDocument()
-    expect(screen.getByText('#2 · 12s · 2.5 CNY · 250 积分')).toBeInTheDocument()
+    expect(screen.getByText('任务固定价').parentElement).toHaveTextContent('6,000 积分')
 
     expect(screen.getByText('完整复刻参考')).toBeInTheDocument()
     expect(screen.getByText('source.mp4')).toBeInTheDocument()

@@ -13,18 +13,15 @@ import (
 type VideoModelCatalog map[string]VideoModelSpec
 
 type VideoModelSpec struct {
-	Key                   string             `json:"key" yaml:"key"`
-	DisplayName           string             `json:"display_name" yaml:"display_name"`
-	ModelID               string             `json:"model_id" yaml:"model_id"`
-	SupportedResolutions  []string           `json:"supported_resolutions" yaml:"supported_resolutions"`
-	SupportedRatios       []string           `json:"supported_ratios" yaml:"supported_ratios"`
-	MinDuration           int64              `json:"min_duration" yaml:"min_duration"`
-	MaxDuration           int64              `json:"max_duration" yaml:"max_duration"`
-	SupportsVideoInput    bool               `json:"supports_video_input" yaml:"supports_video_input"`
-	Supports4K            bool               `json:"supports_4k" yaml:"supports_4k"`
-	NoInputPricePerSecond map[string]float64 `json:"no_input_price_per_second" yaml:"no_input_price_per_second"`
-	VideoInput5sMinPrice  map[string]float64 `json:"video_input_5s_min_price" yaml:"video_input_5s_min_price"`
-	VideoInput5sMaxPrice  map[string]float64 `json:"video_input_5s_max_price" yaml:"video_input_5s_max_price"`
+	Key                  string   `json:"key" yaml:"key"`
+	DisplayName          string   `json:"display_name" yaml:"display_name"`
+	ModelID              string   `json:"model_id" yaml:"model_id"`
+	SupportedResolutions []string `json:"supported_resolutions" yaml:"supported_resolutions"`
+	SupportedRatios      []string `json:"supported_ratios" yaml:"supported_ratios"`
+	MinDuration          int64    `json:"min_duration" yaml:"min_duration"`
+	MaxDuration          int64    `json:"max_duration" yaml:"max_duration"`
+	SupportsVideoInput   bool     `json:"supports_video_input" yaml:"supports_video_input"`
+	Supports4K           bool     `json:"supports_4k" yaml:"supports_4k"`
 }
 
 func DefaultVideoModelCatalog() VideoModelCatalog {
@@ -40,14 +37,6 @@ func DefaultVideoModelCatalog() VideoModelCatalog {
 			MaxDuration:          15,
 			SupportsVideoInput:   true,
 			Supports4K:           true,
-			NoInputPricePerSecond: map[string]float64{
-				"480p":  2.31 / 5,
-				"720p":  4.97 / 5,
-				"1080p": 12.39 / 5,
-				"4k":    25.27 / 5,
-			},
-			VideoInput5sMinPrice: map[string]float64{"480p": 2.53, "720p": 5.44, "1080p": 13.56, "4k": 27.99},
-			VideoInput5sMaxPrice: map[string]float64{"480p": 5.62, "720p": 12.10, "1080p": 30.13, "4k": 62.21},
 		},
 		"seedance-2.0-fast": {
 			Key:                  "seedance-2.0-fast",
@@ -58,12 +47,6 @@ func DefaultVideoModelCatalog() VideoModelCatalog {
 			MinDuration:          1,
 			MaxDuration:          15,
 			SupportsVideoInput:   true,
-			NoInputPricePerSecond: map[string]float64{
-				"480p": 1.86 / 5,
-				"720p": 4.00 / 5,
-			},
-			VideoInput5sMinPrice: map[string]float64{"480p": 1.99, "720p": 4.28},
-			VideoInput5sMaxPrice: map[string]float64{"480p": 4.42, "720p": 9.50},
 		},
 		"seedance-2.0-mini": {
 			Key:                  "seedance-2.0-mini",
@@ -74,12 +57,6 @@ func DefaultVideoModelCatalog() VideoModelCatalog {
 			MinDuration:          1,
 			MaxDuration:          15,
 			SupportsVideoInput:   true,
-			NoInputPricePerSecond: map[string]float64{
-				"480p": 1.16 / 5,
-				"720p": 2.48 / 5,
-			},
-			VideoInput5sMinPrice: map[string]float64{"480p": 1.27, "720p": 2.72},
-			VideoInput5sMaxPrice: map[string]float64{"480p": 2.81, "720p": 6.05},
 		},
 	}
 }
@@ -119,15 +96,6 @@ func VideoModelCatalogFromConfig(entries []config.VideoModelCatalogEntry) VideoM
 		}
 		if !existed || entry.Supports4K {
 			spec.Supports4K = entry.Supports4K
-		}
-		if len(entry.NoInputPricePerSecond) > 0 {
-			spec.NoInputPricePerSecond = entry.NoInputPricePerSecond
-		}
-		if len(entry.VideoInput5sMinPrice) > 0 {
-			spec.VideoInput5sMinPrice = entry.VideoInput5sMinPrice
-		}
-		if len(entry.VideoInput5sMaxPrice) > 0 {
-			spec.VideoInput5sMaxPrice = entry.VideoInput5sMaxPrice
 		}
 		catalog[entry.Key] = spec
 	}
