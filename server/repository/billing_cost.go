@@ -13,7 +13,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var ErrProviderCostConflict = errors.New("provider cost idempotency conflict")
+var (
+	ErrProviderCostConflict      = errors.New("provider cost idempotency conflict")
+	ErrProviderCostStatusMissing = errors.New("provider cost execution status missing after upsert")
+)
 
 // BillingCostRepository persists the internal provider-cost ledger. It has no
 // wallet methods so cost accounting cannot mutate customer balances.
@@ -185,14 +188,29 @@ func (r *billingCostRepository) UpsertExecutionCostStatus(ctx context.Context, s
 	}).Error; err != nil {
 		return err
 	}
-	persisted, err := r.FindExecutionCostStatus(ctx, status.ExecutionID)
+	persisted, err := r.findCurrentExecutionCostStatus(ctx, status.ExecutionID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: execution %q", ErrProviderCostStatusMissing, status.ExecutionID)
+		}
 		return err
 	}
 	if status.Status == model.BillingProviderCostStatusReconciled && persisted.Status == model.BillingProviderCostStatusReconciled && persisted.FinalizationFingerprint != status.FinalizationFingerprint {
 		return fmt.Errorf("%w: execution %q finalized with a different model set", ErrProviderCostConflict, status.ExecutionID)
 	}
 	return nil
+}
+
+func (r *billingCostRepository) findCurrentExecutionCostStatus(ctx context.Context, executionID string) (*model.BillingExecutionCostStatus, error) {
+	var status model.BillingExecutionCostStatus
+	query := r.db.WithContext(ctx)
+	if r.db.Dialector.Name() == "mysql" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.First(&status, "execution_id = ?", executionID).Error; err != nil {
+		return nil, err
+	}
+	return &status, nil
 }
 
 func validateExecutionCostStatus(status *model.BillingExecutionCostStatus) error {

@@ -69,6 +69,73 @@ func TestProviderCostRepositoryMySQLZeroRowsUsesSemanticReadback(t *testing.T) {
 	}
 }
 
+func TestProviderCostRepositoryMySQLFinalizationUsesCurrentLockingRead(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		initialSnapshot bool
+		currentRow      bool
+		wantMissing     bool
+	}{
+		{name: "existing unreconciled snapshot candidate", initialSnapshot: true, currentRow: true},
+		{name: "duplicate insert without initial status read", currentRow: true},
+		{name: "current row unexpectedly missing", wantMissing: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sqlDB, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock: %v", err)
+			}
+			t.Cleanup(func() { _ = sqlDB.Close() })
+			db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{})
+			if err != nil {
+				t.Fatalf("open mysql: %v", err)
+			}
+			incoming := &model.BillingExecutionCostStatus{
+				ExecutionID: "exec-current-read", Status: model.BillingProviderCostStatusReconciled,
+				FinalizationFingerprint: strings.Repeat("a", 64),
+			}
+			mock.ExpectBegin()
+			if test.initialSnapshot {
+				mock.ExpectQuery("SELECT status FROM billing_execution_cost_status WHERE execution_id = \\?").
+					WithArgs(incoming.ExecutionID).
+					WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(model.BillingProviderCostStatusUnreconciled))
+			}
+			mock.ExpectExec("INSERT INTO `billing_execution_cost_status`").WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectExec("UPDATE `billing_execution_cost_status` SET").WillReturnResult(sqlmock.NewResult(0, 0))
+			rows := sqlmock.NewRows([]string{"execution_id", "status", "finalization_fingerprint"})
+			if test.currentRow {
+				rows.AddRow(incoming.ExecutionID, model.BillingProviderCostStatusReconciled, strings.Repeat("b", 64))
+			}
+			mock.ExpectQuery("SELECT .* FROM `billing_execution_cost_status` WHERE execution_id = \\?.* FOR UPDATE").
+				WithArgs(incoming.ExecutionID, 1).WillReturnRows(rows)
+			mock.ExpectRollback()
+
+			err = db.Transaction(func(tx *gorm.DB) error {
+				if test.initialSnapshot {
+					var candidate string
+					if err := tx.Raw("SELECT status FROM billing_execution_cost_status WHERE execution_id = ?", incoming.ExecutionID).Scan(&candidate).Error; err != nil {
+						return err
+					}
+					if candidate != string(model.BillingProviderCostStatusUnreconciled) {
+						t.Fatalf("snapshot candidate = %q", candidate)
+					}
+				}
+				return NewBillingCostRepository(tx).UpsertExecutionCostStatus(context.Background(), incoming)
+			})
+			if test.wantMissing {
+				if !errors.Is(err, ErrProviderCostStatusMissing) {
+					t.Fatalf("error = %v, want ErrProviderCostStatusMissing", err)
+				}
+			} else if !errors.Is(err, ErrProviderCostConflict) {
+				t.Fatalf("error = %v, want ErrProviderCostConflict", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("SQL expectations: %v", err)
+			}
+		})
+	}
+}
+
 func TestProviderCostRepositoryDuplicateIsIdempotentAndDriftConflicts(t *testing.T) {
 	db := newProviderCostRepositoryDB(t)
 	repo := NewBillingCostRepository(db)
