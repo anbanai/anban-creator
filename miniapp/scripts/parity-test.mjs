@@ -27,6 +27,22 @@ function filesUnder(dir) {
   })
 }
 
+function assertSubmitButtonsDisabled(path, clickHandler, disabledBinding, expectedCount) {
+  const tags = [...read(path).matchAll(/<AbButton\b[\s\S]*?>/g)]
+    .map((match) => match[0])
+    .filter((tag) => tag.includes(`@click="${clickHandler}"`))
+  assert.equal(tags.length, expectedCount, `${path} should have ${expectedCount} ${clickHandler} submit buttons`)
+  for (const tag of tags) {
+    assert.equal(tag.includes(`:disabled="${disabledBinding}"`), true, `${path} ${clickHandler} button must be disabled by ${disabledBinding}`)
+  }
+}
+
+function assertSubmitGuard(path, functionName, guardPattern) {
+  const body = read(path)
+  const functionStart = new RegExp(`async function ${functionName}\\(\\) \\{\\s*${guardPattern.source}`)
+  assert.match(body, functionStart, `${path} ${functionName} must reject submission before validation or API calls`)
+}
+
 for (const path of [
   'src/api/request.ts',
   'src/api/api-keys.ts',
@@ -168,6 +184,18 @@ assertContains('src/types/asset.ts', [
   'export interface ReferenceAssetView',
   'download_url: string',
 ])
+
+assertSubmitButtonsDisabled('src/pages/projects/detail.vue', 'onSave', 'referenceUploading', 2)
+assertSubmitGuard('src/pages/projects/detail.vue', 'onSave', /if \(saving\.value \|\| referenceUploading\.value\) return/)
+assertSubmitButtonsDisabled('src/pages/plans/create.vue', 'handleSubmit', 'referenceUploading', 1)
+assertSubmitGuard('src/pages/plans/create.vue', 'handleSubmit', /if \(submitting\.value \|\| referenceUploading\.value\) return/)
+assertSubmitButtonsDisabled('src/pages/tasks/create.vue', 'onSubmit', '!canSubmit', 1)
+assertSubmitGuard('src/pages/tasks/create.vue', 'onSubmit', /if \(!canSubmit\.value \|\| referenceUploading\.value\) return/)
+assert.match(
+  read('src/pages/tasks/create.vue'),
+  /const canSubmit = computed\(\(\) => \{[\s\S]*?return !submitting\.value && !referenceUploading\.value[\s\S]*?\}\)/,
+  'task canSubmit must remain false for the complete reference upload lifecycle',
+)
 
 for (const path of filesUnder(resolve(root, 'src'))) {
   if (!/\.(ts|vue)$/.test(path)) continue

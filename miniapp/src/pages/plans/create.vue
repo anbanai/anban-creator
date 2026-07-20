@@ -257,6 +257,7 @@
       <AbButton
         type="primary"
         block
+        :disabled="referenceUploading"
         :loading="submitting"
         @click="handleSubmit"
       >
@@ -542,7 +543,7 @@ function validate(): boolean {
 // --- Submit ---
 // Builds a full CreatePlanRequest mirroring studio's onSubmit.
 async function handleSubmit() {
-  if (submitting.value) return
+  if (submitting.value || referenceUploading.value) return
   if (!validate()) return
   if (!selectedProject.value) return
 

@@ -607,7 +607,7 @@ const canSubmit = computed(() => {
   if (!form.project_id || !form.prompt.trim()) return false
   if (billableGoalMode.value && !form.goal.trim()) return false
   if (balance.value < creationCost.value) return false
-  return !submitting.value
+  return !submitting.value && !referenceUploading.value
 })
 
 function onProjectChange(project: Project) {
@@ -809,6 +809,7 @@ function validate(): boolean {
 }
 
 async function onSubmit() {
+  if (!canSubmit.value || referenceUploading.value) return
   if (!validate()) return
   if (!selectedProject.value) return
 

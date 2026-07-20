@@ -469,6 +469,7 @@
           v-else
           type="primary"
           size="lg"
+          :disabled="referenceUploading"
           :loading="saving"
           @click="onSave"
           style="flex: 2;"
@@ -482,6 +483,7 @@
           type="primary"
           size="lg"
           block
+          :disabled="referenceUploading"
           :loading="saving"
           @click="onSave"
         >
@@ -1049,6 +1051,7 @@ function buildPayload(): CreateProjectRequest {
 }
 
 async function onSave() {
+  if (saving.value || referenceUploading.value) return
   if (!validate()) return
 
   saving.value = true
