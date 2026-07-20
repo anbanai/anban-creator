@@ -37,7 +37,7 @@ func TestMemoryConfigRejectsUnsafeRuntimeDir(t *testing.T) {
 	cfg := &Config{
 		Database: DatabaseConfig{DSN: "dsn"},
 		JWT:      JWTConfig{SecretKey: "secret"},
-		Claude:   ClaudeConfig{Executor: "docker"},
+		Claude:   validClaudeConfigForTest(),
 		Memory: MemoryConfig{
 			Enabled:    true,
 			RuntimeDir: "../.claude/memory",

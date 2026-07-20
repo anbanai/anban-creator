@@ -255,6 +255,17 @@ image_presets:
     provider_route: image_generation.designer.gpt_image_2
     min_tier: pro
 claude:
+  provider: volcengine_ark
+  base_url: https://ark.cn-beijing.volces.com/api/compatible
+  auth_token: test-auth-token
+  models:
+    default: doubao-seed-evolving
+    opus: doubao-seed-evolving
+    fable: doubao-seed-evolving
+    sonnet: doubao-seed-2-1-pro-260628
+    haiku: doubao-seed-2-1-turbo-260628
+  model_usage_aliases:
+    doubao-seed-evolving-latest-version: doubao-seed-evolving
   plugin_dir: "` + pluginDir + `"
 `)
 	if err := os.WriteFile(cfgPath, body, 0644); err != nil {
@@ -724,6 +735,17 @@ database:
 jwt:
   secret_key: test-secret
 claude:
+  provider: volcengine_ark
+  base_url: https://ark.cn-beijing.volces.com/api/compatible
+  auth_token: test-auth-token
+  models:
+    default: doubao-seed-evolving
+    opus: doubao-seed-evolving
+    fable: doubao-seed-evolving
+    sonnet: doubao-seed-2-1-pro-260628
+    haiku: doubao-seed-2-1-turbo-260628
+  model_usage_aliases:
+    doubao-seed-evolving-latest-version: doubao-seed-evolving
   plugin_dir: "` + pluginDir + `"
 recharge_tiers:
   - key: basic

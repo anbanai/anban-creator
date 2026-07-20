@@ -17,11 +17,12 @@ import (
 func TestFilterAgentEnvPreservesClaudeConfig(t *testing.T) {
 	env := map[string]string{
 		"ANTHROPIC_AUTH_TOKEN":                     "token",
-		"ANTHROPIC_BASE_URL":                       "https://open.bigmodel.cn/api/anthropic",
-		"ANTHROPIC_MODEL":                          "opusplan",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":            "glm-4.5-air",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL":           "glm-5-turbo",
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":             "glm-5.1",
+		"ANTHROPIC_BASE_URL":                       srvconfig.ClaudeArkCompatibleBaseURL,
+		"ANTHROPIC_MODEL":                          "doubao-seed-evolving",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":            "doubao-seed-2-1-turbo-260628",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL":           "doubao-seed-2-1-pro-260628",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":             "doubao-seed-evolving",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":            "doubao-seed-evolving",
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
 	}
 

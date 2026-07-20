@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/docker/docker/client"
@@ -19,7 +20,10 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
 	task := model.Task{ID: "task-1", Type: model.PlatformVideoEditor, Prompt: "topic"}
 
-	cmd := e.buildAgentCommand(&ExecutionOptions{Task: &task}, "sonnet", 100, "/workspace", "key")
+	cmd, err := e.buildAgentCommand(&ExecutionOptions{Task: &task}, "sonnet", 100, "/workspace", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := cmd[0], "anban"; got != want {
 		t.Fatalf("agent binary = %q, want %q", got, want)
 	}
@@ -38,6 +42,35 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	}
 	if got, want := DockerAgentImageDefault, "creator-agent:latest"; got != want {
 		t.Fatalf("Docker Agent image default = %q, want %q", got, want)
+	}
+}
+
+func TestDockerAgentCommandTransportsExactModelUsageAliasesInStableOrder(t *testing.T) {
+	e := &DockerExecutor{modelUsageAliases: map[string]ModelUsageIdentity{
+		"z-raw": {Provider: "volcengine_ark", Model: "z-model"},
+		"a-raw": {Provider: "volcengine_ark", Model: "a-model"},
+	}}
+	task := model.Task{ID: "task-1", Type: model.PlatformArticle}
+	cmd, err := e.buildAgentCommand(&ExecutionOptions{Task: &task}, "default", 10, "/workspace", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"--model-usage-alias", "a-raw=volcengine_ark/a-model",
+		"--model-usage-alias", "z-raw=volcengine_ark/z-model",
+	}
+	if !strings.Contains(strings.Join(cmd, " "), strings.Join(want, " ")) {
+		t.Fatalf("command = %#v, want stable aliases %#v", cmd, want)
+	}
+}
+
+func TestDockerAgentCommandRejectsInvalidModelUsageAliases(t *testing.T) {
+	e := &DockerExecutor{modelUsageAliases: map[string]ModelUsageIdentity{
+		"raw": {Provider: "", Model: "canonical"},
+	}}
+	task := model.Task{ID: "task-1", Type: model.PlatformArticle}
+	if _, err := e.buildAgentCommand(&ExecutionOptions{Task: &task}, "default", 10, "/workspace", "key"); err == nil {
+		t.Fatal("invalid model usage alias was silently omitted")
 	}
 }
 
@@ -136,7 +169,10 @@ func TestDockerExecutorPassesContainerAutoMemoryDirectory(t *testing.T) {
 		AutoMemoryDirectory: "/workspace/task-1/.claude/memory",
 	}
 
-	cmd := e.buildAgentCommand(opts, "sonnet", 100, "/workspace/task-1", "key")
+	cmd, err := e.buildAgentCommand(opts, "sonnet", 100, "/workspace/task-1", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := flagValue(cmd, "--auto-memory-directory"), "/workspace/task-1/.claude/memory"; got != want {
 		t.Fatalf("--auto-memory-directory = %q, want %q", got, want)
 	}

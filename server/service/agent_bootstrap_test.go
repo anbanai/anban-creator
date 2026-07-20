@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,23 @@ type bootstrapSecurityStore struct {
 	signedTTLs     []int
 	signAt         time.Time
 	signedExpiries []time.Time
+}
+
+func testClaudeBootstrapRuntime() (map[string]string, map[string]serveragent.ModelUsageIdentity) {
+	claude := config.ClaudeConfig{
+		Provider: config.ClaudeProviderVolcengineArk, BaseURL: config.ClaudeArkCompatibleBaseURL, AuthToken: "bootstrap-secret",
+		Models: config.ClaudeModelsConfig{
+			Default: "doubao-seed-evolving", Opus: "doubao-seed-evolving", Fable: "doubao-seed-evolving",
+			Sonnet: "doubao-seed-2-1-pro-260628", Haiku: "doubao-seed-2-1-turbo-260628",
+		},
+		UsageAliases: map[string]string{"doubao-seed-evolving-latest-version": "doubao-seed-evolving"},
+		Env: map[string]string{
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+			"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          "0",
+			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          "1000000",
+		},
+	}
+	return claude.RuntimeEnv(), claude.RuntimeModelUsageAliases()
 }
 
 func (s *bootstrapSecurityStore) DownloadURL(_ context.Context, key string, ttl int) (string, error) {
@@ -83,7 +101,11 @@ func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
-	svc := NewAgentBootstrapService(nil, tokens, AgentBootstrapConfig{TokenTTL: 10 * time.Minute, SignedURLTTL: 600, Store: store}, zerolog.Nop())
+	runtimeEnv, modelUsageAliases := testClaudeBootstrapRuntime()
+	svc := NewAgentBootstrapService(nil, tokens, AgentBootstrapConfig{
+		TokenTTL: 10 * time.Minute, SignedURLTTL: 600, Store: store,
+		RuntimeEnv: runtimeEnv, ModelUsageAliases: modelUsageAliases,
+	}, zerolog.Nop())
 	svc.now = func() time.Time { return now }
 	prefix := "uploads/users/user-1/projects/project-1/tasks/task-1"
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformEcommerce, Prompt: "topic", ReferenceImageURL: "https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/inputs/reference.png"}
@@ -184,11 +206,9 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	store := &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, RuntimeEnv: map[string]string{
-		"ANTHROPIC_AUTH_TOKEN": "bootstrap-secret",
-		"ANTHROPIC_BASE_URL":   "https://anthropic.example.com",
-		"PATH":                 "/untrusted/bin",
-	}}, zerolog.Nop())
+	runtimeEnv, modelUsageAliases := testClaudeBootstrapRuntime()
+	runtimeEnv["PATH"] = "/untrusted/bin"
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "doubao-seed-evolving", MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, RuntimeEnv: runtimeEnv, ModelUsageAliases: modelUsageAliases}, zerolog.Nop())
 	identity := &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-1", PodUID: "pod-uid-1", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, JobDeadline: time.Now().Add(4 * time.Minute)}
 	first, err := svc.Bootstrap(ctx, identity)
 	if err != nil {
@@ -198,11 +218,20 @@ func TestBootstrapTransitionsCurrentExecutionAndIsIdempotentForSamePod(t *testin
 	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
-	if first.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "bootstrap-secret" || first.RuntimeEnv["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || len(first.RuntimeEnv) != 2 {
-		t.Fatalf("runtime environment = %#v, want only allowlisted Claude values", first.RuntimeEnv)
+	delete(runtimeEnv, "PATH")
+	if !reflect.DeepEqual(first.RuntimeEnv, runtimeEnv) {
+		t.Fatalf("runtime environment = %#v, want %#v", first.RuntimeEnv, runtimeEnv)
+	}
+	if !reflect.DeepEqual(first.ModelUsageAliases, modelUsageAliases) {
+		t.Fatalf("model usage aliases = %#v", first.ModelUsageAliases)
 	}
 	if len(first.Files) < 2 {
 		t.Fatalf("files = %#v", first.Files)
+	}
+	for _, file := range first.Files {
+		if strings.Contains(file.Text, "bootstrap-secret") {
+			t.Fatalf("provider credential leaked into bootstrap file %q", file.Path)
+		}
 	}
 	paths := map[string]BootstrapFile{}
 	for _, file := range first.Files {

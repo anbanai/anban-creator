@@ -409,6 +409,19 @@ image_presets:
     min_tier: "pro"
 
 claude:
+  # Claude Code 直连火山方舟。provider 身份与五个角色模型是成本归集的唯一 canonical 来源。
+  provider: "volcengine_ark"
+  base_url: "https://ark.cn-beijing.volces.com/api/compatible"
+  auth_token: "${CLAUDE_CODE_AUTH_TOKEN}"
+  models:
+    default: "doubao-seed-evolving"
+    opus: "doubao-seed-evolving"
+    fable: "doubao-seed-evolving"
+    sonnet: "doubao-seed-2-1-pro-260628"
+    haiku: "doubao-seed-2-1-turbo-260628"
+  # 只登记供应商实际返回且已验证的精确别名；未知名称不会被猜测。
+  model_usage_aliases:
+    doubao-seed-evolving-latest-version: "doubao-seed-evolving"
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # Agent 执行器类型：local 用于开发；docker 用于单机容器；kubernetes 用于生产队列。
@@ -493,19 +506,11 @@ claude:
     montage: 90
   # Agent 执行日志目录。生产建议挂载持久卷，便于失败诊断和审计。
   task_log_dir: "./data/logs/tasks"
-  # Claude 运行时环境的唯一配置源。Kubernetes Job 启动后经认证 Bootstrap
-  # 临时获取 allowlist 内的值，仅注入 Claude 子进程，不写入 JobSpec/PVC/OSS。
+  # 仅允许非 provider 的 Claude Code 运行控制。Provider URL、token 和模型不得放在 env。
   env:
-    # Claude Code/兼容模型认证 token。必须通过环境变量注入，禁止写明文密钥。
-    ANTHROPIC_AUTH_TOKEN: "${CLAUDE_CODE_AUTH_TOKEN}"
-    # Claude Code 兼容 API base URL。
-    ANTHROPIC_BASE_URL: "https://ark.cn-beijing.volces.com/api/compatible"
-    # Agent 默认模型。
-    ANTHROPIC_MODEL: "doubao-seed-evolving"
-    # 关闭非必要遥测流量，生产建议保持 1。
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-    # 允许 Claude Code 使用项目记忆；如需完全无状态执行可改为 1。
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1000000"
 
 email:
   smtp_host: "smtp.163.com"

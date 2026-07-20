@@ -60,6 +60,7 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		Topic:               response.Prompt,
 		BootstrapPrompt:     response.Prompt,
 		RuntimeEnv:          serveragent.ClaudeRuntimeEnv(response.RuntimeEnv),
+		ModelUsageAliases:   cloneRuntimeModelUsageAliases(response.ModelUsageAliases),
 		Workspace:           jobCfg.Workspace,
 		Model:               response.Model,
 		AgentFlag:           response.AgentFlag,
@@ -73,4 +74,15 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		cfg.Env = response.Env
 	}
 	return cfg
+}
+
+func cloneRuntimeModelUsageAliases(source map[string]serveragent.ModelUsageIdentity) map[string]serveragent.ModelUsageIdentity {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]serveragent.ModelUsageIdentity, len(source))
+	for raw, identity := range source {
+		result[raw] = identity
+	}
+	return result
 }

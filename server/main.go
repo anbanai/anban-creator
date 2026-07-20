@@ -240,7 +240,7 @@ func main() {
 	var kubeReconciler *agent.KubernetesReconciler
 	switch cfg.Claude.Executor {
 	case "docker":
-		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
+		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker executor")
 		}
@@ -267,7 +267,7 @@ func main() {
 			Str("image", cfg.Claude.Kubernetes.AgentImage).
 			Msg("Kubernetes Job runtime client created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)
+		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)
 		log.Info().
 			Str("plugin_dir", cfg.Claude.PluginDir).
 			Bool("sandbox", cfg.Claude.Sandbox).
@@ -327,7 +327,7 @@ func main() {
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		// Wire executor defaults so local-executor claim responses carry the same
 		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
-		taskSvc.SetExecutorDefaults(cfg.Claude.Model, cfg.Claude.MaxTurns)
+		taskSvc.SetExecutorDefaults(cfg.Claude.Models.Default, cfg.Claude.MaxTurns)
 		if cfg.Claude.Executor == "kubernetes" {
 			var err error
 			executionTokens, err = auth.NewExecutionTokenService(cfg.Claude.Kubernetes.ExecutionTokenSecret)
@@ -344,7 +344,7 @@ func main() {
 			}
 			activeDeadline := time.Duration(cfg.Claude.Kubernetes.ActiveDeadlineSeconds) * time.Second
 			bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{
-				Model:                   cfg.Claude.Model,
+				Model:                   cfg.Claude.Models.Default,
 				MaxTurns:                cfg.Claude.MaxTurns,
 				TokenTTL:                activeDeadline,
 				ActiveDeadline:          activeDeadline,
@@ -354,7 +354,8 @@ func main() {
 				MontageToolPolicy:       cfg.Montage.ToolPolicy,
 				MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
 				MontageEnv:              cfg.Montage.Env,
-				RuntimeEnv:              cfg.Claude.Env,
+				RuntimeEnv:              cfg.Claude.RuntimeEnv(),
+				ModelUsageAliases:       cfg.Claude.RuntimeModelUsageAliases(),
 			}, *log)
 			taskSvc.SetKubernetesDispatcher(kubeDispatcher)
 			workspaceLifecycle, ok := kubeDispatcher.(service.TaskWorkspaceLifecycle)
@@ -395,7 +396,7 @@ func main() {
 		llmAPIKey := cfg.Writing.Key
 		llmModel := cfg.Writing.Model
 		if llmModel == "" {
-			llmModel = cfg.Claude.Model
+			llmModel = cfg.Claude.Models.Default
 		}
 		if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
 			writingLLMClient = service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel, cfg.Writing.Timeout)

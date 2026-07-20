@@ -26,9 +26,7 @@ import (
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
-// filterAgentEnv returns a copy of the server-owned Claude Code environment.
-// User model configuration must never be merged here; it is only for MCP
-// writing/image tools. The agent may use only config.yaml's claude.model/env.
+// filterAgentEnv returns a copy of the typed server-owned Claude runtime.
 func filterAgentEnv(env map[string]string) map[string]string {
 	filtered := make(map[string]string, len(env))
 	for k, v := range env {
@@ -327,7 +325,7 @@ type LocalExecutor struct {
 var _ TaskExecutor = (*LocalExecutor)(nil)
 
 // NewLocalExecutor creates a new LocalExecutor.
-func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int, workspaceDir string, serverBaseURL string, store storage.Provider, memoryMgr *projectmemory.ProjectMemoryManager) *LocalExecutor {
+func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, modelUsageAliases map[string]ModelUsageIdentity, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int, workspaceDir string, serverBaseURL string, store storage.Provider, memoryMgr *projectmemory.ProjectMemoryManager) *LocalExecutor {
 	return &LocalExecutor{
 		logger:            logger,
 		imageAPICfg:       imageAPICfg,
@@ -335,7 +333,7 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 		pluginDir:         pluginDir,
 		sandbox:           sandbox,
 		defaultModel:      defaultModel,
-		modelUsageAliases: map[string]ModelUsageIdentity{},
+		modelUsageAliases: cloneModelUsageAliases(modelUsageAliases),
 		keyProvider:       keyProvider,
 		maxTurnsOverrides: maxTurnsOverrides,
 		workspaceDir:      workspaceDir,
@@ -376,10 +374,7 @@ const (
 
 // ModelUsageIdentity is an explicitly configured raw-to-canonical model mapping.
 // Unknown raw model names are never guessed.
-type ModelUsageIdentity struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-}
+type ModelUsageIdentity = model.ModelUsageIdentity
 
 // ModelTokenUsage is authoritative terminal token evidence for one provider model.
 type ModelTokenUsage = model.ModelTokenUsage
@@ -415,7 +410,7 @@ type ExecutionResult struct {
 	ToolErrorCount      int            `json:"tool_error_count,omitempty"`
 	LastToolErrorTool   string         `json:"last_tool_error_tool,omitempty"`
 	LastToolError       string         `json:"last_tool_error,omitempty"`
-	Model               string         `json:"model,omitempty"` // Claude Code agent model (from config.yaml claude.model)
+	Model               string         `json:"model,omitempty"` // Claude Code agent model (from claude.models.default)
 	RemoteMemoryArchive []byte         `json:"-"`
 }
 
@@ -425,12 +420,8 @@ type ExecutionResult struct {
 // .anban-creator/settings.json, loads the Anban Creator plugin with the matching
 // agent definition, and launches execution via the claude-agent-sdk-go SDK.
 func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
-	// 1. Resolve defaults. Agent model comes from config.yaml,
-	// with fallback to ANTHROPIC_MODEL env var for diagnostics.
+	// 1. Resolve defaults from the typed Claude contract.
 	agentModel := e.defaultModel
-	if agentModel == "" {
-		agentModel = e.claudeEnv["ANTHROPIC_MODEL"]
-	}
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = DefaultMaxTurns(opts.Task.Type, e.maxTurnsOverrides)
@@ -714,7 +705,6 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		Bool("plugin_dir_set", e.pluginDir != "").
 		Str("plugin_dir", e.pluginDir).
 		Int("env_var_count", len(e.claudeEnv)).
-		Bool("env_has_anthropic_api_key", e.claudeEnv["ANTHROPIC_API_KEY"] != "").
 		Bool("env_has_anthropic_base_url", e.claudeEnv["ANTHROPIC_BASE_URL"] != "").
 		Bool("env_has_anthropic_model", e.claudeEnv["ANTHROPIC_MODEL"] != "").
 		Str("env_anthropic_model", e.claudeEnv["ANTHROPIC_MODEL"]).

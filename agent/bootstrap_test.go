@@ -10,7 +10,27 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
+
+func testModelUsageAliases() map[string]serveragent.ModelUsageIdentity {
+	return map[string]serveragent.ModelUsageIdentity{
+		"sonnet": {Provider: "volcengine_ark", Model: "sonnet"},
+	}
+}
+
+func testClaudeRuntimeEnv() map[string]string {
+	return map[string]string{
+		"ANTHROPIC_AUTH_TOKEN":           "token",
+		"ANTHROPIC_BASE_URL":             "https://ark.cn-beijing.volces.com/api/compatible",
+		"ANTHROPIC_MODEL":                "sonnet",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "sonnet",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "sonnet",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "sonnet",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "haiku",
+	}
+}
 
 func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 	workspace := t.TempDir()
@@ -31,6 +51,8 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "article", "project_id": "project-1",
 			"prompt": "write", "model": "sonnet", "max_turns": 12, "agent_flag": "anban:wechatarticle",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": ".task-context", "text": "TASK_ID=task-1\n", "mode": 420}},
+			"model_usage_aliases": testModelUsageAliases(),
+			"runtime_env":         testClaudeRuntimeEnv(),
 		}})
 	}))
 	defer server.Close()
@@ -199,6 +221,8 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 			ExecutionToken: testExecutionToken(t, "execution-1", "task-1", "project-1"),
 			TaskID:         "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write",
 			Model: "sonnet", MaxTurns: 40, AgentFlag: "anban:wechatarticle", AutoMemoryDirectory: ".claude/memory",
+			ModelUsageAliases: testModelUsageAliases(),
+			RuntimeEnv:        testClaudeRuntimeEnv(),
 		}
 	}
 	tests := []struct {
@@ -224,6 +248,10 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		{"empty runtime environment value", func(r *BootstrapResponse) { r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": ""} }},
 		{"oversized runtime environment value", func(r *BootstrapResponse) {
 			r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)}
+		}},
+		{"missing model usage aliases", func(r *BootstrapResponse) { r.ModelUsageAliases = nil }},
+		{"invalid model usage alias", func(r *BootstrapResponse) {
+			r.ModelUsageAliases = map[string]serveragent.ModelUsageIdentity{"raw": {Provider: "", Model: "sonnet"}}
 		}},
 		{"Montage environment on article task", func(r *BootstrapResponse) {
 			r.Env = map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"}
@@ -252,6 +280,8 @@ func TestValidateBootstrapResponseAcceptsArbitraryMontageEnv(t *testing.T) {
 		MaxTurns:            40,
 		AgentFlag:           "anban:montage",
 		AutoMemoryDirectory: ".claude/memory",
+		ModelUsageAliases:   testModelUsageAliases(),
+		RuntimeEnv:          testClaudeRuntimeEnv(),
 		Env:                 map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
 	}
 	if err := validateBootstrapResponse("execution-1", &response); err != nil {

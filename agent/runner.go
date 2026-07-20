@@ -127,7 +127,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 					}
 				}
 			case *claudecode.ResultMessage:
-				serveragent.PopulateTerminalModelUsage(result, m, nil)
+				r.populateTerminalModelUsage(result, m)
 				result.Success = !m.IsError
 				result.ResultSubtype = m.Subtype
 				result.LogText = resultText
@@ -176,6 +176,10 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		result.AgentLikelyFailed = true
 	}
 	return result, nil
+}
+
+func (r *Runner) populateTerminalModelUsage(result *serveragent.ExecutionResult, message claudecode.Message) {
+	serveragent.PopulateTerminalModelUsage(result, message, r.cfg.ModelUsageAliases)
 }
 
 func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, error) {

@@ -47,7 +47,7 @@ func runtimeBillingTestConfig() *srvconfig.Config {
 				},
 			},
 		},
-		Claude: srvconfig.ClaudeConfig{Model: "claude-test"},
+		Claude: srvconfig.ClaudeConfig{Models: srvconfig.ClaudeModelsConfig{Default: "claude-test"}},
 	}
 }
 
