@@ -306,6 +306,8 @@ func TestBillingModelTableNames(t *testing.T) {
 		{BillingDebtAllocation{}, "billing_debt_allocations"},
 		{BillingSettlementOutbox{}, "billing_settlement_outbox"},
 		{BillingReferralIssue{}, "billing_referral_issues"},
+		{BillingProviderCostEvent{}, "billing_provider_cost_events"},
+		{BillingExecutionCostStatus{}, "billing_execution_cost_status"},
 	}
 
 	for _, tt := range tests {
@@ -327,6 +329,8 @@ func TestBillingAutoMigrateCreatesExactTablesAndIndexes(t *testing.T) {
 		"billing_charges",
 		"billing_credit_lots",
 		"billing_debt_allocations",
+		"billing_execution_cost_status",
+		"billing_provider_cost_events",
 		"billing_quotes",
 		"billing_referral_issues",
 		"billing_settlement_outbox",
@@ -351,6 +355,8 @@ func TestBillingAutoMigrateCreatesExactTablesAndIndexes(t *testing.T) {
 	assertBillingIndex(t, db, &BillingCharge{}, "idx_billing_charge_reversal")
 	assertBillingIndex(t, db, &BillingSettlementOutbox{}, "idx_billing_settlement_outbox_idempotency")
 	assertBillingIndex(t, db, &BillingReferralIssue{}, "idx_billing_referral_invitee_program")
+	assertBillingIndex(t, db, &BillingProviderCostEvent{}, "idx_billing_provider_cost_idempotency")
+	assertBillingIndex(t, db, &BillingProviderCostEvent{}, "idx_billing_provider_cost_base_identity")
 
 	var taskIndexColumns []struct {
 		Name string
@@ -739,7 +745,7 @@ func TestBillingReferralIssueIdentityConstraint(t *testing.T) {
 	}
 }
 
-func TestBillingModelsExcludeLegacyAndProviderCostContracts(t *testing.T) {
+func TestBillingWalletModelsExcludeLegacyAndProviderCostContracts(t *testing.T) {
 	models := []any{
 		BillingWalletAccount{}, BillingCreditLot{}, BillingWalletEntry{},
 		BillingCatalogVersion{}, BillingSKU{}, BillingQuote{}, BillingCharge{},
@@ -762,7 +768,7 @@ func TestBillingModelsExcludeLegacyAndProviderCostContracts(t *testing.T) {
 		}
 	}
 
-	for _, sourcePath := range []string{"billing_wallet.go", "model.go"} {
+	for _, sourcePath := range []string{"billing_wallet.go"} {
 		source, err := os.ReadFile(sourcePath)
 		if err != nil {
 			t.Fatalf("read billing model source %s: %v", sourcePath, err)
@@ -789,7 +795,7 @@ func TestBillingModelsExcludeLegacyAndProviderCostContracts(t *testing.T) {
 	}
 	for _, table := range billingTables {
 		lowerTable := strings.ToLower(table)
-		for _, forbidden := range []string{"hold", "reserved", "reservation", "capture", "release", "payment", "shortfall", "provider_cost", "cost_budget"} {
+		for _, forbidden := range []string{"hold", "reserved", "reservation", "capture", "release", "payment", "shortfall", "cost_budget"} {
 			if strings.Contains(lowerTable, forbidden) {
 				t.Errorf("migration created forbidden billing table %q", table)
 			}

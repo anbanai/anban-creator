@@ -41,5 +41,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&BillingDebtAllocation{},
 		&BillingSettlementOutbox{},
 		&BillingReferralIssue{},
+		&BillingProviderCostEvent{},
+		&BillingExecutionCostStatus{},
 	)
 }
