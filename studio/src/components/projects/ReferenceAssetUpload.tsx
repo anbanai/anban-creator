@@ -17,6 +17,13 @@ interface ReferenceAssetUploadProps {
   onUploadingChange?: (uploading: boolean) => void
 }
 
+interface ActiveUpload {
+  generation: number
+  controller: AbortController
+  startValueIdentity: string
+  notify?: (uploading: boolean) => void
+}
+
 const MAX_SIZE_MB = 10
 const ACCEPTED_IMAGE_TYPES = 'image/jpeg,image/png,image/webp,image/gif'
 
@@ -33,15 +40,31 @@ export function ReferenceAssetUpload({
   const blobUrlRef = useRef('')
   const localSessionIdRef = useRef('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const mountedRef = useRef(true)
+  const nextGenerationRef = useRef(0)
+  const activeUploadRef = useRef<ActiveUpload | null>(null)
+  const onChangeRef = useRef(onChange)
 
   const assetId = value && typeof value.asset_id === 'string' ? value.asset_id : ''
   const sessionId = value && 'upload_session_id' in value && typeof value.upload_session_id === 'string'
     ? value.upload_session_id
     : ''
+  const valueIdentity = assetId ? `asset:${assetId}` : sessionId ? `session:${sessionId}` : ''
+  const currentValueIdentityRef = useRef(valueIdentity)
+  currentValueIdentityRef.current = valueIdentity
+  onChangeRef.current = onChange
   const assetPreviewUrl = value && 'download_url' in value ? value.download_url : ''
   const previewUrl = localPreviewUrl || assetPreviewUrl
 
   useEffect(() => {
+    const activeUpload = activeUploadRef.current
+    if (activeUpload && activeUpload.startValueIdentity !== valueIdentity) {
+      activeUploadRef.current = null
+      activeUpload.controller.abort()
+      setUploading(false)
+      activeUpload.notify?.(false)
+    }
+
     const localSessionId = localSessionIdRef.current
     const referencesDifferentValue = assetId
       || (localSessionId && localSessionId !== sessionId)
@@ -51,10 +74,22 @@ export function ReferenceAssetUpload({
     blobUrlRef.current = ''
     localSessionIdRef.current = ''
     setLocalPreviewUrl('')
-  }, [assetId, sessionId])
+  }, [assetId, sessionId, valueIdentity])
 
-  useEffect(() => () => {
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      const activeUpload = activeUploadRef.current
+      if (activeUpload) {
+        activeUploadRef.current = null
+        activeUpload.controller.abort()
+        activeUpload.notify?.(false)
+      }
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
+      blobUrlRef.current = ''
+      localSessionIdRef.current = ''
+    }
   }, [])
 
   const replaceLocalPreview = (file: File) => {
@@ -73,7 +108,7 @@ export function ReferenceAssetUpload({
   }
 
   const uploadFile = async (file: File) => {
-    if (uploading) return
+    if (activeUploadRef.current) return
     if (file.size > MAX_SIZE_MB * 1024 * 1024) {
       setUploadError(`文件大小不能超过 ${MAX_SIZE_MB}MB`)
       return
@@ -81,18 +116,42 @@ export function ReferenceAssetUpload({
 
     setUploadError('')
     replaceLocalPreview(file)
+    const generation = ++nextGenerationRef.current
+    const controller = new AbortController()
+    const startValueIdentity = currentValueIdentityRef.current
+    const activeUpload: ActiveUpload = {
+      generation,
+      controller,
+      startValueIdentity,
+      notify: onUploadingChange,
+    }
+    activeUploadRef.current = activeUpload
     setUploading(true)
-    onUploadingChange?.(true)
+    activeUpload.notify?.(true)
     try {
-      const result = await uploadToOSS({ purpose, file })
+      const result = await uploadToOSS({ purpose, file, signal: controller.signal })
+      if (
+        !mountedRef.current
+        || activeUploadRef.current?.generation !== generation
+        || currentValueIdentityRef.current !== startValueIdentity
+      ) return
       localSessionIdRef.current = result.uploadSessionId
-      onChange(referenceSelectionFromUpload(result))
+      onChangeRef.current(referenceSelectionFromUpload(result))
     } catch (error) {
+      if (
+        !mountedRef.current
+        || activeUploadRef.current?.generation !== generation
+        || currentValueIdentityRef.current !== startValueIdentity
+      ) return
       clearLocalPreview()
-      setUploadError((error as { message?: string } | null)?.message || '上传失败，请重试')
+      if ((error as { name?: string } | null)?.name !== 'AbortError') {
+        setUploadError((error as { message?: string } | null)?.message || '上传失败，请重试')
+      }
     } finally {
+      if (activeUploadRef.current?.generation !== generation) return
+      activeUploadRef.current = null
       setUploading(false)
-      onUploadingChange?.(false)
+      activeUpload.notify?.(false)
     }
   }
 
@@ -102,7 +161,7 @@ export function ReferenceAssetUpload({
     event.target.value = ''
   }
 
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = (event: React.DragEvent<HTMLButtonElement>) => {
     event.preventDefault()
     setIsDragging(false)
     const file = event.dataTransfer.files?.[0]
@@ -140,7 +199,10 @@ export function ReferenceAssetUpload({
           ) : null}
         </div>
       ) : (
-        <div
+        <button
+          type="button"
+          aria-label="上传参考图"
+          disabled={uploading}
           className={`flex h-32 w-32 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-2 text-center transition-colors ${
             isDragging
               ? 'border-ring bg-muted/50'
@@ -165,20 +227,22 @@ export function ReferenceAssetUpload({
               <span className="text-[8px] text-muted-foreground/70">JPG/PNG/WebP/GIF · ≤10MB</span>
             </>
           )}
-        </div>
+        </button>
       )}
 
       <input
         ref={fileInputRef}
         type="file"
         accept={ACCEPTED_IMAGE_TYPES}
-        aria-label="上传参考图"
+        aria-label="参考图文件"
         onChange={handleFileChange}
         disabled={uploading}
         className="hidden"
       />
 
-      {uploadError ? <p className="max-w-48 text-xs text-destructive">{uploadError}</p> : null}
+      {uploadError ? (
+        <p role="alert" className="max-w-48 text-xs text-destructive">{uploadError}</p>
+      ) : null}
     </div>
   )
 }
