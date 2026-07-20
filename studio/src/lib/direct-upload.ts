@@ -17,8 +17,10 @@ export interface UploadToOSSOptions {
 }
 
 export interface UploadToOSSResult {
+  uploadSessionId: string
   uploadId: string
   key: string
+  previewUrl: string
   publicUrl: string
   contentType: string
   size: number
@@ -42,8 +44,10 @@ export function directUploadResultToInputAttachment(
 }
 
 interface PrepareUploadResponse {
+  upload_session_id: string
   upload_id: string
   key: string
+  preview_url: string
   public_url: string
   upload_url: string
   headers?: Record<string, string>
@@ -89,8 +93,10 @@ export async function uploadToOSS({ purpose, file, onProgress, signal }: UploadT
     }
 
     return {
+      uploadSessionId: prepared.upload_session_id,
       uploadId: prepared.upload_id,
       key: prepared.key,
+      previewUrl: prepared.preview_url,
       publicUrl: prepared.public_url,
       contentType: uploadContentType,
       size: file.size,

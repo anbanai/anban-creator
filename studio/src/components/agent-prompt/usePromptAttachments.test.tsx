@@ -15,8 +15,10 @@ function fileOf(name: string, type = 'image/png', size = 5, lastModified = 1) {
 
 function uploadResult(file: File, suffix = file.name): UploadToOSSResult {
   return {
+    uploadSessionId: `session-${suffix}`,
     uploadId: `upload-${suffix}`,
     key: `uploads/pending/user/upload-${suffix}/${file.name}`,
+    previewUrl: `https://signed.example.com/${file.name}`,
     publicUrl: `https://cdn.example.com/${file.name}?signature=secret`,
     contentType: file.type,
     size: file.size,

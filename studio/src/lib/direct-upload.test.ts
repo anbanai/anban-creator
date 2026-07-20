@@ -79,8 +79,10 @@ describe('uploadToOSS', () => {
     vi.mocked(http.post).mockResolvedValue({
       data: {
         data: {
+          upload_session_id: 'session-1',
           upload_id: 'up-1',
           key: 'uploads/pending/user/up-1/asset.png',
+          preview_url: 'https://signed.example.com/uploads/pending/user/up-1/asset.png',
           public_url: 'https://cdn.example.com/uploads/pending/user/up-1/asset.png',
           upload_url: 'https://oss-upload.example.com/uploads/pending/user/up-1/asset.png?signature=put',
           region: 'oss-cn-hangzhou',
@@ -124,6 +126,8 @@ describe('uploadToOSS', () => {
     expect(putMock).not.toHaveBeenCalled()
     expect(multipartUploadMock).not.toHaveBeenCalled()
     expect(progress[progress.length - 1]).toBe(100)
+    expect(result.uploadSessionId).toBe('session-1')
+    expect(result.previewUrl).toBe('https://signed.example.com/uploads/pending/user/up-1/asset.png')
     expect(result.publicUrl).toBe('https://cdn.example.com/uploads/pending/user/up-1/asset.png')
   })
 
@@ -433,8 +437,10 @@ describe('directUploadResultToInputAttachment', () => {
     const file = fileOf(2048, 'image/png', '产品图.png')
 
     const attachment = directUploadResultToInputAttachment({
+      uploadSessionId: 'session-composer',
       uploadId: 'up-composer',
       key: 'uploads/pending/user/up-composer/product.png',
+      previewUrl: 'https://signed.example.com/product.png',
       publicUrl: 'https://cdn.example.com/signed-or-public.png',
       contentType: 'image/png',
       size: 2048,

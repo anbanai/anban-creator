@@ -86,9 +86,10 @@ function image(name: string, lastModified = 1) {
 
 function uploadResult(file: File) {
   return {
+    uploadSessionId: `session:${file.name}`,
     uploadId: `upload:${file.name}`,
     key: `uploads/finalized/user-1/upload:${file.name}/${file.name}`,
-    publicUrl: '', contentType: file.type, size: file.size,
+    previewUrl: '', publicUrl: '', contentType: file.type, size: file.size,
   }
 }
 

@@ -113,8 +113,10 @@ describe('VideoReferenceInput', () => {
     const onChange = vi.fn()
     vi.mocked(uploadToOSS)
       .mockResolvedValueOnce({
+        uploadSessionId: 'session-1',
         uploadId: 'upload-1',
         key: 'uploads/pending/user/upload-1/cup.png',
+        previewUrl: 'https://signed.example.com/uploads/pending/user/upload-1/cup.png',
         publicUrl: 'https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/pending/user/upload-1/cup.png',
         contentType: 'image/png',
         size: 123,
@@ -166,8 +168,10 @@ describe('VideoReferenceInput', () => {
     expect(await screen.findByText('25%')).toBeInTheDocument()
 
     resolveUpload({
+      uploadSessionId: 'session-1',
       uploadId: 'upload-1',
       key: 'uploads/pending/user/upload-1/cup.png',
+      previewUrl: 'https://signed.example.com/uploads/pending/user/upload-1/cup.png',
       publicUrl: 'https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/pending/user/upload-1/cup.png',
       contentType: 'image/png',
       size: 123,
@@ -199,8 +203,10 @@ describe('VideoReferenceInput', () => {
       return element
     })
     vi.mocked(uploadToOSS).mockResolvedValueOnce({
+      uploadSessionId: 'session-video',
       uploadId: 'upload-video',
       key: 'uploads/pending/user/upload-video/clip.mp4',
+      previewUrl: 'https://signed.example.com/uploads/pending/user/upload-video/clip.mp4',
       publicUrl: 'https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/pending/user/upload-video/clip.mp4',
       contentType: 'video/mp4',
       size: 123,
