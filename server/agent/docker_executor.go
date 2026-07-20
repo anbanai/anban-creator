@@ -174,7 +174,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		// still resolve through legacy task overrides.
 		effectiveProject := EffectiveProject(opts.Project, opts.Task)
 		resolved := resolver.ResolveStyle(effectiveProject, opts.Task)
-		cfg, err := BuildAppConfig(effectiveProject, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
+		cfg, err := BuildAppConfig(effectiveProject, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.ReferenceAsset != nil)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -194,24 +194,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 			}
 			opts.AutoMemoryDirectory = runtimeDir
 		}
-		// Download effective reference image.
-		// Task-level image takes priority over project brand image.
-		if opts.Task.ReferenceImageURL != "" {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.ReferenceImageURL); err != nil {
-				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download task reference image")
-			}
-		} else if opts.Project.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Project.ReferenceImageURL); err != nil {
-				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download reference image")
-			}
-		}
+	}
+	if err := MaterializeReferenceAsset(ctx, e.store, workDir, opts.ReferenceAsset); err != nil {
+		return nil, fmt.Errorf("materialize reference asset: %w", err)
 	}
 
 	// E-commerce: materialize the task's product photos into the workspace so the
 	// agent can reference local paths (analyze_image / generate_image ref).
 	if opts.Task.Type == model.PlatformEcommerce {
 		photos := opts.Task.Ecommerce.Data().ProductPhotos
-		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, photos); n == 0 && len(photos) > 0 {
+		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, opts.Task.UserID, photos); n == 0 && len(photos) > 0 {
 			// E-commerce output is a consistency contract on the uploaded product
 			// photos. Fail fast (task error → refund) when none materialized rather
 			// than letting the agent hallucinate inconsistent assets. See executor.go
@@ -221,10 +213,10 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		}
 	}
 	if attachments := opts.Task.InputAttachments.Data(); len(attachments) > 0 {
-		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, workDir, attachments); err != nil {
+		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, workDir, opts.Task.UserID, attachments); err != nil {
 			return nil, fmt.Errorf("materialize resume inputs: %w", err)
 		}
-		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, attachments); n == 0 && hasNonResumeInputAttachments(attachments) {
+		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, opts.Task.UserID, attachments); n == 0 && hasNonResumeInputAttachments(attachments) {
 			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
 		}
 	}

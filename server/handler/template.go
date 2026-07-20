@@ -10,16 +10,17 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
 // TemplateHandler handles template-related HTTP endpoints.
 type TemplateHandler struct {
-	service        *service.TemplateService
-	logger         *zerolog.Logger
-	store          storage.Provider
-	pendingUploads service.PendingUploadRepository
+	service    *service.TemplateService
+	logger     *zerolog.Logger
+	store      storage.Provider
+	uploadRepo repository.Repository
 }
 
 // NewTemplateHandler creates a new TemplateHandler.
@@ -33,10 +34,10 @@ func (h *TemplateHandler) SetStore(s storage.Provider) {
 	h.store = s
 }
 
-// SetPendingUploadRepository injects pending direct-upload tracking for
+// SetUploadRepository injects pending direct-upload tracking for
 // user-uploaded template thumbnails.
-func (h *TemplateHandler) SetPendingUploadRepository(repo service.PendingUploadRepository) {
-	h.pendingUploads = repo
+func (h *TemplateHandler) SetUploadRepository(repo repository.Repository) {
+	h.uploadRepo = repo
 }
 
 // signTemplateURLs resolves stored runtime image URLs to directly-fetchable
@@ -172,9 +173,11 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 	if req.Visibility != "public" && req.Visibility != "private" {
 		req.Visibility = "public"
 	}
-	if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.ThumbnailURL}, h.store); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+	rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.uploadRepo, userID, service.DirectUploadPurposeProjectReference, []string{req.ThumbnailURL})
+	if err != nil {
+		return respondUploadSessionFinalizeError(c, h.logger, err)
 	}
+	req.ThumbnailURL = rewriteFinalizedUploadURL(req.ThumbnailURL, rewrites)
 
 	tmpl := &model.Template{
 		Name:         req.Name,
@@ -250,9 +253,11 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 		patch.Visibility = nil
 	}
 	if req.ThumbnailURL != nil {
-		if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{*req.ThumbnailURL}, h.store); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.uploadRepo, userID, service.DirectUploadPurposeProjectReference, []string{*req.ThumbnailURL})
+		if err != nil {
+			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
+		*req.ThumbnailURL = rewriteFinalizedUploadURL(*req.ThumbnailURL, rewrites)
 	}
 
 	updated, err := h.service.UpdatePatch(c.Context(), id, userID, patch)

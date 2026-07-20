@@ -19,7 +19,6 @@ const project: Project = {
   theme: '当前项目排版',
   author: '当前项目作者',
   template_id: '',
-  reference_image_url: '',
   image_ratio: '16:9',
   max_concurrent_tasks: 1,
   config: {},
@@ -163,6 +162,34 @@ describe('TaskDetailsSheet', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '日志' }))
     expect(screen.getByRole('region', { name: '执行动态' })).toBeInTheDocument()
+  })
+
+  it('renders only the transient asset view URL for a task reference', () => {
+    render(<ControlledTaskDetailsSheet {...createSheetProps({
+      task: {
+        ...articleTask,
+        project_snapshot: {
+          ...articleTask.project_snapshot,
+          reference_image_asset_id: '44444444-4444-4444-8444-444444444444',
+        },
+        reference_image: {
+          asset_id: '44444444-4444-4444-8444-444444444444',
+          file_name: 'reference.png',
+          content_type: 'image/png',
+          size: 9,
+          download_url: 'https://signed.example/reference.png',
+          download_expires_at: '2026-07-20T10:00:00Z',
+        },
+      },
+    })} />)
+
+    fireEvent.click(screen.getByRole('tab', { name: '素材' }))
+
+    expect(screen.getByRole('img', { name: '参考图' })).toHaveAttribute(
+      'src',
+      'https://signed.example/reference.png',
+    )
+    expect(document.body.textContent).not.toContain('44444444-4444-4444-8444-444444444444')
   })
 
   it('keeps the empty log surface compact', () => {

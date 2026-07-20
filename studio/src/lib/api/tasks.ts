@@ -1,10 +1,14 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse, VideoProductionResponse } from '@/types'
+import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse, VideoProductionResponse, InputAttachment } from '@/types'
 
 export interface ResumeTaskRequest {
   prompt?: string
-  files?: File[]
-  fileLabels?: string[]
+  input_attachments: InputAttachment[]
+}
+
+export interface CloneTaskRequest {
+  prompt: string
+  input_attachments: InputAttachment[]
 }
 
 export const tasksApi = {
@@ -24,23 +28,14 @@ export const tasksApi = {
 
   // Clone a completed/failed/cancelled task into a fresh billed task while
   // preserving the full frozen configuration. Returns the new task.
-  clone: (id: string) =>
-    unwrap<Task>(http.post(`/tasks/${id}/clone`)),
+  clone: (id: string, data: CloneTaskRequest) =>
+    unwrap<Task>(http.post(`/tasks/${id}/clone`, data)),
 
-  resume: (id: string, data: ResumeTaskRequest) => {
-    const form = new FormData()
-    const prompt = data.prompt?.trim() ?? ''
-    if (prompt) form.append('prompt', prompt)
-    if (data.fileLabels && data.fileLabels.length > 0) {
-      form.append('file_labels', JSON.stringify(data.fileLabels))
-    }
-    for (const file of data.files ?? []) {
-      form.append('files', file, file.name)
-    }
-    return unwrap<Task>(http.post(`/tasks/${id}/resume`, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }))
-  },
+  resume: (id: string, data: ResumeTaskRequest) =>
+    unwrap<Task>(http.post(`/tasks/${id}/resume`, {
+      prompt: data.prompt?.trim() ?? '',
+      input_attachments: data.input_attachments,
+    })),
 
   delete: (id: string) =>
     unwrap<void>(http.delete(`/tasks/${id}`)),

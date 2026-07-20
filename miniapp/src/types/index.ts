@@ -1,6 +1,13 @@
 // Auth
 export type { User, AuthResponse, ApiResponse } from './auth'
 
+// Finalized reference assets
+export type {
+  ReferenceAssetView,
+  ReferenceImageSelection,
+  ReferenceImageValue,
+} from './asset'
+
 // Project
 export type {
   ProjectPlatform,

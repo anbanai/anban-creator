@@ -19,11 +19,50 @@ import (
 
 // PlanHandler handles plan-related HTTP endpoints.
 type PlanHandler struct {
-	service      *service.PlanService
-	logger       *zerolog.Logger
-	imagePresets []config.ImageModelPreset
-	repo         repository.Repository
-	store        storage.Provider
+	service         *service.PlanService
+	logger          *zerolog.Logger
+	imagePresets    []config.ImageModelPreset
+	repo            repository.Repository
+	store           storage.Provider
+	referenceAssets *service.ReferenceAssetService
+}
+
+func (h *PlanHandler) SetReferenceAssetService(referenceAssets *service.ReferenceAssetService) {
+	h.referenceAssets = referenceAssets
+}
+
+func (h *PlanHandler) presentPlanReference(ctx context.Context, userID string, plan *model.Plan) error {
+	if plan == nil || plan.ReferenceImageAssetID == "" {
+		if plan != nil {
+			plan.ReferenceImage = nil
+		}
+		return nil
+	}
+	view, err := h.planReferenceView(ctx, userID, plan.ReferenceImageAssetID)
+	if err != nil {
+		return err
+	}
+	plan.ReferenceImage = view
+	return nil
+}
+
+func (h *PlanHandler) planReferenceView(ctx context.Context, userID, assetID string) (*model.AssetView, error) {
+	if assetID == "" {
+		return nil, nil
+	}
+	if h.referenceAssets == nil {
+		return nil, service.ErrReferenceAssetUnavailable
+	}
+	return h.referenceAssets.Present(ctx, userID, assetID, []string{service.DirectUploadPurposeTaskReference})
+}
+
+func (h *PlanHandler) presentPlanReferences(ctx context.Context, userID string, plans []*model.Plan) error {
+	for _, plan := range plans {
+		if err := h.presentPlanReference(ctx, userID, plan); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NewPlanHandler creates a new PlanHandler.
@@ -31,20 +70,10 @@ func NewPlanHandler(svc *service.PlanService, logger *zerolog.Logger) *PlanHandl
 	return &PlanHandler{service: svc, logger: logger}
 }
 
-// SetStore injects a storage provider so the reference image URL can be resolved
-// to a signed, directly-fetchable URL in responses.
+// SetStore injects a storage provider for response-only owned-object key
+// serialization and attachment validation.
 func (h *PlanHandler) SetStore(s storage.Provider) {
 	h.store = s
-}
-
-// signPlanURLs resolves the stored reference-image URL to a directly-fetchable
-// signed URL. No-op when no store is wired (e.g. unit tests) or the URL is
-// external/empty.
-func (h *PlanHandler) signPlanURLs(ctx context.Context, p *model.Plan) {
-	if p == nil {
-		return
-	}
-	p.ReferenceImageURL = service.SignURL(ctx, h.store, h.logger, p.ReferenceImageURL, service.DefaultSignedURLTTL)
 }
 
 // SetImagePresets wires the system-managed image model presets for tier-gated
@@ -59,32 +88,32 @@ func (h *PlanHandler) SetRepository(repo repository.Repository) {
 	h.repo = repo
 }
 
-// validReferenceImageURL checks that a reference image URL is empty, an internal
+// validAttachmentURL checks that a generic attachment URL is empty, an internal
 // /api/v1/files/ path, or an absolute http(s) URL.
-var referenceURLPattern = regexp.MustCompile(`^https?://`)
+var attachmentURLPattern = regexp.MustCompile(`^https?://`)
 
-func validReferenceImageURL(url string) bool {
+func validAttachmentURL(url string) bool {
 	if url == "" {
 		return true
 	}
 	if len(url) > 500 {
 		return false
 	}
-	return strings.HasPrefix(url, "/api/v1/files/") || referenceURLPattern.MatchString(url)
+	return strings.HasPrefix(url, "/api/v1/files/") || attachmentURLPattern.MatchString(url)
 }
 
 // Request types.
 
 type createPlanRequest struct {
-	ProjectID          string `json:"project_id"`
-	CronExpr           string `json:"cron_expr"`
-	Prompt             string `json:"prompt"`
-	ImageModelKey      string `json:"image_model_key"`
-	SkipReferenceImage *bool  `json:"skip_reference_image"`
-	ReferenceImageURL  string `json:"reference_image_url"`
-	Watermark          *bool  `json:"watermark"`
-	Goal               string `json:"goal"`
-	GoalMode           bool   `json:"goal_mode"`
+	ProjectID          string                           `json:"project_id"`
+	CronExpr           string                           `json:"cron_expr"`
+	Prompt             string                           `json:"prompt"`
+	ImageModelKey      string                           `json:"image_model_key"`
+	SkipReferenceImage *bool                            `json:"skip_reference_image"`
+	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
+	Watermark          *bool                            `json:"watermark"`
+	Goal               string                           `json:"goal"`
+	GoalMode           bool                             `json:"goal_mode"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off).
 	HasContentImage *bool `json:"has_content_image,omitempty"`
@@ -100,26 +129,30 @@ type createPlanRequest struct {
 }
 
 type updatePlanRequest struct {
-	CronExpr                 string                   `json:"cron_expr"`
-	Prompt                   string                   `json:"prompt"`
-	ImageModelKey            *string                  `json:"image_model_key"`
-	SkipReferenceImage       *bool                    `json:"skip_reference_image"`
-	ReferenceImageURL        *string                  `json:"reference_image_url"`
-	Watermark                *bool                    `json:"watermark"`
-	Goal                     string                   `json:"goal"`
-	GoalMode                 *bool                    `json:"goal_mode"`
-	HasContentImage          *bool                    `json:"has_content_image,omitempty"`
-	HasTailImage             *bool                    `json:"has_tail_image,omitempty"`
-	ArticleWithCover         *bool                    `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool                    `json:"article_with_content_images,omitempty"`
-	VideoCreatorConfig       *model.VideoTaskConfig   `json:"video_creator_config,omitempty"`
-	VideoCreatorInput        *model.VideoInput        `json:"video_creator_input,omitempty"`
-	MontageInput             *model.MontageInput      `json:"montage_input,omitempty"`
-	InputAttachments         *[]model.EntryAttachment `json:"input_attachments,omitempty"`
+	CronExpr                 string                           `json:"cron_expr"`
+	Prompt                   string                           `json:"prompt"`
+	ImageModelKey            *string                          `json:"image_model_key"`
+	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
+	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
+	ReferenceImageSet        bool                             `json:"-"`
+	Watermark                *bool                            `json:"watermark"`
+	Goal                     string                           `json:"goal"`
+	GoalMode                 *bool                            `json:"goal_mode"`
+	HasContentImage          *bool                            `json:"has_content_image,omitempty"`
+	HasTailImage             *bool                            `json:"has_tail_image,omitempty"`
+	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool                            `json:"article_with_content_images,omitempty"`
+	VideoCreatorConfig       *model.VideoTaskConfig           `json:"video_creator_config,omitempty"`
+	VideoCreatorInput        *model.VideoInput                `json:"video_creator_input,omitempty"`
+	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
+	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.
 func (h *PlanHandler) Create(c fiber.Ctx) error {
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	var req createPlanRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -135,9 +168,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
 	}
 
-	if !validReferenceImageURL(req.ReferenceImageURL) {
-		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
-	}
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -145,6 +175,22 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var referenceAssetID string
+	var referenceView *model.AssetView
+	if req.ReferenceImage != nil {
+		if h.referenceAssets == nil {
+			return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+		}
+		resolved, err := h.referenceAssets.ResolveSelection(c.Context(), userID, *req.ReferenceImage, []string{service.DirectUploadPurposeTaskReference})
+		if err != nil {
+			return respondReferenceAssetError(c, h.logger, err)
+		}
+		referenceAssetID = resolved
+		referenceView, err = h.referenceAssets.Present(c.Context(), userID, resolved, []string{service.DirectUploadPurposeTaskReference})
+		if err != nil {
+			return respondReferenceAssetError(c, h.logger, err)
+		}
 	}
 
 	// Validate image_model_key against the caller's tier.
@@ -155,29 +201,30 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
-	var pending service.PendingUploadRepository
+	var pending repository.Repository
 	if h.repo != nil {
-		pending = h.repo.PendingUploads()
+		pending = h.repo
 	}
-	validatedAttachments, err := validateInputAttachments(c.Context(), pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
-		MaxCount:     16,
-		AllowedTypes: map[string]bool{"image": true},
+	validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
+		MaxCount:     maxAgentInputAttachments,
+		AllowedTypes: allAgentAttachmentTypes,
 	})
 	if err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		return respondInputAttachmentError(c, h.logger, err)
 	}
 	req.InputAttachments = validatedAttachments
 	if h.repo != nil {
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL}, h.store); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
+		if err != nil {
+			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil), h.store); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
+		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput), h.store); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
+			rewrites, err = finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			if err != nil {
+				return respondUploadSessionFinalizeError(c, h.logger, err)
 			}
+			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
 	}
 
@@ -188,7 +235,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		Prompt:                   req.Prompt,
 		ImageModelKey:            req.ImageModelKey,
 		SkipReferenceImage:       req.SkipReferenceImage,
-		ReferenceImageURL:        req.ReferenceImageURL,
+		ReferenceImageAssetID:    referenceAssetID,
 		Watermark:                req.Watermark,
 		Goal:                     req.Goal,
 		GoalMode:                 req.GoalMode,
@@ -202,6 +249,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		InputAttachments:         req.InputAttachments,
 	})
 	if err != nil {
+		if isReferenceAssetError(err) {
+			return respondReferenceAssetError(c, h.logger, err)
+		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
 		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
@@ -217,9 +267,8 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		}
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
 	}
-
-	h.signPlanURLs(c.Context(), plan)
-	return Success(c, planAPIResponse(plan))
+	plan.ReferenceImage = referenceView
+	return Success(c, planAPIResponse(plan, h.store))
 }
 
 // List handles GET /api/v1/plans.
@@ -245,13 +294,12 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Msg("list plans failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to list plans")
 	}
-
-	for _, p := range plans {
-		h.signPlanURLs(c.Context(), p)
+	if err := h.presentPlanReferences(c.Context(), userID, plans); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
 	}
 
 	return Success(c, fiber.Map{
-		"items": planAPIResponses(plans),
+		"items": planAPIResponses(plans, h.store),
 		"total": total,
 	})
 }
@@ -276,9 +324,11 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 	if plan.UserID != userID {
 		return Forbidden(c, "you do not have access to this plan")
 	}
+	if err := h.presentPlanReference(c.Context(), userID, plan); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 
-	h.signPlanURLs(c.Context(), plan)
-	return Success(c, planAPIResponse(plan))
+	return Success(c, planAPIResponse(plan, h.store))
 }
 
 // Update handles PUT /api/v1/plans/:id.
@@ -293,6 +343,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	var req updatePlanRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -301,9 +354,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
-	if req.ReferenceImageURL != nil && !validReferenceImageURL(*req.ReferenceImageURL) {
-		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
-	}
+	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -319,6 +370,26 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if existing.UserID != userID {
 		return Forbidden(c, "you do not have access to this plan")
 	}
+	var referenceAssetID *string
+	desiredReferenceID := existing.ReferenceImageAssetID
+	if req.ReferenceImageSet {
+		desiredReferenceID = ""
+		if req.ReferenceImage != nil {
+			if h.referenceAssets == nil {
+				return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+			}
+			resolved, err := h.referenceAssets.ResolveSelection(c.Context(), userID, *req.ReferenceImage, []string{service.DirectUploadPurposeTaskReference})
+			if err != nil {
+				return respondReferenceAssetError(c, h.logger, err)
+			}
+			desiredReferenceID = resolved
+		}
+		referenceAssetID = &desiredReferenceID
+	}
+	referenceView, err := h.planReferenceView(c.Context(), userID, desiredReferenceID)
+	if err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 
 	// Validate image_model_key against the caller's tier.
 	// nil/unset ImageModelKey in the request body means "leave unchanged" — no validation needed.
@@ -331,43 +402,42 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if req.GoalMode != nil && *req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
-	var pending service.PendingUploadRepository
+	var pending repository.Repository
 	if h.repo != nil {
-		pending = h.repo.PendingUploads()
+		pending = h.repo
 	}
 	if req.InputAttachments != nil {
-		validatedAttachments, err := validateInputAttachments(c.Context(), pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
-			MaxCount:     16,
-			AllowedTypes: map[string]bool{"image": true},
+		validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
+			MaxCount:     maxAgentInputAttachments,
+			AllowedTypes: allAgentAttachmentTypes,
 		})
 		if err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+			return respondInputAttachmentError(c, h.logger, err)
 		}
 		req.InputAttachments = &validatedAttachments
 	}
 	if h.repo != nil {
-		if req.ReferenceImageURL != nil {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{*req.ReferenceImageURL}, h.store); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
-			}
+		rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
+		if err != nil {
+			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil), h.store); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
+		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if model.IsMontagePlatform(existing.Type) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput), h.store); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
+			rewrites, err = finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			if err != nil {
+				return respondUploadSessionFinalizeError(c, h.logger, err)
 			}
+			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
 	}
 
-	plan, err := h.service.Update(c.Context(), service.UpdatePlanParams{
+	updateParams := service.UpdatePlanParams{
 		ID:                       id,
 		CronExpr:                 req.CronExpr,
 		Prompt:                   req.Prompt,
 		ImageModelKey:            req.ImageModelKey,
 		SkipReferenceImage:       req.SkipReferenceImage,
-		ReferenceImageURL:        req.ReferenceImageURL,
+		ReferenceImageAssetID:    referenceAssetID,
 		Watermark:                req.Watermark,
 		Goal:                     req.Goal,
 		GoalMode:                 req.GoalMode,
@@ -379,17 +449,49 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		VideoCreatorInput:        req.VideoCreatorInput,
 		MontageInput:             req.MontageInput,
 		InputAttachments:         req.InputAttachments,
-	})
+	}
+	var plan *model.Plan
+	if req.ReferenceImageSet {
+		plan, err = h.service.Update(c.Context(), updateParams)
+	} else {
+		const maxReferenceCASAttempts = 3
+		for attempt := 0; attempt < maxReferenceCASAttempts; attempt++ {
+			plan, err = h.service.UpdateIfReferenceImageAssetID(c.Context(), updateParams, desiredReferenceID)
+			if !errors.Is(err, service.ErrPlanUpdateConflict) {
+				break
+			}
+			if attempt == maxReferenceCASAttempts-1 {
+				break
+			}
+			existing, err = h.service.GetByID(c.Context(), id)
+			if err != nil {
+				return Error(c, fiber.StatusNotFound, "plan not found")
+			}
+			if existing.UserID != userID {
+				return Forbidden(c, "you do not have access to this plan")
+			}
+			desiredReferenceID = existing.ReferenceImageAssetID
+			referenceView, err = h.planReferenceView(c.Context(), userID, desiredReferenceID)
+			if err != nil {
+				return respondReferenceAssetError(c, h.logger, err)
+			}
+		}
+	}
 	if err != nil {
+		if isReferenceAssetError(err) {
+			return respondReferenceAssetError(c, h.logger, err)
+		}
+		if errors.Is(err, service.ErrPlanUpdateConflict) {
+			return Error(c, fiber.StatusConflict, "plan changed concurrently; please retry")
+		}
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")
 	}
-
-	h.signPlanURLs(c.Context(), plan)
-	return Success(c, planAPIResponse(plan))
+	plan.ReferenceImage = referenceView
+	return Success(c, planAPIResponse(plan, h.store))
 }
 
 // Delete handles DELETE /api/v1/plans/:id.

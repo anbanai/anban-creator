@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { UseFormReturn } from 'react-hook-form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -9,6 +10,7 @@ interface MontageCreationPanelProps {
   form: UseFormReturn<any>
   fieldRoot: 'montage_input'
   onUploadingChange?: (uploading: boolean) => void
+  briefField?: ReactNode
 }
 
 function parseTags(value: string): string[] {
@@ -18,12 +20,12 @@ function parseTags(value: string): string[] {
     .filter(Boolean)
 }
 
-export function MontageCreationPanel({ form, fieldRoot, onUploadingChange }: MontageCreationPanelProps) {
+export function MontageCreationPanel({ form, fieldRoot, onUploadingChange, briefField }: MontageCreationPanelProps) {
   const control = form.control
 
   return (
     <div className="space-y-4">
-      <FormField control={control} name={`${fieldRoot}.brief`} render={({ field }) => (
+      {briefField ?? <FormField control={control} name={`${fieldRoot}.brief`} render={({ field }) => (
         <FormItem>
           <FormLabel>视频 brief</FormLabel>
           <FormControl>
@@ -36,7 +38,7 @@ export function MontageCreationPanel({ form, fieldRoot, onUploadingChange }: Mon
           </FormControl>
           <FormMessage />
         </FormItem>
-      )} />
+      )} />}
 
       <FormField control={control} name={`${fieldRoot}.source_assets`} render={({ field }) => (
         <FormItem>

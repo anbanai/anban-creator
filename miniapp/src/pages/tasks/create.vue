@@ -296,10 +296,20 @@
 
       <view class="field-spacer">
         <text class="field-label">本次参考图片</text>
-        <AbInput
-          v-model="form.reference_image_url"
-          placeholder="可选，输入图片 URL 覆盖账号默认参考图"
+        <image
+          v-if="referencePreviewUrl"
+          :src="referencePreviewUrl"
+          class="reference-preview"
+          mode="aspectFill"
         />
+        <view class="reference-actions">
+          <AbButton type="ghost" size="sm" :loading="referenceUploading" @click="chooseReferenceImage">
+            {{ referencePreviewUrl ? '更换图片' : '上传图片' }}
+          </AbButton>
+          <AbButton v-if="referencePreviewUrl" type="danger" size="sm" @click="clearReferenceImage">
+            清除
+          </AbButton>
+        </view>
       </view>
 
       <view class="switch-row field-spacer">
@@ -375,7 +385,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import type { Project, CreditPricing, Template, ResourceEntry } from '@/types'
+import type { Project, CreditPricing, Template, ResourceEntry, ReferenceImageSelection } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import { templatesApi } from '@/api/templates'
 import { resourcesApi } from '@/api/resources'
@@ -423,6 +433,8 @@ const requestedType = ref('')
 const prefillProjectId = ref('')
 const advancedOpen = ref(false)
 const projectSelectorRef = ref<{ refresh?: () => void } | null>(null)
+const referenceUploading = ref(false)
+const referencePreviewUrl = ref('')
 
 // Loaded on platform change
 const platformTemplates = ref<Template[]>([])
@@ -459,7 +471,7 @@ const form = reactive({
   selected_modules: {} as Record<string, number>,
   // image options
   skip_reference_image: false,
-  reference_image_url: '',
+  reference_image: null as ReferenceImageSelection | null,
   watermark: false,
 })
 
@@ -473,6 +485,33 @@ const billableGoalMode = computed(() => !isEcommerce.value && form.goal_mode)
 
 // ---- E-commerce: product photos + delivery modules ----
 const uploadingPhoto = ref(false)
+
+function chooseReferenceImage() {
+  if (referenceUploading.value) return
+  uni.chooseImage({
+    count: 1,
+    success: async (chosen) => {
+      const filePath = chosen.tempFilePaths?.[0]
+      if (!filePath) return
+      referenceUploading.value = true
+      try {
+        const uploaded = await projectsApi.uploadImage(filePath, 'task_reference')
+        form.reference_image = { upload_session_id: uploaded.upload_session_id }
+        referencePreviewUrl.value = uploaded.preview_url
+        uni.showToast({ title: '上传成功', icon: 'success' })
+      } catch (err: any) {
+        uni.showToast({ title: err?.message || '上传失败', icon: 'none' })
+      } finally {
+        referenceUploading.value = false
+      }
+    },
+  })
+}
+
+function clearReferenceImage() {
+  form.reference_image = null
+  referencePreviewUrl.value = ''
+}
 
 function modulePrice(key: string): number | undefined {
   return pricing.value?.ecommerce_module_prices?.[key]
@@ -568,7 +607,7 @@ const canSubmit = computed(() => {
   if (!form.project_id || !form.prompt.trim()) return false
   if (billableGoalMode.value && !form.goal.trim()) return false
   if (balance.value < creationCost.value) return false
-  return !submitting.value
+  return !submitting.value && !referenceUploading.value
 })
 
 function onProjectChange(project: Project) {
@@ -770,6 +809,7 @@ function validate(): boolean {
 }
 
 async function onSubmit() {
+  if (!canSubmit.value || referenceUploading.value) return
   if (!validate()) return
   if (!selectedProject.value) return
 
@@ -805,7 +845,7 @@ async function onSubmit() {
       goal: billableGoalMode.value && form.goal.trim() ? form.goal.trim() : undefined,
       goal_mode: billableGoalMode.value || undefined,
       skip_reference_image: form.skip_reference_image || undefined,
-      reference_image_url: form.reference_image_url.trim() || undefined,
+      reference_image: form.reference_image,
       watermark: form.watermark || undefined,
     })
 
@@ -1213,6 +1253,20 @@ onMounted(() => {
     opacity: 0.5;
     pointer-events: none;
   }
+}
+
+.reference-preview {
+  display: block;
+  width: 160rpx;
+  height: 160rpx;
+  margin-top: $ab-space-xs;
+  border-radius: $ab-radius-sm;
+}
+
+.reference-actions {
+  display: flex;
+  gap: $ab-space-sm;
+  margin-top: $ab-space-sm;
 }
 
 .module-list {

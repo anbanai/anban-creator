@@ -3,8 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 func rejectLegacyVideoFields(body []byte) error {
@@ -67,49 +69,116 @@ func montageSourceAssetURLs(input *model.MontageInput) []string {
 	return urls
 }
 
+func rewriteFinalizedVideoReferenceURLs(rewrites map[string]string, creatorCfg *model.VideoTaskConfig, creatorInput *model.VideoInput, editorCfg *model.VideoTaskConfig, editorInput *model.VideoInput) {
+	for _, cfg := range []*model.VideoTaskConfig{creatorCfg, editorCfg} {
+		if cfg == nil {
+			continue
+		}
+		for i := range cfg.References {
+			cfg.References[i].URL = rewriteFinalizedUploadURL(cfg.References[i].URL, rewrites)
+		}
+	}
+	for _, input := range []*model.VideoInput{creatorInput, editorInput} {
+		if input == nil {
+			continue
+		}
+		for i := range input.References {
+			input.References[i].URL = rewriteFinalizedUploadURL(input.References[i].URL, rewrites)
+		}
+	}
+}
+
+func rewriteFinalizedMontageAssetURLs(input *model.MontageInput, rewrites map[string]string) {
+	if input == nil {
+		return
+	}
+	for i := range input.SourceAssets {
+		input.SourceAssets[i].URL = rewriteFinalizedUploadURL(input.SourceAssets[i].URL, rewrites)
+	}
+}
+
 func validateMontageSourceAssetURLs(input *model.MontageInput) error {
 	for _, url := range montageSourceAssetURLs(input) {
-		if !validReferenceImageURL(url) {
+		if !validAttachmentURL(url) {
 			return fmt.Errorf("montage_input.source_assets.url must be an internal file path or an http(s) URL")
 		}
 	}
 	return nil
 }
 
-func taskAPIResponses(tasks []*model.Task) []map[string]any {
+func taskAPIResponses(tasks []*model.Task, store storage.Provider) []map[string]any {
 	items := make([]map[string]any, 0, len(tasks))
 	for _, task := range tasks {
-		items = append(items, taskAPIResponse(task))
+		items = append(items, taskAPIResponse(task, store))
 	}
 	return items
 }
 
-func taskAPIResponse(task *model.Task) map[string]any {
+func taskAPIResponse(task *model.Task, store storage.Provider) map[string]any {
 	if task == nil {
 		return nil
 	}
 	resp := modelAPIMap(task)
 	rewriteVideoAPIFields(resp, task.Type, task.VideoInput.Data(), task.VideoConfig.Data())
 	rewriteMontageAPIField(resp, task.Type, task.MontageInput.Data())
+	enrichOwnedObjectKeys(resp, store)
 	return resp
 }
 
-func planAPIResponses(plans []*model.Plan) []map[string]any {
+func planAPIResponses(plans []*model.Plan, store storage.Provider) []map[string]any {
 	items := make([]map[string]any, 0, len(plans))
 	for _, plan := range plans {
-		items = append(items, planAPIResponse(plan))
+		items = append(items, planAPIResponse(plan, store))
 	}
 	return items
 }
 
-func planAPIResponse(plan *model.Plan) map[string]any {
+func planAPIResponse(plan *model.Plan, store storage.Provider) map[string]any {
 	if plan == nil {
 		return nil
 	}
 	resp := modelAPIMap(plan)
 	rewriteVideoAPIFields(resp, plan.Type, plan.VideoInput.Data(), plan.VideoConfig.Data())
 	rewriteMontageAPIField(resp, plan.Type, plan.MontageInput.Data())
+	enrichOwnedObjectKeys(resp, store)
 	return resp
+}
+
+// enrichOwnedObjectKeys adds stable object keys to response-only attachment
+// maps. It never mutates the model and never creates temporary download URLs.
+func enrichOwnedObjectKeys(resp map[string]any, store storage.Provider) {
+	if resp == nil || store == nil {
+		return
+	}
+	enrichOwnedObjectKeysValue(resp, store)
+}
+
+func enrichOwnedObjectKeysValue(value any, store storage.Provider) {
+	switch value := value.(type) {
+	case map[string]any:
+		if rawURL, _ := value["url"].(string); rawURL != "" {
+			if existing, _ := value["key"].(string); existing == "" {
+				if key, ok := ownedStorageKey(store, rawURL); ok {
+					value["key"] = key
+				}
+			}
+		}
+		for _, nested := range value {
+			enrichOwnedObjectKeysValue(nested, store)
+		}
+	case []any:
+		for _, nested := range value {
+			enrichOwnedObjectKeysValue(nested, store)
+		}
+	}
+}
+
+func ownedStorageKey(store storage.Provider, rawURL string) (string, bool) {
+	rawURL = strings.TrimSpace(rawURL)
+	if store == nil || rawURL == "" || !store.IsOwnedURL(rawURL) {
+		return "", false
+	}
+	return storage.StorageKeyFromURL(rawURL)
 }
 
 func modelAPIMap(value any) map[string]any {
@@ -129,17 +198,17 @@ func rewriteVideoAPIFields(resp map[string]any, platform string, input model.Vid
 	delete(resp, "video_config")
 	switch {
 	case model.IsVideoCreatorPlatform(platform):
-		resp["video_creator_input"] = input
-		resp["video_creator_config"] = cfg
+		resp["video_creator_input"] = modelAPIMap(input)
+		resp["video_creator_config"] = modelAPIMap(cfg)
 	case model.IsVideoEditorPlatform(platform):
-		resp["video_editor_input"] = input
-		resp["video_editor_config"] = cfg
+		resp["video_editor_input"] = modelAPIMap(input)
+		resp["video_editor_config"] = modelAPIMap(cfg)
 	}
 }
 
 func rewriteMontageAPIField(resp map[string]any, platform string, input model.MontageInput) {
 	delete(resp, "montage_input")
 	if model.IsMontagePlatform(platform) {
-		resp["montage_input"] = input
+		resp["montage_input"] = modelAPIMap(input)
 	}
 }

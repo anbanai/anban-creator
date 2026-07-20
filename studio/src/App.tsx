@@ -12,6 +12,7 @@ import { NavigationProgress } from '@/components/NavigationProgress'
 import ShortcutHelp from '@/components/ShortcutHelp'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette'
 import LocalExecutorLayer from '@/components/desktop/LocalExecutorLayer'
+import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 
 // Lazy-loaded pages
@@ -119,11 +120,13 @@ function AppRoutes() {
         <Route
           element={
             <ProtectedRoute>
-              <NavigationProgress />
-              <KeyboardShortcuts />
-              <GlobalCommandPalette />
-              <LocalExecutorLayer />
-              <AppLayout />
+              <AgentPromptDropProvider>
+                <NavigationProgress />
+                <KeyboardShortcuts />
+                <GlobalCommandPalette />
+                <LocalExecutorLayer />
+                <AppLayout />
+              </AgentPromptDropProvider>
             </ProtectedRoute>
           }
         >

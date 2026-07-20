@@ -20,8 +20,10 @@ export type DirectUploadPurpose =
   | 'ai_entry_attachment'
 
 interface PrepareUploadResponse {
+  upload_session_id: string
   upload_id: string
   key: string
+  preview_url: string
   public_url: string
   upload_url: string
   method: string
@@ -227,6 +229,8 @@ export const projectsApi = {
       key: prepared.key,
       size: data.byteLength,
       type: uploadContentType,
+      upload_session_id: prepared.upload_session_id,
+      preview_url: prepared.preview_url,
     }
   },
 }

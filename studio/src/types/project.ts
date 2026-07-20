@@ -1,5 +1,6 @@
 import type { VideoDefaults, VideoModelPolicy } from './video'
 import type { MontagePreferences } from './montage'
+import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 
 export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'montage'
 export type ProjectStatus = 'active' | 'archived'
@@ -31,7 +32,7 @@ export interface Project {
   theme: string
   author: string
   template_id: string
-  reference_image_url: string
+  reference_image?: ReferenceAssetView | null
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults
@@ -88,7 +89,7 @@ export interface CreateProjectRequest {
   theme?: string
   author?: string
   template_id?: string
-  reference_image_url?: string
+  reference_image?: ReferenceImageSelection | null
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults

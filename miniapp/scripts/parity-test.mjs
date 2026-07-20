@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
@@ -18,6 +18,29 @@ function assertContains(path, terms) {
   for (const term of terms) {
     assert.equal(body.includes(term), true, `${path} should contain ${term}`)
   }
+}
+
+function filesUnder(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(dir, entry.name)
+    return entry.isDirectory() ? filesUnder(path) : [path]
+  })
+}
+
+function assertSubmitButtonsDisabled(path, clickHandler, disabledBinding, expectedCount) {
+  const tags = [...read(path).matchAll(/<AbButton\b[\s\S]*?>/g)]
+    .map((match) => match[0])
+    .filter((tag) => tag.includes(`@click="${clickHandler}"`))
+  assert.equal(tags.length, expectedCount, `${path} should have ${expectedCount} ${clickHandler} submit buttons`)
+  for (const tag of tags) {
+    assert.equal(tag.includes(`:disabled="${disabledBinding}"`), true, `${path} ${clickHandler} button must be disabled by ${disabledBinding}`)
+  }
+}
+
+function assertSubmitGuard(path, functionName, guardPattern) {
+  const body = read(path)
+  const functionStart = new RegExp(`async function ${functionName}\\(\\) \\{\\s*${guardPattern.source}`)
+  assert.match(body, functionStart, `${path} ${functionName} must reject submission before validation or API calls`)
 }
 
 for (const path of [
@@ -65,7 +88,8 @@ assertContains('src/types/auth.ts', [
 assertContains('src/types/task.ts', [
   'topic?: string',
   'skip_reference_image?: boolean',
-  'reference_image_url?: string',
+  'reference_image?: ReferenceAssetView | null',
+  'reference_image?: ReferenceImageSelection | null',
   'watermark?: boolean',
 ])
 
@@ -128,21 +152,55 @@ assertContains('src/pages/designer/index.vue', [
 ])
 
 assertContains('src/pages/tasks/create.vue', [
-  'form.skip_reference_image',
-  'form.reference_image_url',
+  'form.reference_image',
+  "uploadImage(filePath, 'task_reference')",
+  'upload_session_id: uploaded.upload_session_id',
   'form.watermark',
   'skip_reference_image: form.skip_reference_image',
-  'reference_image_url: form.reference_image_url',
+  'reference_image: form.reference_image',
   'watermark: form.watermark',
 ])
 
 assertContains('src/pages/plans/create.vue', [
   'skipReferenceImage',
-  'referenceImageUrl',
+  'referenceImage',
+  "uploadImage(filePath, 'task_reference')",
+  'upload_session_id: uploaded.upload_session_id',
   'watermark',
   'skip_reference_image: form.skipReferenceImage',
-  'reference_image_url: form.referenceImageUrl',
+  'reference_image: form.referenceImage',
 ])
+
+assertContains('src/pages/projects/detail.vue', [
+  'form.reference_image',
+  'referencePreviewUrl',
+  'upload_session_id: result.upload_session_id',
+  'reference_image: form.reference_image',
+])
+
+assertContains('src/types/asset.ts', [
+  'export type ReferenceImageSelection',
+  'upload_session_id: string',
+  'export interface ReferenceAssetView',
+  'download_url: string',
+])
+
+assertSubmitButtonsDisabled('src/pages/projects/detail.vue', 'onSave', 'referenceUploading', 2)
+assertSubmitGuard('src/pages/projects/detail.vue', 'onSave', /if \(saving\.value \|\| referenceUploading\.value\) return/)
+assertSubmitButtonsDisabled('src/pages/plans/create.vue', 'handleSubmit', 'referenceUploading', 1)
+assertSubmitGuard('src/pages/plans/create.vue', 'handleSubmit', /if \(submitting\.value \|\| referenceUploading\.value\) return/)
+assertSubmitButtonsDisabled('src/pages/tasks/create.vue', 'onSubmit', '!canSubmit', 1)
+assertSubmitGuard('src/pages/tasks/create.vue', 'onSubmit', /if \(!canSubmit\.value \|\| referenceUploading\.value\) return/)
+assert.match(
+  read('src/pages/tasks/create.vue'),
+  /const canSubmit = computed\(\(\) => \{[\s\S]*?return !submitting\.value && !referenceUploading\.value[\s\S]*?\}\)/,
+  'task canSubmit must remain false for the complete reference upload lifecycle',
+)
+
+for (const path of filesUnder(resolve(root, 'src'))) {
+  if (!/\.(ts|vue)$/.test(path)) continue
+  assert.equal(readFileSync(path, 'utf8').includes('reference_image_url'), false, `${path} still uses the removed reference URL field`)
+}
 
 // === channel→project migration (2026-06-27): miniapp must call /projects, never /channels ===
 // The Go server renamed channels→projects (router/router.go registers only /projects/*,

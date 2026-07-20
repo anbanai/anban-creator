@@ -19,6 +19,8 @@ const uploadResult = (fileName: string, overrides: Partial<UploadToOSSResult> = 
   contentType: fileName.endsWith('.png') ? 'image/png' : 'application/octet-stream',
   size: 5,
   ...overrides,
+  uploadSessionId: overrides.uploadSessionId ?? `session-${fileName}`,
+  previewUrl: overrides.previewUrl ?? `/${fileName}`,
 })
 
 const seededAttachments = (count: number): InputAttachment[] => Array.from(

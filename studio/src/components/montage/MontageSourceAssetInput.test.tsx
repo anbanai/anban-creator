@@ -38,8 +38,10 @@ describe('MontageSourceAssetInput', () => {
 
   it('maps uploads to Montage assets and preserves saved asset metadata', async () => {
     vi.mocked(uploadToOSS).mockResolvedValue({
+      uploadSessionId: 'session-source',
       uploadId: 'upload-source',
       key: 'uploads/source.mp4',
+      previewUrl: '/source.mp4',
       publicUrl: '/source.mp4',
       contentType: 'video/mp4',
       size: 42,

@@ -16,6 +16,7 @@ var (
 	ErrProjectNotFound        = errors.New("project not found")
 	ErrProjectOwnedByUser     = errors.New("project not owned by user")
 	ErrProjectDeleteConflict  = errors.New("project delete conflict")
+	ErrProjectUpdateConflict  = errors.New("project update conflict")
 	ErrVideoModelUnavailable  = errors.New("video model unavailable")
 	ErrProjectMontageDefaults = errors.New("invalid montage project defaults")
 )
@@ -180,6 +181,35 @@ func (s *ProjectService) BatchStats(ctx context.Context, projectIDs []string) (m
 
 // Update updates mutable fields on a project owned by the user.
 func (s *ProjectService) Update(ctx context.Context, userID, projectID string, ch *model.Project) (*model.Project, error) {
+	existing, err := s.prepareProjectUpdate(ctx, userID, projectID, ch)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.Projects().Update(ctx, existing); err != nil {
+		return nil, fmt.Errorf("update project: %w", err)
+	}
+	return existing, nil
+}
+
+func (s *ProjectService) UpdateIfReferenceImageAssetID(ctx context.Context, userID, projectID string, ch *model.Project, expectedID string) (*model.Project, error) {
+	existing, err := s.prepareProjectUpdate(ctx, userID, projectID, ch)
+	if err != nil {
+		return nil, err
+	}
+	if existing.ReferenceImageAssetID != expectedID {
+		return nil, ErrProjectUpdateConflict
+	}
+	won, err := s.repo.Projects().UpdateIfReferenceImageAssetID(ctx, existing, expectedID)
+	if err != nil {
+		return nil, fmt.Errorf("update project: %w", err)
+	}
+	if !won {
+		return nil, ErrProjectUpdateConflict
+	}
+	return existing, nil
+}
+
+func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, projectID string, ch *model.Project) (*model.Project, error) {
 	existing, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProjectNotFound, err)
@@ -236,8 +266,9 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	existing.Author = ch.Author
 	// 建项来源模板：unconditional assign 以支持清空。
 	existing.CreatedFromTemplateID = ch.CreatedFromTemplateID
-	// ReferenceImageURL: unconditional assign to support clearing.
-	existing.ReferenceImageURL = ch.ReferenceImageURL
+	if ch.ReferenceImageSet {
+		existing.ReferenceImageAssetID = ch.ReferenceImageAssetID
+	}
 	// ImageRatio: unconditional assign to support clearing.
 	existing.ImageRatio = ch.ImageRatio
 	if ch.InstructionsSet {
@@ -270,11 +301,6 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	if ch.Config.WechatSecret != "" {
 		existing.Config.WechatSecret = ch.Config.WechatSecret
 	}
-
-	if err := s.repo.Projects().Update(ctx, existing); err != nil {
-		return nil, fmt.Errorf("update project: %w", err)
-	}
-
 	return existing, nil
 }
 

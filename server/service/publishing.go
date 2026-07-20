@@ -81,7 +81,7 @@ type PublishDraftResult struct {
 // only the fallback the draft service uses for an article with no Author (e.g.
 // the HTML-file fallback path in extractArticleDraftFromWorkspace).
 func (s *PublishingService) buildAppConfig(ch *model.Project) (*appconfig.Config, error) {
-	return agent.BuildAppConfig(ch, ResolveStyle(ch, nil), nil, "", false, "")
+	return agent.BuildAppConfig(ch, ResolveStyle(ch, nil), nil, "", false)
 }
 
 // defaultCreateDraftService creates a draft.Service for the given project.

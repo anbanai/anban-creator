@@ -743,7 +743,7 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			path:       "/api/v1/tasks",
 			body:       `{"project_id":"nonexistent-id","prompt":"test"}`,
 			auth:       true,
-			wantStatus: fiber.StatusInternalServerError,
+			wantStatus: fiber.StatusNotFound,
 		},
 		{
 			name:       "create plan without project_id",

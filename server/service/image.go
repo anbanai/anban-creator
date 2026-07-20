@@ -366,7 +366,7 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 	// BuildAppConfig only needs the image-API/sizing slots here; the style
 	// dimensions are irrelevant for provider resolution but the signature requires
 	// a resolved set, so pass the project-only resolution (no task).
-	appCfg, err := agent.BuildAppConfig(ch, ResolveStyle(ch, nil), effectiveCfg, "", false, "")
+	appCfg, err := agent.BuildAppConfig(ch, ResolveStyle(ch, nil), effectiveCfg, "", false)
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}
@@ -398,7 +398,7 @@ func (s *ImageService) buildProcessorForResolved(
 		return nil, fmt.Errorf("resolved image model is incomplete")
 	}
 
-	appCfg, err := agent.BuildAppConfig(ch, ResolveStyle(ch, nil), resolved.Config, "", false, "")
+	appCfg, err := agent.BuildAppConfig(ch, ResolveStyle(ch, nil), resolved.Config, "", false)
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}

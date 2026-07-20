@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,6 +57,20 @@ func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate db: %v", err)
 	}
 	return db
+}
+
+func seedHandlerUploadSession(t *testing.T, repo repository.Repository, userID, uploadID, purpose, filename, contentType string) string {
+	t.Helper()
+	key := "uploads/pending/" + userID + "/" + uploadID + "/" + filename
+	publicURL := "https://cdn.example.com/" + key
+	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
+		ID: uploadID, UserID: userID, Purpose: purpose, StagingKey: key,
+		FileName: filename, ContentType: contentType, Size: 1,
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("seed upload session %s: %v", uploadID, err)
+	}
+	return publicURL
 }
 
 func postJSON(t *testing.T, app *fiber.App, path, body string) *http.Response {
@@ -687,6 +700,106 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	}
 }
 
+func TestCreateTaskPersistsFinalReferenceAndEcommercePhotoURLs(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "finalecomref"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformEcommerce, Name: "Ecommerce", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	refID, photoID := uuid.NewString(), uuid.NewString()
+	seedHandlerUploadSession(t, repo, userID, refID, service.DirectUploadPurposeTaskReference, "reference.png", "image/png")
+	photoURL := seedHandlerUploadSession(t, repo, userID, photoID, service.DirectUploadPurposeEcommercePhoto, "product.png", "image/png")
+	store := &referencePresentationStore{fakeStorageProvider: uploadSessionStatStore(repo.UploadSessions())}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceSvc)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	h.SetReferenceAssetService(referenceSvc)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","reference_image":{"upload_session_id":"`+refID+`"},"product_photos":["`+photoURL+`"],"selected_modules":{"main_images":1}}`)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
+	}
+	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte(refID)) {
+		t.Fatalf("task response contains non-final upload URL: %s", body)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("persisted tasks = %#v, %v", tasks, err)
+	}
+	wantPhoto := "/api/v1/files/assets/users/" + userID + "/" + photoID + "/product.png"
+	photos := tasks[0].Ecommerce.Data().ProductPhotos
+	if tasks[0].ReferenceImageAssetID != refID || len(photos) != 1 || photos[0] != wantPhoto {
+		t.Fatalf("persisted reference/photos = %q/%#v", tasks[0].ReferenceImageAssetID, photos)
+	}
+	for id, wantKey := range map[string]string{
+		refID:   "assets/users/" + userID + "/" + refID + "/reference.png",
+		photoID: "assets/users/" + userID + "/" + photoID + "/product.png",
+	} {
+		assertFinalizedAsset(t, repo, id, wantKey)
+	}
+}
+
+func TestCreateVideoTaskPersistsFinalReferenceURL(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, projectID, uploadID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "finalvideoref"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoCreator, Name: "Video", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	refURL := seedHandlerUploadSession(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
+	store := uploadSessionStatStore(repo.UploadSessions())
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","video_creator_input":{"brief":"生成产品视频","references":[{"type":"video_url","url":"`+refURL+`"}]}}`)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
+	}
+	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte("assets/users/")) {
+		t.Fatalf("video task response contains non-final reference: %s", body)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("persisted tasks = %#v, %v", tasks, err)
+	}
+	references := tasks[0].VideoInput.Data().References
+	wantURL := "/api/v1/files/assets/users/" + userID + "/" + uploadID + "/reference.mp4"
+	if len(references) != 1 || references[0].URL != wantURL {
+		t.Fatalf("persisted video references = %#v", references)
+	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/reference.mp4")
+}
+
 func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -694,7 +807,7 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := uuid.New().String()
 	uploadID := uuid.New().String()
-	assetURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
+	stagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      userID + "@example.com",
@@ -712,23 +825,23 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeMontageAsset,
-		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
-		PublicURL:   assetURL,
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID:         uploadID,
+		UserID:     userID,
+		Purpose:    service.DirectUploadPurposeMontageAsset,
+		StagingKey: "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
+
 		FileName:    "clip.mp4",
 		ContentType: "video/mp4",
 		Size:        1234,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, uploadSessionStatStore(repo.UploadSessions()), nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 	app := fiber.New()
@@ -741,7 +854,7 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 		"project_id": "`+projectID+`",
 		"montage_input": {
 			"brief": "剪成一条发布会短片",
-			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
+			"source_assets": [{"type": "video", "url": "`+stagingURL+`"}]
 		}
 	}`)
 	defer resp.Body.Close()
@@ -749,13 +862,14 @@ func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
+		t.Fatalf("read response: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("upload status = %q, want finalized", upload.Status)
+	if bytes.Contains(responseBody, []byte("uploads/pending/")) || !bytes.Contains(responseBody, []byte("assets/users/")) {
+		t.Fatalf("task persisted non-final montage URL: %s", responseBody)
 	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/clip.mp4")
 }
 
 func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testing.T) {
@@ -765,7 +879,7 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	userID := uuid.New().String()
 	projectID := uuid.New().String()
 	uploadID := uuid.New().String()
-	assetURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
+	stagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      userID + "@example.com",
@@ -783,19 +897,19 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.PendingUploads().CreatePendingUpload(ctx, &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeMontageAsset,
-		Key:         "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
-		PublicURL:   assetURL,
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID:         uploadID,
+		UserID:     userID,
+		Purpose:    service.DirectUploadPurposeMontageAsset,
+		StagingKey: "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
+
 		FileName:    "clip.mp4",
 		ContentType: "video/mp4",
 		Size:        1234,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Minute),
 	}); err != nil {
-		t.Fatalf("create pending upload: %v", err)
+		t.Fatalf("create upload session: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -812,7 +926,7 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		"project_id": "`+projectID+`",
 		"montage_input": {
 			"brief": "错误平台",
-			"source_assets": [{"type": "video", "url": "`+assetURL+`"}]
+			"source_assets": [{"type": "video", "url": "`+stagingURL+`"}]
 		}
 	}`)
 	defer resp.Body.Close()
@@ -820,16 +934,16 @@ func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
 	}
-	upload, err := repo.PendingUploads().FindPendingUploadByID(ctx, uploadID)
+	session, err := repo.UploadSessions().FindByID(ctx, uploadID)
 	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
+		t.Fatalf("find upload session: %v", err)
 	}
-	if upload.Status != model.PendingUploadStatusPending {
-		t.Fatalf("upload status = %q, want pending", upload.Status)
+	if session.Status != model.UploadSessionPending || session.AssetID != "" {
+		t.Fatalf("upload session changed: %#v", session)
 	}
 }
 
-func TestCreateTaskRejectsMalformedPendingReferenceWithoutCreatingTask(t *testing.T) {
+func TestCreateTaskRejectsMalformedUploadSessionReferenceWithoutCreatingTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -863,7 +977,7 @@ func TestCreateTaskRejectsMalformedPendingReferenceWithoutCreatingTask(t *testin
 	resp := postJSON(t, app, "/tasks", body)
 	defer resp.Body.Close()
 	responseBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != fiber.StatusBadRequest || !bytes.Contains(responseBody, []byte("pending upload URL is invalid")) {
+	if resp.StatusCode != fiber.StatusBadRequest || !bytes.Contains(responseBody, []byte("reference_image_url is no longer supported")) {
 		t.Fatalf("status/body = %d/%s", resp.StatusCode, responseBody)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
@@ -872,7 +986,7 @@ func TestCreateTaskRejectsMalformedPendingReferenceWithoutCreatingTask(t *testin
 	}
 }
 
-func TestCreateTaskAllowsExternalPendingLikeReferencePath(t *testing.T) {
+func TestCreateTaskRejectsExternalLegacyReferencePath(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -906,13 +1020,13 @@ func TestCreateTaskAllowsExternalPendingLikeReferencePath(t *testing.T) {
 	}`, projectID, "https://external.example.com/uploads/pending/user-1/external-id/ref.png")
 	resp := postJSON(t, app, "/tasks", body)
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
+	if resp.StatusCode != fiber.StatusBadRequest {
 		responseBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status/body = %d/%s, want 200", resp.StatusCode, responseBody)
+		t.Fatalf("status/body = %d/%s, want 400", resp.StatusCode, responseBody)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
-	if err != nil || len(tasks) != 1 {
-		t.Fatalf("tasks/error = %d/%v, want 1/nil", len(tasks), err)
+	if err != nil || len(tasks) != 0 {
+		t.Fatalf("tasks/error = %d/%v, want 0/nil", len(tasks), err)
 	}
 }
 
@@ -985,6 +1099,224 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	}
 }
 
+func TestCloneTaskAcceptsFinalInputSnapshot(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "clone-snapshot@example.com", Password: "hashed", InviteCode: "clonesnapshot", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.NewString()
+	source := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, Prompt: "source prompt"}
+	source.SetInputAttachments([]model.EntryAttachment{{Role: "brief", Text: "source attachment"}, {Role: model.EntryAttachmentRoleResumeLatest, Text: "old resume"}})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	uploadID := "clone-upload"
+	stagingKey := "uploads/pending/" + userID + "/" + uploadID + "/reference.png"
+	finalKey := "assets/users/" + userID + "/" + uploadID + "/reference.png"
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		StagingKey: stagingKey, FileName: "reference.png", ContentType: "image/png", Size: 123,
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create upload session: %v", err)
+	}
+	store := uploadSessionStatStore(repo.UploadSessions())
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	app := fiber.New()
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Clone(c)
+	})
+
+	resp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
+		"prompt":"  edited prompt  ",
+		"input_attachments":[{
+			"type":"image","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
+			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999,
+			"url":"https://attacker.example/secret","instruction":"  keep logo  "
+		}]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, body)
+	}
+	var envelope struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data.Prompt != "edited prompt" {
+		t.Fatalf("prompt = %q", envelope.Data.Prompt)
+	}
+	got := envelope.Data.InputAttachments.Data()
+	if len(got) != 1 || got[0].UploadID != uploadID || got[0].Key != finalKey || got[0].URL != "" || got[0].FileName != "reference.png" || got[0].ContentType != "image/png" || got[0].Size != 123 || got[0].Instruction != "keep logo" {
+		t.Fatalf("clone attachments = %#v, want exact verified final snapshot", got)
+	}
+	found, err := repo.Tasks().FindByID(ctx, envelope.Data.ID)
+	if err != nil {
+		t.Fatalf("find clone: %v", err)
+	}
+	if stored := found.InputAttachments.Data(); len(stored) != 1 || stored[0].Key != finalKey || stored[0].URL != "" {
+		t.Fatalf("stored clone attachments = %#v", stored)
+	}
+
+	emptyResp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
+		"prompt":"",
+		"input_attachments":[{
+			"type":"image","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
+			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999
+		}]
+	}`)
+	defer emptyResp.Body.Close()
+	if emptyResp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(emptyResp.Body)
+		t.Fatalf("empty prompt status = %d, body=%s", emptyResp.StatusCode, body)
+	}
+	var emptyEnvelope struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(emptyResp.Body).Decode(&emptyEnvelope); err != nil {
+		t.Fatalf("decode empty prompt response: %v", err)
+	}
+	if emptyEnvelope.Data.Prompt != "" {
+		t.Fatalf("empty prompt clone prompt = %q", emptyEnvelope.Data.Prompt)
+	}
+	if got := emptyEnvelope.Data.InputAttachments.Data(); len(got) != 1 || got[0].Key != finalKey || got[0].FileName != "reference.png" {
+		t.Fatalf("empty prompt clone attachments = %#v", got)
+	}
+}
+
+func TestCreateVideoEditorPromotesVerifiedPromptVideoToPersistedInputReference(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "prompt-video@example.com", Password: "hashed", InviteCode: "promptvideo", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoEditor, Name: "Video Editor", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	uploadID := "video-upload"
+	stagingKey := "uploads/pending/" + userID + "/" + uploadID + "/source.mp4"
+	finalKey := "assets/users/" + userID + "/" + uploadID + "/source.mp4"
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		StagingKey: stagingKey, FileName: "source.mp4", ContentType: "video/mp4", Size: 321,
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create upload session: %v", err)
+	}
+	store := uploadSessionStatStore(repo.UploadSessions())
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{
+		"project_id":"`+projectID+`",
+		"prompt":"给源视频加字幕",
+		"quantity":1,
+		"input_attachments":[{
+			"type":"video","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
+			"file_name":"forged.mov","content_type":"video/quicktime","size":999
+		}]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, body)
+	}
+	var envelope struct {
+		Data struct {
+			ID               string           `json:"id"`
+			VideoEditorInput model.VideoInput `json:"video_editor_input"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	refs := envelope.Data.VideoEditorInput.References
+	if len(refs) != 1 || refs[0].Type != service.VideoReferenceVideo || refs[0].URL != finalKey || refs[0].FileName != "source.mp4" || refs[0].MimeType != "video/mp4" || refs[0].FileSize != 321 {
+		t.Fatalf("response video input references = %#v", refs)
+	}
+	found, err := repo.Tasks().FindByID(ctx, envelope.Data.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	stored := found.VideoInput.Data().References
+	if len(stored) != 1 || stored[0].URL != finalKey || strings.Contains(strings.ToLower(stored[0].URL), "signature=") {
+		t.Fatalf("stored video input references = %#v", stored)
+	}
+}
+
+func TestCloneTaskRejectsEmptyMontageBriefBeforeSideEffects(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "clone-montage@example.com", Password: "hashed", InviteCode: "clonemontage", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformMontage, Name: "Montage", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.NewString()
+	source := &model.Task{
+		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformMontage,
+		Status: model.TaskStatusCompleted, Prompt: "source prompt", ExecutionTarget: model.ExecutionTargetCloud,
+	}
+	source.SetMontageInput(model.MontageInput{Brief: "source montage brief", PipelineKey: "default"})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Clone(c)
+	})
+
+	resp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{"prompt":"  \n\t "}`)
+	defer resp.Body.Close()
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body.Msg, "montage task requires brief") {
+		t.Fatalf("status=%d response=%#v; want montage validation error", resp.StatusCode, body)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 1 || tasks[0].ID != taskID {
+		t.Fatalf("invalid montage clone changed tasks: tasks=%#v err=%v", tasks, err)
+	}
+}
+
 func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -1020,10 +1352,18 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	store, err := storage.NewLocalProvider(t.TempDir())
-	if err != nil {
-		t.Fatalf("create local storage: %v", err)
+	uploadID := "resume-upload"
+	stagingKey := "uploads/pending/" + userID + "/" + uploadID + "/notes.md"
+	finalKey := "assets/users/" + userID + "/" + uploadID + "/notes.md"
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		StagingKey: stagingKey, FileName: "notes.md", ContentType: "text/markdown", Size: int64(len("# notes")),
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create upload session: %v", err)
 	}
+	store := uploadSessionStatStore(repo.UploadSessions())
+	store.data = map[string][]byte{stagingKey: []byte("# notes")}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
@@ -1037,31 +1377,15 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 		return h.Resume(c)
 	})
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("prompt", "继续写结论"); err != nil {
-		t.Fatalf("write prompt: %v", err)
-	}
-	if err := writer.WriteField("file_labels", `["修改意见"]`); err != nil {
-		t.Fatalf("write labels: %v", err)
-	}
-	part, err := writer.CreateFormFile("files", "notes.md")
-	if err != nil {
-		t.Fatalf("create file: %v", err)
-	}
-	if _, err := part.Write([]byte("# notes")); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/resume", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{
+		"prompt":"继续写结论",
+		"input_attachments":[{
+			"type":"text","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
+			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999,
+			"instruction":"修改意见"
+		}]
+	}`)
+	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -1089,6 +1413,55 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	}
 	if !latest || !file {
 		t.Fatalf("resume attachments latest=%v file=%v: %#v", latest, file, resumed.InputAttachments.Data())
+	}
+	assertFinalizedAsset(t, repo, uploadID, finalKey)
+	if len(store.read) != 1 || store.read[0] != finalKey || len(store.readMax) != 1 || store.readMax[0] != maxTaskResumeFileBytes {
+		t.Fatalf("bounded reads keys=%v max=%v", store.read, store.readMax)
+	}
+}
+
+func TestResumeTaskRejectsMoreThanFiveDirectAttachments(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "resume-limit@example.com", Password: "hashed", InviteCode: "resumelimit"}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.NewString()
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc.SetNASResumeEnabled(true)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks/:id/resume", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Resume(c)
+	})
+
+	attachments := make([]string, 6)
+	for i := range attachments {
+		attachments[i] = fmt.Sprintf(`{"type":"text","upload_id":"upload-%d","key":"uploads/pending/%s/upload-%d/file.txt"}`, i, userID, i)
+	}
+	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{"input_attachments":[`+strings.Join(attachments, ",")+`]}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(body.Msg, "at most 5 attachments") {
+		t.Fatalf("message = %q, want five attachment limit", body.Msg)
 	}
 }
 
@@ -1119,24 +1492,13 @@ func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
 		return h.Resume(c)
 	})
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("files", "notes.md")
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := part.Write([]byte("notes")); err != nil {
-		t.Fatalf("write form file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/resume", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{
+		"input_attachments":[{
+			"type":"text","upload_id":"resume-storage-upload",
+			"key":"uploads/pending/`+userID+`/resume-storage-upload/notes.md"
+		}]
+	}`)
+	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
@@ -1568,7 +1930,57 @@ func TestCreateTaskAcceptsSeednoteInputAttachments(t *testing.T) {
 	}
 }
 
-func TestCreateTaskRejectsNonImageSeednoteAttachment(t *testing.T) {
+func TestCreateTaskAcceptsAllAgentAttachmentTypes(t *testing.T) {
+	app, repo, ctx, _, projectID := setupSeednoteTaskCreateHandler(t)
+	body := fmt.Sprintf(`{"project_id":%q,"prompt":"test","input_attachments":%s}`, projectID, fiveTypeHandlerAttachmentsJSON)
+	resp := postJSON(t, app, "/tasks", body)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, raw)
+	}
+	data := decodeEnvelopeRawData(t, resp)
+	var task model.Task
+	if err := json.Unmarshal(data["id"], &task.ID); err != nil || task.ID == "" {
+		t.Fatalf("decode task id: %v", err)
+	}
+	stored, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil || len(stored.InputAttachments.Data()) != 5 {
+		t.Fatalf("stored attachments = %#v, err = %v", stored, err)
+	}
+	attachments := stored.InputAttachments.Data()
+	if attachments[1].ContentType != "application/ogg" || attachments[4].ContentType != "application/csv" {
+		t.Fatalf("stored canonical application MIME attachments = %#v", attachments)
+	}
+}
+
+func TestCreateTaskRejectsInvalidAgentAttachmentsAtHandler(t *testing.T) {
+	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", "uploads/pending/foreign/foreign-upload/product.png") {
+		t.Run(tt.name, func(t *testing.T) {
+			app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
+			if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+				ID: "foreign-upload", UserID: "foreign-user", Purpose: service.DirectUploadPurposeAIEntryAttachment,
+				StagingKey: "uploads/pending/foreign/foreign-upload/product.png", FileName: "product.png", ContentType: "image/png", Size: 10,
+				Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+			}); err != nil {
+				t.Fatalf("create foreign upload: %v", err)
+			}
+			body := fmt.Sprintf(`{"project_id":%q,"prompt":"test","input_attachments":%s}`, projectID, tt.attachments)
+			resp := postJSON(t, app, "/tasks", body)
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusBadRequest {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 400: %s", resp.StatusCode, raw)
+			}
+			tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+			if err != nil || len(tasks) != 0 {
+				t.Fatalf("rejected request persisted tasks = %#v, err = %v", tasks, err)
+			}
+		})
+	}
+}
+
+func TestCreateTaskAcceptsNonImageSeednoteAttachment(t *testing.T) {
 	app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
 	resp := postJSON(t, app, "/tasks", `{
 		"project_id":"`+projectID+`",
@@ -1581,15 +1993,15 @@ func TestCreateTaskRejectsNonImageSeednoteAttachment(t *testing.T) {
 		}]
 	}`)
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusBadRequest {
+	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
 	if err != nil {
 		t.Fatalf("find tasks: %v", err)
 	}
-	if len(tasks) != 0 {
-		t.Fatalf("tasks = %#v, want none", tasks)
+	if len(tasks) != 1 || len(tasks[0].InputAttachments.Data()) != 1 || tasks[0].InputAttachments.Data()[0].Type != "video" {
+		t.Fatalf("tasks = %#v, want one video attachment", tasks)
 	}
 }

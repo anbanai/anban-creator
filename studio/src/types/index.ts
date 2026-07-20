@@ -16,6 +16,12 @@ export type {
   PlatformProfile,
 } from './project'
 
+export type {
+  ReferenceAssetView,
+  ReferenceImageSelection,
+  ReferenceImageValue,
+} from './asset'
+
 // Plan
 export type {
   PlanType,

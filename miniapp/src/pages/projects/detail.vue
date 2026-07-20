@@ -160,8 +160,8 @@
             <text class="field-label">参考图片</text>
             <view class="ref-uploader" @tap="onChooseReference">
               <image
-                v-if="form.reference_image_url"
-                :src="form.reference_image_url"
+                v-if="referencePreviewUrl"
+                :src="referencePreviewUrl"
                 class="ref-uploader__img"
                 mode="aspectFill"
               />
@@ -172,16 +172,11 @@
                 <text>上传中…</text>
               </view>
             </view>
-            <AbInput
-              v-model="form.reference_image_url"
-              placeholder="或输入图片 URL"
-              style="margin-top: 8rpx;"
-            />
-            <view v-if="form.reference_image_url" class="ref-uploader__actions">
+            <view v-if="referencePreviewUrl" class="ref-uploader__actions">
               <text class="ref-uploader__action" @tap="onAnalyzeReference">识别风格</text>
               <text
                 class="ref-uploader__action ref-uploader__action--danger"
-                @tap="form.reference_image_url = ''"
+                @tap="clearReferenceImage"
               >
                 清除
               </text>
@@ -474,6 +469,7 @@
           v-else
           type="primary"
           size="lg"
+          :disabled="referenceUploading"
           :loading="saving"
           @click="onSave"
           style="flex: 2;"
@@ -487,6 +483,7 @@
           type="primary"
           size="lg"
           block
+          :disabled="referenceUploading"
           :loading="saving"
           @click="onSave"
         >
@@ -531,6 +528,7 @@ import type {
   ResourceEntry,
   TopicPool,
   Template,
+  ReferenceImageSelection,
 } from '@/types'
 import { projectsApi } from '@/api/projects'
 import { resourcesApi } from '@/api/resources'
@@ -587,12 +585,14 @@ const form = reactive({
   theme: '',
   layout: '',
   image_preset: '',
-  reference_image_url: '',
+  reference_image: null as ReferenceImageSelection | null,
   image_ratio: '3:4',
   enable_publishing: false,
   wechat_app_id: '',
   wechat_secret: '',
 })
+
+const referencePreviewUrl = ref('')
 
 const keywordList = ref<string[]>([])
 const themes = ref<ResourceEntry[]>([])
@@ -756,7 +756,10 @@ async function loadProject(id: string) {
     form.theme = ch.theme || ''
     form.layout = ch.layout || ''
     form.image_preset = ch.image_preset || ''
-    form.reference_image_url = ch.reference_image_url || ''
+    form.reference_image = ch.reference_image?.asset_id
+      ? { asset_id: ch.reference_image.asset_id }
+      : null
+    referencePreviewUrl.value = ch.reference_image?.download_url || ''
     form.image_ratio = ch.image_ratio || '3:4'
     form.enable_publishing = ch.config?.enable_publishing || false
     form.wechat_app_id = ch.config?.wechat_app_id || ''
@@ -915,7 +918,10 @@ function chooseAndUpload(
       try {
         const result = await projectsApi.uploadImage(filePath, purpose)
         if (target === 'avatar') form.avatar_url = result.url
-        else if (target === 'reference') form.reference_image_url = result.url
+        else if (target === 'reference') {
+          form.reference_image = { upload_session_id: result.upload_session_id }
+          referencePreviewUrl.value = result.preview_url
+        }
         else form.persona_avatar = result.url
         uni.showToast({ title: '上传成功', icon: 'success' })
       } catch (err: any) {
@@ -943,14 +949,14 @@ function onChooseAuthorAvatar() {
 }
 
 async function onAnalyzeReference() {
-  if (!form.reference_image_url) {
-    uni.showToast({ title: '请先上传或填写参考图', icon: 'none' })
+  if (!referencePreviewUrl.value) {
+    uni.showToast({ title: '请先上传参考图', icon: 'none' })
     return
   }
   if (analyzingStyle.value) return
   analyzingStyle.value = true
   try {
-    const result = await projectsApi.analyzeImage(form.reference_image_url)
+    const result = await projectsApi.analyzeImage(referencePreviewUrl.value)
     if (result.visual_style) {
       form.visual_style = result.visual_style
       uni.showToast({ title: '已识别视觉风格', icon: 'success' })
@@ -962,6 +968,11 @@ async function onAnalyzeReference() {
   } finally {
     analyzingStyle.value = false
   }
+}
+
+function clearReferenceImage() {
+  form.reference_image = null
+  referencePreviewUrl.value = ''
 }
 
 function pickTemplate() {
@@ -1031,7 +1042,7 @@ function buildPayload(): CreateProjectRequest {
     layout: form.layout || undefined,
     image_preset: form.image_preset || undefined,
     byline: form.byline || undefined,
-    reference_image_url: form.reference_image_url || undefined,
+    reference_image: form.reference_image,
     image_ratio: form.image_ratio || undefined,
     enable_publishing: form.enable_publishing || undefined,
     wechat_app_id: form.wechat_app_id || undefined,
@@ -1040,6 +1051,7 @@ function buildPayload(): CreateProjectRequest {
 }
 
 async function onSave() {
+  if (saving.value || referenceUploading.value) return
   if (!validate()) return
 
   saving.value = true

@@ -555,13 +555,12 @@ func TestBuildAccountInfo_TaskStyleOverride(t *testing.T) {
 	if got := info["visual_style_source"]; got != "task" {
 		t.Errorf("visual_style_source = %v, want task", got)
 	}
-	// seednote branch must still surface the project's reference_image_url unchanged.
 	imgCfg, ok := info["image_config"].(map[string]any)
 	if !ok {
 		t.Fatalf("image_config missing or wrong type: %T", info["image_config"])
 	}
-	if _, present := imgCfg["reference_image_url"]; !present {
-		t.Errorf("image_config.reference_image_url missing")
+	if _, present := imgCfg["reference_image_path"]; present {
+		t.Errorf("image_config unexpectedly contains a reference path: %#v", imgCfg)
 	}
 }
 
@@ -573,17 +572,17 @@ func TestBuildAccountInfo_TaskProjectSnapshotWinsOverCurrentProject(t *testing.T
 	ch := createAccountInfoProject(t, repo, userID, "当前视觉")
 	ch.Name = "当前项目名"
 	ch.Instructions = "当前定位"
-	ch.ReferenceImageURL = "/api/v1/files/current-ref"
+	ch.ReferenceImageAssetID = "current-asset"
 	if err := repo.Projects().Update(ctx, ch); err != nil {
 		t.Fatalf("update project: %v", err)
 	}
 	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
 	task.SetProjectSnapshot(model.ProjectSnapshot{
-		ProjectName:       "快照项目名",
-		Platform:          model.PlatformSeednote,
-		Instructions:      "快照定位",
-		VisualStyle:       "快照视觉",
-		ReferenceImageURL: "/api/v1/files/snapshot-ref",
+		ProjectName:           "快照项目名",
+		Platform:              model.PlatformSeednote,
+		Instructions:          "快照定位",
+		VisualStyle:           "快照视觉",
+		ReferenceImageAssetID: "snapshot-asset",
 	})
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatalf("update task snapshot: %v", err)
@@ -610,8 +609,64 @@ func TestBuildAccountInfo_TaskProjectSnapshotWinsOverCurrentProject(t *testing.T
 		t.Fatalf("visual_style_source = %v, want snapshot", got)
 	}
 	imgCfg := info["image_config"].(map[string]any)
-	if got := imgCfg["reference_image_url"]; got != "/api/v1/files/snapshot-ref" {
-		t.Fatalf("reference_image_url = %v, want snapshot ref", got)
+	if got := imgCfg["reference_image_path"]; got != ".anban-creator/reference.png" {
+		t.Fatalf("reference_image_path = %v, want runtime path", got)
+	}
+}
+
+func TestBuildAccountInfoReferenceAssetOnlyExposesRuntimePath(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.NewString()
+	ch := createAccountInfoProject(t, repo, userID, "clean")
+	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
+	task.ReferenceImageAssetID = "asset-task"
+	task.SkipReferenceImage = true
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{"project_id": ch.ID, "scope": "seednote", "task_id": task.ID})
+	if errMsg != "" {
+		t.Fatal(errMsg)
+	}
+	raw, _ := json.Marshal(info)
+	if strings.Contains(string(raw), "reference_image_url") || strings.Contains(string(raw), "assets/users/") {
+		t.Fatalf("profile leaked reference storage identity: %s", raw)
+	}
+	profile := info["resolved_profile"].(map[string]any)
+	if got := profile["reference_image_path"]; got != ".anban-creator/reference.png" {
+		t.Fatalf("reference_image_path = %v", got)
+	}
+	imageConfig := info["image_config"].(map[string]any)
+	if got := imageConfig["reference_image_path"]; got != ".anban-creator/reference.png" {
+		t.Fatalf("image_config.reference_image_path = %v", got)
+	}
+
+	task.ReferenceImageAssetID = ""
+	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: task.Type, ReferenceImageAssetID: "asset-project"})
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	info, errMsg = buildAccountInfo(ctx, userID, map[string]any{"project_id": ch.ID, "scope": "seednote", "task_id": task.ID})
+	if errMsg != "" {
+		t.Fatal(errMsg)
+	}
+	if _, ok := info["resolved_profile"].(map[string]any)["reference_image_path"]; ok {
+		t.Fatal("skip_reference_image exposed inherited runtime path")
+	}
+
+	task.SkipReferenceImage = false
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	info, errMsg = buildAccountInfo(ctx, userID, map[string]any{"project_id": ch.ID, "scope": "seednote", "task_id": task.ID})
+	if errMsg != "" {
+		t.Fatal(errMsg)
+	}
+	if got := info["resolved_profile"].(map[string]any)["reference_image_path"]; got != ".anban-creator/reference.png" {
+		t.Fatalf("inherited reference path = %v", got)
 	}
 }
 
@@ -621,16 +676,16 @@ func TestBuildAccountInfo_MomentsProfileIncludesDeliveryContract(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	ch := &model.Project{
-		ID:                uuid.New().String(),
-		UserID:            userID,
-		Platform:          model.PlatformMoments,
-		Name:              "私域朋友圈",
-		Status:            model.ProjectStatusActive,
-		Instructions:      "高信任成交内容",
-		Keywords:          "私域,成交,生活方式",
-		VisualStyle:       "真实手机随拍，自然光",
-		ReferenceImageURL: "/api/v1/files/ref-card.png",
-		ImageRatio:        "3:4",
+		ID:                    uuid.New().String(),
+		UserID:                userID,
+		Platform:              model.PlatformMoments,
+		Name:                  "私域朋友圈",
+		Status:                model.ProjectStatusActive,
+		Instructions:          "高信任成交内容",
+		Keywords:              "私域,成交,生活方式",
+		VisualStyle:           "真实手机随拍，自然光",
+		ReferenceImageAssetID: "moments-asset",
+		ImageRatio:            "3:4",
 	}
 	if err := repo.Projects().Create(ctx, ch); err != nil {
 		t.Fatalf("create moments project: %v", err)

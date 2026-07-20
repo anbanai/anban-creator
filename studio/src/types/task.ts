@@ -2,6 +2,7 @@ import type { VideoInput, VideoTaskConfig } from './video'
 import type { CreditTransaction } from './credits'
 import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
+import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 
 export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'montage'
 
@@ -31,7 +32,7 @@ export interface ProjectSnapshot {
   instructions?: string
   keywords?: string
   visual_style?: string
-  reference_image_url?: string
+  reference_image_asset_id?: string
   image_ratio?: string
   writer?: string
   theme?: string
@@ -62,7 +63,7 @@ export interface Task {
   image_ratio?: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceAssetView | null
   input_attachments?: InputAttachment[]
   // Failure detail persisted by server model.Task.ErrorMessage; omitted when empty.
   error_message?: string
@@ -195,7 +196,7 @@ export interface CreateTaskRequest {
   image_ratio?: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceImageSelection | null
   input_attachments?: InputAttachment[]
   watermark?: boolean
   goal?: string

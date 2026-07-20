@@ -2,7 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,9 +20,10 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
-func setupTemplateHandlerTest(t *testing.T) (*fiber.App, repository.Repository) {
+func setupTemplateHandlerTest(t *testing.T, configureStore ...func(*fakeStorageProvider)) (*fiber.App, repository.Repository) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -32,17 +35,23 @@ func setupTemplateHandlerTest(t *testing.T) (*fiber.App, repository.Repository) 
 			sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.Template{}, &model.PendingUpload{}); err != nil {
+	if err := db.AutoMigrate(&model.Template{}, &model.UploadSession{}, &model.Asset{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	db.Exec("DELETE FROM templates")
-	db.Exec("DELETE FROM pending_uploads")
+	db.Exec("DELETE FROM upload_sessions")
+	db.Exec("DELETE FROM assets")
 
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	svc := service.NewTemplateService(repo, &logger)
 	h := NewTemplateHandler(svc, &logger)
-	h.SetPendingUploadRepository(repo.PendingUploads())
+	store := uploadSessionStatStore(repo.UploadSessions())
+	for _, configure := range configureStore {
+		configure(store)
+	}
+	h.SetStore(store)
+	h.SetUploadRepository(repo)
 
 	app := fiber.New()
 	// Stub middleware: read X-User-ID into locals, mirroring how GetUserID works.
@@ -251,25 +260,25 @@ func TestTemplateHandler_Create_Success(t *testing.T) {
 	}
 }
 
-func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
+func TestTemplateHandler_CreateFinalizesThumbnailUploadSession(t *testing.T) {
 	app, repo := setupTemplateHandlerTest(t)
 	userID := uuid.New().String()
 	uploadID := "thumbnail-upload"
 	key := "uploads/pending/" + userID + "/" + uploadID + "/thumb.png"
 	publicURL := "https://cdn.example.com/" + key
-	if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      userID,
-		Purpose:     service.DirectUploadPurposeProjectReference,
-		Key:         key,
-		PublicURL:   publicURL,
+	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
+		ID:         uploadID,
+		UserID:     userID,
+		Purpose:    service.DirectUploadPurposeProjectReference,
+		StagingKey: key,
+
 		FileName:    "thumb.png",
 		ContentType: "image/png",
 		Size:        123,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}); err != nil {
-		t.Fatalf("seed pending upload: %v", err)
+		t.Fatalf("seed upload session: %v", err)
 	}
 
 	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
@@ -282,13 +291,82 @@ func TestTemplateHandler_CreateFinalizesPendingThumbnail(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
-
-	upload, err := repo.PendingUploads().FindPendingUploadByID(t.Context(), uploadID)
-	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
+	responseBody := decodeBody(t, resp)
+	responseJSON, _ := json.Marshal(responseBody)
+	if bytes.Contains(responseJSON, []byte("uploads/pending/")) || !bytes.Contains(responseJSON, []byte("assets/users/")) {
+		t.Fatalf("template persisted non-final thumbnail: %s", responseJSON)
 	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("pending upload status = %q, want finalized", upload.Status)
+
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/thumb.png")
+}
+
+func TestTemplateHandler_CreateClassifiesUploadSessionFinalizeErrors(t *testing.T) {
+	const (
+		objectKey     = "uploads/pending/user-1/thumbnail-upload/thumb.png"
+		backendDetail = "oss-cn-hangzhou.aliyuncs.com provider secret"
+	)
+	tests := []struct {
+		name       string
+		configure  func(*fakeStorageProvider)
+		wantStatus int
+	}{
+		{
+			name: "missing object is redacted bad request",
+			configure: func(store *fakeStorageProvider) {
+				store.statErr = storage.ErrObjectNotFound
+			},
+			wantStatus: fiber.StatusBadRequest,
+		},
+		{
+			name: "metadata mismatch is redacted bad request",
+			configure: func(store *fakeStorageProvider) {
+				store.statInfo = &storage.ObjectInfo{Key: objectKey, Size: 124, ContentType: "image/png"}
+			},
+			wantStatus: fiber.StatusBadRequest,
+		},
+		{
+			name: "backend error is redacted internal error",
+			configure: func(store *fakeStorageProvider) {
+				store.statErr = errors.New(backendDetail)
+			},
+			wantStatus: fiber.StatusInternalServerError,
+		},
+		{
+			name: "timeout is redacted internal error",
+			configure: func(store *fakeStorageProvider) {
+				store.statErr = context.DeadlineExceeded
+			},
+			wantStatus: fiber.StatusInternalServerError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, repo := setupTemplateHandlerTest(t, tt.configure)
+			if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
+				ID: "thumbnail-upload", UserID: "user-1", Purpose: service.DirectUploadPurposeProjectReference,
+				StagingKey: objectKey,
+				FileName:   "thumb.png", ContentType: "image/png", Size: 123,
+				Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+			}); err != nil {
+				t.Fatalf("seed upload session: %v", err)
+			}
+
+			resp := doRequest(t, app, http.MethodPost, "/api/v1/templates/", "user-1", map[string]any{
+				"name": "template", "type": "seednote", "thumbnail_url": "https://cdn.example.com/" + objectKey,
+			})
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response: %v", err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, body = %s; want %d", resp.StatusCode, body, tt.wantStatus)
+			}
+			for _, secret := range []string{objectKey, backendDetail, "oss-cn-hangzhou", "provider secret"} {
+				if bytes.Contains(body, []byte(secret)) {
+					t.Fatalf("response leaked %q: %s", secret, body)
+				}
+			}
+		})
 	}
 }
 
@@ -407,26 +485,26 @@ func TestTemplateHandler_Update_OwnerSucceeds(t *testing.T) {
 	}
 }
 
-func TestTemplateHandler_UpdateFinalizesPendingThumbnail(t *testing.T) {
+func TestTemplateHandler_UpdateFinalizesThumbnailUploadSession(t *testing.T) {
 	app, repo := setupTemplateHandlerTest(t)
 	owner := uuid.New().String()
 	tmpl := createTemplateRow(t, repo, owner, "public", "old name")
 	uploadID := "updated-thumbnail-upload"
 	key := "uploads/pending/" + owner + "/" + uploadID + "/thumb.png"
 	publicURL := "https://cdn.example.com/" + key
-	if err := repo.PendingUploads().CreatePendingUpload(t.Context(), &model.PendingUpload{
-		ID:          uploadID,
-		UserID:      owner,
-		Purpose:     service.DirectUploadPurposeProjectReference,
-		Key:         key,
-		PublicURL:   publicURL,
+	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
+		ID:         uploadID,
+		UserID:     owner,
+		Purpose:    service.DirectUploadPurposeProjectReference,
+		StagingKey: key,
+
 		FileName:    "thumb.png",
 		ContentType: "image/png",
 		Size:        123,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}); err != nil {
-		t.Fatalf("seed pending upload: %v", err)
+		t.Fatalf("seed upload session: %v", err)
 	}
 
 	resp := doRequest(t, app, "PUT", "/api/v1/templates/"+tmpl.ID, owner, map[string]any{
@@ -436,13 +514,7 @@ func TestTemplateHandler_UpdateFinalizesPendingThumbnail(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
 
-	upload, err := repo.PendingUploads().FindPendingUploadByID(t.Context(), uploadID)
-	if err != nil {
-		t.Fatalf("find pending upload: %v", err)
-	}
-	if upload.Status != model.PendingUploadStatusFinalized {
-		t.Fatalf("pending upload status = %q, want finalized", upload.Status)
-	}
+	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+owner+"/"+uploadID+"/thumb.png")
 }
 
 // Empty type means "leave unchanged" (PATCH semantics). The handler must not

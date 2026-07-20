@@ -6,8 +6,11 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 )
@@ -20,6 +23,8 @@ var validImageMIMETypes = map[string]bool{
 	"image/webp": true,
 	"image/bmp":  true,
 }
+
+const maxDesignerReferenceBytes int64 = 10 * 1024 * 1024
 
 func isValidImageMIME(ct string) bool {
 	ct = strings.ToLower(strings.SplitN(ct, ";", 2)[0])
@@ -36,11 +41,18 @@ func truncate(s string, maxRunes int) string {
 
 type DesignerHandler struct {
 	svc    *service.DesignerService
+	repo   repository.Repository
+	store  storage.Provider
 	logger *zerolog.Logger
 }
 
 func NewDesignerHandler(svc *service.DesignerService, logger *zerolog.Logger) *DesignerHandler {
 	return &DesignerHandler{svc: svc, logger: logger}
+}
+
+func (h *DesignerHandler) SetDirectUploadDependencies(repo repository.Repository, store storage.Provider) {
+	h.repo = repo
+	h.store = store
 }
 
 // GetProviders handles GET /api/v1/designer/providers
@@ -67,11 +79,22 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 
 	created, err := h.svc.CreateGenerationRecord(c.Context(), userID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
+		}
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "project not owned by user")
+		}
 		if errors.Is(err, service.ErrInsufficientCredits) {
 			return Error(c, fiber.StatusPaymentRequired, "积分不足，请充值后重试")
 		}
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("designer create generation record failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		if errors.Is(err, service.ErrDesignerReferenceInvalid) {
+			return Error(c, fiber.StatusBadRequest, "designer reference is invalid or unavailable")
+		}
+		if h.logger != nil {
+			h.logger.Error().Err(err).Str("user_id", userID).Msg("designer create generation record failed")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to create generation")
 	}
 
 	go h.svc.ExecuteGeneration(context.Background(), created.GenerationID)
@@ -123,9 +146,12 @@ func (h *DesignerHandler) UploadReference(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to read file")
 	}
 
-	fileID, err := h.svc.UploadReference(c.Context(), userID, file.Filename, data)
+	fileID, err := h.svc.UploadReference(c.Context(), userID, file.Filename, contentType, data)
 	if err != nil {
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		if h.logger != nil {
+			h.logger.Error().Err(err).Str("user_id", userID).Msg("designer upload reference failed")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to upload reference")
 	}
 
 	return Success(c, fiber.Map{
@@ -133,6 +159,68 @@ func (h *DesignerHandler) UploadReference(c fiber.Ctx) error {
 		"filename": file.Filename,
 		"size":     len(data),
 	})
+}
+
+type registerDesignerReferenceRequest struct {
+	UploadID string `json:"upload_id"`
+	Key      string `json:"key"`
+}
+
+// RegisterReference handles POST /api/v1/designer/register-reference.
+func (h *DesignerHandler) RegisterReference(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req registerDesignerReferenceRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	req.UploadID = strings.TrimSpace(req.UploadID)
+	req.Key = strings.TrimSpace(req.Key)
+	if req.UploadID == "" || req.Key == "" {
+		return Error(c, fiber.StatusBadRequest, "upload_id and key are required")
+	}
+
+	finalStore, _ := h.store.(service.DirectUploadFinalizationStorage)
+	verified, err := service.ResolveDirectUploadSessionAttachment(c.Context(), finalStore, h.repo, userID, []string{
+		service.DirectUploadPurposeDesignerReference,
+	}, req.UploadID, req.Key, time.Now())
+	if err != nil {
+		return h.respondRegisterReferenceError(c, err)
+	}
+	if _, err := storage.ReadObject(c.Context(), h.store, verified.Key, maxDesignerReferenceBytes); err != nil {
+		return h.respondRegisterReferenceError(c, err)
+	}
+	fileID, err := h.svc.RegisterStoredReference(c.Context(), userID, verified.Key, verified.FileName, verified.ContentType, verified.Size)
+	if err != nil {
+		return h.respondRegisterReferenceError(c, err)
+	}
+	return Success(c, fiber.Map{
+		"file_id":  fileID,
+		"filename": verified.FileName,
+		"size":     verified.Size,
+	})
+}
+
+func (h *DesignerHandler) respondRegisterReferenceError(c fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, service.ErrUploadSessionAccessDenied):
+		return Forbidden(c, "pending upload access denied")
+	case errors.Is(err, service.ErrUploadSessionExpired):
+		return Error(c, fiber.StatusBadRequest, "pending upload has expired")
+	case errors.Is(err, service.ErrUploadSessionStateConflict):
+		return Error(c, fiber.StatusBadRequest, "pending upload is not reusable")
+	case errors.Is(err, service.ErrUploadSessionObjectInvalid):
+		return Error(c, fiber.StatusBadRequest, "pending upload object is invalid")
+	case errors.Is(err, storage.ErrObjectExceedsMaxSize):
+		return Error(c, fiber.StatusBadRequest, "file too large (max 10MB)")
+	default:
+		if h.logger != nil {
+			h.logger.Error().Err(err).Msg("designer register reference failed")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to register reference")
+	}
 }
 
 // UploadReferenceFromURL handles POST /api/v1/designer/upload-reference-from-url
@@ -165,8 +253,10 @@ func (h *DesignerHandler) UploadReferenceFromURL(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrURLNotOwned) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("designer upload reference from url failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		if h.logger != nil {
+			h.logger.Error().Err(err).Str("user_id", userID).Msg("designer upload reference from url failed")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to upload reference")
 	}
 
 	return Success(c, fiber.Map{

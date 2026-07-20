@@ -35,23 +35,21 @@ func setupFileHandlerTest(userID string) *fiber.App {
 	return app
 }
 
-func TestServeFile_AllowsOwnPendingUploadThroughRepository(t *testing.T) {
+func TestServeFile_AllowsOwnStagingUploadSessionThroughRepository(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	key := "uploads/pending/user-1/upload-1/ref.png"
-	store := &fakeStorageProvider{data: map[string][]byte{key: []byte("pending-png")}}
-	pending := &fakeProjectPendingUploadRepo{uploads: map[string]*model.PendingUpload{
-		"upload-1": {
-			ID:        "upload-1",
-			UserID:    "user-1",
-			Purpose:   service.DirectUploadPurposeProjectReference,
-			Key:       key,
-			PublicURL: "/api/v1/files/" + key,
-			Status:    model.PendingUploadStatusPending,
-			ExpiresAt: time.Now().Add(time.Minute),
-		},
-	}}
+	store := &fakeStorageProvider{data: map[string][]byte{key: []byte("staging-png")}}
+	session := &model.UploadSession{
+		ID:         "upload-1",
+		UserID:     "user-1",
+		Purpose:    service.DirectUploadPurposeProjectReference,
+		StagingKey: key,
+		Status:     model.UploadSessionPending,
+		ExpiresAt:  time.Now().Add(time.Minute),
+	}
+	repo := uploadRepositoryFromSessions(t, session)
 	h := NewFileHandler(store, &logger)
-	h.SetPendingUploadRepository(pending)
+	h.SetUploadSessionRepository(repo.UploadSessions())
 
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
@@ -71,8 +69,9 @@ func TestServeFile_AllowsOwnPendingUploadThroughRepository(t *testing.T) {
 	if len(store.read) != 1 || store.read[0] != key {
 		t.Fatalf("store.Read keys = %v, want [%s]", store.read, key)
 	}
-	if len(pending.finalized) != 0 {
-		t.Fatalf("ServeFile finalized pending uploads = %v, want none", pending.finalized)
+	found, findErr := repo.UploadSessions().FindByID(t.Context(), session.ID)
+	if findErr != nil || found.Status != model.UploadSessionPending || found.AssetID != "" {
+		t.Fatalf("ServeFile changed upload session: %#v, %v", found, findErr)
 	}
 }
 

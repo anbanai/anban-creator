@@ -28,17 +28,18 @@ import (
 
 // ProjectHandler handles project-related HTTP endpoints.
 type ProjectHandler struct {
-	service        *service.ProjectService
-	logger         *zerolog.Logger
-	llm            service.LLMClient
-	llmTimeout     time.Duration
-	visionClient   service.LLMClient // dedicated vision model for AnalyzeImage; nil = fall back to llm
-	modelConfigSvc *service.ModelConfigService
-	templateSvc    *service.TemplateService
-	store          storage.Provider
-	pendingUploads service.PendingUploadRepository
-	seednoteClient *seednote.Client
-	seednoteReady  service.Readiness
+	service         *service.ProjectService
+	logger          *zerolog.Logger
+	llm             service.LLMClient
+	llmTimeout      time.Duration
+	visionClient    service.LLMClient // dedicated vision model for AnalyzeImage; nil = fall back to llm
+	modelConfigSvc  *service.ModelConfigService
+	templateSvc     *service.TemplateService
+	store           storage.Provider
+	uploadRepo      repository.Repository
+	referenceAssets *service.ReferenceAssetService
+	seednoteClient  *seednote.Client
+	seednoteReady   service.Readiness
 }
 
 // NewProjectHandler creates a new ProjectHandler.
@@ -73,11 +74,15 @@ func (h *ProjectHandler) SetStore(s storage.Provider) {
 	h.store = s
 }
 
-func (h *ProjectHandler) SetPendingUploadRepository(repo service.PendingUploadRepository) {
-	h.pendingUploads = repo
+func (h *ProjectHandler) SetUploadRepository(repo repository.Repository) {
+	h.uploadRepo = repo
 }
 
-// signProjectURLs resolves stored image URLs (avatar, reference image) to
+func (h *ProjectHandler) SetReferenceAssetService(svc *service.ReferenceAssetService) {
+	h.referenceAssets = svc
+}
+
+// signProjectURLs resolves the stored avatar URL to
 // directly-fetchable signed URLs so any viewer who can see the project can load
 // its images regardless of which user originally uploaded them. No-op when no
 // store is wired (e.g. unit tests) or the URL is external/empty.
@@ -86,7 +91,60 @@ func (h *ProjectHandler) signProjectURLs(ctx context.Context, ch *model.Project)
 		return
 	}
 	ch.AvatarURL = service.SignURL(ctx, h.store, h.logger, ch.AvatarURL, service.DefaultSignedURLTTL)
-	ch.ReferenceImageURL = service.SignURL(ctx, h.store, h.logger, ch.ReferenceImageURL, service.DefaultSignedURLTTL)
+}
+
+func (h *ProjectHandler) resolveProjectReference(ctx context.Context, userID string, req *projectRequest) error {
+	if req == nil || !req.ReferenceImageSet || req.ReferenceImage == nil {
+		return nil
+	}
+	if h.referenceAssets == nil {
+		return service.ErrReferenceAssetUnavailable
+	}
+	assetID, err := h.referenceAssets.ResolveSelection(ctx, userID, *req.ReferenceImage, []string{service.DirectUploadPurposeProjectReference})
+	if err != nil {
+		return err
+	}
+	req.ReferenceImageAssetID = assetID
+	return nil
+}
+
+func (h *ProjectHandler) presentProjectReference(ctx context.Context, userID string, ch *model.Project) error {
+	if ch == nil {
+		return nil
+	}
+	view, err := h.projectReferenceView(ctx, userID, ch.ReferenceImageAssetID)
+	if err != nil {
+		return err
+	}
+	ch.ReferenceImage = view
+	return nil
+}
+
+func (h *ProjectHandler) projectReferenceView(ctx context.Context, userID, assetID string) (*model.AssetView, error) {
+	if h.referenceAssets == nil {
+		if assetID == "" {
+			return nil, nil
+		}
+		return nil, service.ErrReferenceAssetUnavailable
+	}
+	return h.referenceAssets.Present(ctx, userID, assetID, []string{service.DirectUploadPurposeProjectReference})
+}
+
+func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string, err error) error {
+	if errors.Is(err, service.ErrProjectNotFound) {
+		return Error(c, fiber.StatusNotFound, "project not found")
+	}
+	if errors.Is(err, service.ErrProjectOwnedByUser) {
+		return Forbidden(c, "you do not have access to this project")
+	}
+	if errors.Is(err, service.ErrProjectUpdateConflict) {
+		return Error(c, fiber.StatusConflict, "project reference changed concurrently; retry the update")
+	}
+	if errors.Is(err, service.ErrVideoModelUnavailable) || errors.Is(err, service.ErrProjectMontageDefaults) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
+	return Error(c, fiber.StatusInternalServerError, "failed to update project")
 }
 
 // SetSeednoteClient injects the Seednote SDK client.
@@ -111,26 +169,28 @@ func (h *ProjectHandler) ensureSeednoteReady(c fiber.Ctx) (bool, error) {
 
 // projectRequest is the shared request body for creating and updating a project.
 type projectRequest struct {
-	Platform           string                          `json:"platform"`
-	Name               string                          `json:"name"`
-	ProfileURL         string                          `json:"profile_url"`
-	AvatarURL          string                          `json:"avatar_url"`
-	Positioning        string                          `json:"positioning"`
-	Keywords           string                          `json:"keywords"`
-	VisualStyle        string                          `json:"visual_style"`
-	Writer             string                          `json:"writer"`
-	Theme              string                          `json:"theme"`
-	Author             string                          `json:"author"`
-	TemplateID         string                          `json:"template_id"`
-	ReferenceImageURL  string                          `json:"reference_image_url"`
-	ImageRatio         string                          `json:"image_ratio"`
-	MaxConcurrentTasks int                             `json:"max_concurrent_tasks"`
-	Instructions       string                          `json:"instructions"`
-	InstructionsSet    bool                            `json:"-"`
-	EcommerceDefaults  *model.EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
-	MontageDefaults    *model.MontageDefaults          `json:"montage_defaults,omitempty"`
-	VideoDefaults      *model.VideoDefaults            `json:"video_defaults,omitempty"`
-	VideoModelPolicy   *model.VideoModelPolicy         `json:"video_model_policy,omitempty"`
+	Platform              string                           `json:"platform"`
+	Name                  string                           `json:"name"`
+	ProfileURL            string                           `json:"profile_url"`
+	AvatarURL             string                           `json:"avatar_url"`
+	Positioning           string                           `json:"positioning"`
+	Keywords              string                           `json:"keywords"`
+	VisualStyle           string                           `json:"visual_style"`
+	Writer                string                           `json:"writer"`
+	Theme                 string                           `json:"theme"`
+	Author                string                           `json:"author"`
+	TemplateID            string                           `json:"template_id"`
+	ReferenceImage        *service.ReferenceImageSelection `json:"reference_image"`
+	ReferenceImageSet     bool                             `json:"-"`
+	ReferenceImageAssetID string                           `json:"-"`
+	ImageRatio            string                           `json:"image_ratio"`
+	MaxConcurrentTasks    int                              `json:"max_concurrent_tasks"`
+	Instructions          string                           `json:"instructions"`
+	InstructionsSet       bool                             `json:"-"`
+	EcommerceDefaults     *model.EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
+	MontageDefaults       *model.MontageDefaults           `json:"montage_defaults,omitempty"`
+	VideoDefaults         *model.VideoDefaults             `json:"video_defaults,omitempty"`
+	VideoModelPolicy      *model.VideoModelPolicy          `json:"video_model_policy,omitempty"`
 	// Config fields for platform-specific credentials.
 	WechatAppID            string `json:"wechat_app_id"`
 	WechatSecret           string `json:"wechat_secret"`
@@ -166,7 +226,8 @@ func (req *projectRequest) toProject() *model.Project {
 		Theme:                 req.Theme,
 		Author:                req.Author,
 		CreatedFromTemplateID: req.TemplateID,
-		ReferenceImageURL:     req.ReferenceImageURL,
+		ReferenceImageAssetID: req.ReferenceImageAssetID,
+		ReferenceImageSet:     req.ReferenceImageSet,
 		ImageRatio:            req.ImageRatio,
 		MaxConcurrentTasks:    req.MaxConcurrentTasks,
 		Instructions:          instructions,
@@ -221,6 +282,9 @@ func (h *ProjectHandler) List(c fiber.Ctx) error {
 	for _, ch := range projects {
 		h.service.SanitizeProjectForResponse(ch)
 		h.signProjectURLs(c.Context(), ch)
+		if err := h.presentProjectReference(c.Context(), userID, ch); err != nil {
+			return respondReferenceAssetError(c, h.logger, err)
+		}
 	}
 
 	return Success(c, projects)
@@ -276,6 +340,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -283,6 +350,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if hasJSONField(c.Body(), "instructions") {
 		req.InstructionsSet = true
 	}
+	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 
 	if req.Platform == "" {
 		return Error(c, fiber.StatusBadRequest, "platform is required")
@@ -311,13 +379,23 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
+	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	ch := req.toProject()
+	referenceView, err := h.projectReferenceView(c.Context(), userID, ch.ReferenceImageAssetID)
+	if err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
-	if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL}, h.store); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+	rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.uploadRepo, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL})
+	if err != nil {
+		return respondUploadSessionFinalizeError(c, h.logger, err)
 	}
+	req.AvatarURL = rewriteFinalizedUploadURL(req.AvatarURL, rewrites)
+	ch.AvatarURL = req.AvatarURL
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
@@ -330,6 +408,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	h.service.SanitizeProjectForResponse(created)
 	h.signProjectURLs(c.Context(), created)
+	created.ReferenceImage = referenceView
 
 	// For Seednote projects, include recommended templates.
 	recommended := []*model.Template{}
@@ -377,6 +456,9 @@ func (h *ProjectHandler) Get(c fiber.Ctx) error {
 
 	h.service.SanitizeProjectForResponse(ch)
 	h.signProjectURLs(c.Context(), ch)
+	if err := h.presentProjectReference(c.Context(), userID, ch); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	return Success(c, fiber.Map{
 		"project": ch,
 		"stats":   stats,
@@ -395,6 +477,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "project id is required")
 	}
 
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -402,6 +487,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	if hasJSONField(c.Body(), "instructions") {
 		req.InstructionsSet = true
 	}
+	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
@@ -412,31 +498,63 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
+	current, _, err := h.service.Get(c.Context(), userID, projectID)
+	if err != nil {
+		return h.respondProjectUpdateError(c, projectID, err)
+	}
+	targetReferenceAssetID := current.ReferenceImageAssetID
+	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
+	if req.ReferenceImageSet {
+		targetReferenceAssetID = req.ReferenceImageAssetID
+	}
+	referenceView, err := h.projectReferenceView(c.Context(), userID, targetReferenceAssetID)
+	if err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	ch := req.toProject()
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
-	if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL}, h.store); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-
-	updated, err := h.service.Update(c.Context(), userID, projectID, ch)
+	rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.uploadRepo, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL})
 	if err != nil {
-		if errors.Is(err, service.ErrProjectNotFound) {
-			return Error(c, fiber.StatusNotFound, "project not found")
+		return respondUploadSessionFinalizeError(c, h.logger, err)
+	}
+	req.AvatarURL = rewriteFinalizedUploadURL(req.AvatarURL, rewrites)
+	ch.AvatarURL = req.AvatarURL
+
+	var updated *model.Project
+	if req.ReferenceImageSet {
+		updated, err = h.service.Update(c.Context(), userID, projectID, ch)
+	} else {
+		const maxReferenceCASAttempts = 3
+		for attempt := 0; attempt < maxReferenceCASAttempts; attempt++ {
+			updated, err = h.service.UpdateIfReferenceImageAssetID(c.Context(), userID, projectID, ch, targetReferenceAssetID)
+			if !errors.Is(err, service.ErrProjectUpdateConflict) {
+				break
+			}
+			if attempt == maxReferenceCASAttempts-1 {
+				break
+			}
+			current, _, err = h.service.Get(c.Context(), userID, projectID)
+			if err != nil {
+				break
+			}
+			targetReferenceAssetID = current.ReferenceImageAssetID
+			referenceView, err = h.projectReferenceView(c.Context(), userID, targetReferenceAssetID)
+			if err != nil {
+				return respondReferenceAssetError(c, h.logger, err)
+			}
 		}
-		if errors.Is(err, service.ErrProjectOwnedByUser) {
-			return Forbidden(c, "you do not have access to this project")
-		}
-		if errors.Is(err, service.ErrVideoModelUnavailable) || errors.Is(err, service.ErrProjectMontageDefaults) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to update project")
+	}
+	if err != nil {
+		return h.respondProjectUpdateError(c, projectID, err)
 	}
 
 	h.service.SanitizeProjectForResponse(updated)
 	h.signProjectURLs(c.Context(), updated)
+	updated.ReferenceImage = referenceView
 	return Success(c, updated)
 }
 
@@ -856,8 +974,6 @@ func (req *projectRequest) getFieldValue(key string) string {
 		return req.Theme
 	case "author":
 		return req.Author
-	case "reference_image_url":
-		return req.ReferenceImageURL
 	case "image_ratio":
 		return req.ImageRatio
 	case "max_concurrent_tasks":
@@ -1131,12 +1247,16 @@ func (h *ProjectHandler) cleanAnalysisImageKey(ctx context.Context, imageURL, us
 	if key, ok := storage.StorageKeyFromURL(imageURL); ok {
 		cleanKey := filepath.Clean(key)
 		if strings.HasPrefix(cleanKey, "uploads/pending/") {
-			pendingKey, err := service.ValidatePendingUploadURL(ctx, h.pendingUploads, userID, []string{
+			var sessions repository.UploadSessionRepository
+			if h.uploadRepo != nil {
+				sessions = h.uploadRepo.UploadSessions()
+			}
+			pendingKey, err := service.ValidateUploadSessionURL(ctx, sessions, userID, []string{
 				service.DirectUploadPurposeProjectReference,
 				service.DirectUploadPurposeTaskReference,
 			}, imageURL, time.Now())
 			if err != nil {
-				return "", pendingUploadAnalyzeError(h.logger, err)
+				return "", uploadSessionAnalyzeError(h.logger, err)
 			}
 			return pendingKey, nil
 		}
@@ -1144,15 +1264,15 @@ func (h *ProjectHandler) cleanAnalysisImageKey(ctx context.Context, imageURL, us
 	return cleanOwnedUploadKey(imageURL, userID)
 }
 
-func pendingUploadAnalyzeError(logger *zerolog.Logger, err error) fiberErrorFunc {
+func uploadSessionAnalyzeError(logger *zerolog.Logger, err error) fiberErrorFunc {
 	switch {
-	case errors.Is(err, service.ErrPendingUploadInvalidURL):
+	case errors.Is(err, service.ErrUploadSessionInvalidURL):
 		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
-	case errors.Is(err, service.ErrPendingUploadExpired):
+	case errors.Is(err, service.ErrUploadSessionExpired):
 		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "pending upload has expired") }
-	case errors.Is(err, service.ErrPendingUploadNotPending):
+	case errors.Is(err, service.ErrUploadSessionStateConflict):
 		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "pending upload is not pending") }
-	case errors.Is(err, service.ErrPendingUploadAccessDenied):
+	case errors.Is(err, service.ErrUploadSessionAccessDenied):
 		return func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }
 	default:
 		if logger != nil {

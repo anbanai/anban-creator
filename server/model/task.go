@@ -63,33 +63,34 @@ type StyleOverrides struct {
 // creation time. Runtime surfaces (MCP/settings/UI) read this when present so
 // later project edits do not change an already-created task.
 type ProjectSnapshot struct {
-	ProjectName       string                   `json:"project_name,omitempty"`
-	Platform          string                   `json:"platform,omitempty"`
-	Instructions      string                   `json:"instructions,omitempty"`
-	Keywords          string                   `json:"keywords,omitempty"`
-	VisualStyle       string                   `json:"visual_style,omitempty"`
-	ReferenceImageURL string                   `json:"reference_image_url,omitempty"`
-	ImageRatio        string                   `json:"image_ratio,omitempty"`
-	Writer            string                   `json:"writer,omitempty"`
-	Theme             string                   `json:"theme,omitempty"`
-	Author            string                   `json:"author,omitempty"`
-	EcommerceDefaults EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
-	MontageDefaults   MontageDefaults          `json:"montage_defaults,omitempty"`
+	ProjectName           string                   `json:"project_name,omitempty"`
+	Platform              string                   `json:"platform,omitempty"`
+	Instructions          string                   `json:"instructions,omitempty"`
+	Keywords              string                   `json:"keywords,omitempty"`
+	VisualStyle           string                   `json:"visual_style,omitempty"`
+	ReferenceImageAssetID string                   `json:"reference_image_asset_id,omitempty"`
+	ImageRatio            string                   `json:"image_ratio,omitempty"`
+	Writer                string                   `json:"writer,omitempty"`
+	Theme                 string                   `json:"theme,omitempty"`
+	Author                string                   `json:"author,omitempty"`
+	EcommerceDefaults     EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
+	MontageDefaults       MontageDefaults          `json:"montage_defaults,omitempty"`
 }
 
 // Task represents a content generation task.
 type Task struct {
-	ID                string  `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID            string  `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
-	ProjectID         string  `gorm:"type:char(36);index" json:"project_id"`
-	PlanID            *string `gorm:"type:char(36);index" json:"plan_id,omitempty"`
-	Type              string  `gorm:"type:varchar(20);not null" json:"type"`
-	Status            string  `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
-	Prompt            string  `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
-	Title             string  `gorm:"type:varchar(200)" json:"title,omitempty"`
-	ImageRatio        string  `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
-	ImageModelKey     string  `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
-	ReferenceImageURL string  `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
+	ID                    string     `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID                string     `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
+	ProjectID             string     `gorm:"type:char(36);index" json:"project_id"`
+	PlanID                *string    `gorm:"type:char(36);index" json:"plan_id,omitempty"`
+	Type                  string     `gorm:"type:varchar(20);not null" json:"type"`
+	Status                string     `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
+	Prompt                string     `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
+	Title                 string     `gorm:"type:varchar(200)" json:"title,omitempty"`
+	ImageRatio            string     `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
+	ImageModelKey         string     `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
+	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
+	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
 	// InputSourceTaskID records the root task whose immutable OSS inputs a clone
 	// may reuse. It is internal ownership provenance, not a client-controlled field.
 	InputSourceTaskID string `gorm:"type:char(36);index" json:"-"`
@@ -242,18 +243,18 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		return ProjectSnapshot{}
 	}
 	return ProjectSnapshot{
-		ProjectName:       p.Name,
-		Platform:          p.Platform,
-		Instructions:      p.Instructions,
-		Keywords:          p.Keywords,
-		VisualStyle:       p.VisualStyle,
-		ReferenceImageURL: p.ReferenceImageURL,
-		ImageRatio:        p.ImageRatio,
-		Writer:            p.Writer,
-		Theme:             p.Theme,
-		Author:            p.Author,
-		EcommerceDefaults: p.EcommerceDefaults.Data(),
-		MontageDefaults:   p.MontageDefaults.Data(),
+		ProjectName:           p.Name,
+		Platform:              p.Platform,
+		Instructions:          p.Instructions,
+		Keywords:              p.Keywords,
+		VisualStyle:           p.VisualStyle,
+		ReferenceImageAssetID: p.ReferenceImageAssetID,
+		ImageRatio:            p.ImageRatio,
+		Writer:                p.Writer,
+		Theme:                 p.Theme,
+		Author:                p.Author,
+		EcommerceDefaults:     p.EcommerceDefaults.Data(),
+		MontageDefaults:       p.MontageDefaults.Data(),
 	}
 }
 
@@ -272,7 +273,7 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.Instructions = snap.Instructions
 	p.Keywords = snap.Keywords
 	p.VisualStyle = snap.VisualStyle
-	p.ReferenceImageURL = snap.ReferenceImageURL
+	p.ReferenceImageAssetID = snap.ReferenceImageAssetID
 	p.ImageRatio = snap.ImageRatio
 	p.Writer = snap.Writer
 	p.Theme = snap.Theme

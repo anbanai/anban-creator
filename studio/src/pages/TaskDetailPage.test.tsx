@@ -9,10 +9,31 @@ import { createTestQueryClient, render } from '@/test/test-utils'
 import { mockProjectDetail, mockTasks } from '@/test/mocks/handlers'
 import type { Task, TaskFile } from '@/types'
 import { api } from '@/lib/api'
+import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
 
 const mockNavigate = vi.fn()
 const routeState = vi.hoisted(() => ({ taskId: 'task-1' }))
 const mockStreamTaskProgress = vi.hoisted(() => vi.fn<typeof import('@/lib/sse').streamTaskProgress>())
+const uploadToOSSMock = vi.hoisted(() => vi.fn())
+const resolveDownloadUrlMock = vi.hoisted(() => vi.fn())
+const toastSuccessMock = vi.hoisted(() => vi.fn())
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), message: vi.fn(), success: toastSuccessMock },
+}))
+
+vi.mock('@/lib/direct-upload', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
+  return { ...actual, uploadToOSS: uploadToOSSMock }
+})
+
+vi.mock('@/lib/api/uploads', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api/uploads')>('@/lib/api/uploads')
+  return {
+    ...actual,
+		uploadsApi: { ...actual.uploadsApi, resolveDownloadUrl: resolveDownloadUrlMock },
+	}
+})
 
 const mockReferenceUsageSummary = vi.hoisted(() => vi.fn(({ task }: {
   task: { title?: string; input_attachments?: Array<{ file_name?: string }> }
@@ -115,7 +136,7 @@ function renderWithCachedTasks(...tasks: Task[]) {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-            {children}
+            <AgentPromptDropProvider>{children}</AgentPromptDropProvider>
           </ThemeProvider>
         </BrowserRouter>
       </QueryClientProvider>
@@ -143,6 +164,29 @@ async function openTaskDetails(tab?: '概览' | '配置' | '素材' | '日志') 
   expect(screen.getByRole('tab', { name: tab ?? '概览' })).toHaveAttribute('aria-selected', 'true')
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
+}
+
+async function openResumeDialog() {
+  fireEvent.click(await screen.findByRole('button', { name: '补充信息并继续' }))
+  const title = await screen.findByRole('heading', { name: '继续执行此任务' })
+  return title.closest('[data-slot="dialog-content"]') as HTMLElement
+}
+
+async function openCloneDialog() {
+  fireEvent.click(await screen.findByRole('button', { name: '更多任务操作' }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: /克隆任务/ }))
+  const title = await screen.findByRole('heading', { name: '克隆任务' })
+  return title.closest('[data-slot="dialog-content"]') as HTMLElement
+}
+
 describe('TaskDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -165,6 +209,17 @@ describe('TaskDetailPage', () => {
     vi.mocked(api.tasks.downloadZipBlob).mockResolvedValue(new Blob(['zip'], { type: 'application/zip' }))
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
+    uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
+      uploadId: `upload-${file.name}`,
+      key: `uploads/pending/user-1/upload-${file.name}/${file.name}`,
+      publicUrl: `/api/v1/files/uploads/pending/user-1/upload-${file.name}/${file.name}`,
+      contentType: file.type,
+      size: file.size,
+    }))
+    resolveDownloadUrlMock.mockResolvedValue({
+      url: 'https://cdn.example.com/signed-input.png',
+      expires_at: '2026-07-17T12:00:00Z',
+    })
   })
 
   it('shows compact running progress and hides workflow stage grid', async () => {
@@ -265,6 +320,75 @@ describe('TaskDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
     })
+  })
+
+  it('discards task A resume input before task B can submit it after a route switch', async () => {
+    const taskA = taskWith({
+      id: 'task-1',
+      title: '失败任务 A',
+      status: 'failed',
+      result: null,
+    })
+    const taskB = taskWith({
+      id: 'task-2',
+      title: '失败任务 B',
+      status: 'failed',
+      result: null,
+    })
+    const view = renderWithCachedTasks(taskA, taskB)
+
+    const taskADialog = await openResumeDialog()
+    fireEvent.change(within(taskADialog).getByLabelText('继续任务要求'), {
+      target: { value: '只属于任务 A 的补充要求' },
+    })
+
+    routeState.taskId = 'task-2'
+    view.rerender(<TaskDetailPage />)
+
+    expect(await screen.findAllByText('失败任务 B')).not.toHaveLength(0)
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument()
+    })
+
+    const taskBDialog = await openResumeDialog()
+    expect(within(taskBDialog).getByLabelText('继续任务要求')).toHaveValue('')
+    const submitButton = within(taskBDialog).getByLabelText('提交并继续')
+    expect(submitButton).toBeDisabled()
+    fireEvent.click(submitButton)
+    expect(api.tasks.resume).not.toHaveBeenCalled()
+  })
+
+  it('closes task A clone snapshot when the route switches to task B', async () => {
+    const taskA = taskWith({
+      id: 'task-1',
+      title: '已完成任务 A',
+      prompt: '任务 A 的原始要求',
+      status: 'completed',
+      result: null,
+    })
+    const taskB = taskWith({
+      id: 'task-2',
+      title: '已完成任务 B',
+      prompt: '任务 B 的原始要求',
+      status: 'completed',
+      result: null,
+    })
+    const view = renderWithCachedTasks(taskA, taskB)
+
+    const taskADialog = await openCloneDialog()
+    expect(within(taskADialog).getByLabelText('克隆任务要求')).toHaveValue('任务 A 的原始要求')
+
+    routeState.taskId = 'task-2'
+    view.rerender(<TaskDetailPage />)
+
+    expect(await screen.findAllByText('已完成任务 B')).not.toHaveLength(0)
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: '克隆任务' })).not.toBeInTheDocument()
+    })
+
+    const taskBDialog = await openCloneDialog()
+    expect(within(taskBDialog).getByLabelText('克隆任务要求')).toHaveValue('任务 B 的原始要求')
+    expect(api.tasks.clone).not.toHaveBeenCalled()
   })
 
   it('drops running task SSE state when switching directly to a cached completed task', async () => {
@@ -844,12 +968,32 @@ describe('TaskDetailPage', () => {
     expect(api.tasks.videoProduction).not.toHaveBeenCalled()
   })
 
-  it('lets completed tasks be cloned as a fresh task', async () => {
+  it('opens a clone composer without posting until the user confirms the full snapshot', async () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'completed',
       progress: 100,
-      result: null,
+      prompt: '原始任务要求',
+      input_attachments: [
+        {
+          type: 'image',
+          upload_id: 'upload-original',
+          key: 'uploads/finalized/user-1/original.png',
+          file_name: 'original.png',
+          content_type: 'image/png',
+          size: 12,
+          instruction: '原说明',
+          role: 'reference',
+        },
+        {
+          type: 'text',
+          text: '上一轮补充',
+          file_name: 'resume.md',
+          content_type: 'text/markdown',
+          role: 'resume_latest',
+        },
+      ],
+      result: JSON.stringify({ files: null, output: '' }),
     }))
 
     render(<TaskDetailPage />)
@@ -858,10 +1002,55 @@ describe('TaskDetailPage', () => {
     const rerunButton = await screen.findByRole('menuitem', { name: /克隆任务/ })
     fireEvent.click(rerunButton)
 
-    await waitFor(() => {
-      expect(api.tasks.clone).toHaveBeenCalledWith('task-1')
-      expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone')
+    const title = await screen.findByRole('heading', { name: '克隆任务' })
+    const dialog = title.closest('[data-slot="dialog-content"]') as HTMLElement
+    expect(api.tasks.clone).not.toHaveBeenCalled()
+    expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('克隆任务要求')).toHaveValue('原始任务要求')
+    expect(within(dialog).getByRole('button', { name: '预览 original.png' })).toBeInTheDocument()
+    expect(within(dialog).queryByText('resume.md')).not.toBeInTheDocument()
+
+    fireEvent.change(within(dialog).getByLabelText('克隆任务要求'), {
+      target: { value: '修改后的任务要求' },
     })
+    fireEvent.click(within(dialog).getByRole('button', { name: '编辑 original.png 的附件说明' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), {
+      target: { value: '更新后的说明' },
+    })
+    const added = new File(['added'], 'added.md', { type: 'text/markdown' })
+    fireEvent.change(within(dialog).getByLabelText('选择附件文件'), {
+      target: { files: [added] },
+    })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: 'ai_entry_attachment',
+      file: added,
+    })))
+    fireEvent.click(within(dialog).getByLabelText('确认克隆'))
+
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith('task-1', {
+      prompt: '修改后的任务要求',
+      input_attachments: [
+        {
+          type: 'image',
+          upload_id: 'upload-original',
+          key: 'uploads/finalized/user-1/original.png',
+          file_name: 'original.png',
+          content_type: 'image/png',
+          size: 12,
+          instruction: '更新后的说明',
+          role: 'reference',
+        },
+        {
+          type: 'text',
+          upload_id: 'upload-added.md',
+          key: 'uploads/pending/user-1/upload-added.md/added.md',
+          file_name: 'added.md',
+          content_type: 'text/markdown',
+          size: 5,
+        },
+      ],
+    }))
+    expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone')
   })
 
   it('keeps the low-frequency unpublish action in the more menu', async () => {
@@ -882,44 +1071,165 @@ describe('TaskDetailPage', () => {
     })
   })
 
-  it('opens a continue dialog and submits prompt files and labels for the current task', async () => {
+  it('uploads resume files to OSS, keeps failed input for retry, then reopens blank', async () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
       result: null,
     }))
+    vi.mocked(api.tasks.resume)
+      .mockRejectedValueOnce(new Error('resume failed'))
+      .mockResolvedValueOnce(taskWith({ id: 'task-1', status: 'pending' }))
 
     render(<TaskDetailPage />)
 
-    const continueButton = await screen.findByRole('button', { name: '补充信息并继续' })
-    fireEvent.click(continueButton)
-
-    const dialogTitle = await screen.findByText('继续执行此任务')
-    const dialog = dialogTitle.closest('[data-slot="dialog-content"]') as HTMLElement
-    expect(dialog).toBeTruthy()
-    fireEvent.change(within(dialog).getByLabelText('补充指令'), {
+    const dialog = await openResumeDialog()
+    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('')
+    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), {
       target: { value: '请基于现有草稿继续修改' },
     })
     const file = new File(['notes'], 'notes.md', { type: 'text/markdown' })
-    fireEvent.change(within(dialog).getByLabelText('补充文件'), {
+    fireEvent.change(within(dialog).getByLabelText('选择附件文件'), {
       target: { files: [file] },
     })
-    fireEvent.change(within(dialog).getByPlaceholderText('例如：客户反馈、参考图、修改意见、产品参数'), {
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: 'ai_entry_attachment',
+      file,
+    })))
+    fireEvent.click(within(dialog).getByRole('button', { name: '预览 notes.md' }))
+    expect(await screen.findByRole('heading', { name: 'notes.md' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '关闭附件预览' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '编辑 notes.md 的附件说明' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), {
       target: { value: '修改意见' },
     })
-    fireEvent.click(within(dialog).getByText('提交并继续').closest('button') as HTMLButtonElement)
+    fireEvent.click(within(dialog).getByLabelText('提交并继续'))
 
-    await waitFor(() => {
-      expect(api.tasks.resume).toHaveBeenCalledWith('task-1', {
-        prompt: '请基于现有草稿继续修改',
-        files: [file],
-        fileLabels: ['修改意见'],
-      })
-      expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/task-clone')
+    await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledTimes(1))
+    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('请基于现有草稿继续修改')
+    expect(within(dialog).getByRole('button', { name: '预览 notes.md' })).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByLabelText('提交并继续'))
+    await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledTimes(2))
+    expect(api.tasks.resume).toHaveBeenLastCalledWith('task-1', {
+      prompt: '请基于现有草稿继续修改',
+      input_attachments: [{
+        type: 'text',
+        upload_id: 'upload-notes.md',
+        key: 'uploads/pending/user-1/upload-notes.md/notes.md',
+        file_name: 'notes.md',
+        content_type: 'text/markdown',
+        size: file.size,
+        instruction: '修改意见',
+      }],
     })
+    expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/task-clone')
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
+
+    const reopened = await openResumeDialog()
+    expect(within(reopened).getByLabelText('继续任务要求')).toHaveValue('')
+    expect(within(reopened).queryByText('notes.md')).not.toBeInTheDocument()
   })
 
-  it('keeps resume file labels aligned when a file is removed', async () => {
+  it('keeps the resume dialog mounted and dismiss controls disabled until its request settles', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'failed',
+      result: JSON.stringify({ files: null, output: '' }),
+    }))
+    const request = deferred<Task>()
+    vi.mocked(api.tasks.resume).mockReturnValue(request.promise)
+
+    render(<TaskDetailPage />)
+
+    const reopenTrigger = await screen.findByRole('button', { name: '补充信息并继续' })
+    fireEvent.click(reopenTrigger)
+    const title = await screen.findByRole('heading', { name: '继续执行此任务' })
+    const dialog = title.closest('[data-slot="dialog-content"]') as HTMLElement
+    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), {
+      target: { value: '继续完成当前任务' },
+    })
+    fireEvent.click(within(dialog).getByLabelText('提交并继续'))
+    await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledTimes(1))
+
+    const cancel = within(dialog).getByRole('button', { name: '取消' })
+    const close = within(dialog).getByRole('button', { name: 'Close' })
+    await waitFor(() => {
+      expect(cancel).toBeDisabled()
+      expect(close).toBeDisabled()
+    })
+    fireEvent.click(cancel)
+    fireEvent.click(close)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    const overlay = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')
+    expect(overlay).not.toBeNull()
+    fireEvent.pointerDown(overlay as HTMLElement)
+    fireEvent.pointerUp(overlay as HTMLElement)
+    fireEvent.click(overlay as HTMLElement)
+    fireEvent.click(reopenTrigger)
+
+    expect(screen.getAllByRole('heading', { name: '继续执行此任务' })).toHaveLength(1)
+    expect(api.tasks.resume).toHaveBeenCalledTimes(1)
+    expect(toastSuccessMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      request.resolve(taskWith({ id: 'task-1', status: 'pending' }))
+      await request.promise
+    })
+
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
+    expect(api.tasks.resume).toHaveBeenCalledTimes(1)
+    expect(toastSuccessMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the clone dialog mounted and dismiss controls disabled until its request settles', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'completed',
+      prompt: '克隆当前任务',
+      result: JSON.stringify({ files: null, output: '' }),
+    }))
+    const request = deferred<Task>()
+    vi.mocked(api.tasks.clone).mockReturnValue(request.promise)
+
+    render(<TaskDetailPage />)
+
+    const reopenTrigger = await screen.findByRole('button', { name: '更多任务操作' })
+    const dialog = await openCloneDialog()
+    fireEvent.click(within(dialog).getByLabelText('确认克隆'))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
+
+    const cancel = within(dialog).getByRole('button', { name: '取消' })
+    const close = within(dialog).getByRole('button', { name: 'Close' })
+    expect(cancel).toBeDisabled()
+    expect(close).toBeDisabled()
+    fireEvent.click(cancel)
+    fireEvent.click(close)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    const overlay = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')
+    expect(overlay).not.toBeNull()
+    fireEvent.pointerDown(overlay as HTMLElement)
+    fireEvent.pointerUp(overlay as HTMLElement)
+    fireEvent.click(overlay as HTMLElement)
+    fireEvent.click(reopenTrigger)
+
+    expect(screen.getAllByRole('heading', { name: '克隆任务' })).toHaveLength(1)
+    expect(api.tasks.clone).toHaveBeenCalledTimes(1)
+    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(toastSuccessMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      request.resolve(taskWith({ id: 'task-clone', status: 'pending' }))
+      await request.promise
+    })
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone'))
+    expect(mockNavigate).toHaveBeenCalledTimes(1)
+    expect(api.tasks.clone).toHaveBeenCalledTimes(1)
+    expect(toastSuccessMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('discards resume input after cancel, close, or Escape and keeps remaining labels in file order', async () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
@@ -928,29 +1238,170 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const continueButton = await screen.findByRole('button', { name: '补充信息并继续' })
-    fireEvent.click(continueButton)
+    let dialog = await openResumeDialog()
+    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), { target: { value: '取消这次输入' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
 
-    const dialogTitle = await screen.findByText('继续执行此任务')
-    const dialog = dialogTitle.closest('[data-slot="dialog-content"]') as HTMLElement
+    dialog = await openResumeDialog()
+    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('')
+    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), { target: { value: '关闭这次输入' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+
+    dialog = await openResumeDialog()
+    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('')
+    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), { target: { value: 'Escape 这次输入' } })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
+
+    dialog = await openResumeDialog()
+    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('')
     const first = new File(['first'], 'first.md', { type: 'text/markdown' })
     const second = new File(['second'], 'second.md', { type: 'text/markdown' })
-    fireEvent.change(within(dialog).getByLabelText('补充文件'), {
+    fireEvent.change(within(dialog).getByLabelText('选择附件文件'), {
       target: { files: [first, second] },
     })
-    const labelInputs = within(dialog).getAllByPlaceholderText('例如：客户反馈、参考图、修改意见、产品参数')
-    fireEvent.change(labelInputs[0], { target: { value: '第一份' } })
-    fireEvent.change(labelInputs[1], { target: { value: '第二份' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '移除 first.md' }))
-    fireEvent.click(within(dialog).getByText('提交并继续').closest('button') as HTMLButtonElement)
+    fireEvent.click(within(dialog).getByRole('button', { name: '编辑 first.md 的附件说明' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), { target: { value: '第一份' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '编辑 second.md 的附件说明' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), { target: { value: '第二份' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除 first.md' }))
+    fireEvent.click(within(dialog).getByLabelText('提交并继续'))
 
     await waitFor(() => {
       expect(api.tasks.resume).toHaveBeenCalledWith('task-1', {
         prompt: '',
-        files: [second],
-        fileLabels: ['第二份'],
+        input_attachments: [{
+          type: 'text',
+          upload_id: 'upload-second.md',
+          key: 'uploads/pending/user-1/upload-second.md/second.md',
+          file_name: 'second.md',
+          content_type: 'text/markdown',
+          size: second.size,
+          instruction: '第二份',
+        }],
       })
     })
+  })
+
+  it('matches the resume server policy of five files and 25 MiB per file', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'failed',
+      result: JSON.stringify({ files: null, output: '' }),
+    }))
+
+    render(<TaskDetailPage />)
+    const dialog = await openResumeDialog()
+    const files = Array.from({ length: 6 }, (_, index) => (
+      new File([`${index}`], `file-${index + 1}.txt`, { type: 'text/plain' })
+    ))
+    fireEvent.change(within(dialog).getByLabelText('选择附件文件'), {
+      target: { files },
+    })
+
+    expect(within(dialog).getByRole('button', { name: '预览 file-5.txt' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '预览 file-6.txt' })).not.toBeInTheDocument()
+    expect(within(dialog).getByLabelText('选择附件文件')).toBeDisabled()
+
+    const oversized = new File(['large'], 'too-large.pdf', { type: 'application/pdf' })
+    Object.defineProperty(oversized, 'size', { value: 25 * 1024 * 1024 + 1 })
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除 file-5.txt' }))
+    fireEvent.change(within(dialog).getByLabelText('选择附件文件'), {
+      target: { files: [oversized] },
+    })
+    expect(within(dialog).queryByText('too-large.pdf')).not.toBeInTheDocument()
+  })
+
+  it('previews legacy owned clone inputs, strips their derived key on submit, and visibly rejects unusable sources', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'completed',
+      prompt: '克隆素材测试',
+      input_attachments: [
+        {
+          type: 'image',
+          url: '/api/v1/files/tasks/task-1/input/legacy.png',
+          key: 'tasks/task-1/input/legacy.png',
+          file_name: 'legacy.png',
+          content_type: 'image/png',
+          size: 20,
+        },
+        {
+          type: 'document',
+          key: 'tasks/task-1/input/key-only.pdf',
+          file_name: 'key-only.pdf',
+          content_type: 'application/pdf',
+          size: 30,
+        },
+      ],
+      result: JSON.stringify({ files: null, output: '' }),
+    }))
+
+    render(<TaskDetailPage />)
+    const dialog = await openCloneDialog()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '预览 legacy.png' }))
+    await waitFor(() => expect(resolveDownloadUrlMock).toHaveBeenCalledWith({
+      key: 'tasks/task-1/input/legacy.png',
+      owner_type: 'task',
+      owner_id: 'task-1',
+    }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭附件预览' }))
+
+    fireEvent.click(within(dialog).getByLabelText('确认克隆'))
+    expect(await within(dialog).findByText('附件 key-only.pdf 缺少可复用的内部文件地址，请删除后重新上传')).toBeInTheDocument()
+    expect(api.tasks.clone).not.toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除 key-only.pdf' }))
+    fireEvent.click(within(dialog).getByLabelText('确认克隆'))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith('task-1', {
+      prompt: '克隆素材测试',
+      input_attachments: [{
+        type: 'image',
+        url: '/api/v1/files/tasks/task-1/input/legacy.png',
+        file_name: 'legacy.png',
+        content_type: 'image/png',
+        size: 20,
+      }],
+    }))
+  })
+
+  it('keeps clone edits after an API failure and rejects external legacy URLs before posting', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'completed',
+      prompt: '原任务',
+      input_attachments: [{
+        type: 'image',
+        url: 'https://external.example.com/input.png',
+        file_name: 'external.png',
+        content_type: 'image/png',
+        size: 10,
+      }],
+      result: JSON.stringify({ files: null, output: '' }),
+    }))
+
+    render(<TaskDetailPage />)
+    let dialog = await openCloneDialog()
+    fireEvent.change(within(dialog).getByLabelText('克隆任务要求'), { target: { value: '已编辑任务' } })
+    fireEvent.click(within(dialog).getByLabelText('确认克隆'))
+    expect(await within(dialog).findByText('附件 external.png 使用外部地址，无法安全克隆，请删除后重新上传')).toBeInTheDocument()
+    expect(api.tasks.clone).not.toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除 external.png' }))
+    vi.mocked(api.tasks.clone)
+      .mockRejectedValueOnce(new Error('clone failed'))
+      .mockResolvedValueOnce(taskWith({ id: 'task-clone', status: 'pending' }))
+    fireEvent.click(within(dialog).getByLabelText('确认克隆'))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
+    expect(within(dialog).getByLabelText('克隆任务要求')).toHaveValue('已编辑任务')
+    fireEvent.click(within(dialog).getByLabelText('确认克隆'))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(2))
+    expect(api.tasks.clone).toHaveBeenLastCalledWith('task-1', {
+      prompt: '已编辑任务',
+      input_attachments: [],
+    })
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone'))
   })
 
   it('does not show clone for running tasks', async () => {
@@ -1085,7 +1536,7 @@ describe('TaskDetailPage', () => {
         platform: 'article',
         visual_style: '柔光生活摄影',
         image_ratio: '16:9',
-        reference_image_url: 'https://cdn.example.com/ref.png',
+        reference_image_asset_id: '44444444-4444-4444-8444-444444444444',
         author: '安般',
         writer: 'dan-koe',
         theme: 'autumn-warm',
@@ -1298,10 +1749,9 @@ describe('TaskDetailPage', () => {
     expect(screen.getByRole('button', { name: '导出剪映草稿' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Re-roll' }))
-    await waitFor(() => {
-      expect(api.tasks.clone).toHaveBeenCalledWith('task-1')
-      expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone')
-    })
+    expect(await screen.findByRole('heading', { name: '克隆任务' })).toBeInTheDocument()
+    expect(api.tasks.clone).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/task-clone')
   })
 
   it('opens project details in a dialog instead of navigating to the projects list', async () => {

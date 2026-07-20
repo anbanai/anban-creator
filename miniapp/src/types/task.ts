@@ -1,3 +1,5 @@
+import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
+
 export type TaskType = 'seednote' | 'article' | 'ecommerce'
 
 // E-commerce package config carried on a task (mirrors server model.EcommerceConfig).
@@ -31,7 +33,7 @@ export interface Task {
   image_ratio?: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceAssetView | null
   watermark?: boolean
   error: string | null
   // miniapp-specific convenience (some endpoints return a human message)
@@ -88,7 +90,7 @@ export interface CreateTaskRequest {
   image_ratio?: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceImageSelection | null
   visual_style?: string
   writer_key?: string
   theme?: string

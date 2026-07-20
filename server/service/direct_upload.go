@@ -18,6 +18,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
@@ -32,14 +33,20 @@ const (
 	DirectUploadPurposeTaskArtifact      = "task_artifact"
 
 	defaultDirectUploadTTLSeconds = 15 * 60
+	uploadSessionCleanupLease     = 5 * time.Minute
+	uploadFinalizationLease       = time.Minute
+	uploadFinalizationTimeout     = 45 * time.Second
+	uploadFinalizationCleanupTTL  = 5 * time.Second
 )
 
 var (
-	ErrPendingUploadNotFound     = model.ErrPendingUploadNotFound
-	ErrPendingUploadInvalidURL   = errors.New("pending upload URL is invalid")
-	ErrPendingUploadAccessDenied = errors.New("pending upload access denied")
-	ErrPendingUploadNotPending   = errors.New("pending upload is not pending")
-	ErrPendingUploadExpired      = errors.New("pending upload has expired")
+	ErrUploadSessionNotFound      = model.ErrUploadSessionNotFound
+	ErrUploadSessionInvalidURL    = errors.New("upload session URL is invalid")
+	ErrUploadSessionAccessDenied  = errors.New("upload session access denied")
+	ErrUploadSessionExpired       = errors.New("upload session has expired")
+	ErrUploadSessionStateConflict = errors.New("upload session state conflict")
+	ErrUploadSessionObjectInvalid = errors.New("upload session object metadata is invalid")
+	ErrUploadSessionUnavailable   = errors.New("upload session dependency is unavailable")
 )
 
 type directUploadStorage interface {
@@ -48,14 +55,6 @@ type directUploadStorage interface {
 	DownloadURL(ctx context.Context, key string, expirySeconds int) (string, error)
 	GetURL(key string) string
 	Delete(ctx context.Context, key string) error
-}
-
-type PendingUploadRepository interface {
-	CreatePendingUpload(ctx context.Context, upload *model.PendingUpload) error
-	FindPendingUploadByID(ctx context.Context, id string) (*model.PendingUpload, error)
-	FinalizePendingUploads(ctx context.Context, ids []string, finalizedAt time.Time) error
-	FindExpiredPendingUploads(ctx context.Context, before time.Time, limit int) ([]*model.PendingUpload, error)
-	MarkPendingUploadExpired(ctx context.Context, id string, expiredAt time.Time) error
 }
 
 type DirectUploadPrepareRequest struct {
@@ -67,8 +66,11 @@ type DirectUploadPrepareRequest struct {
 }
 
 type DirectUploadPrepareResult struct {
+	UploadSessionID    string            `json:"upload_session_id"`
 	UploadID           string            `json:"upload_id"`
-	Key                string            `json:"key"`
+	StagingKey         string            `json:"key"`
+	Key                string            `json:"-"`
+	PreviewURL         string            `json:"preview_url"`
 	PublicURL          string            `json:"public_url"`
 	UploadURL          string            `json:"upload_url,omitempty"`
 	Method             string            `json:"method"`
@@ -81,6 +83,29 @@ type DirectUploadPrepareResult struct {
 	STSSecurityToken   string            `json:"sts_security_token"`
 	ExpiresAt          time.Time         `json:"expires_at"`
 	MaxSize            int64             `json:"max_size"`
+}
+
+type VerifiedDirectUpload struct {
+	UploadID    string
+	Key         string
+	FileName    string
+	ContentType string
+	Size        int64
+	Purpose     string
+}
+
+type DirectUploadFinalizationStorage interface {
+	storage.ObjectStatProvider
+	storage.ConditionalObjectPromoter
+	Delete(ctx context.Context, key string) error
+	GetURL(key string) string
+}
+
+type FinalizeUploadRequest struct {
+	SessionID       string
+	UserID          string
+	AllowedPurposes []string
+	Now             time.Time
 }
 
 type UploadCredentialRequest struct {
@@ -134,7 +159,7 @@ const maxUploadImageBytes = 10 * 1024 * 1024
 
 var unsafeFilenameRunes = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
-func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo PendingUploadRepository, cfg DirectUploadConfig, req DirectUploadPrepareRequest) (*DirectUploadPrepareResult, error) {
+func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo repository.UploadSessionRepository, cfg DirectUploadConfig, req DirectUploadPrepareRequest) (*DirectUploadPrepareResult, error) {
 	if store == nil {
 		return nil, fmt.Errorf("storage provider is not available")
 	}
@@ -142,7 +167,7 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 		return nil, fmt.Errorf("direct uploads require OSS storage")
 	}
 	if repo == nil {
-		return nil, fmt.Errorf("pending upload repository is not available")
+		return nil, fmt.Errorf("upload session repository is not available")
 	}
 	userID := strings.TrimSpace(req.UserID)
 	if userID == "" {
@@ -183,9 +208,7 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 		return nil, fmt.Errorf("file size exceeds the %d MB limit", maxSize/(1024*1024))
 	}
 	if ext == "" {
-		if exts, _ := mime.ExtensionsByType(contentType); len(exts) > 0 {
-			ext = strings.ToLower(exts[0])
-		}
+		ext = canonicalDirectUploadExtension(contentType)
 	}
 	if ext == "" {
 		ext = ".bin"
@@ -233,24 +256,26 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 	if cred.ExpiresAt.IsZero() {
 		cred.ExpiresAt = expiresAt
 	}
-	upload := &model.PendingUpload{
+	session := &model.UploadSession{
 		ID:          uploadID,
 		UserID:      userID,
 		Purpose:     purpose,
-		Key:         key,
-		PublicURL:   publicURL,
+		StagingKey:  key,
 		FileName:    filename,
 		ContentType: contentType,
 		Size:        req.Size,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   expiresAt,
 	}
-	if err := repo.CreatePendingUpload(ctx, upload); err != nil {
-		return nil, fmt.Errorf("record pending upload: %w", err)
+	if err := repo.Create(ctx, session); err != nil {
+		return nil, fmt.Errorf("record upload session: %w", err)
 	}
 	return &DirectUploadPrepareResult{
+		UploadSessionID:    uploadID,
 		UploadID:           uploadID,
+		StagingKey:         key,
 		Key:                key,
+		PreviewURL:         publicURL,
 		PublicURL:          publicURL,
 		UploadURL:          uploadURL,
 		Method:             "PUT",
@@ -266,94 +291,477 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo Pe
 	}, nil
 }
 
-func FinalizePendingUploadURLs(ctx context.Context, repo PendingUploadRepository, userID, purpose string, urls []string, now time.Time, ownedURLChecks ...func(string) bool) error {
-	if repo == nil || len(urls) == 0 {
+func FinalizeUploadSession(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, req FinalizeUploadRequest) (*model.Asset, error) {
+	if store == nil || repo == nil {
+		return nil, ErrUploadSessionUnavailable
+	}
+	req.SessionID = strings.TrimSpace(req.SessionID)
+	req.UserID = strings.TrimSpace(req.UserID)
+	if req.SessionID == "" || req.UserID == "" {
+		return nil, ErrUploadSessionAccessDenied
+	}
+	if req.Now.IsZero() {
+		req.Now = time.Now()
+	}
+	operationCtx, operationCancel := context.WithTimeout(ctx, uploadFinalizationTimeout)
+	defer operationCancel()
+	ctx = operationCtx
+
+	session, err := repo.UploadSessions().FindByID(ctx, req.SessionID)
+	if err != nil {
+		if errors.Is(err, model.ErrUploadSessionNotFound) {
+			return nil, ErrUploadSessionAccessDenied
+		}
+		return nil, fmt.Errorf("%w: find upload session: %v", ErrUploadSessionUnavailable, err)
+	}
+	if session.UserID != req.UserID || !directUploadPurposeAllowed(session.Purpose, req.AllowedPurposes) {
+		return nil, ErrUploadSessionAccessDenied
+	}
+	if session.Status == model.UploadSessionFinalized {
+		return loadFinalizedUploadSessionAsset(ctx, store, repo, session)
+	}
+
+	finalKey, err := finalizedUploadSessionKey(session)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUploadSessionObjectInvalid, err)
+	}
+
+	finalInfo, statErr := store.StatObject(ctx, finalKey)
+	finalExists := statErr == nil
+	switch {
+	case finalExists:
+		if err := validateUploadSessionObjectInfo(session, finalKey, finalInfo); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(session.FinalizationETag) == "" && strings.TrimSpace(session.PromotionSourceETag) == "" {
+			return nil, fmt.Errorf("%w: final object has no persisted fingerprint", ErrUploadSessionObjectInvalid)
+		}
+		if strings.TrimSpace(session.FinalizationETag) != "" {
+			if err := validateFinalUploadSessionObject(session, finalKey, session.FinalizationETag, finalInfo); err != nil {
+				return nil, err
+			}
+		}
+	case errors.Is(statErr, storage.ErrObjectNotFound):
+	default:
+		return nil, fmt.Errorf("%w: stat final upload object: %v", ErrUploadSessionUnavailable, statErr)
+	}
+
+	token := uuid.NewString()
+	claimStaleBefore := req.Now.Add(-uploadFinalizationLease)
+	var claimed bool
+	if finalExists && !(session.Status == model.UploadSessionPending && session.ExpiresAt.After(req.Now)) {
+		claimed, err = repo.UploadSessions().ClaimFinalizationRecovery(ctx, session.ID, token, req.Now, claimStaleBefore)
+	} else {
+		if session.Status == model.UploadSessionExpired || session.Status == model.UploadSessionExpiring || !session.ExpiresAt.After(req.Now) {
+			return nil, ErrUploadSessionExpired
+		}
+		if session.Status != model.UploadSessionPending && session.Status != model.UploadSessionFinalizing {
+			return nil, ErrUploadSessionStateConflict
+		}
+		claimed, err = repo.UploadSessions().ClaimFinalization(ctx, session.ID, token, req.Now, claimStaleBefore)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: claim upload finalization: %v", ErrUploadSessionUnavailable, err)
+	}
+	if !claimed {
+		latest, findErr := repo.UploadSessions().FindByID(ctx, session.ID)
+		if findErr == nil && latest.Status == model.UploadSessionFinalized {
+			return loadFinalizedUploadSessionAsset(ctx, store, repo, latest)
+		}
+		return nil, ErrUploadSessionStateConflict
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(ctx), uploadFinalizationCleanupTTL)
+		defer releaseCancel()
+		_, _ = repo.UploadSessions().ReleaseFinalization(releaseCtx, session.ID, token)
+	}()
+	if finalExists && strings.TrimSpace(session.FinalizationETag) == "" {
+		stagingInfo, err := statUploadSessionObject(ctx, store, session.StagingKey, "staging recovery")
+		if err != nil {
+			return nil, err
+		}
+		if err := validateUploadSessionObjectInfo(session, session.StagingKey, stagingInfo); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(stagingInfo.ETag) == "" || strings.TrimSpace(stagingInfo.ETag) != strings.TrimSpace(session.PromotionSourceETag) {
+			return nil, fmt.Errorf("%w: staging object changed after promotion", ErrUploadSessionObjectInvalid)
+		}
+		targetETag := strings.TrimSpace(finalInfo.ETag)
+		if targetETag == "" {
+			return nil, fmt.Errorf("%w: final object has no ETag", ErrUploadSessionObjectInvalid)
+		}
+		recorded, recordErr := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, token, targetETag)
+		if recordErr != nil {
+			return nil, fmt.Errorf("%w: record upload fingerprint: %v", ErrUploadSessionUnavailable, recordErr)
+		}
+		if !recorded {
+			return nil, ErrUploadSessionStateConflict
+		}
+		session.FinalizationETag = targetETag
+	}
+
+	if !finalExists {
+		stagingInfo, err := statUploadSessionObject(ctx, store, session.StagingKey, "staging")
+		if err != nil {
+			return nil, err
+		}
+		if err := validateUploadSessionObjectInfo(session, session.StagingKey, stagingInfo); err != nil {
+			return nil, err
+		}
+		verifiedETag := strings.TrimSpace(stagingInfo.ETag)
+		if verifiedETag == "" {
+			return nil, fmt.Errorf("%w: staging object has no ETag", ErrUploadSessionObjectInvalid)
+		}
+		recorded, recordErr := repo.UploadSessions().RecordPromotionSourceETag(ctx, session.ID, token, verifiedETag)
+		if recordErr != nil {
+			return nil, fmt.Errorf("%w: record promotion source fingerprint: %v", ErrUploadSessionUnavailable, recordErr)
+		}
+		if !recorded {
+			return nil, ErrUploadSessionStateConflict
+		}
+		session.PromotionSourceETag = verifiedETag
+		promotedInfo, promoteErr := store.PromoteObject(ctx, session.StagingKey, finalKey, verifiedETag)
+		if promoteErr != nil {
+			switch {
+			case errors.Is(promoteErr, storage.ErrPromotionPreconditionFailed):
+				return nil, fmt.Errorf("%w: staging object changed during finalization", ErrUploadSessionObjectInvalid)
+			case errors.Is(promoteErr, storage.ErrObjectAlreadyExists):
+			default:
+				return nil, fmt.Errorf("%w: promote upload session object: %v", ErrUploadSessionUnavailable, promoteErr)
+			}
+		}
+		finalInfo, err = statUploadSessionObject(ctx, store, finalKey, "final")
+		if err != nil {
+			return nil, err
+		}
+		targetETag := strings.TrimSpace(finalInfo.ETag)
+		if promoteErr == nil {
+			if promotedInfo == nil || promotedInfo.Key != finalKey || strings.TrimSpace(promotedInfo.ETag) == "" {
+				return nil, fmt.Errorf("%w: promotion target identity is unavailable", ErrUploadSessionObjectInvalid)
+			}
+			targetETag = strings.TrimSpace(promotedInfo.ETag)
+		}
+		if err := validateFinalUploadSessionObject(session, finalKey, targetETag, finalInfo); err != nil {
+			return nil, err
+		}
+		recorded, recordErr = repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, token, targetETag)
+		if recordErr != nil {
+			return nil, fmt.Errorf("%w: record upload fingerprint: %v", ErrUploadSessionUnavailable, recordErr)
+		}
+		if !recorded {
+			return nil, ErrUploadSessionStateConflict
+		}
+		session.FinalizationETag = targetETag
+	}
+
+	asset := &model.Asset{
+		ID: session.ID, UserID: session.UserID, Purpose: session.Purpose,
+		StorageKey: finalKey, FileName: session.FileName, ContentType: normalizeDirectUploadContentType(session.ContentType),
+		Size: session.Size, ETag: strings.TrimSpace(finalInfo.ETag),
+	}
+	err = repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		if createErr := txRepo.Assets().Create(ctx, asset); createErr != nil {
+			existing, findErr := txRepo.Assets().FindByID(ctx, asset.ID)
+			if findErr != nil {
+				return createErr
+			}
+			if err := verifyUploadSessionAsset(session, existing); err != nil {
+				return err
+			}
+			if existing.StorageKey != asset.StorageKey || existing.ETag != asset.ETag {
+				return ErrUploadSessionObjectInvalid
+			}
+			asset = existing
+		}
+		completed, completeErr := txRepo.UploadSessions().CompleteFinalization(ctx, session.ID, token, asset.ID, req.Now)
+		if completeErr != nil {
+			return completeErr
+		}
+		if !completed {
+			return ErrUploadSessionStateConflict
+		}
 		return nil
+	})
+	if err != nil {
+		if errors.Is(err, ErrUploadSessionStateConflict) || errors.Is(err, ErrUploadSessionObjectInvalid) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: persist finalized upload: %v", ErrUploadSessionUnavailable, err)
+	}
+	committed = true
+	deleteCtx, deleteCancel := context.WithTimeout(context.WithoutCancel(ctx), uploadFinalizationCleanupTTL)
+	defer deleteCancel()
+	_ = store.Delete(deleteCtx, session.StagingKey)
+	return asset, nil
+}
+
+func loadFinalizedUploadSessionAsset(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, session *model.UploadSession) (*model.Asset, error) {
+	if strings.TrimSpace(session.AssetID) == "" || session.AssetID != session.ID {
+		return nil, ErrUploadSessionStateConflict
+	}
+	asset, err := repo.Assets().FindByID(ctx, session.AssetID)
+	if err != nil {
+		if errors.Is(err, model.ErrAssetNotFound) {
+			return nil, ErrUploadSessionStateConflict
+		}
+		return nil, fmt.Errorf("%w: find finalized asset: %v", ErrUploadSessionUnavailable, err)
+	}
+	if err := verifyUploadSessionAsset(session, asset); err != nil {
+		return nil, err
+	}
+	info, err := statUploadSessionObject(ctx, store, asset.StorageKey, "final")
+	if err != nil {
+		return nil, err
+	}
+	if err := validateFinalUploadSessionObject(session, asset.StorageKey, asset.ETag, info); err != nil {
+		return nil, err
+	}
+	return asset, nil
+}
+
+func verifyUploadSessionAsset(session *model.UploadSession, asset *model.Asset) error {
+	finalKey, err := finalizedUploadSessionKey(session)
+	if err != nil || asset == nil || asset.ID != session.ID || asset.UserID != session.UserID || asset.Purpose != session.Purpose ||
+		asset.StorageKey != finalKey || asset.FileName != session.FileName || normalizeDirectUploadContentType(asset.ContentType) != normalizeDirectUploadContentType(session.ContentType) || asset.Size != session.Size || strings.TrimSpace(session.FinalizationETag) == "" || strings.TrimSpace(asset.ETag) != strings.TrimSpace(session.FinalizationETag) {
+		return ErrUploadSessionObjectInvalid
+	}
+	return nil
+}
+
+func statUploadSessionObject(ctx context.Context, store storage.ObjectStatProvider, key, kind string) (*storage.ObjectInfo, error) {
+	info, err := store.StatObject(ctx, key)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return nil, fmt.Errorf("%w: %s object not found", ErrUploadSessionObjectInvalid, kind)
+		}
+		return nil, fmt.Errorf("%w: stat %s upload object: %v", ErrUploadSessionUnavailable, kind, err)
+	}
+	if info == nil {
+		return nil, fmt.Errorf("%w: %s object metadata is unavailable", ErrUploadSessionObjectInvalid, kind)
+	}
+	return info, nil
+}
+
+func validateUploadSessionObjectInfo(session *model.UploadSession, objectKey string, info *storage.ObjectInfo) error {
+	if session == nil || info == nil || strings.TrimSpace(objectKey) == "" || info.Size != session.Size {
+		return fmt.Errorf("%w: %s size mismatch", ErrUploadSessionObjectInvalid, objectKey)
+	}
+	policy, ok := directUploadPolicies[session.Purpose]
+	if !ok {
+		return fmt.Errorf("%w: unsupported upload purpose %q", ErrUploadSessionObjectInvalid, session.Purpose)
+	}
+	expectedType := normalizeDirectUploadContentType(session.ContentType)
+	actualType := normalizeDirectUploadContentType(firstNonEmptyString(info.ContentType, info.MimeType))
+	ext := strings.ToLower(filepath.Ext(session.FileName))
+	maxSize := policy.maxSize
+	if policy.maxSizeFor != nil {
+		maxSize = policy.maxSizeFor(session.ContentType, ext)
+	}
+	if maxSize <= 0 || info.Size > maxSize || expectedType == "" || actualType == "" || expectedType != actualType {
+		return fmt.Errorf("%w: %s metadata does not match prepared upload", ErrUploadSessionObjectInvalid, objectKey)
+	}
+	return nil
+}
+
+func validateFinalUploadSessionObject(session *model.UploadSession, finalKey, expectedETag string, info *storage.ObjectInfo) error {
+	if err := validateUploadSessionObjectInfo(session, finalKey, info); err != nil {
+		return err
+	}
+	if strings.TrimSpace(info.ETag) == "" || strings.TrimSpace(info.ETag) != strings.TrimSpace(expectedETag) {
+		return fmt.Errorf("%w: final object ETag does not match", ErrUploadSessionObjectInvalid)
+	}
+	return nil
+}
+
+func finalizedUploadSessionKey(session *model.UploadSession) (string, error) {
+	if session == nil {
+		return "", errors.New("upload session is required")
+	}
+	userID := strings.TrimSpace(session.UserID)
+	sessionID := strings.TrimSpace(session.ID)
+	fileName := path.Base(strings.TrimSpace(session.FileName))
+	if userID == "" || sessionID == "" || fileName == "" || fileName == "." || fileName == "/" || path.Base(userID) != userID || path.Base(sessionID) != sessionID || fileName != session.FileName {
+		return "", errors.New("upload session identity is invalid")
+	}
+	return path.Join("assets/users", userID, sessionID, fileName), nil
+}
+
+func FinalizeUploadSessionURLs(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, userID, purpose string, urls []string, now time.Time, ownedURLChecks ...func(string) bool) (map[string]string, error) {
+	rewrites := make(map[string]string)
+	if repo == nil || len(urls) == 0 {
+		return rewrites, nil
 	}
 	var isOwnedURL func(string) bool
 	if len(ownedURLChecks) > 0 {
 		isOwnedURL = ownedURLChecks[0]
 	}
-	ids := make([]string, 0, len(urls))
-	seen := map[string]struct{}{}
 	for _, raw := range urls {
-		key, hasCanonicalKey := pendingUploadKeyFromURL(raw)
-		isPendingKey := hasCanonicalKey && strings.HasPrefix(key, "uploads/pending/")
-		if isPendingKey && isOwnedURL != nil && !isOwnedURL(raw) {
+		key, ok := uploadSessionKeyFromURL(raw)
+		if !ok {
 			continue
 		}
-		id := pendingUploadIDFromURL(raw)
-		if id == "" {
-			if isPendingKey {
-				return ErrPendingUploadInvalidURL
-			}
+		matchesStoreURL := store != nil && directUploadFinalURLMatches(raw, store.GetURL(key), key)
+		if isOwnedURL != nil && !isOwnedURL(raw) && !matchesStoreURL && !strings.HasPrefix(raw, "/api/v1/files/") && !strings.HasPrefix(raw, "/files/") {
 			continue
 		}
-		if _, ok := seen[id]; ok {
-			continue
+		sessionID := uploadSessionIDFromKey(key)
+		if sessionID == "" {
+			return nil, ErrUploadSessionInvalidURL
 		}
-		upload, err := repo.FindPendingUploadByID(ctx, id)
+		if store == nil {
+			return nil, ErrUploadSessionUnavailable
+		}
+		session, err := repo.UploadSessions().FindByID(ctx, sessionID)
 		if err != nil {
-			return err
+			if errors.Is(err, model.ErrUploadSessionNotFound) {
+				return nil, ErrUploadSessionAccessDenied
+			}
+			return nil, fmt.Errorf("%w: find upload session: %v", ErrUploadSessionUnavailable, err)
 		}
-		if upload.UserID != userID {
-			return fmt.Errorf("pending upload %s does not belong to current user", id)
+		if session.UserID != userID || session.Purpose != purpose {
+			return nil, ErrUploadSessionAccessDenied
 		}
-		if upload.Purpose != purpose {
-			return fmt.Errorf("pending upload %s has purpose %s, want %s", id, upload.Purpose, purpose)
+		if key != session.StagingKey {
+			if session.Status != model.UploadSessionFinalized || session.AssetID == "" {
+				return nil, ErrUploadSessionAccessDenied
+			}
+			asset, err := repo.Assets().FindByID(ctx, session.AssetID)
+			if err != nil || asset.StorageKey != key {
+				return nil, ErrUploadSessionAccessDenied
+			}
 		}
-		if upload.Status != model.PendingUploadStatusPending {
-			return fmt.Errorf("pending upload %s is not pending", id)
+		asset, err := FinalizeUploadSession(ctx, store, repo, FinalizeUploadRequest{
+			SessionID: session.ID, UserID: userID, AllowedPurposes: []string{purpose}, Now: now,
+		})
+		if err != nil {
+			return nil, err
 		}
-		if !upload.ExpiresAt.After(now) {
-			return fmt.Errorf("pending upload %s has expired", id)
-		}
-		if !pendingUploadURLMatches(raw, upload) {
-			return fmt.Errorf("pending upload %s URL does not match the prepared object", id)
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
+		rewrites[raw] = store.GetURL(asset.StorageKey)
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	return repo.FinalizePendingUploads(ctx, ids, now)
+	return rewrites, nil
 }
 
-func ValidatePendingUploadURL(ctx context.Context, repo PendingUploadRepository, userID string, allowedPurposes []string, rawURL string, now time.Time) (string, error) {
+func ValidateUploadSessionURL(ctx context.Context, repo repository.UploadSessionRepository, userID string, allowedPurposes []string, rawURL string, now time.Time) (string, error) {
 	if repo == nil {
-		return "", fmt.Errorf("pending upload repository is not available")
+		return "", ErrUploadSessionUnavailable
 	}
-	if strings.TrimSpace(userID) == "" {
-		return "", ErrPendingUploadAccessDenied
+	key, ok := uploadSessionKeyFromURL(rawURL)
+	if !ok || !strings.HasPrefix(key, "uploads/pending/") {
+		return "", ErrUploadSessionInvalidURL
 	}
-	id := pendingUploadIDFromURL(rawURL)
-	if id == "" {
-		return "", ErrPendingUploadInvalidURL
-	}
-	upload, err := repo.FindPendingUploadByID(ctx, id)
+	sessionID := uploadSessionIDFromKey(key)
+	session, err := repo.FindByID(ctx, sessionID)
 	if err != nil {
-		if errors.Is(err, ErrPendingUploadNotFound) {
-			return "", ErrPendingUploadAccessDenied
+		if errors.Is(err, model.ErrUploadSessionNotFound) {
+			return "", ErrUploadSessionAccessDenied
 		}
-		return "", err
+		return "", fmt.Errorf("%w: find upload session: %v", ErrUploadSessionUnavailable, err)
 	}
-	if upload.UserID != userID {
-		return "", ErrPendingUploadAccessDenied
+	if session.UserID != userID || !directUploadPurposeAllowed(session.Purpose, allowedPurposes) || session.StagingKey != key {
+		return "", ErrUploadSessionAccessDenied
 	}
-	if !directUploadPurposeAllowed(upload.Purpose, allowedPurposes) {
-		return "", ErrPendingUploadAccessDenied
+	if session.Status != model.UploadSessionPending {
+		return "", ErrUploadSessionStateConflict
 	}
-	if upload.Status != model.PendingUploadStatusPending {
-		return "", ErrPendingUploadNotPending
+	if !session.ExpiresAt.After(now) {
+		return "", ErrUploadSessionExpired
 	}
-	if !upload.ExpiresAt.After(now) {
-		return "", ErrPendingUploadExpired
+	return session.StagingKey, nil
+}
+
+func ResolveDirectUploadSessionAttachment(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, userID string, allowedPurposes []string, uploadID, assertedKey string, now time.Time) (*VerifiedDirectUpload, error) {
+	verified, err := VerifyDirectUploadSessionAttachment(ctx, repo, userID, allowedPurposes, uploadID, assertedKey, now)
+	if err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(upload.Key) == "" || !pendingUploadURLMatches(rawURL, upload) {
-		return "", ErrPendingUploadAccessDenied
+	asset, err := FinalizeUploadSession(ctx, store, repo, FinalizeUploadRequest{
+		SessionID: uploadID, UserID: userID, AllowedPurposes: allowedPurposes, Now: now,
+	})
+	if err != nil {
+		return nil, err
 	}
-	return upload.Key, nil
+	verified.Key = asset.StorageKey
+	verified.FileName = asset.FileName
+	verified.ContentType = asset.ContentType
+	verified.Size = asset.Size
+	return verified, nil
+}
+
+func VerifyDirectUploadSessionAttachment(ctx context.Context, repo repository.Repository, userID string, allowedPurposes []string, uploadID, assertedKey string, now time.Time) (*VerifiedDirectUpload, error) {
+	if repo == nil || userID == "" || uploadID == "" || assertedKey == "" {
+		return nil, ErrUploadSessionAccessDenied
+	}
+	session, err := repo.UploadSessions().FindByID(ctx, uploadID)
+	if err != nil {
+		if errors.Is(err, model.ErrUploadSessionNotFound) {
+			return nil, ErrUploadSessionAccessDenied
+		}
+		return nil, fmt.Errorf("%w: find upload session: %v", ErrUploadSessionUnavailable, err)
+	}
+	if session.UserID != userID || !directUploadPurposeAllowed(session.Purpose, allowedPurposes) {
+		return nil, ErrUploadSessionAccessDenied
+	}
+	if session.Status != model.UploadSessionFinalized {
+		if session.Status != model.UploadSessionPending || !session.ExpiresAt.After(now) {
+			if !session.ExpiresAt.After(now) {
+				return nil, ErrUploadSessionExpired
+			}
+			return nil, ErrUploadSessionStateConflict
+		}
+	}
+	if assertedKey != session.StagingKey {
+		if session.Status != model.UploadSessionFinalized || session.AssetID == "" {
+			return nil, ErrUploadSessionAccessDenied
+		}
+		asset, findErr := repo.Assets().FindByID(ctx, session.AssetID)
+		if findErr != nil || asset.StorageKey != assertedKey {
+			return nil, ErrUploadSessionAccessDenied
+		}
+	}
+	finalKey, err := finalizedUploadSessionKey(session)
+	if err != nil {
+		return nil, ErrUploadSessionAccessDenied
+	}
+	return &VerifiedDirectUpload{UploadID: session.ID, Key: finalKey, FileName: session.FileName, ContentType: session.ContentType, Size: session.Size, Purpose: session.Purpose}, nil
+}
+
+func uploadSessionKeyFromURL(raw string) (string, bool) {
+	key, ok := storage.StorageKeyFromURL(strings.TrimSpace(raw))
+	if !ok {
+		return "", false
+	}
+	key = strings.TrimPrefix(key, "/")
+	if path.Clean(key) != key || (!strings.HasPrefix(key, "uploads/pending/") && !strings.HasPrefix(key, "assets/users/")) {
+		return "", false
+	}
+	return key, true
+}
+
+func uploadSessionIDFromKey(key string) string {
+	parts := strings.Split(strings.TrimPrefix(key, "/"), "/")
+	if len(parts) < 5 {
+		return ""
+	}
+	if parts[0] == "uploads" && parts[1] == "pending" || parts[0] == "assets" && parts[1] == "users" {
+		return parts[3]
+	}
+	return ""
+}
+
+func normalizeDirectUploadContentType(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err == nil {
+		return strings.ToLower(strings.TrimSpace(mediaType))
+	}
+	return strings.ToLower(strings.TrimSpace(strings.SplitN(value, ";", 2)[0]))
 }
 
 func directUploadPurposeAllowed(purpose string, allowed []string) bool {
@@ -365,81 +773,86 @@ func directUploadPurposeAllowed(purpose string, allowed []string) bool {
 	return false
 }
 
-func CleanupExpiredPendingUploads(ctx context.Context, store directUploadStorage, repo PendingUploadRepository, before time.Time, limit int) (int, error) {
+func CleanupExpiredUploadSessions(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, before time.Time, limit int) (int, error) {
 	if store == nil || repo == nil {
 		return 0, nil
 	}
 	if limit <= 0 {
 		limit = 100
 	}
-	uploads, err := repo.FindExpiredPendingUploads(ctx, before, limit)
+	claimStaleBefore := before.Add(-uploadSessionCleanupLease)
+	sessions, err := repo.UploadSessions().FindForCleanup(ctx, before, claimStaleBefore, limit)
 	if err != nil {
 		return 0, err
 	}
 	cleaned := 0
-	for _, upload := range uploads {
-		if upload == nil {
+	for _, session := range sessions {
+		if session == nil {
 			continue
 		}
-		if err := store.Delete(ctx, upload.Key); err != nil {
+		if strings.TrimSpace(session.FinalizationETag) != "" || strings.TrimSpace(session.PromotionSourceETag) != "" {
+			finalKey, keyErr := finalizedUploadSessionKey(session)
+			if keyErr != nil {
+				return cleaned, fmt.Errorf("%w: %v", ErrUploadSessionObjectInvalid, keyErr)
+			}
+			statCtx, statCancel := context.WithTimeout(ctx, uploadFinalizationTimeout)
+			_, finalErr := store.StatObject(statCtx, finalKey)
+			statCancel()
+			switch {
+			case finalErr == nil:
+				if _, finalizeErr := FinalizeUploadSession(ctx, store, repo, FinalizeUploadRequest{
+					SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: before,
+				}); finalizeErr != nil {
+					return cleaned, finalizeErr
+				}
+				continue
+			case errors.Is(finalErr, storage.ErrObjectNotFound):
+			default:
+				return cleaned, fmt.Errorf("%w: stat final upload object during cleanup: %v", ErrUploadSessionUnavailable, finalErr)
+			}
+		}
+		claimID := uuid.NewString()
+		claimed, err := repo.UploadSessions().ClaimExpiration(ctx, session.ID, claimID, before, claimStaleBefore)
+		if err != nil {
 			return cleaned, err
 		}
-		if err := repo.MarkPendingUploadExpired(ctx, upload.ID, before); err != nil {
+		if !claimed {
+			continue
+		}
+		if err := store.Delete(ctx, session.StagingKey); err != nil {
+			reopened, reopenErr := repo.UploadSessions().ReopenExpiration(ctx, session.ID, claimID)
+			if reopenErr != nil {
+				return cleaned, fmt.Errorf("delete expired upload session staging object: %w; reopen cleanup claim: %v", err, reopenErr)
+			}
+			if !reopened {
+				return cleaned, fmt.Errorf("delete expired upload session staging object: %w; cleanup claim was not reopened", err)
+			}
 			return cleaned, err
+		}
+		completed, err := repo.UploadSessions().CompleteExpiration(ctx, session.ID, claimID, before)
+		if err != nil {
+			return cleaned, err
+		}
+		if !completed {
+			return cleaned, ErrUploadSessionStateConflict
 		}
 		cleaned++
 	}
 	return cleaned, nil
 }
 
-func pendingUploadKeyFromURL(raw string) (string, bool) {
-	key, ok := storage.StorageKeyFromURL(strings.TrimSpace(raw))
-	if !ok {
-		return "", false
-	}
-	key = strings.TrimPrefix(key, "/")
-	if path.Clean(key) != key {
-		return "", false
-	}
-	return key, true
-}
-
-func pendingUploadIDFromURL(raw string) string {
-	key, ok := pendingUploadKeyFromURL(raw)
-	if !ok {
-		return ""
-	}
-	segments := strings.Split(key, "/")
-	if len(segments) < 5 || segments[0] != "uploads" || segments[1] != "pending" || segments[2] == "" || segments[3] == "" {
-		return ""
-	}
-	return segments[3]
-}
-
-func pendingUploadURLMatches(raw string, upload *model.PendingUpload) bool {
-	if upload == nil || strings.TrimSpace(upload.Key) == "" {
-		return false
-	}
+func directUploadFinalURLMatches(raw, finalURL, finalKey string) bool {
 	candidate := stripURLQueryAndFragment(strings.TrimSpace(raw))
-	key := strings.TrimPrefix(upload.Key, "/")
+	key := strings.TrimPrefix(strings.TrimSpace(finalKey), "/")
 	if candidate == key || strings.TrimPrefix(candidate, "/") == key {
 		return true
 	}
-
 	candidateURL, candidateIsAbsolute := parseAbsoluteURL(candidate)
-	if !candidateIsAbsolute {
+	finalParsed, finalIsAbsolute := parseAbsoluteURL(stripURLQueryAndFragment(finalURL))
+	if !candidateIsAbsolute || !finalIsAbsolute || !strings.EqualFold(candidateURL.Host, finalParsed.Host) {
 		return false
 	}
-	publicURL, publicIsAbsolute := parseAbsoluteURL(stripURLQueryAndFragment(upload.PublicURL))
-	if !publicIsAbsolute {
-		return false
-	}
-	if !strings.EqualFold(candidateURL.Host, publicURL.Host) {
-		return false
-	}
-	candidatePath := strings.TrimPrefix(candidateURL.Path, "/")
-	publicPath := strings.TrimPrefix(publicURL.Path, "/")
-	return candidatePath == publicPath && candidatePath == key
+	return strings.TrimPrefix(candidateURL.Path, "/") == key && strings.TrimPrefix(finalParsed.Path, "/") == key
 }
 
 func stripURLQueryAndFragment(raw string) string {
@@ -506,6 +919,9 @@ func (i *aliyunUploadCredentialIssuer) IssueUploadCredential(_ context.Context, 
 }
 
 func directUploadPolicyJSON(bucket, key string) string {
+	// RAM scopes PUT and multipart actions to the exact object key. The current
+	// OSS STS/PUT flow has no reliably enforceable content-length condition, so
+	// finalization HEAD checks and bounded reads remain the authoritative limits.
 	policy := map[string]any{
 		"Version": "1",
 		"Statement": []map[string]any{{
@@ -525,26 +941,103 @@ func directUploadPolicyJSON(bucket, key string) string {
 	return string(raw)
 }
 
-func isDirectUploadImage(contentType, ext string) bool {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	if strings.HasPrefix(ct, "image/") {
-		switch strings.ToLower(ext) {
-		case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", "":
-			return true
+type directUploadFileRule struct {
+	kind         string
+	contentTypes []string
+}
+
+var directUploadFileRules = map[string]directUploadFileRule{
+	".jpg":      {kind: "image", contentTypes: []string{"image/jpeg", "image/jpg", "image/pjpeg"}},
+	".jpeg":     {kind: "image", contentTypes: []string{"image/jpeg", "image/jpg", "image/pjpeg"}},
+	".png":      {kind: "image", contentTypes: []string{"image/png", "image/x-png"}},
+	".webp":     {kind: "image", contentTypes: []string{"image/webp"}},
+	".gif":      {kind: "image", contentTypes: []string{"image/gif"}},
+	".bmp":      {kind: "image", contentTypes: []string{"image/bmp", "image/x-ms-bmp"}},
+	".mp3":      {kind: "audio", contentTypes: []string{"audio/mpeg", "audio/mp3"}},
+	".wav":      {kind: "audio", contentTypes: []string{"audio/wav", "audio/x-wav"}},
+	".m4a":      {kind: "audio", contentTypes: []string{"audio/mp4", "audio/x-m4a"}},
+	".aac":      {kind: "audio", contentTypes: []string{"audio/aac"}},
+	".ogg":      {kind: "audio", contentTypes: []string{"audio/ogg", "application/ogg"}},
+	".mp4":      {kind: "video", contentTypes: []string{"video/mp4"}},
+	".mov":      {kind: "video", contentTypes: []string{"video/quicktime"}},
+	".webm":     {kind: "video", contentTypes: []string{"video/webm"}},
+	".pdf":      {kind: "document", contentTypes: []string{"application/pdf"}},
+	".doc":      {kind: "document", contentTypes: []string{"application/msword"}},
+	".docx":     {kind: "document", contentTypes: []string{"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}},
+	".ppt":      {kind: "document", contentTypes: []string{"application/vnd.ms-powerpoint"}},
+	".pptx":     {kind: "document", contentTypes: []string{"application/vnd.openxmlformats-officedocument.presentationml.presentation"}},
+	".xls":      {kind: "document", contentTypes: []string{"application/vnd.ms-excel"}},
+	".xlsx":     {kind: "document", contentTypes: []string{"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}},
+	".json":     {kind: "document", contentTypes: []string{"application/json", "text/json"}},
+	".csv":      {kind: "text", contentTypes: []string{"text/csv", "application/csv"}},
+	".txt":      {kind: "text", contentTypes: []string{"text/plain"}},
+	".md":       {kind: "text", contentTypes: []string{"text/markdown", "text/plain"}},
+	".markdown": {kind: "text", contentTypes: []string{"text/markdown", "text/plain"}},
+}
+
+var directUploadCanonicalExtensionOrder = []string{
+	".jpg", ".png", ".webp", ".gif", ".bmp",
+	".mp3", ".wav", ".m4a", ".aac", ".ogg",
+	".mp4", ".mov", ".webm",
+	".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
+	".json", ".csv", ".txt", ".md",
+}
+
+func canonicalDirectUploadExtension(contentType string) string {
+	ct := normalizeDirectUploadContentType(contentType)
+	for _, ext := range directUploadCanonicalExtensionOrder {
+		rule := directUploadFileRules[ext]
+		for _, allowed := range rule.contentTypes {
+			if ct == allowed {
+				return ext
+			}
 		}
 	}
-	return false
+	return ""
+}
+
+func directUploadFileKind(contentType, ext string) string {
+	ct := normalizeDirectUploadContentType(contentType)
+	ext = strings.ToLower(strings.TrimSpace(ext))
+	if ext != "" {
+		rule, ok := directUploadFileRules[ext]
+		if !ok {
+			return ""
+		}
+		for _, allowed := range rule.contentTypes {
+			if ct == allowed {
+				return rule.kind
+			}
+		}
+		return ""
+	}
+	for _, rule := range directUploadFileRules {
+		for _, allowed := range rule.contentTypes {
+			if ct == allowed {
+				return rule.kind
+			}
+		}
+	}
+	return ""
+}
+
+// ClassifyDirectUploadFile returns the canonical attachment kind for an exact
+// content-type and extension pair accepted by the direct-upload boundary.
+func ClassifyDirectUploadFile(contentType, ext string) string {
+	return directUploadFileKind(contentType, ext)
+}
+
+func isDirectUploadImage(contentType, ext string) bool {
+	return directUploadFileKind(contentType, ext) == "image"
 }
 
 func isDirectUploadVideoReference(contentType, ext string) bool {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	if strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") {
-		switch strings.ToLower(ext) {
-		case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".mp4", ".mov", ".webm", "":
-			return true
-		}
+	switch directUploadFileKind(contentType, ext) {
+	case "image", "audio", "video":
+		return true
+	default:
+		return false
 	}
-	return false
 }
 
 func isDirectUploadAIEntryAttachment(contentType, ext string) bool {
@@ -556,47 +1049,14 @@ func isDirectUploadMontageAsset(contentType, ext string) bool {
 }
 
 func aiEntryAttachmentMaxSize(contentType, ext string) int64 {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	ext = strings.ToLower(strings.TrimSpace(ext))
-	if strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") {
-		switch ext {
-		case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".mp4", ".mov", ".webm", "":
-			return 50 * 1024 * 1024
-		}
+	switch directUploadFileKind(contentType, ext) {
+	case "image", "audio", "video":
+		return 50 * 1024 * 1024
+	case "document", "text":
+		return 25 * 1024 * 1024
+	default:
+		return 0
 	}
-	switch ext {
-	case ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".csv", ".txt", ".md", ".markdown", ".json":
-		if isAIEntryDocumentContentType(ct, ext) {
-			return 25 * 1024 * 1024
-		}
-	}
-	return 0
-}
-
-func isAIEntryDocumentContentType(ct, ext string) bool {
-	if strings.HasPrefix(ct, "text/") {
-		switch ext {
-		case ".csv", ".txt", ".md", ".markdown":
-			return true
-		}
-	}
-	switch ct {
-	case "application/pdf",
-		"application/msword",
-		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-		"application/vnd.ms-powerpoint",
-		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
-		"application/vnd.ms-excel",
-		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-		"application/csv",
-		"application/json":
-		return true
-	case "application/octet-stream":
-		// Some browsers report generic types for local files. Keep the allowlist
-		// extension-bound so executable formats are still rejected.
-		return ext != ""
-	}
-	return false
 }
 
 func sanitizeUploadFilename(raw string) string {

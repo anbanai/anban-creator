@@ -280,6 +280,7 @@ func main() {
 	var templateSvc *service.TemplateService
 	var viralAnalysisSvc *service.ViralAnalysisService
 	var posterSvc *service.PosterService
+	var referenceAssetSvc *service.ReferenceAssetService
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService()
 	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalog)
@@ -314,6 +315,9 @@ func main() {
 		}
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
+		planSvc.SetReferenceAssetService(referenceAssetSvc)
+		taskSvc.SetReferenceAssetService(referenceAssetSvc)
 		taskSvc.SetProjectMemoryManager(memoryMgr)
 		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
 		taskSvc.SetVideoBillingConfig(cfg.Billing)
@@ -416,6 +420,7 @@ func main() {
 	var aiEntrySvc *service.AIEntryService
 	if repo != nil && taskSvc != nil {
 		aiEntrySvc = service.NewAIEntryService(repo, taskSvc, writingLLMClient, log)
+		aiEntrySvc.SetReferenceAssetService(referenceAssetSvc)
 		if modelConfigSvc != nil {
 			aiEntrySvc.SetModelConfigService(modelConfigSvc, cfg.Writing.Timeout)
 		}
@@ -500,11 +505,13 @@ func main() {
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
+		planHandler.SetReferenceAssetService(referenceAssetSvc)
 		if store != nil {
 			planHandler.SetStore(store)
 		}
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
+		taskHandler.SetReferenceAssetService(referenceAssetSvc)
 		if store != nil {
 			taskHandler.SetStore(store)
 		}
@@ -513,6 +520,7 @@ func main() {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
+		projectHandler.SetReferenceAssetService(referenceAssetSvc)
 		if modelConfigSvc != nil {
 			projectHandler.SetModelConfigService(modelConfigSvc)
 		}
@@ -527,7 +535,7 @@ func main() {
 		}
 		if store != nil {
 			projectHandler.SetStore(store)
-			projectHandler.SetPendingUploadRepository(repo.PendingUploads())
+			projectHandler.SetUploadRepository(repo)
 		}
 		projectHandler.SetSeednoteClient(seednoteClient)
 		projectHandler.SetSeednoteReadiness(seednoteMonitor)
@@ -551,13 +559,14 @@ func main() {
 		})
 		if store != nil {
 			fileHandler = handler.NewFileHandler(store, log)
-			fileHandler.SetPendingUploadRepository(repo.PendingUploads())
-			uploadHandler = handler.NewUploadHandler(store, repo.PendingUploads(), service.DirectUploadConfig{
+			fileHandler.SetUploadSessionRepository(repo.UploadSessions())
+			uploadHandler = handler.NewUploadHandler(store, repo, service.DirectUploadConfig{
 				Storage: cfg.Storage,
 			}, log)
+			uploadHandler.SetRepository(repo)
 		}
 		if aiEntrySvc != nil {
-			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo.PendingUploads(), log)
+			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo, store, log)
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
@@ -565,7 +574,7 @@ func main() {
 			templateHandler.SetStore(store)
 		}
 		if repo != nil {
-			templateHandler.SetPendingUploadRepository(repo.PendingUploads())
+			templateHandler.SetUploadRepository(repo)
 		}
 		if viralAnalysisSvc != nil {
 			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
@@ -635,6 +644,7 @@ func main() {
 		if mysqlDB != nil && imageSvc != nil {
 			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, cfg, store, log)
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
+			designerHandler.SetDirectUploadDependencies(repo, store)
 		}
 		if repo != nil {
 			if writingLLMClient != nil || imageUnderstandingClient != nil || videoUnderstandingClient != nil {
@@ -748,9 +758,11 @@ func main() {
 		go startLocalClaimFallback(reclaimCtx, taskSvc, log)
 	}
 	if repo != nil && store != nil && store.Name() == "oss" {
-		uploadCleanupCtx, uploadCleanupCancel := context.WithCancel(context.Background())
-		defer uploadCleanupCancel()
-		service.StartPendingUploadCleanup(uploadCleanupCtx, store, repo.PendingUploads(), 30*time.Minute, log)
+		if finalStore, ok := store.(service.DirectUploadFinalizationStorage); ok {
+			uploadCleanupCtx, uploadCleanupCancel := context.WithCancel(context.Background())
+			defer uploadCleanupCancel()
+			service.StartUploadSessionCleanup(uploadCleanupCtx, finalStore, repo, 30*time.Minute, log)
+		}
 	}
 
 	// 15.4 Start ilink inbound poller and terminal notification worker.

@@ -3,10 +3,47 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ProjectsPage from './ProjectsPage'
 import { api } from '@/lib/api'
 import { render } from '@/test/test-utils'
+import type { Project } from '@/types'
 
 const { errorMock } = vi.hoisted(() => ({ errorMock: vi.fn() }))
+const uploadToOSSMock = vi.hoisted(() => vi.fn())
+
+const projectWithReference: Project = {
+  id: 'ch-1',
+  user_id: '1',
+  platform: 'article',
+  name: '测试项目',
+  avatar_url: '',
+  profile_url: 'https://mp.weixin.qq.com/test',
+  instructions: '测试定位',
+  keywords: '测试',
+  visual_style: '',
+  writer: '',
+  theme: '',
+  author: '作者',
+  template_id: '',
+  reference_image: {
+    asset_id: '44444444-4444-4444-8444-444444444444',
+    file_name: 'project-reference.png',
+    content_type: 'image/png',
+    size: 9,
+    download_url: 'https://signed.example/project-reference.png',
+    download_expires_at: '2026-07-20T10:00:00Z',
+  },
+  image_ratio: '16:9',
+  max_concurrent_tasks: 2,
+  config: { wechat_app_id: 'wx123' },
+  status: 'active',
+  created_at: '2025-01-01T00:00:00Z',
+  updated_at: '2025-01-01T00:00:00Z',
+}
 
 vi.mock('sonner', () => ({ toast: { error: errorMock, success: vi.fn() } }))
+
+vi.mock('@/lib/direct-upload', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
+  return { ...actual, uploadToOSS: uploadToOSSMock }
+})
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -40,28 +77,7 @@ vi.mock('@/lib/api', async () => {
 describe('ProjectsPage deletion feedback', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(api.projects.list).mockResolvedValue([{
-      id: 'ch-1',
-      user_id: '1',
-      platform: 'article',
-      name: '测试项目',
-      avatar_url: '',
-      profile_url: 'https://mp.weixin.qq.com/test',
-      instructions: '测试定位',
-      keywords: '测试',
-      visual_style: '',
-      writer: '',
-      theme: '',
-      author: '作者',
-      template_id: '',
-      reference_image_url: '',
-      image_ratio: '16:9',
-      max_concurrent_tasks: 2,
-      config: { wechat_app_id: 'wx123' },
-      status: 'active',
-      created_at: '2025-01-01T00:00:00Z',
-      updated_at: '2025-01-01T00:00:00Z',
-    }])
+    vi.mocked(api.projects.list).mockResolvedValue([projectWithReference])
     vi.mocked(api.projects.stats).mockResolvedValue({
       'ch-1': {
         total_tasks: 0,
@@ -77,7 +93,114 @@ describe('ProjectsPage deletion feedback', () => {
     vi.mocked(api.projects.create).mockReset()
     vi.mocked(api.projects.update).mockReset()
     vi.mocked(api.projects.delete).mockReset()
+    uploadToOSSMock.mockResolvedValue({
+      uploadSessionId: '11111111-1111-4111-8111-111111111111',
+      uploadId: 'upload-project-reference',
+      key: 'uploads/pending/project-reference.png',
+      publicUrl: 'https://staging.example/project-reference.png',
+      previewUrl: 'https://staging.example/project-reference.png',
+      contentType: 'image/png',
+      size: 9,
+    })
     window.history.pushState({}, '', '/projects')
+  })
+
+  it('creates a project with a reference session and no legacy URL field', async () => {
+    vi.mocked(api.projects.create).mockResolvedValueOnce({ project: {
+      ...(await vi.mocked(api.projects.list)())[0],
+      id: 'created-project',
+      platform: 'seednote',
+    } })
+    window.history.pushState({}, '', '/projects?create=true&type=seednote&intent=new')
+
+    render(<ProjectsPage />)
+
+    await screen.findByRole('dialog', { name: '新建项目' })
+    fireEvent.change(screen.getByLabelText('参考图文件'), {
+      target: { files: [new File(['reference'], 'reference.png', { type: 'image/png' })] },
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalled())
+    const payload = vi.mocked(api.projects.create).mock.calls[0][0]
+    expect(payload.reference_image).toEqual({
+      upload_session_id: '11111111-1111-4111-8111-111111111111',
+    })
+    expect(payload).not.toHaveProperty('reference_image_url')
+  })
+
+  it('keeps the uploaded selection open when server finalization fails', async () => {
+    vi.mocked(api.projects.create).mockRejectedValueOnce({
+      response: { data: { msg: '上传会话已过期，请重新上传参考图' } },
+    })
+    window.history.pushState({}, '', '/projects?create=true&type=seednote&intent=new')
+
+    render(<ProjectsPage />)
+
+    await screen.findByRole('dialog', { name: '新建项目' })
+    fireEvent.change(screen.getByLabelText('参考图文件'), {
+      target: { files: [new File(['reference'], 'reference.png', { type: 'image/png' })] },
+    })
+    const preview = await screen.findByRole('img', { name: '参考图' })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(errorMock).toHaveBeenCalledWith('上传会话已过期，请重新上传参考图'))
+    expect(screen.getByRole('dialog', { name: '新建项目' })).toBeInTheDocument()
+    expect(preview).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建' })).toBeEnabled()
+  })
+
+  it('omits an untouched existing project asset from an edit payload', async () => {
+    vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
+    render(<ProjectsPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑项目' }))
+    expect(await screen.findByRole('img', { name: '参考图' })).toHaveAttribute(
+      'src',
+      'https://signed.example/project-reference.png',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+
+    await waitFor(() => expect(api.projects.update).toHaveBeenCalled())
+    const payload = vi.mocked(api.projects.update).mock.calls[0][1]
+    expect(payload).not.toHaveProperty('reference_image')
+    expect(payload).not.toHaveProperty('reference_image_url')
+  })
+
+  it('sends null when an existing project asset is explicitly cleared', async () => {
+    vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
+    render(<ProjectsPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑项目' }))
+    fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+
+    await waitFor(() => expect(api.projects.update).toHaveBeenCalled())
+    const payload = vi.mocked(api.projects.update).mock.calls[0][1]
+    expect(payload.reference_image).toBeNull()
+    expect(payload).not.toHaveProperty('reference_image_url')
+  })
+
+  it('replaces an existing project asset with an upload session selection', async () => {
+    vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
+    render(<ProjectsPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑项目' }))
+    fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
+    fireEvent.change(screen.getByLabelText('参考图文件'), {
+      target: { files: [new File(['replacement'], 'replacement.png', { type: 'image/png' })] },
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+
+    await waitFor(() => expect(api.projects.update).toHaveBeenCalled())
+    const payload = vi.mocked(api.projects.update).mock.calls[0][1]
+    expect(payload.reference_image).toEqual({
+      upload_session_id: '11111111-1111-4111-8111-111111111111',
+    })
+    expect(payload).not.toHaveProperty('reference_image_url')
   })
 
   it('shows the server archive guidance when deleting a project fails with associated work', async () => {
@@ -127,7 +250,7 @@ describe('ProjectsPage deletion feedback', () => {
       theme: '',
       author: '',
       template_id: '',
-      reference_image_url: '',
+      reference_image: null,
       image_ratio: '',
       montage_defaults: {},
       max_concurrent_tasks: 1,
@@ -184,7 +307,7 @@ describe('ProjectsPage deletion feedback', () => {
       theme: '',
       author: '',
       template_id: '',
-      reference_image_url: '',
+      reference_image: null,
       image_ratio: '',
       montage_defaults: {
         default_pipeline: 'social-short',

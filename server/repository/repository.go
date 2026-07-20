@@ -17,7 +17,8 @@ type Repository interface {
 	Tasks() TaskRepository
 	TaskExecutions() TaskExecutionRepository
 	TaskFiles() TaskFileRepository
-	PendingUploads() PendingUploadRepository
+	UploadSessions() UploadSessionRepository
+	Assets() AssetRepository
 	Projects() ProjectRepository
 	Credits() CreditRepository
 	APIKeys() APIKeyRepository
@@ -68,6 +69,10 @@ type PlanRepository interface {
 	FindByID(ctx context.Context, id string) (*model.Plan, error)
 	FindByUserID(ctx context.Context, userID string, projectID string, offset, limit int) ([]*model.Plan, error)
 	Update(ctx context.Context, plan *model.Plan) error
+	UpdateEditable(ctx context.Context, plan *model.Plan, scheduleChanged bool) error
+	UpdateEditableIfReferenceImageAssetID(ctx context.Context, plan *model.Plan, expectedID string, scheduleChanged bool) (bool, error)
+	UpdateStatusAndNextRunAt(ctx context.Context, id, status string, nextRunAt *time.Time) error
+	UpdateNextRunAtIf(ctx context.Context, id string, nextRunAt, expectedNextRunAt *time.Time) (bool, error)
 	Delete(ctx context.Context, id string) error
 	ListActive(ctx context.Context) ([]*model.Plan, error)
 	ListActiveByUserID(ctx context.Context, userID string, projectID string) ([]*model.Plan, error)
@@ -210,13 +215,27 @@ type TaskExecutionRepository interface {
 	ReleaseCleanup(ctx context.Context, id, token string) error
 }
 
-// PendingUploadRepository tracks browser-direct uploads until submit finalizes them.
-type PendingUploadRepository interface {
-	CreatePendingUpload(ctx context.Context, upload *model.PendingUpload) error
-	FindPendingUploadByID(ctx context.Context, id string) (*model.PendingUpload, error)
-	FinalizePendingUploads(ctx context.Context, ids []string, finalizedAt time.Time) error
-	FindExpiredPendingUploads(ctx context.Context, before time.Time, limit int) ([]*model.PendingUpload, error)
-	MarkPendingUploadExpired(ctx context.Context, id string, expiredAt time.Time) error
+// UploadSessionRepository tracks browser-direct uploads until finalization or expiration.
+type UploadSessionRepository interface {
+	Create(ctx context.Context, session *model.UploadSession) error
+	FindByID(ctx context.Context, id string) (*model.UploadSession, error)
+	ClaimFinalization(ctx context.Context, id, token string, claimedAt, claimStaleBefore time.Time) (bool, error)
+	RecordPromotionSourceETag(ctx context.Context, id, token, etag string) (bool, error)
+	RecordFinalizationETag(ctx context.Context, id, token, etag string) (bool, error)
+	ClaimFinalizationRecovery(ctx context.Context, id, token string, claimedAt, claimStaleBefore time.Time) (bool, error)
+	CompleteFinalization(ctx context.Context, id, token, assetID string, finalizedAt time.Time) (bool, error)
+	ReleaseFinalization(ctx context.Context, id, token string) (bool, error)
+	FindForCleanup(ctx context.Context, expiredBefore, claimStaleBefore time.Time, limit int) ([]*model.UploadSession, error)
+	ClaimExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error)
+	CompleteExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error)
+	ReopenExpiration(ctx context.Context, id, claimID string) (bool, error)
+}
+
+// AssetRepository provides access to immutable finalized upload assets.
+type AssetRepository interface {
+	Create(ctx context.Context, asset *model.Asset) error
+	FindByID(ctx context.Context, id string) (*model.Asset, error)
+	FindOwnedByID(ctx context.Context, id, userID string) (*model.Asset, error)
 }
 
 // FeedbackRepository provides access to the feedbacks table.
@@ -288,7 +307,8 @@ type repository struct {
 	tasks                   TaskRepository
 	taskExecutions          TaskExecutionRepository
 	files                   TaskFileRepository
-	pendingUploads          PendingUploadRepository
+	uploadSessions          UploadSessionRepository
+	assets                  AssetRepository
 	projects                ProjectRepository
 	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
@@ -314,7 +334,8 @@ func New(db *gorm.DB) Repository {
 	tasks := newTaskRepository(db)
 	taskExecutions := newTaskExecutionRepository(db)
 	files := newTaskFileRepository(db)
-	pendingUploads := newPendingUploadRepository(db)
+	uploadSessions := newUploadSessionRepository(db)
+	assets := newAssetRepository(db)
 	projects := newProjectRepository(db)
 	credits := newCreditRepository(db)
 	apiKeys := newAPIKeyRepository(db)
@@ -339,7 +360,8 @@ func New(db *gorm.DB) Repository {
 		tasks:                   tasks,
 		taskExecutions:          taskExecutions,
 		files:                   files,
-		pendingUploads:          pendingUploads,
+		uploadSessions:          uploadSessions,
+		assets:                  assets,
 		projects:                projects,
 		credits:                 credits,
 		apiKeys:                 apiKeys,
@@ -364,7 +386,8 @@ func (r *repository) Plans() PlanRepository                         { return r.p
 func (r *repository) Tasks() TaskRepository                         { return r.tasks }
 func (r *repository) TaskExecutions() TaskExecutionRepository       { return r.taskExecutions }
 func (r *repository) TaskFiles() TaskFileRepository                 { return r.files }
-func (r *repository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
+func (r *repository) UploadSessions() UploadSessionRepository       { return r.uploadSessions }
+func (r *repository) Assets() AssetRepository                       { return r.assets }
 func (r *repository) Projects() ProjectRepository                   { return r.projects }
 func (r *repository) Credits() CreditRepository                     { return r.credits }
 func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
@@ -422,7 +445,8 @@ type txRepository struct {
 	tasks                   TaskRepository
 	taskExecutions          TaskExecutionRepository
 	files                   TaskFileRepository
-	pendingUploads          PendingUploadRepository
+	uploadSessions          UploadSessionRepository
+	assets                  AssetRepository
 	projects                ProjectRepository
 	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
@@ -449,7 +473,8 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		tasks:                   newTaskRepository(tx),
 		taskExecutions:          newTaskExecutionRepository(tx),
 		files:                   newTaskFileRepository(tx),
-		pendingUploads:          newPendingUploadRepository(tx),
+		uploadSessions:          newUploadSessionRepository(tx),
+		assets:                  newAssetRepository(tx),
 		projects:                newProjectRepository(tx),
 		credits:                 newCreditRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
@@ -474,7 +499,8 @@ func (r *txRepository) Plans() PlanRepository                         { return r
 func (r *txRepository) Tasks() TaskRepository                         { return r.tasks }
 func (r *txRepository) TaskExecutions() TaskExecutionRepository       { return r.taskExecutions }
 func (r *txRepository) TaskFiles() TaskFileRepository                 { return r.files }
-func (r *txRepository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
+func (r *txRepository) UploadSessions() UploadSessionRepository       { return r.uploadSessions }
+func (r *txRepository) Assets() AssetRepository                       { return r.assets }
 func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
 func (r *txRepository) Credits() CreditRepository                     { return r.credits }
 func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }

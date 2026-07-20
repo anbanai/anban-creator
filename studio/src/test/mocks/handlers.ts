@@ -105,7 +105,6 @@ export const mockProjects: Project[] = [
     theme: '',
     author: '作者',
     template_id: '',
-    reference_image_url: '',
     image_ratio: '16:9',
     max_concurrent_tasks: 2,
     config: { wechat_app_id: 'wx123' },

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -47,6 +48,12 @@ func TestNew(t *testing.T) {
 	}
 	if repo.TaskFiles() == nil {
 		t.Error("TaskFiles() should not be nil")
+	}
+	if repo.UploadSessions() == nil {
+		t.Error("UploadSessions() should not be nil")
+	}
+	if repo.Assets() == nil {
+		t.Error("Assets() should not be nil")
 	}
 }
 
@@ -221,6 +228,43 @@ func TestWithTx_Rollback(t *testing.T) {
 	_, err = repo.Users().FindByID(ctx, "user-tx-rollback")
 	if err == nil {
 		t.Fatal("expected error (not found) after rollback, got nil")
+	}
+}
+
+func TestWithTx_RollbackUploadSessionAndAssetRepositories(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 14, 0, 0, 0, time.UTC)
+	rollbackErr := errors.New("rollback upload persistence")
+
+	err := repo.WithTx(ctx, func(txRepo Repository) error {
+		if err := txRepo.UploadSessions().Create(ctx, &model.UploadSession{
+			ID: "session-tx-rollback", UserID: "user-1", Purpose: "project_reference",
+			StagingKey: "uploads/staging/user-1/session-tx-rollback/reference.png",
+			FileName:   "reference.png", ContentType: "image/png", Size: 1024,
+			Status: model.UploadSessionPending, ExpiresAt: now.Add(time.Hour),
+		}); err != nil {
+			return err
+		}
+		if err := txRepo.Assets().Create(ctx, &model.Asset{
+			ID: "asset-tx-rollback", UserID: "user-1", Purpose: "project_reference",
+			StorageKey: "assets/user-1/asset-tx-rollback/reference.png",
+			FileName:   "reference.png", ContentType: "image/png", Size: 1024, ETag: "etag-1",
+		}); err != nil {
+			return err
+		}
+		return rollbackErr
+	})
+	if !errors.Is(err, rollbackErr) {
+		t.Fatalf("WithTx error = %v, want rollback sentinel", err)
+	}
+
+	if _, err := repo.UploadSessions().FindByID(ctx, "session-tx-rollback"); !errors.Is(err, model.ErrUploadSessionNotFound) {
+		t.Fatalf("upload session after rollback error = %v, want ErrUploadSessionNotFound", err)
+	}
+	if _, err := repo.Assets().FindByID(ctx, "asset-tx-rollback"); !errors.Is(err, model.ErrAssetNotFound) {
+		t.Fatalf("asset after rollback error = %v, want ErrAssetNotFound", err)
 	}
 }
 

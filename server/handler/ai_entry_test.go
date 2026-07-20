@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type fakeAIEntrySubmitter struct {
@@ -29,39 +32,9 @@ func (f *fakeAIEntrySubmitter) Submit(_ context.Context, req service.AIEntrySubm
 	return &f.res, f.err
 }
 
-type aiEntryPendingRepo struct {
-	upload       *model.PendingUpload
-	finalizedIDs []string
-}
-
-func (r *aiEntryPendingRepo) CreatePendingUpload(context.Context, *model.PendingUpload) error {
-	return nil
-}
-
-func (r *aiEntryPendingRepo) FindPendingUploadByID(_ context.Context, id string) (*model.PendingUpload, error) {
-	if r.upload != nil && r.upload.ID == id {
-		cp := *r.upload
-		return &cp, nil
-	}
-	return nil, service.ErrPendingUploadNotFound
-}
-
-func (r *aiEntryPendingRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) error {
-	r.finalizedIDs = append(r.finalizedIDs, ids...)
-	return nil
-}
-
-func (r *aiEntryPendingRepo) FindExpiredPendingUploads(context.Context, time.Time, int) ([]*model.PendingUpload, error) {
-	return nil, nil
-}
-
-func (r *aiEntryPendingRepo) MarkPendingUploadExpired(context.Context, string, time.Time) error {
-	return nil
-}
-
 func TestAIEntryHandlerSubmitRequiresAuth(t *testing.T) {
 	logger := zerolog.New(io.Discard)
-	h := NewAIEntryHandler(&fakeAIEntrySubmitter{}, nil, &logger)
+	h := NewAIEntryHandler(&fakeAIEntrySubmitter{}, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", h.Submit)
 
@@ -76,6 +49,40 @@ func TestAIEntryHandlerSubmitRequiresAuth(t *testing.T) {
 	}
 }
 
+func TestAIEntryHandlerMapsAndRedactsReferenceErrors(t *testing.T) {
+	const rootText = "database shard secret"
+	for _, tt := range []struct {
+		name       string
+		class      error
+		wantStatus int
+		wantText   string
+	}{
+		{name: "forbidden", class: service.ErrReferenceAssetForbidden, wantStatus: fiber.StatusForbidden, wantText: "reference image is not accessible"},
+		{name: "purpose mismatch", class: service.ErrReferenceAssetPurposeMismatch, wantStatus: fiber.StatusBadRequest, wantText: "reference image purpose is not allowed"},
+		{name: "unavailable", class: service.ErrReferenceAssetUnavailable, wantStatus: fiber.StatusServiceUnavailable, wantText: "reference image storage is temporarily unavailable"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := zerolog.New(io.Discard)
+			h := NewAIEntryHandler(&fakeAIEntrySubmitter{err: fmt.Errorf("%w: %s", tt.class, rootText)}, nil, nil, &logger)
+			app := fiber.New()
+			app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+				c.Locals("user_id", "user-1")
+				return h.Submit(c)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"project_id":"project-1","text":"write"}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != tt.wantStatus || !strings.Contains(string(body), tt.wantText) || strings.Contains(string(body), rootText) {
+				t.Fatalf("status/body = %d/%s, want %d containing %q without root", resp.StatusCode, body, tt.wantStatus, tt.wantText)
+			}
+		})
+	}
+}
+
 func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	task := &model.Task{ID: uuid.NewString(), Type: model.PlatformArticle, Prompt: "写文章"}
@@ -86,7 +93,7 @@ func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 			Message: "已创建任务",
 		},
 	}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	userID := uuid.NewString()
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
@@ -140,7 +147,7 @@ func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 	}
 }
 
-func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
+func TestAIEntryHandlerSubmitFinalizesUploadSession(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	task := &model.Task{ID: uuid.NewString(), Type: model.PlatformArticle, Prompt: "写文章"}
 	submitter := &fakeAIEntrySubmitter{
@@ -151,20 +158,19 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 		},
 	}
 	userID := "user-1"
-	publicURL := "https://cdn.example.com/uploads/pending/user-1/upload-1/ref.png"
-	pending := &aiEntryPendingRepo{upload: &model.PendingUpload{
+	session := &model.UploadSession{
 		ID:          "upload-1",
 		UserID:      userID,
 		Purpose:     service.DirectUploadPurposeAIEntryAttachment,
-		Key:         "uploads/pending/user-1/upload-1/ref.png",
-		PublicURL:   publicURL,
+		StagingKey:  "uploads/pending/user-1/upload-1/ref.png",
 		FileName:    "ref.png",
 		ContentType: "image/png",
 		Size:        123,
-		Status:      model.PendingUploadStatusPending,
+		Status:      model.UploadSessionPending,
 		ExpiresAt:   time.Now().Add(time.Hour),
-	}}
-	h := NewAIEntryHandler(submitter, pending, &logger)
+	}
+	uploadRepo := uploadRepositoryFromSessions(t, session)
+	h := NewAIEntryHandler(submitter, uploadRepo, uploadSessionStatStore(uploadRepo.UploadSessions()), &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -177,12 +183,12 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 		"text":"写文章",
 		"attachments":[{
 			"type":"image",
-			"url":"https://cdn.example.com/uploads/pending/user-1/upload-1/ref.png",
-			"key":"uploads/pending/victim/other/secret.png",
-			"upload_id":"other",
-			"file_name":"ref.png",
-			"content_type":"image/png",
-			"size":123
+			"url":"https://attacker.example/forged.exe",
+			"key":"uploads/pending/user-1/upload-1/ref.png",
+			"upload_id":"upload-1",
+			"file_name":"forged.exe",
+			"content_type":"application/x-msdownload",
+			"size":999999
 		}]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -193,18 +199,17 @@ func TestAIEntryHandlerSubmitFinalizesPendingUpload(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if len(pending.finalizedIDs) != 1 || pending.finalizedIDs[0] != "upload-1" {
-		t.Fatalf("finalized IDs = %#v, want upload-1", pending.finalizedIDs)
-	}
-	if got := submitter.req.Attachments[0]; got.Key != "" || got.UploadID != "" {
-		t.Fatalf("client storage authority persisted: %#v", got)
+	assertFinalizedAsset(t, uploadRepo, "upload-1", "assets/users/user-1/upload-1/ref.png")
+	if got := submitter.req.Attachments[0]; got.UploadID != "upload-1" || got.Key != "assets/users/user-1/upload-1/ref.png" || got.URL != "" ||
+		got.FileName != session.FileName || got.ContentType != session.ContentType || got.Size != session.Size {
+		t.Fatalf("verified storage metadata not persisted: %#v", got)
 	}
 }
 
 func TestAIEntryHandlerSubmitRejectsInvalidAttachmentURL(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())
@@ -230,10 +235,112 @@ func TestAIEntryHandlerSubmitRejectsInvalidAttachmentURL(t *testing.T) {
 	}
 }
 
+func TestAIEntryHandlerSubmitRedactsAttachmentRepositoryErrors(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	submitter := &fakeAIEntrySubmitter{}
+	repo := uploadRepositoryFromSessions(t)
+	if err := repo.Close(); err != nil {
+		t.Fatalf("close repository: %v", err)
+	}
+	h := NewAIEntryHandler(submitter, repo, nil, &logger)
+	app := fiber.New()
+	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.Submit(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
+		"project_id":"project-1",
+		"text":"写文章",
+		"attachments":[{
+			"type":"image",
+			"upload_id":"upload-1",
+			"key":"uploads/pending/user-1/upload-1/ref.png"
+		}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s; want 500", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "database password secret") {
+		t.Fatalf("response leaked repository error: %s", body)
+	}
+	if submitter.req.UserID != "" {
+		t.Fatalf("submitter called after repository error: %#v", submitter.req)
+	}
+}
+
+func TestAIEntryHandlerSubmitClassifiesStorageStatErrors(t *testing.T) {
+	const backendDetail = "OSS endpoint secret: request timed out"
+	tests := []struct {
+		name       string
+		statErr    error
+		statInfo   *storage.ObjectInfo
+		wantStatus int
+	}{
+		{name: "not found is bad request", statErr: storage.ErrObjectNotFound, wantStatus: fiber.StatusBadRequest},
+		{name: "backend failure is redacted internal error", statErr: errors.New(backendDetail), wantStatus: fiber.StatusInternalServerError},
+		{name: "metadata mismatch is bad request", statInfo: &storage.ObjectInfo{Size: 124, ContentType: "image/png"}, wantStatus: fiber.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := zerolog.New(io.Discard)
+			submitter := &fakeAIEntrySubmitter{}
+			session := &model.UploadSession{
+				ID: "upload-1", UserID: "user-1", Purpose: service.DirectUploadPurposeAIEntryAttachment,
+				StagingKey: "uploads/pending/user-1/upload-1/ref.png", FileName: "ref.png", ContentType: "image/png", Size: 123,
+				Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+			}
+			uploadRepo := uploadRepositoryFromSessions(t, session)
+			store := uploadSessionStatStore(uploadRepo.UploadSessions())
+			store.statErr = tt.statErr
+			store.statInfo = tt.statInfo
+			h := NewAIEntryHandler(submitter, uploadRepo, store, &logger)
+			app := fiber.New()
+			app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+				c.Locals("user_id", "user-1")
+				return h.Submit(c)
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
+				"project_id":"project-1",
+				"text":"write",
+				"attachments":[{"type":"image","upload_id":"upload-1","key":"uploads/pending/user-1/upload-1/ref.png"}]
+			}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response: %v", err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, body = %s; want %d", resp.StatusCode, body, tt.wantStatus)
+			}
+			if strings.Contains(string(body), backendDetail) {
+				t.Fatalf("response leaked storage backend detail: %s", body)
+			}
+			if submitter.req.UserID != "" {
+				t.Fatalf("submitter called after storage error: %#v", submitter.req)
+			}
+		})
+	}
+}
+
 func TestAIEntryHandlerSubmitRejectsExternalAttachmentURL(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())
@@ -259,10 +366,10 @@ func TestAIEntryHandlerSubmitRejectsExternalAttachmentURL(t *testing.T) {
 	}
 }
 
-func TestAIEntryHandlerSubmitRejectsExternalPendingLookingAttachmentURLWithoutPendingRepo(t *testing.T) {
+func TestAIEntryHandlerSubmitRejectsExternalStagingLookingAttachmentURLWithoutUploadRepository(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())
@@ -288,10 +395,10 @@ func TestAIEntryHandlerSubmitRejectsExternalPendingLookingAttachmentURLWithoutPe
 	}
 }
 
-func TestAIEntryHandlerSubmitRejectsMalformedPendingAttachmentURL(t *testing.T) {
+func TestAIEntryHandlerSubmitRejectsMalformedUploadSessionAttachmentURL(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, &aiEntryPendingRepo{}, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())
@@ -320,7 +427,7 @@ func TestAIEntryHandlerSubmitRejectsMalformedPendingAttachmentURL(t *testing.T) 
 func TestAIEntryHandlerSubmitRejectsUnsupportedAttachmentMetadata(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	submitter := &fakeAIEntrySubmitter{}
-	h := NewAIEntryHandler(submitter, nil, &logger)
+	h := NewAIEntryHandler(submitter, nil, nil, &logger)
 	app := fiber.New()
 	app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.NewString())

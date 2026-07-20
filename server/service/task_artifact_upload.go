@@ -130,8 +130,10 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 		cred.ExpiresAt = expiresAt
 	}
 
+	uploadID := uuid.NewString()
 	return &DirectUploadPrepareResult{
-		UploadID:           uuid.NewString(),
+		UploadID:           uploadID,
+		StagingKey:         key,
 		Key:                key,
 		PublicURL:          s.store.GetURL(key),
 		UploadURL:          uploadURL,

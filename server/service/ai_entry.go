@@ -40,12 +40,19 @@ type AIEntrySubmitter interface {
 }
 
 type AIEntryService struct {
-	repo           repository.Repository
-	taskSvc        *TaskService
-	llm            LLMClient
-	modelConfigSvc *ModelConfigService
-	llmTimeout     time.Duration
-	logger         *zerolog.Logger
+	repo            repository.Repository
+	taskSvc         *TaskService
+	llm             LLMClient
+	modelConfigSvc  *ModelConfigService
+	llmTimeout      time.Duration
+	logger          *zerolog.Logger
+	referenceAssets *ReferenceAssetService
+}
+
+func (s *AIEntryService) SetReferenceAssetService(referenceAssets *ReferenceAssetService) {
+	if s != nil {
+		s.referenceAssets = referenceAssets
+	}
 }
 
 type aiEntryIntent struct {
@@ -128,6 +135,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		return aiEntryNeedsConfiguration("请先描述你想创建的内容。", "/"), nil
 	}
 
+	projectSnapshot := model.SnapshotProject(project)
 	params := CreateManualParams{
 		UserID:           req.UserID,
 		ProjectID:        req.ProjectID,
@@ -136,11 +144,26 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		ImageRatio:       normalizeAIEntryImageRatio(intent.ImageRatio),
 		InputAttachments: normalizeEntryAttachments(req.Attachments),
 		ExecutionTarget:  normalizeAIEntryExecutionTarget(req.ExecutionTarget),
+		ProjectSnapshot:  &projectSnapshot,
 	}
+	var referenceView *model.AssetView
 
 	switch project.Platform {
 	case model.PlatformArticle, model.PlatformMoments:
-		params.ReferenceImageURL = firstImageAttachmentURL(req.Attachments)
+		if uploadSessionID := firstImageAttachmentUploadSessionID(req.Attachments); uploadSessionID != "" {
+			if s.referenceAssets == nil {
+				return nil, ErrReferenceAssetUnavailable
+			}
+			assetID, err := s.referenceAssets.ResolveSelection(ctx, req.UserID, ReferenceImageSelection{UploadSessionID: uploadSessionID}, []string{DirectUploadPurposeAIEntryAttachment})
+			if err != nil {
+				return nil, err
+			}
+			params.ReferenceImageAssetID = assetID
+			referenceView, err = s.referenceAssets.Present(ctx, req.UserID, assetID, []string{DirectUploadPurposeAIEntryAttachment})
+			if err != nil {
+				return nil, err
+			}
+		}
 	case model.PlatformSeednote:
 		// Seednote uses InputAttachments as its only new per-run reference source.
 	case model.PlatformEcommerce:
@@ -185,14 +208,27 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	default:
 		return aiEntryNeedsConfiguration("当前项目平台暂不支持 AI 入口创建任务。", "/projects/"+project.ID), nil
 	}
+	if referenceView == nil && project.ReferenceImageAssetID != "" {
+		if s.referenceAssets == nil {
+			return nil, ErrReferenceAssetUnavailable
+		}
+		referenceView, err = s.referenceAssets.Present(ctx, req.UserID, project.ReferenceImageAssetID, []string{DirectUploadPurposeProjectReference})
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	tasks, err := s.taskSvc.CreateManual(ctx, params)
 	if err != nil {
+		if IsReferenceAssetError(err) {
+			return nil, err
+		}
 		return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
 	}
 	if len(tasks) == 0 {
 		return aiEntryError("创建任务失败：未生成任务。"), nil
 	}
+	tasks[0].ReferenceImage = referenceView
 	return &AIEntrySubmitResult{
 		Status:  AIEntryStatusCreated,
 		Task:    tasks[0],
@@ -381,10 +417,10 @@ func normalizeAIEntryVideoDuration(duration int64) int64 {
 	return duration
 }
 
-func firstImageAttachmentURL(attachments []model.EntryAttachment) string {
-	for _, a := range attachments {
-		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "image" && strings.TrimSpace(a.URL) != "" {
-			return strings.TrimSpace(a.URL)
+func firstImageAttachmentUploadSessionID(attachments []model.EntryAttachment) string {
+	for _, attachment := range attachments {
+		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "image" {
+			return strings.TrimSpace(attachment.UploadID)
 		}
 	}
 	return ""
@@ -393,8 +429,10 @@ func firstImageAttachmentURL(attachments []model.EntryAttachment) string {
 func imageAttachmentURLs(attachments []model.EntryAttachment) []string {
 	urls := []string{}
 	for _, a := range attachments {
-		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "image" && strings.TrimSpace(a.URL) != "" {
-			urls = append(urls, strings.TrimSpace(a.URL))
+		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "image" {
+			if source := entryAttachmentStorageSource(a); source != "" {
+				urls = append(urls, source)
+			}
 		}
 	}
 	return urls
@@ -403,8 +441,10 @@ func imageAttachmentURLs(attachments []model.EntryAttachment) []string {
 func videoAttachmentURLs(attachments []model.EntryAttachment) []string {
 	urls := []string{}
 	for _, a := range attachments {
-		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "video" && strings.TrimSpace(a.URL) != "" {
-			urls = append(urls, strings.TrimSpace(a.URL))
+		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "video" {
+			if source := entryAttachmentStorageSource(a); source != "" {
+				urls = append(urls, source)
+			}
 		}
 	}
 	return urls
@@ -414,8 +454,9 @@ func videoReferencesFromEntryAttachments(attachments []model.EntryAttachment) []
 	refs := []model.VideoReferenceAsset{}
 	for _, a := range attachments {
 		typ := normalizeEntryAttachmentType(a.Type, a.ContentType)
+		source := entryAttachmentStorageSource(a)
 		ref := model.VideoReferenceAsset{
-			URL:      strings.TrimSpace(a.URL),
+			URL:      source,
 			Text:     strings.TrimSpace(a.Text),
 			FileName: strings.TrimSpace(a.FileName),
 			MimeType: strings.TrimSpace(a.ContentType),
@@ -446,6 +487,13 @@ func videoReferencesFromEntryAttachments(attachments []model.EntryAttachment) []
 		refs = append(refs, ref)
 	}
 	return refs
+}
+
+func entryAttachmentStorageSource(attachment model.EntryAttachment) string {
+	if rawURL := strings.TrimSpace(attachment.URL); rawURL != "" {
+		return rawURL
+	}
+	return strings.TrimSpace(attachment.Key)
 }
 
 func aiEntryNeedsConfiguration(message, actionURL string) *AIEntrySubmitResult {

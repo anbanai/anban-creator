@@ -48,6 +48,81 @@ func (r *planRepository) Update(ctx context.Context, plan *model.Plan) error {
 	return r.db.WithContext(ctx).Save(plan).Error
 }
 
+func (r *planRepository) UpdateEditable(ctx context.Context, plan *model.Plan, scheduleChanged bool) error {
+	return r.db.WithContext(ctx).
+		Model(&model.Plan{}).
+		Where("id = ?", plan.ID).
+		Updates(planEditableUpdates(plan, scheduleChanged)).Error
+}
+
+func (r *planRepository) UpdateEditableIfReferenceImageAssetID(ctx context.Context, plan *model.Plan, expectedID string, scheduleChanged bool) (bool, error) {
+	query := r.db.WithContext(ctx).
+		Model(&model.Plan{}).
+		Where("id = ?", plan.ID)
+	if expectedID == "" {
+		query = query.Where("(reference_image_asset_id = ? OR reference_image_asset_id IS NULL)", "")
+	} else {
+		query = query.Where("reference_image_asset_id = ?", expectedID)
+	}
+	result := query.Updates(planEditableUpdates(plan, scheduleChanged))
+	return result.RowsAffected == 1, result.Error
+}
+
+func planEditableUpdates(plan *model.Plan, scheduleChanged bool) map[string]interface{} {
+	now := time.Now()
+	plan.UpdatedAt = now
+	updates := map[string]interface{}{
+		"topic_hint":                  plan.Prompt,
+		"image_model_key":             plan.ImageModelKey,
+		"reference_image_asset_id":    plan.ReferenceImageAssetID,
+		"skip_reference_image":        plan.SkipReferenceImage,
+		"watermark":                   plan.Watermark,
+		"goal":                        plan.Goal,
+		"goal_mode":                   plan.GoalMode,
+		"has_content_image":           plan.HasContentImage,
+		"has_tail_image":              plan.HasTailImage,
+		"article_with_cover":          plan.ArticleWithCover,
+		"article_with_content_images": plan.ArticleWithContentImages,
+		"input_attachments":           plan.InputAttachments,
+		"video_input":                 plan.VideoInput,
+		"montage_input":               plan.MontageInput,
+		"video_estimated_credits":     plan.VideoEstimatedCredits,
+		"updated_at":                  now,
+	}
+	if scheduleChanged {
+		updates["cron_expr"] = plan.CronExpr
+		updates["next_run_at"] = plan.NextRunAt
+	}
+	return updates
+}
+
+func (r *planRepository) UpdateStatusAndNextRunAt(ctx context.Context, id, status string, nextRunAt *time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(&model.Plan{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"status":      status,
+			"next_run_at": nextRunAt,
+			"updated_at":  time.Now(),
+		}).Error
+}
+
+func (r *planRepository) UpdateNextRunAtIf(ctx context.Context, id string, nextRunAt, expectedNextRunAt *time.Time) (bool, error) {
+	query := r.db.WithContext(ctx).
+		Model(&model.Plan{}).
+		Where("id = ?", id)
+	if expectedNextRunAt == nil {
+		query = query.Where("next_run_at IS NULL")
+	} else {
+		query = query.Where("next_run_at = ?", *expectedNextRunAt)
+	}
+	result := query.Updates(map[string]interface{}{
+		"next_run_at": nextRunAt,
+		"updated_at":  time.Now(),
+	})
+	return result.RowsAffected == 1, result.Error
+}
+
 func (r *planRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Plan{}).Error
 }

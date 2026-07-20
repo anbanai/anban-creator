@@ -3,6 +3,7 @@ import type { ReactElement, ReactNode } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from 'next-themes'
+import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
 
 function createTestQueryClient() {
   return new QueryClient({
@@ -21,7 +22,7 @@ function AllProviders({ children }: { children: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          {children}
+          <AgentPromptDropProvider>{children}</AgentPromptDropProvider>
         </ThemeProvider>
       </BrowserRouter>
     </QueryClientProvider>

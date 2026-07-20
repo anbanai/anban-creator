@@ -17,8 +17,11 @@ import (
 
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 type handlerDirectUploadStore struct{}
@@ -44,32 +47,17 @@ func (handlerDirectUploadStore) DownloadURL(_ context.Context, key string, _ int
 func (handlerDirectUploadStore) HasCustomDomain() bool  { return true }
 func (handlerDirectUploadStore) IsOwnedURL(string) bool { return false }
 
-type handlerPendingUploadRepo struct {
-	created *model.PendingUpload
-}
-
-func (r *handlerPendingUploadRepo) CreatePendingUpload(_ context.Context, upload *model.PendingUpload) error {
-	cp := *upload
-	r.created = &cp
-	return nil
-}
-func (r *handlerPendingUploadRepo) FindPendingUploadByID(context.Context, string) (*model.PendingUpload, error) {
-	return nil, service.ErrPendingUploadNotFound
-}
-func (r *handlerPendingUploadRepo) FinalizePendingUploads(context.Context, []string, time.Time) error {
-	return nil
-}
-func (r *handlerPendingUploadRepo) FindExpiredPendingUploads(context.Context, time.Time, int) ([]*model.PendingUpload, error) {
-	return nil, nil
-}
-func (r *handlerPendingUploadRepo) MarkPendingUploadExpired(context.Context, string, time.Time) error {
-	return nil
-}
-
 func TestUploadPrepareReturnsDirectUploadCredentials(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	store := handlerDirectUploadStore{}
-	repo := &handlerPendingUploadRepo{}
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate sqlite: %v", err)
+	}
+	repo := repository.New(db)
 	h := NewUploadHandler(store, repo, service.DirectUploadConfig{
 		Storage: config.StorageConfig{
 			Provider:       "oss",
@@ -108,6 +96,7 @@ func TestUploadPrepareReturnsDirectUploadCredentials(t *testing.T) {
 	}
 	var decoded struct {
 		Data struct {
+			UploadSessionID  string    `json:"upload_session_id"`
 			UploadID         string    `json:"upload_id"`
 			Key              string    `json:"key"`
 			PublicURL        string    `json:"public_url"`
@@ -124,13 +113,13 @@ func TestUploadPrepareReturnsDirectUploadCredentials(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if decoded.Data.UploadID == "" || decoded.Data.Key == "" || decoded.Data.PublicURL == "" {
+	if decoded.Data.UploadSessionID == "" || decoded.Data.UploadSessionID != decoded.Data.UploadID || decoded.Data.Key == "" || decoded.Data.PublicURL == "" {
 		t.Fatalf("missing upload fields: %+v", decoded.Data)
 	}
 	if decoded.Data.Method != "PUT" || decoded.Data.MaxSize != 50*1024*1024 {
 		t.Fatalf("method/max_size = %q/%d", decoded.Data.Method, decoded.Data.MaxSize)
 	}
 	if !strings.HasPrefix(decoded.Data.Key, "uploads/pending/user-1/") {
-		t.Fatalf("key = %q, want user pending prefix", decoded.Data.Key)
+		t.Fatalf("key = %q, want user staging prefix", decoded.Data.Key)
 	}
 }

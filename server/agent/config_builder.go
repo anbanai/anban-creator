@@ -26,6 +26,14 @@ import (
 // unbounded memory/disk usage. Mirrors the upload limit in handler/file.go.
 const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 
+const (
+	referenceImageDirName  = ".anban-creator"
+	referenceImageFileName = "reference.png"
+	ReferenceImagePath     = referenceImageDirName + "/" + referenceImageFileName
+)
+
+var referenceMaterializeBeforeCommitHook func() error
+
 const maxInputAttachmentBytes int64 = 50 << 20 // 50 MB
 
 var unsafeAttachmentFilenameRunes = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -41,6 +49,7 @@ type MaterializedInputAttachment struct {
 	Path            string `json:"path,omitempty"`
 	Instruction     string `json:"instruction,omitempty"`
 	UploadID        string `json:"upload_id,omitempty"`
+	Key             string `json:"key,omitempty"`
 }
 
 type MaterializedInputAttachmentError struct {
@@ -50,6 +59,7 @@ type MaterializedInputAttachmentError struct {
 	FileName        string `json:"file_name,omitempty"`
 	Instruction     string `json:"instruction,omitempty"`
 	UploadID        string `json:"upload_id,omitempty"`
+	Key             string `json:"key,omitempty"`
 	Error           string `json:"error"`
 }
 
@@ -73,7 +83,7 @@ func EffectiveProject(ch *model.Project, task *model.Task) *model.Project {
 // the dimensions each platform's settings.json slot consumes are read here:
 // Article.Writer / Article.Author / Article.Theme and Seednote.VisualStyle,
 // each driven by the resolved value (not the raw project column).
-func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, skipRefImage bool, taskReferenceImageURL string) (*appconfig.Config, error) {
+func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, hasReference bool) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
 		Name:        ch.Name,
 		Positioning: ch.Instructions,
@@ -150,21 +160,15 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 		}
 	}
 
-	// Set reference image path for image generation (downloaded by executor).
-	// Task-level reference image takes priority over project brand image.
-	effectiveReferURL := taskReferenceImageURL
-	if effectiveReferURL == "" && !skipRefImage {
-		effectiveReferURL = ch.ReferenceImageURL
-	}
-	if effectiveReferURL != "" {
-		referPath := filepath.Join(appconfig.ConfigDir, "reference.png")
+	// Runtime reference assets always materialize at this fixed private path.
+	if hasReference {
 		switch ch.Platform {
 		case model.ScopeArticle:
-			cfg.Wechat.Article.Cover.Image.Refer = referPath
-			cfg.Wechat.Article.Content.Image.Refer = referPath
+			cfg.Wechat.Article.Cover.Image.Refer = ReferenceImagePath
+			cfg.Wechat.Article.Content.Image.Refer = ReferenceImagePath
 		case model.ScopeSeednote:
-			cfg.Seednote.Cover.Image.Refer = referPath
-			cfg.Seednote.Content.Image.Refer = referPath
+			cfg.Seednote.Cover.Image.Refer = ReferenceImagePath
+			cfg.Seednote.Content.Image.Refer = ReferenceImagePath
 		}
 	}
 
@@ -257,79 +261,41 @@ func TaskToAgent(task *model.Task) string {
 	return TaskTypeToAgent(task.Type)
 }
 
-// DownloadReferenceImage downloads a project's brand reference image to the
-// workspace's .anban-creator directory. The image is saved as reference.png for
-// use by both Claude Code visual context and image generation reference inputs.
-//
-// Resolution order:
-//  1. If store is non-nil and imageURL is server-owned (OSS or local storage),
-//     read bytes via store.Read. This works for both private OSS buckets
-//     (OSSProvider.Read signs the URL internally) and local files
-//     (LocalProvider.Read reads from disk), avoiding the 403 that the raw
-//     public URL stored in the database would hit on a private bucket.
-//  2. Otherwise (external URL, or store.Read failed), fall back to direct
-//     HTTP GET. imageURL must be an absolute http(s) URL in this path.
-//
-// logger may be nil; when non-nil, fallbacks from path (1) are logged at warn.
-func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, imageURL string) error {
-	destDir := filepath.Join(workDir, appconfig.ConfigDir)
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
+// MaterializeReferenceAsset reads only the repository-owned storage key. It
+// deliberately has no URL or HTTP fallback. Exact-size validation detects
+// truncated or extended reads; same-size mutation remains governed by finalized
+// object immutability and storage ACLs.
+func MaterializeReferenceAsset(ctx context.Context, store storage.Provider, workDir string, asset *model.Asset) error {
+	if asset == nil {
+		return nil
 	}
-	destPath := filepath.Join(destDir, "reference.png")
-
-	if store != nil && store.IsOwnedURL(imageURL) {
-		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
-			data, err := store.Read(ctx, key)
-			if err == nil {
-				if int64(len(data)) > maxReferenceImageBytes {
-					return fmt.Errorf("download: file too large (%d bytes)", len(data))
-				}
-				if err := os.WriteFile(destPath, data, 0o644); err != nil {
-					return fmt.Errorf("write file: %w", err)
-				}
-				return nil
-			}
-			if logger != nil {
-				logger.Warn().Err(err).
-					Str("url", imageURL).
-					Str("key", key).
-					Msg("storage.Read failed for reference image, falling back to direct HTTP")
-			}
-		} else if logger != nil {
-			logger.Warn().
-				Str("url", imageURL).
-				Msg("could not extract storage key from owned URL, falling back to direct HTTP")
-		}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if store == nil {
+		return errors.New("storage provider is unavailable")
+	}
+	key := strings.TrimSpace(asset.StorageKey)
+	if key == "" {
+		return errors.New("reference asset storage key is empty")
+	}
+	if asset.Size <= 0 {
+		return errors.New("reference asset size is invalid")
+	}
+	if asset.Size > maxReferenceImageBytes {
+		return fmt.Errorf("reference asset: %w", storage.ErrObjectExceedsMaxSize)
+	}
+	data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("read reference asset: %w", err)
 	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("download: %w", err)
+	if int64(len(data)) != asset.Size {
+		return fmt.Errorf("reference asset size mismatch: read %d bytes, expected %d", len(data), asset.Size)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download: HTTP %d", resp.StatusCode)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-
-	f, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("create file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := io.Copy(f, io.LimitReader(resp.Body, maxReferenceImageBytes)); err != nil {
-		os.Remove(destPath)
-		return fmt.Errorf("write file: %w", err)
-	}
-	return nil
+	return materializeReferenceAssetBytes(ctx, workDir, data)
 }
 
 // DownloadProductImages downloads each product photo URL into the workspace's
@@ -337,13 +303,10 @@ func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger 
 // order with 1-indexed names (product_01.<ext>, product_02.<ext>, ...). It also
 // writes index.json listing the exact filenames so the agent can reference them
 // deterministically (extensions vary by upload). Returns the count successfully
-// materialized; per-image failures are logged and skipped (best-effort), matching
-// DownloadReferenceImage's non-fatal posture.
+// materialized; per-image failures are logged and skipped (best-effort).
 //
-// The resolution path mirrors DownloadReferenceImage (store.Read for URLs owned
-// by this backend — works on private OSS buckets; direct HTTP otherwise) so it
-// behaves identically under the local and docker executors.
-func DownloadProductImages(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, urls []string) int {
+// Product-photo resolution retains its independent attachment URL contract.
+func DownloadProductImages(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID string, urls []string) int {
 	if len(urls) == 0 {
 		return 0
 	}
@@ -357,7 +320,7 @@ func DownloadProductImages(ctx context.Context, store storage.Provider, logger *
 
 	names := make([]string, 0, len(urls))
 	for i, imageURL := range urls {
-		data, err := fetchImageBytes(ctx, store, imageURL)
+		data, err := fetchImageBytes(ctx, store, userID, imageURL)
 		if err != nil {
 			if logger != nil {
 				logger.Warn().Err(err).Str("url", imageURL).Int("index", i+1).Msg("failed to download product photo, skipping")
@@ -388,7 +351,7 @@ func DownloadProductImages(ctx context.Context, store storage.Provider, logger *
 
 // DownloadInputAttachments materializes AI-entry attachments into
 // .anban-creator/input-attachments and writes index.json with stable local paths.
-func DownloadInputAttachments(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, attachments []model.EntryAttachment) int {
+func DownloadInputAttachments(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID string, attachments []model.EntryAttachment) int {
 	destDir := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		if logger != nil {
@@ -408,8 +371,18 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 		path := filepath.Join(destDir, name)
 		var data []byte
 		var err error
-		if strings.TrimSpace(attachment.URL) != "" {
-			data, err = fetchAttachmentBytes(ctx, store, attachment.URL)
+		if rawKey := strings.TrimSpace(attachment.Key); rawKey != "" {
+			key, validKey := explicitStorageObjectKey(rawKey)
+			if !validKey {
+				err = fmt.Errorf("attachment storage key is invalid")
+			} else if key, err = runtimeStorageObjectKey(key, userID, attachment.UploadID, true); err != nil {
+			} else if store == nil {
+				err = fmt.Errorf("storage provider is required for attachment key")
+			} else {
+				data, err = readStorageObject(ctx, store, key, maxInputAttachmentBytes)
+			}
+		} else if strings.TrimSpace(attachment.URL) != "" {
+			data, err = fetchAttachmentBytes(ctx, store, attachment.URL, userID, attachment.UploadID, true)
 		} else if strings.TrimSpace(attachment.Text) != "" {
 			data = []byte(strings.TrimSpace(attachment.Text))
 		} else {
@@ -423,6 +396,7 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 				FileName:        attachment.FileName,
 				Instruction:     attachment.Instruction,
 				UploadID:        attachment.UploadID,
+				Key:             attachment.Key,
 				Error:           err.Error(),
 			})
 			if logger != nil {
@@ -438,6 +412,7 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 				FileName:        attachment.FileName,
 				Instruction:     attachment.Instruction,
 				UploadID:        attachment.UploadID,
+				Key:             attachment.Key,
 				Error:           err.Error(),
 			})
 			if logger != nil {
@@ -457,6 +432,7 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 			Path:            relPath,
 			Instruction:     attachment.Instruction,
 			UploadID:        attachment.UploadID,
+			Key:             attachment.Key,
 		})
 	}
 
@@ -494,7 +470,7 @@ func hasNonResumeInputAttachments(attachments []model.EntryAttachment) bool {
 
 // MaterializeResumeInputs restores persisted task resume inputs into the
 // workspace location consumed by AppendResumeContextToPrompt.
-func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, attachments []model.EntryAttachment) (int, error) {
+func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID string, attachments []model.EntryAttachment) (int, error) {
 	var latest *model.EntryAttachment
 	files := make([]model.EntryAttachment, 0)
 	for i := range attachments {
@@ -538,7 +514,7 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 	defer os.RemoveAll(stagedAttachmentsDir)
 	written := 0
 	for _, attachment := range files {
-		data, err := fetchResumeAttachmentBytes(ctx, store, attachment)
+		data, err := fetchResumeAttachmentBytes(ctx, store, attachment, userID)
 		if err != nil {
 			if logger != nil {
 				logger.Warn().Err(err).Str("url", attachment.URL).Msg("failed to fetch resume attachment")
@@ -581,15 +557,19 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 	return written + 1, nil
 }
 
-func fetchResumeAttachmentBytes(ctx context.Context, store storage.Provider, attachment model.EntryAttachment) ([]byte, error) {
+func fetchResumeAttachmentBytes(ctx context.Context, store storage.Provider, attachment model.EntryAttachment, userID string) ([]byte, error) {
 	if store != nil && strings.TrimSpace(attachment.Key) != "" {
-		data, err := store.Read(ctx, strings.TrimSpace(attachment.Key))
+		key, err := runtimeStorageObjectKey(attachment.Key, userID, attachment.UploadID, true)
+		if err != nil {
+			return nil, err
+		}
+		data, err := storage.ReadObject(ctx, store, key, maxInputAttachmentBytes)
 		if err == nil {
 			return data, nil
 		}
 	}
 	if strings.TrimSpace(attachment.URL) != "" {
-		return fetchAttachmentBytes(ctx, store, attachment.URL)
+		return fetchAttachmentBytes(ctx, store, attachment.URL, userID, attachment.UploadID, true)
 	}
 	if strings.TrimSpace(attachment.Text) != "" {
 		return []byte(strings.TrimSpace(attachment.Text)), nil
@@ -597,15 +577,18 @@ func fetchResumeAttachmentBytes(ctx context.Context, store storage.Provider, att
 	return nil, fmt.Errorf("resume attachment has no readable source")
 }
 
-func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL string) ([]byte, error) {
+func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL, userID, uploadID string, requireUploadID bool) ([]byte, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if store != nil && store.IsOwnedURL(rawURL) {
 		if key, ok := storage.StorageKeyFromURL(rawURL); ok {
-			if data, err := store.Read(ctx, key); err == nil {
-				if int64(len(data)) > maxInputAttachmentBytes {
-					return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
-				}
+			key, err := runtimeStorageObjectKey(key, userID, uploadID, requireUploadID)
+			if err != nil {
+				return nil, err
+			}
+			if data, err := storage.ReadObject(ctx, store, key, maxInputAttachmentBytes); err == nil {
 				return data, nil
+			} else if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
+				return nil, fmt.Errorf("download: %w", err)
 			}
 		}
 	}
@@ -634,12 +617,13 @@ func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL st
 
 func inputAttachmentFilename(index int, attachment model.EntryAttachment) string {
 	base := sanitizeAttachmentFilename(attachment.FileName)
+	source := firstNonEmptyAttachmentSource(attachment.URL, attachment.Key)
 	if base == "" {
-		base = sanitizeAttachmentFilename(filenameFromURLPath(attachment.URL))
+		base = sanitizeAttachmentFilename(filenameFromURLPath(source))
 	}
 	ext := strings.ToLower(filepath.Ext(base))
 	if ext == "" {
-		ext = inputAttachmentExt(attachment.ContentType, attachment.URL)
+		ext = inputAttachmentExt(attachment.ContentType, source)
 	}
 	if base == "" {
 		base = "attachment" + ext
@@ -647,6 +631,15 @@ func inputAttachmentFilename(index int, attachment model.EntryAttachment) string
 		base += ext
 	}
 	return fmt.Sprintf("attachment_%02d_%s", index, base)
+}
+
+func firstNonEmptyAttachmentSource(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func sanitizeAttachmentFilename(raw string) string {
@@ -725,17 +718,29 @@ func inputAttachmentExt(contentType, rawURL string) string {
 
 // fetchImageBytes resolves an image URL to its bytes. For URLs owned by this
 // backend (OSS / local storage) it reads via the storage provider (works on
-// private buckets); otherwise it downloads via HTTP. Mirrors the resolution logic
-// inside DownloadReferenceImage, extracted here so the multi-file product-photo
-// flow can reuse it without touching the well-tested reference-image path.
-func fetchImageBytes(ctx context.Context, store storage.Provider, imageURL string) ([]byte, error) {
+// private buckets); otherwise it downloads via HTTP. This remains isolated to
+// the product-photo URL contract.
+func fetchImageBytes(ctx context.Context, store storage.Provider, userID, imageURL string) ([]byte, error) {
+	if key, ok := explicitStorageObjectKey(imageURL); ok {
+		key, err := runtimeStorageObjectKey(key, userID, "", false)
+		if err != nil {
+			return nil, err
+		}
+		if store == nil {
+			return nil, fmt.Errorf("storage provider is required for object key %q", key)
+		}
+		return readStorageObject(ctx, store, key, maxReferenceImageBytes)
+	}
 	if store != nil && store.IsOwnedURL(imageURL) {
 		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
-			if data, err := store.Read(ctx, key); err == nil {
-				if int64(len(data)) > maxReferenceImageBytes {
-					return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
-				}
+			key, err := runtimeStorageObjectKey(key, userID, "", false)
+			if err != nil {
+				return nil, err
+			}
+			if data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes); err == nil {
 				return data, nil
+			} else if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
+				return nil, fmt.Errorf("download: %w", err)
 			}
 		}
 	}
@@ -753,6 +758,47 @@ func fetchImageBytes(ctx context.Context, store storage.Provider, imageURL strin
 		return nil, fmt.Errorf("download: HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, maxReferenceImageBytes))
+}
+
+func explicitStorageObjectKey(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.Contains(raw, "://") || strings.HasPrefix(raw, "/") {
+		return "", false
+	}
+	key, ok := storage.StorageKeyFromURL(raw)
+	if !ok {
+		return "", false
+	}
+	key = filepath.ToSlash(strings.TrimPrefix(key, "/"))
+	clean := filepath.ToSlash(filepath.Clean(key))
+	if clean != key || clean == "." || strings.HasPrefix(clean, "../") {
+		return "", false
+	}
+	return key, true
+}
+
+func runtimeStorageObjectKey(raw, userID, uploadID string, requireUploadID bool) (string, error) {
+	parsed, err := storage.ParseRuntimeStorageKey(raw)
+	if err != nil {
+		return "", err
+	}
+	if parsed.FinalizedUpload != nil {
+		if requireUploadID && strings.TrimSpace(uploadID) == "" {
+			return "", storage.ErrFinalizedUploadIdentityMismatch
+		}
+		if err := parsed.ValidateFinalizedUploadIdentity(userID, uploadID); err != nil {
+			return "", err
+		}
+	}
+	return parsed.Key, nil
+}
+
+func readStorageObject(ctx context.Context, store storage.Provider, key string, maxBytes int64) ([]byte, error) {
+	data, err := storage.ReadObject(ctx, store, key, maxBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read storage object: %w", err)
+	}
+	return data, nil
 }
 
 // imageExtFromURL infers a lowercase image extension from the URL path, defaulting

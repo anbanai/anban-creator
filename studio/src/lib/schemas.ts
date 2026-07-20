@@ -15,6 +15,17 @@ const goalSchema = z.string().refine(
   `目标条件不能超过 ${GOAL_TEXT_MAX_LENGTH} 个字符`,
 )
 
+const referenceImageSelectionSchema = z.union([
+  z.object({
+    asset_id: z.string().uuid(),
+    upload_session_id: z.never().optional(),
+  }),
+  z.object({
+    upload_session_id: z.string().uuid(),
+    asset_id: z.never().optional(),
+  }),
+])
+
 const inputAttachmentSchema = z.object({
   type: z.enum(["image", "audio", "video", "document", "text"]),
   url: z.string().optional(),
@@ -108,12 +119,9 @@ export const createTaskSchema = z.object({
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).default(""),
   image_model_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
-  reference_image_url: z.string().refine(
-    (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
-    { message: "请输入有效的图片 URL" },
-  ).optional(),
+  reference_image: referenceImageSelectionSchema.nullable().optional(),
   input_attachments: z.array(inputAttachmentSchema)
-    .max(16, "最多添加 16 张参考图片")
+    .max(16, "最多添加 16 个附件")
     .default([]),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
@@ -141,17 +149,6 @@ export const createTaskSchema = z.object({
   video_editor_input: videoInputSchema,
   montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
-  if (
-    data.type === "seednote" &&
-    (data.input_attachments ?? []).some((item) => item.type !== "image")
-  ) {
-    ctx.addIssue({
-      code: "custom",
-      message: "种草笔记只支持图片参考素材",
-      path: ["input_attachments"],
-    })
-  }
-
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
     if (!/https?:\/\/[^\s]+/.test(prompt)) {
@@ -185,7 +182,12 @@ export const createTaskSchema = z.object({
 
   if (data.type === "videoeditor") {
     const refs = data.video_editor_input?.references ?? []
-    const hasVideoSource = refs.some((ref) => ref.type === "video_url" && Boolean(ref.url || ref.task_file_id))
+    const hasStructuredVideoSource = refs.some((ref) => ref.type === "video_url" && Boolean(ref.url || ref.task_file_id))
+    const hasPromptVideoSource = data.input_attachments.some((attachment) => (
+      attachment.type === "video"
+      && Boolean((attachment.upload_id && attachment.key) || attachment.url)
+    ))
+    const hasVideoSource = hasStructuredVideoSource || hasPromptVideoSource
     if (!hasVideoSource) {
       ctx.addIssue({
         code: "custom",
@@ -234,12 +236,9 @@ export const planSchema = z.object({
   prompt: promptSchema.optional(),
   image_model_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
-  reference_image_url: z.string().refine(
-    (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
-    { message: "请输入有效的图片 URL" },
-  ).optional(),
+  reference_image: referenceImageSelectionSchema.nullable().optional(),
   input_attachments: z.array(inputAttachmentSchema)
-    .max(16, "最多添加 16 张参考图片")
+    .max(16, "最多添加 16 个附件")
     .default([]),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
@@ -254,17 +253,6 @@ export const planSchema = z.object({
   video_creator_input: videoInputSchema,
   montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
-  if (
-    data.type === "seednote" &&
-    (data.input_attachments ?? []).some((item) => item.type !== "image")
-  ) {
-    ctx.addIssue({
-      code: "custom",
-      message: "种草笔记只支持图片参考素材",
-      path: ["input_attachments"],
-    })
-  }
-
   if (data.type === "montage") {
     const brief = data.montage_input?.brief?.trim() || ""
     if (!brief) {
@@ -332,10 +320,7 @@ export const projectSchema = z.object({
     max_resolution: z.string().default("720p"),
     max_duration: z.number().int().min(1).max(600).default(120),
   }).optional(),
-  reference_image_url: z.string().refine(
-    (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
-    { message: "请输入有效的图片 URL" },
-  ).optional(),
+  reference_image: referenceImageSelectionSchema.nullable().optional(),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).optional(),
 }).refine((data) => {
   if (data.enable_publishing) {

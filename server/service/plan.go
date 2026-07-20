@@ -16,7 +16,10 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
-var ErrUnsupportedPlanPlatform = errors.New("plans are not supported for this project platform")
+var (
+	ErrUnsupportedPlanPlatform = errors.New("plans are not supported for this project platform")
+	ErrPlanUpdateConflict      = errors.New("plan changed concurrently")
+)
 
 // PlanService handles plan CRUD and lifecycle operations.
 type PlanService struct {
@@ -26,6 +29,7 @@ type PlanService struct {
 	videoCreditMultiplier int
 	videoBilling          srvconfig.BillingConfig
 	creditSvc             *CreditService
+	referenceAssets       *ReferenceAssetService
 }
 
 // NewPlanService creates a new PlanService.
@@ -46,6 +50,12 @@ func (s *PlanService) SetCreditService(creditSvc *CreditService) {
 		return
 	}
 	s.creditSvc = creditSvc
+}
+
+func (s *PlanService) SetReferenceAssetService(referenceAssets *ReferenceAssetService) {
+	if s != nil {
+		s.referenceAssets = referenceAssets
+	}
 }
 
 func (s *PlanService) SetVideoBillingConfig(billing srvconfig.BillingConfig) {
@@ -102,16 +112,16 @@ func (s *PlanService) videoBillingOptions(ctx context.Context, userID string) Vi
 // and prevents argument-order bugs on a signature that has grown past a dozen
 // positional params.
 type CreatePlanParams struct {
-	UserID             string
-	ProjectID          string
-	CronExpr           string
-	Prompt             string
-	ImageModelKey      string
-	SkipReferenceImage *bool
-	ReferenceImageURL  string
-	Watermark          *bool
-	Goal               string
-	GoalMode           bool
+	UserID                string
+	ProjectID             string
+	CronExpr              string
+	Prompt                string
+	ImageModelKey         string
+	SkipReferenceImage    *bool
+	ReferenceImageAssetID string
+	Watermark             *bool
+	Goal                  string
+	GoalMode              bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -156,6 +166,14 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	}
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
+	}
+	if p.ReferenceImageAssetID != "" {
+		if s.referenceAssets == nil {
+			return nil, ErrReferenceAssetUnavailable
+		}
+		if _, err := s.referenceAssets.RequireOwned(ctx, p.UserID, p.ReferenceImageAssetID, []string{DirectUploadPurposeTaskReference}); err != nil {
+			return nil, err
+		}
 	}
 	// Package-priced or one-off-only platforms can't back plans. Reject up front
 	// so API/MCP callers fail fast instead of creating schedules the task runner
@@ -217,7 +235,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		Status:                   model.PlanStatusActive,
 		NextRunAt:                nextRun,
 		ImageModelKey:            p.ImageModelKey,
-		ReferenceImageURL:        p.ReferenceImageURL,
+		ReferenceImageAssetID:    p.ReferenceImageAssetID,
 		SkipReferenceImage:       p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:                p.Watermark != nil && *p.Watermark,
 		Goal:                     p.Goal,
@@ -278,7 +296,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - ImageModelKey: nil = leave unchanged; &"" = clear to system default
 //     (use model.ImageModelKeySystemDefault / ImageModelKeyCustom for clarity)
 //   - SkipReferenceImage: nil = leave unchanged; &true/&false = set
-//   - ReferenceImageURL: nil = leave unchanged; &"" = clear; &"value" = set
+//   - ReferenceImageAssetID: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
@@ -292,7 +310,7 @@ type UpdatePlanParams struct {
 	Prompt                   string
 	ImageModelKey            *string
 	SkipReferenceImage       *bool
-	ReferenceImageURL        *string
+	ReferenceImageAssetID    *string
 	Watermark                *bool
 	Goal                     string
 	GoalMode                 *bool
@@ -309,14 +327,59 @@ type UpdatePlanParams struct {
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
 // changed, next_run_at is recomputed. See UpdatePlanParams for field semantics.
 func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Plan, error) {
+	plan, scheduleChanged, err := s.preparePlanUpdate(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.Plans().UpdateEditable(ctx, plan, scheduleChanged); err != nil {
+		return nil, fmt.Errorf("update plan: %w", err)
+	}
+	return plan, nil
+}
+
+func (s *PlanService) UpdateIfReferenceImageAssetID(ctx context.Context, p UpdatePlanParams, expectedID string) (*model.Plan, error) {
+	plan, scheduleChanged, err := s.preparePlanUpdate(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if plan.ReferenceImageAssetID != expectedID {
+		return nil, ErrPlanUpdateConflict
+	}
+	won, err := s.repo.Plans().UpdateEditableIfReferenceImageAssetID(ctx, plan, expectedID, scheduleChanged)
+	if err != nil {
+		return nil, fmt.Errorf("update plan: %w", err)
+	}
+	if !won {
+		return nil, ErrPlanUpdateConflict
+	}
+	return plan, nil
+}
+
+func (s *PlanService) preparePlanUpdate(ctx context.Context, p UpdatePlanParams) (*model.Plan, bool, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, p.ID)
 	if err != nil {
-		return nil, fmt.Errorf("find plan: %w", err)
+		return nil, false, fmt.Errorf("find plan: %w", err)
 	}
+	scheduleChanged := p.CronExpr != "" && p.CronExpr != plan.CronExpr
+	plan, err = s.applyPlanUpdate(ctx, plan, p, scheduleChanged)
+	if err != nil {
+		return nil, false, err
+	}
+	return plan, scheduleChanged, nil
+}
 
+func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p UpdatePlanParams, scheduleChanged bool) (*model.Plan, error) {
 	plan.Prompt = p.Prompt
-	if p.ReferenceImageURL != nil {
-		plan.ReferenceImageURL = *p.ReferenceImageURL
+	if p.ReferenceImageAssetID != nil {
+		if *p.ReferenceImageAssetID != "" {
+			if s.referenceAssets == nil {
+				return nil, ErrReferenceAssetUnavailable
+			}
+			if _, err := s.referenceAssets.RequireOwned(ctx, plan.UserID, *p.ReferenceImageAssetID, []string{DirectUploadPurposeTaskReference}); err != nil {
+				return nil, err
+			}
+		}
+		plan.ReferenceImageAssetID = *p.ReferenceImageAssetID
 	}
 	plan.Goal = p.Goal
 	if p.ImageModelKey != nil {
@@ -383,7 +446,7 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		plan.SetMontageInput(*p.MontageInput)
 	}
 	// If cron expression changed, validate and recompute next run.
-	if p.CronExpr != "" && p.CronExpr != plan.CronExpr {
+	if scheduleChanged {
 		if _, err := cron.ParseStandard(p.CronExpr); err != nil {
 			return nil, fmt.Errorf("invalid cron expression: %w", err)
 		}
@@ -393,10 +456,6 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 			return nil, fmt.Errorf("compute next run: %w", err)
 		}
 		plan.NextRunAt = nextRun
-	}
-
-	if err := s.repo.Plans().Update(ctx, plan); err != nil {
-		return nil, fmt.Errorf("update plan: %w", err)
 	}
 
 	return plan, nil
@@ -417,10 +476,7 @@ func (s *PlanService) Pause(ctx context.Context, id string) error {
 		return fmt.Errorf("find plan: %w", err)
 	}
 
-	plan.Status = model.PlanStatusPaused
-	plan.NextRunAt = nil
-
-	if err := s.repo.Plans().Update(ctx, plan); err != nil {
+	if err := s.repo.Plans().UpdateStatusAndNextRunAt(ctx, plan.ID, model.PlanStatusPaused, nil); err != nil {
 		return fmt.Errorf("pause plan: %w", err)
 	}
 
@@ -434,14 +490,11 @@ func (s *PlanService) Resume(ctx context.Context, id string) error {
 		return fmt.Errorf("find plan: %w", err)
 	}
 
-	plan.Status = model.PlanStatusActive
 	nextRun, err := s.computeNextRun(plan.CronExpr)
 	if err != nil {
 		return fmt.Errorf("compute next run: %w", err)
 	}
-	plan.NextRunAt = nextRun
-
-	if err := s.repo.Plans().Update(ctx, plan); err != nil {
+	if err := s.repo.Plans().UpdateStatusAndNextRunAt(ctx, plan.ID, model.PlanStatusActive, nextRun); err != nil {
 		return fmt.Errorf("resume plan: %w", err)
 	}
 

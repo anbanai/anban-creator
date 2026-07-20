@@ -11,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
@@ -95,6 +97,7 @@ type TaskService struct {
 	memoryMgr         *projectmemory.ProjectMemoryManager
 	nasResumeEnabled  bool
 	taskWorkspace     TaskWorkspaceLifecycle
+	referenceAssets   *ReferenceAssetService
 }
 
 type TaskWorkspaceLifecycle interface {
@@ -156,12 +159,26 @@ func (s *TaskService) Repository() repository.Repository {
 	return s.repo
 }
 
+// Storage returns the configured provider for handler-level upload verification.
+func (s *TaskService) Storage() storage.Provider {
+	if s == nil {
+		return nil
+	}
+	return s.store
+}
+
 func (s *TaskService) SetProjectMemoryManager(memoryMgr *projectmemory.ProjectMemoryManager) {
 	s.memoryMgr = memoryMgr
 }
 
 func (s *TaskService) SetTaskWorkspaceLifecycle(workspace TaskWorkspaceLifecycle) {
 	s.taskWorkspace = workspace
+}
+
+func (s *TaskService) SetReferenceAssetService(referenceAssets *ReferenceAssetService) {
+	if s != nil {
+		s.referenceAssets = referenceAssets
+	}
 }
 
 func (s *TaskService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
@@ -399,23 +416,28 @@ func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID            string
-	ProjectID         string
-	Prompt            string
-	Quantity          int
-	ImageRatio        string
-	ImageModelKey     string
-	SkipRefImage      *bool
-	ReferenceImageURL string
+	UserID    string
+	ProjectID string
+	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
+	// keep billing and runtime configuration anchored to the source task instead
+	// of re-deriving them from a project or server policy that changed later.
+	FrozenTaskType        string
+	PreserveFrozenConfig  bool
+	Prompt                string
+	Quantity              int
+	ImageRatio            string
+	ImageModelKey         string
+	SkipRefImage          *bool
+	ReferenceImageAssetID string
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
 	// Overrides is deprecated. New Studio/API flows do not set task-level style
 	// overrides; runtime style/account config comes from ProjectSnapshot.
 	Overrides *model.StyleOverrides
-	// ProjectSnapshot, when set, is copied verbatim. Clone uses this to preserve
-	// the original task's frozen config. New manual tasks leave it nil and snapshot
-	// the current project at creation time.
+	// ProjectSnapshot, when set, is copied verbatim. Clone preserves its original
+	// frozen config; HTTP/AI orchestration freezes the project used for reference
+	// preflight. Other callers leave it nil and snapshot the current project.
 	ProjectSnapshot *model.ProjectSnapshot
 	// InputAttachments stores the original AI-entry attachments on the task so
 	// executors can materialize them into the agent workspace.
@@ -448,6 +470,9 @@ type CreateManualParams struct {
 	// videoeditor tasks. They are rejected for creator projects and vice versa.
 	VideoEditorConfig *model.VideoTaskConfig
 	VideoEditorInput  *model.VideoInput
+	// FrozenVideoConfig is clone-only resolved video state. Ordinary creation
+	// leaves it nil so the agent can resolve a fresh execution configuration.
+	FrozenVideoConfig *model.VideoTaskConfig
 	// MontageInput carries the Montage-specific creation contract.
 	// It is independent from video creator/editor payloads and is only valid
 	// for montage projects.
@@ -458,6 +483,70 @@ type CreateManualParams struct {
 	// via ClaimLocalTask. Unclaimed tasks fall back to cloud after the deadline
 	// (ReclaimExpiredLocalTasks). Empty = cloud (default).
 	ExecutionTarget string
+}
+
+// ResolveTaskCreationProject loads the authoritative project once and applies
+// the ownership/status checks required before task side effects.
+func (s *TaskService) ResolveTaskCreationProject(ctx context.Context, userID, projectID string) (*model.Project, error) {
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("task repository is unavailable")
+	}
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %w", ErrProjectNotFound, err)
+		}
+		return nil, fmt.Errorf("find project: %w", err)
+	}
+	if err := validateTaskCreationProject(project, userID, projectID); err != nil {
+		return nil, err
+	}
+	return project, nil
+}
+
+func validateTaskCreationProject(project *model.Project, userID, projectID string) error {
+	if project == nil || project.ID != projectID {
+		return ErrProjectNotFound
+	}
+	if project.UserID != userID {
+		return ErrProjectOwnedByUser
+	}
+	if project.Status != model.ProjectStatusActive {
+		return fmt.Errorf("project is not active")
+	}
+	return nil
+}
+
+func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot) error {
+	checks := []struct {
+		assetID string
+		allowed []string
+	}{
+		{assetID: taskAssetID, allowed: []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}},
+	}
+	if snapshot != nil {
+		checks = append(checks, struct {
+			assetID string
+			allowed []string
+		}{assetID: snapshot.ReferenceImageAssetID, allowed: []string{DirectUploadPurposeProjectReference}})
+	} else if project != nil {
+		checks = append(checks, struct {
+			assetID string
+			allowed []string
+		}{assetID: project.ReferenceImageAssetID, allowed: []string{DirectUploadPurposeProjectReference}})
+	}
+	for _, check := range checks {
+		if check.assetID == "" {
+			continue
+		}
+		if s.referenceAssets == nil {
+			return ErrReferenceAssetUnavailable
+		}
+		if _, err := s.referenceAssets.RequireOwned(ctx, userID, check.assetID, check.allowed); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
@@ -485,22 +574,24 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		quantity = 5
 	}
 
-	// Load and validate project.
-	project, err := s.repo.Projects().FindByID(ctx, p.ProjectID)
+	project, err := s.ResolveTaskCreationProject(ctx, p.UserID, p.ProjectID)
 	if err != nil {
-		return nil, fmt.Errorf("find project: %w", err)
+		return nil, err
 	}
-	if project.UserID != p.UserID {
-		return nil, fmt.Errorf("project not owned by user")
-	}
-	if project.Status != model.ProjectStatusActive {
-		return nil, fmt.Errorf("project is not active")
+	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
+		return nil, err
 	}
 
 	taskType := project.Platform
+	if p.FrozenTaskType != "" {
+		taskType = p.FrozenTaskType
+	}
 	videoCfg, videoInput, err := p.videoPayloadForTask(taskType)
 	if err != nil {
 		return nil, err
+	}
+	if model.IsVideoPlatform(taskType) {
+		videoInput = videoInputWithAttachmentReferences(p.Prompt, videoInput, p.InputAttachments)
 	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
 		return nil, fmt.Errorf("%w: montage_input can only be set on montage tasks", ErrMontageInput)
@@ -512,7 +603,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	// stay per-task. Done before validation so selected modules are available to
 	// the agent; modules shape later MCP usage, not the creation-time base fee.
 	effectiveImageModelKey := p.ImageModelKey
-	if taskType == model.PlatformEcommerce {
+	if taskType == model.PlatformEcommerce && !p.PreserveFrozenConfig {
 		projEc := project.EcommerceDefaults.Data()
 		if p.Ecommerce == nil {
 			p.Ecommerce = &model.EcommerceConfig{}
@@ -538,17 +629,19 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
-		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
-			Config:          s.montageCfg,
-			TaskType:        taskType,
-			LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
-			CloudAvailable:  s.montageCloudAvailable(),
-			AssetsCloudSafe: true,
-		})
-		if err != nil {
-			return nil, err
+		if !p.PreserveFrozenConfig {
+			target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+				Config:          s.montageCfg,
+				TaskType:        taskType,
+				LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
+				CloudAvailable:  s.montageCloudAvailable(),
+				AssetsCloudSafe: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			p.ExecutionTarget = target
 		}
-		p.ExecutionTarget = target
 	}
 	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(videoInput, p.InputAttachments) {
 		return nil, fmt.Errorf("videoeditor task requires at least one source video")
@@ -625,7 +718,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		// to the agent's auto-research path. The generation skill respects an
 		// already-set topic, so it will not re-claim during execution.
 		taskPrompt := p.Prompt
-		if taskPrompt == "" && s.topicPoolSvc != nil &&
+		if taskPrompt == "" && !p.PreserveFrozenConfig && s.topicPoolSvc != nil &&
 			(taskType == model.PlatformArticle || taskType == model.PlatformSeednote || taskType == model.PlatformMoments) {
 			claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, p.UserID, p.ProjectID, taskID)
 			if claimErr != nil {
@@ -665,7 +758,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Prompt:                   taskPrompt,
 			ImageRatio:               p.ImageRatio,
 			ImageModelKey:            effectiveImageModelKey,
-			ReferenceImageURL:        p.ReferenceImageURL,
+			ReferenceImageAssetID:    p.ReferenceImageAssetID,
 			InputSourceTaskID:        p.InputSourceTaskID,
 			SkipReferenceImage:       p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:                p.Watermark != nil && *p.Watermark,
@@ -702,6 +795,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 				task.SetVideoInput(videoInputFromTaskConfig(taskPrompt, videoCfg))
 			} else if model.IsVideoCreatorPlatform(taskType) && strings.TrimSpace(taskPrompt) != "" {
 				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
+			}
+			if p.FrozenVideoConfig != nil {
+				task.SetVideoConfig(*p.FrozenVideoConfig)
 			}
 		}
 		if model.IsMontagePlatform(taskType) && p.MontageInput != nil {
@@ -782,11 +878,70 @@ func hasVideoEditorSourceVideo(input *model.VideoInput, attachments []model.Entr
 		}
 	}
 	for _, attachment := range attachments {
-		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && strings.TrimSpace(attachment.URL) != "" {
+		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && entryAttachmentStorageSource(attachment) != "" {
 			return true
 		}
 	}
 	return false
+}
+
+func videoInputWithAttachmentReferences(prompt string, input *model.VideoInput, attachments []model.EntryAttachment) *model.VideoInput {
+	attachmentRefs := videoReferencesFromEntryAttachments(attachments)
+	if input == nil && len(attachmentRefs) == 0 {
+		return nil
+	}
+	result := model.VideoInput{Brief: strings.TrimSpace(prompt)}
+	if input != nil {
+		result = *input
+		if strings.TrimSpace(result.Brief) == "" {
+			result.Brief = strings.TrimSpace(prompt)
+		}
+		result.References = cloneVideoReferenceAssets(input.References)
+	}
+	seen := make(map[string]struct{}, len(result.References)+len(attachmentRefs))
+	for _, ref := range result.References {
+		seen[videoReferenceAssetIdentity(ref)] = struct{}{}
+	}
+	for _, ref := range attachmentRefs {
+		identity := videoReferenceAssetIdentity(ref)
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		result.References = append(result.References, ref)
+	}
+	return &result
+}
+
+func cloneVideoReferenceAssets(references []model.VideoReferenceAsset) []model.VideoReferenceAsset {
+	cloned := make([]model.VideoReferenceAsset, len(references))
+	for i, ref := range references {
+		cloned[i] = ref
+		cloned[i].MustKeep = append([]string(nil), ref.MustKeep...)
+		cloned[i].CanChange = append([]string(nil), ref.CanChange...)
+		cloned[i].MustNotTransfer = append([]string(nil), ref.MustNotTransfer...)
+	}
+	return cloned
+}
+
+func videoReferenceAssetIdentity(ref model.VideoReferenceAsset) string {
+	typ := strings.ToLower(strings.TrimSpace(ref.Type))
+	switch typ {
+	case "image":
+		typ = VideoReferenceImage
+	case "audio":
+		typ = VideoReferenceAudio
+	case "video":
+		typ = VideoReferenceVideo
+	case "text":
+		typ = VideoReferenceText
+	}
+	return strings.Join([]string{
+		typ,
+		strings.TrimSpace(ref.URL),
+		strings.TrimSpace(ref.TaskFileID),
+		strings.TrimSpace(ref.Text),
+	}, "\x00")
 }
 
 func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) VideoGenerationRequest {
@@ -926,6 +1081,9 @@ func videoTaskSegmentsFromPlan(segments []VideoGenerationSegmentPlan) []model.Vi
 // reference image, watermark, goal, seednote image composition) flow to the task.
 // Project/account style config is frozen from the project into ProjectSnapshot.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("plan is required")
+	}
 	taskID := generateTaskID()
 
 	prompt := plan.Prompt
@@ -933,23 +1091,29 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		prompt = plan.Title
 	}
 
-	// Try to claim a topic from the topic pool if no prompt is set.
-	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {
-		claimed, err := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ProjectID, taskID)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
-		} else if claimed != "" {
-			prompt = claimed
-		}
-	}
-
 	// Derive task type from the project if ProjectID is set.
 	taskType := plan.Type
 	var project *model.Project
 	if plan.ProjectID != "" {
-		if found, err := s.repo.Projects().FindByID(ctx, plan.ProjectID); err == nil {
-			project = found
-			taskType = found.Platform
+		found, err := s.ResolveTaskCreationProject(ctx, plan.UserID, plan.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve plan project: %w", err)
+		}
+		project = found
+		taskType = found.Platform
+	}
+	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil); err != nil {
+		return nil, err
+	}
+
+	// Claim topics only after every persisted reference identity has been
+	// validated, so an invalid plan cannot consume a topic early.
+	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {
+		claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ProjectID, taskID)
+		if claimErr != nil {
+			s.logger.Warn().Err(claimErr).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
+		} else if claimed != "" {
+			prompt = claimed
 		}
 	}
 	var planVideoInput *model.VideoInput
@@ -1011,7 +1175,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Status:                   model.TaskStatusPending,
 		Prompt:                   prompt,
 		ImageModelKey:            plan.ImageModelKey,
-		ReferenceImageURL:        plan.ReferenceImageURL,
+		ReferenceImageAssetID:    plan.ReferenceImageAssetID,
 		SkipReferenceImage:       plan.SkipReferenceImage,
 		Watermark:                plan.Watermark,
 		Goal:                     plan.Goal,
@@ -1378,11 +1542,42 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 		}
 	}
 
+	fallbackClaimToken := ""
+	fallbackClaimOwned := false
+	releaseFallbackClaim := func(releaseCtx context.Context) {
+		if !fallbackClaimOwned {
+			return
+		}
+		if _, err := s.pubsub.ReleaseFallbackClaim(releaseCtx, task.ID, fallbackClaimToken); err != nil {
+			s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("failed to release fallback dispatch claim")
+		}
+		fallbackClaimOwned = false
+	}
+	defer func() {
+		releaseFallbackClaim(context.Background())
+	}()
+	if s.enqueuer == nil && s.pubsub != nil && s.pubsub.Available() {
+		fallbackClaimToken = uuid.NewString()
+		claimTTL := s.executionTimeout + s.persistTimeout + time.Minute
+		if claimTTL <= 0 {
+			claimTTL = time.Minute
+		}
+		claimed, err := s.pubsub.TryClaimFallback(ctx, task.ID, fallbackClaimToken, claimTTL)
+		if err != nil {
+			return fmt.Errorf("claim fallback task dispatch: %w", err)
+		}
+		if !claimed {
+			s.logger.Info().Str("task_id", task.ID).Msg("fallback task dispatch already claimed")
+			return nil
+		}
+		fallbackClaimOwned = true
+	}
+
 	// Check per-project concurrency limit.
+	slotReserved := false
 	if project != nil {
 		maxConcurrent := s.effectiveProjectMaxConcurrent(project)
 
-		slotReserved := false
 		if s.pubsub != nil && s.pubsub.Available() {
 			// Atomic check-and-reserve via Redis to prevent TOCTOU races.
 			count, ok, err := s.pubsub.TryReserveSlot(ctx, project.ID, maxConcurrent)
@@ -1463,33 +1658,83 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 
 	// Fallback: run in goroutine if no enqueuer.
 	s.logger.Warn().Str("task_id", task.ID).Msg("no enqueuer available, running task in goroutine")
-	go func() {
+	goroutineClaimToken := fallbackClaimToken
+	goroutineOwnsClaim := fallbackClaimOwned
+	fallbackClaimOwned = false
+	go func(ownsFallbackClaim bool, claimToken string) {
+		if ownsFallbackClaim {
+			defer func() {
+				if _, err := s.pubsub.ReleaseFallbackClaim(context.Background(), task.ID, claimToken); err != nil {
+					s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("failed to release fallback dispatch claim")
+				}
+			}()
+		}
+		ownsSlot := slotReserved && s.pubsub != nil && s.pubsub.Available() && project != nil
+		releaseOwnedSlot := func(ctx context.Context) {
+			if !ownsSlot {
+				return
+			}
+			s.pubsub.ReleaseSlot(ctx, project.ID)
+			ownsSlot = false
+		}
+		releaseOwnedSlotIfNonTerminal := func(ctx context.Context) {
+			if !ownsSlot {
+				return
+			}
+			current, err := s.repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("could not resolve fallback slot ownership; leaving count for periodic reconciliation")
+				ownsSlot = false
+				return
+			}
+			if model.IsTerminalTaskStatus(current.Status) {
+				ownsSlot = false
+				return
+			}
+			releaseOwnedSlot(ctx)
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				s.logger.Error().
 					Str("task_id", task.ID).
 					Interface("panic", r).
 					Msg("panic recovered in fallback task execution")
-				if s.pubsub != nil && s.pubsub.Available() && project != nil {
-					s.pubsub.ReleaseSlot(context.Background(), project.ID)
-				}
+				releaseOwnedSlot(context.Background())
 			}
 		}()
 		fallbackCtx, cancel := context.WithTimeout(context.Background(), s.executionTimeout)
 		defer cancel()
-		// Set running status before execution to prevent plan checker from re-dispatching.
-		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
-		if !swapped {
-			// Task was cancelled or already running; release the reserved slot.
-			if s.pubsub != nil && s.pubsub.Available() && project != nil {
-				s.pubsub.ReleaseSlot(fallbackCtx, project.ID)
-			}
+		referenceAsset, preparation, err := s.preparePendingExecution(fallbackCtx, task)
+		if err != nil {
+			releaseOwnedSlot(fallbackCtx)
+			s.logger.Error().Err(err).
+				Str("task_id", task.ID).
+				Msg("fallback task preparation failed; task remains pending for periodic dispatch retry")
 			return
 		}
-		if err := s.HandleExecution(fallbackCtx, task, project); err != nil {
+		if preparation == pendingExecutionTerminalized {
+			ownsSlot = false
+			return
+		}
+		if preparation != pendingExecutionReady {
+			releaseOwnedSlotIfNonTerminal(fallbackCtx)
+			return
+		}
+		// Set running status before execution to prevent plan checker from re-dispatching.
+		swapped, swapErr := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
+		if swapErr != nil {
+			releaseOwnedSlot(fallbackCtx)
+			s.logger.Error().Err(swapErr).Str("task_id", task.ID).Msg("fallback task running claim failed; task remains pending for periodic dispatch retry")
+			return
+		}
+		if !swapped {
+			releaseOwnedSlotIfNonTerminal(fallbackCtx)
+			return
+		}
+		if err := s.handleExecution(fallbackCtx, task, project, referenceAsset, true); err != nil {
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task execution failed")
 		}
-	}()
+	}(goroutineOwnsClaim, goroutineClaimToken)
 	return nil
 }
 
