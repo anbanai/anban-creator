@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: wcflink-state
-  namespace: ${namespace}
+  namespace: "${namespace}"
   labels:
     app: wcflink
 spec:
@@ -10,13 +10,13 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: ${wcflink_storage_size}
+      storage: "${wcflink_storage_size}"
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: wcflink
-  namespace: ${namespace}
+  namespace: "${namespace}"
   labels:
     app: wcflink
 spec:
@@ -31,11 +31,14 @@ spec:
       labels:
         app: wcflink
     spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/arch: amd64
       imagePullSecrets:
-        - name: ${imagePullSecret}
+        - name: "${imagePullSecret}"
       containers:
         - name: wcflink
-          image: ${wcflink_image_repo}
+          image: "${wcflink_image_repo}"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -85,7 +88,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: wcflink
-  namespace: ${namespace}
+  namespace: "${namespace}"
   labels:
     app: wcflink
 spec:
@@ -102,7 +105,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: seednote-data
-  namespace: ${namespace}
+  namespace: "${namespace}"
   labels:
     app: seednote
 spec:
@@ -110,13 +113,13 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: ${seednote_storage_size}
+      storage: "${seednote_storage_size}"
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: seednote
-  namespace: ${namespace}
+  namespace: "${namespace}"
   labels:
     app: seednote
 spec:
@@ -131,13 +134,12 @@ spec:
       labels:
         app: seednote
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/arch: amd64
-      imagePullSecrets:
-        - name: ${imagePullSecret}
       containers:
         - name: seednote
-          image: ${seednote_image_repo}
+          image: "${seednote_image_repo}"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -145,9 +147,15 @@ spec:
               protocol: TCP
           env:
             - name: ROD_BROWSER_BIN
-              value: "/usr/bin/google-chrome"
+              value: "/usr/local/bin/cloak-chromium"
             - name: COOKIES_PATH
               value: "/app/data/cookies.json"
+            - name: HOME
+              value: "/app/data/home"
+            - name: XDG_CACHE_HOME
+              value: "/app/data/cache"
+            - name: XDG_CONFIG_HOME
+              value: "/app/data/config"
           readinessProbe:
             httpGet:
               path: /health
@@ -170,20 +178,26 @@ spec:
               memory: 1Gi
             limits:
               cpu: "2"
-              memory: 2Gi
+              memory: 4Gi
           volumeMounts:
             - name: seednote-data
               mountPath: /app/data
+            - name: browser-shm
+              mountPath: /dev/shm
       volumes:
         - name: seednote-data
           persistentVolumeClaim:
             claimName: seednote-data
+        - name: browser-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: seednote
-  namespace: ${namespace}
+  namespace: "${namespace}"
   labels:
     app: seednote
 spec:
