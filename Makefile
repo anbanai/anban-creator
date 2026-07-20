@@ -7,6 +7,8 @@ BINARY      := anban-creator-server
 BINDIR      := bin
 AGENT_IMAGE := anban-creator-agent:latest
 SERVER_IMAGE := anban-creator-server:latest
+WCFLINK_IMAGE := anban-creator-wcflink:latest
+STUDIO_IMAGE := anban-creator-studio:latest
 SERVER_CONFIG := server/config.yaml
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
@@ -14,7 +16,7 @@ SERVER_CONFIG := server/config.yaml
         agent-build-native plugin-binaries \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-server-image docker-images
+        docker-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images
 
 # Default target
 all: server-build
@@ -108,7 +110,7 @@ web-build:
 # Docker targets
 # ---------------------------------------------------------------------------
 
-# Start all services (MySQL, Redis, agent, server)
+# Start all Compose services (MySQL, Redis, wcfLink, server, Studio)
 docker-up:
 	@docker compose up -d
 
@@ -134,8 +136,20 @@ docker-server-image:
 	docker build -f Dockerfile.server -t $(SERVER_IMAGE) . && \
 	echo "Image build complete: $(SERVER_IMAGE)"
 
-# Build both images
-docker-images: docker-agent-image docker-server-image
+# Build the wcfLink sidecar Docker image from its pinned upstream source.
+docker-wcflink-image:
+	@echo "Building $(WCFLINK_IMAGE)..." && \
+	docker build -f Dockerfile.wcflink -t $(WCFLINK_IMAGE) . && \
+	echo "Image build complete: $(WCFLINK_IMAGE)"
+
+# Build the Studio Docker image from the repository-root build context.
+docker-studio-image:
+	@echo "Building $(STUDIO_IMAGE)..." && \
+	docker build -f Dockerfile.studio -t $(STUDIO_IMAGE) . && \
+	echo "Image build complete: $(STUDIO_IMAGE)"
+
+# Build all supported images.
+docker-images: docker-agent-image docker-server-image docker-wcflink-image docker-studio-image
 
 # Backward-compatible alias (builds agent image)
 docker-image: docker-agent-image
@@ -199,12 +213,14 @@ help:
 	@echo "  make web-build     - Build frontend for production (bun)"
 	@echo ""
 	@echo "Docker targets:"
-	@echo "  make docker-up          - Start all services (MySQL, Redis, agent, server)"
+	@echo "  make docker-up          - Start all Compose services"
 	@echo "  make docker-down        - Stop containers"
 	@echo "  make docker-logs        - Follow container logs"
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-server-image - Build server image (Go binary)"
-	@echo "  make docker-images      - Build both images"
+	@echo "  make docker-wcflink-image - Build wcfLink sidecar image"
+	@echo "  make docker-studio-image - Build Studio image (Bun + nginx)"
+	@echo "  make docker-images      - Build all supported images"
 	@echo "  make docker-image       - Build agent image (alias)"
 	@echo ""
 	@echo "Desktop (Tauri) targets:"

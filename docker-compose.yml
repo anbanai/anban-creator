@@ -71,7 +71,7 @@ services:
   wcflink:
     build:
       context: .
-      dockerfile: docker/wcflink.Dockerfile
+      dockerfile: Dockerfile.wcflink
       args:
         WCFLINK_REF: refs/tags/v0.1.0
         WCFLINK_COMMIT: fb0999b81043c91e8fddb780eb2ecf03f1f8588f
@@ -162,8 +162,10 @@ services:
   # serves both static assets and the proxied API — access via http://localhost:8081.
   studio:
     build:
-      context: ./studio
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Dockerfile.studio
+      args:
+        VITE_API_BASE_URL: /api/v1
     image: anban-creator-studio:latest
     # Local-build-only image (no registry artifact). Without this compose probes
     # Docker Hub for anban-creator-studio and may abort on a registry hiccup instead
