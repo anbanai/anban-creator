@@ -178,56 +178,63 @@ func (p *LocalProvider) StatObject(_ context.Context, key string) (*ObjectInfo, 
 }
 
 // PromoteObject conditionally copies a local object to an immutable final path.
-func (p *LocalProvider) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) error {
+func (p *LocalProvider) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) (*ObjectInfo, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	sourcePath, err := p.safePath(sourceKey)
 	if err != nil {
-		return fmt.Errorf("invalid source key: %w", err)
+		return nil, fmt.Errorf("invalid source key: %w", err)
 	}
 	finalPath, err := p.safePath(finalKey)
 	if err != nil {
-		return fmt.Errorf("invalid final key: %w", err)
+		return nil, fmt.Errorf("invalid final key: %w", err)
 	}
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("%w: %s", ErrObjectNotFound, sourceKey)
+			return nil, fmt.Errorf("%w: %s", ErrObjectNotFound, sourceKey)
 		}
-		return fmt.Errorf("open promotion source %s: %w", sourcePath, err)
+		return nil, fmt.Errorf("open promotion source %s: %w", sourcePath, err)
 	}
 	defer source.Close()
+	sourceInfo, err := source.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat promotion source %s: %w", sourcePath, err)
+	}
 	hash := sha256.New()
 	if _, err := io.Copy(hash, source); err != nil {
-		return fmt.Errorf("hash promotion source %s: %w", sourcePath, err)
+		return nil, fmt.Errorf("hash promotion source %s: %w", sourcePath, err)
 	}
 	actualETag := fmt.Sprintf("\"%x\"", hash.Sum(nil))
 	if actualETag != expectedETag {
-		return fmt.Errorf("%w: %s", ErrPromotionPreconditionFailed, sourceKey)
+		return nil, fmt.Errorf("%w: %s", ErrPromotionPreconditionFailed, sourceKey)
 	}
 	if _, err := source.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("rewind promotion source %s: %w", sourcePath, err)
+		return nil, fmt.Errorf("rewind promotion source %s: %w", sourcePath, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
-		return fmt.Errorf("create final object directory: %w", err)
+		return nil, fmt.Errorf("create final object directory: %w", err)
 	}
 	dest, err := os.OpenFile(finalPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
-			return fmt.Errorf("%w: %s", ErrObjectAlreadyExists, finalKey)
+			return nil, fmt.Errorf("%w: %s", ErrObjectAlreadyExists, finalKey)
 		}
-		return fmt.Errorf("create final object %s: %w", finalPath, err)
+		return nil, fmt.Errorf("create final object %s: %w", finalPath, err)
 	}
 	if _, err := io.Copy(dest, source); err != nil {
 		_ = dest.Close()
 		_ = os.Remove(finalPath)
-		return fmt.Errorf("copy final object %s: %w", finalPath, err)
+		return nil, fmt.Errorf("copy final object %s: %w", finalPath, err)
 	}
 	if err := dest.Close(); err != nil {
 		_ = os.Remove(finalPath)
-		return fmt.Errorf("close final object %s: %w", finalPath, err)
+		return nil, fmt.Errorf("close final object %s: %w", finalPath, err)
 	}
-	return nil
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(finalPath)))
+	return &ObjectInfo{
+		Key: finalKey, Size: sourceInfo.Size(), MimeType: contentType, ContentType: contentType, ETag: actualETag,
+	}, nil
 }
 
 // ReadObject reads a local object with a hard memory bound.

@@ -45,9 +45,10 @@ type BoundedObjectReader interface {
 }
 
 // ConditionalObjectPromoter copies a verified source object to an immutable
-// destination only when the source still has the expected ETag.
+// destination only when the source still has the expected ETag, and returns
+// the destination identity reported by the storage backend.
 type ConditionalObjectPromoter interface {
-	PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) error
+	PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) (*ObjectInfo, error)
 }
 
 // ReadObject requires an explicitly bounded reader. Security-sensitive callers

@@ -14,6 +14,7 @@ CREATE TABLE `upload_sessions` (
   `expires_at` datetime(3) NOT NULL,
   `finalization_token` char(36) DEFAULT NULL,
   `finalization_claimed_at` datetime(3) DEFAULT NULL,
+  `promotion_source_etag` varchar(255) NOT NULL DEFAULT '',
   `finalization_etag` varchar(255) NOT NULL DEFAULT '',
   `asset_id` char(36) DEFAULT NULL,
   `finalized_at` datetime(3) DEFAULT NULL,

@@ -169,16 +169,16 @@ func (f *fakeStorageProvider) StatObject(ctx context.Context, key string) (*stor
 	return nil, storage.ErrObjectNotFound
 }
 
-func (f *fakeStorageProvider) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) error {
+func (f *fakeStorageProvider) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) (*storage.ObjectInfo, error) {
 	if f.objects[finalKey] != nil {
-		return storage.ErrObjectAlreadyExists
+		return nil, storage.ErrObjectAlreadyExists
 	}
 	info, err := f.StatObject(ctx, sourceKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if info.ETag != expectedETag {
-		return storage.ErrPromotionPreconditionFailed
+		return nil, storage.ErrPromotionPreconditionFailed
 	}
 	if f.objects == nil {
 		f.objects = map[string]*storage.ObjectInfo{}
@@ -192,7 +192,7 @@ func (f *fakeStorageProvider) PromoteObject(ctx context.Context, sourceKey, fina
 		}
 		f.data[finalKey] = append([]byte(nil), data...)
 	}
-	return nil
+	return &copy, nil
 }
 
 func uploadSessionStatStore(repo repository.UploadSessionRepository) *fakeStorageProvider {

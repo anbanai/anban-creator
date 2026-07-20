@@ -31,32 +31,36 @@ type fakeDirectUploadStore struct {
 	statHook    func(context.Context, string)
 	promoteHook func(sourceKey, finalKey string)
 	promoteErr  error
+	promoteETag string
 	promoted    []string
 	readCalls   int
 }
 
-func (s *fakeDirectUploadStore) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) error {
+func (s *fakeDirectUploadStore) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) (*storage.ObjectInfo, error) {
 	if s.promoteHook != nil {
 		s.promoteHook(sourceKey, finalKey)
 	}
 	if s.promoteErr != nil {
-		return s.promoteErr
+		return nil, s.promoteErr
 	}
 	if s.objects[finalKey] != nil {
-		return storage.ErrObjectAlreadyExists
+		return nil, storage.ErrObjectAlreadyExists
 	}
 	source := s.objects[sourceKey]
 	if source == nil {
-		return storage.ErrObjectNotFound
+		return nil, storage.ErrObjectNotFound
 	}
 	if source.ETag != expectedETag {
-		return storage.ErrPromotionPreconditionFailed
+		return nil, storage.ErrPromotionPreconditionFailed
 	}
 	copy := *source
 	copy.Key = finalKey
+	if s.promoteETag != "" {
+		copy.ETag = s.promoteETag
+	}
 	s.objects[finalKey] = &copy
 	s.promoted = append(s.promoted, sourceKey+"->"+finalKey)
-	return nil
+	return &copy, nil
 }
 
 func (s *fakeDirectUploadStore) Read(_ context.Context, _ string) ([]byte, error) {
@@ -112,6 +116,10 @@ func (r *fakeUploadSessionRepo) FindByID(context.Context, string) (*model.Upload
 }
 
 func (r *fakeUploadSessionRepo) ClaimFinalization(context.Context, string, string, time.Time, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeUploadSessionRepo) RecordPromotionSourceETag(context.Context, string, string, string) (bool, error) {
 	return false, nil
 }
 
@@ -184,7 +192,7 @@ func matchingUploadSessionStore(session *model.UploadSession) *fakeDirectUploadS
 	}}
 }
 
-func TestFinalizeUploadSessionCreatesAssetWithoutReadingBody(t *testing.T) {
+func TestFinalizeUploadSessionUsesPromotionTargetETagWithoutReadingBody(t *testing.T) {
 	now := time.Date(2026, 7, 17, 15, 0, 0, 0, time.UTC)
 	repo := newDirectUploadTestRepository(t)
 	session := &model.UploadSession{
@@ -195,6 +203,7 @@ func TestFinalizeUploadSessionCreatesAssetWithoutReadingBody(t *testing.T) {
 	}
 	seedUploadSession(t, repo, session)
 	store := matchingUploadSessionStore(session)
+	store.promoteETag = "etag-final-session-1"
 
 	asset, err := FinalizeUploadSession(t.Context(), store, repo, FinalizeUploadRequest{
 		SessionID: session.ID, UserID: session.UserID,
@@ -206,8 +215,12 @@ func TestFinalizeUploadSessionCreatesAssetWithoutReadingBody(t *testing.T) {
 	if asset.ID != session.ID || asset.StorageKey != "assets/users/user-1/session-1/ref.png" {
 		t.Fatalf("asset identity = %#v", asset)
 	}
-	if asset.UserID != session.UserID || asset.Purpose != session.Purpose || asset.FileName != session.FileName || asset.ContentType != session.ContentType || asset.Size != session.Size || asset.ETag != "etag-session-1" {
+	if asset.UserID != session.UserID || asset.Purpose != session.Purpose || asset.FileName != session.FileName || asset.ContentType != session.ContentType || asset.Size != session.Size || asset.ETag != "etag-final-session-1" {
 		t.Fatalf("asset metadata = %#v", asset)
+	}
+	finalized, err := repo.UploadSessions().FindByID(t.Context(), session.ID)
+	if err != nil || finalized.PromotionSourceETag != "etag-session-1" || finalized.FinalizationETag != asset.ETag || finalized.PromotionSourceETag == finalized.FinalizationETag {
+		t.Fatalf("source/target fingerprints = %#v, %v", finalized, err)
 	}
 	if store.readCalls != 0 {
 		t.Fatalf("storage body reads = %d, want 0", store.readCalls)
@@ -221,6 +234,28 @@ func TestFinalizeUploadSessionCreatesAssetWithoutReadingBody(t *testing.T) {
 type failFirstUploadFinalizationTx struct {
 	repository.Repository
 	fail bool
+}
+
+type uploadSessionRepositoryOverride struct {
+	repository.Repository
+	uploadSessions repository.UploadSessionRepository
+}
+
+func (r *uploadSessionRepositoryOverride) UploadSessions() repository.UploadSessionRepository {
+	return r.uploadSessions
+}
+
+type failFirstTargetFingerprintRepository struct {
+	repository.UploadSessionRepository
+	fail bool
+}
+
+func (r *failFirstTargetFingerprintRepository) RecordFinalizationETag(ctx context.Context, id, token, etag string) (bool, error) {
+	if r.fail {
+		r.fail = false
+		return false, errors.New("injected target fingerprint database failure")
+	}
+	return r.UploadSessionRepository.RecordFinalizationETag(ctx, id, token, etag)
 }
 
 func (r *failFirstUploadFinalizationTx) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
@@ -248,13 +283,14 @@ func TestFinalizeUploadSessionCompletesAfterCopyBeforeDatabaseFailure(t *testing
 	}
 	seedUploadSession(t, repo, session)
 	store := matchingUploadSessionStore(session)
+	store.promoteETag = "etag-final-session-retry"
 	req := FinalizeUploadRequest{SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: now}
 
 	if _, err := FinalizeUploadSession(t.Context(), store, repo, req); err == nil {
 		t.Fatal("first finalization unexpectedly succeeded")
 	}
 	failed, err := baseRepo.UploadSessions().FindByID(t.Context(), session.ID)
-	if err != nil || failed.FinalizationETag != "etag-session-retry" {
+	if err != nil || failed.FinalizationETag != "etag-final-session-retry" {
 		t.Fatalf("failed finalization fingerprint = %#v, %v", failed, err)
 	}
 	delete(store.objects, session.StagingKey)
@@ -270,8 +306,52 @@ func TestFinalizeUploadSessionCompletesAfterCopyBeforeDatabaseFailure(t *testing
 		t.Fatalf("successful promotions = %#v, want one immutable copy", store.promoted)
 	}
 	finalized, err := baseRepo.UploadSessions().FindByID(t.Context(), session.ID)
-	if err != nil || finalized.Status != model.UploadSessionFinalized || finalized.AssetID != session.ID || finalized.FinalizationETag != "etag-session-retry" {
+	if err != nil || finalized.Status != model.UploadSessionFinalized || finalized.AssetID != session.ID || finalized.FinalizationETag != "etag-final-session-retry" || asset.ETag != finalized.FinalizationETag {
 		t.Fatalf("recovered upload session = %#v, %v", finalized, err)
+	}
+}
+
+func TestFinalizeUploadSessionRecoversWhenTargetFingerprintWriteFailsAfterCopy(t *testing.T) {
+	now := time.Date(2026, 7, 17, 15, 20, 0, 0, time.UTC)
+	baseRepo := newDirectUploadTestRepository(t)
+	sessions := &failFirstTargetFingerprintRepository{UploadSessionRepository: baseRepo.UploadSessions(), fail: true}
+	repo := &uploadSessionRepositoryOverride{Repository: baseRepo, uploadSessions: sessions}
+	session := &model.UploadSession{
+		ID: "session-fingerprint-retry", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
+		StagingKey: "uploads/pending/user-1/session-fingerprint-retry/ref.png", FileName: "ref.png",
+		ContentType: "image/png", Size: 1024, Status: model.UploadSessionPending,
+		ExpiresAt: now.Add(time.Hour),
+	}
+	seedUploadSession(t, repo, session)
+	store := matchingUploadSessionStore(session)
+	store.promoteETag = "etag-target-fingerprint-retry"
+	req := FinalizeUploadRequest{SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: now}
+
+	if _, err := FinalizeUploadSession(t.Context(), store, repo, req); !errors.Is(err, ErrUploadSessionUnavailable) {
+		t.Fatalf("first finalization error = %v, want ErrUploadSessionUnavailable", err)
+	}
+	interrupted, err := baseRepo.UploadSessions().FindByID(t.Context(), session.ID)
+	if err != nil || interrupted.Status != model.UploadSessionPending || interrupted.PromotionSourceETag != "etag-session-fingerprint-retry" || interrupted.FinalizationETag != "" {
+		t.Fatalf("interrupted fingerprints = %#v, %v", interrupted, err)
+	}
+	if store.objects["assets/users/user-1/session-fingerprint-retry/ref.png"] == nil {
+		t.Fatal("promotion target missing after target fingerprint write failure")
+	}
+
+	req.Now = now.Add(2 * time.Hour)
+	asset, err := FinalizeUploadSession(t.Context(), store, repo, req)
+	if err != nil {
+		t.Fatalf("retry FinalizeUploadSession: %v", err)
+	}
+	if asset.ETag != "etag-target-fingerprint-retry" {
+		t.Fatalf("recovered asset ETag = %q", asset.ETag)
+	}
+	if len(store.promoted) != 1 {
+		t.Fatalf("promotions = %#v, want one immutable copy", store.promoted)
+	}
+	finalized, err := baseRepo.UploadSessions().FindByID(t.Context(), session.ID)
+	if err != nil || finalized.Status != model.UploadSessionFinalized || finalized.FinalizationETag != asset.ETag {
+		t.Fatalf("recovered session = %#v, %v", finalized, err)
 	}
 }
 
@@ -313,7 +393,8 @@ func TestFinalizeUploadSessionRejectsUnverifiedExistingFinalObject(t *testing.T)
 func TestCleanupExpiredUploadSessionsRecoversPromotedFinalObject(t *testing.T) {
 	now := time.Date(2026, 7, 18, 10, 30, 0, 0, time.UTC)
 	baseRepo := newDirectUploadTestRepository(t)
-	repo := &failFirstUploadFinalizationTx{Repository: baseRepo, fail: true}
+	sessions := &failFirstTargetFingerprintRepository{UploadSessionRepository: baseRepo.UploadSessions(), fail: true}
+	repo := &uploadSessionRepositoryOverride{Repository: baseRepo, uploadSessions: sessions}
 	session := &model.UploadSession{
 		ID: "cleanup-recovery", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
 		StagingKey: "uploads/pending/user-1/cleanup-recovery/ref.png", FileName: "ref.png",
@@ -322,12 +403,12 @@ func TestCleanupExpiredUploadSessionsRecoversPromotedFinalObject(t *testing.T) {
 	}
 	seedUploadSession(t, repo, session)
 	store := matchingUploadSessionStore(session)
+	store.promoteETag = "etag-final-cleanup-recovery"
 	if _, err := FinalizeUploadSession(t.Context(), store, repo, FinalizeUploadRequest{
 		SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: now,
 	}); err == nil {
 		t.Fatal("first finalization unexpectedly succeeded")
 	}
-	delete(store.objects, session.StagingKey)
 	cleanupAt := now.Add(2 * time.Hour)
 	cleaned, err := CleanupExpiredUploadSessions(t.Context(), store, baseRepo, cleanupAt, 10)
 	if err != nil {
@@ -337,7 +418,7 @@ func TestCleanupExpiredUploadSessionsRecoversPromotedFinalObject(t *testing.T) {
 		t.Fatalf("expired sessions cleaned = %d, want recovery instead", cleaned)
 	}
 	found, err := baseRepo.UploadSessions().FindByID(t.Context(), session.ID)
-	if err != nil || found.Status != model.UploadSessionFinalized || found.AssetID != session.ID || found.FinalizationETag != "etag-cleanup-recovery" {
+	if err != nil || found.Status != model.UploadSessionFinalized || found.AssetID != session.ID || found.PromotionSourceETag != "etag-cleanup-recovery" || found.FinalizationETag != "etag-final-cleanup-recovery" {
 		t.Fatalf("cleanup recovery session = %#v, %v", found, err)
 	}
 	asset, err := baseRepo.Assets().FindByID(t.Context(), session.ID)

@@ -163,25 +163,29 @@ func (p *OSSProvider) StatObject(ctx context.Context, key string) (*ObjectInfo, 
 }
 
 // PromoteObject conditionally copies an OSS object into an immutable final key.
-func (p *OSSProvider) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) error {
-	_, err := p.bucket.CopyObject(sourceKey, finalKey,
+func (p *OSSProvider) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) (*ObjectInfo, error) {
+	result, err := p.bucket.CopyObject(sourceKey, finalKey,
 		oss.CopySourceIfMatch(expectedETag),
 		oss.ForbidOverWrite(true),
 		oss.WithContext(ctx),
 	)
 	if err == nil {
-		return nil
+		etag := strings.TrimSpace(result.ETag)
+		if etag == "" {
+			return nil, fmt.Errorf("oss promote object %s to %s: target ETag is unavailable", sourceKey, finalKey)
+		}
+		return &ObjectInfo{Key: finalKey, ETag: etag}, nil
 	}
 	var serviceErr oss.ServiceError
 	if errors.As(err, &serviceErr) {
 		switch {
 		case serviceErr.StatusCode == http.StatusPreconditionFailed || serviceErr.Code == "PreconditionFailed":
-			return fmt.Errorf("%w: %s", ErrPromotionPreconditionFailed, sourceKey)
+			return nil, fmt.Errorf("%w: %s", ErrPromotionPreconditionFailed, sourceKey)
 		case serviceErr.StatusCode == http.StatusConflict || serviceErr.Code == "FileAlreadyExists" || serviceErr.Code == "ObjectAlreadyExists":
-			return fmt.Errorf("%w: %s", ErrObjectAlreadyExists, finalKey)
+			return nil, fmt.Errorf("%w: %s", ErrObjectAlreadyExists, finalKey)
 		}
 	}
-	return fmt.Errorf("oss promote object %s to %s: %w", sourceKey, finalKey, err)
+	return nil, fmt.Errorf("oss promote object %s to %s: %w", sourceKey, finalKey, err)
 }
 
 // GetURL returns the public URL for the given key.

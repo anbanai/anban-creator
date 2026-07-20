@@ -220,6 +220,7 @@ type UploadSessionRepository interface {
 	Create(ctx context.Context, session *model.UploadSession) error
 	FindByID(ctx context.Context, id string) (*model.UploadSession, error)
 	ClaimFinalization(ctx context.Context, id, token string, claimedAt, claimStaleBefore time.Time) (bool, error)
+	RecordPromotionSourceETag(ctx context.Context, id, token, etag string) (bool, error)
 	RecordFinalizationETag(ctx context.Context, id, token, etag string) (bool, error)
 	ClaimFinalizationRecovery(ctx context.Context, id, token string, claimedAt, claimStaleBefore time.Time) (bool, error)
 	CompleteFinalization(ctx context.Context, id, token, assetID string, finalizedAt time.Time) (bool, error)

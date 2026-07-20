@@ -49,6 +49,7 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 	required := []string{
 		"CREATE TABLE `upload_sessions`",
 		"UNIQUE KEY `idx_upload_sessions_staging_key` (`staging_key`)",
+		"`promotion_source_etag` varchar(255) NOT NULL DEFAULT ''",
 		"`finalization_etag` varchar(255) NOT NULL DEFAULT ''",
 		"KEY `idx_upload_sessions_user_id` (`user_id`)",
 		"KEY `idx_upload_sessions_purpose` (`purpose`)",

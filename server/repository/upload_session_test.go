@@ -182,10 +182,16 @@ func TestUploadSessionRecordsFinalizationETagWithLeaseToken(t *testing.T) {
 		t.Fatalf("create upload session: %v", err)
 	}
 
-	if recorded, err := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, "lease-old", "etag-verified"); err != nil || recorded {
+	if recorded, err := repo.UploadSessions().RecordPromotionSourceETag(ctx, session.ID, "lease-old", "etag-source"); err != nil || recorded {
+		t.Fatalf("stale token source record = %v, %v; want false, nil", recorded, err)
+	}
+	if recorded, err := repo.UploadSessions().RecordPromotionSourceETag(ctx, session.ID, "lease-current", "etag-source"); err != nil || !recorded {
+		t.Fatalf("current token source record = %v, %v; want true, nil", recorded, err)
+	}
+	if recorded, err := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, "lease-old", "etag-target"); err != nil || recorded {
 		t.Fatalf("stale token record = %v, %v; want false, nil", recorded, err)
 	}
-	if recorded, err := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, "lease-current", "etag-verified"); err != nil || !recorded {
+	if recorded, err := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, "lease-current", "etag-target"); err != nil || !recorded {
 		t.Fatalf("current token record = %v, %v; want true, nil", recorded, err)
 	}
 	if released, err := repo.UploadSessions().ReleaseFinalization(ctx, session.ID, "lease-current"); err != nil || !released {
@@ -195,7 +201,7 @@ func TestUploadSessionRecordsFinalizationETagWithLeaseToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find upload session: %v", err)
 	}
-	if found.Status != model.UploadSessionPending || found.FinalizationETag != "etag-verified" {
+	if found.Status != model.UploadSessionPending || found.PromotionSourceETag != "etag-source" || found.FinalizationETag != "etag-target" {
 		t.Fatalf("released session = %#v; want pending with retained fingerprint", found)
 	}
 }
@@ -232,6 +238,11 @@ func TestUploadSessionFinalizationRecoveryClaimCAS(t *testing.T) {
 			s.ExpiresAt = now
 			s.FinalizationETag = ""
 		}},
+		{name: "source fingerprint before target fingerprint", mutate: func(s *model.UploadSession) {
+			s.ExpiresAt = now
+			s.FinalizationETag = ""
+			s.PromotionSourceETag = "etag-source"
+		}, wantClaim: true},
 		{name: "active expiring cleanup lease", mutate: func(s *model.UploadSession) {
 			s.Status = model.UploadSessionExpiring
 			s.CleanupClaimID = "cleanup-active"

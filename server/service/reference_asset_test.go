@@ -62,22 +62,22 @@ func (s *referenceAssetStore) StatObject(_ context.Context, key string) (*storag
 	copy := *info
 	return &copy, nil
 }
-func (s *referenceAssetStore) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) error {
+func (s *referenceAssetStore) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) (*storage.ObjectInfo, error) {
 	s.promoteCalls++
 	if s.objects[finalKey] != nil {
-		return storage.ErrObjectAlreadyExists
+		return nil, storage.ErrObjectAlreadyExists
 	}
 	source := s.objects[sourceKey]
 	if source == nil {
-		return storage.ErrObjectNotFound
+		return nil, storage.ErrObjectNotFound
 	}
 	if source.ETag != expectedETag {
-		return storage.ErrPromotionPreconditionFailed
+		return nil, storage.ErrPromotionPreconditionFailed
 	}
 	copy := *source
 	copy.Key = finalKey
 	s.objects[finalKey] = &copy
-	return nil
+	return &copy, nil
 }
 
 type providerOnlyReferenceAssetStore struct {

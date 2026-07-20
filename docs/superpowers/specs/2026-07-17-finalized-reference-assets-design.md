@@ -165,19 +165,24 @@ When a form submits an `upload_session_id`, the backend performs:
    requests either observe the same finalized asset or receive a state conflict.
 3. Fetch staging object metadata without reading its body.
 4. Validate exact size and normalized content type against prepared metadata.
-5. Use OSS `CopyObject` with source ETag precondition and destination
+5. Persist the source ETag as the copy precondition, then use OSS `CopyObject`
+   with that source ETag and destination
    `ForbidOverWrite` to create the deterministic final object. File bytes stay
    inside OSS.
-6. Fetch and validate final object metadata.
-7. In one database transaction, insert the immutable `Asset`, attach its ID to
+6. Capture the target ETag returned by the copy, fetch final object metadata,
+   and persist the target ETag as the recovery fingerprint after validating it.
+7. In one database transaction, insert the immutable `Asset` with the target
+   ETag, attach its ID to
    the upload session, and mark the session finalized.
 8. Return the asset ID to the business write transaction.
 9. Delete the staging object best-effort. A lifecycle rule and the existing
    cleanup loop remain the fallback for abandoned or recreated staging objects.
 
-If OSS succeeds but the database transaction fails, retry uses the deterministic
-destination and validates the existing object before completing the database
-state. Finalization is therefore idempotent without overwriting an asset.
+If OSS succeeds but persistence of the target fingerprint or the final database
+transaction fails, retry uses the durable source precondition and deterministic,
+non-overwritable destination to validate the existing object, record its target
+ETag, and complete the database state. Finalization is therefore idempotent
+without assuming source and target ETags are equal.
 
 An unexpired browser credential may still write the staging key after submit,
 but it cannot write the asset namespace. No business record reads staging after

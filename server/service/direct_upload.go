@@ -330,11 +330,16 @@ func FinalizeUploadSession(ctx context.Context, store DirectUploadFinalizationSt
 	finalExists := statErr == nil
 	switch {
 	case finalExists:
-		if strings.TrimSpace(session.FinalizationETag) == "" {
+		if err := validateUploadSessionObjectInfo(session, finalKey, finalInfo); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(session.FinalizationETag) == "" && strings.TrimSpace(session.PromotionSourceETag) == "" {
 			return nil, fmt.Errorf("%w: final object has no persisted fingerprint", ErrUploadSessionObjectInvalid)
 		}
-		if err := validateFinalUploadSessionObject(session, finalKey, session.FinalizationETag, finalInfo); err != nil {
-			return nil, err
+		if strings.TrimSpace(session.FinalizationETag) != "" {
+			if err := validateFinalUploadSessionObject(session, finalKey, session.FinalizationETag, finalInfo); err != nil {
+				return nil, err
+			}
 		}
 	case errors.Is(statErr, storage.ErrObjectNotFound):
 	default:
@@ -374,6 +379,30 @@ func FinalizeUploadSession(ctx context.Context, store DirectUploadFinalizationSt
 		defer releaseCancel()
 		_, _ = repo.UploadSessions().ReleaseFinalization(releaseCtx, session.ID, token)
 	}()
+	if finalExists && strings.TrimSpace(session.FinalizationETag) == "" {
+		stagingInfo, err := statUploadSessionObject(ctx, store, session.StagingKey, "staging recovery")
+		if err != nil {
+			return nil, err
+		}
+		if err := validateUploadSessionObjectInfo(session, session.StagingKey, stagingInfo); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(stagingInfo.ETag) == "" || strings.TrimSpace(stagingInfo.ETag) != strings.TrimSpace(session.PromotionSourceETag) {
+			return nil, fmt.Errorf("%w: staging object changed after promotion", ErrUploadSessionObjectInvalid)
+		}
+		targetETag := strings.TrimSpace(finalInfo.ETag)
+		if targetETag == "" {
+			return nil, fmt.Errorf("%w: final object has no ETag", ErrUploadSessionObjectInvalid)
+		}
+		recorded, recordErr := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, token, targetETag)
+		if recordErr != nil {
+			return nil, fmt.Errorf("%w: record upload fingerprint: %v", ErrUploadSessionUnavailable, recordErr)
+		}
+		if !recorded {
+			return nil, ErrUploadSessionStateConflict
+		}
+		session.FinalizationETag = targetETag
+	}
 
 	if !finalExists {
 		stagingInfo, err := statUploadSessionObject(ctx, store, session.StagingKey, "staging")
@@ -387,30 +416,46 @@ func FinalizeUploadSession(ctx context.Context, store DirectUploadFinalizationSt
 		if verifiedETag == "" {
 			return nil, fmt.Errorf("%w: staging object has no ETag", ErrUploadSessionObjectInvalid)
 		}
-		recorded, recordErr := repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, token, verifiedETag)
+		recorded, recordErr := repo.UploadSessions().RecordPromotionSourceETag(ctx, session.ID, token, verifiedETag)
 		if recordErr != nil {
-			return nil, fmt.Errorf("%w: record upload fingerprint: %v", ErrUploadSessionUnavailable, recordErr)
+			return nil, fmt.Errorf("%w: record promotion source fingerprint: %v", ErrUploadSessionUnavailable, recordErr)
 		}
 		if !recorded {
 			return nil, ErrUploadSessionStateConflict
 		}
-		session.FinalizationETag = verifiedETag
-		if err := store.PromoteObject(ctx, session.StagingKey, finalKey, verifiedETag); err != nil {
+		session.PromotionSourceETag = verifiedETag
+		promotedInfo, promoteErr := store.PromoteObject(ctx, session.StagingKey, finalKey, verifiedETag)
+		if promoteErr != nil {
 			switch {
-			case errors.Is(err, storage.ErrPromotionPreconditionFailed):
+			case errors.Is(promoteErr, storage.ErrPromotionPreconditionFailed):
 				return nil, fmt.Errorf("%w: staging object changed during finalization", ErrUploadSessionObjectInvalid)
-			case errors.Is(err, storage.ErrObjectAlreadyExists):
+			case errors.Is(promoteErr, storage.ErrObjectAlreadyExists):
 			default:
-				return nil, fmt.Errorf("%w: promote upload session object: %v", ErrUploadSessionUnavailable, err)
+				return nil, fmt.Errorf("%w: promote upload session object: %v", ErrUploadSessionUnavailable, promoteErr)
 			}
 		}
 		finalInfo, err = statUploadSessionObject(ctx, store, finalKey, "final")
 		if err != nil {
 			return nil, err
 		}
-		if err := validateFinalUploadSessionObject(session, finalKey, session.FinalizationETag, finalInfo); err != nil {
+		targetETag := strings.TrimSpace(finalInfo.ETag)
+		if promoteErr == nil {
+			if promotedInfo == nil || promotedInfo.Key != finalKey || strings.TrimSpace(promotedInfo.ETag) == "" {
+				return nil, fmt.Errorf("%w: promotion target identity is unavailable", ErrUploadSessionObjectInvalid)
+			}
+			targetETag = strings.TrimSpace(promotedInfo.ETag)
+		}
+		if err := validateFinalUploadSessionObject(session, finalKey, targetETag, finalInfo); err != nil {
 			return nil, err
 		}
+		recorded, recordErr = repo.UploadSessions().RecordFinalizationETag(ctx, session.ID, token, targetETag)
+		if recordErr != nil {
+			return nil, fmt.Errorf("%w: record upload fingerprint: %v", ErrUploadSessionUnavailable, recordErr)
+		}
+		if !recorded {
+			return nil, ErrUploadSessionStateConflict
+		}
+		session.FinalizationETag = targetETag
 	}
 
 	asset := &model.Asset{
@@ -745,7 +790,7 @@ func CleanupExpiredUploadSessions(ctx context.Context, store DirectUploadFinaliz
 		if session == nil {
 			continue
 		}
-		if strings.TrimSpace(session.FinalizationETag) != "" {
+		if strings.TrimSpace(session.FinalizationETag) != "" || strings.TrimSpace(session.PromotionSourceETag) != "" {
 			finalKey, keyErr := finalizedUploadSessionKey(session)
 			if keyErr != nil {
 				return cleaned, fmt.Errorf("%w: %v", ErrUploadSessionObjectInvalid, keyErr)

@@ -139,8 +139,16 @@ func TestLocalProviderPromotesVerifiedObjectImmutably(t *testing.T) {
 	if err != nil || info.ETag == "" {
 		t.Fatalf("StatObject = %#v, %v; want content ETag", info, err)
 	}
-	if err := provider.PromoteObject(ctx, source, final, info.ETag); err != nil {
+	promoted, err := provider.PromoteObject(ctx, source, final, info.ETag)
+	if err != nil {
 		t.Fatalf("PromoteObject: %v", err)
+	}
+	if promoted == nil || promoted.Key != final || promoted.ETag == "" {
+		t.Fatalf("PromoteObject result = %#v, want target object identity", promoted)
+	}
+	finalInfo, err := provider.StatObject(ctx, final)
+	if err != nil || finalInfo.ETag != promoted.ETag {
+		t.Fatalf("target metadata = %#v, %v; want promotion ETag %q", finalInfo, err, promoted.ETag)
 	}
 	if _, err := provider.Upload(ctx, source, strings.NewReader("replaced"), "image/png"); err != nil {
 		t.Fatalf("replace source: %v", err)
@@ -149,14 +157,14 @@ func TestLocalProviderPromotesVerifiedObjectImmutably(t *testing.T) {
 	if err != nil || string(finalData) != "verified" {
 		t.Fatalf("final data = %q, %v; want immutable verified bytes", finalData, err)
 	}
-	if err := provider.PromoteObject(ctx, source, final+".retry", info.ETag); !errors.Is(err, ErrPromotionPreconditionFailed) {
+	if _, err := provider.PromoteObject(ctx, source, final+".retry", info.ETag); !errors.Is(err, ErrPromotionPreconditionFailed) {
 		t.Fatalf("stale promotion error = %v, want ErrPromotionPreconditionFailed", err)
 	}
 	currentInfo, err := provider.StatObject(ctx, source)
 	if err != nil {
 		t.Fatalf("stat replaced source: %v", err)
 	}
-	if err := provider.PromoteObject(ctx, source, final, currentInfo.ETag); !errors.Is(err, ErrObjectAlreadyExists) {
+	if _, err := provider.PromoteObject(ctx, source, final, currentInfo.ETag); !errors.Is(err, ErrObjectAlreadyExists) {
 		t.Fatalf("existing final error = %v, want ErrObjectAlreadyExists", err)
 	}
 }
@@ -166,16 +174,19 @@ func TestOSSProviderPromoteObjectUsesConditionalImmutableCopy(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHeaders = r.Header.Clone()
 		w.Header().Set("Content-Type", "application/xml")
-		_, _ = w.Write([]byte(`<CopyObjectResult><ETag>verified-etag</ETag><LastModified>2026-07-15T00:00:00.000Z</LastModified></CopyObjectResult>`))
+		_, _ = w.Write([]byte(`<CopyObjectResult><ETag>target-etag</ETag><LastModified>2026-07-15T00:00:00.000Z</LastModified></CopyObjectResult>`))
 	}))
 	t.Cleanup(server.Close)
 	provider := newTestOSSProvider(t, server.URL)
 
-	err := provider.PromoteObject(context.Background(), "uploads/pending/user-1/upload-1/input.png", "uploads/finalized/user-1/upload-1/input.png", "verified-etag")
+	promoted, err := provider.PromoteObject(context.Background(), "uploads/pending/user-1/upload-1/input.png", "uploads/finalized/user-1/upload-1/input.png", "source-etag")
 	if err != nil {
 		t.Fatalf("PromoteObject: %v", err)
 	}
-	if got := gotHeaders.Get("X-Oss-Copy-Source-If-Match"); got != "verified-etag" {
+	if promoted == nil || promoted.Key != "uploads/finalized/user-1/upload-1/input.png" || promoted.ETag != "target-etag" {
+		t.Fatalf("PromoteObject result = %#v, want target ETag", promoted)
+	}
+	if got := gotHeaders.Get("X-Oss-Copy-Source-If-Match"); got != "source-etag" {
 		t.Fatalf("copy source If-Match = %q", got)
 	}
 	if got := gotHeaders.Get("X-Oss-Forbid-Overwrite"); got != "true" {
@@ -205,7 +216,7 @@ func TestOSSProviderPromoteObjectClassifiesStructuredFailures(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			provider := newTestOSSProvider(t, server.URL)
-			err := provider.PromoteObject(context.Background(), "source", "final", "etag")
+			_, err := provider.PromoteObject(context.Background(), "source", "final", "etag")
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("PromoteObject error = %v, want %v", err, tt.want)
 			}
@@ -244,7 +255,8 @@ func TestOSSProviderFinalizationOperationsHonorContextCancellation(t *testing.T)
 			return err
 		}},
 		{name: "copy", call: func(ctx context.Context) error {
-			return provider.PromoteObject(ctx, "source.png", "final.png", "etag-object")
+			_, err := provider.PromoteObject(ctx, "source.png", "final.png", "etag-object")
+			return err
 		}},
 		{name: "delete", call: func(ctx context.Context) error {
 			return provider.Delete(ctx, "object.png")
