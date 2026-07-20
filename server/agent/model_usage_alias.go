@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-)
 
-const maxModelUsageAliases = 128
+	"github.com/anbanai/anban-creator/server/model"
+)
 
 func cloneModelUsageAliases(source map[string]ModelUsageIdentity) map[string]ModelUsageIdentity {
 	if len(source) == 0 {
@@ -20,21 +20,7 @@ func cloneModelUsageAliases(source map[string]ModelUsageIdentity) map[string]Mod
 }
 
 func ValidateModelUsageAliases(aliases map[string]ModelUsageIdentity) error {
-	if len(aliases) > maxModelUsageAliases {
-		return fmt.Errorf("model usage alias count exceeds limit")
-	}
-	for raw, identity := range aliases {
-		if raw == "" || strings.TrimSpace(raw) != raw || strings.ContainsAny(raw, "\x00\r\n=") {
-			return fmt.Errorf("model usage alias %q is invalid", raw)
-		}
-		if identity.Provider == "" || strings.TrimSpace(identity.Provider) != identity.Provider || strings.ContainsAny(identity.Provider, "\x00\r\n/") {
-			return fmt.Errorf("model usage alias %q provider is invalid", raw)
-		}
-		if identity.Model == "" || strings.TrimSpace(identity.Model) != identity.Model || strings.ContainsAny(identity.Model, "\x00\r\n") {
-			return fmt.Errorf("model usage alias %q model is invalid", raw)
-		}
-	}
-	return nil
+	return model.ValidateModelUsageAliases(aliases)
 }
 
 func FormatModelUsageAliases(aliases map[string]ModelUsageIdentity) ([]string, error) {

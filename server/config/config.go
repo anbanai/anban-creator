@@ -1283,6 +1283,9 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, "claude.models."+role.role+" must be "+role.expected)
 		}
 	}
+	if err := model.ValidateModelUsageAliases(c.RuntimeModelUsageAliases()); err != nil {
+		errs = append(errs, "claude.model_usage_aliases: "+err.Error())
+	}
 	if c.UsageAliases["doubao-seed-evolving-latest-version"] != "doubao-seed-evolving" {
 		errs = append(errs, "claude.model_usage_aliases.doubao-seed-evolving-latest-version is required and must target doubao-seed-evolving")
 	}
@@ -1308,9 +1311,6 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for raw, canonical := range c.UsageAliases {
-		if raw == "" || strings.TrimSpace(raw) != raw || strings.ContainsAny(raw, "\x00\r\n") {
-			errs = append(errs, "claude.model_usage_aliases contains an invalid raw alias")
-		}
 		if strings.Contains(raw, "[1M]") || strings.Contains(canonical, "[1M]") {
 			errs = append(errs, "claude.model_usage_aliases must not contain [1M]")
 		}

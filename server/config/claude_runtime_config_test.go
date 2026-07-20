@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -154,6 +155,44 @@ func TestClaudeConfigRejectsWrongRoleModels(t *testing.T) {
 			wantError := "claude.models." + test.role + " must be " + test.want
 			if err == nil || !strings.Contains(err.Error(), wantError) {
 				t.Fatalf("NewConfig() error = %v, want containing %q", err, wantError)
+			}
+		})
+	}
+}
+
+func TestClaudeConfigUsesSharedModelUsageAliasValidation(t *testing.T) {
+	manyAliases := strings.Builder{}
+	manyAliases.WriteString("  model_usage_aliases:\n    doubao-seed-evolving-latest-version: doubao-seed-evolving\n")
+	for i := 0; i < 129; i++ {
+		manyAliases.WriteString("    raw-")
+		manyAliases.WriteString(strconv.Itoa(i))
+		manyAliases.WriteString(": doubao-seed-evolving\n")
+	}
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "raw alias contains equals",
+			body: strings.Replace(validClaudeConfigYAML,
+				"    doubao-seed-evolving-latest-version: doubao-seed-evolving\n",
+				"    doubao-seed-evolving-latest-version: doubao-seed-evolving\n    \"bad=raw\": doubao-seed-evolving\n", 1),
+			want: `model usage alias "bad=raw" is invalid`,
+		},
+		{
+			name: "alias count exceeds limit",
+			body: strings.Replace(validClaudeConfigYAML,
+				"  model_usage_aliases:\n    doubao-seed-evolving-latest-version: doubao-seed-evolving\n",
+				manyAliases.String(), 1),
+			want: "model usage alias count exceeds limit",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := loadClaudeConfigYAML(t, test.body)
+			if err == nil || !strings.Contains(err.Error(), "claude.model_usage_aliases") || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("NewConfig() error = %v, want claude.model_usage_aliases context containing %q", err, test.want)
 			}
 		})
 	}
