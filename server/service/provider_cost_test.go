@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -52,6 +56,174 @@ func TestProviderCostCalculatorRejectsNegativeUsageAndCostOverflow(t *testing.T)
 	}
 	if _, err := calculator.TokenCost("volcengine_ark/doubao-seed-evolving", TokenUsage{Output: int64(^uint64(0) >> 1)}); err == nil {
 		t.Fatal("overflowing micro-CNY cost was accepted")
+	}
+}
+
+func TestProviderCostCalculatorOutputPixelTiersAreExact(t *testing.T) {
+	calculator := NewProviderCostCalculator(providerCostBundleWithPixels().Costs)
+	for _, test := range []struct {
+		name          string
+		width, height int64
+		wantPixels    int64
+		wantMicroCNY  int64
+		wantTier      int
+	}{
+		{name: "at bounded tier", width: 2_360, height: 1_000, wantPixels: 2_360_000, wantMicroCNY: 300_000, wantTier: 0},
+		{name: "above bounded tier", width: 2_361, height: 1_000, wantPixels: 2_361_000, wantMicroCNY: 600_000, wantTier: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := calculator.OutputPixelCost("volcengine_ark/doubao-seedream-5-0-pro-260628", OutputPixelUsage{Width: test.width, Height: test.height})
+			if err != nil {
+				t.Fatalf("OutputPixelCost: %v", err)
+			}
+			if got.Pixels != test.wantPixels || got.MicroCNY != test.wantMicroCNY || got.SelectedTier.Index != test.wantTier {
+				t.Fatalf("calculation = %#v", got)
+			}
+		})
+	}
+}
+
+func TestProviderCostCalculatorOutputPixelRejectsInvalidAndOverflow(t *testing.T) {
+	calculator := NewProviderCostCalculator(providerCostBundleWithPixels().Costs)
+	for _, usage := range []OutputPixelUsage{{Width: 0, Height: 1}, {Width: -1, Height: 1}, {Width: int64(^uint64(0) >> 1), Height: 2}} {
+		if _, err := calculator.OutputPixelCost("volcengine_ark/doubao-seedream-5-0-pro-260628", usage); err == nil {
+			t.Fatalf("invalid usage %#v was accepted", usage)
+		}
+	}
+	if _, err := calculator.OutputPixelCost("volcengine_ark/missing", OutputPixelUsage{Width: 1, Height: 1}); err == nil {
+		t.Fatal("missing pixel price was accepted")
+	}
+}
+
+func TestProviderCostFinalizeExecutionPrecomputesAllModelsBeforePersistence(t *testing.T) {
+	fixture := newProviderCostFixture(t)
+	_, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), FinalizeExecutionTokenCostsRequest{
+		ExecutionID: "exec-batch", TaskID: "task-1", CatalogID: "cost-v1",
+		Entries: []ExecutionTokenCostEntry{
+			{Provider: "volcengine_ark", Model: "doubao-seed-evolving", IdempotencyKey: "exec-batch/evolving", Source: string(model.BillingProviderCostSourceClaudeResult), Usage: TokenUsage{Input: 1}},
+			{Provider: "volcengine_ark", Model: "missing-model", IdempotencyKey: "exec-batch/missing", Source: string(model.BillingProviderCostSourceClaudeResult), Usage: TokenUsage{Input: 1}},
+		},
+	})
+	if err == nil {
+		t.Fatal("batch with missing second model price succeeded")
+	}
+	assertProviderCostExecutionEmpty(t, fixture, "exec-batch")
+}
+
+func TestProviderCostFinalizeExecutionRejectsDuplicateProviderModel(t *testing.T) {
+	fixture := newProviderCostFixture(t)
+	_, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), FinalizeExecutionTokenCostsRequest{
+		ExecutionID: "exec-duplicate", TaskID: "task-1", CatalogID: "cost-v1",
+		Entries: []ExecutionTokenCostEntry{
+			{Provider: "volcengine_ark", Model: "doubao-seed-evolving", IdempotencyKey: "first", Source: string(model.BillingProviderCostSourceClaudeResult), Usage: TokenUsage{Input: 1}},
+			{Provider: "volcengine_ark", Model: "doubao-seed-evolving", IdempotencyKey: "second", Source: string(model.BillingProviderCostSourceClaudeResult), Usage: TokenUsage{Input: 1}},
+		},
+	})
+	if err == nil {
+		t.Fatal("duplicate provider/model batch succeeded")
+	}
+	assertProviderCostExecutionEmpty(t, fixture, "exec-duplicate")
+}
+
+func TestProviderCostFinalizeExecutionRejectsMoreThan128Models(t *testing.T) {
+	fixture := newProviderCostFixture(t)
+	entries := make([]ExecutionTokenCostEntry, 129)
+	for index := range entries {
+		entries[index] = ExecutionTokenCostEntry{
+			Provider: "provider", Model: fmt.Sprintf("model-%d", index), IdempotencyKey: fmt.Sprintf("key-%d", index),
+			Source: string(model.BillingProviderCostSourceClaudeResult), Usage: TokenUsage{Input: 1},
+		}
+	}
+	_, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), FinalizeExecutionTokenCostsRequest{
+		ExecutionID: "exec-too-many", TaskID: "task-1", CatalogID: "cost-v1", Entries: entries,
+	})
+	if err == nil || !strings.Contains(err.Error(), "128") {
+		t.Fatalf("129-entry batch error = %v, want limit error", err)
+	}
+	assertProviderCostExecutionEmpty(t, fixture, "exec-too-many")
+}
+
+func TestProviderCostFinalizeExecutionRecordsAllModelsThenReconcilesOnce(t *testing.T) {
+	fixture := newProviderCostFixtureWithBundle(t, providerCostBundleWithTurbo())
+	req := executionTokenBatchRequest("exec-batch")
+	first, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), req)
+	if err != nil {
+		t.Fatalf("FinalizeExecutionTokenCosts: %v", err)
+	}
+	if len(first) != 2 || first[0].Model == first[1].Model {
+		t.Fatalf("events = %#v", first)
+	}
+	status, err := fixture.costRepo.FindExecutionCostStatus(context.Background(), "exec-batch")
+	if err != nil || status.Status != model.BillingProviderCostStatusReconciled {
+		t.Fatalf("status = %#v, %v", status, err)
+	}
+	replayed, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), req)
+	if err != nil {
+		t.Fatalf("batch replay: %v", err)
+	}
+	if len(replayed) != 2 || replayed[0].ID != first[0].ID || replayed[1].ID != first[1].ID {
+		t.Fatalf("batch replay = %#v, want original IDs", replayed)
+	}
+}
+
+func TestProviderCostFinalizeExecutionConcurrentReplay(t *testing.T) {
+	fixture := newProviderCostFixtureWithBundle(t, providerCostBundleWithTurbo())
+	req := executionTokenBatchRequest("exec-concurrent")
+	const workers = 4
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), req)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent replay: %v", err)
+		}
+	}
+	events, err := fixture.costRepo.ListEventsByExecution(context.Background(), "exec-concurrent")
+	if err != nil || len(events) != 2 {
+		t.Fatalf("events = %#v, %v", events, err)
+	}
+}
+
+func TestProviderCostRecordOutputPixelsUsesRequestIdentityWithoutExecutionStatus(t *testing.T) {
+	fixture := newProviderCostFixtureWithBundle(t, providerCostBundleWithPixels())
+	req := RecordOutputPixelCostRequest{
+		TaskID: "task-1", Provider: "volcengine_ark", Model: "doubao-seedream-5-0-pro-260628",
+		ProviderRequestID: "image-request-1", CatalogID: "cost-v1", IdempotencyKey: "image-request-1",
+		Width: 2_360, Height: 1_000, Source: string(model.BillingProviderCostSourceProviderResponse),
+	}
+	first, err := fixture.service.RecordOutputPixelCost(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RecordOutputPixelCost: %v", err)
+	}
+	if first.ExecutionID != "" || first.ProviderRequestID != req.ProviderRequestID || first.CostMicroCNY != 300_000 {
+		t.Fatalf("pixel event = %#v", first)
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal(first.UsageEvidence, &evidence); err != nil {
+		t.Fatalf("decode evidence: %v", err)
+	}
+	if len(evidence) != 4 || evidence["kind"] != "output_pixels" || evidence["width"] != float64(2_360) || evidence["height"] != float64(1_000) || evidence["pixels"] != float64(2_360_000) {
+		t.Fatalf("unsafe or incomplete pixel evidence = %#v", evidence)
+	}
+	if _, err := fixture.costRepo.FindExecutionCostStatus(context.Background(), "image-request-1"); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("request event execution status error = %v, want not found", err)
+	}
+	replayed, err := fixture.service.RecordOutputPixelCost(context.Background(), req)
+	if err != nil || replayed.ID != first.ID {
+		t.Fatalf("pixel replay = %#v, %v", replayed, err)
+	}
+	req.Width++
+	if _, err := fixture.service.RecordOutputPixelCost(context.Background(), req); !errors.Is(err, repository.ErrProviderCostConflict) {
+		t.Fatalf("pixel drift error = %v, want conflict", err)
 	}
 }
 
@@ -182,6 +354,10 @@ type providerCostFixture struct {
 }
 
 func newProviderCostFixture(t *testing.T) providerCostFixture {
+	return newProviderCostFixtureWithBundle(t, providerCostBundle())
+}
+
+func newProviderCostFixtureWithBundle(t *testing.T, bundle *billing.Bundle) providerCostFixture {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -190,12 +366,17 @@ func newProviderCostFixture(t *testing.T) providerCostFixture {
 	if err := model.AutoMigrate(db); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("database pool: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	account := model.BillingWalletAccount{UserID: "user-1", PaidCredits: 7_000, PromotionalCredits: 800, DebtCredits: 300, Version: 9}
 	if err := db.Create(&account).Error; err != nil {
 		t.Fatalf("create wallet: %v", err)
 	}
 	costRepo := repository.NewBillingCostRepository(db)
-	return providerCostFixture{db: db, costRepo: costRepo, service: NewProviderCostService(costRepo, providerCostBundle())}
+	return providerCostFixture{db: db, costRepo: costRepo, service: NewProviderCostService(costRepo, bundle)}
 }
 
 type walletCostSnapshot struct {
@@ -228,4 +409,45 @@ func providerCostBundle() *billing.Bundle {
 			},
 		},
 	}}
+}
+
+func providerCostBundleWithTurbo() *billing.Bundle {
+	bundle := providerCostBundle()
+	bundle.Costs.Models["volcengine_ark/doubao-seed-2-1-turbo-260628"] = billing.ModelCostConfig{
+		PricingType: "token", Currency: "CNY", Unit: 1_000_000,
+		Input: 3_000_000, CacheReadInput: 600_000, CacheCreationInput: 3_000_000, Output: 15_000_000,
+		OperatorEvidence: "test-turbo-price", EffectiveAt: time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC),
+	}
+	return bundle
+}
+
+func providerCostBundleWithPixels() *billing.Bundle {
+	bundle := providerCostBundle()
+	bundle.Costs.Models["volcengine_ark/doubao-seedream-5-0-pro-260628"] = billing.ModelCostConfig{
+		PricingType: "output_pixel_tier", Currency: "CNY",
+		Tiers:            []billing.CostTier{{MaxPixels: 2_360_000, Price: 300_000}, {Price: 600_000}},
+		OperatorEvidence: "test-pixel-price", EffectiveAt: time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC),
+	}
+	return bundle
+}
+
+func executionTokenBatchRequest(executionID string) FinalizeExecutionTokenCostsRequest {
+	return FinalizeExecutionTokenCostsRequest{
+		ExecutionID: executionID, TaskID: "task-1", CatalogID: "cost-v1",
+		Entries: []ExecutionTokenCostEntry{
+			{Provider: "volcengine_ark", Model: "doubao-seed-evolving", IdempotencyKey: executionID + "/evolving", Source: string(model.BillingProviderCostSourceClaudeResult), Usage: TokenUsage{Input: 4_807, CacheRead: 7_792, Output: 198}},
+			{Provider: "volcengine_ark", Model: "doubao-seed-2-1-turbo-260628", IdempotencyKey: executionID + "/turbo", Source: string(model.BillingProviderCostSourceClaudeResult), Usage: TokenUsage{Input: 9, Output: 2}},
+		},
+	}
+}
+
+func assertProviderCostExecutionEmpty(t *testing.T, fixture providerCostFixture, executionID string) {
+	t.Helper()
+	events, err := fixture.costRepo.ListEventsByExecution(context.Background(), executionID)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("events = %#v, %v, want empty", events, err)
+	}
+	if _, err := fixture.costRepo.FindExecutionCostStatus(context.Background(), executionID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("execution status error = %v, want not found", err)
+	}
 }

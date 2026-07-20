@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"strings"
 	"time"
@@ -23,6 +24,11 @@ type TokenUsage struct {
 	CacheRead     int64 `json:"cache_read_input_tokens"`
 	CacheCreation int64 `json:"cache_creation_input_tokens"`
 	Output        int64 `json:"output_tokens"`
+}
+
+type OutputPixelUsage struct {
+	Width  int64 `json:"width"`
+	Height int64 `json:"height"`
 }
 
 type TokenCostCategoryNumerators struct {
@@ -58,6 +64,32 @@ type TokenCostCalculation struct {
 	Rounding                 string                      `json:"rounding"`
 	OperatorEvidence         string                      `json:"operator_evidence"`
 	EffectiveAt              time.Time                   `json:"effective_at"`
+}
+
+type OutputPixelTierSnapshot struct {
+	Index     int   `json:"index"`
+	MaxPixels int64 `json:"max_pixels"`
+	Price     int64 `json:"price_micro_currency"`
+}
+
+type OutputPixelCostCalculation struct {
+	Version                  int                       `json:"version"`
+	CatalogID                string                    `json:"catalog_id"`
+	ModelID                  string                    `json:"model_id"`
+	PricingType              string                    `json:"pricing_type"`
+	Currency                 string                    `json:"currency"`
+	CurrencyRateMicroCNY     int64                     `json:"currency_rate_micro_cny"`
+	Width                    int64                     `json:"width"`
+	Height                   int64                     `json:"height"`
+	Pixels                   int64                     `json:"pixels"`
+	Tiers                    []OutputPixelTierSnapshot `json:"tiers"`
+	SelectedTier             OutputPixelTierSnapshot   `json:"selected_tier"`
+	CNYConversionNumerator   string                    `json:"cny_conversion_numerator"`
+	CNYConversionDenominator string                    `json:"cny_conversion_denominator"`
+	MicroCNY                 int64                     `json:"cost_micro_cny"`
+	Rounding                 string                    `json:"rounding"`
+	OperatorEvidence         string                    `json:"operator_evidence"`
+	EffectiveAt              time.Time                 `json:"effective_at"`
 }
 
 type ProviderCostCalculator struct {
@@ -127,6 +159,60 @@ func (c *ProviderCostCalculator) TokenCost(modelID string, usage TokenUsage) (To
 	}, nil
 }
 
+func (c *ProviderCostCalculator) OutputPixelCost(modelID string, usage OutputPixelUsage) (OutputPixelCostCalculation, error) {
+	if c == nil {
+		return OutputPixelCostCalculation{}, errors.New("provider cost calculator is required")
+	}
+	price, ok := c.catalog.Models[modelID]
+	if !ok {
+		return OutputPixelCostCalculation{}, fmt.Errorf("provider cost model %q is not in catalog %q", modelID, c.catalog.CatalogID)
+	}
+	if price.PricingType != "output_pixel_tier" || len(price.Tiers) == 0 {
+		return OutputPixelCostCalculation{}, fmt.Errorf("provider cost model %q is not output-pixel-tier priced", modelID)
+	}
+	if usage.Width <= 0 || usage.Height <= 0 || usage.Width > math.MaxInt64/usage.Height {
+		return OutputPixelCostCalculation{}, errors.New("provider output pixel dimensions must be positive and non-overflowing")
+	}
+	pixels := usage.Width * usage.Height
+	rate, ok := c.catalog.CurrencyRates[price.Currency]
+	if !ok || rate <= 0 {
+		return OutputPixelCostCalculation{}, fmt.Errorf("provider cost currency %q has no positive CNY rate", price.Currency)
+	}
+	tiers := make([]OutputPixelTierSnapshot, 0, len(price.Tiers))
+	selected := OutputPixelTierSnapshot{Index: -1}
+	var previousMax int64
+	for index, tier := range price.Tiers {
+		last := index == len(price.Tiers)-1
+		if tier.Price <= 0 || (!last && (tier.MaxPixels <= previousMax || tier.MaxPixels <= 0)) || (last && tier.MaxPixels != 0) {
+			return OutputPixelCostCalculation{}, fmt.Errorf("provider cost model %q has invalid output pixel tiers", modelID)
+		}
+		snapshot := OutputPixelTierSnapshot{Index: index, MaxPixels: tier.MaxPixels, Price: int64(tier.Price)}
+		tiers = append(tiers, snapshot)
+		if selected.Index < 0 && (tier.MaxPixels == 0 || pixels <= tier.MaxPixels) {
+			selected = snapshot
+		}
+		if tier.MaxPixels > 0 {
+			previousMax = tier.MaxPixels
+		}
+	}
+	if selected.Index < 0 {
+		return OutputPixelCostCalculation{}, fmt.Errorf("provider cost model %q has no output pixel tier for %d pixels", modelID, pixels)
+	}
+	numerator := new(big.Int).Mul(big.NewInt(selected.Price), big.NewInt(int64(rate)))
+	denominator := big.NewInt(1_000_000)
+	cost := ceilPositiveQuotient(numerator, denominator)
+	if !cost.IsInt64() || cost.Sign() < 0 {
+		return OutputPixelCostCalculation{}, errors.New("provider output pixel cost overflows signed micro-CNY")
+	}
+	return OutputPixelCostCalculation{
+		Version: 1, CatalogID: c.catalog.CatalogID, ModelID: modelID, PricingType: price.PricingType,
+		Currency: price.Currency, CurrencyRateMicroCNY: int64(rate), Width: usage.Width, Height: usage.Height, Pixels: pixels,
+		Tiers: tiers, SelectedTier: selected, CNYConversionNumerator: numerator.String(),
+		CNYConversionDenominator: denominator.String(), MicroCNY: cost.Int64(),
+		Rounding: "ceil_once_per_provider_event", OperatorEvidence: price.OperatorEvidence, EffectiveAt: price.EffectiveAt,
+	}, nil
+}
+
 func ceilPositiveQuotient(numerator, denominator *big.Int) *big.Int {
 	quotient, remainder := new(big.Int), new(big.Int)
 	quotient.QuoRem(numerator, denominator, remainder)
@@ -147,6 +233,33 @@ type RecordTokenCostRequest struct {
 	Source         string
 }
 
+type ExecutionTokenCostEntry struct {
+	Provider       string
+	Model          string
+	IdempotencyKey string
+	Usage          TokenUsage
+	Source         string
+}
+
+type FinalizeExecutionTokenCostsRequest struct {
+	ExecutionID string
+	TaskID      string
+	CatalogID   string
+	Entries     []ExecutionTokenCostEntry
+}
+
+type RecordOutputPixelCostRequest struct {
+	TaskID            string
+	Provider          string
+	Model             string
+	ProviderRequestID string
+	CatalogID         string
+	IdempotencyKey    string
+	Width             int64
+	Height            int64
+	Source            string
+}
+
 type AdjustmentRequest struct {
 	OriginalEventID   string
 	IdempotencyKey    string
@@ -160,6 +273,13 @@ type tokenUsageEvidence struct {
 	CacheReadInputTokens     int64  `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int64  `json:"cache_creation_input_tokens"`
 	OutputTokens             int64  `json:"output_tokens"`
+}
+
+type outputPixelEvidence struct {
+	Kind   string `json:"kind"`
+	Width  int64  `json:"width"`
+	Height int64  `json:"height"`
+	Pixels int64  `json:"pixels"`
 }
 
 type invoiceAdjustmentEvidence struct {
@@ -181,6 +301,8 @@ type ProviderCostService struct {
 	catalogID  string
 }
 
+const maxExecutionTokenCostEntries = 128
+
 func NewProviderCostService(repo repository.BillingCostRepository, bundle *billing.Bundle) *ProviderCostService {
 	service := &ProviderCostService{repo: repo}
 	if bundle != nil {
@@ -190,21 +312,64 @@ func NewProviderCostService(repo repository.BillingCostRepository, bundle *billi
 	return service
 }
 
+// RecordTokenUsage finalizes a deliberately single-model execution. Terminal
+// Claude modelUsage, which may contain parent and child models, must use
+// FinalizeExecutionTokenCosts so all models and the status commit atomically.
 func (s *ProviderCostService) RecordTokenUsage(ctx context.Context, req RecordTokenCostRequest) (*model.BillingProviderCostEvent, error) {
+	result, err := s.FinalizeExecutionTokenCosts(ctx, FinalizeExecutionTokenCostsRequest{
+		ExecutionID: req.ExecutionID, TaskID: req.TaskID, CatalogID: req.CatalogID,
+		Entries: []ExecutionTokenCostEntry{{
+			Provider: req.Provider, Model: req.Model, IdempotencyKey: req.IdempotencyKey,
+			Usage: req.Usage, Source: req.Source,
+		}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result[0], nil
+}
+
+func (s *ProviderCostService) FinalizeExecutionTokenCosts(ctx context.Context, req FinalizeExecutionTokenCostsRequest) ([]*model.BillingProviderCostEvent, error) {
 	if s == nil || s.repo == nil || s.calculator == nil {
 		return nil, errors.New("provider cost service is not configured")
 	}
-	req.ExecutionID = strings.TrimSpace(req.ExecutionID)
-	req.TaskID = strings.TrimSpace(req.TaskID)
-	req.Provider = strings.TrimSpace(req.Provider)
-	req.Model = strings.TrimSpace(req.Model)
-	req.CatalogID = strings.TrimSpace(req.CatalogID)
-	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
-	if req.ExecutionID == "" || req.Provider == "" || req.Model == "" || req.IdempotencyKey == "" {
-		return nil, errors.New("provider token cost requires execution, provider, model, and idempotency identities")
+	req.ExecutionID, req.TaskID, req.CatalogID = strings.TrimSpace(req.ExecutionID), strings.TrimSpace(req.TaskID), strings.TrimSpace(req.CatalogID)
+	if req.ExecutionID == "" || len(req.Entries) == 0 {
+		return nil, errors.New("provider token cost finalization requires execution identity and model entries")
+	}
+	if len(req.Entries) > maxExecutionTokenCostEntries {
+		return nil, fmt.Errorf("provider token cost finalization supports at most %d model entries", maxExecutionTokenCostEntries)
 	}
 	if req.CatalogID != s.catalogID {
 		return nil, fmt.Errorf("provider token cost catalog %q does not match active catalog %q", req.CatalogID, s.catalogID)
+	}
+	events := make([]*model.BillingProviderCostEvent, 0, len(req.Entries))
+	seenModels := make(map[[2]string]struct{}, len(req.Entries))
+	for _, entry := range req.Entries {
+		identity := [2]string{strings.TrimSpace(entry.Provider), strings.TrimSpace(entry.Model)}
+		if _, exists := seenModels[identity]; exists {
+			return nil, fmt.Errorf("provider token cost finalization contains duplicate provider/model %q/%q", identity[0], identity[1])
+		}
+		seenModels[identity] = struct{}{}
+		event, err := s.buildTokenCostEvent(RecordTokenCostRequest{
+			ExecutionID: req.ExecutionID, TaskID: req.TaskID, Provider: entry.Provider, Model: entry.Model,
+			CatalogID: req.CatalogID, IdempotencyKey: entry.IdempotencyKey, Usage: entry.Usage, Source: entry.Source,
+		})
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	status := &model.BillingExecutionCostStatus{
+		ExecutionID: req.ExecutionID, TaskID: req.TaskID, Status: model.BillingProviderCostStatusReconciled,
+	}
+	return s.repo.AppendEventsAndUpsertExecutionCostStatus(ctx, events, status)
+}
+
+func (s *ProviderCostService) buildTokenCostEvent(req RecordTokenCostRequest) (*model.BillingProviderCostEvent, error) {
+	req.Provider, req.Model, req.IdempotencyKey = strings.TrimSpace(req.Provider), strings.TrimSpace(req.Model), strings.TrimSpace(req.IdempotencyKey)
+	if req.Provider == "" || req.Model == "" || req.IdempotencyKey == "" {
+		return nil, errors.New("provider token cost requires provider, model, and idempotency identities")
 	}
 	source := model.BillingProviderCostSource(strings.TrimSpace(req.Source))
 	switch source {
@@ -250,10 +415,59 @@ func (s *ProviderCostService) RecordTokenUsage(ctx context.Context, req RecordTo
 		Source: source, Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: calculation.MicroCNY,
 		UsageEvidence: datatypes.JSON(evidenceJSON), CalculationSnapshot: datatypes.JSON(calculationJSON),
 	}
-	status := &model.BillingExecutionCostStatus{
-		ExecutionID: req.ExecutionID, TaskID: req.TaskID, Status: model.BillingProviderCostStatusReconciled,
+	return event, nil
+}
+
+func (s *ProviderCostService) RecordOutputPixelCost(ctx context.Context, req RecordOutputPixelCostRequest) (*model.BillingProviderCostEvent, error) {
+	if s == nil || s.repo == nil || s.calculator == nil {
+		return nil, errors.New("provider cost service is not configured")
 	}
-	return s.repo.AppendEventAndUpsertExecutionCostStatus(ctx, event, status)
+	req.TaskID, req.Provider, req.Model = strings.TrimSpace(req.TaskID), strings.TrimSpace(req.Provider), strings.TrimSpace(req.Model)
+	req.ProviderRequestID, req.CatalogID = strings.TrimSpace(req.ProviderRequestID), strings.TrimSpace(req.CatalogID)
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	if req.Provider == "" || req.Model == "" || req.ProviderRequestID == "" || req.IdempotencyKey == "" {
+		return nil, errors.New("provider output pixel cost requires provider, model, request, and idempotency identities")
+	}
+	if req.CatalogID != s.catalogID {
+		return nil, fmt.Errorf("provider output pixel cost catalog %q does not match active catalog %q", req.CatalogID, s.catalogID)
+	}
+	source := model.BillingProviderCostSource(strings.TrimSpace(req.Source))
+	if source != model.BillingProviderCostSourceProviderResponse && source != model.BillingProviderCostSourceManualReconciliation {
+		return nil, fmt.Errorf("unsupported output pixel cost source %q", req.Source)
+	}
+	calculation, err := s.calculator.OutputPixelCost(req.Provider+"/"+req.Model, OutputPixelUsage{Width: req.Width, Height: req.Height})
+	if err != nil {
+		return nil, err
+	}
+	evidence := outputPixelEvidence{Kind: "output_pixels", Width: req.Width, Height: req.Height, Pixels: calculation.Pixels}
+	evidenceJSON, err := json.Marshal(evidence)
+	if err != nil {
+		return nil, fmt.Errorf("marshal provider output pixel evidence: %w", err)
+	}
+	calculationJSON, err := json.Marshal(calculation)
+	if err != nil {
+		return nil, fmt.Errorf("marshal provider output pixel calculation: %w", err)
+	}
+	baseIdentity, err := model.ProviderCostBaseIdentityKey(model.BillingProviderCostIdentityProviderRequest, "", req.Provider, req.Model, req.ProviderRequestID)
+	if err != nil {
+		return nil, err
+	}
+	fingerprint, err := providerCostFingerprint(struct {
+		TaskID, Provider, Model, ProviderRequestID, CatalogID, Source string
+		Width, Height                                                 int64
+	}{req.TaskID, req.Provider, req.Model, req.ProviderRequestID, req.CatalogID, string(source), req.Width, req.Height})
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.AppendEvent(ctx, &model.BillingProviderCostEvent{
+		ID: uuid.NewString(), EventKind: model.BillingProviderCostEventKindBase,
+		IdentityKind: model.BillingProviderCostIdentityProviderRequest, ProviderRequestID: req.ProviderRequestID,
+		TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, CatalogID: req.CatalogID,
+		IdempotencyScope: "provider_cost_base/" + req.Provider, IdempotencyKey: req.IdempotencyKey,
+		BaseIdentityKey: &baseIdentity, RequestFingerprint: fingerprint, Source: source,
+		Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: calculation.MicroCNY,
+		UsageEvidence: datatypes.JSON(evidenceJSON), CalculationSnapshot: datatypes.JSON(calculationJSON),
+	})
 }
 
 func (s *ProviderCostService) MarkExecutionUnreconciled(ctx context.Context, executionID, reason string) error {

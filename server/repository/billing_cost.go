@@ -19,8 +19,10 @@ var ErrProviderCostConflict = errors.New("provider cost idempotency conflict")
 type BillingCostRepository interface {
 	AppendEvent(ctx context.Context, event *model.BillingProviderCostEvent) (*model.BillingProviderCostEvent, error)
 	AppendEventAndUpsertExecutionCostStatus(ctx context.Context, event *model.BillingProviderCostEvent, status *model.BillingExecutionCostStatus) (*model.BillingProviderCostEvent, error)
+	AppendEventsAndUpsertExecutionCostStatus(ctx context.Context, events []*model.BillingProviderCostEvent, status *model.BillingExecutionCostStatus) ([]*model.BillingProviderCostEvent, error)
 	FindEventByID(ctx context.Context, id string) (*model.BillingProviderCostEvent, error)
 	FindEventByIdempotency(ctx context.Context, scope, key string) (*model.BillingProviderCostEvent, error)
+	FindEventByBaseIdentity(ctx context.Context, baseIdentityKey string) (*model.BillingProviderCostEvent, error)
 	ListEventsByExecution(ctx context.Context, executionID string) ([]model.BillingProviderCostEvent, error)
 	UpsertExecutionCostStatus(ctx context.Context, status *model.BillingExecutionCostStatus) error
 	FindExecutionCostStatus(ctx context.Context, executionID string) (*model.BillingExecutionCostStatus, error)
@@ -39,23 +41,47 @@ func (r *billingCostRepository) AppendEvent(ctx context.Context, event *model.Bi
 }
 
 func (r *billingCostRepository) AppendEventAndUpsertExecutionCostStatus(ctx context.Context, event *model.BillingProviderCostEvent, status *model.BillingExecutionCostStatus) (*model.BillingProviderCostEvent, error) {
-	if event == nil || event.IdentityKind != model.BillingProviderCostIdentityExecutionModel {
-		return nil, fmt.Errorf("execution cost status requires an execution/model provider cost event")
+	persisted, err := r.AppendEventsAndUpsertExecutionCostStatus(ctx, []*model.BillingProviderCostEvent{event}, status)
+	if err != nil {
+		return nil, err
 	}
-	if status == nil || strings.TrimSpace(event.ExecutionID) == "" || strings.TrimSpace(event.ExecutionID) != strings.TrimSpace(status.ExecutionID) {
-		return nil, fmt.Errorf("provider cost event and execution status identities must match")
+	return persisted[0], nil
+}
+
+func (r *billingCostRepository) AppendEventsAndUpsertExecutionCostStatus(ctx context.Context, events []*model.BillingProviderCostEvent, status *model.BillingExecutionCostStatus) ([]*model.BillingProviderCostEvent, error) {
+	if len(events) == 0 {
+		return nil, fmt.Errorf("execution cost finalization requires at least one event")
 	}
-	var persisted *model.BillingProviderCostEvent
+	if status == nil || strings.TrimSpace(status.ExecutionID) == "" {
+		return nil, fmt.Errorf("execution cost finalization requires execution status")
+	}
+	for _, event := range events {
+		if event == nil || event.IdentityKind != model.BillingProviderCostIdentityExecutionModel {
+			return nil, fmt.Errorf("execution cost status requires execution/model provider cost events")
+		}
+		if strings.TrimSpace(event.ExecutionID) == "" || strings.TrimSpace(event.ExecutionID) != strings.TrimSpace(status.ExecutionID) {
+			return nil, fmt.Errorf("provider cost events and execution status identities must match")
+		}
+		if err := event.Validate(); err != nil {
+			return nil, fmt.Errorf("validate execution provider cost event: %w", err)
+		}
+	}
+	persisted := make([]*model.BillingProviderCostEvent, 0, len(events))
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		bound := &billingCostRepository{db: tx}
-		var err error
-		persisted, err = bound.appendEvent(ctx, event)
-		if err != nil {
-			return err
+		for _, event := range events {
+			stored, err := bound.appendEvent(ctx, event)
+			if err != nil {
+				return err
+			}
+			persisted = append(persisted, stored)
 		}
 		return bound.UpsertExecutionCostStatus(ctx, status)
 	})
-	return persisted, err
+	if err != nil {
+		return nil, err
+	}
+	return persisted, nil
 }
 
 func (r *billingCostRepository) appendEvent(ctx context.Context, event *model.BillingProviderCostEvent) (*model.BillingProviderCostEvent, error) {
@@ -74,15 +100,32 @@ func (r *billingCostRepository) appendEvent(ctx context.Context, event *model.Bi
 	// rows for both a replay and a no-op insert, so RowsAffected is not semantic.
 	persisted, err := r.FindEventByIdempotency(ctx, event.IdempotencyScope, event.IdempotencyKey)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("%w: insert collided outside the domain identity", ErrProviderCostConflict)
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
 		}
-		return nil, err
+		if event.EventKind != model.BillingProviderCostEventKindBase || event.BaseIdentityKey == nil {
+			return nil, fmt.Errorf("%w: insert collided outside the idempotency identity", ErrProviderCostConflict)
+		}
+		persisted, err = r.FindEventByBaseIdentity(ctx, *event.BaseIdentityKey)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("%w: insert collided outside the domain identity", ErrProviderCostConflict)
+			}
+			return nil, err
+		}
 	}
 	if persisted.RequestFingerprint != event.RequestFingerprint {
 		return nil, fmt.Errorf("%w: scope %q key %q", ErrProviderCostConflict, event.IdempotencyScope, event.IdempotencyKey)
 	}
 	return persisted, nil
+}
+
+func (r *billingCostRepository) FindEventByBaseIdentity(ctx context.Context, baseIdentityKey string) (*model.BillingProviderCostEvent, error) {
+	var event model.BillingProviderCostEvent
+	if err := r.db.WithContext(ctx).Where("base_identity_key = ?", baseIdentityKey).First(&event).Error; err != nil {
+		return nil, err
+	}
+	return &event, nil
 }
 
 func (r *billingCostRepository) FindEventByID(ctx context.Context, id string) (*model.BillingProviderCostEvent, error) {

@@ -17,10 +17,12 @@ func TestProviderCostRepositoryMySQLZeroRowsUsesSemanticReadback(t *testing.T) {
 	for _, test := range []struct {
 		name            string
 		readFingerprint string
+		readByBase      bool
 		wantConflict    bool
 	}{
 		{name: "identical replay", readFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		{name: "parameter drift", readFingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", wantConflict: true},
+		{name: "same base with another key", readFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", readByBase: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			sqlDB, mock, err := sqlmock.New()
@@ -33,12 +35,23 @@ func TestProviderCostRepositoryMySQLZeroRowsUsesSemanticReadback(t *testing.T) {
 				t.Fatalf("open mysql: %v", err)
 			}
 			event := repositoryCostEvent("cost-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+			if test.readByBase {
+				event.IdempotencyKey = "another-key"
+			}
 			mock.ExpectBegin()
 			mock.ExpectExec("INSERT INTO `billing_provider_cost_events`").WillReturnResult(sqlmock.NewResult(0, 0))
 			mock.ExpectCommit()
+			idempotencyRows := sqlmock.NewRows([]string{"id", "request_fingerprint"})
+			if !test.readByBase {
+				idempotencyRows.AddRow("persisted-cost", test.readFingerprint)
+			}
 			mock.ExpectQuery("SELECT .* FROM `billing_provider_cost_events` WHERE idempotency_scope = \\? AND idempotency_key = \\?").
-				WithArgs(event.IdempotencyScope, event.IdempotencyKey, 1).
-				WillReturnRows(sqlmock.NewRows([]string{"id", "request_fingerprint"}).AddRow("persisted-cost", test.readFingerprint))
+				WithArgs(event.IdempotencyScope, event.IdempotencyKey, 1).WillReturnRows(idempotencyRows)
+			if test.readByBase {
+				mock.ExpectQuery("SELECT .* FROM `billing_provider_cost_events` WHERE base_identity_key = \\?").
+					WithArgs(*event.BaseIdentityKey, 1).
+					WillReturnRows(sqlmock.NewRows([]string{"id", "request_fingerprint"}).AddRow("persisted-cost", test.readFingerprint))
+			}
 
 			got, err := NewBillingCostRepository(db).AppendEvent(context.Background(), event)
 			if test.wantConflict {
@@ -88,17 +101,18 @@ func TestProviderCostRepositoryDuplicateIsIdempotentAndDriftConflicts(t *testing
 	}
 }
 
-func TestProviderCostRepositoryBaseIdentityCannotBeBypassedWithAnotherIdempotencyKey(t *testing.T) {
+func TestProviderCostRepositoryBaseIdentityReplayCanUseAnotherIdempotencyKey(t *testing.T) {
 	db := newProviderCostRepositoryDB(t)
 	repo := NewBillingCostRepository(db)
 	ctx := context.Background()
 	if _, err := repo.AppendEvent(ctx, repositoryCostEvent("cost-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")); err != nil {
 		t.Fatalf("append base: %v", err)
 	}
-	duplicate := repositoryCostEvent("cost-2", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	duplicate := repositoryCostEvent("cost-2", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	duplicate.IdempotencyKey = "caller-chose-another-key"
-	if _, err := repo.AppendEvent(ctx, duplicate); !errors.Is(err, ErrProviderCostConflict) {
-		t.Fatalf("same base identity with another idempotency key error = %v, want ErrProviderCostConflict", err)
+	replayed, err := repo.AppendEvent(ctx, duplicate)
+	if err != nil || replayed.ID != "cost-1" {
+		t.Fatalf("same base identity replay = %#v, %v", replayed, err)
 	}
 	var count int64
 	if err := db.Model(&model.BillingProviderCostEvent{}).Count(&count).Error; err != nil {
@@ -106,6 +120,65 @@ func TestProviderCostRepositoryBaseIdentityCannotBeBypassedWithAnotherIdempotenc
 	}
 	if count != 1 {
 		t.Fatalf("base event count = %d, want 1", count)
+	}
+}
+
+func TestProviderCostRepositoryBatchRollsBackFirstEventWhenSecondConflicts(t *testing.T) {
+	db := newProviderCostRepositoryDB(t)
+	repo := NewBillingCostRepository(db)
+	ctx := context.Background()
+	second := repositoryCostEventForModel("existing-second", "exec-batch", "doubao-seed-2-1-turbo-260628", "exec-batch/turbo", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	if _, err := repo.AppendEvent(ctx, second); err != nil {
+		t.Fatalf("seed second identity: %v", err)
+	}
+	first := repositoryCostEventForModel("new-first", "exec-batch", "doubao-seed-evolving", "exec-batch/evolving", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	conflictingSecond := repositoryCostEventForModel("new-second", "exec-batch", "doubao-seed-2-1-turbo-260628", "exec-batch/turbo", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+	status := &model.BillingExecutionCostStatus{ExecutionID: "exec-batch", Status: model.BillingProviderCostStatusReconciled}
+	result, err := repo.AppendEventsAndUpsertExecutionCostStatus(ctx, []*model.BillingProviderCostEvent{first, conflictingSecond}, status)
+	if !errors.Is(err, ErrProviderCostConflict) {
+		t.Fatalf("batch error = %v, want conflict", err)
+	}
+	if result != nil {
+		t.Fatalf("failed batch returned partial result %#v", result)
+	}
+	events, err := repo.ListEventsByExecution(ctx, "exec-batch")
+	if err != nil || len(events) != 1 || events[0].ID != second.ID {
+		t.Fatalf("events after rollback = %#v, %v", events, err)
+	}
+	if _, err := repo.FindExecutionCostStatus(ctx, "exec-batch"); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("status error = %v, want not found", err)
+	}
+}
+
+func TestProviderCostRepositoryBatchRollsBackOnSecondDatabaseFailure(t *testing.T) {
+	db := newProviderCostRepositoryDB(t)
+	repo := NewBillingCostRepository(db)
+	creates := 0
+	callbackName := "test:fail_second_provider_cost_create"
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == (model.BillingProviderCostEvent{}).TableName() {
+			creates++
+			if creates == 2 {
+				tx.AddError(errors.New("injected second create failure"))
+			}
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callbackName) })
+	first := repositoryCostEventForModel("new-first", "exec-db-failure", "doubao-seed-evolving", "exec-db-failure/evolving", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	second := repositoryCostEventForModel("new-second", "exec-db-failure", "doubao-seed-2-1-turbo-260628", "exec-db-failure/turbo", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	status := &model.BillingExecutionCostStatus{ExecutionID: "exec-db-failure", Status: model.BillingProviderCostStatusReconciled}
+	result, err := repo.AppendEventsAndUpsertExecutionCostStatus(context.Background(), []*model.BillingProviderCostEvent{first, second}, status)
+	if err == nil {
+		t.Fatal("injected second create failure succeeded")
+	}
+	if result != nil {
+		t.Fatalf("failed batch returned partial result %#v", result)
+	}
+	events, err := repo.ListEventsByExecution(context.Background(), "exec-db-failure")
+	if err != nil || len(events) != 0 {
+		t.Fatalf("events after database rollback = %#v, %v", events, err)
 	}
 }
 
@@ -208,15 +281,19 @@ func newProviderCostRepositoryDB(t *testing.T) *gorm.DB {
 }
 
 func repositoryCostEvent(id, fingerprint string) *model.BillingProviderCostEvent {
-	baseIdentity, err := model.ProviderCostBaseIdentityKey(model.BillingProviderCostIdentityExecutionModel, "exec-1", "volcengine_ark", "doubao-seed-evolving", "")
+	return repositoryCostEventForModel(id, "exec-1", "doubao-seed-evolving", "exec-1/evolving", fingerprint)
+}
+
+func repositoryCostEventForModel(id, executionID, modelID, idempotencyKey, fingerprint string) *model.BillingProviderCostEvent {
+	baseIdentity, err := model.ProviderCostBaseIdentityKey(model.BillingProviderCostIdentityExecutionModel, executionID, "volcengine_ark", modelID, "")
 	if err != nil {
 		panic(err)
 	}
 	return &model.BillingProviderCostEvent{
 		ID: id, EventKind: model.BillingProviderCostEventKindBase,
 		IdentityKind: model.BillingProviderCostIdentityExecutionModel,
-		ExecutionID:  "exec-1", TaskID: "task-1", Provider: "volcengine_ark", Model: "doubao-seed-evolving",
-		CatalogID: "cost-v1", IdempotencyScope: "execution_model", IdempotencyKey: "exec-1/evolving",
+		ExecutionID:  executionID, TaskID: "task-1", Provider: "volcengine_ark", Model: modelID,
+		CatalogID: "cost-v1", IdempotencyScope: "execution_model", IdempotencyKey: idempotencyKey,
 		BaseIdentityKey:    &baseIdentity,
 		RequestFingerprint: fingerprint, Source: model.BillingProviderCostSourceClaudeResult,
 		Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: 44_133,
