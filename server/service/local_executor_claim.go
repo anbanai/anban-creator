@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 // maxExecutorInfoBytes caps the desktop-supplied diagnostics blob written to the
@@ -83,7 +86,37 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 	if err != nil {
 		return nil, fmt.Errorf("marshal executor info: %w", err)
 	}
-	task, err := s.repo.Tasks().ClaimNextLocalTask(ctx, userID, canonical)
+	var task *model.Task
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		claimed, err := tx.Tasks().ClaimNextLocalTask(ctx, userID, canonical)
+		if err != nil || claimed == nil {
+			task = claimed
+			return err
+		}
+		attempt, err := tx.TaskExecutions().NextAttempt(ctx, claimed.ID)
+		if err != nil {
+			return fmt.Errorf("allocate local task execution attempt: %w", err)
+		}
+		execution := &model.TaskExecution{
+			ID: uuid.NewString(), TaskID: claimed.ID, Attempt: attempt, Target: model.ExecutionTargetLocalClaimed,
+			Status: model.TaskExecutionRunning, Started: true, RuntimeProfile: "local",
+		}
+		now := time.Now()
+		execution.StartedAt = &now
+		if err := tx.TaskExecutions().Create(ctx, execution); err != nil {
+			return fmt.Errorf("create local task execution: %w", err)
+		}
+		won, err := tx.Tasks().SetCurrentExecution(ctx, claimed.ID, execution.ID)
+		if err != nil || !won {
+			if err == nil {
+				err = fmt.Errorf("claimed local task lost execution authority")
+			}
+			return err
+		}
+		claimed.CurrentExecutionID = &execution.ID
+		task = claimed
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -261,15 +294,19 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 	if err != nil {
 		return err
 	}
-	swapped, err := s.repo.Tasks().FinalizeLocalTask(ctx, taskID, model.TaskStatusCompleted, "", resultJSON, result.ModelUsage, result.CostStatus)
+	if task.CurrentExecutionID == nil {
+		return fmt.Errorf("finalize local task as completed: durable execution identity is required")
+	}
+	swapped, err := s.repo.Tasks().FinalizeLocalTask(ctx, taskID, *task.CurrentExecutionID, model.TaskStatusCompleted, "", resultJSON, result.ModelUsage, result.CostStatus)
 	if err != nil {
 		return fmt.Errorf("finalize local task as completed: %w", err)
 	}
 	if !swapped {
 		return nil // already terminal (e.g. reaped as failed meanwhile)
 	}
-	// NOTE: no refund on success — successful tasks consumed the credits, same as
-	// the cloud success path (refundTaskByMode is failure/cancel only).
+	s.recordTerminalProviderCost(ctx, task, result)
+	// Task-admission charges remain posted on success. Provider usage is recorded
+	// separately as internal cost evidence and never becomes a retail deduction.
 	s.releaseSlotAndDispatch(ctx, task)
 	s.logger.Info().Str("task_id", taskID).Bool("published", published).Msg("local task completed")
 	return nil
@@ -282,13 +319,17 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, resul
 	if err != nil {
 		return err
 	}
-	swapped, err := s.repo.Tasks().FinalizeLocalTask(ctx, task.ID, model.TaskStatusFailed, errMsg, resultJSON, result.ModelUsage, result.CostStatus)
+	if task.CurrentExecutionID == nil {
+		return fmt.Errorf("finalize local task as failed: durable execution identity is required")
+	}
+	swapped, err := s.repo.Tasks().FinalizeLocalTask(ctx, task.ID, *task.CurrentExecutionID, model.TaskStatusFailed, errMsg, resultJSON, result.ModelUsage, result.CostStatus)
 	if err != nil {
 		return fmt.Errorf("finalize local task as failed: %w", err)
 	}
 	if !swapped {
 		return nil // already terminal (e.g. reaped meanwhile)
 	}
+	s.recordTerminalProviderCost(ctx, task, result)
 	// Re-read so refundTaskByMode sees the final (failed) status.
 	if t, err := s.repo.Tasks().FindByID(ctx, task.ID); err == nil {
 		s.refundTaskByMode(ctx, t, "local_executor_failed")

@@ -46,6 +46,9 @@ type ImageGeneration struct {
 	FinalCost              int                     `gorm:"default:0" json:"final_cost,omitempty"`
 	BillingMode            string                  `gorm:"type:varchar(32)" json:"billing_mode,omitempty"`
 	BillingStatus          string                  `gorm:"type:varchar(32)" json:"billing_status,omitempty"`
+	BillingQuoteID         string                  `gorm:"type:char(36);index" json:"billing_quote_id,omitempty"`
+	BillingChargeID        string                  `gorm:"type:char(36);uniqueIndex" json:"billing_charge_id,omitempty"`
+	RequestFingerprint     string                  `gorm:"type:char(64);not null" json:"-"`
 	PriceSnapshot          datatypes.JSON          `gorm:"type:json" json:"price_snapshot,omitempty"`
 	StartedAt              *time.Time              `json:"started_at,omitempty"`
 	CompletedAt            *time.Time              `json:"completed_at,omitempty"`

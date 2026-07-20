@@ -67,8 +67,6 @@ type VideoTaskConfig struct {
 	References                []VideoReferenceAsset    `json:"references,omitempty"`
 	RetakeBudget              int                      `json:"retake_budget,omitempty"`
 	DeliveryTargets           []string                 `json:"delivery_targets,omitempty"`
-	EstimatedCredits          int                      `json:"estimated_credits,omitempty"`
-	PricingBreakdown          *VideoPricingBreakdown   `json:"pricing_breakdown,omitempty"`
 }
 
 type VideoTaskSegmentConfig struct {
@@ -81,7 +79,6 @@ type VideoTaskSegmentConfig struct {
 	Model            string `json:"model,omitempty"`
 	Resolution       string `json:"resolution,omitempty"`
 	Ratio            string `json:"ratio,omitempty"`
-	EstimatedCredits int    `json:"estimated_credits,omitempty"`
 }
 
 // VideoReferenceAsset is a Studio/API-facing reference saved on

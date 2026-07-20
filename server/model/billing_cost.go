@@ -241,6 +241,66 @@ func validateProviderCostEvidence(event BillingProviderCostEvent) error {
 		if width <= 0 || height <= 0 || width > math.MaxInt64/height || pixels != width*height {
 			return fmt.Errorf("output pixel provider cost evidence requires consistent positive dimensions and pixels")
 		}
+	case "openai_image_usage":
+		if event.EventKind != BillingProviderCostEventKindBase || event.Source != BillingProviderCostSourceProviderResponse {
+			return fmt.Errorf("OpenAI image usage evidence requires a provider-response base event")
+		}
+		var evidence struct {
+			Kind                   string `json:"kind"`
+			TextInputTokens        *int64 `json:"text_input_tokens"`
+			TextCachedInputTokens  *int64 `json:"text_cached_input_tokens"`
+			ImageInputTokens       *int64 `json:"image_input_tokens"`
+			ImageCachedInputTokens *int64 `json:"image_cached_input_tokens"`
+			ImageOutputTokens      *int64 `json:"image_output_tokens"`
+		}
+		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
+			return fmt.Errorf("invalid OpenAI image provider cost evidence: %w", err)
+		}
+		counts := []*int64{evidence.TextInputTokens, evidence.TextCachedInputTokens, evidence.ImageInputTokens, evidence.ImageCachedInputTokens, evidence.ImageOutputTokens}
+		for _, count := range counts {
+			if count == nil || *count < 0 {
+				return fmt.Errorf("OpenAI image provider cost evidence requires all five nonnegative token counts")
+			}
+		}
+	case "video_output":
+		if event.EventKind != BillingProviderCostEventKindBase || event.Source != BillingProviderCostSourceProviderResponse {
+			return fmt.Errorf("video output evidence requires a provider-response base event")
+		}
+		var evidence struct {
+			Kind            string `json:"kind"`
+			DurationSeconds *int64 `json:"duration_seconds"`
+			Resolution      string `json:"resolution"`
+			HasVideoInput   *bool  `json:"has_video_input"`
+			HasAudioInput   *bool  `json:"has_audio_input"`
+		}
+		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
+			return fmt.Errorf("invalid video output provider cost evidence: %w", err)
+		}
+		if evidence.DurationSeconds == nil || *evidence.DurationSeconds <= 0 || strings.TrimSpace(evidence.Resolution) == "" || evidence.HasVideoInput == nil || evidence.HasAudioInput == nil {
+			return fmt.Errorf("video output provider cost evidence requires actual duration, resolution, and typed input flags")
+		}
+	case "media_unreconciled":
+		if event.EventKind != BillingProviderCostEventKindBase || event.Status != BillingProviderCostStatusUnreconciled || event.Source != BillingProviderCostSourceProviderResponse {
+			return fmt.Errorf("unreconciled media evidence requires an unreconciled provider-response base event")
+		}
+		var evidence struct {
+			Kind            string                         `json:"kind"`
+			ReasonCode      BillingExecutionCostReasonCode `json:"reason_code"`
+			MediaKind       string                         `json:"media_kind"`
+			DurationSeconds int64                          `json:"duration_seconds,omitempty"`
+			Resolution      string                         `json:"resolution,omitempty"`
+			HasVideoInput   *bool                          `json:"has_video_input,omitempty"`
+			HasAudioInput   *bool                          `json:"has_audio_input,omitempty"`
+		}
+		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
+			return fmt.Errorf("invalid unreconciled media provider cost evidence: %w", err)
+		}
+		if !evidence.ReasonCode.Valid() || (evidence.MediaKind != "image" && evidence.MediaKind != "video") {
+			return fmt.Errorf("unreconciled media evidence requires a supported reason and media kind")
+		}
+		if evidence.MediaKind == "video" && (evidence.DurationSeconds < 0 || evidence.HasVideoInput == nil || evidence.HasAudioInput == nil) {
+			return fmt.Errorf("unreconciled video evidence requires typed input flags and nonnegative actual duration")
+		}
 	case "invoice_adjustment":
 		if event.EventKind != BillingProviderCostEventKindAdjustment {
 			return fmt.Errorf("invoice adjustment evidence requires an adjustment provider cost event")

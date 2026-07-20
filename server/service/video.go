@@ -13,7 +13,6 @@ import (
 	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 
 	"github.com/anbanai/anban-creator/server/config"
-	"github.com/anbanai/anban-creator/server/model"
 )
 
 const (
@@ -146,16 +145,15 @@ const (
 )
 
 type VideoGenerationSegmentPlan struct {
-	Index            int    `json:"index"`
-	StartSecond      int64  `json:"start_second"`
-	EndSecond        int64  `json:"end_second"`
-	Duration         int64  `json:"duration"`
-	Prompt           string `json:"prompt,omitempty"`
-	ModelKey         string `json:"model_key,omitempty"`
-	Model            string `json:"model,omitempty"`
-	Resolution       string `json:"resolution,omitempty"`
-	Ratio            string `json:"ratio,omitempty"`
-	EstimatedCredits int    `json:"estimated_credits,omitempty"`
+	Index       int    `json:"index"`
+	StartSecond int64  `json:"start_second"`
+	EndSecond   int64  `json:"end_second"`
+	Duration    int64  `json:"duration"`
+	Prompt      string `json:"prompt,omitempty"`
+	ModelKey    string `json:"model_key,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Resolution  string `json:"resolution,omitempty"`
+	Ratio       string `json:"ratio,omitempty"`
 }
 
 // VideoGenerationPlan is a deterministic MCP planning artifact.
@@ -188,8 +186,6 @@ type VideoGenerationPlan struct {
 	References                []VideoReferenceInput        `json:"references,omitempty"`
 	RetakeBudget              int                          `json:"retake_budget,omitempty"`
 	DeliveryTargets           []string                     `json:"delivery_targets,omitempty"`
-	EstimatedCredits          int                          `json:"estimated_credits,omitempty"`
-	PricingBreakdown          *model.VideoPricingBreakdown `json:"pricing_breakdown,omitempty"`
 	RequiredArtifacts         []string                     `json:"required_artifacts"`
 	SDKPayloadPreview         map[string]any               `json:"sdk_payload_preview"`
 }

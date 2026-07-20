@@ -30,6 +30,7 @@ type Repository interface {
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
 	VideoGenerations() VideoGenerationRepository
+	ImageGenerations() ImageGenerationRepository
 	AgentFeedbacks() AgentFeedbackRepository
 	IlinkBindings() IlinkBindingRepository
 	IlinkNotifications() IlinkNotificationRepository
@@ -101,7 +102,7 @@ type TaskRepository interface {
 	GetTypeAndProgress(ctx context.Context, id string) (taskType string, progress int, err error)
 	UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
-	FinalizeLocalTask(ctx context.Context, id, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error)
 	Update(ctx context.Context, task *model.Task) error
 	UpdateInputAttachments(ctx context.Context, id string, attachments []model.EntryAttachment) error
@@ -171,6 +172,7 @@ type TaskFileRepository interface {
 	Upsert(ctx context.Context, file *model.TaskFile) (*model.TaskFile, error)
 	FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error)
 	FindByID(ctx context.Context, id string) (*model.TaskFile, error)
+	FindByIDForExecution(ctx context.Context, id, taskID, executionID string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error)
@@ -277,6 +279,12 @@ type VideoGenerationRepository interface {
 	UpdateSegment(ctx context.Context, segment *model.VideoGenerationSegment) error
 }
 
+type ImageGenerationRepository interface {
+	Create(ctx context.Context, generation *model.ImageGeneration) error
+	FindByID(ctx context.Context, id string) (*model.ImageGeneration, error)
+	MarkFailed(ctx context.Context, id, message string, completedAt time.Time) error
+}
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
@@ -302,6 +310,7 @@ type repository struct {
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
 	videoGenerations        VideoGenerationRepository
+	imageGenerations        ImageGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
@@ -329,6 +338,7 @@ func New(db *gorm.DB) Repository {
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
 	videoGenerations := newVideoGenerationRepository(db)
+	imageGenerations := newImageGenerationRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
 	ilinkBindings := newIlinkBindingRepository(db)
 	ilinkNotifications := newIlinkNotificationRepository(db)
@@ -355,6 +365,7 @@ func New(db *gorm.DB) Repository {
 		posterTasks:             posterTasks,
 		topicPools:              topicPools,
 		videoGenerations:        videoGenerations,
+		imageGenerations:        imageGenerations,
 		agentFeedbacks:          agentFeedbacks,
 		ilinkBindings:           ilinkBindings,
 		ilinkNotifications:      ilinkNotifications,
@@ -387,6 +398,7 @@ func (r *repository) TopicPools() TopicPoolRepository { return r.topicPools }
 func (r *repository) VideoGenerations() VideoGenerationRepository {
 	return r.videoGenerations
 }
+func (r *repository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
 
 func (r *repository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings
@@ -440,6 +452,7 @@ type txRepository struct {
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
 	videoGenerations        VideoGenerationRepository
+	imageGenerations        ImageGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
@@ -468,6 +481,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
 		videoGenerations:        newVideoGenerationRepository(tx),
+		imageGenerations:        newImageGenerationRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
 		ilinkBindings:           newIlinkBindingRepository(tx),
 		ilinkNotifications:      newIlinkNotificationRepository(tx),
@@ -500,6 +514,7 @@ func (r *txRepository) TopicPools() TopicPoolRepository { return r.topicPools }
 func (r *txRepository) VideoGenerations() VideoGenerationRepository {
 	return r.videoGenerations
 }
+func (r *txRepository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
 
 func (r *txRepository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings

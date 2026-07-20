@@ -129,7 +129,7 @@ func main() {
 	if mysqlDB != nil {
 		repo = repository.New(mysqlDB)
 	}
-	fixedBilling, err := buildBillingRuntime(context.Background(), repo, cfg, log)
+	fixedBilling, err := buildBillingRuntime(context.Background(), mysqlDB, repo, cfg, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to initialize fixed-SKU billing runtime")
 	}
@@ -320,6 +320,8 @@ func main() {
 		}
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc.SetProviderCostService(fixedBilling.Cost)
+		taskSvc.SetBillingWalletService(fixedBilling.Wallet)
 		taskSvc.SetProjectMemoryManager(memoryMgr)
 		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
 		taskSvc.SetVideoBillingConfig(cfg.Billing)
@@ -640,8 +642,14 @@ func main() {
 			}
 		}
 		if mysqlDB != nil && imageSvc != nil {
-			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, cfg, store, log)
+			designerSvc = service.NewDesignerService(mysqlDB, cfg, store, log)
+			designerSvc.SetProviderCostService(fixedBilling.Cost)
+			designerSvc.SetBillingCatalogService(fixedBilling.Catalog)
+			designerSvc.SetBillingWalletService(fixedBilling.Wallet)
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
+		}
+		if imageSvc != nil {
+			imageSvc.SetProviderCostService(fixedBilling.Cost)
 		}
 		if repo != nil {
 			if writingLLMClient != nil || imageUnderstandingClient != nil || videoUnderstandingClient != nil {
@@ -690,6 +698,8 @@ func main() {
 			ImageModelResolver:    modelConfigSvc,
 			ImageGenerator:        imageSvc,
 			ImageGenerationBiller: mcp.NewImageGenerationBiller(),
+			ProviderCostSvc:       fixedBilling.Cost,
+			BillingCatalogSvc:     fixedBilling.Catalog,
 			GenerateImageTimeout:  cfg.MCP.ToolTimeouts.GenerateImage,
 			VideoSvc:              videoSvc,
 			AudioASRSvc:           audioASRSvc,
@@ -1026,11 +1036,15 @@ type billingRuntimeServices struct {
 	Referrals *service.BillingReferralService
 	Handler   *handler.BillingHandler
 	Worker    *service.BillingMaintenanceWorker
+	Cost      *service.ProviderCostService
 }
 
-func buildBillingRuntime(ctx context.Context, repo repository.Repository, cfg *config.Config, log *zerolog.Logger) (*billingRuntimeServices, error) {
+func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repository, cfg *config.Config, log *zerolog.Logger) (*billingRuntimeServices, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("billing repository is required")
+	}
+	if db == nil {
+		return nil, fmt.Errorf("provider cost database is required")
 	}
 	if cfg == nil || strings.TrimSpace(cfg.BillingRuntime.ConfigDir) == "" {
 		return nil, fmt.Errorf("billing_runtime.config_dir is required")
@@ -1049,11 +1063,12 @@ func buildBillingRuntime(ctx context.Context, repo repository.Repository, cfg *c
 	wallet := service.NewBillingWalletService(repo, bundle, service.BillingWalletOptions{})
 	referrals := service.NewBillingReferralService(repo, wallet, bundle, service.BillingReferralOptions{})
 	worker := service.NewBillingMaintenanceWorker(wallet, service.BillingMaintenanceWorkerOptions{}, log)
+	cost := service.NewProviderCostService(repository.NewBillingCostRepository(db), bundle)
 	billingHandler := handler.NewBillingHandler(repo, catalog, referrals, bundle, handler.BillingHandlerOptions{
 		AdminAPIKey:   cfg.BillingRuntime.AdminAPIKey,
 		InviteBaseURL: "https://creator.anbanai.com/register?invite=",
 	}, log)
-	return &billingRuntimeServices{Catalog: catalog, Wallet: wallet, Referrals: referrals, Handler: billingHandler, Worker: worker}, nil
+	return &billingRuntimeServices{Catalog: catalog, Wallet: wallet, Referrals: referrals, Handler: billingHandler, Worker: worker, Cost: cost}, nil
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.

@@ -221,3 +221,40 @@ func (s *TaskService) updateExecutionResultForExecution(ctx context.Context, tas
 	}
 	return nil
 }
+
+func (s *TaskService) recordTerminalProviderCost(ctx context.Context, task *model.Task, result *serveragent.ExecutionResult) {
+	if s == nil || s.providerCostSvc == nil || task == nil {
+		return
+	}
+	if task.CurrentExecutionID == nil || strings.TrimSpace(*task.CurrentExecutionID) == "" {
+		s.logger.Error().Str("task_id", task.ID).Msg("terminal provider cost evidence has no durable execution identity")
+		return
+	}
+	executionID := strings.TrimSpace(*task.CurrentExecutionID)
+	if result == nil || len(result.ModelUsage) == 0 {
+		if err := s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonMissingTerminalModelUsage); err != nil {
+			s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("mark terminal provider cost unreconciled")
+		}
+		return
+	}
+	if result.CostStatus != serveragent.CostStatusReconciled {
+		if err := s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonInvalidTerminalModelUsage); err != nil {
+			s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("mark invalid terminal provider cost evidence")
+		}
+		return
+	}
+	entries := make([]ExecutionTokenCostEntry, 0, len(result.ModelUsage))
+	for _, usage := range result.ModelUsage {
+		entries = append(entries, ExecutionTokenCostEntry{
+			Provider: usage.Provider, Model: usage.Model,
+			IdempotencyKey: executionID + "/" + usage.Provider + "/" + usage.Model,
+			Usage:          TokenUsage{Input: usage.InputTokens, CacheRead: usage.CacheReadInputTokens, CacheCreation: usage.CacheCreationInputTokens, Output: usage.OutputTokens},
+			Source:         string(model.BillingProviderCostSourceClaudeResult),
+		})
+	}
+	if _, err := s.providerCostSvc.FinalizeExecutionTokenCosts(ctx, FinalizeExecutionTokenCostsRequest{
+		ExecutionID: executionID, TaskID: task.ID, CatalogID: s.providerCostSvc.catalogID, Entries: entries,
+	}); err != nil {
+		s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("record terminal provider cost; typed evidence remains retryable")
+	}
+}

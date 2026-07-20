@@ -779,7 +779,7 @@ func TestTaskService_CreateManualVideoTaskStoresInputAndChargesOnlyBaseFee(t *te
 	if len(vi.References) != 1 || vi.References[0].URL != "https://cdn.example.com/cup.png" {
 		t.Fatalf("video input references = %+v", vi.References)
 	}
-	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should be empty at creation, got %+v", vc)
 	}
 	if found.VideoEstimatedCredits != 0 || found.VideoCreditsCharged != 0 {
@@ -938,9 +938,6 @@ func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
 	if vc.ScenarioKey != "" || vc.ProductionMode != "" || vc.RetakeBudget != 0 || len(vc.DeliveryTargets) != 0 {
 		t.Fatalf("video creator resolved config = %+v, want no Studio-authored business fields", vc)
 	}
-	if vc.PricingBreakdown != nil {
-		t.Fatalf("pricing breakdown = %+v, want nil before MCP execution", vc.PricingBreakdown)
-	}
 }
 
 func TestTaskService_CreateManualVideoEditorRequiresSourceVideo(t *testing.T) {
@@ -1080,7 +1077,7 @@ func TestTaskService_CreateManualVideoTaskUsesConfiguredCreditMultiplier(t *test
 	if vi := found.VideoInput.Data(); vi.Brief != "生成一条咖啡杯种草视频" {
 		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
 	}
-	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
@@ -1150,7 +1147,7 @@ func TestTaskService_CreateManualVideoTaskAppliesUserBillingMultiplier(t *testin
 	if vi := found.VideoInput.Data(); vi.Brief != "生成一条咖啡杯种草视频" {
 		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
 	}
-	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
@@ -1239,7 +1236,7 @@ func TestTaskService_CreateFromPlanVideoTaskCopiesVideoInputAndChargesOnlyBaseFe
 	if len(vi.References) != 1 || vi.References[0].URL != "https://cdn.example.com/cup.png" {
 		t.Fatalf("video input references = %+v", vi.References)
 	}
-	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
 	}
 	bal, err := creditSvc.GetBalance(ctx, userID)
@@ -1319,7 +1316,7 @@ func TestTaskService_CreateManualVideoTaskDoesNotRequireProjectProfileAtCreation
 	if vi := found.VideoInput.Data(); vi.Brief != "生成视频" {
 		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
 	}
-	if vc := found.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+	if vc := found.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should stay empty before agent/MCP execution, got %+v", vc)
 	}
 }

@@ -73,7 +73,7 @@ func setupDesignerHandlerTest() *fiber.App {
 			},
 		},
 	}
-	designerSvc := service.NewDesignerService(nil, nil, nil, cfg, nil, &logger)
+	designerSvc := service.NewDesignerService(nil, cfg, nil, &logger)
 	handler := NewDesignerHandler(designerSvc, &logger)
 
 	app := fiber.New()
@@ -130,7 +130,7 @@ func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
 	if providers[0].ProviderKey != "wangcai_openai" || providers[0].Route != "image_generation.designer.test-openai" {
 		t.Fatalf("provider route fields = %+v", providers[0])
 	}
-	if providers[0].Capabilities.MaxBatch != 10 || !providers[0].Capabilities.SupportsReference || len(providers[0].Capabilities.QualityLevels) == 0 {
+	if providers[0].Capabilities.MaxBatch != 1 || !providers[0].Capabilities.SupportsReference || len(providers[0].Capabilities.QualityLevels) == 0 {
 		t.Fatalf("capabilities = %+v", providers[0].Capabilities)
 	}
 	if providers[0].Capabilities.DefaultSize != "auto" {
@@ -139,11 +139,11 @@ func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
 	if len(providers[0].Capabilities.SizePresets) == 0 || providers[0].Capabilities.SizePresets[0] != "auto" {
 		t.Fatalf("size presets = %+v, want auto first for GPT Image", providers[0].Capabilities.SizePresets)
 	}
-	if providers[0].Pricing.PricingType != srvconfig.ImagePricingTypeOpenAIUsage || !providers[0].Pricing.RequiresUsage {
+	if providers[0].Pricing.PricingType != "fixed_sku" || providers[0].Pricing.Currency != "credits" || providers[0].Pricing.BillingNote != "fixed retail SKU" {
 		t.Fatalf("pricing = %+v", providers[0].Pricing)
 	}
 	if providers[0].Credits != 0 {
-		t.Fatalf("legacy credits = %d, want 0 for dynamic GPT Image 2", providers[0].Credits)
+		t.Fatalf("credits = %d, want 0 without an injected retail catalog", providers[0].Credits)
 	}
 }
 

@@ -649,7 +649,7 @@ func TestPlanService_UpdateVideoConfigStoresVideoInputOnly(t *testing.T) {
 	if len(vi.References) != 1 || vi.References[0].URL != "https://cdn.example.com/cup.png" {
 		t.Fatalf("video input references = %#v", vi.References)
 	}
-	if vc := updated.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+	if vc := updated.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should stay empty before agent/MCP execution, got %#v", vc)
 	}
 	if updated.VideoEstimatedCredits != 0 {
@@ -739,7 +739,7 @@ func TestPlanService_CreateVideoPlanDoesNotRequireLegacyMinimumBalance(t *testin
 	if vi.Brief != "计划生成视频" {
 		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
 	}
-	if vc := created.VideoConfig.Data(); vc.ModelKey != "" || vc.EstimatedCredits != 0 {
+	if vc := created.VideoConfig.Data(); vc.ModelKey != "" {
 		t.Fatalf("video config should stay empty before agent/MCP execution, got %#v", vc)
 	}
 }

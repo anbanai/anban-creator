@@ -261,21 +261,46 @@ func jsonValuesEqual(left, right string) bool {
 
 // FinalizeLocalTask makes terminal ownership and terminal evidence one CAS.
 // Only the request that still owns a running local claim can write any field.
-func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	res := r.db.WithContext(ctx).Model(&model.Task{}).
-		Where("id = ? AND status = ? AND execution_target = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed).
-		Updates(map[string]any{
-			"status":               status,
-			"error_message":        errorMsg,
-			"completed_at":         time.Now(),
-			"result":               result,
-			"terminal_model_usage": datatypes.NewJSONType(usage),
-			"cost_status":          costStatus,
-		})
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected == 1, nil
+func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	var won bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		res := tx.Model(&model.Task{}).
+			Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
+			Updates(map[string]any{
+				"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
+				"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
+		executionStatus := model.TaskExecutionFailed
+		if status == model.TaskStatusCompleted {
+			executionStatus = model.TaskExecutionSucceeded
+		} else if status == model.TaskStatusCancelled {
+			executionStatus = model.TaskExecutionCancelled
+		}
+		executionResult := datatypes.JSON([]byte(result))
+		execRes := tx.Model(&model.TaskExecution{}).
+			Where("id = ? AND task_id = ? AND target = ? AND status = ?", executionID, id, model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning).
+			Updates(map[string]any{
+				"status": executionStatus, "terminal_reason": errorMsg, "result": executionResult,
+				"completed_at": now, "finalization_status": model.TaskExecutionFinalizationDone,
+				"cleanup_status": model.TaskExecutionCleanupDone,
+			})
+		if execRes.Error != nil {
+			return execRes.Error
+		}
+		if execRes.RowsAffected != 1 {
+			return fmt.Errorf("local task execution %s is missing or not running", executionID)
+		}
+		won = true
+		return nil
+	})
+	return won, err
 }
 
 func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error) {

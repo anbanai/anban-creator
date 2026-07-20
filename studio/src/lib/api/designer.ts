@@ -1,9 +1,9 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { DesignerProvider, GenerateRequest, HistoryResponse, ImageGeneration, RawDesignerProvider } from '@/types/designer'
+import type { DesignerProvider, GenerateQuote, GenerateRequest, HistoryResponse, ImageGeneration, RawDesignerProvider } from '@/types/designer'
 
 export function normalizeProvider(raw: RawDesignerProvider): DesignerProvider {
   const caps = raw.capabilities ?? {}
-  const pricing = raw.pricing ?? {}
+  const pricing = raw.pricing
   return {
     id: raw.id,
     name: raw.name,
@@ -29,12 +29,9 @@ export function normalizeProvider(raw: RawDesignerProvider): DesignerProvider {
       watermark: caps.watermark ?? false,
     },
     pricing: {
-      pricingType: pricing.pricing_type,
-      currency: pricing.currency,
-      estimateTable: pricing.estimate_table,
-      creditsPerCny: pricing.credits_per_cny,
-      requiresUsage: pricing.requires_usage,
-      billingNote: pricing.billing_note,
+      pricingType: pricing?.pricing_type ?? 'fixed_sku',
+      currency: pricing?.currency ?? 'credits',
+      billingNote: pricing?.billing_note ?? 'fixed retail SKU',
     },
   }
 }
@@ -43,8 +40,18 @@ export const designerApi = {
   getProviders: () =>
     unwrap<RawDesignerProvider[]>(http.get('/designer/providers')).then((items) => items.map(normalizeProvider)),
 
-  generate: (req: GenerateRequest) =>
-    unwrap<{ generation_id: string; status: string; estimated_credits?: number; billing_mode?: string }>(http.post('/designer/generate', req)),
+  generate: async (req: GenerateRequest) => {
+    const operation_id = crypto.randomUUID()
+    const quotedRequest = { ...req, n: 1, operation_id }
+    const quote = await unwrap<GenerateQuote>(http.post('/designer/quote', quotedRequest))
+    return unwrap<{ generation_id: string; status: string; price_credits: number }>(
+      http.post('/designer/generate', {
+        ...quotedRequest,
+        quote_id: quote.quote_id,
+        request_fingerprint: quote.request_fingerprint,
+      }),
+    )
+  },
 
   uploadReference: (file: File) => {
     const form = new FormData()

@@ -62,40 +62,6 @@ func (s *PlanService) resolvedVideoCatalog() VideoModelCatalog {
 	return VideoModelCatalog{}
 }
 
-func (s *PlanService) resolvedVideoCreditMultiplier() int {
-	if s != nil && s.videoCreditMultiplier > 0 {
-		return s.videoCreditMultiplier
-	}
-	return 1000
-}
-
-func (s *PlanService) videoBillingOptions(ctx context.Context, userID string) VideoBillingOptions {
-	fallback := s.resolvedVideoCreditMultiplier()
-	tier := model.TierFree
-	userMultiplier := 1.0
-	var billing srvconfig.BillingConfig
-	if s != nil {
-		billing = s.videoBilling
-	}
-	if s == nil || s.creditSvc == nil || userID == "" {
-		return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
-	}
-	if foundTier, err := s.creditSvc.GetUserTier(ctx, userID); err == nil {
-		tier = foundTier
-	} else if s.logger != nil {
-		s.logger.Warn().Err(err).Str("user_id", userID).Msg("video tier lookup failed")
-	}
-	foundMultiplier, err := s.creditSvc.GetUserBillingMultiplier(ctx, userID)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn().Err(err).Str("user_id", userID).Msg("video billing multiplier lookup failed")
-		}
-	} else if foundMultiplier > 0 {
-		userMultiplier = foundMultiplier
-	}
-	return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
-}
-
 // CreatePlanParams holds the inputs for PlanService.Create. Pointer-typed optional
 // fields use the same nil-means-default / nil-means-unchanged semantics as the
 // underlying model. Struct form keeps call sites readable as fields are added

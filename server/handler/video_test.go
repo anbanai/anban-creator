@@ -100,10 +100,6 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 			AvailableModels []struct {
 				Key string `json:"key"`
 			} `json:"available_models"`
-			EstimatedCredits      int  `json:"estimated_credits"`
-			Balance               int  `json:"balance"`
-			MinBalance            int  `json:"min_balance"`
-			MeetsMinBalance       bool `json:"meets_min_balance"`
 			ResolvedCreatorConfig struct {
 				ModelKey string `json:"model_key"`
 			} `json:"resolved_creator_config"`
@@ -118,11 +114,8 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 	if body.Data.AvailableModels[0].Key != "configured-video" {
 		t.Fatalf("available model = %+v", body.Data.AvailableModels[0])
 	}
-	if body.Data.ResolvedCreatorConfig.ModelKey != "configured-video" || body.Data.EstimatedCredits != 5000 {
+	if body.Data.ResolvedCreatorConfig.ModelKey != "configured-video" {
 		t.Fatalf("estimate = %+v", body.Data)
-	}
-	if body.Data.Balance != 120_000 || body.Data.MinBalance != 0 || !body.Data.MeetsMinBalance {
-		t.Fatalf("balance gate = %+v", body.Data)
 	}
 
 	legacyReq := httptest.NewRequest("POST", "/videocreator/estimate", strings.NewReader(`{"project_id":"`+projectID+`","video_config":{"duration":9}}`))
@@ -148,7 +141,7 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 	}
 }
 
-func TestVideoCreatorEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
+func TestVideoCreatorEstimateDoesNotExposeDynamicRetailPricing(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -231,24 +224,14 @@ func TestVideoCreatorEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	var body struct {
-		Data struct {
-			EstimatedCredits int `json:"estimated_credits"`
-			PricingBreakdown struct {
-				CreditsPerCNY  int     `json:"credits_per_cny"`
-				TierMultiplier float64 `json:"tier_multiplier"`
-				UserMultiplier float64 `json:"user_multiplier"`
-			} `json:"pricing_breakdown"`
-		} `json:"data"`
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.Data.EstimatedCredits != 5400 {
-		t.Fatalf("estimated credits = %d, want ceil(5*1600*1.35*0.5)=5400", body.Data.EstimatedCredits)
-	}
-	if body.Data.PricingBreakdown.CreditsPerCNY != 1600 || body.Data.PricingBreakdown.TierMultiplier != 1.35 || body.Data.PricingBreakdown.UserMultiplier != 0.5 {
-		t.Fatalf("pricing breakdown = %+v, want configured billing multipliers", body.Data.PricingBreakdown)
+	for _, removed := range []string{"estimated_credits", "pricing_breakdown", "tier_multiplier", "user_multiplier", `"balance"`} {
+		if strings.Contains(string(raw), removed) {
+			t.Fatalf("response leaked removed dynamic retail field %q: %s", removed, raw)
+		}
 	}
 }
 
@@ -478,7 +461,6 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 		Data struct {
 			MissingReferenceRoles []string `json:"missing_reference_roles"`
 			ExpectedArtifacts     []string `json:"expected_artifacts"`
-			AffordableTakes       int      `json:"affordable_takes"`
 			SegmentPlan           []struct {
 				Index    int   `json:"index"`
 				Duration int64 `json:"duration"`
@@ -504,9 +486,6 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 	}
 	if !containsString(decoded.Data.ExpectedArtifacts, "quality-review.md") || !containsString(decoded.Data.ExpectedArtifacts, "delivery-manifest.json") {
 		t.Fatalf("expected artifacts = %+v", decoded.Data.ExpectedArtifacts)
-	}
-	if decoded.Data.AffordableTakes != 5 {
-		t.Fatalf("affordable takes = %d, want capped retake budget 5", decoded.Data.AffordableTakes)
 	}
 }
 

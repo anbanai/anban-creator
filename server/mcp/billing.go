@@ -2,11 +2,10 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
@@ -54,111 +53,6 @@ func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, coun
 	return maybeDeductForResolvedModel(ctx, userID, opType, provider, mdl, count, task, "")
 }
 
-func maybeDeductUnderstandingTokens(ctx context.Context, userID, taskID, opType string, usage config.TokenUsage) (int, error) {
-	if billSvc == nil || billSvc.creditSvc == nil || billSvc.config == nil {
-		logBillingSkip(userID, opType, "no_credit_or_config_service")
-		return 0, nil
-	}
-	if usage.TotalTokens <= 0 {
-		return 0, fmt.Errorf("%s token usage is required for billing", opType)
-	}
-	if userID == "" || userID == "system" || isAdminCall(ctx) {
-		logBillingSkip(userID, opType, "admin_or_system")
-		return 0, nil
-	}
-	provider, modelName, err := understandingBillingRoute(opType)
-	if err != nil {
-		return 0, err
-	}
-	tier, err := billSvc.creditSvc.GetUserTier(ctx, userID)
-	if err != nil {
-		return 0, err
-	}
-	userMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
-	if err != nil {
-		return 0, err
-	}
-	cost, err := billSvc.config.CalculateTokenModelCredits(provider, modelName, usage, string(tier), userMultiplier)
-	if err != nil {
-		return 0, err
-	}
-	if taskID != "" {
-		if err := validateBillingTask(ctx, userID, taskID); err != nil {
-			return 0, err
-		}
-	}
-	priceSnapshot := map[string]any{}
-	if data, err := json.Marshal(cost.PriceSnapshot); err == nil {
-		_ = json.Unmarshal(data, &priceSnapshot)
-	}
-	cacheReadTokens := usage.CacheReadInputTokens
-	if cacheReadTokens == 0 && usage.CachedInputTokens > 0 {
-		cacheReadTokens = usage.CachedInputTokens
-	}
-	metadata := model.CreditTransactionMetadata{
-		Provider:                 provider,
-		Model:                    modelName,
-		Route:                    opType,
-		InputTokens:              usage.InputTokens,
-		CachedInputTokens:        usage.CachedInputTokens,
-		CacheReadInputTokens:     cacheReadTokens,
-		CacheCreationInputTokens: usage.CacheCreationInputTokens,
-		OutputTokens:             usage.OutputTokens,
-		TotalTokens:              usage.TotalTokens,
-		BaseCredits:              cost.BaseCredits,
-		TierMultiplier:           cost.TierMultiplier,
-		UserMultiplier:           cost.UserMultiplier,
-		FinalCredits:             cost.FinalCredits,
-		PriceSnapshot:            priceSnapshot,
-	}
-	operationID := fmt.Sprintf("%s:%s:%d:%d", opType, taskID, usage.TotalTokens, time.Now().UnixNano())
-	_, err = billSvc.creditSvc.DeductForMCPOperationWithMetadata(ctx, userID, opType, cost.FinalCredits, metadata, operationID, taskID)
-	if err != nil {
-		return 0, err
-	}
-	return cost.FinalCredits, nil
-}
-
-func preflightUnderstandingTokenBilling(ctx context.Context, userID, taskID, opType string) error {
-	if billSvc == nil || billSvc.creditSvc == nil || billSvc.config == nil {
-		logBillingSkip(userID, opType, "no_credit_or_config_service")
-		return nil
-	}
-	if userID == "" || userID == "system" || isAdminCall(ctx) {
-		logBillingSkip(userID, opType, "admin_or_system")
-		return nil
-	}
-	provider, modelName, err := understandingBillingRoute(opType)
-	if err != nil {
-		return err
-	}
-	if taskID != "" {
-		if err := validateBillingTask(ctx, userID, taskID); err != nil {
-			return err
-		}
-	}
-	tier, err := billSvc.creditSvc.GetUserTier(ctx, userID)
-	if err != nil {
-		return err
-	}
-	userMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
-	if err != nil {
-		return err
-	}
-	cost, err := billSvc.config.CalculateTokenModelCredits(provider, modelName, config.TokenUsage{InputTokens: 1, TotalTokens: 1}, string(tier), userMultiplier)
-	if err != nil {
-		return err
-	}
-	balance, err := billSvc.creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		return err
-	}
-	if balance < cost.FinalCredits {
-		return service.ErrInsufficientCredits
-	}
-	return nil
-}
-
 func understandingBillingRoute(opType string) (string, string, error) {
 	var provider, modelName string
 	switch opType {
@@ -177,64 +71,45 @@ func understandingBillingRoute(opType string) (string, string, error) {
 	return provider, modelName, nil
 }
 
-func maybeDeductImageGenerationUsage(ctx context.Context, userID, taskID, route, provider, modelName string, usage config.ImageGenerationUsage) (int, error) {
-	if billSvc == nil || billSvc.creditSvc == nil || billSvc.config == nil {
-		logBillingSkip(userID, model.CreditTypeImageGen, "no_credit_or_config_service")
-		return 0, nil
+func newUnderstandingProviderRequestID(opType string) string {
+	return "internal:understanding:" + opType + ":" + uuid.NewString()
+}
+
+func recordUnderstandingProviderCost(ctx context.Context, taskID, opType, providerRequestID string, usage *config.TokenUsage) {
+	if svcs == nil || svcs.ProviderCostSvc == nil {
+		return
 	}
-	if usage.TotalTokens <= 0 || usage.ImageOutputTokens <= 0 {
-		return 0, fmt.Errorf("%s usage is required for billing", modelName)
-	}
-	if userID == "" || userID == "system" || isAdminCall(ctx) {
-		logBillingSkip(userID, model.CreditTypeImageGen, "admin_or_system")
-		return 0, nil
-	}
-	if provider == "" || modelName == "" {
-		return 0, fmt.Errorf("image generation billing route is not configured")
-	}
-	if taskID != "" {
-		if err := validateBillingTask(ctx, userID, taskID); err != nil {
-			return 0, err
+	provider, modelName, err := understandingBillingRoute(opType)
+	if err != nil {
+		if mcpLog != nil {
+			mcpLog.Error().Err(err).Str("provider_request_id", providerRequestID).Msg("resolve understanding provider cost route")
 		}
+		return
 	}
-	tier, err := billSvc.creditSvc.GetUserTier(ctx, userID)
-	if err != nil {
-		return 0, err
+	if usage == nil || usage.TotalTokens <= 0 {
+		mediaKind := "image"
+		if opType == model.CreditTypeVideoUnderstanding {
+			mediaKind = "video"
+		}
+		_, err = svcs.ProviderCostSvc.RecordMediaUnreconciled(ctx, service.RecordMediaUnreconciledRequest{
+			TaskID: taskID, Provider: provider, Model: modelName, ProviderRequestID: providerRequestID,
+			MediaKind: mediaKind, ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,
+		})
+	} else {
+		cacheRead := usage.CacheReadInputTokens
+		if cacheRead == 0 {
+			cacheRead = usage.CachedInputTokens
+		}
+		_, err = svcs.ProviderCostSvc.RecordProviderTokenUsage(ctx, service.RecordProviderTokenCostRequest{
+			TaskID: taskID, Provider: provider, Model: modelName, ProviderRequestID: providerRequestID,
+			CatalogID: svcs.ProviderCostSvc.CatalogID(), IdempotencyKey: providerRequestID,
+			Usage:  service.TokenUsage{Input: usage.InputTokens, CacheRead: cacheRead, CacheCreation: usage.CacheCreationInputTokens, Output: usage.OutputTokens},
+			Source: string(model.BillingProviderCostSourceProviderResponse),
+		})
 	}
-	userMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
-	if err != nil {
-		return 0, err
+	if err != nil && mcpLog != nil {
+		mcpLog.Error().Err(err).Str("task_id", taskID).Str("provider_request_id", providerRequestID).Str("operation", opType).Msg("record understanding provider cost; operation result remains valid")
 	}
-	cost, err := billSvc.config.CalculateImageGenerationUsageCredits(provider, modelName, usage, string(tier), userMultiplier)
-	if err != nil {
-		return 0, err
-	}
-	priceSnapshot := map[string]any{}
-	if data, err := json.Marshal(cost.PriceSnapshot); err == nil {
-		_ = json.Unmarshal(data, &priceSnapshot)
-	}
-	metadata := model.CreditTransactionMetadata{
-		Provider:               provider,
-		Model:                  modelName,
-		Route:                  route,
-		TextInputTokens:        usage.TextInputTokens,
-		TextCachedInputTokens:  usage.TextCachedInputTokens,
-		ImageInputTokens:       usage.ImageInputTokens,
-		ImageCachedInputTokens: usage.ImageCachedInputTokens,
-		ImageOutputTokens:      usage.ImageOutputTokens,
-		TotalTokens:            usage.TotalTokens,
-		BaseCredits:            cost.BaseCredits,
-		TierMultiplier:         cost.TierMultiplier,
-		UserMultiplier:         cost.UserMultiplier,
-		FinalCredits:           cost.FinalCredits,
-		PriceSnapshot:          priceSnapshot,
-	}
-	operationID := fmt.Sprintf("%s:%s:%d:%d", model.CreditTypeImageGen, taskID, usage.TotalTokens, time.Now().UnixNano())
-	_, err = billSvc.creditSvc.DeductForMCPOperationWithMetadata(ctx, userID, model.CreditTypeImageGen, cost.FinalCredits, metadata, operationID, taskID)
-	if err != nil {
-		return 0, err
-	}
-	return cost.FinalCredits, nil
 }
 
 func maybeDeductForResolvedModel(ctx context.Context, userID, opType, provider, mdl string, count int, taskID, modelSource string) error {

@@ -13,12 +13,9 @@ export interface ModelCapabilities {
 }
 
 export interface DesignerProviderPricing {
-  pricingType?: string
-  currency?: string
-  estimateTable?: Record<string, Record<string, number>>
-  creditsPerCny?: number
-  requiresUsage?: boolean
-  billingNote?: string
+  pricingType: 'fixed_sku'
+  currency: 'credits'
+  billingNote: string
 }
 
 export interface RawDesignerProvider {
@@ -46,12 +43,9 @@ export interface RawDesignerProvider {
     watermark?: boolean
   }
   pricing?: {
-    pricing_type?: string
-    currency?: string
-    estimate_table?: Record<string, Record<string, number>>
-    credits_per_cny?: number
-    requires_usage?: boolean
-    billing_note?: string
+    pricing_type: 'fixed_sku'
+    currency: 'credits'
+    billing_note: string
   }
 }
 
@@ -99,6 +93,16 @@ export interface GenerateRequest {
   reference_file_ids?: string[]
   mask_file_id?: string
   watermark?: boolean
+}
+
+export interface GenerateQuote {
+  quote_id: string
+  operation_id: string
+  request_fingerprint: string
+  catalog_id: string
+  sku_id: string
+  price_credits: number
+  expires_at: string
 }
 
 export interface GenerateImage {

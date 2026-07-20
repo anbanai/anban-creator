@@ -41,7 +41,7 @@ describe('Designer provider contract', () => {
         providerKey: 'wangcai_openai',
         route: 'image_generation.designer.gpt_image_2',
         model: 'gpt-image-2',
-        credits: 0,
+        credits: 500,
         enabled: true,
         idx: 0,
         capabilities: {
@@ -58,15 +58,16 @@ describe('Designer provider contract', () => {
           watermark: false,
         },
         pricing: {
-          pricingType: 'openai_image_usage',
-          requiresUsage: true,
+          pricingType: 'fixed_sku',
+          currency: 'credits',
+          billingNote: 'fixed retail SKU',
         },
       },
     ])
     vi.mocked(designerApi.generate).mockResolvedValue({
       generation_id: 'generation-1',
       status: 'generating',
-      billing_mode: 'openai_image_usage',
+      price_credits: 500,
     })
   })
 
@@ -139,7 +140,7 @@ describe('Designer provider contract', () => {
           hasCompression: false,
           watermark: true,
         },
-        pricing: {},
+        pricing: { pricingType: 'fixed_sku', currency: 'credits', billingNote: 'fixed retail SKU' },
       },
     ])
 

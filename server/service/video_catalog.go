@@ -27,36 +27,6 @@ type VideoModelSpec struct {
 	VideoInput5sMaxPrice  map[string]float64 `json:"video_input_5s_max_price" yaml:"video_input_5s_max_price"`
 }
 
-type VideoBillingOptions struct {
-	CreditsPerCNY    int
-	CreditMultiplier int
-	TierMultiplier   float64
-	UserMultiplier   float64
-}
-
-func VideoBillingOptionsFromConfig(billing config.BillingConfig, fallbackCreditMultiplier int, tier model.Tier, userMultiplier float64) VideoBillingOptions {
-	tierMultiplier := billing.DefaultUserMultiplier
-	if tierMultiplier <= 0 {
-		tierMultiplier = 1
-	}
-	if billing.TierMultipliers != nil {
-		tierKey := strings.ToLower(strings.TrimSpace(string(model.NormalizeTier(string(tier)))))
-		if configured, ok := billing.TierMultipliers[tierKey]; ok && configured > 0 {
-			tierMultiplier = configured
-		}
-	}
-	creditsPerCNY := billing.CreditsPerCNY
-	if creditsPerCNY <= 0 {
-		creditsPerCNY = fallbackCreditMultiplier
-	}
-	return normalizeVideoBillingOptions(VideoBillingOptions{
-		CreditsPerCNY:    creditsPerCNY,
-		CreditMultiplier: fallbackCreditMultiplier,
-		TierMultiplier:   tierMultiplier,
-		UserMultiplier:   userMultiplier,
-	})
-}
-
 func DefaultVideoModelCatalog() VideoModelCatalog {
 	commonRatios := []string{"16:9", "9:16", "1:1", "4:3", "3:4"}
 	return VideoModelCatalog{
@@ -164,18 +134,13 @@ func VideoModelCatalogFromConfig(entries []config.VideoModelCatalogEntry) VideoM
 	return catalog
 }
 
-func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.VideoDefaults, policy model.VideoModelPolicy, catalog VideoModelCatalog, creditMultiplier int) (VideoGenerationPlan, error) {
-	return ResolveVideoGenerationPlanWithBilling(req, defaults, policy, catalog, VideoBillingOptions{CreditMultiplier: creditMultiplier})
-}
-
-func ResolveVideoGenerationPlanWithBilling(req VideoGenerationRequest, defaults model.VideoDefaults, policy model.VideoModelPolicy, catalog VideoModelCatalog, billing VideoBillingOptions) (VideoGenerationPlan, error) {
+func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.VideoDefaults, policy model.VideoModelPolicy, catalog VideoModelCatalog) (VideoGenerationPlan, error) {
 	if defaults == (model.VideoDefaults{}) || policy.DefaultModel == "" || len(policy.AllowedModels) == 0 {
 		return VideoGenerationPlan{}, fmt.Errorf("project videocreator profile is not configured")
 	}
 	if catalog == nil {
 		catalog = VideoModelCatalog{}
 	}
-	billing = normalizeVideoBillingOptions(billing)
 	resolved := req
 	if playbook, ok := FindVideoPlaybook(resolved.ScenarioKey); ok {
 		if resolved.CreativeType == "" {
@@ -261,7 +226,7 @@ func ResolveVideoGenerationPlanWithBilling(req VideoGenerationRequest, defaults 
 	if !stringInFold(resolved.Ratio, spec.SupportedRatios) {
 		return VideoGenerationPlan{}, fmt.Errorf("model %s does not support ratio %s", modelKey, resolved.Ratio)
 	}
-	hasInputVideo, inputSeconds := videoInputStats(resolved.ReferenceSet)
+	hasInputVideo, _ := videoInputStats(resolved.ReferenceSet)
 	if hasInputVideo && !spec.SupportsVideoInput {
 		return VideoGenerationPlan{}, fmt.Errorf("model %s does not support video input", modelKey)
 	}
@@ -270,57 +235,25 @@ func ResolveVideoGenerationPlanWithBilling(req VideoGenerationRequest, defaults 
 		return VideoGenerationPlan{}, err
 	}
 	segments := make([]VideoGenerationSegmentPlan, 0, len(segmentDurations))
-	pricingSegments := make([]model.VideoPricingSegmentBreakdown, 0, len(segmentDurations))
-	var totalCNY float64
-	totalCredits := 0
 	var cursor int64
 	for i, duration := range segmentDurations {
-		cny, err := estimateVideoCNY(spec, resolved.Resolution, duration, hasInputVideo, inputSeconds)
-		if err != nil {
-			return VideoGenerationPlan{}, err
-		}
-		credits := videoCreditsFromCNY(cny, billing)
 		index := i + 1
 		segmentPrompt := resolved.Prompt
 		if len(segmentDurations) > 1 {
 			segmentPrompt = fmt.Sprintf("%s\n\nSegment %d/%d: generate the continuous portion from %ds to %ds of the final video. Keep character, setting, lighting, and style consistent with adjacent segments.", resolved.Prompt, index, len(segmentDurations), cursor, cursor+duration)
 		}
 		segments = append(segments, VideoGenerationSegmentPlan{
-			Index:            index,
-			StartSecond:      cursor,
-			EndSecond:        cursor + duration,
-			Duration:         duration,
-			Prompt:           segmentPrompt,
-			ModelKey:         modelKey,
-			Model:            resolved.Model,
-			Resolution:       resolved.Resolution,
-			Ratio:            resolved.Ratio,
-			EstimatedCredits: credits,
+			Index:       index,
+			StartSecond: cursor,
+			EndSecond:   cursor + duration,
+			Duration:    duration,
+			Prompt:      segmentPrompt,
+			ModelKey:    modelKey,
+			Model:       resolved.Model,
+			Resolution:  resolved.Resolution,
+			Ratio:       resolved.Ratio,
 		})
-		pricingSegments = append(pricingSegments, model.VideoPricingSegmentBreakdown{
-			Index:   index,
-			Seconds: duration,
-			CNY:     cny,
-			Credits: credits,
-		})
-		totalCNY += cny
-		totalCredits += credits
 		cursor += duration
-	}
-	breakdown := &model.VideoPricingBreakdown{
-		CNY:              round2(totalCNY),
-		CreditMultiplier: billing.CreditMultiplier,
-		CreditsPerCNY:    billing.CreditsPerCNY,
-		TierMultiplier:   billing.TierMultiplier,
-		UserMultiplier:   billing.UserMultiplier,
-		InputVideo:       hasInputVideo,
-		InputSeconds:     inputSeconds,
-		OutputSeconds:    targetDuration,
-		SegmentCount:     len(segments),
-		Resolution:       resolved.Resolution,
-		Ratio:            resolved.Ratio,
-		ModelKey:         modelKey,
-		Segments:         pricingSegments,
 	}
 	plan := VideoGenerationPlan{
 		ScenarioKey:               resolved.ScenarioKey,
@@ -350,34 +283,8 @@ func ResolveVideoGenerationPlanWithBilling(req VideoGenerationRequest, defaults 
 		References:                resolved.ReferenceSet,
 		RetakeBudget:              resolved.RetakeBudget,
 		DeliveryTargets:           resolved.DeliveryTargets,
-		EstimatedCredits:          totalCredits,
-		PricingBreakdown:          breakdown,
 	}
 	return plan, nil
-}
-
-func normalizeVideoBillingOptions(billing VideoBillingOptions) VideoBillingOptions {
-	if billing.CreditsPerCNY <= 0 {
-		billing.CreditsPerCNY = billing.CreditMultiplier
-	}
-	if billing.CreditsPerCNY <= 0 {
-		billing.CreditsPerCNY = 1000
-	}
-	if billing.CreditMultiplier <= 0 {
-		billing.CreditMultiplier = billing.CreditsPerCNY
-	}
-	if billing.TierMultiplier <= 0 {
-		billing.TierMultiplier = 1
-	}
-	if billing.UserMultiplier <= 0 {
-		billing.UserMultiplier = 1
-	}
-	return billing
-}
-
-func videoCreditsFromCNY(cny float64, billing VideoBillingOptions) int {
-	billing = normalizeVideoBillingOptions(billing)
-	return int(math.Ceil(cny * float64(billing.CreditsPerCNY) * billing.TierMultiplier * billing.UserMultiplier))
 }
 
 func resolveTargetVideoDuration(req VideoGenerationRequest, defaults model.VideoDefaults) (int64, string, string, error) {
@@ -440,38 +347,6 @@ func splitVideoDuration(target, minDuration, maxDuration int64) ([]int64, error)
 	}
 }
 
-func estimateVideoCNY(spec VideoModelSpec, resolution string, duration int64, hasInputVideo bool, inputSeconds float64) (float64, error) {
-	resolution = strings.ToLower(resolution)
-	perSecond, ok := spec.NoInputPricePerSecond[resolution]
-	if !ok {
-		return 0, fmt.Errorf("pricing is not configured for model %s resolution %s", spec.Key, resolution)
-	}
-	if !hasInputVideo {
-		return round2(perSecond * float64(duration)), nil
-	}
-	minPrice, minOK := spec.VideoInput5sMinPrice[resolution]
-	maxPrice, maxOK := spec.VideoInput5sMaxPrice[resolution]
-	if !minOK || !maxOK {
-		return 0, fmt.Errorf("video-input pricing is not configured for model %s resolution %s", spec.Key, resolution)
-	}
-	if inputSeconds <= 0 {
-		inputSeconds = 4
-	}
-	if inputSeconds < 2 {
-		inputSeconds = 2
-	}
-	if inputSeconds > 15 {
-		inputSeconds = 15
-	}
-	// Official table gives a 5s-output range: minimum for 2-4s input, maximum
-	// for 15s input. Interpolate between 4s and 15s, then scale by output length.
-	base := minPrice
-	if inputSeconds > 4 {
-		base = minPrice + (maxPrice-minPrice)*((inputSeconds-4)/(15-4))
-	}
-	return round2(base * float64(duration) / 5), nil
-}
-
 func videoInputStats(refs []VideoReferenceInput) (bool, float64) {
 	maxSeconds := 0.0
 	found := false
@@ -532,8 +407,4 @@ func highestResolutionAtOrBelow(supported []string, requested string) string {
 		}
 	}
 	return ""
-}
-
-func round2(v float64) float64 {
-	return math.Round(v*100) / 100
 }

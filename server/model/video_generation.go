@@ -42,25 +42,39 @@ func (g *VideoGeneration) BeforeCreate(tx *gorm.DB) error {
 // video generation job. The aggregate VideoGeneration owns final delivery state;
 // segments keep provider task state and intermediate files diagnosable.
 type VideoGenerationSegment struct {
-	ID                string         `gorm:"type:char(36);primaryKey" json:"id"`
-	VideoGenerationID string         `gorm:"type:char(36);index;not null" json:"video_generation_id"`
-	UserID            string         `gorm:"type:char(36);index" json:"user_id"`
-	ProjectID         string         `gorm:"type:char(36);index" json:"project_id"`
-	TaskID            string         `gorm:"type:char(36);index" json:"task_id"`
-	Index             int            `gorm:"index;not null" json:"index"`
-	ArkTaskID         string         `gorm:"type:varchar(100);index" json:"ark_task_id,omitempty"`
-	Status            string         `gorm:"type:varchar(40);index" json:"status"`
-	Prompt            string         `gorm:"type:text" json:"prompt,omitempty"`
-	StartSecond       int64          `json:"start_second"`
-	EndSecond         int64          `json:"end_second"`
-	Duration          int64          `json:"duration"`
-	EstimatedCredits  int            `gorm:"default:0" json:"estimated_credits"`
-	CreditsCharged    int            `gorm:"default:0" json:"credits_charged"`
-	ProviderURLs      datatypes.JSON `gorm:"type:json" json:"provider_urls,omitempty"`
-	TaskFileID        string         `gorm:"type:char(36);index" json:"task_file_id,omitempty"`
-	ErrorMessage      string         `gorm:"type:text" json:"error_message,omitempty"`
-	CreatedAt         time.Time      `gorm:"index" json:"created_at"`
-	UpdatedAt         time.Time      `gorm:"index" json:"updated_at"`
+	ID                string                                    `gorm:"type:char(36);primaryKey" json:"id"`
+	VideoGenerationID string                                    `gorm:"type:char(36);index;not null" json:"video_generation_id"`
+	UserID            string                                    `gorm:"type:char(36);index" json:"user_id"`
+	ProjectID         string                                    `gorm:"type:char(36);index" json:"project_id"`
+	TaskID            string                                    `gorm:"type:char(36);index" json:"task_id"`
+	Index             int                                       `gorm:"index;not null" json:"index"`
+	ArkTaskID         string                                    `gorm:"type:varchar(100);index" json:"ark_task_id,omitempty"`
+	Status            string                                    `gorm:"type:varchar(40);index" json:"status"`
+	Prompt            string                                    `gorm:"type:text" json:"prompt,omitempty"`
+	StartSecond       int64                                     `json:"start_second"`
+	EndSecond         int64                                     `json:"end_second"`
+	Duration          int64                                     `json:"duration"`
+	EstimatedCredits  int                                       `gorm:"default:0" json:"estimated_credits"`
+	CreditsCharged    int                                       `gorm:"default:0" json:"credits_charged"`
+	RetailSKU         datatypes.JSONType[VideoSegmentRetailSKU] `gorm:"type:json" json:"retail_sku"`
+	ProviderURLs      datatypes.JSON                            `gorm:"type:json" json:"provider_urls,omitempty"`
+	TaskFileID        string                                    `gorm:"type:char(36);index" json:"task_file_id,omitempty"`
+	ErrorMessage      string                                    `gorm:"type:text" json:"error_message,omitempty"`
+	CreatedAt         time.Time                                 `gorm:"index" json:"created_at"`
+	UpdatedAt         time.Time                                 `gorm:"index" json:"updated_at"`
+}
+
+// VideoSegmentRetailSKU pins the exact immutable retail decision before the
+// provider request is dispatched. Download settlement must use this snapshot,
+// never whatever catalog happens to be current later.
+type VideoSegmentRetailSKU struct {
+	CatalogID    string `json:"catalog_id"`
+	SKUID        string `json:"sku_id"`
+	PriceCredits int64  `json:"price_credits"`
+	ModelKey     string `json:"model_key"`
+	Resolution   string `json:"resolution"`
+	DurationTier string `json:"duration_tier"`
+	InputMode    string `json:"input_mode"`
 }
 
 func (VideoGenerationSegment) TableName() string { return "video_generation_segments" }

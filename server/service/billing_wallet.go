@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -113,6 +115,7 @@ type SettlementIntent struct {
 	SKUID              string
 	Reason             string
 	RequestFingerprint string
+	ResultSnapshot     []byte
 	IdempotencyScope   string
 	IdempotencyKey     string
 }
@@ -236,22 +239,56 @@ func (s *BillingWalletService) ChargeStandaloneOperation(ctx context.Context, re
 	return s.chargeOperation(ctx, req, false)
 }
 
+func (s *BillingWalletService) ChargeStandaloneOperationInTx(ctx context.Context, tx repository.Repository, req OperationChargeRequest) (*model.BillingCharge, error) {
+	return s.chargeOperationInTx(ctx, tx, req, false)
+}
+
 func (s *BillingWalletService) chargeOperation(ctx context.Context, req OperationChargeRequest, accepted bool) (*model.BillingCharge, error) {
-	if strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.CatalogID) == "" || strings.TrimSpace(req.SKUID) == "" ||
-		strings.TrimSpace(req.ResourceType) == "" || strings.TrimSpace(req.ResourceID) == "" || !validBillingFingerprint(req.RequestFingerprint) ||
-		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
-		return nil, fmt.Errorf("%w: incomplete operation charge identity", ErrBillingInvalid)
-	}
-	if accepted && (strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.AttemptID) == "" || strings.TrimSpace(req.ToolCallID) == "") {
-		return nil, fmt.Errorf("%w: accepted operation identity is required", ErrBillingInvalid)
-	}
-	if !accepted && strings.TrimSpace(req.QuoteID) == "" {
-		return nil, fmt.Errorf("%w: standalone operation quote is required", ErrBillingInvalid)
+	if err := validateOperationChargeRequest(req, accepted); err != nil {
+		return nil, err
 	}
 	if replay, replayErr := findOperationChargeReplay(ctx, s.repo.Billing(), req, accepted); replayErr != nil || replay != nil {
 		return replay, replayErr
 	}
-	sku, err := s.repo.Billing().FindSKU(ctx, req.CatalogID, req.SKUID)
+	var result *model.BillingCharge
+	err := s.withTx(ctx, func(tx repository.Repository) error {
+		var err error
+		result, err = s.chargeOperationInTx(ctx, tx, req, accepted)
+		return err
+	})
+	if err != nil {
+		if replay, replayErr := findOperationChargeReplay(ctx, s.repo.Billing(), req, accepted); replayErr != nil || replay != nil {
+			return replay, replayErr
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+func validateOperationChargeRequest(req OperationChargeRequest, accepted bool) error {
+	if strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.CatalogID) == "" || strings.TrimSpace(req.SKUID) == "" ||
+		strings.TrimSpace(req.ResourceType) == "" || strings.TrimSpace(req.ResourceID) == "" || !validBillingFingerprint(req.RequestFingerprint) ||
+		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
+		return fmt.Errorf("%w: incomplete operation charge identity", ErrBillingInvalid)
+	}
+	if accepted && (strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.AttemptID) == "" || strings.TrimSpace(req.ToolCallID) == "") {
+		return fmt.Errorf("%w: accepted operation identity is required", ErrBillingInvalid)
+	}
+	if !accepted && strings.TrimSpace(req.QuoteID) == "" {
+		return fmt.Errorf("%w: standalone operation quote is required", ErrBillingInvalid)
+	}
+	return nil
+}
+
+func (s *BillingWalletService) chargeOperationInTx(ctx context.Context, tx repository.Repository, req OperationChargeRequest, accepted bool) (*model.BillingCharge, error) {
+	if s == nil || tx == nil {
+		return nil, fmt.Errorf("%w: operation charge transaction is required", ErrBillingInvalid)
+	}
+	if err := validateOperationChargeRequest(req, accepted); err != nil {
+		return nil, err
+	}
+	billingRepo := tx.Billing()
+	sku, err := billingRepo.FindSKU(ctx, req.CatalogID, req.SKUID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrBillingSKUNotFound
@@ -265,82 +302,68 @@ func (s *BillingWalletService) chargeOperation(ctx context.Context, req Operatio
 	if sku.Policy != wantPolicy {
 		return nil, fmt.Errorf("%w: SKU policy is %q", ErrBillingInvalid, sku.Policy)
 	}
-	var result *model.BillingCharge
-	err = s.withTx(ctx, func(tx repository.Repository) error {
-		billingRepo := tx.Billing()
-		expectedCharge := newOperationCharge(req, sku, accepted, s.now().UTC())
-		if replay, replayErr := findExpectedChargeReplay(ctx, billingRepo, expectedCharge); replayErr != nil || replay != nil {
-			result = replay
-			return replayErr
+	expectedCharge := newOperationCharge(req, sku, accepted, s.now().UTC())
+	if replay, replayErr := findExpectedChargeReplay(ctx, billingRepo, expectedCharge); replayErr != nil || replay != nil {
+		return replay, replayErr
+	}
+	if accepted {
+		if _, findErr := billingRepo.FindChargeByOperation(ctx, req.TaskID, req.AttemptID, req.ToolCallID, req.CatalogID, req.SKUID); findErr == nil {
+			return nil, ErrBillingConflict
+		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return nil, findErr
 		}
-		if accepted {
-			if _, findErr := billingRepo.FindChargeByOperation(ctx, req.TaskID, req.AttemptID, req.ToolCallID, req.CatalogID, req.SKUID); findErr == nil {
-				return ErrBillingConflict
-			} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
-				return findErr
-			}
+	}
+	account, lockErr := billingRepo.LockAccount(ctx, req.UserID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	if replay, replayErr := findLockedOperationChargeReplay(ctx, billingRepo, expectedCharge, accepted); replayErr != nil || replay != nil {
+		return replay, replayErr
+	}
+	now := s.now().UTC()
+	if !accepted {
+		quote, quoteErr := billingRepo.LockQuote(ctx, req.QuoteID)
+		if quoteErr != nil {
+			return nil, quoteErr
 		}
-		account, lockErr := billingRepo.LockAccount(ctx, req.UserID)
-		if lockErr != nil {
-			return lockErr
+		if err := validateAdmissionQuote(quote, req.UserID, sku, req.RequestFingerprint, now); err != nil {
+			return nil, err
 		}
-		if replay, replayErr := findLockedOperationChargeReplay(ctx, billingRepo, expectedCharge, accepted); replayErr != nil || replay != nil {
-			result = replay
-			return replayErr
+		if account.DebtCredits > 0 {
+			return nil, ErrBillingDebtOutstanding
 		}
-		now := s.now().UTC()
-		if !accepted {
-			quote, quoteErr := billingRepo.LockQuote(ctx, req.QuoteID)
-			if quoteErr != nil {
-				return quoteErr
-			}
-			if err := validateAdmissionQuote(quote, req.UserID, sku, req.RequestFingerprint, now); err != nil {
-				return err
-			}
-			if account.DebtCredits > 0 {
-				return ErrBillingDebtOutstanding
-			}
+	}
+	charge := newOperationCharge(req, sku, accepted, now)
+	allocations, entries, paid, promotional, debt, spendErr := s.consumeForCharge(ctx, billingRepo, account, *sku, charge, accepted)
+	if spendErr != nil {
+		if accepted || !errors.Is(spendErr, errBillingSpendInsufficient) {
+			return nil, spendErr
 		}
-		charge := newOperationCharge(req, sku, accepted, now)
-		allocations, entries, paid, promotional, debt, spendErr := s.consumeForCharge(ctx, billingRepo, account, *sku, charge, accepted)
-		if spendErr != nil {
-			if accepted || !errors.Is(spendErr, errBillingSpendInsufficient) {
-				return spendErr
-			}
-			return ErrBillingInsufficientForStandaloneOperation
+		return nil, ErrBillingInsufficientForStandaloneOperation
+	}
+	charge.PaidCredits, charge.PromotionalCredits, charge.DebtCredits = paid, promotional, debt
+	if err := charge.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBillingInvalid, err)
+	}
+	if !accepted {
+		consumed, consumeErr := billingRepo.MarkQuoteConsumed(ctx, req.QuoteID, now, req.ResourceType, req.ResourceID)
+		if consumeErr != nil {
+			return nil, consumeErr
 		}
-		charge.PaidCredits, charge.PromotionalCredits, charge.DebtCredits = paid, promotional, debt
-		if err := charge.Validate(); err != nil {
-			return fmt.Errorf("%w: %v", ErrBillingInvalid, err)
+		if !consumed {
+			return nil, ErrBillingQuoteConsumed
 		}
-		if !accepted {
-			consumed, consumeErr := billingRepo.MarkQuoteConsumed(ctx, req.QuoteID, now, req.ResourceType, req.ResourceID)
-			if consumeErr != nil {
-				return consumeErr
-			}
-			if !consumed {
-				return ErrBillingQuoteConsumed
-			}
-		}
-		if err := billingRepo.CreateCharge(ctx, charge, allocations); err != nil {
-			return err
-		}
-		if err := appendWalletEntries(ctx, billingRepo, entries); err != nil {
-			return err
-		}
-		if err := updateBillingAccount(ctx, billingRepo, account); err != nil {
-			return err
-		}
-		result = charge
-		return nil
-	})
-	if err != nil {
-		if replay, replayErr := findOperationChargeReplay(ctx, s.repo.Billing(), req, accepted); replayErr != nil || replay != nil {
-			return replay, replayErr
-		}
+	}
+	if err := billingRepo.CreateCharge(ctx, charge, allocations); err != nil {
 		return nil, err
 	}
-	return result, nil
+	if err := appendWalletEntries(ctx, billingRepo, entries); err != nil {
+		return nil, err
+	}
+	if err := updateBillingAccount(ctx, billingRepo, account); err != nil {
+		return nil, err
+	}
+	return charge, nil
 }
 
 func (s *BillingWalletService) consumeForCharge(ctx context.Context, repo repository.BillingRepository, account *model.BillingWalletAccount, sku model.BillingSKU, charge *model.BillingCharge, allowDebt bool) ([]model.BillingChargeAllocation, []*model.BillingWalletEntry, int64, int64, int64, error) {
@@ -631,6 +654,14 @@ func requirePublishedBillingCatalog(ctx context.Context, repo repository.Billing
 }
 
 func (s *BillingWalletService) Reverse(ctx context.Context, chargeID, reason, key string) (*model.BillingCharge, error) {
+	return s.reverseCharge(ctx, chargeID, reason, key, false)
+}
+
+func (s *BillingWalletService) ReverseStandaloneOperation(ctx context.Context, chargeID, reason, key string) (*model.BillingCharge, error) {
+	return s.reverseCharge(ctx, chargeID, reason, key, true)
+}
+
+func (s *BillingWalletService) reverseCharge(ctx context.Context, chargeID, reason, key string, standalone bool) (*model.BillingCharge, error) {
 	chargeID, reason, key = strings.TrimSpace(chargeID), strings.TrimSpace(reason), strings.TrimSpace(key)
 	if chargeID == "" || reason == "" || key == "" {
 		return nil, fmt.Errorf("%w: reversal charge, reason, and key are required", ErrBillingInvalid)
@@ -646,8 +677,11 @@ func (s *BillingWalletService) Reverse(ctx context.Context, chargeID, reason, ke
 		if err != nil {
 			return err
 		}
-		if original.Kind != model.BillingChargeKindTask || original.Policy != "task_admission" ||
-			original.Status != model.BillingChargeStatusPosted || original.DebtCredits != 0 {
+		validOriginal := original.Kind == model.BillingChargeKindTask && original.Policy == "task_admission"
+		if standalone {
+			validOriginal = original.Kind == model.BillingChargeKindOperation && original.Policy == "standalone_operation" && original.QuoteID != nil
+		}
+		if !validOriginal || original.Status != model.BillingChargeStatusPosted || original.DebtCredits != 0 {
 			return ErrBillingReversalNotAllowed
 		}
 		if replay, replayErr := findReversalChargeReplay(ctx, billingRepo, original, reason, key); replayErr != nil || replay != nil {
@@ -875,17 +909,17 @@ func (s *BillingWalletService) ExpirePromotionalCredits(ctx context.Context, now
 
 func (s *BillingWalletService) EnqueueSettlementInTx(ctx context.Context, tx repository.Repository, req SettlementIntent) (*model.BillingSettlementOutbox, error) {
 	if tx == nil || strings.TrimSpace(req.ResourceType) == "" || strings.TrimSpace(req.ResourceID) == "" ||
-		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" || !validBillingFingerprint(req.RequestFingerprint) {
+		strings.TrimSpace(req.IdempotencyScope) == "" || strings.TrimSpace(req.IdempotencyKey) == "" || !validBillingFingerprint(req.RequestFingerprint) || len(req.ResultSnapshot) > 16*1024 {
 		return nil, fmt.Errorf("%w: invalid settlement intent", ErrBillingInvalid)
 	}
 	switch req.Action {
 	case model.BillingSettlementActionChargeOperation:
 		if strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.AttemptID) == "" || strings.TrimSpace(req.ToolCallID) == "" ||
-			strings.TrimSpace(req.CatalogID) == "" || strings.TrimSpace(req.SKUID) == "" {
+			strings.TrimSpace(req.CatalogID) == "" || strings.TrimSpace(req.SKUID) == "" || len(req.ResultSnapshot) == 0 || !json.Valid(req.ResultSnapshot) {
 			return nil, fmt.Errorf("%w: incomplete operation settlement", ErrBillingInvalid)
 		}
-	case model.BillingSettlementActionReverseTask:
-		if strings.TrimSpace(req.ChargeID) == "" || strings.TrimSpace(req.Reason) == "" {
+	case model.BillingSettlementActionReverseTask, model.BillingSettlementActionReverseOperation:
+		if strings.TrimSpace(req.ChargeID) == "" || strings.TrimSpace(req.Reason) == "" || len(req.ResultSnapshot) != 0 {
 			return nil, fmt.Errorf("%w: reversal settlement requires charge and reason", ErrBillingInvalid)
 		}
 	default:
@@ -908,6 +942,7 @@ func (s *BillingWalletService) EnqueueSettlementInTx(ctx context.Context, tx rep
 		CatalogID: req.CatalogID, SKUID: req.SKUID, IdempotencyScope: req.IdempotencyScope,
 		IdempotencyKey: req.IdempotencyKey, Reason: req.Reason, Status: "pending", RequestFingerprint: req.RequestFingerprint,
 		CreatedAt: now, UpdatedAt: now,
+		ResultSnapshot: append([]byte(nil), req.ResultSnapshot...),
 	}
 	if req.TaskID != "" {
 		settlement.TaskID = stringPtr(req.TaskID)
@@ -1015,6 +1050,12 @@ func (s *BillingWalletService) applySettlement(ctx context.Context, settlement m
 		}
 		_, err := s.Reverse(ctx, *settlement.ChargeID, settlement.Reason, settlement.ID)
 		return err
+	case model.BillingSettlementActionReverseOperation:
+		if settlement.ChargeID == nil {
+			return ErrBillingInvalid
+		}
+		_, err := s.ReverseStandaloneOperation(ctx, *settlement.ChargeID, settlement.Reason, settlement.ID)
+		return err
 	default:
 		return ErrBillingInvalid
 	}
@@ -1024,6 +1065,9 @@ func sameSettlementIntent(existing *model.BillingSettlementOutbox, req Settlemen
 	if existing == nil || existing.Action != req.Action || existing.ResourceType != req.ResourceType || existing.ResourceID != req.ResourceID ||
 		existing.CatalogID != req.CatalogID || existing.SKUID != req.SKUID || existing.Reason != req.Reason ||
 		existing.RequestFingerprint != req.RequestFingerprint {
+		return false
+	}
+	if !bytes.Equal(existing.ResultSnapshot, req.ResultSnapshot) {
 		return false
 	}
 	return optionalStringEqual(existing.TaskID, req.TaskID) && optionalStringEqual(existing.AttemptID, req.AttemptID) &&

@@ -85,7 +85,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newRepo := func(t *testing.T) repository.Repository {
+	newRepo := func(t *testing.T) (*gorm.DB, repository.Repository) {
 		t.Helper()
 		db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 		if err != nil {
@@ -96,7 +96,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		}
 		repo := repository.New(db)
 		t.Cleanup(func() { _ = repo.Close() })
-		return repo
+		return db, repo
 	}
 	logger := zerolog.New(os.Stderr)
 
@@ -105,7 +105,8 @@ func TestBuildBillingRuntime(t *testing.T) {
 			{BillingRuntime: config.BillingRuntimeConfig{AdminAPIKey: "key"}},
 			{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir}},
 		} {
-			if _, err := buildBillingRuntime(t.Context(), newRepo(t), cfg, &logger); err == nil {
+			db, repo := newRepo(t)
+			if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err == nil {
 				t.Fatalf("buildBillingRuntime(%+v) error = nil", cfg.BillingRuntime)
 			}
 		}
@@ -113,30 +114,31 @@ func TestBuildBillingRuntime(t *testing.T) {
 
 	t.Run("load failure", func(t *testing.T) {
 		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: t.TempDir(), AdminAPIKey: "key"}}
-		if _, err := buildBillingRuntime(t.Context(), newRepo(t), cfg, &logger); err == nil || !strings.Contains(err.Error(), "load billing bundle") {
+		db, repo := newRepo(t)
+		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err == nil || !strings.Contains(err.Error(), "load billing bundle") {
 			t.Fatalf("load failure = %v", err)
 		}
 	})
 
 	t.Run("publish failure", func(t *testing.T) {
-		repo := newRepo(t)
+		db, repo := newRepo(t)
 		if err := repo.Close(); err != nil {
 			t.Fatal(err)
 		}
 		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
-		if _, err := buildBillingRuntime(t.Context(), repo, cfg, &logger); err == nil || !strings.Contains(err.Error(), "publish billing catalog") {
+		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err == nil || !strings.Contains(err.Error(), "publish billing catalog") {
 			t.Fatalf("publish failure = %v", err)
 		}
 	})
 
 	t.Run("success", func(t *testing.T) {
-		repo := newRepo(t)
+		db, repo := newRepo(t)
 		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
-		runtime, err := buildBillingRuntime(t.Context(), repo, cfg, &logger)
+		runtime, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger)
 		if err != nil || runtime == nil || runtime.Handler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil {
 			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
 		}
-		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-17-v1"); err != nil {
+		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-20-v2"); err != nil {
 			t.Fatalf("published production catalog: %v", err)
 		}
 	})
@@ -149,7 +151,7 @@ func TestMainWiresRequiredBillingRuntime(t *testing.T) {
 	}
 	text := string(source)
 	for _, required := range []string{
-		"buildBillingRuntime(context.Background(), repo, cfg, log)",
+		"buildBillingRuntime(context.Background(), mysqlDB, repo, cfg, log)",
 		"service.NewBillingMaintenanceWorker(wallet",
 		"BillingHandler:",
 		"go func() {",

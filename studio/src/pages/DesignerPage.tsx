@@ -363,7 +363,7 @@ export default function DesignerPage() {
         provider_id: effectiveProvider.id,
         quality: settings.quality !== 'auto' ? settings.quality : undefined,
         size: requestSize,
-        n: settings.n > 1 ? settings.n : undefined,
+        n: 1,
         output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
         output_compression: effectiveCaps?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
         background: effectiveCaps?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,

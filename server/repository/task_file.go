@@ -449,6 +449,19 @@ func (r *taskFileRepository) FindByID(ctx context.Context, id string) (*model.Ta
 	return &file, nil
 }
 
+// FindByIDForExecution is the exact current-attempt lookup used after task and
+// execution ownership have already been validated. Unlike FindByID, it may
+// return pending artifacts but cannot cross task or execution boundaries.
+func (r *taskFileRepository) FindByIDForExecution(ctx context.Context, id, taskID, executionID string) (*model.TaskFile, error) {
+	var file model.TaskFile
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND task_id = ? AND execution_id = ?", id, taskID, executionID).
+		First(&file).Error; err != nil {
+		return nil, err
+	}
+	return &file, nil
+}
+
 func (r *taskFileRepository) FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error) {
 	var files []*model.TaskFile
 	if err := r.db.WithContext(ctx).Where("task_id = ? AND role = ? AND state = ?", taskID, role, model.TaskFileStatePublished).Find(&files).Error; err != nil {

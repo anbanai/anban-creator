@@ -162,6 +162,66 @@ func (s *BillingCatalogService) ResolveSKU(ctx context.Context, catalogID, opera
 	return sku, err
 }
 
+// ResolveVideoSKU selects one immutable fixed retail price from the published
+// catalog. Provider usage and provider-cost data are intentionally absent from
+// this boundary.
+func (s *BillingCatalogService) ResolveVideoSKU(ctx context.Context, catalogID string, selectors billing.SKUSelectors) (*model.BillingSKU, error) {
+	var ok bool
+	if catalogID, ok = canonicalBillingText(catalogID, 128, false); !ok {
+		return nil, fmt.Errorf("%w: invalid video SKU catalog", ErrBillingInvalid)
+	}
+	selectors.ModelKey = strings.ToLower(strings.TrimSpace(selectors.ModelKey))
+	selectors.Resolution = strings.ToLower(strings.TrimSpace(selectors.Resolution))
+	selectors.DurationTier = strings.TrimSpace(selectors.DurationTier)
+	selectors.InputMode = strings.TrimSpace(selectors.InputMode)
+	if selectors.ModelKey == "" || selectors.Resolution == "" ||
+		(selectors.DurationTier != "1-5" && selectors.DurationTier != "6-10" && selectors.DurationTier != "11-15") ||
+		(selectors.InputMode != "no_input" && selectors.InputMode != "media_input") {
+		return nil, fmt.Errorf("%w: invalid video SKU selectors", ErrBillingInvalid)
+	}
+	if catalogID == "" {
+		catalog, err := s.repo.Billing().FindLatestPublishedCatalog(ctx)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrBillingSKUNotFound
+			}
+			return nil, err
+		}
+		catalogID = catalog.CatalogID
+	}
+	skus, err := s.repo.Billing().ListSKUsByCatalog(ctx, catalogID)
+	if err != nil {
+		return nil, err
+	}
+	var matched *model.BillingSKU
+	for _, persisted := range skus {
+		if persisted.Operation != "mcp.generate_video" || persisted.Route != "video_generation" || persisted.Policy != "accepted_task_operation" {
+			continue
+		}
+		var snapshot billing.SKUConfig
+		if err := json.Unmarshal(persisted.Snapshot, &snapshot); err != nil || snapshot.Selectors == nil {
+			continue
+		}
+		candidate := *snapshot.Selectors
+		candidate.ModelKey = strings.ToLower(strings.TrimSpace(candidate.ModelKey))
+		candidate.Resolution = strings.ToLower(strings.TrimSpace(candidate.Resolution))
+		candidate.DurationTier = strings.TrimSpace(candidate.DurationTier)
+		candidate.InputMode = strings.TrimSpace(candidate.InputMode)
+		if candidate != selectors {
+			continue
+		}
+		if matched != nil {
+			return nil, ErrBillingConflict
+		}
+		copy := persisted
+		matched = &copy
+	}
+	if matched == nil {
+		return nil, ErrBillingSKUNotFound
+	}
+	return matched, nil
+}
+
 func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteRequest) (*model.BillingQuote, error) {
 	var err error
 	req, err = canonicalQuoteRequest(req)

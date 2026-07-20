@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -18,12 +17,14 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gorm.io/datatypes"
-	"gorm.io/gorm"
 
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
+
+var videoDownloadHTTPClient = &http.Client{Transport: http.DefaultTransport}
 
 func registerVideoTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
@@ -88,13 +89,13 @@ func registerVideoTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "validate_video_generation_params",
-		Description: "Validate video generation parameters against the project videocreator profile and return resolved parameters, suggested params, and estimated credits without calling Ark.",
+		Description: "Validate video generation parameters against the project videocreator profile and return resolved parameters without calling Ark or calculating retail charges.",
 		InputSchema: videoGenerationInputSchema(),
 	}, validateVideoGenerationParamsHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "create_video_generation_job",
-		Description: "Create a target-duration video generation job. The server resolves target duration, splits provider-bounded segments, deducts total credits once, submits one provider task per segment, and records segment state.",
+		Description: "Create a target-duration video generation job. The server resolves target duration, splits provider-bounded segments, pins one fixed retail SKU per segment before dispatch, submits one provider task per segment, and records segment state. No operation charge occurs at provider submission.",
 		InputSchema: videoGenerationInputSchema(),
 	}, createVideoGenerationJobHandler)
 
@@ -113,7 +114,7 @@ func registerVideoTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "download_video_generation_results",
-		Description: "Download one or more succeeded segment video URLs, register each segment file, and mark a single-segment result as final_video. Multi-segment jobs should call compose_video_segments after all segments are downloaded.",
+		Description: "Download persisted provider outputs for succeeded segments, atomically register each durable task file with its pinned fixed-SKU settlement, and mark a single-segment result as final_video. The URL must exactly match query_video_generation_job output. Multi-segment jobs should call compose_video_segments after all segments are downloaded.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -462,9 +463,6 @@ func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, re
 		return videoUnderstandingContractFile{}, err
 	}
 	userID := getUserID(ctx)
-	if err := preflightUnderstandingTokenBilling(ctx, userID, taskID, model.CreditTypeVideoUnderstanding); err != nil {
-		return videoUnderstandingContractFile{}, err
-	}
 	inferredMode = strings.TrimSpace(inferredMode)
 	if inferredMode == "" {
 		inferredMode = "standard"
@@ -474,10 +472,13 @@ func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, re
 		purposeHint = ref.ReferenceRole
 	}
 	prompt := buildVideoUnderstandingPrompt(ref.ReferenceRole, purposeHint, "Extract the full reference timeline, surface facts, deep intent, business intent, latent subtext, joke or reversal structure, visual beats, camera, action, expression, rhythm, must_keep, must_keep_meaning, can_change, can_adapt_meaning, must_not_change, and must_not_break_meaning for reference-timeline.json and shot-plan.md.")
+	providerRequestID := newUnderstandingProviderRequestID(model.CreditTypeVideoUnderstanding)
 	analysis, err := svcs.WritingSvc.AnalyzeVideoURLDetailed(ctx, userID, ref.URL, prompt)
 	if err != nil {
+		recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeVideoUnderstanding, providerRequestID, nil)
 		return videoUnderstandingContractFile{}, fmt.Errorf("analyze video reference during preparation: %w", err)
 	}
+	recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeVideoUnderstanding, providerRequestID, &analysis.Usage)
 	understanding := normalizeVideoUnderstanding(analysis.Text)
 	understanding["metadata"] = map[string]any{"source_url": ref.URL}
 	understanding["model"] = analysis.Model
@@ -489,11 +490,6 @@ func analyzeAndRegisterVideoUnderstanding(ctx context.Context, taskID string, re
 	if err := validateDeepVideoUnderstanding(understanding); err != nil {
 		return videoUnderstandingContractFile{}, fmt.Errorf("analyze video reference during preparation returned insufficient native video understanding: %w", err)
 	}
-	creditsCharged, err := maybeDeductUnderstandingTokens(ctx, userID, taskID, model.CreditTypeVideoUnderstanding, analysis.Usage)
-	if err != nil {
-		return videoUnderstandingContractFile{}, fmt.Errorf("bill video understanding during preparation: %w", err)
-	}
-	understanding["credits_charged"] = creditsCharged
 	payload, _ := json.MarshalIndent(understanding, "", "  ")
 	tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, taskID, userID, fileName, strings.NewReader(string(payload)), "application/json", int64(len(payload)))
 	if err != nil {
@@ -715,6 +711,22 @@ func analyzeVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest)
 	referenceRole, _ := args["reference_role"].(string)
 	purposeHint, _ := args["purpose_hint"].(string)
 	analysisPrompt, _ := args["analysis_prompt"].(string)
+	userID := getUserID(ctx)
+	if strings.TrimSpace(taskID) != "" {
+		if svcs.TaskSvc == nil {
+			return errorResult("task service not available"), nil
+		}
+		task, err := svcs.TaskSvc.GetByID(ctx, taskID)
+		if err != nil || task == nil {
+			return errorResult("task not found"), nil
+		}
+		if task.UserID != userID {
+			return errorResult("task does not belong to user"), nil
+		}
+		if task.ProjectID != projectID {
+			return errorResult("task does not belong to the requested project"), nil
+		}
+	}
 	if strings.TrimSpace(taskFileID) != "" {
 		resolved, _, _, err := videoReferenceURLFromTaskFile(ctx, taskID, taskFileID, service.VideoReferenceVideo)
 		if err != nil {
@@ -725,17 +737,16 @@ func analyzeVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest)
 	if err := service.ValidatePublicHTTPSURLForVideoReference(videoURL); err != nil {
 		return errorResult(err.Error()), nil
 	}
-	userID := getUserID(ctx)
-	if err := preflightUnderstandingTokenBilling(ctx, userID, taskID, model.CreditTypeVideoUnderstanding); err != nil {
-		return billingError("analyze video reference", err), nil
-	}
 	prompt := buildVideoUnderstandingPrompt(referenceRole, purposeHint, analysisPrompt)
+	providerRequestID := newUnderstandingProviderRequestID(model.CreditTypeVideoUnderstanding)
 	analysis, err := svcs.WritingSvc.AnalyzeVideoURLDetailed(ctx, userID, videoURL, prompt)
 	analysisMode := "native_video"
 	metadata := map[string]any{"source_url": videoURL}
 	if err != nil {
+		recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeVideoUnderstanding, providerRequestID, nil)
 		return errorResult("analyze video reference: " + err.Error()), nil
 	}
+	recordUnderstandingProviderCost(ctx, taskID, model.CreditTypeVideoUnderstanding, providerRequestID, &analysis.Usage)
 	understanding := normalizeVideoUnderstanding(analysis.Text)
 	understanding["metadata"] = metadata
 	understanding["model"] = analysis.Model
@@ -747,18 +758,11 @@ func analyzeVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest)
 	if err := validateDeepVideoUnderstanding(understanding); err != nil {
 		return errorResult("analyze video reference returned insufficient native video understanding: " + err.Error()), nil
 	}
-	creditsCharged, err := maybeDeductUnderstandingTokens(ctx, userID, taskID, model.CreditTypeVideoUnderstanding, analysis.Usage)
-	if err != nil {
-		return errorResult("bill video understanding: " + err.Error()), nil
-	}
-	understanding["credits_charged"] = creditsCharged
-
 	resp := map[string]any{
 		"analysis_mode":            analysisMode,
 		"video_understanding":      understanding,
 		"video_understanding_file": "video-understanding.json",
 		"usage":                    analysis.Usage,
-		"credits_charged":          creditsCharged,
 	}
 	if strings.TrimSpace(taskID) != "" && svcs.TaskSvc != nil {
 		payload, _ := json.MarshalIndent(understanding, "", "  ")
@@ -1008,7 +1012,7 @@ func buildVideoGenerationPlanHandler(ctx context.Context, req *mcp.CallToolReque
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
-	return textResult(map[string]any{"generation_plan": plan, "sdk_payload_preview": plan.SDKPayloadPreview, "estimated_credits": plan.EstimatedCredits})
+	return textResult(map[string]any{"generation_plan": plan, "sdk_payload_preview": plan.SDKPayloadPreview})
 }
 
 func validateVideoGenerationParamsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1029,53 +1033,9 @@ func validateVideoGenerationParamsHandler(ctx context.Context, req *mcp.CallTool
 		return errorResult(err.Error()), nil
 	}
 	return textResult(map[string]any{
-		"valid":             true,
-		"resolved_params":   plan,
-		"estimated_credits": plan.EstimatedCredits,
-		"pricing_breakdown": plan.PricingBreakdown,
+		"valid":           true,
+		"resolved_params": plan,
 	})
-}
-
-func createVideoGenerationTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	args := parseArgs(req.Params.Arguments)
-	if err := rejectMCPModelSelection(args, "model"); err != nil {
-		return errorResult(err.Error()), nil
-	}
-	if svcs == nil || svcs.VideoSvc == nil {
-		return errorResult("video service not available"), nil
-	}
-	projectID, _ := args["project_id"].(string)
-	if projectID == "" {
-		return errorResult("project_id is required"), nil
-	}
-	videoReq, err := parseVideoGenerationRequest(args)
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-	plan, err := resolveMCPVideoPlan(ctx, projectID, videoReq)
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-	videoReq.Model = plan.Model
-	videoReq.Purpose = plan.Purpose
-	videoReq.Resolution = plan.Resolution
-	videoReq.Ratio = plan.Ratio
-	videoReq.Duration = plan.Duration
-	videoReq.Watermark = plan.Watermark
-	userID := getUserID(ctx)
-	operationID, err := maybeDeductVideo(ctx, userID, videoReq.TaskID, plan)
-	if err != nil {
-		return billingError("create video generation task", err), nil
-	}
-	result, err := svcs.VideoSvc.CreateTask(ctx, videoReq)
-	if err != nil {
-		_ = maybeRefundVideoOperation(ctx, operationID)
-		return billingError("create video generation task", err), nil
-	}
-	if err := persistVideoGenerationSubmitted(ctx, projectID, userID, videoReq.TaskID, result, plan); err != nil {
-		return billingError("persist video generation", err), nil
-	}
-	return textResult(map[string]any{"task": result, "estimated_credits": plan.EstimatedCredits, "pricing_breakdown": plan.PricingBreakdown})
 }
 
 func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1089,6 +1049,9 @@ func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReque
 	if svcs.TaskSvc == nil || svcs.TaskSvc.Repository() == nil || svcs.TaskSvc.Repository().VideoGenerations() == nil {
 		return errorResult("task/video generation repository not available"), nil
 	}
+	if svcs.BillingCatalogSvc == nil {
+		return errorResult("fixed video SKU catalog is not available"), nil
+	}
 	projectID, _ := args["project_id"].(string)
 	if projectID == "" {
 		return errorResult("project_id is required"), nil
@@ -1102,19 +1065,55 @@ func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReque
 		return errorResult(err.Error()), nil
 	}
 	userID := getUserID(ctx)
-	operationID, err := maybeDeductVideo(ctx, userID, videoReq.TaskID, plan)
-	if err != nil {
-		return billingError("create video generation job", err), nil
-	}
 	gen, err := persistVideoGenerationJobPlanned(ctx, projectID, userID, videoReq.TaskID, plan)
 	if err != nil {
-		_ = maybeRefundVideoOperation(ctx, operationID)
 		return billingError("persist video generation job", err), nil
 	}
 	repo := svcs.TaskSvc.Repository().VideoGenerations()
 	submitted := make([]map[string]any, 0, len(plan.Segments))
-	providerSubmitted := 0
+	inputMode := videoRetailInputMode(plan.References)
 	for _, seg := range plan.Segments {
+		durationTier, err := videoRetailDurationTier(seg.Duration)
+		if err != nil {
+			gen.Status = "failed"
+			gen.ErrorMessage = err.Error()
+			_ = repo.Update(ctx, gen)
+			return billingError("resolve video duration SKU tier", err), nil
+		}
+		sku, err := svcs.BillingCatalogSvc.ResolveVideoSKU(ctx, "", serverbilling.SKUSelectors{
+			ModelKey: seg.ModelKey, Resolution: seg.Resolution, DurationTier: durationTier, InputMode: inputMode,
+		})
+		if err != nil {
+			gen.Status = "failed"
+			gen.ErrorMessage = err.Error()
+			_ = repo.Update(ctx, gen)
+			return billingError("resolve fixed video SKU", err), nil
+		}
+		pinnedSKU := model.VideoSegmentRetailSKU{
+			CatalogID: sku.CatalogID, SKUID: sku.SKUID, PriceCredits: sku.PriceCredits,
+			ModelKey: seg.ModelKey, Resolution: strings.ToLower(seg.Resolution), DurationTier: durationTier, InputMode: inputMode,
+		}
+		segment := &model.VideoGenerationSegment{
+			VideoGenerationID: gen.ID,
+			UserID:            userID,
+			ProjectID:         projectID,
+			TaskID:            videoReq.TaskID,
+			Index:             seg.Index,
+			Status:            "planned",
+			Prompt:            seg.Prompt,
+			StartSecond:       seg.StartSecond,
+			EndSecond:         seg.EndSecond,
+			Duration:          seg.Duration,
+			RetailSKU:         datatypes.NewJSONType(pinnedSKU),
+			EstimatedCredits:  0,
+			CreditsCharged:    0,
+		}
+		if err := repo.CreateSegment(ctx, segment); err != nil {
+			gen.Status = "failed"
+			gen.ErrorMessage = err.Error()
+			_ = repo.Update(ctx, gen)
+			return billingError("pin video generation segment SKU", err), nil
+		}
 		segmentReq := videoReq
 		segmentReq.Model = seg.Model
 		segmentReq.Purpose = plan.Purpose
@@ -1125,32 +1124,17 @@ func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReque
 		segmentReq.Watermark = plan.Watermark
 		result, err := svcs.VideoSvc.CreateTask(ctx, segmentReq)
 		if err != nil {
+			segment.Status = "failed"
+			segment.ErrorMessage = err.Error()
+			_ = repo.UpdateSegment(ctx, segment)
 			gen.Status = "failed"
 			gen.ErrorMessage = err.Error()
 			_ = repo.Update(ctx, gen)
-			if providerSubmitted == 0 {
-				_ = maybeRefundVideoOperation(ctx, operationID)
-				clearVideoGenerationChargeSnapshot(ctx, gen, videoReq.TaskID)
-			}
 			return billingError("create video generation segment", err), nil
 		}
-		providerSubmitted++
-		segment := &model.VideoGenerationSegment{
-			VideoGenerationID: gen.ID,
-			UserID:            userID,
-			ProjectID:         projectID,
-			TaskID:            videoReq.TaskID,
-			Index:             seg.Index,
-			ArkTaskID:         result.VideoTaskID,
-			Status:            "submitted",
-			Prompt:            seg.Prompt,
-			StartSecond:       seg.StartSecond,
-			EndSecond:         seg.EndSecond,
-			Duration:          seg.Duration,
-			EstimatedCredits:  seg.EstimatedCredits,
-			CreditsCharged:    seg.EstimatedCredits,
-		}
-		if err := repo.CreateSegment(ctx, segment); err != nil {
+		segment.ArkTaskID = result.VideoTaskID
+		segment.Status = "submitted"
+		if err := repo.UpdateSegment(ctx, segment); err != nil {
 			gen.Status = "failed"
 			gen.ErrorMessage = err.Error()
 			_ = repo.Update(ctx, gen)
@@ -1160,7 +1144,7 @@ func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReque
 			"index":         seg.Index,
 			"video_task_id": result.VideoTaskID,
 			"duration":      seg.Duration,
-			"credits":       seg.EstimatedCredits,
+			"retail_sku":    pinnedSKU,
 		})
 	}
 	gen.Status = "submitted"
@@ -1169,23 +1153,29 @@ func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReque
 		"video_generation_id": gen.ID,
 		"generation_plan":     plan,
 		"segments":            submitted,
-		"estimated_credits":   plan.EstimatedCredits,
-		"pricing_breakdown":   plan.PricingBreakdown,
 	})
 }
 
-func queryVideoGenerationTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.VideoSvc == nil {
-		return errorResult("video service not available"), nil
+func videoRetailDurationTier(duration int64) (string, error) {
+	switch {
+	case duration >= 1 && duration <= 5:
+		return "1-5", nil
+	case duration >= 6 && duration <= 10:
+		return "6-10", nil
+	case duration >= 11 && duration <= 15:
+		return "11-15", nil
+	default:
+		return "", fmt.Errorf("video segment duration %d has no fixed retail tier", duration)
 	}
-	args := parseArgs(req.Params.Arguments)
-	videoTaskID, _ := args["video_task_id"].(string)
-	result, err := svcs.VideoSvc.QueryTask(ctx, videoTaskID)
-	if err != nil {
-		return errorResult(err.Error()), nil
+}
+
+func videoRetailInputMode(references []service.VideoReferenceInput) string {
+	for _, reference := range references {
+		if reference.Type == service.VideoReferenceVideo || reference.Type == service.VideoReferenceAudio {
+			return "media_input"
+		}
 	}
-	_ = persistVideoGenerationQuery(ctx, videoTaskID, result)
-	return textResult(result)
+	return "no_input"
 }
 
 func queryVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1219,6 +1209,7 @@ func queryVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReques
 					segment.ProviderURLs = datatypes.JSON(b)
 				}
 				_ = repo.UpdateSegment(ctx, segment)
+				recordVideoGenerationProviderCost(ctx, gen, result)
 			} else {
 				queryError = err.Error()
 			}
@@ -1258,54 +1249,6 @@ func queryVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolReques
 		"status":              gen.Status,
 		"segments":            respSegments,
 	})
-}
-
-func downloadVideoGenerationResultHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	args := parseArgs(req.Params.Arguments)
-	videoURL, _ := args["video_url"].(string)
-	outputPath, _ := args["output_path"].(string)
-	taskID, _ := args["task_id"].(string)
-	fileName, _ := args["file_name"].(string)
-	if videoURL == "" {
-		return errorResult("video_url is required"), nil
-	}
-	if strings.TrimSpace(taskID) == "" {
-		return errorResult("task_id is required so the generated video can be registered as an OSS task file"), nil
-	}
-	if svcs == nil || svcs.TaskSvc == nil {
-		return errorResult("task service not available: generated videos must be registered as OSS task files"), nil
-	}
-	if !strings.HasPrefix(videoURL, "https://") {
-		return errorResult("video_url must be a publicly accessible HTTPS URL"), nil
-	}
-	if fileName == "" {
-		fileName = fmt.Sprintf("generated-video-%d.mp4", time.Now().Unix())
-	}
-	if outputPath == "" {
-		outputPath = filepath.Join(os.TempDir(), "anban-video-results", fmt.Sprintf("%d-%s", time.Now().UnixNano(), filepath.Base(fileName)))
-	} else if strings.HasSuffix(outputPath, string(os.PathSeparator)) || filepath.Ext(outputPath) == "" {
-		outputPath = filepath.Join(outputPath, fileName)
-	}
-	if err := downloadFile(ctx, videoURL, outputPath, 500<<20); err != nil {
-		return errorResult(err.Error()), nil
-	}
-	resp := map[string]any{"file_path": outputPath}
-	userID := getUserID(ctx)
-	f, err := os.Open(outputPath)
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-	defer f.Close()
-	info, _ := f.Stat()
-	tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, taskID, userID, filepath.Base(outputPath), f, "video/mp4", info.Size())
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-	svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
-	resp["task_file"] = tf
-	resp["file_url"] = tf.URL
-	_ = persistVideoGenerationDownload(ctx, taskID, videoURL, tf)
-	return textResult(resp)
 }
 
 func downloadVideoGenerationResultsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1369,15 +1312,33 @@ func downloadVideoGenerationResultsHandler(ctx context.Context, req *mcp.CallToo
 		if strings.TrimSpace(videoURL) == "" {
 			videoURL, _ = item["file_url"].(string)
 		}
-		if !strings.HasPrefix(videoURL, "https://") {
-			return errorResult("segment video_url must be a publicly accessible HTTPS URL"), nil
+		videoURL, err = validateVideoSegmentProviderURL(segment, videoURL)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		identity, err := resolveVideoSegmentSettlementIdentity(ctx, taskID, gen, segment, videoURL)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		if replayFile, _, replayErr := svcs.TaskSvc.FindExecutionTaskFileSettlement(ctx, taskID, identity.ExecutionID, segment.ArkTaskID, identity.RequestFingerprint, "video", "mcp-video-settlement"); replayErr != nil {
+			return errorResult(fmt.Sprintf("replay fixed video operation: %v", replayErr)), nil
+		} else if replayFile != nil {
+			svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{replayFile})
+			files = append(files, replayFile)
+			segmentIDs = append(segmentIDs, replayFile.ID)
+			segment.TaskFileID = replayFile.ID
+			segment.Status = "archived"
+			if err := repo.UpdateSegment(ctx, segment); err != nil {
+				return errorResult(err.Error()), nil
+			}
+			continue
 		}
 		fileName := fmt.Sprintf("segment-%02d.mp4", index)
 		tmpPath := filepath.Join(os.TempDir(), "anban-video-results", fmt.Sprintf("%d-%s", time.Now().UnixNano(), fileName))
 		if err := downloadFile(ctx, videoURL, tmpPath, 500<<20); err != nil {
 			return errorResult(err.Error()), nil
 		}
-		tf, err := uploadLocalVideoTaskFile(ctx, taskID, filepath.ToSlash(filepath.Join("video-segments", fileName)), tmpPath)
+		tf, err := uploadLocalVideoSegmentTaskFile(ctx, taskID, gen, segment, identity, filepath.ToSlash(filepath.Join("video-segments", fileName)), tmpPath)
 		_ = os.Remove(tmpPath)
 		if err != nil {
 			return errorResult(err.Error()), nil
@@ -1386,7 +1347,9 @@ func downloadVideoGenerationResultsHandler(ctx context.Context, req *mcp.CallToo
 		segmentIDs = append(segmentIDs, tf.ID)
 		segment.TaskFileID = tf.ID
 		segment.Status = "archived"
-		_ = repo.UpdateSegment(ctx, segment)
+		if err := repo.UpdateSegment(ctx, segment); err != nil {
+			return errorResult(err.Error()), nil
+		}
 	}
 	ids["segments"] = segmentIDs
 	if len(persistedSegments) == 1 && len(segmentIDs) == 1 {
@@ -1595,8 +1558,15 @@ func validateVideoInputContractPlan(contract *videoInputContract, plan *service.
 		}
 	}
 	if contract.RequiredVideoReference {
-		if plan.PricingBreakdown == nil || !plan.PricingBreakdown.InputVideo {
-			return fmt.Errorf("video_creator_input.references includes a required video reference but resolved plan has input_video=false")
+		hasVideoReference := false
+		for _, reference := range plan.References {
+			if reference.Type == service.VideoReferenceVideo {
+				hasVideoReference = true
+				break
+			}
+		}
+		if !hasVideoReference {
+			return fmt.Errorf("video_creator_input.references includes a required video reference but the resolved plan lost it")
 		}
 	}
 	return nil
@@ -1806,12 +1776,11 @@ func resolveMCPVideoPlan(ctx context.Context, projectID string, videoReq service
 	if err := requireMeasuredVideoReferences(ctx, videoReq.ReferenceSet, videoReq.TaskID); err != nil {
 		return nil, err
 	}
-	plan, err := service.ResolveVideoGenerationPlanWithBilling(
+	plan, err := service.ResolveVideoGenerationPlan(
 		videoReq,
 		project.VideoDefaults.Data(),
 		project.VideoModelPolicy.Data(),
 		videoModelCatalog(),
-		videoBillingOptions(ctx, getUserID(ctx)),
 	)
 	if err != nil {
 		return nil, err
@@ -1847,13 +1816,12 @@ func resolveMCPVideoPlan(ctx context.Context, projectID string, videoReq service
 	segmentPreviews := make([]map[string]any, 0, len(plan.Segments))
 	for _, seg := range plan.Segments {
 		segmentPreviews = append(segmentPreviews, map[string]any{
-			"index":             seg.Index,
-			"start_second":      seg.StartSecond,
-			"end_second":        seg.EndSecond,
-			"duration":          seg.Duration,
-			"model":             seg.Model,
-			"model_key":         seg.ModelKey,
-			"estimated_credits": seg.EstimatedCredits,
+			"index":        seg.Index,
+			"start_second": seg.StartSecond,
+			"end_second":   seg.EndSecond,
+			"duration":     seg.Duration,
+			"model":        seg.Model,
+			"model_key":    seg.ModelKey,
 		})
 	}
 	plan.SDKPayloadPreview["segments"] = segmentPreviews
@@ -1930,134 +1898,11 @@ func validateMCPPersistedVideoModels(project *model.Project, task *model.Task, c
 	return nil
 }
 
-func videoCreditMultiplier() int {
-	if billSvc != nil && billSvc.config != nil && billSvc.config.Billing.CreditsPerCNY > 0 {
-		return billSvc.config.Billing.CreditsPerCNY
-	}
-	if billSvc != nil && billSvc.config != nil {
-		return billSvc.config.VideoAPI.CreditMultiplierOrDefault()
-	}
-	return 1000
-}
-
 func videoModelCatalog() service.VideoModelCatalog {
 	if billSvc != nil && billSvc.config != nil {
 		return service.VideoModelCatalogFromConfig(billSvc.config.VideoAPI.ModelCatalog)
 	}
 	return service.VideoModelCatalog{}
-}
-
-func videoBillingOptions(ctx context.Context, userID string) service.VideoBillingOptions {
-	fallback := videoCreditMultiplier()
-	var billing srvconfig.BillingConfig
-	if billSvc != nil && billSvc.config != nil {
-		billing = billSvc.config.Billing
-	}
-	tier := model.TierFree
-	userMultiplier := 1.0
-	if billSvc == nil || billSvc.creditSvc == nil || userID == "" || userID == "system" || isAdminCall(ctx) {
-		return service.VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
-	}
-	if foundTier, err := billSvc.creditSvc.GetUserTier(ctx, userID); err == nil {
-		tier = foundTier
-	} else {
-		logBillingSkip(userID, model.CreditTypeVideoGen, "tier_lookup_failed")
-	}
-	foundMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
-	if err != nil {
-		logBillingSkip(userID, model.CreditTypeVideoGen, "billing_multiplier_lookup_failed")
-	} else if foundMultiplier > 0 {
-		userMultiplier = foundMultiplier
-	}
-	return service.VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
-}
-
-func maybeDeductVideo(ctx context.Context, userID, taskID string, plan *service.VideoGenerationPlan) (string, error) {
-	if billSvc == nil || billSvc.creditSvc == nil {
-		logBillingSkip(userID, model.CreditTypeVideoGen, "no_credit_service")
-		return "", nil
-	}
-	if userID == "" || isAdminCall(ctx) {
-		logBillingSkip(userID, model.CreditTypeVideoGen, "admin_static_key")
-		return "", nil
-	}
-	if userID == "system" {
-		logBillingSkip(userID, model.CreditTypeVideoGen, "system_user")
-		return "", nil
-	}
-	if plan == nil {
-		return "", fmt.Errorf("video generation plan is required")
-	}
-	if plan.EstimatedCredits <= 0 {
-		return "", fmt.Errorf("video_gen estimated credits must be positive")
-	}
-	if err := validateBillingTask(ctx, userID, taskID); err != nil {
-		return "", err
-	}
-	provider := "volcengine_ark"
-	if billSvc.config != nil && strings.TrimSpace(billSvc.config.ModelRoutes.VideoGeneration.Provider) != "" {
-		provider = billSvc.config.ModelRoutes.VideoGeneration.Provider
-	}
-	priceSnapshot := map[string]any{}
-	if plan.PricingBreakdown != nil {
-		if data, err := json.Marshal(plan.PricingBreakdown); err == nil {
-			_ = json.Unmarshal(data, &priceSnapshot)
-		}
-	}
-	tierMultiplier := 0.0
-	userMultiplier := 0.0
-	if plan.PricingBreakdown != nil {
-		tierMultiplier = plan.PricingBreakdown.TierMultiplier
-		userMultiplier = plan.PricingBreakdown.UserMultiplier
-	}
-	metadata := model.CreditTransactionMetadata{
-		Provider:       provider,
-		Model:          plan.Model,
-		Route:          "video_generation",
-		BaseCredits:    plan.EstimatedCredits,
-		TierMultiplier: tierMultiplier,
-		UserMultiplier: userMultiplier,
-		FinalCredits:   plan.EstimatedCredits,
-		PriceSnapshot:  priceSnapshot,
-	}
-	operationID := videoOperationID(taskID)
-	_, err := billSvc.creditSvc.DeductForMCPOperationWithMetadata(ctx, userID, model.CreditTypeVideoGen, plan.EstimatedCredits, metadata, operationID, taskID)
-	return operationID, err
-}
-
-func maybeRefundVideoOperation(ctx context.Context, operationID string) error {
-	if billSvc == nil || billSvc.creditSvc == nil || operationID == "" {
-		return nil
-	}
-	return billSvc.creditSvc.RefundForOperationByID(ctx, operationID, "视频生成提交失败退还")
-}
-
-func clearVideoGenerationChargeSnapshot(ctx context.Context, gen *model.VideoGeneration, taskID string) {
-	if svcs == nil || svcs.TaskSvc == nil || svcs.TaskSvc.Repository() == nil {
-		return
-	}
-	repo := svcs.TaskSvc.Repository()
-	if gen != nil && repo.VideoGenerations() != nil {
-		gen.CreditsCharged = 0
-		_ = repo.VideoGenerations().Update(ctx, gen)
-	}
-	if strings.TrimSpace(taskID) == "" {
-		return
-	}
-	task, err := repo.Tasks().FindByID(ctx, taskID)
-	if err != nil {
-		return
-	}
-	task.VideoCreditsCharged = 0
-	_ = repo.Tasks().Update(ctx, task)
-}
-
-func videoOperationID(taskID string) string {
-	suffix := time.Now().UnixNano()
-	if strings.TrimSpace(taskID) == "" {
-		return fmt.Sprintf("video_gen:%d", suffix)
-	}
-	return fmt.Sprintf("video_gen:%s:%d", strings.TrimSpace(taskID), suffix)
 }
 
 func rejectMCPModelSelection(args map[string]any, keys ...string) error {
@@ -2300,78 +2145,6 @@ func probeVideoDurationFromReader(ctx context.Context, reader io.Reader, fileNam
 	return duration, nil
 }
 
-func persistVideoGenerationSubmitted(ctx context.Context, projectID, userID, taskID string, result *service.VideoGenerationCreateResult, plan *service.VideoGenerationPlan) error {
-	if result == nil || plan == nil || svcs == nil || svcs.TaskSvc == nil {
-		return nil
-	}
-	repo := svcs.TaskSvc.Repository()
-	if repo == nil || repo.VideoGenerations() == nil {
-		return nil
-	}
-	references, err := json.Marshal(plan.References)
-	if err != nil {
-		return err
-	}
-	cfg := model.VideoTaskConfig{
-		Purpose:                   plan.Purpose,
-		ModelKey:                  plan.ModelKey,
-		Model:                     plan.Model,
-		Resolution:                plan.Resolution,
-		Ratio:                     plan.Ratio,
-		Duration:                  plan.Duration,
-		TargetDurationSeconds:     plan.TargetDurationSeconds,
-		TargetDurationSource:      plan.TargetDurationSource,
-		TargetDurationReason:      plan.TargetDurationReason,
-		SegmentMaxDurationSeconds: plan.SegmentMaxDurationSeconds,
-		SegmentMinDurationSeconds: plan.SegmentMinDurationSeconds,
-		Watermark:                 plan.Watermark,
-		Preflight:                 plan.Preflight,
-		EstimatedCredits:          plan.EstimatedCredits,
-		PricingBreakdown:          plan.PricingBreakdown,
-	}
-	for _, seg := range plan.Segments {
-		cfg.Segments = append(cfg.Segments, model.VideoTaskSegmentConfig{
-			Index:            seg.Index,
-			StartSecond:      seg.StartSecond,
-			EndSecond:        seg.EndSecond,
-			Duration:         seg.Duration,
-			Prompt:           seg.Prompt,
-			ModelKey:         seg.ModelKey,
-			Model:            seg.Model,
-			Resolution:       seg.Resolution,
-			Ratio:            seg.Ratio,
-			EstimatedCredits: seg.EstimatedCredits,
-		})
-	}
-	gen := &model.VideoGeneration{
-		UserID:           userID,
-		ProjectID:        projectID,
-		TaskID:           taskID,
-		ArkTaskID:        result.VideoTaskID,
-		Status:           "submitted",
-		ResolvedParams:   datatypes.NewJSONType(cfg),
-		References:       datatypes.JSON(references),
-		PricingBreakdown: datatypes.NewJSONType(*plan.PricingBreakdown),
-		CreditsCharged:   plan.EstimatedCredits,
-	}
-	if err := repo.VideoGenerations().Create(ctx, gen); err != nil {
-		return err
-	}
-	if strings.TrimSpace(taskID) != "" {
-		task, err := repo.Tasks().FindByID(ctx, taskID)
-		if err == nil {
-			task.VideoGenerationID = gen.ID
-			task.SetVideoConfig(cfg)
-			task.VideoEstimatedCredits = plan.EstimatedCredits
-			task.VideoCreditsCharged = plan.EstimatedCredits
-			if updateErr := repo.Tasks().Update(ctx, task); updateErr != nil {
-				return updateErr
-			}
-		}
-	}
-	return nil
-}
-
 func persistVideoGenerationJobPlanned(ctx context.Context, projectID, userID, taskID string, plan *service.VideoGenerationPlan) (*model.VideoGeneration, error) {
 	if plan == nil || svcs == nil || svcs.TaskSvc == nil {
 		return nil, fmt.Errorf("task service not available")
@@ -2398,21 +2171,18 @@ func persistVideoGenerationJobPlanned(ctx context.Context, projectID, userID, ta
 		SegmentMinDurationSeconds: plan.SegmentMinDurationSeconds,
 		Watermark:                 plan.Watermark,
 		Preflight:                 plan.Preflight,
-		EstimatedCredits:          plan.EstimatedCredits,
-		PricingBreakdown:          plan.PricingBreakdown,
 	}
 	for _, seg := range plan.Segments {
 		cfg.Segments = append(cfg.Segments, model.VideoTaskSegmentConfig{
-			Index:            seg.Index,
-			StartSecond:      seg.StartSecond,
-			EndSecond:        seg.EndSecond,
-			Duration:         seg.Duration,
-			Prompt:           seg.Prompt,
-			ModelKey:         seg.ModelKey,
-			Model:            seg.Model,
-			Resolution:       seg.Resolution,
-			Ratio:            seg.Ratio,
-			EstimatedCredits: seg.EstimatedCredits,
+			Index:       seg.Index,
+			StartSecond: seg.StartSecond,
+			EndSecond:   seg.EndSecond,
+			Duration:    seg.Duration,
+			Prompt:      seg.Prompt,
+			ModelKey:    seg.ModelKey,
+			Model:       seg.Model,
+			Resolution:  seg.Resolution,
+			Ratio:       seg.Ratio,
 		})
 	}
 	gen := &model.VideoGeneration{
@@ -2422,8 +2192,8 @@ func persistVideoGenerationJobPlanned(ctx context.Context, projectID, userID, ta
 		Status:           "planned",
 		ResolvedParams:   datatypes.NewJSONType(cfg),
 		References:       datatypes.JSON(references),
-		PricingBreakdown: datatypes.NewJSONType(*plan.PricingBreakdown),
-		CreditsCharged:   plan.EstimatedCredits,
+		PricingBreakdown: datatypes.NewJSONType(model.VideoPricingBreakdown{}),
+		CreditsCharged:   0,
 	}
 	if err := repo.VideoGenerations().Create(ctx, gen); err != nil {
 		return nil, err
@@ -2433,8 +2203,8 @@ func persistVideoGenerationJobPlanned(ctx context.Context, projectID, userID, ta
 		if err == nil {
 			task.VideoGenerationID = gen.ID
 			task.SetVideoConfig(cfg)
-			task.VideoEstimatedCredits = plan.EstimatedCredits
-			task.VideoCreditsCharged = plan.EstimatedCredits
+			task.VideoEstimatedCredits = 0
+			task.VideoCreditsCharged = 0
 			if updateErr := repo.Tasks().Update(ctx, task); updateErr != nil {
 				return nil, updateErr
 			}
@@ -2443,36 +2213,53 @@ func persistVideoGenerationJobPlanned(ctx context.Context, projectID, userID, ta
 	return gen, nil
 }
 
-func persistVideoGenerationQuery(ctx context.Context, arkTaskID string, result *service.VideoGenerationTaskResult) error {
-	if result == nil || svcs == nil || svcs.TaskSvc == nil {
-		return nil
+func recordVideoGenerationProviderCost(ctx context.Context, gen *model.VideoGeneration, result *service.VideoGenerationTaskResult) {
+	if svcs == nil || svcs.ProviderCostSvc == nil || gen == nil || result == nil || !strings.EqualFold(result.Status, "succeeded") {
+		return
 	}
-	repo := svcs.TaskSvc.Repository()
-	if repo == nil || repo.VideoGenerations() == nil {
-		return nil
+	providerRequestID := strings.TrimSpace(result.VideoTaskID)
+	if providerRequestID == "" {
+		providerRequestID = strings.TrimSpace(gen.ArkTaskID)
 	}
-	gen, err := repo.VideoGenerations().FindByArkTaskID(ctx, arkTaskID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		return err
+	modelID := strings.TrimSpace(result.Model)
+	if modelID == "" {
+		modelID = strings.TrimSpace(gen.ResolvedParams.Data().Model)
 	}
-	gen.Status = result.Status
-	if result.Error != nil {
-		gen.ErrorMessage = result.Error.Message
+	hasVideoInput, hasAudioInput := videoGenerationInputFlags(gen.References)
+	var err error
+	if result.Duration <= 0 || strings.TrimSpace(result.Resolution) == "" {
+		_, err = svcs.ProviderCostSvc.RecordMediaUnreconciled(ctx, service.RecordMediaUnreconciledRequest{
+			TaskID: gen.TaskID, Provider: "volcengine_ark", Model: modelID, ProviderRequestID: providerRequestID,
+			MediaKind: "video", ReasonCode: model.BillingExecutionCostReasonMissingOutputMetadata,
+			DurationSeconds: result.Duration, Resolution: result.Resolution, HasVideoInput: hasVideoInput, HasAudioInput: hasAudioInput,
+		})
+	} else {
+		_, err = svcs.ProviderCostSvc.RecordVideoOutputCost(ctx, service.RecordVideoOutputCostRequest{
+			TaskID: gen.TaskID, Provider: "volcengine_ark", Model: modelID, ProviderRequestID: providerRequestID,
+			CatalogID: svcs.ProviderCostSvc.CatalogID(), IdempotencyKey: providerRequestID,
+			DurationSeconds: result.Duration, Resolution: result.Resolution,
+			HasVideoInput: hasVideoInput, HasAudioInput: hasAudioInput,
+			Source: string(model.BillingProviderCostSourceProviderResponse),
+		})
 	}
-	urls := map[string]string{
-		"video_url":      result.VideoURL,
-		"file_url":       result.FileURL,
-		"last_frame_url": result.LastFrameURL,
+	if err != nil && mcpLog != nil {
+		mcpLog.Error().Err(err).Str("video_generation_id", gen.ID).Str("provider_request_id", providerRequestID).
+			Msg("record video provider cost; provider result remains valid")
 	}
-	b, err := json.Marshal(urls)
-	if err != nil {
-		return err
+}
+
+func videoGenerationInputFlags(raw datatypes.JSON) (bool, bool) {
+	var references []service.VideoReferenceInput
+	if len(raw) == 0 || json.Unmarshal(raw, &references) != nil {
+		return false, false
 	}
-	gen.ProviderURLs = datatypes.JSON(b)
-	return repo.VideoGenerations().Update(ctx, gen)
+	var video, audio bool
+	for _, reference := range references {
+		kind := strings.ToLower(strings.TrimSpace(reference.Type))
+		video = video || strings.Contains(kind, "video")
+		audio = audio || strings.Contains(kind, "audio")
+	}
+	return video, audio
 }
 
 func videoGenerationFromArgs(ctx context.Context, args map[string]any) (*model.VideoGeneration, error) {
@@ -2520,42 +2307,87 @@ func uploadLocalVideoTaskFile(ctx context.Context, taskID, fileName, filePath st
 	return tf, nil
 }
 
-func persistVideoGenerationDownload(ctx context.Context, taskID, providerURL string, tf *model.TaskFile) error {
-	if tf == nil || svcs == nil || svcs.TaskSvc == nil {
-		return nil
+type videoSegmentSettlementIdentity struct {
+	ExecutionID        string
+	RequestFingerprint string
+	Pinned             model.VideoSegmentRetailSKU
+}
+
+func resolveVideoSegmentSettlementIdentity(ctx context.Context, taskID string, gen *model.VideoGeneration, segment *model.VideoGenerationSegment, providerURL string) (videoSegmentSettlementIdentity, error) {
+	if gen == nil || segment == nil || strings.TrimSpace(segment.ArkTaskID) == "" {
+		return videoSegmentSettlementIdentity{}, fmt.Errorf("persisted Ark segment identity is required for fixed video settlement")
 	}
-	repo := svcs.TaskSvc.Repository()
-	if repo == nil || repo.VideoGenerations() == nil {
-		return nil
+	pinned := segment.RetailSKU.Data()
+	if pinned.CatalogID == "" || pinned.SKUID == "" || pinned.PriceCredits <= 0 || pinned.ModelKey == "" || pinned.Resolution == "" || pinned.DurationTier == "" || pinned.InputMode == "" {
+		return videoSegmentSettlementIdentity{}, fmt.Errorf("video segment %d has no pinned fixed retail SKU", segment.Index)
 	}
-	task, err := repo.Tasks().FindByID(ctx, taskID)
-	if err != nil {
-		return nil
-	}
-	var gen *model.VideoGeneration
-	if strings.TrimSpace(task.VideoGenerationID) != "" {
-		gen, err = repo.VideoGenerations().FindByID(ctx, task.VideoGenerationID)
-	} else {
-		gen, err = repo.VideoGenerations().FindLatestByTaskID(ctx, taskID)
-	}
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
+	executionID := getExecutionID(ctx)
+	if executionID == "" && svcs != nil && svcs.TaskSvc != nil {
+		if task, err := svcs.TaskSvc.GetByID(ctx, taskID); err == nil && task.CurrentExecutionID != nil {
+			executionID = strings.TrimSpace(*task.CurrentExecutionID)
 		}
-		return err
 	}
-	ids := map[string]any{
-		"final_video": tf.ID,
+	if executionID == "" {
+		return videoSegmentSettlementIdentity{}, fmt.Errorf("current execution identity is required for fixed-SKU video settlement")
 	}
-	b, err := json.Marshal(ids)
+	fingerprint := imageOperationFingerprint(
+		"video-segment", taskID, executionID, gen.ID, segment.ID, segment.ArkTaskID,
+		pinned.CatalogID, pinned.SKUID, pinned.PriceCredits, pinned.ModelKey, pinned.Resolution, pinned.DurationTier, pinned.InputMode,
+		providerURL,
+	)
+	return videoSegmentSettlementIdentity{ExecutionID: executionID, RequestFingerprint: fingerprint, Pinned: pinned}, nil
+}
+
+func validateVideoSegmentProviderURL(segment *model.VideoGenerationSegment, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if !strings.HasPrefix(requested, "https://") {
+		return "", fmt.Errorf("segment video_url must be a publicly accessible HTTPS URL")
+	}
+	if segment == nil || len(segment.ProviderURLs) == 0 {
+		return "", fmt.Errorf("segment provider output is not persisted; query the video generation job before downloading")
+	}
+	var urls map[string]string
+	if err := json.Unmarshal(segment.ProviderURLs, &urls); err != nil {
+		return "", fmt.Errorf("decode persisted segment provider output: %w", err)
+	}
+	for _, key := range []string{"video_url", "file_url"} {
+		if authoritative := strings.TrimSpace(urls[key]); authoritative != "" && requested == authoritative {
+			return authoritative, nil
+		}
+	}
+	return "", fmt.Errorf("segment video_url does not match the persisted provider output")
+}
+
+func uploadLocalVideoSegmentTaskFile(ctx context.Context, taskID string, gen *model.VideoGeneration, segment *model.VideoGenerationSegment, identity videoSegmentSettlementIdentity, fileName, filePath string) (*model.TaskFile, error) {
+	if svcs == nil || svcs.TaskSvc == nil {
+		return nil, fmt.Errorf("task service not available")
+	}
+	f, err := os.Open(filepath.Clean(filePath))
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("read video file: %w", err)
 	}
-	gen.TaskFileIDs = datatypes.JSON(b)
-	if gen.Status == "" || gen.Status == "submitted" {
-		gen.Status = "archived"
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat video file: %w", err)
 	}
-	return repo.VideoGenerations().Update(ctx, gen)
+	snapshot, err := json.Marshal(map[string]any{
+		"video_generation_id": gen.ID,
+		"segment_index":       segment.Index,
+	})
+	if err != nil {
+		return nil, err
+	}
+	tf, err := svcs.TaskSvc.UploadExecutionTaskFileWithOperationSettlementFromReader(ctx, taskID, getUserID(ctx), identity.ExecutionID, filepath.Base(fileName), f, "video/mp4", info.Size(), service.GenericTaskFileOperationSettlement{
+		ResourceType: "video", IdempotencyScope: "mcp-video-settlement",
+		CatalogID: identity.Pinned.CatalogID, SKUID: identity.Pinned.SKUID, PriceCredits: identity.Pinned.PriceCredits,
+		OperationID: segment.ArkTaskID, RequestFingerprint: identity.RequestFingerprint, ResultSnapshot: snapshot,
+	})
+	if err != nil {
+		return nil, err
+	}
+	svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
+	return tf, nil
 }
 
 func downloadFile(ctx context.Context, rawURL, outputPath string, maxBytes int64) error {
@@ -2563,7 +2395,7 @@ func downloadFile(ctx context.Context, rawURL, outputPath string, maxBytes int64
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := videoDownloadHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("download video: %w", err)
 	}

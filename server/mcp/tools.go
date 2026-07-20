@@ -75,6 +75,8 @@ type Services struct {
 	ImageModelResolver    ImageModelResolver
 	ImageGenerator        ImageGenerator
 	ImageGenerationBiller ImageGenerationBiller
+	ProviderCostSvc       *service.ProviderCostService
+	BillingCatalogSvc     *service.BillingCatalogService
 	GenerateImageTimeout  time.Duration
 	VideoSvc              *service.VideoService
 	AudioASRSvc           *service.AudioASRService
@@ -676,11 +678,12 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 		"references":    input.References,
 		"task_config":   taskConfig,
 		"pricing": map[string]any{
-			"credits_per_cny":        videoCreditMultiplier(),
-			"base_task_fee_rule":     "VideoCreator task/plan creation deducts only credits.task_costs.videocreator as the base service fee.",
-			"operation_billing_rule": "create_video_generation_job/create_video_generation_task deduct video_gen operation credits independently when the provider job is submitted.",
-			"operation_refund_rule":  "If provider submission or persistence fails immediately, the video_gen operation deduction is refunded; task failure/cancel refunds only the base task fee.",
-			"estimate_rule":          "Server estimates video_gen credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",
+			"retail_model":             "fixed_sku",
+			"base_task_fee_rule":       "VideoCreator task admission uses the fixed task SKU.",
+			"operation_billing_rule":   "Each provider segment pins a fixed SKU before dispatch; its accepted-task charge is enqueued only after the matching provider output is durably persisted as a task file.",
+			"operation_debt_rule":      "Accepted task segment charges may create debt and never invalidate a durable successful video result.",
+			"sku_selectors":            []string{"model_key", "resolution", "duration_tier", "input_mode"},
+			"provider_cost_separation": "Provider usage is internal cost evidence and never determines retail credits.",
 		},
 		"persistent_file_rule": "all server-persistent references and generated results must be OSS-backed task files; local agent files are temporary only",
 		"visual_anchor_generation": map[string]any{
@@ -765,7 +768,7 @@ func buildProjectAgentBrief(ch *model.Project, usesProjectSnapshot bool, videoBl
 			defaults["model_key"], defaults["resolution"], defaults["ratio"], defaults["duration"], defaults["watermark"])
 	}
 	if pricing, ok := videoBlock["pricing"].(map[string]any); ok {
-		fmt.Fprintf(&b, "积分规则：创建/触发 AI 视频生成任务只扣基础任务服务费；提交 video_gen 时按服务端估价独立记录操作扣费（%v）。\n", pricing["operation_billing_rule"])
+		fmt.Fprintf(&b, "积分规则：任务准入使用固定任务 SKU；每个视频片段在提交前固定操作 SKU，仅在对应 provider 输出持久化为任务文件后排队扣费；已接受任务允许形成欠款且不影响成功视频结果（%v）。\n", pricing["operation_billing_rule"])
 	}
 	b.WriteString("模型规则：只能使用本 profile 返回的 videocreator.model_catalog 与 videocreator.policy.allowed_models 中的模型 key；未返回的模型不可使用。")
 	return b.String()

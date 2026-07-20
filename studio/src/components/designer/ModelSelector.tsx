@@ -50,12 +50,7 @@ export default function ModelSelector({
           <span className={cn('truncate font-medium', !selected && 'text-muted-foreground')}>
             {selected?.name ?? '选择模型...'}
           </span>
-          {selected && selected.pricing.pricingType === 'openai_image_usage' && (
-            <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[9px]">
-              用量计费
-            </Badge>
-          )}
-          {selected && selected.pricing.pricingType !== 'openai_image_usage' && selected.credits > 0 && (
+          {selected && selected.credits > 0 && (
             <Badge
               variant="secondary"
               className="h-4 shrink-0 gap-0.5 px-1.5 text-[9px]"
@@ -113,12 +108,7 @@ export default function ModelSelector({
                         未启用
                       </Badge>
                     )}
-                    {!isDisabled && p.pricing.pricingType === 'openai_image_usage' && (
-                      <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
-                        用量计费
-                      </Badge>
-                    )}
-                    {!isDisabled && p.pricing.pricingType !== 'openai_image_usage' && p.credits > 0 && (
+                    {!isDisabled && p.credits > 0 && (
                       <Badge
                         variant="secondary"
                         className="h-4 px-1.5 text-[9px]"

@@ -63,7 +63,7 @@ function provider(overrides: Partial<DesignerProvider['capabilities']> = {}): De
       watermark: false,
       ...overrides,
     },
-    pricing: {},
+    pricing: { pricingType: 'fixed_sku', currency: 'credits', billingNote: 'fixed retail SKU' },
   }
 }
 
@@ -159,6 +159,7 @@ describe('Designer workspace reference drop', () => {
     vi.mocked(designerApi.generate).mockResolvedValue({
       generation_id: 'generation-1',
       status: 'generating',
+      price_credits: 500,
     })
   })
 

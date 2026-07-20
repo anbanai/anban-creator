@@ -95,6 +95,8 @@ type TaskService struct {
 	memoryMgr         *projectmemory.ProjectMemoryManager
 	nasResumeEnabled  bool
 	taskWorkspace     TaskWorkspaceLifecycle
+	providerCostSvc   *ProviderCostService
+	billingWalletSvc  *BillingWalletService
 }
 
 type TaskWorkspaceLifecycle interface {
@@ -164,6 +166,18 @@ func (s *TaskService) SetTaskWorkspaceLifecycle(workspace TaskWorkspaceLifecycle
 	s.taskWorkspace = workspace
 }
 
+func (s *TaskService) SetProviderCostService(providerCostSvc *ProviderCostService) {
+	if s != nil {
+		s.providerCostSvc = providerCostSvc
+	}
+}
+
+func (s *TaskService) SetBillingWalletService(wallet *BillingWalletService) {
+	if s != nil {
+		s.billingWalletSvc = wallet
+	}
+}
+
 func (s *TaskService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
 	if s == nil {
 		return
@@ -201,40 +215,6 @@ func (s *TaskService) resolvedVideoCatalog() VideoModelCatalog {
 		return s.videoCatalog
 	}
 	return VideoModelCatalog{}
-}
-
-func (s *TaskService) resolvedVideoCreditMultiplier() int {
-	if s != nil && s.videoCreditMultiplier > 0 {
-		return s.videoCreditMultiplier
-	}
-	return 1000
-}
-
-func (s *TaskService) videoBillingOptions(ctx context.Context, userID string) VideoBillingOptions {
-	fallback := s.resolvedVideoCreditMultiplier()
-	tier := model.TierFree
-	userMultiplier := 1.0
-	var billing srvconfig.BillingConfig
-	if s != nil {
-		billing = s.videoBilling
-	}
-	if s == nil || s.creditSvc == nil || userID == "" {
-		return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
-	}
-	if foundTier, err := s.creditSvc.GetUserTier(ctx, userID); err == nil {
-		tier = foundTier
-	} else if s.logger != nil {
-		s.logger.Warn().Err(err).Str("user_id", userID).Msg("video tier lookup failed")
-	}
-	foundMultiplier, err := s.creditSvc.GetUserBillingMultiplier(ctx, userID)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn().Err(err).Str("user_id", userID).Msg("video billing multiplier lookup failed")
-		}
-	} else if foundMultiplier > 0 {
-		userMultiplier = foundMultiplier
-	}
-	return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
 }
 
 // Close stops the Redis pub/sub subscriber goroutine.
@@ -890,8 +870,6 @@ func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
 		References:                videoAssetsFromReferences(plan.References),
 		RetakeBudget:              plan.RetakeBudget,
 		DeliveryTargets:           plan.DeliveryTargets,
-		EstimatedCredits:          plan.EstimatedCredits,
-		PricingBreakdown:          plan.PricingBreakdown,
 	}
 }
 
@@ -902,16 +880,15 @@ func videoTaskSegmentsFromPlan(segments []VideoGenerationSegmentPlan) []model.Vi
 	out := make([]model.VideoTaskSegmentConfig, 0, len(segments))
 	for _, seg := range segments {
 		out = append(out, model.VideoTaskSegmentConfig{
-			Index:            seg.Index,
-			StartSecond:      seg.StartSecond,
-			EndSecond:        seg.EndSecond,
-			Duration:         seg.Duration,
-			Prompt:           seg.Prompt,
-			ModelKey:         seg.ModelKey,
-			Model:            seg.Model,
-			Resolution:       seg.Resolution,
-			Ratio:            seg.Ratio,
-			EstimatedCredits: seg.EstimatedCredits,
+			Index:       seg.Index,
+			StartSecond: seg.StartSecond,
+			EndSecond:   seg.EndSecond,
+			Duration:    seg.Duration,
+			Prompt:      seg.Prompt,
+			ModelKey:    seg.ModelKey,
+			Model:       seg.Model,
+			Resolution:  seg.Resolution,
+			Ratio:       seg.Ratio,
 		})
 	}
 	return out

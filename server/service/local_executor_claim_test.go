@@ -39,14 +39,14 @@ func newLocalCompletionRaceRepository(base repository.Repository) *localCompleti
 	return wrapped
 }
 
-func (r *localCompletionRaceTaskRepository) FinalizeLocalTask(ctx context.Context, id, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+func (r *localCompletionRaceTaskRepository) FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
 	switch r.race.finalizeCalls.Add(1) {
 	case 1:
 		if len(usage) > 0 {
 			r.race.winnerModel = usage[0].Model
 		}
 		<-r.race.secondFinalize
-		won, err := r.TaskRepository.FinalizeLocalTask(ctx, id, status, errorMsg, result, usage, costStatus)
+		won, err := r.TaskRepository.FinalizeLocalTask(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
 		if won {
 			close(r.race.winnerCommitted)
 		}
@@ -56,7 +56,7 @@ func (r *localCompletionRaceTaskRepository) FinalizeLocalTask(ctx context.Contex
 		<-r.race.winnerCommitted
 		return false, nil
 	}
-	return r.TaskRepository.FinalizeLocalTask(ctx, id, status, errorMsg, result, usage, costStatus)
+	return r.TaskRepository.FinalizeLocalTask(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
 }
 
 func (r *localCompletionRaceRepository) Tasks() repository.TaskRepository { return r.tasks }

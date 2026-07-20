@@ -51,11 +51,12 @@ type BillingDebtAllocationKind string
 type BillingReferralStatus string
 
 const (
-	BillingSettlementActionChargeOperation BillingSettlementAction   = "charge_operation"
-	BillingSettlementActionReverseTask     BillingSettlementAction   = "reverse_task"
-	BillingDebtAllocationKindRepayment     BillingDebtAllocationKind = "repayment"
-	BillingReferralStatusIssued            BillingReferralStatus     = "issued"
-	BillingReferralStatusCapped            BillingReferralStatus     = "capped"
+	BillingSettlementActionChargeOperation  BillingSettlementAction   = "charge_operation"
+	BillingSettlementActionReverseTask      BillingSettlementAction   = "reverse_task"
+	BillingSettlementActionReverseOperation BillingSettlementAction   = "reverse_operation"
+	BillingDebtAllocationKindRepayment      BillingDebtAllocationKind = "repayment"
+	BillingReferralStatusIssued             BillingReferralStatus     = "issued"
+	BillingReferralStatusCapped             BillingReferralStatus     = "capped"
 )
 
 // BillingWalletAccount is a rebuildable projection of a user's wallet.
@@ -332,7 +333,7 @@ func (BillingDebtAllocation) TableName() string { return "billing_debt_allocatio
 // BillingSettlementOutbox stores retryable settlement intent state.
 type BillingSettlementOutbox struct {
 	ID                 string                  `gorm:"type:char(36);primaryKey" json:"id"`
-	Action             BillingSettlementAction `gorm:"type:varchar(32);index;not null;check:chk_billing_settlement_reverse_reason,action <> 'reverse_task' OR TRIM(reason) <> ''" json:"action"`
+	Action             BillingSettlementAction `gorm:"type:varchar(32);index;not null;check:chk_billing_settlement_reverse_reason,action NOT IN ('reverse_task','reverse_operation') OR TRIM(reason) <> ''" json:"action"`
 	ResourceType       string                  `gorm:"type:varchar(40);index:idx_billing_settlement_resource,priority:1;not null" json:"resource_type"`
 	ResourceID         string                  `gorm:"type:varchar(128);index:idx_billing_settlement_resource,priority:2;not null" json:"resource_id"`
 	TaskID             *string                 `gorm:"type:char(36);index" json:"task_id,omitempty"`
@@ -351,6 +352,7 @@ type BillingSettlementOutbox struct {
 	ProcessedAt        *time.Time              `json:"processed_at,omitempty"`
 	FailedAt           *time.Time              `json:"failed_at,omitempty"`
 	RequestFingerprint string                  `gorm:"type:char(64);not null" json:"request_fingerprint"`
+	ResultSnapshot     datatypes.JSON          `gorm:"type:json" json:"result_snapshot,omitempty"`
 	CreatedAt          time.Time               `json:"created_at"`
 	UpdatedAt          time.Time               `json:"updated_at"`
 }

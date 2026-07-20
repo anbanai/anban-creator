@@ -31,24 +31,27 @@ import (
 
 // ImageResult is the response for single image generation.
 type ImageResult struct {
-	FilePath           string                      `json:"file_path"`
-	LocalFilePath      string                      `json:"-"`
-	DownloadURL        string                      `json:"download_url,omitempty"`
-	Size               string                      `json:"size"`
-	Width              int                         `json:"width,omitempty"`
-	Height             int                         `json:"height,omitempty"`
-	Prompt             string                      `json:"prompt,omitempty"`
-	ImageType          string                      `json:"image_type,omitempty"`
-	Provider           string                      `json:"provider,omitempty"`
-	Model              string                      `json:"model,omitempty"`
-	SelectionReason    string                      `json:"selection_reason,omitempty"`
-	SupportsReference  bool                        `json:"supports_reference"`
-	MaxReferenceImages int                         `json:"max_reference_images"`
-	RevisedPrompt      string                      `json:"revised_prompt,omitempty"`
-	ResponseType       string                      `json:"response_type,omitempty"`
-	ResponsePreview    string                      `json:"response_preview,omitempty"`
-	OutputMIME         string                      `json:"output_mime,omitempty"`
-	Usage              *image.ImageGenerationUsage `json:"usage,omitempty"`
+	ProviderRequestID    string                      `json:"-"`
+	ProviderOutputWidth  int                         `json:"-"`
+	ProviderOutputHeight int                         `json:"-"`
+	FilePath             string                      `json:"file_path"`
+	LocalFilePath        string                      `json:"-"`
+	DownloadURL          string                      `json:"download_url,omitempty"`
+	Size                 string                      `json:"size"`
+	Width                int                         `json:"width,omitempty"`
+	Height               int                         `json:"height,omitempty"`
+	Prompt               string                      `json:"prompt,omitempty"`
+	ImageType            string                      `json:"image_type,omitempty"`
+	Provider             string                      `json:"provider,omitempty"`
+	Model                string                      `json:"model,omitempty"`
+	SelectionReason      string                      `json:"selection_reason,omitempty"`
+	SupportsReference    bool                        `json:"supports_reference"`
+	MaxReferenceImages   int                         `json:"max_reference_images"`
+	RevisedPrompt        string                      `json:"revised_prompt,omitempty"`
+	ResponseType         string                      `json:"response_type,omitempty"`
+	ResponsePreview      string                      `json:"response_preview,omitempty"`
+	OutputMIME           string                      `json:"output_mime,omitempty"`
+	Usage                *image.ImageGenerationUsage `json:"usage,omitempty"`
 	// WeChatURL/MediaID are populated when generate_image is called with
 	// upload_to_cdn=true and the image is uploaded to the project's CDN
 	// (WeChat material library for article projects) in the same call.
@@ -93,11 +96,12 @@ type DownloadImageResult struct {
 // ImageService handles image generation, upload, and compression
 // for server-side MCP tool use. It wraps the app/image package.
 type ImageService struct {
-	imageCfg       *srvconfig.ImageAPIConfig
-	storage        storage.Provider
-	repo           repository.Repository
-	modelConfigSvc *ModelConfigService
-	logger         *zerolog.Logger
+	imageCfg        *srvconfig.ImageAPIConfig
+	storage         storage.Provider
+	repo            repository.Repository
+	modelConfigSvc  *ModelConfigService
+	logger          *zerolog.Logger
+	providerCostSvc *ProviderCostService
 	// imageRetry optionally overrides the same-provider backoff-retry policy used
 	// by generateWithRetry. nil ⇒ package defaults (3 attempts, 0/5s/15s backoff).
 	// The SAME provider is always retried — never switched — so a successful
@@ -142,6 +146,12 @@ func (s *ImageService) SetModelConfigService(svc *ModelConfigService) {
 	s.modelConfigSvc = svc
 }
 
+func (s *ImageService) SetProviderCostService(svc *ProviderCostService) {
+	if s != nil {
+		s.providerCostSvc = svc
+	}
+}
+
 // resolveToLocalFile downloads a remote URL or decodes a data URL to a temp file.
 func (s *ImageService) resolveToLocalFile(rawURL string) (string, error) {
 	if strings.HasPrefix(rawURL, "data:") {
@@ -160,17 +170,22 @@ func (s *ImageService) resolveToLocalFile(rawURL string) (string, error) {
 // the raw value.
 func buildImageResult(rawResult *image.GenerateRawResult, imageType string) *ImageResult {
 	return &ImageResult{
-		DownloadURL:     rawResult.URL,
-		Size:            rawResult.Size,
-		Prompt:          rawResult.Prompt,
-		ImageType:       imageType,
-		Provider:        rawResult.Provider,
-		Model:           rawResult.Model,
-		RevisedPrompt:   rawResult.RevisedPrompt,
-		ResponseType:    rawResult.ResponseType,
-		ResponsePreview: rawResult.ResponsePreview,
-		OutputMIME:      rawResult.OutputMIME,
-		Usage:           rawResult.Usage,
+		ProviderRequestID:    rawResult.ProviderRequestID,
+		ProviderOutputWidth:  rawResult.OutputWidth,
+		ProviderOutputHeight: rawResult.OutputHeight,
+		Width:                rawResult.OutputWidth,
+		Height:               rawResult.OutputHeight,
+		DownloadURL:          rawResult.URL,
+		Size:                 rawResult.Size,
+		Prompt:               rawResult.Prompt,
+		ImageType:            imageType,
+		Provider:             rawResult.Provider,
+		Model:                rawResult.Model,
+		RevisedPrompt:        rawResult.RevisedPrompt,
+		ResponseType:         rawResult.ResponseType,
+		ResponsePreview:      rawResult.ResponsePreview,
+		OutputMIME:           rawResult.OutputMIME,
+		Usage:                rawResult.Usage,
 	}
 }
 
@@ -571,6 +586,7 @@ func (s *ImageService) GenerateImage(
 	// Generate with same-provider backoff retry: the closure always calls the ONE
 	// processor built above (same provider/model/ref/watermark), so a retry never
 	// changes the visual result — it only rides out transient 5xx/429/network blips.
+	providerRequestID := "internal:image:" + uuid.NewString()
 	rawResult, err := s.generateWithRetry(ctx, providerAttemptTimeout(resolved, imageType), func(attemptCtx context.Context) (*image.GenerateRawResult, error) {
 		if size != "" {
 			return processor.GenerateRawWithSize(attemptCtx, prompt, size)
@@ -578,14 +594,21 @@ func (s *ImageService) GenerateImage(
 		return processor.GenerateRaw(attemptCtx, prompt)
 	}, imageType)
 	if err != nil {
+		s.recordFailedImageProviderCost(ctx, taskID, providerRequestID, resolved)
 		return nil, err
+	}
+	if strings.TrimSpace(rawResult.ProviderRequestID) == "" {
+		rawResult.ProviderRequestID = providerRequestID
 	}
 
 	result := buildImageResult(rawResult, imageType)
+	defer s.recordImageProviderCost(ctx, taskID, result)
 	if resolved != nil {
 		if imageProviderKind(result.Provider) != imageProviderKind(resolved.Provider) || strings.TrimSpace(result.Model) != strings.TrimSpace(resolved.Model) {
 			return nil, fmt.Errorf("generated image provider/model does not match resolved image model")
 		}
+		result.Provider = resolved.Provider
+		result.Model = resolved.Model
 		result.SelectionReason = resolved.SelectionReason
 		result.SupportsReference = resolved.SupportsReference
 		result.MaxReferenceImages = resolved.MaxReferenceImages
@@ -662,6 +685,39 @@ func (s *ImageService) GenerateImage(
 	return result, nil
 }
 
+func (s *ImageService) recordFailedImageProviderCost(ctx context.Context, taskID, providerRequestID string, resolved *ResolvedImageModel) {
+	if s == nil || s.providerCostSvc == nil || resolved == nil {
+		return
+	}
+	if _, err := s.providerCostSvc.RecordMediaUnreconciled(ctx, RecordMediaUnreconciledRequest{
+		TaskID: taskID, Provider: resolved.Provider, Model: resolved.Model, ProviderRequestID: providerRequestID,
+		MediaKind: "image", ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,
+	}); err != nil && s.logger != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Str("provider_request_id", providerRequestID).Msg("record failed image provider cost evidence")
+	}
+}
+
+func (s *ImageService) recordImageProviderCost(ctx context.Context, taskID string, result *ImageResult) {
+	if s == nil || s.providerCostSvc == nil || result == nil {
+		return
+	}
+	var usage *OpenAIImageUsage
+	if result.Usage != nil {
+		usage = &OpenAIImageUsage{
+			TextInput: result.Usage.TextInputTokens, TextCachedInput: result.Usage.TextCachedInputTokens,
+			ImageInput: result.Usage.ImageInputTokens, ImageCachedInput: result.Usage.ImageCachedInputTokens,
+			ImageOutput: result.Usage.ImageOutputTokens,
+		}
+	}
+	_, err := s.providerCostSvc.RecordImageGenerationCost(ctx, RecordImageGenerationCostRequest{
+		TaskID: taskID, Provider: result.Provider, Model: result.Model, ProviderRequestID: result.ProviderRequestID,
+		Width: int64(result.ProviderOutputWidth), Height: int64(result.ProviderOutputHeight), Usage: usage,
+	})
+	if err != nil && s.logger != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Str("provider_request_id", result.ProviderRequestID).Msg("record image provider cost; generated output remains valid")
+	}
+}
+
 func populateImageResultDimensions(result *ImageResult) error {
 	if result == nil || result.SavedFilePath() == "" {
 		return fmt.Errorf("saved image path is required")
@@ -672,6 +728,10 @@ func populateImageResultDimensions(result *ImageResult) error {
 	}
 	result.Width = w
 	result.Height = h
+	if result.ProviderOutputWidth == 0 && result.ProviderOutputHeight == 0 {
+		result.ProviderOutputWidth = w
+		result.ProviderOutputHeight = h
+	}
 	return nil
 }
 

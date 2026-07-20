@@ -1061,9 +1061,37 @@ func TestBillingWalletEnqueueSettlementRejectsRootRepository(t *testing.T) {
 		ResourceType: "image", ResourceID: "root-repository", TaskID: uuid.NewString(),
 		AttemptID: uuid.NewString(), ToolCallID: "root-repository", CatalogID: "retail-test-v1", SKUID: "image.cover.v1",
 		RequestFingerprint: billingFingerprint("root-repository"), IdempotencyScope: "settlement", IdempotencyKey: "root-repository",
+		ResultSnapshot: []byte(`{}`),
 	}
 	if _, err := f.wallet.EnqueueSettlementInTx(context.Background(), f.repo, intent); !errors.Is(err, repository.ErrBillingRequiresTransaction) {
 		t.Fatalf("root repository enqueue error = %v", err)
+	}
+}
+
+func TestBillingWalletSettlementSnapshotIsActionSpecific(t *testing.T) {
+	f := newBillingWalletFixture(t, 0, 0, 0)
+	charge := SettlementIntent{
+		Action: model.BillingSettlementActionChargeOperation, ResourceType: "image", ResourceID: "snapshot-charge",
+		TaskID: uuid.NewString(), AttemptID: uuid.NewString(), ToolCallID: "snapshot-charge",
+		CatalogID: "retail-test-v1", SKUID: "image.cover.v1", RequestFingerprint: billingFingerprint("snapshot-charge"),
+		IdempotencyScope: "settlement", IdempotencyKey: "snapshot-charge",
+	}
+	if err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
+		_, err := f.wallet.EnqueueSettlementInTx(context.Background(), tx, charge)
+		return err
+	}); !errors.Is(err, ErrBillingInvalid) {
+		t.Fatalf("charge without snapshot error = %v, want invalid", err)
+	}
+	reversal := SettlementIntent{
+		Action: model.BillingSettlementActionReverseTask, ResourceType: "task", ResourceID: "snapshot-reversal",
+		ChargeID: uuid.NewString(), Reason: "provider_error", RequestFingerprint: billingFingerprint("snapshot-reversal"),
+		IdempotencyScope: "settlement", IdempotencyKey: "snapshot-reversal", ResultSnapshot: []byte(`{}`),
+	}
+	if err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
+		_, err := f.wallet.EnqueueSettlementInTx(context.Background(), tx, reversal)
+		return err
+	}); !errors.Is(err, ErrBillingInvalid) {
+		t.Fatalf("reversal with snapshot error = %v, want invalid", err)
 	}
 }
 
@@ -1075,6 +1103,7 @@ func TestBillingWalletOwningResourceAndSettlementRollbackTogether(t *testing.T) 
 		ResourceType: "image", ResourceID: "rollback-resource", TaskID: taskID,
 		AttemptID: uuid.NewString(), ToolCallID: "rollback-resource", CatalogID: "retail-test-v1", SKUID: "image.cover.v1",
 		RequestFingerprint: billingFingerprint("rollback-resource"), IdempotencyScope: "settlement", IdempotencyKey: "rollback-resource",
+		ResultSnapshot: []byte(`{}`),
 	}
 	rollbackErr := errors.New("rollback owning resource")
 	err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
@@ -1112,6 +1141,7 @@ func TestBillingWalletSettlementOutboxRetryNoDuplicateAndFencing(t *testing.T) {
 		ResourceType: "image", ResourceID: "outbox-image", TaskID: taskID,
 		AttemptID: uuid.NewString(), ToolCallID: "outbox-call", CatalogID: "retail-test-v1", SKUID: "image.cover.v1",
 		RequestFingerprint: billingFingerprint("outbox-operation"), IdempotencyScope: "settlement", IdempotencyKey: "outbox-operation",
+		ResultSnapshot: []byte(`{}`),
 	}
 	var first *model.BillingSettlementOutbox
 	if err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
@@ -1169,6 +1199,7 @@ func TestBillingWalletSettlementOutboxUsesSettlementIDForDownstreamIdentity(t *t
 			TaskID: taskID, AttemptID: uuid.NewString(), ToolCallID: fmt.Sprintf("shared-key-call-%d", index),
 			CatalogID: "retail-test-v1", SKUID: "image.cover.v1", RequestFingerprint: billingFingerprint("shared-key", scope),
 			IdempotencyScope: scope, IdempotencyKey: "same-upstream-key",
+			ResultSnapshot: []byte(`{}`),
 		}
 		if err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
 			_, err := f.wallet.EnqueueSettlementInTx(context.Background(), tx, intent)
@@ -1249,6 +1280,7 @@ func TestBillingWalletSettlementOutboxTerminatesPermanentFailure(t *testing.T) {
 		ResourceType: "image", ResourceID: "retry-image", TaskID: missingTask,
 		AttemptID: uuid.NewString(), ToolCallID: "retry-call", CatalogID: "retail-test-v1", SKUID: "image.cover.v1",
 		RequestFingerprint: billingFingerprint("retry-operation"), IdempotencyScope: "settlement", IdempotencyKey: "retry-operation",
+		ResultSnapshot: []byte(`{}`),
 	}
 	if err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
 		_, err := f.wallet.EnqueueSettlementInTx(context.Background(), tx, intent)
@@ -1287,6 +1319,7 @@ func TestBillingWalletSettlementOutboxContextCancellationLeavesLeaseForRecovery(
 		ResourceType: "image", ResourceID: "cancelled-image", TaskID: taskID,
 		AttemptID: uuid.NewString(), ToolCallID: "cancelled-call", CatalogID: "retail-test-v1", SKUID: "image.cover.v1",
 		RequestFingerprint: billingFingerprint("cancelled-operation"), IdempotencyScope: "settlement", IdempotencyKey: "cancelled-operation",
+		ResultSnapshot: []byte(`{}`),
 	}
 	if err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
 		_, err := f.wallet.EnqueueSettlementInTx(context.Background(), tx, intent)
