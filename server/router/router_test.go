@@ -186,6 +186,27 @@ func TestLegacyFileUploadRouteIsNotRegistered(t *testing.T) {
 	}
 }
 
+func TestResolveAssetRouteIsRegistered(t *testing.T) {
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	app := NewRouter(&Services{
+		Config: &config.Config{Server: config.ServerConfig{Port: 0, Host: "0.0.0.0"}},
+		Logger: &logger,
+		UploadHandler: handler.NewUploadHandler(
+			nil,
+			nil,
+			service.DirectUploadConfig{},
+			&logger,
+		),
+	})
+
+	for _, route := range app.GetRoutes() {
+		if route.Method == "POST" && route.Path == "/api/v1/uploads/resolve-asset-url" {
+			return
+		}
+	}
+	t.Fatal("POST /api/v1/uploads/resolve-asset-url is not registered")
+}
+
 // TestPublicAuthEndpoints tests that public auth endpoints are accessible
 // without authentication.
 func TestPublicAuthEndpoints(t *testing.T) {

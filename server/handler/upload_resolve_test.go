@@ -71,12 +71,28 @@ func newResolveUploadHandler(t *testing.T, repo repository.Repository, store *re
 		return c.Next()
 	})
 	app.Post("/uploads/resolve-download-url", h.ResolveDownloadURL)
+	app.Post("/uploads/resolve-asset-url", h.ResolveAssetDownloadURL)
 	return app, h
 }
 
 func resolveDownloadRequest(t *testing.T, app *fiber.App, payload string) (*http.Response, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/uploads/resolve-download-url", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return resp, body
+}
+
+func resolveAssetRequest(t *testing.T, app *fiber.App, payload string) (*http.Response, map[string]any) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/uploads/resolve-asset-url", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {
@@ -98,6 +114,140 @@ func createUploadSession(t *testing.T, repo repository.Repository, session *mode
 		if err := repo.Assets().Create(t.Context(), asset); err != nil {
 			t.Fatalf("create asset: %v", err)
 		}
+	}
+}
+
+func createPreviewAsset(t *testing.T, repo repository.Repository, id, userID, purpose string) *model.Asset {
+	t.Helper()
+	asset := &model.Asset{
+		ID:          id,
+		UserID:      userID,
+		Purpose:     purpose,
+		StorageKey:  "assets/users/" + userID + "/" + id + "/reference.png",
+		FileName:    "reference.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "etag-" + id,
+	}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatalf("create preview asset: %v", err)
+	}
+	return asset
+}
+
+func TestResolveAssetDownloadURLUsesRepositoryKey(t *testing.T) {
+	repo := repository.New(setupTaskHandlerTestDB(t))
+	userID := uuid.NewString()
+	asset := createPreviewAsset(t, repo, "asset-project", userID, service.DirectUploadPurposeProjectReference)
+	store := &resolveDownloadStore{}
+	app, _ := newResolveUploadHandler(t, repo, store, userID)
+
+	resp, body := resolveAssetRequest(t, app, `{"asset_id":"asset-project"}`)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d body=%v", resp.StatusCode, fiber.StatusOK, body)
+	}
+	if len(store.calls) != 1 || store.calls[0] != (resolveDownloadCall{key: asset.StorageKey, ttl: service.DefaultSignedURLTTL}) {
+		t.Fatalf("DownloadURL calls = %+v", store.calls)
+	}
+	data, ok := body["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("response data = %#v", body["data"])
+	}
+	if data["asset_id"] != asset.ID || data["file_name"] != asset.FileName || data["content_type"] != asset.ContentType || data["size"] != float64(asset.Size) {
+		t.Fatalf("asset view = %#v", data)
+	}
+	if data["download_url"] != "https://signed.example.com/"+asset.StorageKey+"?token=fresh" || data["download_expires_at"] == "" {
+		t.Fatalf("signed asset view = %#v", data)
+	}
+}
+
+func TestResolveAssetDownloadURLAcceptsReferencePurposes(t *testing.T) {
+	for _, purpose := range []string{
+		service.DirectUploadPurposeProjectReference,
+		service.DirectUploadPurposeTaskReference,
+		service.DirectUploadPurposeAIEntryAttachment,
+	} {
+		t.Run(purpose, func(t *testing.T) {
+			repo := repository.New(setupTaskHandlerTestDB(t))
+			asset := createPreviewAsset(t, repo, "asset-1", "user-1", purpose)
+			store := &resolveDownloadStore{}
+			app, _ := newResolveUploadHandler(t, repo, store, asset.UserID)
+			resp, body := resolveAssetRequest(t, app, `{"asset_id":"asset-1"}`)
+			if resp.StatusCode != fiber.StatusOK {
+				t.Fatalf("status = %d, want %d body=%v", resp.StatusCode, fiber.StatusOK, body)
+			}
+		})
+	}
+}
+
+func TestResolveAssetDownloadURLRejectsCallerAssertions(t *testing.T) {
+	repo := repository.New(setupTaskHandlerTestDB(t))
+	createPreviewAsset(t, repo, "asset-1", "user-1", service.DirectUploadPurposeProjectReference)
+	store := &resolveDownloadStore{}
+	app, _ := newResolveUploadHandler(t, repo, store, "user-1")
+
+	for _, payload := range []string{
+		`{"asset_id":"asset-1","key":"assets/users/user-1/asset-1/reference.png"}`,
+		`{"asset_id":"asset-1","url":"https://example.com/reference.png"}`,
+		`{"asset_id":"asset-1","owner_type":"project"}`,
+		`{"asset_id":"asset-1","owner_id":"project-1"}`,
+		`{"asset_id":"asset-1","unexpected":true}`,
+	} {
+		resp, body := resolveAssetRequest(t, app, payload)
+		if resp.StatusCode != fiber.StatusBadRequest {
+			t.Fatalf("payload %s: status = %d, want %d body=%v", payload, resp.StatusCode, fiber.StatusBadRequest, body)
+		}
+	}
+	if len(store.calls) != 0 {
+		t.Fatalf("DownloadURL called for rejected requests: %+v", store.calls)
+	}
+}
+
+func TestResolveAssetDownloadURLRejectsInvalidAssetOnlyBodies(t *testing.T) {
+	repo := repository.New(setupTaskHandlerTestDB(t))
+	store := &resolveDownloadStore{}
+	app, _ := newResolveUploadHandler(t, repo, store, "user-1")
+
+	for _, payload := range []string{
+		`{}`,
+		`null`,
+		`[]`,
+		`{"asset_id":null}`,
+		`{"asset_id":123}`,
+		`{"asset_id":""}`,
+		`{"asset_id":"   "}`,
+		`{"Asset_ID":"asset-1"}`,
+		`{"asset_id":"asset-1","asset_id":"asset-1"}`,
+	} {
+		resp, body := resolveAssetRequest(t, app, payload)
+		if resp.StatusCode != fiber.StatusBadRequest {
+			t.Fatalf("payload %s: status = %d, want %d body=%v", payload, resp.StatusCode, fiber.StatusBadRequest, body)
+		}
+	}
+	if len(store.calls) != 0 {
+		t.Fatalf("DownloadURL called for invalid requests: %+v", store.calls)
+	}
+}
+
+func TestResolveAssetDownloadURLKeepsMissingAndForeignOpaque(t *testing.T) {
+	repo := repository.New(setupTaskHandlerTestDB(t))
+	createPreviewAsset(t, repo, "foreign", "other-user", service.DirectUploadPurposeProjectReference)
+	createPreviewAsset(t, repo, "wrong-purpose", "user-1", service.DirectUploadPurposeEcommercePhoto)
+	store := &resolveDownloadStore{}
+	app, _ := newResolveUploadHandler(t, repo, store, "user-1")
+
+	for _, id := range []string{"missing", "foreign"} {
+		resp, body := resolveAssetRequest(t, app, fmt.Sprintf(`{"asset_id":%q}`, id))
+		if resp.StatusCode != fiber.StatusForbidden || body["msg"] != "reference image is not accessible" {
+			t.Fatalf("asset %s: status=%d body=%v", id, resp.StatusCode, body)
+		}
+	}
+	resp, body := resolveAssetRequest(t, app, `{"asset_id":"wrong-purpose"}`)
+	if resp.StatusCode != fiber.StatusBadRequest || body["msg"] != "reference image purpose is not allowed" {
+		t.Fatalf("wrong purpose: status=%d body=%v", resp.StatusCode, body)
+	}
+	if len(store.calls) != 0 {
+		t.Fatalf("DownloadURL called for denied assets: %+v", store.calls)
 	}
 }
 

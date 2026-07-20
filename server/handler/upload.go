@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -17,11 +19,12 @@ import (
 )
 
 type UploadHandler struct {
-	store     storage.Provider
-	repo      repository.Repository
-	ownerRepo repository.Repository
-	cfg       service.DirectUploadConfig
-	logger    *zerolog.Logger
+	store           storage.Provider
+	repo            repository.Repository
+	ownerRepo       repository.Repository
+	referenceAssets *service.ReferenceAssetService
+	cfg             service.DirectUploadConfig
+	logger          *zerolog.Logger
 }
 
 // SetRepository wires task and plan ownership lookup for resolving stable
@@ -35,7 +38,13 @@ func NewUploadHandler(store storage.Provider, repo repository.Repository, cfg se
 		nop := zerolog.Nop()
 		logger = &nop
 	}
-	return &UploadHandler{store: store, repo: repo, cfg: cfg, logger: logger}
+	return &UploadHandler{
+		store:           store,
+		repo:            repo,
+		referenceAssets: service.NewReferenceAssetService(repo, store, time.Now),
+		cfg:             cfg,
+		logger:          logger,
+	}
 }
 
 func (h *UploadHandler) Prepare(c fiber.Ctx) error {
@@ -77,6 +86,77 @@ type resolveDownloadURLRequest struct {
 type resolveDownloadURLResponse struct {
 	URL       string    `json:"url"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type resolveAssetURLRequest struct {
+	AssetID string `json:"asset_id"`
+}
+
+var previewReferenceAssetPurposes = []string{
+	service.DirectUploadPurposeProjectReference,
+	service.DirectUploadPurposeTaskReference,
+	service.DirectUploadPurposeAIEntryAttachment,
+}
+
+func hasSingleAssetIDField(body []byte) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil || len(fields) != 1 {
+		return false
+	}
+	if _, ok := fields["asset_id"]; !ok {
+		return false
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if _, err := decoder.Token(); err != nil {
+		return false
+	}
+	seen := false
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok || key != "asset_id" || seen {
+			return false
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return false
+		}
+		seen = true
+	}
+	return seen
+}
+
+// ResolveAssetDownloadURL signs the repository-owned key for an immutable
+// reference asset. The caller supplies only asset identity and cannot assert a
+// storage key, URL, or business-record ownership relationship.
+func (h *UploadHandler) ResolveAssetDownloadURL(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	if !hasSingleAssetIDField(c.Body()) {
+		return Error(c, fiber.StatusBadRequest, "request body must contain only asset_id")
+	}
+
+	var req resolveAssetURLRequest
+	if err := json.Unmarshal(c.Body(), &req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "asset_id must be a string")
+	}
+	req.AssetID = strings.TrimSpace(req.AssetID)
+	if req.AssetID == "" {
+		return Error(c, fiber.StatusBadRequest, "asset_id is required")
+	}
+	if h.referenceAssets == nil {
+		return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+	}
+
+	view, err := h.referenceAssets.Present(c.Context(), userID, req.AssetID, previewReferenceAssetPurposes)
+	if err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
+	return Success(c, view)
 }
 
 // ResolveDownloadURL turns a stable, server-verified object identity into a

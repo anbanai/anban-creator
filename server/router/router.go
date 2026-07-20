@@ -342,6 +342,7 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.UploadHandler != nil {
 		apiV1.Post("/uploads/prepare", svc.UploadHandler.Prepare)
+		apiV1.Post("/uploads/resolve-asset-url", svc.UploadHandler.ResolveAssetDownloadURL)
 		apiV1.Post("/uploads/resolve-download-url", svc.UploadHandler.ResolveDownloadURL)
 	}
 	if svc.AIEntryHandler != nil {
