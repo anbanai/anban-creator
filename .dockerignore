@@ -14,7 +14,7 @@
 
 # Frontend, desktop, mobile, and plugin distributions that are not needed for
 # building the server/agent Go binaries. claudecode/ is intentionally kept
-# because both runtime Dockerfiles copy it into the image.
+# because Dockerfile.agent copies it into the Agent runtime image.
 /studio/
 /desktop/
 /miniapp/

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -141,7 +142,7 @@ func taskArtifactDirectUploadConfig(t *testing.T) DirectUploadConfig {
 func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 	svc, _, store, task := newTaskArtifactTestService(t)
 
-	result, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+	result, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
 		RelativePath: "output/article.md",
 		Filename:     "article.md",
 		ContentType:  "text/markdown",
@@ -163,6 +164,62 @@ func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 	}
 }
 
+func TestFinalizeTaskArtifactManifestPreservesExecutionMCPArtifacts(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	task.Type = model.PlatformSeednote
+	task.HasContentImage = true
+	executionID := uuid.NewString()
+	task.CurrentExecutionID = &executionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes",
+		Status: model.TaskExecutionRunning, Started: true, StartedAt: &now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	generated, err := svc.UploadExecutionTaskFileFromReader(ctx, task.ID, task.UserID, executionID,
+		"output/seednote/title/image_01.png", strings.NewReader("png"), "image/png", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generated.ExecutionID != executionID || generated.State != model.TaskFileStatePending || !strings.Contains(generated.OSSKey, "/mcp/") {
+		t.Fatalf("generated execution artifact = %#v", generated)
+	}
+
+	var paths []string
+	for _, name := range seednoteCompletionArtifactNamesForTest(false, false) {
+		paths = append(paths, "output/seednote/title/"+name)
+	}
+	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID}
+	store.stats = make(map[string]*storage.ObjectInfo, len(paths))
+	for _, relPath := range paths {
+		key := buildTaskArtifactStorageKey(task, executionID, relPath)
+		store.stats[key] = &storage.ObjectInfo{Key: key, Size: 3, ContentType: DetectTaskFileMIME(relPath)}
+		manifest.Files = append(manifest.Files, TaskArtifactManifestFile{
+			RelativePath: relPath, ObjectKey: key, ContentType: DetectTaskFileMIME(relPath), Size: 3, SHA256: strings.Repeat("a", 64),
+		})
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCount := len(paths) + 1
+	if len(pending) != wantCount {
+		t.Fatalf("pending artifact count = %d, want %d: %#v", len(pending), wantCount, pending)
+	}
+	if validation := serveragent.ValidateTaskArtifactsFromTaskFiles(task, pending); !validation.Valid {
+		t.Fatalf("merged execution artifacts are invalid: %#v", validation)
+	}
+}
+
 func TestPrepareTaskArtifactUploadRejectsUnsafeRelativePath(t *testing.T) {
 	svc, _, _, task := newTaskArtifactTestService(t)
 
@@ -176,7 +233,7 @@ func TestPrepareTaskArtifactUploadRejectsUnsafeRelativePath(t *testing.T) {
 		{name: "runtime directory", relPath: ".git/config", wantMessage: "refusing to upload runtime directory"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+			_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
 				RelativePath: tt.relPath,
 				Filename:     "secret.md",
 				ContentType:  "text/markdown",
@@ -192,7 +249,7 @@ func TestPrepareTaskArtifactUploadRejectsUnsafeRelativePath(t *testing.T) {
 func TestPrepareTaskArtifactUploadRejectsWrongUserAndNonOSSStorage(t *testing.T) {
 	svc, _, store, task := newTaskArtifactTestService(t)
 
-	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, uuid.NewString(), taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, uuid.NewString(), "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
 		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
@@ -202,7 +259,7 @@ func TestPrepareTaskArtifactUploadRejectsWrongUserAndNonOSSStorage(t *testing.T)
 	}
 
 	store.name = "local"
-	_, err = svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+	_, err = svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
 		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
@@ -220,7 +277,7 @@ func TestPrepareTaskArtifactUploadRejectsMissingSTSRole(t *testing.T) {
 	cfg.Storage.AccessKeyID = "ak"
 	cfg.Storage.AccessKeySecret = "secret"
 
-	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, cfg, TaskArtifactPrepareRequest{
+	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", cfg, TaskArtifactPrepareRequest{
 		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
@@ -233,7 +290,7 @@ func TestPrepareTaskArtifactUploadRejectsMissingSTSRole(t *testing.T) {
 func TestFinalizeTaskArtifactManifestRejectsObjectOutsideTaskPrefix(t *testing.T) {
 	svc, _, _, task := newTaskArtifactTestService(t)
 
-	err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, TaskArtifactManifestRequest{
+	err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, "", TaskArtifactManifestRequest{
 		TaskID: task.ID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: "output/article.md",
@@ -263,7 +320,7 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 		},
 	}
 
-	if err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, TaskArtifactManifestRequest{
+	if err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, "", TaskArtifactManifestRequest{
 		TaskID: task.ID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: "output/article.md",
@@ -293,5 +350,103 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 	}
 	if file.FileSize != int64(len(body)) || file.ContentHash != hash {
 		t.Fatalf("file size/hash = %d/%q, want %d/%q", file.FileSize, file.ContentHash, len(body), hash)
+	}
+}
+
+func TestExecutionArtifactManifestStaysPendingUntilPublication(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := uuid.NewString()
+	task.CurrentExecutionID = &executionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+	objectKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/executions/" + executionID + "/artifacts/output/article.md"
+	store.stats = map[string]*storage.ObjectInfo{objectKey: {Key: objectKey, Size: 7, ContentType: "text/markdown"}}
+	req := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{{RelativePath: "output/article.md", ObjectKey: objectKey, Size: 7, SHA256: strings.Repeat("a", 64)}}}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, req); err != nil {
+		t.Fatal(err)
+	}
+	visible, _ := repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	if len(visible) != 0 {
+		t.Fatalf("pending manifest leaked: %#v", visible)
+	}
+	pending, _ := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if len(pending) != 1 || pending[0].State != model.TaskFileStatePending {
+		t.Fatalf("pending = %#v", pending)
+	}
+	if err := repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, executionID); err != nil {
+		t.Fatal(err)
+	}
+	visible, _ = repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	if len(visible) != 1 || visible[0].ExecutionID != executionID {
+		t.Fatalf("published = %#v", visible)
+	}
+}
+
+func TestExecutionArtifactPrepareRejectsMissingOrStaleIdentity(t *testing.T) {
+	svc, repo, _, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := uuid.NewString()
+	task.CurrentExecutionID = &executionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+	request := TaskArtifactPrepareRequest{TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", Size: 7}
+	result, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "/executions/" + executionID + "/artifacts/output/article.md"
+	if !strings.Contains(result.Key, want) {
+		t.Fatalf("key = %q, want segment %q", result.Key, want)
+	}
+	if _, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), request); err == nil || !strings.Contains(err.Error(), "execution identity") {
+		t.Fatalf("API-key execution impersonation error = %v", err)
+	}
+	other := uuid.NewString()
+	if _, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, other, taskArtifactDirectUploadConfig(t), request); err == nil {
+		t.Fatal("stale authenticated execution accepted")
+	}
+}
+
+func TestCloudTaskRejectsLegacyArtifactRequestsWithoutExecutionIdentity(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := uuid.NewString()
+	task.CurrentExecutionID = &executionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		TaskID: task.ID, RelativePath: "output/article.md", Size: 7,
+	})
+	if err == nil || !strings.Contains(err.Error(), "execution identity") {
+		t.Fatalf("legacy prepare error = %v, want execution identity rejection", err)
+	}
+	if store.uploadKey != "" {
+		t.Fatalf("rejected prepare signed object %q", store.uploadKey)
+	}
+
+	err = svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, "", TaskArtifactManifestRequest{TaskID: task.ID, Files: nil})
+	if err == nil || !strings.Contains(err.Error(), "execution identity") {
+		t.Fatalf("legacy manifest error = %v, want execution identity rejection", err)
+	}
+	rows, findErr := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if findErr != nil || len(rows) != 0 {
+		t.Fatalf("rejected manifest rows = %#v, %v", rows, findErr)
 	}
 }

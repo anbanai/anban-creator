@@ -32,7 +32,7 @@ The persistent container must be started externally with:
 docker run -d --name anban-creator-persistent \
   -v /tmp/anban-creator:/workspace \
   --add-host=host.docker.internal:host-gateway \
-  anban-creator-agent:latest sleep infinity
+  creator-agent:latest sleep infinity
 ```
 
 Requirements:

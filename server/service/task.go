@@ -27,8 +27,16 @@ type TaskEnqueuer interface {
 	EnqueueIn(taskType string, payload []byte, delay time.Duration) error
 }
 
+type UniqueTaskEnqueuer interface {
+	EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error)
+}
+
 type PublishedTrackingService interface {
 	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error
+}
+
+type cloudDraftPublisher interface {
+	PublishDraft(context.Context, string, string, []DraftArticleInput) (*PublishDraftResult, error)
 }
 
 // TypeContentGenerate is the Asynq task type for content generation.
@@ -36,24 +44,36 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo                  repository.Repository
-	executor              agent.TaskExecutor
-	logger                *zerolog.Logger
-	enqueuer              TaskEnqueuer
-	store                 storage.Provider
-	creditSvc             *CreditService
-	publishingSvc         *PublishingService
-	taskLogDir            string
-	workspaceSvc          *WorkspaceService
-	workspaceDir          string
-	pubsub                *RedisPubSub
-	pubsubCancel          context.CancelFunc // stops the listenCancelEvents goroutine
-	cancelFuncs           sync.Map           // taskID → context.CancelFunc
-	seednoteTrackingSvc   PublishedTrackingService
-	videoCatalog          VideoModelCatalog
-	videoCreditMultiplier int
-	videoBilling          srvconfig.BillingConfig
-	montageCfg            srvconfig.MontageConfig
+	repo                     repository.Repository
+	executor                 agent.TaskExecutor
+	kubernetesDispatcher     agent.KubernetesDispatcher
+	dispatchLeaseDuration    time.Duration
+	dispatchBeforeCreate     func()
+	finalizationAfterStage   func(string) error
+	finalizationAfterEffect  func(string) error
+	finalizationAfterAdvance func(string) error
+	finalizationLease        time.Duration
+	finalizationRenewEvery   time.Duration
+	finalizationRenewClaim   func(context.Context, string, string) (bool, error)
+	cleanupRetryBackoff      time.Duration
+	projectConcurrencyCap    int
+	logger                   *zerolog.Logger
+	enqueuer                 TaskEnqueuer
+	store                    storage.Provider
+	creditSvc                *CreditService
+	publishingSvc            *PublishingService
+	cloudPublisher           cloudDraftPublisher
+	taskLogDir               string
+	workspaceSvc             *WorkspaceService
+	workspaceDir             string
+	pubsub                   *RedisPubSub
+	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
+	cancelFuncs              sync.Map           // taskID → context.CancelFunc
+	seednoteTrackingSvc      PublishedTrackingService
+	videoCatalog             VideoModelCatalog
+	videoCreditMultiplier    int
+	videoBilling             srvconfig.BillingConfig
+	montageCfg               srvconfig.MontageConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
 	ilinkNotifier  *IlinkNotifier
@@ -73,11 +93,12 @@ type TaskService struct {
 	defaultModel      string
 	maxTurnsOverrides map[string]int
 	memoryMgr         *projectmemory.ProjectMemoryManager
-	// projectConcurrencyCap optionally lowers per-project concurrency for
-	// executors that reuse a mutable project workspace, such as Kubernetes
-	// project Pods. Zero means no service-level cap.
-	projectConcurrencyCap int
-	nasResumeEnabled      bool
+	nasResumeEnabled  bool
+	taskWorkspace     TaskWorkspaceLifecycle
+}
+
+type TaskWorkspaceLifecycle interface {
+	DeleteTaskWorkspace(context.Context, *model.Task) error
 }
 
 // NewTaskService creates a new TaskService.
@@ -96,19 +117,23 @@ func NewTaskService(
 	publishingSvc *PublishingService,
 ) *TaskService {
 	svc := &TaskService{
-		repo:             repo,
-		executor:         executor,
-		logger:           logger,
-		enqueuer:         enqueuer,
-		store:            store,
-		creditSvc:        creditSvc,
-		publishingSvc:    publishingSvc,
-		taskLogDir:       taskLogDir,
-		workspaceSvc:     workspaceSvc,
-		workspaceDir:     workspaceDir,
-		pubsub:           pubsub,
-		executionTimeout: 60 * time.Minute,
-		persistTimeout:   10 * time.Minute,
+		repo:                   repo,
+		executor:               executor,
+		logger:                 logger,
+		enqueuer:               enqueuer,
+		store:                  store,
+		creditSvc:              creditSvc,
+		publishingSvc:          publishingSvc,
+		cloudPublisher:         publishingSvc,
+		taskLogDir:             taskLogDir,
+		workspaceSvc:           workspaceSvc,
+		workspaceDir:           workspaceDir,
+		pubsub:                 pubsub,
+		executionTimeout:       60 * time.Minute,
+		persistTimeout:         10 * time.Minute,
+		finalizationLease:      time.Minute,
+		finalizationRenewEvery: 15 * time.Second,
+		cleanupRetryBackoff:    10 * time.Second,
 	}
 	svc.montageCfg = defaultMontageServiceConfig()
 
@@ -131,8 +156,20 @@ func (s *TaskService) Repository() repository.Repository {
 	return s.repo
 }
 
+// Storage returns the configured provider for handler-level upload verification.
+func (s *TaskService) Storage() storage.Provider {
+	if s == nil {
+		return nil
+	}
+	return s.store
+}
+
 func (s *TaskService) SetProjectMemoryManager(memoryMgr *projectmemory.ProjectMemoryManager) {
 	s.memoryMgr = memoryMgr
+}
+
+func (s *TaskService) SetTaskWorkspaceLifecycle(workspace TaskWorkspaceLifecycle) {
+	s.taskWorkspace = workspace
 }
 
 func (s *TaskService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
@@ -230,6 +267,13 @@ func (s *TaskService) notifyTerminal(ctx context.Context, task *model.Task, stat
 	}
 }
 
+func (s *TaskService) notifyTerminalDurable(ctx context.Context, task *model.Task, status, errMsg string) error {
+	if s.ilinkNotifier == nil {
+		return nil
+	}
+	return s.ilinkNotifier.NotifyTerminalDurable(ctx, task, status, errMsg)
+}
+
 // SetTopicPoolService sets the topic pool service for plan-task integration.
 func (s *TaskService) SetTopicPoolService(svc *TopicPoolService) {
 	s.topicPoolSvc = svc
@@ -300,7 +344,7 @@ func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int 
 	if project != nil && project.MaxConcurrentTasks > 0 {
 		maxConcurrent = project.MaxConcurrentTasks
 	}
-	if s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
+	if s.kubernetesDispatcher == nil && s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
 		return s.projectConcurrencyCap
 	}
 	return maxConcurrent
@@ -354,19 +398,31 @@ func (s *TaskService) StorageProviderName() string {
 
 var ErrMontageInput = errors.New("montage input invalid")
 
+func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
+	return append([]model.EntryAttachment(nil), in...)
+}
+
 // CreateManualParams holds the inputs for CreateManual. Fields map 1:1 to the
 // model.Task attributes that callers can supply at creation time. Using a struct
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID            string
-	ProjectID         string
-	Prompt            string
-	Quantity          int
-	ImageRatio        string
-	ImageModelKey     string
-	SkipRefImage      *bool
-	ReferenceImageURL string
+	UserID    string
+	ProjectID string
+	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
+	// keep billing and runtime configuration anchored to the source task instead
+	// of re-deriving them from a project or server policy that changed later.
+	FrozenTaskType       string
+	PreserveFrozenConfig bool
+	Prompt               string
+	Quantity             int
+	ImageRatio           string
+	ImageModelKey        string
+	SkipRefImage         *bool
+	ReferenceImageURL    string
+	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
+	// reuse input objects from this task's exact user/project/task prefix.
+	InputSourceTaskID string
 	// Overrides is deprecated. New Studio/API flows do not set task-level style
 	// overrides; runtime style/account config comes from ProjectSnapshot.
 	Overrides *model.StyleOverrides
@@ -405,6 +461,9 @@ type CreateManualParams struct {
 	// videoeditor tasks. They are rejected for creator projects and vice versa.
 	VideoEditorConfig *model.VideoTaskConfig
 	VideoEditorInput  *model.VideoInput
+	// FrozenVideoConfig is clone-only resolved video state. Ordinary creation
+	// leaves it nil so the agent can resolve a fresh execution configuration.
+	FrozenVideoConfig *model.VideoTaskConfig
 	// MontageInput carries the Montage-specific creation contract.
 	// It is independent from video creator/editor payloads and is only valid
 	// for montage projects.
@@ -455,9 +514,15 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	taskType := project.Platform
+	if p.FrozenTaskType != "" {
+		taskType = p.FrozenTaskType
+	}
 	videoCfg, videoInput, err := p.videoPayloadForTask(taskType)
 	if err != nil {
 		return nil, err
+	}
+	if model.IsVideoPlatform(taskType) {
+		videoInput = videoInputWithAttachmentReferences(p.Prompt, videoInput, p.InputAttachments)
 	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
 		return nil, fmt.Errorf("%w: montage_input can only be set on montage tasks", ErrMontageInput)
@@ -469,7 +534,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	// stay per-task. Done before validation so selected modules are available to
 	// the agent; modules shape later MCP usage, not the creation-time base fee.
 	effectiveImageModelKey := p.ImageModelKey
-	if taskType == model.PlatformEcommerce {
+	if taskType == model.PlatformEcommerce && !p.PreserveFrozenConfig {
 		projEc := project.EcommerceDefaults.Data()
 		if p.Ecommerce == nil {
 			p.Ecommerce = &model.EcommerceConfig{}
@@ -495,17 +560,19 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
-		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
-			Config:          s.montageCfg,
-			TaskType:        taskType,
-			LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
-			CloudAvailable:  s.montageCloudAvailable(),
-			AssetsCloudSafe: true,
-		})
-		if err != nil {
-			return nil, err
+		if !p.PreserveFrozenConfig {
+			target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
+				Config:          s.montageCfg,
+				TaskType:        taskType,
+				LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
+				CloudAvailable:  s.montageCloudAvailable(),
+				AssetsCloudSafe: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			p.ExecutionTarget = target
 		}
-		p.ExecutionTarget = target
 	}
 	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(videoInput, p.InputAttachments) {
 		return nil, fmt.Errorf("videoeditor task requires at least one source video")
@@ -582,7 +649,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		// to the agent's auto-research path. The generation skill respects an
 		// already-set topic, so it will not re-claim during execution.
 		taskPrompt := p.Prompt
-		if taskPrompt == "" && s.topicPoolSvc != nil &&
+		if taskPrompt == "" && !p.PreserveFrozenConfig && s.topicPoolSvc != nil &&
 			(taskType == model.PlatformArticle || taskType == model.PlatformSeednote || taskType == model.PlatformMoments) {
 			claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, p.UserID, p.ProjectID, taskID)
 			if claimErr != nil {
@@ -623,6 +690,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ImageRatio:               p.ImageRatio,
 			ImageModelKey:            effectiveImageModelKey,
 			ReferenceImageURL:        p.ReferenceImageURL,
+			InputSourceTaskID:        p.InputSourceTaskID,
 			SkipReferenceImage:       p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:                p.Watermark != nil && *p.Watermark,
 			Goal:                     p.Goal,
@@ -649,7 +717,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			task.SetEcommerce(*p.Ecommerce)
 		}
 		if len(p.InputAttachments) > 0 {
-			task.SetInputAttachments(p.InputAttachments)
+			task.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
 		}
 		if model.IsVideoPlatform(taskType) {
 			if videoInput != nil {
@@ -658,6 +726,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 				task.SetVideoInput(videoInputFromTaskConfig(taskPrompt, videoCfg))
 			} else if model.IsVideoCreatorPlatform(taskType) && strings.TrimSpace(taskPrompt) != "" {
 				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
+			}
+			if p.FrozenVideoConfig != nil {
+				task.SetVideoConfig(*p.FrozenVideoConfig)
 			}
 		}
 		if model.IsMontagePlatform(taskType) && p.MontageInput != nil {
@@ -738,11 +809,70 @@ func hasVideoEditorSourceVideo(input *model.VideoInput, attachments []model.Entr
 		}
 	}
 	for _, attachment := range attachments {
-		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && strings.TrimSpace(attachment.URL) != "" {
+		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && entryAttachmentStorageSource(attachment) != "" {
 			return true
 		}
 	}
 	return false
+}
+
+func videoInputWithAttachmentReferences(prompt string, input *model.VideoInput, attachments []model.EntryAttachment) *model.VideoInput {
+	attachmentRefs := videoReferencesFromEntryAttachments(attachments)
+	if input == nil && len(attachmentRefs) == 0 {
+		return nil
+	}
+	result := model.VideoInput{Brief: strings.TrimSpace(prompt)}
+	if input != nil {
+		result = *input
+		if strings.TrimSpace(result.Brief) == "" {
+			result.Brief = strings.TrimSpace(prompt)
+		}
+		result.References = cloneVideoReferenceAssets(input.References)
+	}
+	seen := make(map[string]struct{}, len(result.References)+len(attachmentRefs))
+	for _, ref := range result.References {
+		seen[videoReferenceAssetIdentity(ref)] = struct{}{}
+	}
+	for _, ref := range attachmentRefs {
+		identity := videoReferenceAssetIdentity(ref)
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		result.References = append(result.References, ref)
+	}
+	return &result
+}
+
+func cloneVideoReferenceAssets(references []model.VideoReferenceAsset) []model.VideoReferenceAsset {
+	cloned := make([]model.VideoReferenceAsset, len(references))
+	for i, ref := range references {
+		cloned[i] = ref
+		cloned[i].MustKeep = append([]string(nil), ref.MustKeep...)
+		cloned[i].CanChange = append([]string(nil), ref.CanChange...)
+		cloned[i].MustNotTransfer = append([]string(nil), ref.MustNotTransfer...)
+	}
+	return cloned
+}
+
+func videoReferenceAssetIdentity(ref model.VideoReferenceAsset) string {
+	typ := strings.ToLower(strings.TrimSpace(ref.Type))
+	switch typ {
+	case "image":
+		typ = VideoReferenceImage
+	case "audio":
+		typ = VideoReferenceAudio
+	case "video":
+		typ = VideoReferenceVideo
+	case "text":
+		typ = VideoReferenceText
+	}
+	return strings.Join([]string{
+		typ,
+		strings.TrimSpace(ref.URL),
+		strings.TrimSpace(ref.TaskFileID),
+		strings.TrimSpace(ref.Text),
+	}, "\x00")
 }
 
 func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) VideoGenerationRequest {
@@ -977,6 +1107,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ArticleWithCover:         plan.ArticleWithCover,
 		ArticleWithContentImages: plan.ArticleWithContentImages,
 	}
+	task.SetInputAttachments(cloneEntryAttachments(plan.InputAttachments.Data()))
 	if model.IsMontagePlatform(taskType) {
 		task.ExecutionTarget = montageExecutionTarget
 	}
@@ -1067,7 +1198,7 @@ var artifactTaskTitles = map[string]struct{}{
 	"违禁词合规检查报告": {},
 }
 
-// FinalizeTitle records the hook-reported final title as the canonical task title.
+// FinalizeTitle records the owning Agent's final title as the canonical task title.
 func (s *TaskService) FinalizeTitle(ctx context.Context, userID, taskID, title string) (string, error) {
 	cleaned := cleanFinalTitle(title)
 	if cleaned == "" {
@@ -1152,6 +1283,9 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 	task, taskErr := s.repo.Tasks().FindByID(ctx, id)
 	if userID != "" && taskErr == nil && task != nil && task.UserID != userID {
 		return fmt.Errorf("task not found")
+	}
+	if taskErr == nil && task != nil && task.CurrentExecutionID != nil && s.kubernetesDispatcher != nil {
+		return s.cancelCloudExecution(ctx, task, userID)
 	}
 
 	// Atomically transition status: only pending or running can be cancelled.
@@ -1259,6 +1393,22 @@ func (s *TaskService) GetFiles(ctx context.Context, taskID string) ([]*model.Tas
 	if err != nil {
 		return nil, fmt.Errorf("get task files: %w", err)
 	}
+	s.EnrichFilesWithURLs(ctx, files)
+	return files, nil
+}
+
+// GetVisibleFiles returns successful delivery files followed by retained files
+// from failed attempts. Delivery and workflow code must continue using GetFiles.
+func (s *TaskService) GetVisibleFiles(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
+	published, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("get published task files: %w", err)
+	}
+	collected, err := s.repo.TaskFiles().FindCollectedByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("get collected task files: %w", err)
+	}
+	files := append(published, collected...)
 	s.EnrichFilesWithURLs(ctx, files)
 	return files, nil
 }
@@ -1372,11 +1522,25 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 			return fmt.Errorf("marshal payload: %w", err)
 		}
 
-		if err := s.enqueuer.Enqueue(TypeContentGenerate, payload); err != nil {
+		uniqueEnqueuer, ok := s.enqueuer.(UniqueTaskEnqueuer)
+		if !ok {
 			if s.pubsub != nil && s.pubsub.Available() && project != nil {
 				s.pubsub.ReleaseSlot(ctx, project.ID)
 			}
+			return errors.New("content task enqueuer does not support idempotent enqueue")
+		}
+		enqueued, err := uniqueEnqueuer.EnqueueUnique(TypeContentGenerate, payload, task.ID)
+		if err != nil || !enqueued {
+			if s.pubsub != nil && s.pubsub.Available() && project != nil {
+				s.pubsub.ReleaseSlot(ctx, project.ID)
+			}
+		}
+		if err != nil {
 			return fmt.Errorf("enqueue task: %w", err)
+		}
+		if !enqueued {
+			s.logger.Info().Str("task_id", task.ID).Msg("task already enqueued for async execution")
+			return nil
 		}
 
 		s.logger.Info().Str("task_id", task.ID).Msg("task enqueued for async execution")
@@ -1455,13 +1619,15 @@ func (s *TaskService) DispatchPendingTasks(ctx context.Context, projectID string
 		return fmt.Errorf("find pending: %w", err)
 	}
 
+	var dispatchErr error
 	for _, t := range pending {
 		if err := s.EnqueueExecution(ctx, t, project); err != nil {
 			s.logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to dispatch pending task")
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("dispatch pending task %s: %w", t.ID, err))
 		}
 	}
 
-	return nil
+	return dispatchErr
 }
 
 // RefundForTask refunds credits for a failed task. This is a public wrapper
@@ -1590,6 +1756,11 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 			s.logger.Error().Err(cancelErr).Str("task_id", id).Msg("failed to cancel task before delete")
 		}
 	}
+	if s.taskWorkspace != nil {
+		if err := s.taskWorkspace.DeleteTaskWorkspace(ctx, task); err != nil {
+			return fmt.Errorf("delete task workspace: %w", err)
+		}
+	}
 
 	files, err := s.repo.TaskFiles().FindByTaskID(ctx, id)
 	if err != nil {
@@ -1611,7 +1782,6 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 	if err := s.repo.Tasks().Delete(ctx, id); err != nil {
 		return fmt.Errorf("delete task: %w", err)
 	}
-
 	s.deregisterCancel(id)
 	return nil
 }

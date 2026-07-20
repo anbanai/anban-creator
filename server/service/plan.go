@@ -125,6 +125,7 @@ type CreatePlanParams struct {
 	VideoCreatorConfig       *model.VideoTaskConfig
 	VideoCreatorInput        *model.VideoInput
 	MontageInput             *model.MontageInput
+	InputAttachments         []model.EntryAttachment
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -226,6 +227,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ArticleWithCover:         &articleCover,
 		ArticleWithContentImages: &articleContent,
 	}
+	plan.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
 	if model.IsVideoCreatorPlatform(project.Platform) {
 		if p.VideoCreatorInput != nil {
 			plan.SetVideoInput(*p.VideoCreatorInput)
@@ -301,6 +303,7 @@ type UpdatePlanParams struct {
 	VideoCreatorConfig       *model.VideoTaskConfig
 	VideoCreatorInput        *model.VideoInput
 	MontageInput             *model.MontageInput
+	InputAttachments         *[]model.EntryAttachment
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -341,6 +344,9 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 	if p.ArticleWithContentImages != nil {
 		v := *p.ArticleWithContentImages
 		plan.ArticleWithContentImages = &v
+	}
+	if p.InputAttachments != nil {
+		plan.SetInputAttachments(cloneEntryAttachments(*p.InputAttachments))
 	}
 	if p.VideoCreatorInput != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)

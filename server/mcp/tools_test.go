@@ -27,7 +27,7 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.Template{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Template{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := repository.New(db)
@@ -48,6 +48,59 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 		svcs = old
 	}
 	return taskSvc, projectSvc, repo, cleanup
+}
+
+func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	userID := uuid.NewString()
+	project := createAccountInfoProject(t, repo, userID, "")
+	task := createAccountInfoTask(t, repo, userID, project.ID, "")
+	if err := repo.TaskFiles().BatchCreate(context.Background(), []*model.TaskFile{
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := taskFilesHandler(withMCPUserID(context.Background(), userID), taskToolRequest(t, task.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := decodeMCPMap(t, result)
+	files, ok := data["files"].([]any)
+	if !ok || len(files) != 2 {
+		t.Fatalf("files = %#v", data["files"])
+	}
+	states := []any{files[0].(map[string]any)["state"], files[1].(map[string]any)["state"]}
+	if states[0] != model.TaskFileStatePublished || states[1] != model.TaskFileStateCollected {
+		t.Fatalf("states = %#v", states)
+	}
+}
+
+func TestListTaskFilesRejectsForeignTask(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ownerID, intruderID := uuid.NewString(), uuid.NewString()
+	project := createAccountInfoProject(t, repo, ownerID, "")
+	task := createAccountInfoTask(t, repo, ownerID, project.ID, "")
+	if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateCollected,
+		Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := taskFilesHandler(withMCPUserID(context.Background(), intruderID), taskToolRequest(t, task.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || !result.IsError {
+		t.Fatalf("foreign list result = %#v, want tool error", result)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if strings.Contains(text, "failure-state.json") {
+		t.Fatalf("foreign list leaked collected file: %s", text)
+	}
 }
 
 func decodeMCPMap(t *testing.T, result *mcp.CallToolResult) map[string]any {
@@ -960,6 +1013,61 @@ func TestBuildAccountInfo_NoTemplateNamespace(t *testing.T) {
 	}
 }
 
+func TestBuildAccountInfoExposesImageGenerationCapability(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	project := createAccountInfoProject(t, repo, userID, "clean editorial collage")
+	task := &model.Task{
+		ID:            uuid.New().String(),
+		UserID:        userID,
+		ProjectID:     project.ID,
+		Type:          model.PlatformSeednote,
+		Status:        model.TaskStatusPending,
+		ImageModelKey: "preferred-key",
+	}
+	task.SetProjectSnapshot(model.SnapshotProject(project))
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	resolved := &service.ResolvedImageModel{
+		Key:                "server-only-key",
+		Provider:           "openai",
+		Model:              "gpt-image-2",
+		Source:             "preset:openai-gpt-image",
+		SupportsReference:  true,
+		MaxReferenceImages: 16,
+		SelectionReason:    "preferred",
+	}
+	resolver := &fakeImageModelResolver{resolved: resolved}
+	svcs.ImageModelResolver = resolver
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"project_id": project.ID,
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	imageGeneration, ok := info["image_generation"].(map[string]any)
+	if !ok {
+		t.Fatalf("image_generation block missing: %#v", info)
+	}
+	if imageGeneration["provider"] != resolved.Provider || imageGeneration["model"] != resolved.Model {
+		t.Fatalf("image_generation model = %#v", imageGeneration)
+	}
+	if imageGeneration["supports_reference"] != true || imageGeneration["max_reference_images"] != 16 || imageGeneration["selection_reason"] != "preferred" {
+		t.Fatalf("image_generation capabilities = %#v", imageGeneration)
+	}
+	if _, ok := imageGeneration["key"]; ok || strings.Contains(mustJSON(t, imageGeneration), resolved.Key) {
+		t.Fatalf("image_generation must not expose resolved key: %#v", imageGeneration)
+	}
+	if resolver.calls != 1 || resolver.userID != userID || resolver.imageModelKey != task.ImageModelKey || resolver.imageType != "content" || resolver.referenceCount != 0 {
+		t.Fatalf("resolver calls/args = %d user=%q key=%q type=%q refs=%d", resolver.calls, resolver.userID, resolver.imageModelKey, resolver.imageType, resolver.referenceCount)
+	}
+}
+
 func TestBuildAccountInfo_EcommerceProjectAutoReturnsEcommerceBlockWithoutScope(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
@@ -1022,9 +1130,9 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	oldBillSvc := billSvc
 	defer func() { billSvc = oldBillSvc }()
 	SetBillingServices(nil, nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{
-		ProviderEnv: map[string]string{
-			"FAL_KEY":        "fal-secret",
-			"RUNWAY_API_KEY": "",
+		Env: map[string]string{
+			"NEW_PROVIDER_TOKEN": "future-secret",
+			"RUNWAY_API_KEY":     "",
 		},
 		ToolPolicy: map[string]srvconfig.MontageToolCapabilityPolicy{
 			"video_generation": {Preferred: []string{"fal"}},
@@ -1111,12 +1219,12 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	if !ok || !strings.Contains(contract, "ANBAN_MONTAGE_SUBMODULE_PATH") {
 		t.Fatalf("runner_contract = %#v, want Montage runtime env path hint", montage["runner_contract"])
 	}
-	providerEnv, ok := montage["provider_env"].(map[string]bool)
+	env, ok := montage["env"].(map[string]bool)
 	if !ok {
-		t.Fatalf("provider_env = %#v, want redacted map", montage["provider_env"])
+		t.Fatalf("env = %#v, want redacted map", montage["env"])
 	}
-	if providerEnv["FAL_KEY"] != true || providerEnv["RUNWAY_API_KEY"] != false {
-		t.Fatalf("provider_env = %#v, want configured statuses", providerEnv)
+	if env["NEW_PROVIDER_TOKEN"] != true || env["RUNWAY_API_KEY"] != false {
+		t.Fatalf("env = %#v, want configured statuses", env)
 	}
 	toolPolicy, ok := montage["tool_policy"].(map[string]any)
 	if !ok {
@@ -1136,11 +1244,11 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	}
 	if strings.Contains(strings.Join([]string{
 		contract,
-		toJSONForTest(t, montage["provider_env"]),
+		toJSONForTest(t, montage["env"]),
 		toJSONForTest(t, montage["tool_policy"]),
 		toJSONForTest(t, montage["pipeline_defaults"]),
-	}, "\n"), "fal-secret") {
-		t.Fatalf("montage profile leaked provider secret: %#v", montage)
+	}, "\n"), "future-secret") {
+		t.Fatalf("montage profile leaked environment secret: %#v", montage)
 	}
 }
 
@@ -1150,7 +1258,7 @@ func TestBuildMontageProfileBlockReturnsEmptyObjectsForUnsetRuntimeConfig(t *tes
 	SetBillingServices(nil, nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{}})
 
 	block := buildMontageProfileBlock(&model.Project{Platform: model.PlatformMontage}, &model.Task{Type: model.PlatformMontage})
-	for _, key := range []string{"provider_env", "tool_policy", "pipeline_defaults"} {
+	for _, key := range []string{"env", "tool_policy", "pipeline_defaults"} {
 		data, err := json.Marshal(block[key])
 		if err != nil {
 			t.Fatalf("marshal %s: %v", key, err)
@@ -1190,4 +1298,13 @@ func TestParseStringArray(t *testing.T) {
 	if gotScalar := parseStringArray(args, "scalar"); gotScalar != nil {
 		t.Errorf("scalar (non-array) = %v, want nil", gotScalar)
 	}
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JSON: %v", err)
+	}
+	return string(data)
 }

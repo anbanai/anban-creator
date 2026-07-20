@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,12 +21,13 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (
 	maxTaskPromptCharacters         = 5120
 	maxGoalTextCharacters           = 4000
-	maxTaskResumeFiles              = 10
+	maxTaskResumeFiles              = maxAgentInputAttachments
 	maxTaskResumeFileBytes          = 25 * 1024 * 1024
 	maxVideoProductionArtifactBytes = 512 * 1024
 )
@@ -40,6 +40,7 @@ type TaskHandler struct {
 	taskLogDir   string // task log directory (for GetLog)
 	imagePresets []config.ImageModelPreset
 	repo         repository.Repository
+	store        storage.Provider
 }
 
 // NewTaskHandler creates a new TaskHandler.
@@ -70,19 +71,26 @@ func (h *TaskHandler) SetRepository(repo repository.Repository) {
 	h.repo = repo
 }
 
+// SetStore wires storage ownership checks used by response serialization and
+// as the handler-side fallback for pending upload finalization.
+func (h *TaskHandler) SetStore(store storage.Provider) {
+	h.store = store
+}
+
 // Request types.
 
 type createTaskRequest struct {
-	ProjectID          string `json:"project_id"`
-	Prompt             string `json:"prompt"`
-	Quantity           int    `json:"quantity"`
-	ImageRatio         string `json:"image_ratio"`
-	ImageModelKey      string `json:"image_model_key"`
-	SkipReferenceImage *bool  `json:"skip_reference_image"`
-	ReferenceImageURL  string `json:"reference_image_url"`
-	Watermark          *bool  `json:"watermark"`
-	Goal               string `json:"goal"`
-	GoalMode           bool   `json:"goal_mode"`
+	ProjectID          string                  `json:"project_id"`
+	Prompt             string                  `json:"prompt"`
+	Quantity           int                     `json:"quantity"`
+	ImageRatio         string                  `json:"image_ratio"`
+	ImageModelKey      string                  `json:"image_model_key"`
+	SkipReferenceImage *bool                   `json:"skip_reference_image"`
+	ReferenceImageURL  string                  `json:"reference_image_url"`
+	InputAttachments   []model.EntryAttachment `json:"input_attachments,omitempty"`
+	Watermark          *bool                   `json:"watermark"`
+	Goal               string                  `json:"goal"`
+	GoalMode           bool                    `json:"goal_mode"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to CreateManualParams defaults (content on,
 	// tail off). Non-seednote task types ignore them.
@@ -114,6 +122,16 @@ type createTaskRequest struct {
 	// desktop local executor. Montage ignores this user input and resolves cloud
 	// vs local from server policy and runtime capability.
 	ExecutionTarget string `json:"execution_target,omitempty"`
+}
+
+type cloneTaskRequest struct {
+	Prompt           *string                  `json:"prompt"`
+	InputAttachments *[]model.EntryAttachment `json:"input_attachments"`
+}
+
+type resumeTaskRequest struct {
+	Prompt           string                  `json:"prompt"`
+	InputAttachments []model.EntryAttachment `json:"input_attachments"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -198,6 +216,19 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
+	var pending service.PendingUploadRepository
+	if h.repo != nil {
+		pending = h.repo.PendingUploads()
+	}
+	validatedAttachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
+		MaxCount:     maxAgentInputAttachments,
+		AllowedTypes: allAgentAttachmentTypes,
+	})
+	if err != nil {
+		return respondInputAttachmentError(c, h.logger, err)
+	}
+	req.InputAttachments = validatedAttachments
+
 	quantity := req.Quantity
 	if quantity <= 0 {
 		quantity = 1
@@ -238,19 +269,31 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		}
 	}
 	if h.repo != nil {
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL}); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		finalizationStore := h.service.Storage()
+		if finalizationStore == nil {
+			finalizationStore = h.store
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		rewrites, err := finalizePendingURLs(c.Context(), finalizationStore, h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL})
+		if err != nil {
+			return respondPendingUploadFinalizeError(c, h.logger, err)
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		req.ReferenceImageURL = rewriteFinalizedUploadURL(req.ReferenceImageURL, rewrites)
+		rewrites, err = finalizePendingURLs(c.Context(), finalizationStore, h.repo.PendingUploads(), userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos)
+		if err != nil {
+			return respondPendingUploadFinalizeError(c, h.logger, err)
 		}
+		rewriteFinalizedUploadURLSlice(req.ProductPhotos, rewrites)
+		rewrites, err = finalizePendingURLs(c.Context(), finalizationStore, h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput))
+		if err != nil {
+			return respondPendingUploadFinalizeError(c, h.logger, err)
+		}
+		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput)); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
+			rewrites, err = finalizePendingURLs(c.Context(), finalizationStore, h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			if err != nil {
+				return respondPendingUploadFinalizeError(c, h.logger, err)
 			}
+			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
 	}
 
@@ -277,6 +320,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		ImageModelKey:            req.ImageModelKey,
 		SkipRefImage:             req.SkipReferenceImage,
 		ReferenceImageURL:        req.ReferenceImageURL,
+		InputAttachments:         req.InputAttachments,
 		Watermark:                req.Watermark,
 		Goal:                     req.Goal,
 		GoalMode:                 req.GoalMode,
@@ -309,9 +353,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	// Montage is always a single deliverable and Studio expects one task
 	// object even when the request quantity is clamped by the service.
 	if len(tasks) == 1 && (quantity == 1 || req.MontageInput != nil) {
-		return Success(c, taskAPIResponse(tasks[0]))
+		return Success(c, taskAPIResponse(tasks[0], h.store))
 	}
-	return Success(c, taskAPIResponses(tasks))
+	return Success(c, taskAPIResponses(tasks, h.store))
 }
 
 // List handles GET /api/v1/tasks.
@@ -341,7 +385,7 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{
-		"items": taskAPIResponses(tasks),
+		"items": taskAPIResponses(tasks, h.store),
 		"total": total,
 	})
 }
@@ -367,7 +411,7 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	resp := taskAPIResponse(task)
+	resp := taskAPIResponse(task, h.store)
 	if h.repo != nil {
 		if tx, err := h.repo.Credits().FindDeductionByTaskID(c.Context(), task.ID); err == nil && tx != nil && tx.Amount < 0 {
 			charged := -tx.Amount
@@ -473,10 +517,39 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 
-	newTask, err := h.service.Clone(c.Context(), id)
+	var req cloneTaskRequest
+	if len(c.Body()) > 0 {
+		if err := c.Bind().Body(&req); err != nil {
+			return Error(c, fiber.StatusBadRequest, "invalid request body")
+		}
+	}
+	params := service.CloneTaskParams{}
+	if req.Prompt != nil {
+		prompt := strings.TrimSpace(*req.Prompt)
+		if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
+			return Error(c, fiber.StatusBadRequest, "prompt must not exceed 5120 characters")
+		}
+		params.Prompt = &prompt
+	}
+	if req.InputAttachments != nil {
+		var pending service.PendingUploadRepository
+		if h.repo != nil {
+			pending = h.repo.PendingUploads()
+		}
+		attachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
+			MaxCount:     maxAgentInputAttachments,
+			AllowedTypes: allAgentAttachmentTypes,
+		})
+		if err != nil {
+			return respondInputAttachmentError(c, h.logger, err)
+		}
+		params.InputAttachments = &attachments
+	}
+
+	newTask, err := h.service.Clone(c.Context(), id, params)
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", id).Msg("clone task failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) {
+		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrInsufficientCredits) {
@@ -488,7 +561,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
 	}
 
-	return Success(c, taskAPIResponse(newTask))
+	return Success(c, taskAPIResponse(newTask, h.store))
 }
 
 // Resume handles POST /api/v1/tasks/:id/resume.
@@ -512,52 +585,46 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	prompt := strings.TrimSpace(c.FormValue("prompt"))
+	var req resumeTaskRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	prompt := strings.TrimSpace(req.Prompt)
 	if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
 		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充指令不能超过 %d 个字符", maxTaskPromptCharacters))
 	}
-
-	var labels []string
-	if raw := strings.TrimSpace(c.FormValue("file_labels")); raw != "" {
-		if err := json.Unmarshal([]byte(raw), &labels); err != nil {
-			return Error(c, fiber.StatusBadRequest, "file_labels must be a JSON string array")
-		}
+	if len(req.InputAttachments) > maxTaskResumeFiles {
+		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("at most %d attachments are allowed", maxTaskResumeFiles))
 	}
 
-	form, _ := c.MultipartForm()
-	fileHeaders := formFiles(form, "files")
-	if len(fileHeaders) > maxTaskResumeFiles {
-		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充文件最多上传 %d 个", maxTaskResumeFiles))
+	resumeStore := h.service.Storage()
+	if len(req.InputAttachments) > 0 && resumeStore == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "补充文件存储暂不可用，请稍后重试")
 	}
-
-	files := make([]service.ResumeTaskFile, 0, len(fileHeaders))
-	opened := make([]io.Closer, 0, len(fileHeaders))
-	defer func() {
-		for _, f := range opened {
-			_ = f.Close()
-		}
-	}()
-	for i, header := range fileHeaders {
-		if header == nil {
-			continue
-		}
-		if header.Size > maxTaskResumeFileBytes {
-			return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充文件不能超过 %dMB", maxTaskResumeFileBytes/(1024*1024)))
-		}
-		src, err := header.Open()
-		if err != nil {
-			return Error(c, fiber.StatusBadRequest, "读取补充文件失败")
-		}
-		opened = append(opened, src)
-		label := ""
-		if i < len(labels) {
-			label = labels[i]
+	var pending service.PendingUploadRepository
+	if h.repo != nil {
+		pending = h.repo.PendingUploads()
+	}
+	validatedAttachments, err := validateInputAttachments(c.Context(), resumeStore, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
+		MaxCount:     maxTaskResumeFiles,
+		MaxBytes:     maxTaskResumeFileBytes,
+		AllowedTypes: allAgentAttachmentTypes,
+	})
+	if err != nil {
+		return respondInputAttachmentError(c, h.logger, err)
+	}
+	files := make([]service.ResumeTaskFile, 0, len(validatedAttachments))
+	for i, attachment := range validatedAttachments {
+		if attachment.UploadID == "" || attachment.Key == "" {
+			return Error(c, fiber.StatusBadRequest, fmt.Sprintf("attachment %d requires upload_id and key", i+1))
 		}
 		files = append(files, service.ResumeTaskFile{
-			OriginalName: header.Filename,
-			Label:        label,
-			Reader:       src,
-			Size:         header.Size,
+			OriginalName: attachment.FileName,
+			Label:        attachment.Instruction,
+			Key:          attachment.Key,
+			Type:         attachment.Type,
+			ContentType:  attachment.ContentType,
+			Size:         attachment.Size,
 		})
 	}
 
@@ -583,14 +650,7 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		}
 	}
 
-	return Success(c, taskAPIResponse(task))
-}
-
-func formFiles(form *multipart.Form, key string) []*multipart.FileHeader {
-	if form == nil || form.File == nil {
-		return nil
-	}
-	return form.File[key]
+	return Success(c, taskAPIResponse(task, h.store))
 }
 
 // PublishApprove handles POST /api/v1/tasks/:id/publish-approve: resumes a held
@@ -803,7 +863,7 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "image_model_unavailable"})
 			continue
 		}
-		newTask, err := h.service.Clone(c.Context(), id)
+		newTask, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{})
 		if err != nil {
 			if errors.Is(err, service.ErrInsufficientCredits) {
 				results = append(results, bulkTaskResult{ID: id, Reason: "insufficient_credits"})
@@ -918,7 +978,7 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	files, err := h.service.GetFiles(c.Context(), id)
+	files, err := h.service.GetVisibleFiles(c.Context(), id)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("get task files failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to get task files")

@@ -31,8 +31,8 @@ export type {
   TaskStatus,
   ExecutionTarget,
   Task,
-  TaskResult,
   TaskFile,
+  ReferenceUsageSummaryData,
   CreateTaskRequest,
   BulkTaskResult,
   BulkTasksResponse,
@@ -150,3 +150,6 @@ export type {
   ImageGenerationResult,
   HistoryResponse,
 } from './designer'
+
+// Shared input attachments
+export type { InputAttachment, InputAttachmentType } from './input-attachment'

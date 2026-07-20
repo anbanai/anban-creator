@@ -46,6 +46,13 @@ type Reporter struct {
 	client *http.Client
 }
 
+type agentReportRequest struct {
+	TaskID      string                       `json:"task_id"`
+	ExecutionID string                       `json:"execution_id,omitempty"`
+	Message     string                       `json:"message,omitempty"`
+	Result      *serveragent.ExecutionResult `json:"result,omitempty"`
+}
+
 func NewReporter(cfg *Config) *Reporter {
 	return &Reporter{
 		cfg: cfg,
@@ -60,29 +67,23 @@ func (r *Reporter) ReportProgress(ctx context.Context, message string) error {
 	if message == "" {
 		return nil
 	}
-	return r.postJSON(ctx, "/api/v1/agent/progress", map[string]any{
-		"task_id": r.cfg.TaskID,
-		"message": message,
-	})
+	return r.postJSON(ctx, "/api/v1/agent/progress", agentReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID, Message: message})
 }
 
 func (r *Reporter) ReportHeartbeat(ctx context.Context) error {
-	return r.postJSON(ctx, "/api/v1/agent/progress", map[string]any{
-		"task_id": r.cfg.TaskID,
-	})
+	return r.postJSON(ctx, "/api/v1/agent/progress", agentReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID})
 }
 
 func (r *Reporter) ReportResult(ctx context.Context, result *serveragent.ExecutionResult) error {
 	if result == nil {
 		return nil
 	}
-	return r.postJSON(ctx, "/api/v1/agent/progress", map[string]any{
-		"task_id": r.cfg.TaskID,
-		"result":  result,
-	})
+	return r.postJSON(ctx, "/api/v1/agent/progress", agentReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID, Result: result})
 }
 
 func (r *Reporter) PrepareArtifactUpload(ctx context.Context, req ArtifactPrepareRequest) (*ArtifactPrepareResponse, error) {
+	req.TaskID = r.cfg.TaskID
+	req.ExecutionID = r.cfg.ExecutionID
 	var env apiEnvelope[ArtifactPrepareResponse]
 	if err := r.postJSONDecode(ctx, "/api/v1/agent/artifacts/prepare", req, &env); err != nil {
 		return nil, err
@@ -91,6 +92,8 @@ func (r *Reporter) PrepareArtifactUpload(ctx context.Context, req ArtifactPrepar
 }
 
 func (r *Reporter) ReportArtifactManifest(ctx context.Context, req ArtifactManifestRequest) error {
+	req.TaskID = r.cfg.TaskID
+	req.ExecutionID = r.cfg.ExecutionID
 	return r.postJSON(ctx, "/api/v1/agent/artifacts/manifest", req)
 }
 
@@ -110,10 +113,7 @@ func (r *Reporter) ReportComplete(ctx context.Context, result *serveragent.Execu
 	// blip, 5xx) would otherwise leave the task "running" until the stuck-task
 	// reaper force-fails + refunds it ~5 min later — the user sees a failed
 	// task despite a successful run. Retry with backoff; idempotent, so safe.
-	return r.postJSONWithRetry(ctx, "/api/v1/agent/complete", map[string]any{
-		"task_id": r.cfg.TaskID,
-		"result":  result,
-	})
+	return r.postJSONWithRetry(ctx, "/api/v1/agent/complete", agentReportRequest{TaskID: r.cfg.TaskID, ExecutionID: r.cfg.ExecutionID, Result: result})
 }
 
 // postJSONWithRetry retries a terminal report a bounded number of times with

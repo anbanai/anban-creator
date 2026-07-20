@@ -13,12 +13,37 @@ import (
 	"strings"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/auth"
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
+	serverauth "github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/service"
 )
+
+// ExecutionAccessAuthorizer verifies that a JWT still represents the task's
+// current, active execution. *service.TaskService implements this interface.
+type ExecutionAccessAuthorizer interface {
+	ValidateAgentExecutionAccess(ctx context.Context, userID, projectID, taskID, executionID string) error
+}
+
+type mcpHandlerConfig struct {
+	executionTokens     *serverauth.ExecutionTokenService
+	executionAuthorizer ExecutionAccessAuthorizer
+}
+
+// MCPHandlerOption configures optional MCP authentication modes.
+type MCPHandlerOption func(*mcpHandlerConfig)
+
+// WithExecutionAuthentication lets an agent execution JWT authenticate to MCP.
+// Both dependencies are required: token validation alone is insufficient because
+// a superseded execution must stop working immediately, before JWT expiry.
+func WithExecutionAuthentication(tokens *serverauth.ExecutionTokenService, authorizer ExecutionAccessAuthorizer) MCPHandlerOption {
+	return func(cfg *mcpHandlerConfig) {
+		cfg.executionTokens = tokens
+		cfg.executionAuthorizer = authorizer
+	}
+}
 
 // statusWriter wraps http.ResponseWriter to capture the status code.
 type statusWriter struct {
@@ -103,14 +128,20 @@ func mcpLoggingMiddleware(next http.Handler, zlog *zerolog.Logger) http.Handler 
 }
 
 // NewMCPHandler creates an http.Handler for the MCP endpoint using the official
-// MCP Go SDK. It supports per-user API keys (via APIKeyService) with optional
-// fallback to a static API key.
+// MCP Go SDK. It supports per-user API keys (via APIKeyService), short-lived
+// execution JWTs when configured, and optional fallback to a static API key.
 //
 // The returned handler handles:
 //   - POST /mcp — client-to-server JSON-RPC messages
 //   - GET /mcp  — server-to-client SSE stream
 //   - DELETE /mcp — terminate session
-func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zerolog.Logger) http.Handler {
+func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zerolog.Logger, options ...MCPHandlerOption) http.Handler {
+	cfg := &mcpHandlerConfig{}
+	for _, option := range options {
+		if option != nil {
+			option(cfg)
+		}
+	}
 	// Create MCP server.
 	mcServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "anban-mcp",
@@ -137,25 +168,44 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 	)
 
 	// Auth middleware: validate bearer token via per-user API keys or static key.
-	verifier := newTokenVerifier(apiKeySvc, staticKey, zlog)
-	protected := auth.RequireBearerToken(verifier, nil)(mcpHTTP)
+	verifier := newTokenVerifier(apiKeySvc, staticKey, cfg.executionTokens, cfg.executionAuthorizer, zlog)
+	scoped := executionScopeMiddleware(mcpHTTP, cfg.executionAuthorizer)
+	protected := mcpauth.RequireBearerToken(verifier, nil)(scoped)
 
 	return mcpLoggingMiddleware(protected, zlog)
 }
 
-// tokenVerifier validates per-user API keys via APIKeyService, with static key fallback.
-func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *zerolog.Logger) auth.TokenVerifier {
-	return func(ctx context.Context, token string, r *http.Request) (*auth.TokenInfo, error) {
+// tokenVerifier validates execution JWTs and per-user API keys, with static key fallback.
+func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, executionTokens *serverauth.ExecutionTokenService, executionAuthorizer ExecutionAccessAuthorizer, zlog *zerolog.Logger) mcpauth.TokenVerifier {
+	return func(ctx context.Context, token string, r *http.Request) (*mcpauth.TokenInfo, error) {
 		if token == "" {
 			if zlog != nil {
 				zlog.Warn().
 					Str("remote_addr", r.RemoteAddr).
 					Msg("mcp auth failed: empty bearer token (ANBAN_API_KEY env var may not be set)")
 			}
-			return nil, auth.ErrInvalidToken
+			return nil, mcpauth.ErrInvalidToken
 		}
 
-		// 1. Try per-user API key.
+		// 1. Short-lived execution JWT. Do not accept these unless current
+		// execution authorization is also configured for dispatch-time checks.
+		if executionTokens != nil && executionAuthorizer != nil {
+			claims, err := executionTokens.Validate(token)
+			if err == nil {
+				return &mcpauth.TokenInfo{
+					UserID:     claims.UserID,
+					Scopes:     []string{"mcp", "managed", "execution"},
+					Expiration: claims.ExpiresAt.Time,
+					Extra: map[string]any{
+						"project_id":   claims.ProjectID,
+						"task_id":      claims.TaskID,
+						"execution_id": claims.ExecutionID,
+					},
+				}, nil
+			}
+		}
+
+		// 2. Try per-user API key.
 		if apiKeySvc != nil {
 			apiKey, err := apiKeySvc.Validate(ctx, token)
 			if err == nil && apiKey != nil {
@@ -169,7 +219,7 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *
 				if apiKey.IsManaged {
 					scopes = append(scopes, "managed")
 				}
-				return &auth.TokenInfo{
+				return &mcpauth.TokenInfo{
 					UserID:     apiKey.UserID,
 					Scopes:     scopes,
 					Expiration: time.Now().Add(10 * 365 * 24 * time.Hour),
@@ -177,12 +227,12 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *
 			}
 		}
 
-		// 2. Fallback to static key (admin mode, no userID).
+		// 3. Fallback to static key (admin mode, no userID).
 		if staticKey != "" && token == staticKey {
 			if zlog != nil {
 				zlog.Debug().Msg("mcp auth succeeded via static key (admin)")
 			}
-			return &auth.TokenInfo{
+			return &mcpauth.TokenInfo{
 				UserID:     "",
 				Scopes:     []string{"mcp", "admin"},
 				Expiration: time.Now().Add(10 * 365 * 24 * time.Hour),
@@ -200,8 +250,95 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *
 				Bool("api_key_svc_available", apiKeySvc != nil).
 				Msg("mcp auth failed: invalid token")
 		}
-		return nil, auth.ErrInvalidToken
+		return nil, mcpauth.ErrInvalidToken
 	}
+}
+
+func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAuthorizer) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		info := mcpauth.TokenInfoFromContext(r.Context())
+		if info == nil || !slices.Contains(info.Scopes, "execution") || r.Method != http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		const maximumScopeRequestBytes = 1 << 20
+		body, err := io.ReadAll(io.LimitReader(r.Body, maximumScopeRequestBytes+1))
+		if err != nil {
+			http.Error(w, "invalid MCP request", http.StatusBadRequest)
+			return
+		}
+		if len(body) > maximumScopeRequestBytes {
+			http.Error(w, "MCP request is too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		requests, err := parseScopeRequests(body)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		projectID, _ := info.Extra["project_id"].(string)
+		taskID, _ := info.Extra["task_id"].(string)
+		executionID, _ := info.Extra["execution_id"].(string)
+		toolCallFound := false
+		for _, request := range requests {
+			if request.Method != "tools/call" {
+				continue
+			}
+			toolCallFound = true
+			if requested, ok := stringArgument(request.Params.Arguments, "project_id"); ok && requested != projectID {
+				http.Error(w, "execution token cannot access requested project", http.StatusForbidden)
+				return
+			}
+			if requested, ok := stringArgument(request.Params.Arguments, "task_id"); ok && requested != taskID {
+				http.Error(w, "execution token cannot access requested task", http.StatusForbidden)
+				return
+			}
+			if requested, ok := stringArgument(request.Params.Arguments, "execution_id"); ok && requested != executionID {
+				http.Error(w, "execution token cannot access requested execution", http.StatusForbidden)
+				return
+			}
+		}
+		if !toolCallFound {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if authorizer == nil || authorizer.ValidateAgentExecutionAccess(r.Context(), info.UserID, projectID, taskID, executionID) != nil {
+			http.Error(w, "execution token is not authorized for the current task execution", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withMCPExecutionID(r.Context(), executionID)))
+	})
+}
+
+type scopeRequest struct {
+	Method string `json:"method"`
+	Params struct {
+		Arguments map[string]any `json:"arguments"`
+	} `json:"params"`
+}
+
+func parseScopeRequests(body []byte) ([]scopeRequest, error) {
+	var single scopeRequest
+	if err := json.Unmarshal(body, &single); err == nil {
+		return []scopeRequest{single}, nil
+	}
+	var batch []scopeRequest
+	if err := json.Unmarshal(body, &batch); err != nil {
+		return nil, err
+	}
+	return batch, nil
+}
+
+func stringArgument(arguments map[string]any, key string) (string, bool) {
+	value, exists := arguments[key]
+	if !exists {
+		return "", false
+	}
+	valueString, ok := value.(string)
+	return valueString, ok
 }
 
 var mcpLogURLArgKeys = map[string]bool{
@@ -252,7 +389,7 @@ func redactURLQuery(raw string) string {
 // getUserID extracts the authenticated user ID from the MCP request context.
 // Returns empty string for static key / admin mode.
 func getUserID(ctx context.Context) string {
-	info := auth.TokenInfoFromContext(ctx)
+	info := mcpauth.TokenInfoFromContext(ctx)
 	if info != nil {
 		return info.UserID
 	}
@@ -264,8 +401,19 @@ func getUserID(ctx context.Context) string {
 
 type mcpUserIDContextKey struct{}
 
+type mcpExecutionIDContextKey struct{}
+
 func withMCPUserID(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, mcpUserIDContextKey{}, userID)
+}
+
+func withMCPExecutionID(ctx context.Context, executionID string) context.Context {
+	return context.WithValue(ctx, mcpExecutionIDContextKey{}, strings.TrimSpace(executionID))
+}
+
+func getExecutionID(ctx context.Context) string {
+	executionID, _ := ctx.Value(mcpExecutionIDContextKey{}).(string)
+	return strings.TrimSpace(executionID)
 }
 
 // textResult creates a CallToolResult with JSON text content.
@@ -293,7 +441,7 @@ func errorResult(msg string) *mcp.CallToolResult {
 
 // isManagedCall returns true if the MCP call is from a managed key (agent task execution).
 func isManagedCall(ctx context.Context) bool {
-	info := auth.TokenInfoFromContext(ctx)
+	info := mcpauth.TokenInfoFromContext(ctx)
 	if info == nil {
 		return false
 	}
@@ -301,7 +449,7 @@ func isManagedCall(ctx context.Context) bool {
 }
 
 func isAdminCall(ctx context.Context) bool {
-	info := auth.TokenInfoFromContext(ctx)
+	info := mcpauth.TokenInfoFromContext(ctx)
 	if info == nil {
 		return false
 	}

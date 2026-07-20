@@ -1,20 +1,14 @@
 import { http, unwrap } from '@/lib/http-client'
 import type { ExecutionTarget, Task } from '@/types'
+import type {
+  InputAttachment,
+  InputAttachmentType,
+} from '@/types/input-attachment'
 
 export type AIEntryStatus = 'created' | 'needs_configuration' | 'error'
-export type AIEntryAttachmentType = 'image' | 'audio' | 'video' | 'document' | 'text'
-
-export interface AIEntryAttachment {
-  type: AIEntryAttachmentType
-  url?: string
-  text?: string
-  file_name?: string
-  content_type?: string
-  size?: number
-  role?: string
-  upload_id?: string
-  key?: string
-}
+export type AIEntryAttachment = InputAttachment
+export type AIEntryAttachmentType = InputAttachmentType
+export type { InputAttachment, InputAttachmentType }
 
 export interface AIEntrySubmitRequest {
   channel: 'studio' | 'ilink' | string

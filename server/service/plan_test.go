@@ -1006,3 +1006,116 @@ func TestPublishingService_ListDrafts_ReturnsNon48001Error(t *testing.T) {
 		t.Fatalf("expected wrapped list drafts error, got %v", err)
 	}
 }
+
+func createSeednotePlanWithInputAttachments(t *testing.T, svc *PlanService, repo repository.Repository, attachments []model.EntryAttachment) *model.Plan {
+	t.Helper()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "planattachments",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		UserID:           userID,
+		ProjectID:        projectID,
+		CronExpr:         "0 9 * * *",
+		Prompt:           "使用参考素材生成种草内容",
+		InputAttachments: attachments,
+	})
+	if err != nil {
+		t.Fatalf("Create plan: %v", err)
+	}
+	return plan
+}
+
+func TestCreatePlanClonesInputAttachments(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	attachments := []model.EntryAttachment{{
+		Type:        "image",
+		URL:         "https://cdn.example.com/product.png",
+		FileName:    "product.png",
+		ContentType: "image/png",
+		Instruction: "保留产品包装细节",
+	}}
+
+	plan := createSeednotePlanWithInputAttachments(t, svc, repo, attachments)
+	attachments[0].Instruction = "调用方后续修改"
+
+	stored, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("find plan: %v", err)
+	}
+	got := stored.InputAttachments.Data()
+	if len(got) != 1 || got[0].Instruction != "保留产品包装细节" {
+		t.Fatalf("stored attachments = %#v, want independent original snapshot", got)
+	}
+}
+
+func TestUpdatePlanInputAttachmentsOmittedRetainsExisting(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	plan := createSeednotePlanWithInputAttachments(t, svc, repo, []model.EntryAttachment{{
+		Type: "image", URL: "https://cdn.example.com/original.png", Instruction: "原始说明",
+	}})
+
+	updated, err := svc.Update(context.Background(), UpdatePlanParams{ID: plan.ID})
+	if err != nil {
+		t.Fatalf("Update plan: %v", err)
+	}
+	got := updated.InputAttachments.Data()
+	if len(got) != 1 || got[0].Instruction != "原始说明" {
+		t.Fatalf("attachments after omitted update = %#v, want original", got)
+	}
+}
+
+func TestUpdatePlanInputAttachmentsEmptyClears(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	plan := createSeednotePlanWithInputAttachments(t, svc, repo, []model.EntryAttachment{{
+		Type: "image", URL: "https://cdn.example.com/original.png", Instruction: "原始说明",
+	}})
+	empty := []model.EntryAttachment{}
+
+	updated, err := svc.Update(context.Background(), UpdatePlanParams{
+		ID:               plan.ID,
+		InputAttachments: &empty,
+	})
+	if err != nil {
+		t.Fatalf("Update plan: %v", err)
+	}
+	if got := updated.InputAttachments.Data(); len(got) != 0 {
+		t.Fatalf("attachments after explicit empty update = %#v, want empty", got)
+	}
+}
+
+func TestUpdatePlanInputAttachmentsNonEmptyReplaces(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	plan := createSeednotePlanWithInputAttachments(t, svc, repo, []model.EntryAttachment{{
+		Type: "image", URL: "https://cdn.example.com/original.png", Instruction: "原始说明",
+	}})
+	replacement := []model.EntryAttachment{{
+		Type: "image", URL: "https://cdn.example.com/replacement.png", Instruction: "替换说明",
+	}}
+
+	if _, err := svc.Update(ctx, UpdatePlanParams{
+		ID:               plan.ID,
+		InputAttachments: &replacement,
+	}); err != nil {
+		t.Fatalf("Update plan: %v", err)
+	}
+	replacement[0].Instruction = "调用方后续修改"
+
+	stored, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("find plan: %v", err)
+	}
+	got := stored.InputAttachments.Data()
+	if len(got) != 1 || got[0].URL != "https://cdn.example.com/replacement.png" || got[0].Instruction != "替换说明" {
+		t.Fatalf("stored attachments = %#v, want replacement snapshot", got)
+	}
+}

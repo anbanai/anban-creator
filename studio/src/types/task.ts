@@ -1,6 +1,7 @@
 import type { VideoInput, VideoTaskConfig } from './video'
 import type { CreditTransaction } from './credits'
 import type { MontageInput } from './montage'
+import type { InputAttachment } from './input-attachment'
 
 export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'montage'
 
@@ -62,10 +63,12 @@ export interface Task {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
-  error: string | null
+  input_attachments?: InputAttachment[]
+  // Failure detail persisted by server model.Task.ErrorMessage; omitted when empty.
+  error_message?: string
   plan_id?: string | null
   project_id: string
-  result: TaskResult
+  result?: string | null
   published: boolean
   published_at: string | null
   // Publish-approval gate state (Batch 4A). Empty unless the owning project has
@@ -118,9 +121,35 @@ export interface Task {
 // Publish-approval gate state (mirrors server model.PublishApprovalState*).
 export type PublishApprovalState = '' | 'pending' | 'approved' | 'rejected'
 
-export interface TaskResult {
-  files: TaskFile[] | null
-  output: string
+export interface ReferenceUsageSummaryData {
+  version: '1.0'
+  inputs: Array<{
+    attachment_index: number
+    file_name?: string
+    url?: string
+    instruction?: string
+    status: 'used' | 'excluded' | 'analysis_failed'
+    decision_summary: string
+    analysis_attempts: number
+    warnings?: string[]
+  }>
+  outputs: Array<{
+    file_name: string
+    references: Array<{
+      attachment_index: number
+      purpose: string
+    }>
+    generation_attempts: number
+    verification: {
+      status: 'passed' | 'warning' | 'failed'
+      summary: string
+    }
+    provider?: string
+    model?: string
+    selection_reason?: string
+  }>
+  warnings?: string[]
+  model_fallback_reason?: string
 }
 
 // Bulk operation per-task outcome (mirrors server handler.bulkTaskResult).
@@ -145,6 +174,8 @@ export interface BulkTasksResponse {
 export interface TaskFile {
   id: string
   task_id: string
+  execution_id?: string
+  state?: 'published' | 'collected'
   role: string
   file_name: string
   mime_type: string
@@ -165,6 +196,7 @@ export interface CreateTaskRequest {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  input_attachments?: InputAttachment[]
   watermark?: boolean
   goal?: string
   goal_mode?: boolean

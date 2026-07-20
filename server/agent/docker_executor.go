@@ -100,28 +100,44 @@ func (e *DockerExecutor) Close() error {
 	return nil
 }
 
-// CleanupOrphanedContainers removes stopped ephemeral task containers
+// CleanupOrphanedContainers removes stopped or unused Agent task containers
 // left behind by previous runs. Safe to call at startup.
 func (e *DockerExecutor) CleanupOrphanedContainers() {
+	nameFilters := filters.NewArgs()
+	for _, name := range OrphanedContainerNameFilters() {
+		nameFilters.Add("name", name)
+	}
 	containers, err := e.dockerCLI.ContainerList(context.Background(), container.ListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.KeyValuePair{Key: "name", Value: OrphanedContainerNameFilter}),
+		Filters: nameFilters,
 	})
 	if err != nil {
-		e.logger.Warn().Err(err).Msg("failed to list containers for orphan cleanup")
+		e.logger.Warn().Err(err).Msg("failed to list Agent task containers for orphan cleanup")
 		return
 	}
 
 	removed := 0
 	for _, c := range containers {
+		if !isRemovableOrphanContainerState(c.State) {
+			continue
+		}
 		if err := e.dockerCLI.ContainerRemove(context.Background(), c.ID, container.RemoveOptions{Force: true}); err != nil {
-			e.logger.Warn().Err(err).Str("container", c.ID).Msg("failed to remove orphan container")
+			e.logger.Warn().Err(err).Str("container", c.ID).Msg("failed to remove orphaned Agent task container")
 			continue
 		}
 		removed++
 	}
 	if removed > 0 {
-		e.logger.Info().Int("removed", removed).Msg("cleaned up orphaned Anban Creator containers")
+		e.logger.Info().Int("removed", removed).Msg("cleaned up stopped or unused Agent task containers")
+	}
+}
+
+func isRemovableOrphanContainerState(state container.ContainerState) bool {
+	switch state {
+	case container.StateCreated, container.StateExited, container.StateDead:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -132,6 +148,10 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = DefaultMaxTurns(opts.Task.Type, e.maxTurnsOverrides)
+	}
+	runtimeUser, err := currentDockerRuntimeUser()
+	if err != nil {
+		return nil, err
 	}
 
 	var workDir string
@@ -177,11 +197,11 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		// Download effective reference image.
 		// Task-level image takes priority over project brand image.
 		if opts.Task.ReferenceImageURL != "" {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.UserID, opts.Task.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download task reference image")
 			}
 		} else if opts.Project.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Project.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.UserID, opts.Project.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download reference image")
 			}
 		}
@@ -191,7 +211,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	// agent can reference local paths (analyze_image / generate_image ref).
 	if opts.Task.Type == model.PlatformEcommerce {
 		photos := opts.Task.Ecommerce.Data().ProductPhotos
-		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, photos); n == 0 && len(photos) > 0 {
+		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, opts.Task.UserID, photos); n == 0 && len(photos) > 0 {
 			// E-commerce output is a consistency contract on the uploaded product
 			// photos. Fail fast (task error → refund) when none materialized rather
 			// than letting the agent hallucinate inconsistent assets. See executor.go
@@ -201,10 +221,10 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		}
 	}
 	if attachments := opts.Task.InputAttachments.Data(); len(attachments) > 0 {
-		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, workDir, attachments); err != nil {
+		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, workDir, opts.Task.UserID, attachments); err != nil {
 			return nil, fmt.Errorf("materialize resume inputs: %w", err)
 		}
-		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, attachments); n == 0 && hasNonResumeInputAttachments(attachments) {
+		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, opts.Task.UserID, attachments); n == 0 && hasNonResumeInputAttachments(attachments) {
 			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
 		}
 	}
@@ -213,6 +233,9 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 	if err := writeMontageRuntimeFiles(workDir, opts); err != nil {
 		return nil, err
+	}
+	if err := validateDockerHostWorkspace(workDir); err != nil {
+		return nil, fmt.Errorf("validate Docker host workspace: %w", err)
 	}
 
 	apiKey, err := e.resolveAgentAPIKey(ctx, opts)
@@ -238,13 +261,13 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		opts.AutoMemoryDirectory = containerMemoryDir(workDir, workDirInContainer, opts.AutoMemoryDirectory)
 	}
 	cmd = e.buildAgentCommand(opts, agentModel, maxTurns, workDirInContainer, apiKey)
-	env := e.buildAgentEnv(opts)
+	env := e.buildAgentEnv(opts, dockerRuntimeHome(workDirInContainer))
 
 	var execRes execResult
 	if e.dockerCfg.ContainerName != "" {
-		execRes = e.executeViaExec(ctx, opts.Task.ID, workDirInContainer, cmd, env, opts.HeartbeatFunc)
+		execRes = e.executeViaExec(ctx, opts.Task.ID, workDirInContainer, runtimeUser, cmd, env, opts.HeartbeatFunc)
 	} else {
-		execRes = e.executeInNewContainer(ctx, opts.Task.ID, workDir, cmd, env)
+		execRes = e.executeInNewContainer(ctx, opts.Task.ID, workDir, runtimeUser, cmd, env)
 	}
 
 	if opts.LogWriter != nil {
@@ -351,20 +374,36 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 	return cmd
 }
 
-func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
-	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin"}
+func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions, runtimeHome string) []string {
+	env := make([]string, 0, len(e.claudeEnv)+len(opts.MontageEnv)+5)
+	for key, value := range montageEnvForTask(opts) {
+		env = upsertContainerEnv(env, key, value)
+	}
 	for k, v := range e.claudeEnv {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
+		if isManagedContainerEnv(k) {
+			continue
+		}
+		env = upsertContainerEnv(env, k, v)
 	}
+	env = upsertContainerEnv(env, "PATH", ContainerRuntimePath)
+	env = upsertContainerEnv(env, "HOME", runtimeHome)
 	if opts.Project != nil {
-		env = append(env, fmt.Sprintf("ANBAN_DEFAULT_PROJECT=%s", opts.Project.ID))
+		env = upsertContainerEnv(env, "ANBAN_DEFAULT_PROJECT", opts.Project.ID)
 	}
-	env = append(env, fmt.Sprintf("ANBAN_API_URL=%s", e.serverURL))
-	env = append(env, fmt.Sprintf("%s=%s", MontageSubmoduleEnvName, ContainerMontageSubmodulePath))
-	for key, value := range montageProviderEnvForTask(opts) {
-		env = append(env, fmt.Sprintf("%s=%s", key, value))
-	}
+	env = upsertContainerEnv(env, "ANBAN_API_URL", e.serverURL)
+	env = upsertContainerEnv(env, MontageSubmoduleEnvName, ContainerMontageSubmodulePath)
 	return env
+}
+
+func upsertContainerEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
 
 type execResult struct {
@@ -373,28 +412,28 @@ type execResult struct {
 	err    error
 }
 
-func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInContainer string, cmd []string, env []string, heartbeatFunc func(string)) execResult {
+func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInContainer, runtimeUser string, cmd []string, env []string, heartbeatFunc func(string)) execResult {
 	containerName := e.dockerCfg.ContainerName
 	if containerName == "" {
 		return execResult{err: fmt.Errorf("persistent container name is empty")}
 	}
 
-	mkdirExec, err := e.dockerCLI.ContainerExecCreate(ctx, containerName, container.ExecOptions{
-		Cmd:  []string{"mkdir", "-p", workDirInContainer},
-		User: "root",
-	})
-	if err == nil {
-		_ = e.dockerCLI.ContainerExecStart(ctx, mkdirExec.ID, container.ExecStartOptions{})
+	mkdirExec, err := e.dockerCLI.ContainerExecCreate(ctx, containerName, dockerWorkspacePreparationExecOptions(workDirInContainer, runtimeUser))
+	if err != nil {
+		return execResult{err: fmt.Errorf("prepare persistent container workspace exec: %w", err)}
+	}
+	if err := e.dockerCLI.ContainerExecStart(ctx, mkdirExec.ID, container.ExecStartOptions{}); err != nil {
+		return execResult{err: fmt.Errorf("start persistent container workspace preparation: %w", err)}
+	}
+	workspaceInspect, err := e.dockerCLI.ContainerExecInspect(ctx, mkdirExec.ID)
+	if err != nil {
+		return execResult{err: fmt.Errorf("inspect persistent container workspace preparation: %w", err)}
+	}
+	if workspaceInspect.ExitCode != 0 {
+		return execResult{err: fmt.Errorf("persistent container workspace preparation exited with code %d", workspaceInspect.ExitCode)}
 	}
 
-	execCreate, err := e.dockerCLI.ContainerExecCreate(ctx, containerName, container.ExecOptions{
-		Cmd:          cmd,
-		Env:          env,
-		WorkingDir:   workDirInContainer,
-		User:         "node",
-		AttachStdout: true,
-		AttachStderr: true,
-	})
+	execCreate, err := e.dockerCLI.ContainerExecCreate(ctx, containerName, dockerAgentExecOptions(cmd, env, workDirInContainer, runtimeUser))
 	if err != nil {
 		return execResult{err: fmt.Errorf("exec create: %w", err)}
 	}
@@ -455,6 +494,45 @@ func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInCo
 	}
 }
 
+func validateDockerHostWorkspace(root string) error {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("Docker workspace root %q must be a real directory: %w", root, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("Docker workspace root %q must be a real directory", root)
+	}
+	return nil
+}
+
+func dockerWorkspacePreparationExecOptions(workDirInContainer, runtimeUser string) container.ExecOptions {
+	return container.ExecOptions{
+		Cmd:  []string{"mkdir", "-p", workDirInContainer},
+		User: runtimeUser,
+	}
+}
+
+func dockerAgentExecOptions(cmd, env []string, workDirInContainer, runtimeUser string) container.ExecOptions {
+	return container.ExecOptions{
+		Cmd:          cmd,
+		Env:          env,
+		WorkingDir:   workDirInContainer,
+		User:         runtimeUser,
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+}
+
+func dockerAgentContainerConfig(image string, cmd, env []string, runtimeUser string) *container.Config {
+	return &container.Config{
+		Image:      image,
+		Cmd:        cmd,
+		Env:        env,
+		WorkingDir: "/workspace",
+		User:       runtimeUser,
+	}
+}
+
 func (e *DockerExecutor) killExecProcess(execID, containerName string) {
 	inspect, err := e.dockerCLI.ContainerExecInspect(context.Background(), execID)
 	if err != nil || !inspect.Running || inspect.Pid == 0 {
@@ -507,14 +585,8 @@ func (e *DockerExecutor) waitForDone(done chan error, execID, containerName stri
 	}
 }
 
-func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, workDir string, cmd []string, env []string) execResult {
-	containerConfig := &container.Config{
-		Image:      e.dockerCfg.Image,
-		Cmd:        cmd,
-		Env:        env,
-		WorkingDir: "/workspace",
-		User:       "node",
-	}
+func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, workDir, runtimeUser string, cmd []string, env []string) execResult {
+	containerConfig := dockerAgentContainerConfig(e.dockerCfg.Image, cmd, env, runtimeUser)
 	hostConfig := &container.HostConfig{
 		Mounts: []mount.Mount{{
 			Type:   mount.TypeBind,

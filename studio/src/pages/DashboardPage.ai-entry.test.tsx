@@ -1,12 +1,12 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DashboardPage from './DashboardPage'
 import { api } from '@/lib/api'
-import { uploadToOSS } from '@/lib/direct-upload'
 import { render } from '@/test/test-utils'
 
 const navigateMock = vi.fn()
+const uploadToOSSMock = vi.hoisted(() => vi.fn())
 
 const { articleProject, seednoteProject, ecommerceProject } = vi.hoisted(() => {
   const articleProject = {
@@ -71,15 +71,10 @@ vi.mock('@/contexts/AuthContext', () => ({
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), message: vi.fn(), success: vi.fn() } }))
 
-vi.mock('@/lib/direct-upload', () => ({
-  uploadToOSS: vi.fn().mockResolvedValue({
-    uploadId: 'upload-1',
-    key: 'uploads/pending/user/upload-1/ref.png',
-    publicUrl: 'https://cdn.example.com/uploads/pending/user/upload-1/ref.png',
-    contentType: 'image/png',
-    size: 123,
-  }),
-}))
+vi.mock('@/lib/direct-upload', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
+  return { ...actual, uploadToOSS: uploadToOSSMock }
+})
 
 vi.mock('@/lib/tauri', () => ({
   isDesktop: () => true,
@@ -107,10 +102,9 @@ vi.mock('@/lib/api', async () => {
             prompt: '帮我写一篇新品发布公众号文章',
             status: 'pending',
             progress: 0,
-            error: null,
             plan_id: null,
             project_id: 'project-1',
-            result: { files: null, output: '' },
+            result: null,
             published: false,
             published_at: null,
             created_at: '2026-07-07T00:00:00.000Z',
@@ -158,7 +152,19 @@ describe('DashboardPage AI entry', () => {
   beforeEach(() => {
     navigateMock.mockClear()
     vi.mocked(api.aiEntry.submit).mockClear()
-    vi.mocked(uploadToOSS).mockClear()
+    uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
+      uploadId: `upload-${file.name}`,
+      key: `uploads/pending/user/${file.name}`,
+      publicUrl: `https://cdn.example/${file.name}?signed=secret`,
+      contentType: file.type,
+      size: file.size,
+    }))
+  })
+
+  it('renders the shared prompt composer', async () => {
+    render(<DashboardPage />)
+    await screen.findByRole('heading', { name: '首页' })
+    expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
   })
 
   it('sends first-time users to project creation from the AI entry', async () => {
@@ -167,8 +173,10 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: '选择项目' })).toBeInTheDocument()
+    const projectControl = await screen.findByRole('combobox', { name: '项目上下文' })
+    expect(projectControl).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /创建第一个项目/ })).not.toBeInTheDocument()
+    fireEvent.click(projectControl)
     expect(await screen.findByRole('link', { name: '创建项目' })).toHaveAttribute(
       'href',
       '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
@@ -186,12 +194,20 @@ describe('DashboardPage AI entry', () => {
     expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
   })
 
-  it('renders a Codex-style AI entry and creates a task with uploaded attachments', async () => {
+  it('renders a Codex-style AI entry and submits every shared attachment unchanged', async () => {
+    const files = [
+      new File(['image'], 'product.png', { type: 'image/png' }),
+      new File(['audio'], 'voice.mp3', { type: 'audio/mpeg' }),
+      new File(['video'], 'demo.mp4', { type: 'video/mp4' }),
+      new File(['pdf'], 'brief.pdf', { type: 'application/pdf' }),
+      new File(['notes'], 'notes.txt', { type: 'text/plain' }),
+    ]
+
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '首页项目选择' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: '选择项目 公众号项目' })).toHaveAttribute('aria-expanded', 'false')
+    expect(await screen.findByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目')
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     expect(screen.getByText('公众号文章')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
@@ -202,17 +218,11 @@ describe('DashboardPage AI entry', () => {
     expect(screen.queryByText('下一步')).not.toBeInTheDocument()
     expect(screen.queryByText('最近任务')).not.toBeInTheDocument()
     await waitFor(() => expect(screen.queryByText('还没有任务')).not.toBeInTheDocument())
-
+    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files } })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledTimes(5))
+    expect(screen.getByLabelText('选择附件文件')).toBeDisabled()
+    await screen.findByText('product.png')
     fireEvent.change(prompt, { target: { value: '帮我写一篇新品发布公众号文章' } })
-    const fileInput = screen.getByLabelText('上传参考素材')
-    const file = new File(['img'], 'ref.png', { type: 'image/png' })
-    fireEvent.change(fileInput, { target: { files: [file] } })
-
-    await waitFor(() => expect(uploadToOSS).toHaveBeenCalledWith(expect.objectContaining({
-      purpose: 'ai_entry_attachment',
-      file,
-    })))
-
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
@@ -220,13 +230,36 @@ describe('DashboardPage AI entry', () => {
       project_id: 'project-1',
       text: '帮我写一篇新品发布公众号文章',
       execution_target: 'local',
-      attachments: [expect.objectContaining({
-        type: 'image',
-        url: 'https://cdn.example.com/uploads/pending/user/upload-1/ref.png',
-        file_name: 'ref.png',
-      })],
+      attachments: files.map((file, index) => ({
+        type: (['image', 'audio', 'video', 'document', 'text'] as const)[index],
+        upload_id: `upload-${file.name}`,
+        key: `uploads/pending/user/${file.name}`,
+        file_name: file.name,
+        content_type: file.type,
+        size: file.size,
+      })),
     }))
     expect(navigateMock).toHaveBeenCalledWith('/tasks/task-ai-1')
+  })
+
+  it('disables submission while the shared reference input is uploading', async () => {
+    let resolveUpload!: (value: unknown) => void
+    uploadToOSSMock.mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve }))
+    render(<DashboardPage />)
+
+    const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
+    fireEvent.change(prompt, { target: { value: '写一篇新品介绍' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
+
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+      target: { files: [new File(['image'], 'pending.png', { type: 'image/png' })] },
+    })
+
+    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    await act(async () => {
+      resolveUpload({ uploadId: 'pending', key: 'uploads/pending/pending.png', publicUrl: '', contentType: 'image/png', size: 5 })
+      await Promise.resolve()
+    })
   })
 
   it('uses the selected project from the composer menu when multiple projects exist', async () => {
@@ -242,10 +275,9 @@ describe('DashboardPage AI entry', () => {
     expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
 
-    fireEvent.click(await screen.findByRole('button', { name: '选择项目 公众号项目' }))
-    expect(await screen.findByRole('textbox', { name: '搜索项目' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /种草项目/ }))
-    expect(screen.getByRole('button', { name: '选择项目 种草项目' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(await screen.findByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
+    expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('种草项目')
 
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇小红书种草笔记' },
@@ -266,7 +298,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: '选择项目 电商项目' })).toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '项目上下文' })).toHaveTextContent('电商项目')
     expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /管理项目配置/ })).not.toBeInTheDocument()

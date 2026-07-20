@@ -15,6 +15,7 @@ type Repository interface {
 	Sessions() SessionRepository
 	Plans() PlanRepository
 	Tasks() TaskRepository
+	TaskExecutions() TaskExecutionRepository
 	TaskFiles() TaskFileRepository
 	PendingUploads() PendingUploadRepository
 	Projects() ProjectRepository
@@ -39,6 +40,7 @@ type Repository interface {
 // UserRepository provides access to the users table.
 type UserRepository interface {
 	FindByID(ctx context.Context, id string) (*model.User, error)
+	LockByID(ctx context.Context, id string) (*model.User, error)
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByOpenID(ctx context.Context, openID string) (*model.User, error)
 	FindByInviteCode(ctx context.Context, code string) (*model.User, error)
@@ -134,6 +136,8 @@ type TaskRepository interface {
 	CompareAndSwapStatusForUser(ctx context.Context, taskID, userID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
+	SetCurrentExecution(ctx context.Context, taskID, executionID string) (bool, error)
+	FailRunningTask(ctx context.Context, taskID, errorMsg string) (bool, error)
 	FailPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error)
 	ResetTerminalTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error)
 	FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error)
@@ -167,20 +171,54 @@ type TaskFileRepository interface {
 	FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error)
 	FindByID(ctx context.Context, id string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
+	FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
+	FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)
 	FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error)
 	BatchCreate(ctx context.Context, files []*model.TaskFile) error
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
+	PublishCurrentExecution(ctx context.Context, taskID, executionID string) error
+	CollectCurrentExecution(ctx context.Context, taskID, executionID string) error
+	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
+	UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error)
+	ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
+}
+
+// TaskExecutionRepository provides durable execution-attempt persistence.
+type TaskExecutionRepository interface {
+	Create(ctx context.Context, execution *model.TaskExecution) error
+	NextAttempt(ctx context.Context, taskID string) (int, error)
+	ClaimDispatch(ctx context.Context, id, token string, leaseDuration time.Duration) (bool, error)
+	AbandonDispatch(ctx context.Context, id, token string) (bool, error)
+	CompleteDispatch(ctx context.Context, id, token, namespace, jobName string) (bool, error)
+	FailDispatch(ctx context.Context, id, token, reason string, diagnostics, result []byte) (bool, error)
+	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)
+	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
+	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)
+	SetRuntimeIdentity(ctx context.Context, id, namespace, jobName, podUID string) error
+	UpdateHeartbeat(ctx context.Context, id string, now time.Time) error
+	Transition(ctx context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error)
+	ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error)
+	AdvanceFinalization(ctx context.Context, id, token, from, to string) (bool, error)
+	RenewFinalizationClaim(ctx context.Context, id, token string) (bool, error)
+	ReleaseFinalization(ctx context.Context, id, token string) error
+	TransitionPublishing(ctx context.Context, id, from, to string, result []byte) (bool, error)
+	ClaimCleanup(ctx context.Context, id, token string, lease time.Duration) (bool, error)
+	CompleteCleanup(ctx context.Context, id, token string) (bool, error)
+	FailCleanup(ctx context.Context, id, token string, backoff time.Duration) (bool, error)
+	ReleaseCleanup(ctx context.Context, id, token string) error
 }
 
 // PendingUploadRepository tracks browser-direct uploads until submit finalizes them.
 type PendingUploadRepository interface {
 	CreatePendingUpload(ctx context.Context, upload *model.PendingUpload) error
 	FindPendingUploadByID(ctx context.Context, id string) (*model.PendingUpload, error)
-	FinalizePendingUploads(ctx context.Context, ids []string, finalizedAt time.Time) error
-	FindExpiredPendingUploads(ctx context.Context, before time.Time, limit int) ([]*model.PendingUpload, error)
-	MarkPendingUploadExpired(ctx context.Context, id string, expiredAt time.Time) error
+	FinalizePendingUploadClaims(ctx context.Context, claims []model.PendingUploadClaim, finalizedAt time.Time) error
+	FindPendingUploadsForCleanup(ctx context.Context, expiredBefore, claimStaleBefore time.Time, limit int) ([]*model.PendingUpload, error)
+	ClaimPendingUploadExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error)
+	CompletePendingUploadExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error)
+	ReopenPendingUploadExpiration(ctx context.Context, id, claimID string) (bool, error)
 }
 
 // FeedbackRepository provides access to the feedbacks table.
@@ -250,6 +288,7 @@ type repository struct {
 	sessions                SessionRepository
 	plans                   PlanRepository
 	tasks                   TaskRepository
+	taskExecutions          TaskExecutionRepository
 	files                   TaskFileRepository
 	pendingUploads          PendingUploadRepository
 	projects                ProjectRepository
@@ -275,6 +314,7 @@ func New(db *gorm.DB) Repository {
 	sessions := newSessionRepository(db)
 	plans := newPlanRepository(db)
 	tasks := newTaskRepository(db)
+	taskExecutions := newTaskExecutionRepository(db)
 	files := newTaskFileRepository(db)
 	pendingUploads := newPendingUploadRepository(db)
 	projects := newProjectRepository(db)
@@ -299,6 +339,7 @@ func New(db *gorm.DB) Repository {
 		sessions:                sessions,
 		plans:                   plans,
 		tasks:                   tasks,
+		taskExecutions:          taskExecutions,
 		files:                   files,
 		pendingUploads:          pendingUploads,
 		projects:                projects,
@@ -323,6 +364,7 @@ func (r *repository) Users() UserRepository                         { return r.u
 func (r *repository) Sessions() SessionRepository                   { return r.sessions }
 func (r *repository) Plans() PlanRepository                         { return r.plans }
 func (r *repository) Tasks() TaskRepository                         { return r.tasks }
+func (r *repository) TaskExecutions() TaskExecutionRepository       { return r.taskExecutions }
 func (r *repository) TaskFiles() TaskFileRepository                 { return r.files }
 func (r *repository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
 func (r *repository) Projects() ProjectRepository                   { return r.projects }
@@ -380,6 +422,7 @@ type txRepository struct {
 	sessions                SessionRepository
 	plans                   PlanRepository
 	tasks                   TaskRepository
+	taskExecutions          TaskExecutionRepository
 	files                   TaskFileRepository
 	pendingUploads          PendingUploadRepository
 	projects                ProjectRepository
@@ -406,6 +449,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		sessions:                newSessionRepository(tx),
 		plans:                   newPlanRepository(tx),
 		tasks:                   newTaskRepository(tx),
+		taskExecutions:          newTaskExecutionRepository(tx),
 		files:                   newTaskFileRepository(tx),
 		pendingUploads:          newPendingUploadRepository(tx),
 		projects:                newProjectRepository(tx),
@@ -430,6 +474,7 @@ func (r *txRepository) Users() UserRepository                         { return r
 func (r *txRepository) Sessions() SessionRepository                   { return r.sessions }
 func (r *txRepository) Plans() PlanRepository                         { return r.plans }
 func (r *txRepository) Tasks() TaskRepository                         { return r.tasks }
+func (r *txRepository) TaskExecutions() TaskExecutionRepository       { return r.taskExecutions }
 func (r *txRepository) TaskFiles() TaskFileRepository                 { return r.files }
 func (r *txRepository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
 func (r *txRepository) Projects() ProjectRepository                   { return r.projects }

@@ -24,9 +24,11 @@ func NewAgentFeedbackService(repo repository.Repository, logger *zerolog.Logger)
 	return &AgentFeedbackService{repo: repo, logger: logger}
 }
 
-// Create stores agent feedback for a task.
+// Create idempotently stores the latest feedback for one task/agent run.
 func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, scores, errors, optimizations, summary string) (*model.AgentFeedback, error) {
-	if strings.TrimSpace(taskID) == "" {
+	taskID = strings.TrimSpace(taskID)
+	agentName = strings.TrimSpace(agentName)
+	if taskID == "" {
 		return nil, fmt.Errorf("task_id is required")
 	}
 	if !isLocalFeedbackTaskID(taskID) {
@@ -36,7 +38,7 @@ func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, sc
 	} else if s.logger != nil {
 		s.logger.Info().Str("task_id", taskID).Str("agent_name", agentName).Msg("accepting local agent feedback without persisted task")
 	}
-	if strings.TrimSpace(agentName) == "" {
+	if agentName == "" {
 		return nil, fmt.Errorf("agent_name is required")
 	}
 	if scores != "" && !json.Valid([]byte(scores)) {
@@ -65,5 +67,5 @@ func isLocalFeedbackTaskID(taskID string) bool {
 
 // FindByTaskID returns all feedback entries for a task.
 func (s *AgentFeedbackService) FindByTaskID(ctx context.Context, taskID string) ([]*model.AgentFeedback, error) {
-	return s.repo.AgentFeedbacks().FindByTaskID(ctx, taskID)
+	return s.repo.AgentFeedbacks().FindByTaskID(ctx, strings.TrimSpace(taskID))
 }

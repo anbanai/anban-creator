@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -14,7 +15,12 @@ import (
 // Completed, failed, and cancelled tasks may be cloned. The cloned task carries
 // the original's project snapshot verbatim so it uses the same frozen config as
 // the source run.
-func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, error) {
+type CloneTaskParams struct {
+	Prompt           *string
+	InputAttachments *[]model.EntryAttachment
+}
+
+func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) (*model.Task, error) {
 	src, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("find task: %w", err)
@@ -38,15 +44,30 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 
 	overrides := src.Overrides.Data()
 	snapshot := src.ProjectSnapshot.Data()
+	inputSourceTaskID := src.InputSourceTaskID
+	if inputSourceTaskID == "" {
+		inputSourceTaskID = src.ID
+	}
+	prompt := src.Prompt
+	if cloneParams.Prompt != nil {
+		prompt = strings.TrimSpace(*cloneParams.Prompt)
+	}
+	executionTarget, err := cloneExecutionTarget(src.ExecutionTarget)
+	if err != nil {
+		return nil, err
+	}
 	params := CreateManualParams{
 		UserID:                   src.UserID,
 		ProjectID:                src.ProjectID,
-		Prompt:                   src.Prompt,
+		FrozenTaskType:           src.Type,
+		PreserveFrozenConfig:     true,
+		Prompt:                   prompt,
 		Quantity:                 1,
 		ImageRatio:               src.ImageRatio,
 		ImageModelKey:            src.ImageModelKey,
 		SkipRefImage:             &skipRef,
 		ReferenceImageURL:        src.ReferenceImageURL,
+		InputSourceTaskID:        inputSourceTaskID,
 		Overrides:                &overrides,
 		ProjectSnapshot:          &snapshot,
 		Watermark:                &watermark,
@@ -56,6 +77,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		HasTailImage:             &hasTail,
 		ArticleWithCover:         articleCover,
 		ArticleWithContentImages: articleContent,
+		ExecutionTarget:          executionTarget,
 	}
 
 	// Preserve the e-commerce package config (module selection, product photos,
@@ -64,19 +86,34 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		ec := src.Ecommerce.Data()
 		params.Ecommerce = &ec
 	}
-	if attachments := src.InputAttachments.Data(); len(attachments) > 0 {
+	if cloneParams.InputAttachments != nil {
+		params.InputAttachments = cloneEntryAttachments(*cloneParams.InputAttachments)
+	} else if attachments := cloneOriginalInputAttachments(src.InputAttachments.Data()); len(attachments) > 0 {
 		params.InputAttachments = attachments
 	}
 	if model.IsVideoCreatorPlatform(src.Type) {
 		input := src.VideoInput.Data()
+		if cloneParams.Prompt != nil {
+			input.Brief = prompt
+		}
+		config := src.VideoConfig.Data()
 		params.VideoCreatorInput = &input
+		params.FrozenVideoConfig = &config
 	}
 	if model.IsVideoEditorPlatform(src.Type) {
 		input := src.VideoInput.Data()
+		if cloneParams.Prompt != nil {
+			input.Brief = prompt
+		}
+		config := src.VideoConfig.Data()
 		params.VideoEditorInput = &input
+		params.FrozenVideoConfig = &config
 	}
 	if model.IsMontagePlatform(src.Type) {
 		input := src.MontageInput.Data()
+		if cloneParams.Prompt != nil {
+			input.Brief = prompt
+		}
 		params.MontageInput = &input
 	}
 
@@ -93,4 +130,25 @@ func (s *TaskService) Clone(ctx context.Context, taskID string) (*model.Task, er
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
 	return tasks[0], nil
+}
+
+func cloneExecutionTarget(source string) (string, error) {
+	switch source {
+	case model.ExecutionTargetLocal, model.ExecutionTargetLocalClaimed:
+		return model.ExecutionTargetLocal, nil
+	case model.ExecutionTargetCloud:
+		return model.ExecutionTargetCloud, nil
+	default:
+		return "", fmt.Errorf("unsupported source execution target %q", source)
+	}
+}
+
+func cloneOriginalInputAttachments(attachments []model.EntryAttachment) []model.EntryAttachment {
+	originals := make([]model.EntryAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if !model.IsResumeEntryAttachment(attachment) {
+			originals = append(originals, attachment)
+		}
+	}
+	return originals
 }

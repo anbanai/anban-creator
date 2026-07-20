@@ -2,7 +2,7 @@ name: anban-creator
 
 services:
   mysql:
-    image: mysql:8.0
+    image: mysql:latest
     container_name: anban-creator-mysql
     restart: unless-stopped
     ports:
@@ -23,7 +23,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:alpine
     container_name: anban-creator-redis
     restart: unless-stopped
     ports:
@@ -39,7 +39,7 @@ services:
       retries: 5
 
   seednote:
-    image: xpzouying/xiaohongshu-mcp
+    image: xpzouying/xiaohongshu-mcp:latest
     # The upstream image publishes an amd64 manifest only. On arm64 hosts
     # (Apple Silicon) the pull fails with "no matching manifest for
     # linux/arm64/v8". Force amd64 and run under Docker Desktop's QEMU/Rosetta
@@ -106,21 +106,25 @@ services:
       timeout: 5s
       retries: 5
 
-  # NOTE: agent service disabled — server now uses local executor (Claude CLI subprocess).
-  # Uncomment only if you need Docker executor mode (separate agent containers).
-  # agent:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.agent
-  #   image: anban-creator-agent:latest
-  #   container_name: anban-creator-agent
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ./data/workspace:/workspace
-  #   networks:
-  #     - anban-creator-network
-  #   extra_hosts:
-  #     - "host.docker.internal:host-gateway"
+  # Persistent Agent runtime used by the server's Docker executor. The image's
+  # normal one-shot entrypoint is overridden so each task can run via docker exec
+  # while sharing the same workspace volume with the server container.
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: creator-agent:latest
+    pull_policy: build
+    container_name: creator-agent
+    restart: unless-stopped
+    entrypoint: ["tini", "--"]
+    command: ["sleep", "infinity"]
+    volumes:
+      - ./data/workspace:/workspace
+    networks:
+      - anban-creator-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   server:
     build:
@@ -138,9 +142,15 @@ services:
         condition: service_healthy
       wcflink:
         condition: service_started
+      agent:
+        condition: service_started
     environment:
       ANBAN_DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-anban_creator_dev}@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local"
       ANBAN_REDIS_ADDR: "redis:6379"
+      ANBAN_CLAUDE_EXECUTOR: "docker"
+      ANBAN_CLAUDE_AGENT_SERVER_URL: "http://server:8080"
+      ANBAN_CLAUDE_DOCKER_IMAGE: "creator-agent:latest"
+      ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: "creator-agent"
       ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: "/app/data/workspace"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"
@@ -151,6 +161,10 @@ services:
       - ./data/logs:/app/data/logs
       - ./data/workspace:/app/data/workspace
       - /var/run/docker.sock:/var/run/docker.sock
+    # make docker-up resolves this from the host socket. Direct Compose users
+    # can export DOCKER_GID=$(stat -L -c '%g' /var/run/docker.sock) on Linux.
+    group_add:
+      - "${DOCKER_GID:-0}"
     networks:
       - anban-creator-network
     extra_hosts:

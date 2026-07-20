@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -143,11 +144,15 @@ func (p *OSSProvider) UploadURL(_ context.Context, key string, contentType strin
 func (p *OSSProvider) StatObject(_ context.Context, key string) (*ObjectInfo, error) {
 	meta, err := p.bucket.GetObjectDetailedMeta(key)
 	if err != nil {
+		var serviceErr oss.ServiceError
+		if errors.As(err, &serviceErr) && (serviceErr.StatusCode == http.StatusNotFound || serviceErr.Code == "NoSuchKey") {
+			return nil, fmt.Errorf("%w: %s", ErrObjectNotFound, key)
+		}
 		return nil, fmt.Errorf("oss stat object %s: %w", key, err)
 	}
 	size, _ := strconv.ParseInt(meta.Get("Content-Length"), 10, 64)
 	contentType := meta.Get("Content-Type")
-	etag := strings.Trim(meta.Get("ETag"), `"`)
+	etag := strings.TrimSpace(meta.Get("ETag"))
 	return &ObjectInfo{
 		Key:         key,
 		Size:        size,
@@ -155,6 +160,27 @@ func (p *OSSProvider) StatObject(_ context.Context, key string) (*ObjectInfo, er
 		ContentType: contentType,
 		ETag:        etag,
 	}, nil
+}
+
+// PromoteObject conditionally copies an OSS object into an immutable final key.
+func (p *OSSProvider) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) error {
+	_, err := p.bucket.CopyObject(sourceKey, finalKey,
+		oss.CopySourceIfMatch(expectedETag),
+		oss.ForbidOverWrite(true),
+	)
+	if err == nil {
+		return nil
+	}
+	var serviceErr oss.ServiceError
+	if errors.As(err, &serviceErr) {
+		switch {
+		case serviceErr.StatusCode == http.StatusPreconditionFailed || serviceErr.Code == "PreconditionFailed":
+			return fmt.Errorf("%w: %s", ErrPromotionPreconditionFailed, sourceKey)
+		case serviceErr.StatusCode == http.StatusConflict || serviceErr.Code == "FileAlreadyExists" || serviceErr.Code == "ObjectAlreadyExists":
+			return fmt.Errorf("%w: %s", ErrObjectAlreadyExists, finalKey)
+		}
+	}
+	return fmt.Errorf("oss promote object %s to %s: %w", sourceKey, finalKey, err)
 }
 
 // GetURL returns the public URL for the given key.
@@ -171,6 +197,19 @@ func (p *OSSProvider) GetURL(key string) string {
 // Read downloads an object from OSS by key and returns its content.
 // Transient server errors (5xx) are retried up to 3 times with exponential backoff.
 func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
+	return p.readObject(ctx, key, 0)
+}
+
+// ReadObject downloads an OSS object while retaining at most maxBytes+1 bytes,
+// allowing callers to reject oversized objects without unbounded allocation.
+func (p *OSSProvider) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("maximum object size must be positive")
+	}
+	return p.readObject(ctx, key, maxBytes)
+}
+
+func (p *OSSProvider) readObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
 	signedURL, err := p.DownloadURL(ctx, key, 3600)
 	if err != nil {
 		return nil, fmt.Errorf("get signed URL for %s: %w", key, err)
@@ -202,7 +241,11 @@ func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
 			continue
 		}
 
-		data, err := io.ReadAll(resp.Body)
+		reader := io.Reader(resp.Body)
+		if maxBytes > 0 {
+			reader = io.LimitReader(resp.Body, maxBytes+1)
+		}
+		data, err := io.ReadAll(reader)
 		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read %s from OSS: %w", key, err)
@@ -210,6 +253,9 @@ func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
 
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("download %s from OSS: unexpected status %d", key, resp.StatusCode)
+		}
+		if maxBytes > 0 && int64(len(data)) > maxBytes {
+			return nil, fmt.Errorf("%w: key=%s size>%d", ErrObjectExceedsMaxSize, key, maxBytes)
 		}
 		return data, nil
 	}

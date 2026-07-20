@@ -324,11 +324,18 @@ func claimOneLocal(t *testing.T, svc *TaskService, repo repository.Repository, u
 
 func addLocalSeednoteDeliverables(t *testing.T, repo repository.Repository, taskID string) {
 	t.Helper()
-	files := []*model.TaskFile{
-		{TaskID: taskID, Role: model.FileRoleOther, FileName: "content.md", FilePath: "output/seednote/title/content.md"},
-		{TaskID: taskID, Role: model.FileRoleOther, FileName: "image-plan.md", FilePath: "output/seednote/title/image-plan.md"},
-		{TaskID: taskID, Role: model.FileRoleCover, FileName: "cover.png", FilePath: "output/seednote/title/cover.png"},
-		{TaskID: taskID, Role: model.FileRoleImage, FileName: "image_01.png", FilePath: "output/seednote/title/image_01.png"},
+	var files []*model.TaskFile
+	for _, name := range seednoteCompletionArtifactNamesForTest(true, false) {
+		role := model.FileRoleOther
+		switch name {
+		case "cover.png":
+			role = model.FileRoleCover
+		case "image_01.png":
+			role = model.FileRoleImage
+		}
+		files = append(files, &model.TaskFile{
+			TaskID: taskID, Role: role, FileName: name, FilePath: "output/seednote/title/" + name,
+		})
 	}
 	if err := repo.TaskFiles().BatchCreate(context.Background(), files); err != nil {
 		t.Fatalf("create task files: %v", err)

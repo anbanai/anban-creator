@@ -12,7 +12,9 @@ import (
 type Config struct {
 	ServerURL                string
 	APIKey                   string
+	ExecutionID              string
 	TaskID                   string
+	ProjectID                string
 	TaskType                 string
 	Topic                    string
 	Goal                     string
@@ -26,6 +28,11 @@ type Config struct {
 	ArticleWithCover         bool
 	ArticleWithContentImages bool
 	ArtifactUploadMode       string
+	BootstrapPrompt          string
+	ResumeSessionID          string
+	ResumeContextPath        string
+	RuntimeEnv               map[string]string
+	Env                      map[string]string
 }
 
 const (
@@ -110,12 +117,18 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 }
 
 func (c *Config) UserPrompt() string {
+	if strings.TrimSpace(c.ResumeContextPath) != "" {
+		return serveragent.AppendResumeContextFileToPrompt(c.BootstrapPrompt, c.Workspace, c.ResumeContextPath)
+	}
+	if strings.TrimSpace(c.BootstrapPrompt) != "" {
+		return serveragent.AppendResumeContextToPrompt(c.BootstrapPrompt, c.Workspace)
+	}
 	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{
 		TaskType:                 c.TaskType,
 		Topic:                    c.Topic,
 		Goal:                     c.Goal,
 		TaskID:                   c.TaskID,
-		ProjectID:                os.Getenv("ANBAN_DEFAULT_PROJECT"),
+		ProjectID:                firstNonEmpty(c.ProjectID, os.Getenv("ANBAN_DEFAULT_PROJECT")),
 		HasContentImage:          c.HasContentImage,
 		HasTailImage:             c.HasTailImage,
 		ArticleWithCover:         &c.ArticleWithCover,
@@ -124,41 +137,11 @@ func (c *Config) UserPrompt() string {
 	return serveragent.AppendResumeContextToPrompt(prompt, c.Workspace)
 }
 
-func montageProviderEnvFromProcess(taskType string) map[string]string {
-	if taskType != "montage" {
-		return map[string]string{}
-	}
-	env := map[string]string{}
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || strings.TrimSpace(value) == "" {
-			continue
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
 		}
-		if !isSupportedMontageProviderEnv(key) {
-			continue
-		}
-		env[key] = value
 	}
-	return env
-}
-
-func isSupportedMontageProviderEnv(key string) bool {
-	_, ok := supportedMontageProviderEnv[key]
-	return ok
-}
-
-var supportedMontageProviderEnv = map[string]struct{}{
-	"FAL_KEY":                 {},
-	"PEXELS_API_KEY":          {},
-	"PIXABAY_API_KEY":         {},
-	"UNSPLASH_ACCESS_KEY":     {},
-	"SUNO_API_KEY":            {},
-	"ELEVENLABS_API_KEY":      {},
-	"OPENAI_API_KEY":          {},
-	"XAI_API_KEY":             {},
-	"GOOGLE_API_KEY":          {},
-	"HEYGEN_API_KEY":          {},
-	"RUNWAY_API_KEY":          {},
-	"VIDEO_GEN_LOCAL_ENABLED": {},
-	"VIDEO_GEN_LOCAL_MODEL":   {},
+	return ""
 }

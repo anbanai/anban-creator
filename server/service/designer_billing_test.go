@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -17,6 +18,75 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestDesignerCreateGenerationValidatesProjectOwnershipBeforeBilling(t *testing.T) {
+	svc, repo, db := setupDesignerBillingTest(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 5000)
+	otherUserID := createCreditTestUser(t, repo, 5000)
+	foreignProjectID := uuid.NewString()
+	if err := db.Create(&model.Project{
+		ID: foreignProjectID, UserID: otherUserID, Platform: model.PlatformArticle,
+		Name: "Foreign", Status: model.ProjectStatusActive,
+	}).Error; err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		projectID string
+		wantErr   error
+	}{
+		{name: "missing", projectID: uuid.NewString(), wantErr: ErrProjectNotFound},
+		{name: "foreign", projectID: foreignProjectID, wantErr: ErrProjectOwnedByUser},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			created, err := svc.CreateGenerationRecord(ctx, userID, DesignerGenerateRequest{
+				ProjectID: tc.projectID, Prompt: "a cat", ProviderID: "gpt_image_2",
+				Quality: "medium", Size: "1024x1024", N: 1,
+			})
+			if created != nil || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("CreateGenerationRecord() = %#v, %v; want %v", created, err, tc.wantErr)
+			}
+
+			balance, balanceErr := svc.creditSvc.GetBalance(ctx, userID)
+			if balanceErr != nil || balance != 5000 {
+				t.Fatalf("balance = %d, %v; want unchanged 5000", balance, balanceErr)
+			}
+			var transactionCount int64
+			if err := db.Model(&model.CreditTransaction{}).Where("user_id = ?", userID).Count(&transactionCount).Error; err != nil || transactionCount != 0 {
+				t.Fatalf("credit transaction count = %d, %v; want 0", transactionCount, err)
+			}
+			var generationCount int64
+			if err := db.Model(&model.ImageGeneration{}).Where("user_id = ?", userID).Count(&generationCount).Error; err != nil || generationCount != 0 {
+				t.Fatalf("generation count = %d, %v; want 0", generationCount, err)
+			}
+		})
+	}
+}
+
+func TestDesignerCreateGenerationAllowsDefaultAndOwnedProjects(t *testing.T) {
+	svc, repo, db := setupDesignerBillingTest(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 5000)
+	ownedProjectID := uuid.NewString()
+	if err := db.Create(&model.Project{
+		ID: ownedProjectID, UserID: userID, Platform: model.PlatformArticle,
+		Name: "Owned", Status: model.ProjectStatusActive,
+	}).Error; err != nil {
+		t.Fatalf("create owned project: %v", err)
+	}
+
+	for _, projectID := range []string{"default", ownedProjectID} {
+		created, err := svc.CreateGenerationRecord(ctx, userID, DesignerGenerateRequest{
+			ProjectID: projectID, Prompt: "a cat", ProviderID: "gpt_image_2",
+			Quality: "medium", Size: "1024x1024", N: 1,
+		})
+		if err != nil || created == nil {
+			t.Fatalf("project %q CreateGenerationRecord() = %#v, %v", projectID, created, err)
+		}
+	}
+}
 
 func setupDesignerBillingTest(t *testing.T) (*DesignerService, repository.Repository, *gorm.DB) {
 	t.Helper()

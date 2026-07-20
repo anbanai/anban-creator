@@ -37,8 +37,15 @@ func (f *fakeProjectLLM) CompleteWithImage(_ context.Context, systemPrompt, user
 }
 
 type fakeStorageProvider struct {
-	data map[string][]byte
-	read []string
+	data     map[string][]byte
+	read     []string
+	uploaded []string
+	readErr  error
+	readMax  []int64
+	statRepo service.PendingUploadRepository
+	statErr  error
+	statInfo *storage.ObjectInfo
+	objects  map[string]*storage.ObjectInfo
 }
 
 var _ storage.Provider = (*fakeStorageProvider)(nil)
@@ -54,6 +61,7 @@ func (f *fakeStorageProvider) Upload(_ context.Context, key string, reader io.Re
 		f.data = map[string][]byte{}
 	}
 	f.data[key] = data
+	f.uploaded = append(f.uploaded, key)
 	return &storage.UploadResult{Key: key, URL: f.GetURL(key), Size: int64(len(data)), MimeType: contentType}, nil
 }
 
@@ -69,10 +77,78 @@ func (f *fakeStorageProvider) GetURL(key string) string { return "/api/v1/files/
 
 func (f *fakeStorageProvider) Read(_ context.Context, key string) ([]byte, error) {
 	f.read = append(f.read, key)
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
 	if data, ok := f.data[key]; ok {
 		return data, nil
 	}
 	return nil, fmt.Errorf("not found")
+}
+
+func (f *fakeStorageProvider) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	f.readMax = append(f.readMax, maxBytes)
+	data, err := f.Read(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, storage.ErrObjectExceedsMaxSize
+	}
+	return data, nil
+}
+
+func (f *fakeStorageProvider) StatObject(ctx context.Context, key string) (*storage.ObjectInfo, error) {
+	if f.statErr != nil {
+		return nil, f.statErr
+	}
+	if f.statInfo != nil {
+		info := *f.statInfo
+		return &info, nil
+	}
+	if info := f.objects[key]; info != nil {
+		copy := *info
+		return &copy, nil
+	}
+	parts := strings.Split(strings.Trim(key, "/"), "/")
+	if f.statRepo == nil || len(parts) < 4 || parts[0] != "uploads" || parts[1] != "pending" {
+		return nil, storage.ErrObjectNotFound
+	}
+	upload, err := f.statRepo.FindPendingUploadByID(ctx, parts[3])
+	if err != nil || upload.Key != key {
+		return nil, storage.ErrObjectNotFound
+	}
+	return &storage.ObjectInfo{Key: key, Size: upload.Size, ContentType: upload.ContentType, ETag: "etag-" + upload.ID}, nil
+}
+
+func (f *fakeStorageProvider) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) error {
+	if f.objects[finalKey] != nil {
+		return storage.ErrObjectAlreadyExists
+	}
+	info, err := f.StatObject(ctx, sourceKey)
+	if err != nil {
+		return err
+	}
+	if info.ETag != expectedETag {
+		return storage.ErrPromotionPreconditionFailed
+	}
+	if f.objects == nil {
+		f.objects = map[string]*storage.ObjectInfo{}
+	}
+	copy := *info
+	copy.Key = finalKey
+	f.objects[finalKey] = &copy
+	if data, ok := f.data[sourceKey]; ok {
+		if f.data == nil {
+			f.data = map[string][]byte{}
+		}
+		f.data[finalKey] = append([]byte(nil), data...)
+	}
+	return nil
+}
+
+func pendingUploadStatStore(repo service.PendingUploadRepository) *fakeStorageProvider {
+	return &fakeStorageProvider{statRepo: repo}
 }
 
 func (f *fakeStorageProvider) Delete(context.Context, string) error { return nil }
@@ -83,13 +159,14 @@ func (f *fakeStorageProvider) DownloadURL(context.Context, string, int) (string,
 
 func (f *fakeStorageProvider) HasCustomDomain() bool { return false }
 
-// IsOwnedURL is a plumbing fake: it accepts both the Local prefix and a
-// fixed OSS hostname so handler tests can exercise the OSS routing branch.
+// IsOwnedURL is a plumbing fake: it accepts its Local/CDN fixture URLs and a
+// fixed OSS hostname so handler tests can exercise each storage routing branch.
 // It does NOT replicate the real SSRF defenses (subdomain spoofing, scheme
 // rejection, case-insensitive host match) — those are exercised against the
 // production provider in server/storage/owned_url_test.go.
 func (f *fakeStorageProvider) IsOwnedURL(rawURL string) bool {
 	return strings.HasPrefix(rawURL, "/api/v1/files/") ||
+		strings.HasPrefix(rawURL, "https://cdn.example.com/") ||
 		strings.HasPrefix(rawURL, "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/")
 }
 
@@ -110,17 +187,25 @@ func (r *fakeProjectPendingUploadRepo) FindPendingUploadByID(_ context.Context, 
 	return &cp, nil
 }
 
-func (r *fakeProjectPendingUploadRepo) FinalizePendingUploads(_ context.Context, ids []string, _ time.Time) error {
-	r.finalized = append(r.finalized, ids...)
+func (r *fakeProjectPendingUploadRepo) FinalizePendingUploadClaims(_ context.Context, claims []model.PendingUploadClaim, _ time.Time) error {
+	for _, claim := range claims {
+		r.finalized = append(r.finalized, claim.UploadID)
+	}
 	return nil
 }
 
-func (r *fakeProjectPendingUploadRepo) FindExpiredPendingUploads(context.Context, time.Time, int) ([]*model.PendingUpload, error) {
+func (r *fakeProjectPendingUploadRepo) FindPendingUploadsForCleanup(context.Context, time.Time, time.Time, int) ([]*model.PendingUpload, error) {
 	return nil, nil
 }
 
-func (r *fakeProjectPendingUploadRepo) MarkPendingUploadExpired(context.Context, string, time.Time) error {
-	return nil
+func (r *fakeProjectPendingUploadRepo) ClaimPendingUploadExpiration(context.Context, string, string, time.Time, time.Time) (bool, error) {
+	return false, nil
+}
+func (r *fakeProjectPendingUploadRepo) CompletePendingUploadExpiration(context.Context, string, string, time.Time) (bool, error) {
+	return false, nil
+}
+func (r *fakeProjectPendingUploadRepo) ReopenPendingUploadExpiration(context.Context, string, string) (bool, error) {
+	return false, nil
 }
 
 func TestProjectFetchProfileAIAnalysisMergesFields(t *testing.T) {

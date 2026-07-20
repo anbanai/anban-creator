@@ -35,6 +35,72 @@ func TestSetupGitSyncConfiguresRepositoryLocalBehavior(t *testing.T) {
 	}
 }
 
+func TestUpdateAgentReachFastForwardsDetachedSubmodule(t *testing.T) {
+	remote, seed, superproject, submodule := newAgentReachUpdateFixture(t)
+	runCommand(t, submodule, nil, "git", "checkout", "--detach")
+
+	writeFile(t, filepath.Join(seed, "agent_reach.txt"), "updated\n")
+	runCommand(t, seed, nil, "git", "add", "agent_reach.txt")
+	runCommand(t, seed, nil, "git", "commit", "-m", "update agent reach")
+	runCommand(t, seed, nil, "git", "push", "origin", "main")
+	wantHead := strings.TrimSpace(runCommand(t, remote, nil, "git", "rev-parse", "refs/heads/main"))
+
+	script := repositoryPath(t, "scripts", "update-agent-reach.sh")
+	output := runCommand(t, superproject, []string{"GIT_ALLOW_PROTOCOL=file"}, script)
+	if !strings.Contains(output, "Agent-Reach updated to "+wantHead+" (main)") {
+		t.Fatalf("update output = %q, want updated revision", output)
+	}
+	if got := strings.TrimSpace(runCommand(t, submodule, nil, "git", "branch", "--show-current")); got != "main" {
+		t.Fatalf("Agent-Reach branch = %q, want main", got)
+	}
+	if got := strings.TrimSpace(runCommand(t, submodule, nil, "git", "rev-parse", "HEAD")); got != wantHead {
+		t.Fatalf("Agent-Reach HEAD = %s, want %s", got, wantHead)
+	}
+	if status := runCommand(t, superproject, nil, "git", "status", "--short"); !strings.Contains(status, " M third_party/Agent-Reach") {
+		t.Fatalf("superproject status = %q, want updated Agent-Reach gitlink", status)
+	}
+}
+
+func TestUpdateAgentReachRejectsDirtySubmodule(t *testing.T) {
+	_, _, superproject, submodule := newAgentReachUpdateFixture(t)
+	writeFile(t, filepath.Join(submodule, "local.txt"), "do not overwrite\n")
+
+	script := repositoryPath(t, "scripts", "update-agent-reach.sh")
+	output := runCommandError(t, superproject, []string{"GIT_ALLOW_PROTOCOL=file"}, script)
+	if !strings.Contains(output, "has local changes") {
+		t.Fatalf("update output = %q, want dirty-submodule error", output)
+	}
+}
+
+func newAgentReachUpdateFixture(t *testing.T) (remote, seed, superproject, submodule string) {
+	t.Helper()
+	root := t.TempDir()
+	remote = filepath.Join(root, "agent-reach.git")
+	seed = filepath.Join(root, "seed")
+	superproject = filepath.Join(root, "superproject")
+
+	mustMkdirAll(t, remote)
+	runCommand(t, root, nil, "git", "init", "--bare", "--initial-branch=main", remote)
+	initWorkingRepository(t, seed)
+	writeFile(t, filepath.Join(seed, "agent_reach.txt"), "initial\n")
+	runCommand(t, seed, nil, "git", "add", "agent_reach.txt")
+	runCommand(t, seed, nil, "git", "commit", "-m", "initial agent reach")
+	runCommand(t, seed, nil, "git", "remote", "add", "origin", remote)
+	runCommand(t, seed, nil, "git", "push", "-u", "origin", "main")
+
+	initWorkingRepository(t, superproject)
+	writeFile(t, filepath.Join(superproject, "README.md"), "superproject\n")
+	runCommand(t, superproject, nil, "git", "add", "README.md")
+	runCommand(t, superproject, nil, "git", "commit", "-m", "initial superproject")
+	runCommand(t, superproject, nil, "git", "-c", "protocol.file.allow=always", "submodule", "add", remote, "third_party/Agent-Reach")
+	runCommand(t, superproject, nil, "git", "config", "-f", ".gitmodules", "submodule.third_party/Agent-Reach.branch", "main")
+	runCommand(t, superproject, nil, "git", "add", ".gitmodules", "third_party/Agent-Reach")
+	runCommand(t, superproject, nil, "git", "commit", "-m", "add agent reach")
+
+	submodule = filepath.Join(superproject, "third_party", "Agent-Reach")
+	return remote, seed, superproject, submodule
+}
+
 func repositoryPath(t *testing.T, elements ...string) string {
 	t.Helper()
 	root, err := filepath.Abs("..")

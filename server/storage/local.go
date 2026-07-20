@@ -2,11 +2,14 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog"
 )
@@ -15,6 +18,7 @@ import (
 type LocalProvider struct {
 	dataDir string
 	logger  *zerolog.Logger
+	mu      sync.RWMutex
 }
 
 // NewLocalProvider creates a new LocalProvider and ensures dataDir exists.
@@ -68,6 +72,12 @@ func (p *LocalProvider) safePath(key string) (string, error) {
 
 // Upload writes data from reader to {dataDir}/{key}, creating parent directories as needed.
 func (p *LocalProvider) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*UploadResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.upload(key, reader, contentType)
+}
+
+func (p *LocalProvider) upload(key string, reader io.Reader, contentType string) (*UploadResult, error) {
 	destPath, err := p.safePath(key)
 	if err != nil {
 		return nil, fmt.Errorf("invalid key: %w", err)
@@ -126,6 +136,8 @@ func (p *LocalProvider) GetURL(key string) string {
 
 // Read reads a file from local storage by key and returns its content.
 func (p *LocalProvider) Read(_ context.Context, key string) ([]byte, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	destPath, err := p.safePath(key)
 	if err != nil {
 		return nil, fmt.Errorf("invalid key: %w", err)
@@ -137,9 +149,115 @@ func (p *LocalProvider) Read(_ context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
+// StatObject returns local file metadata without reading its contents.
+func (p *LocalProvider) StatObject(_ context.Context, key string) (*ObjectInfo, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	destPath, err := p.safePath(key)
+	if err != nil {
+		return nil, fmt.Errorf("invalid key: %w", err)
+	}
+	info, err := os.Stat(destPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrObjectNotFound, key)
+		}
+		return nil, fmt.Errorf("stat file %s: %w", destPath, err)
+	}
+	file, err := os.Open(destPath)
+	if err != nil {
+		return nil, fmt.Errorf("open file %s for ETag: %w", destPath, err)
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return nil, fmt.Errorf("hash file %s: %w", destPath, err)
+	}
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(destPath)))
+	return &ObjectInfo{Key: key, Size: info.Size(), MimeType: contentType, ContentType: contentType, ETag: fmt.Sprintf("\"%x\"", hash.Sum(nil))}, nil
+}
+
+// PromoteObject conditionally copies a local object to an immutable final path.
+func (p *LocalProvider) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	sourcePath, err := p.safePath(sourceKey)
+	if err != nil {
+		return fmt.Errorf("invalid source key: %w", err)
+	}
+	finalPath, err := p.safePath(finalKey)
+	if err != nil {
+		return fmt.Errorf("invalid final key: %w", err)
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", ErrObjectNotFound, sourceKey)
+		}
+		return fmt.Errorf("open promotion source %s: %w", sourcePath, err)
+	}
+	defer source.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, source); err != nil {
+		return fmt.Errorf("hash promotion source %s: %w", sourcePath, err)
+	}
+	actualETag := fmt.Sprintf("\"%x\"", hash.Sum(nil))
+	if actualETag != expectedETag {
+		return fmt.Errorf("%w: %s", ErrPromotionPreconditionFailed, sourceKey)
+	}
+	if _, err := source.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind promotion source %s: %w", sourcePath, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+		return fmt.Errorf("create final object directory: %w", err)
+	}
+	dest, err := os.OpenFile(finalPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("%w: %s", ErrObjectAlreadyExists, finalKey)
+		}
+		return fmt.Errorf("create final object %s: %w", finalPath, err)
+	}
+	if _, err := io.Copy(dest, source); err != nil {
+		_ = dest.Close()
+		_ = os.Remove(finalPath)
+		return fmt.Errorf("copy final object %s: %w", finalPath, err)
+	}
+	if err := dest.Close(); err != nil {
+		_ = os.Remove(finalPath)
+		return fmt.Errorf("close final object %s: %w", finalPath, err)
+	}
+	return nil
+}
+
+// ReadObject reads a local object with a hard memory bound.
+func (p *LocalProvider) ReadObject(_ context.Context, key string, maxBytes int64) ([]byte, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	destPath, err := p.safePath(key)
+	if err != nil {
+		return nil, fmt.Errorf("invalid key: %w", err)
+	}
+	file, err := os.Open(destPath)
+	if err != nil {
+		return nil, fmt.Errorf("open file %s: %w", destPath, err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read file %s: %w", destPath, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: key=%s size>%d", ErrObjectExceedsMaxSize, key, maxBytes)
+	}
+	return data, nil
+}
+
 // Delete removes the file from local storage.
 // If the file does not exist, a warning is logged but no error is returned.
 func (p *LocalProvider) Delete(_ context.Context, key string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	destPath, err := p.safePath(key)
 	if err != nil {
 		return fmt.Errorf("invalid key: %w", err)

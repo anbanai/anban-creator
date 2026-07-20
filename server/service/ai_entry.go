@@ -139,8 +139,10 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	}
 
 	switch project.Platform {
-	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments:
+	case model.PlatformArticle, model.PlatformMoments:
 		params.ReferenceImageURL = firstImageAttachmentURL(req.Attachments)
+	case model.PlatformSeednote:
+		// Seednote uses InputAttachments as its only new per-run reference source.
 	case model.PlatformEcommerce:
 		photos := imageAttachmentURLs(req.Attachments)
 		if len(photos) == 0 {
@@ -257,6 +259,9 @@ func aiEntryPrompt(project *model.Project, req AIEntrySubmitRequest) string {
 		b.WriteString("attachments:\n")
 		for i, a := range req.Attachments {
 			fmt.Fprintf(&b, "- index=%d type=%s file_name=%s content_type=%s size=%d url=%s text=%s\n", i, a.Type, a.FileName, a.ContentType, a.Size, a.URL, a.Text)
+			if instruction := strings.TrimSpace(a.Instruction); instruction != "" {
+				fmt.Fprintf(&b, "- attachment %d instruction: %s\n", i+1, instruction)
+			}
 		}
 	}
 	return b.String()
@@ -295,6 +300,7 @@ func normalizeEntryAttachments(in []model.EntryAttachment) []model.EntryAttachme
 		a.Role = strings.TrimSpace(a.Role)
 		a.UploadID = strings.TrimSpace(a.UploadID)
 		a.Key = strings.TrimSpace(a.Key)
+		a.Instruction = strings.TrimSpace(a.Instruction)
 		out = append(out, a)
 	}
 	return out
@@ -377,8 +383,10 @@ func normalizeAIEntryVideoDuration(duration int64) int64 {
 
 func firstImageAttachmentURL(attachments []model.EntryAttachment) string {
 	for _, a := range attachments {
-		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "image" && strings.TrimSpace(a.URL) != "" {
-			return strings.TrimSpace(a.URL)
+		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "image" {
+			if source := entryAttachmentStorageSource(a); source != "" {
+				return source
+			}
 		}
 	}
 	return ""
@@ -387,8 +395,10 @@ func firstImageAttachmentURL(attachments []model.EntryAttachment) string {
 func imageAttachmentURLs(attachments []model.EntryAttachment) []string {
 	urls := []string{}
 	for _, a := range attachments {
-		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "image" && strings.TrimSpace(a.URL) != "" {
-			urls = append(urls, strings.TrimSpace(a.URL))
+		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "image" {
+			if source := entryAttachmentStorageSource(a); source != "" {
+				urls = append(urls, source)
+			}
 		}
 	}
 	return urls
@@ -397,8 +407,10 @@ func imageAttachmentURLs(attachments []model.EntryAttachment) []string {
 func videoAttachmentURLs(attachments []model.EntryAttachment) []string {
 	urls := []string{}
 	for _, a := range attachments {
-		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "video" && strings.TrimSpace(a.URL) != "" {
-			urls = append(urls, strings.TrimSpace(a.URL))
+		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "video" {
+			if source := entryAttachmentStorageSource(a); source != "" {
+				urls = append(urls, source)
+			}
 		}
 	}
 	return urls
@@ -408,8 +420,9 @@ func videoReferencesFromEntryAttachments(attachments []model.EntryAttachment) []
 	refs := []model.VideoReferenceAsset{}
 	for _, a := range attachments {
 		typ := normalizeEntryAttachmentType(a.Type, a.ContentType)
+		source := entryAttachmentStorageSource(a)
 		ref := model.VideoReferenceAsset{
-			URL:      strings.TrimSpace(a.URL),
+			URL:      source,
 			Text:     strings.TrimSpace(a.Text),
 			FileName: strings.TrimSpace(a.FileName),
 			MimeType: strings.TrimSpace(a.ContentType),
@@ -440,6 +453,13 @@ func videoReferencesFromEntryAttachments(attachments []model.EntryAttachment) []
 		refs = append(refs, ref)
 	}
 	return refs
+}
+
+func entryAttachmentStorageSource(attachment model.EntryAttachment) string {
+	if rawURL := strings.TrimSpace(attachment.URL); rawURL != "" {
+		return rawURL
+	}
+	return strings.TrimSpace(attachment.Key)
 }
 
 func aiEntryNeedsConfiguration(message, actionURL string) *AIEntrySubmitResult {

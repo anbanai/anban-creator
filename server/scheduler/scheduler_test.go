@@ -4,10 +4,53 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/rs/zerolog"
 )
+
+type fakeAsynqEnqueueClient struct {
+	calls   int
+	options []asynq.Option
+}
+
+func (c *fakeAsynqEnqueueClient) Enqueue(_ *asynq.Task, options ...asynq.Option) (*asynq.TaskInfo, error) {
+	c.calls++
+	c.options = append([]asynq.Option(nil), options...)
+	if c.calls > 1 {
+		return nil, asynq.ErrTaskIDConflict
+	}
+	return nil, nil
+}
+
+func (*fakeAsynqEnqueueClient) Close() error { return nil }
+
+func TestAsynqClientEnqueueUniqueUsesTaskIDAndAcceptsReplay(t *testing.T) {
+	fake := &fakeAsynqEnqueueClient{}
+	client := &AsynqClient{client: fake, timeout: time.Minute}
+	for i := range 2 {
+		enqueued, err := client.EnqueueUnique(TypeContentGenerate, []byte(`{"task_id":"task-1"}`), "task-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if enqueued != (i == 0) {
+			t.Fatalf("enqueue %d created=%v, want %v", i+1, enqueued, i == 0)
+		}
+	}
+	if fake.calls != 2 {
+		t.Fatalf("enqueue calls=%d, want 2", fake.calls)
+	}
+	foundTaskID := false
+	for _, option := range fake.options {
+		if option.Type() == asynq.TaskIDOpt && option.Value() == "task-1" {
+			foundTaskID = true
+		}
+	}
+	if !foundTaskID {
+		t.Fatal("unique enqueue did not pass Asynq TaskID")
+	}
+}
 
 func TestTaskProcessor_SeednoteHandlers(t *testing.T) {
 	logger := zerolog.Nop()

@@ -24,6 +24,10 @@ spec:
             # only for docker-compose.
             - name: BACKEND_HOST
               value: ${backend_host}
+            - name: BACKEND_SCHEME
+              value: https
+            - name: BACKEND_PORT
+              value: "8443"
             - name: aliyun_logs_log-${micro_service_name}-${version_switch}_logstore
               value: ${log_store}
             - name: aliyun_logs_log-${micro_service_name}-${version_switch}

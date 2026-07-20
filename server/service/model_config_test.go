@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -12,6 +13,21 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
+
+func TestPresetToImageAPIConfigUsesPresetTimeout(t *testing.T) {
+	base := &srvconfig.Config{ImageAPI: srvconfig.ImageAPIConfig{
+		Cover:   &appconfig.ImageAPI{TimeoutSec: 30},
+		Content: &appconfig.ImageAPI{TimeoutSec: 45},
+	}}
+	preset := &srvconfig.ImageModelPreset{
+		Provider: "volcengine", Model: "seedream", Timeout: 2 * time.Minute,
+	}
+
+	got := presetToImageAPIConfig(preset, base)
+	if got == nil || got.Cover.TimeoutSec != 120 || got.Content.TimeoutSec != 120 {
+		t.Fatalf("preset runtime timeouts = %#v/%#v, want 120/120", got.Cover, got.Content)
+	}
+}
 
 func setupTestModelConfigService(t *testing.T) (*ModelConfigService, repository.Repository) {
 	t.Helper()

@@ -13,6 +13,7 @@ type EntryAttachment struct {
 	Role        string `json:"role,omitempty"`
 	UploadID    string `json:"upload_id,omitempty"`
 	Key         string `json:"key,omitempty"`
+	Instruction string `json:"instruction,omitempty"`
 }
 
 const (

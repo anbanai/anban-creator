@@ -117,9 +117,25 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		}
 		return result
 	}
+	if files["failure-state.json"] {
+		result.Missing = []string{"successful seednote completion"}
+		result.Reason = "seednote reported a recoverable failure; inspect failure-state.json"
+		return result
+	}
 
 	var missing []string
-	for _, name := range []string{"content.md", "image-plan.md", "cover.png"} {
+	for _, name := range []string{
+		"content.md",
+		"request-analysis.json",
+		"request-analysis.md",
+		"reference-analysis.json",
+		"reference-analysis.md",
+		"image-plan.md",
+		"image-prompts.md",
+		"image-review.md",
+		"reference-usage-summary.json",
+		"cover.png",
+	} {
 		if !files[name] {
 			missing = append(missing, name)
 		}
@@ -165,7 +181,7 @@ func collectWorkDirArtifacts(workDir string) (map[string]bool, int) {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".anban-creator", ".claude":
+			case ".anban-creator", ".claude", DockerRuntimeHomeDirName:
 				return filepath.SkipDir
 			}
 			return nil

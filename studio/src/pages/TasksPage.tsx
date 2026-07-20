@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, type BaseSyntheticEvent } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus, Ban, RotateCcw, Trash2, Send, Settings, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus, Ban, RotateCcw, Trash2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -39,6 +39,10 @@ import {
 } from '@/lib/local-executor-ux'
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
+import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
+import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
+import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { buildVideoInputForSubmit, initialVideoInput } from '@/lib/video-form'
@@ -51,6 +55,7 @@ import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { getProjectCreationDefaults, taskActionSignal, taskCreationCostPreview } from '@/lib/studio-ux'
+import type { PromptAttachment } from '@/types/input-attachment'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -81,6 +86,7 @@ export default function TasksPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [quantity, setQuantity] = useState(1)
   const [watermark, setWatermark] = useState(false)
+  const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
   const [goalMode, setGoalMode] = useState(false)
   const [hasContentImage, setHasContentImage] = useState(true)
   const [hasTailImage, setHasTailImage] = useState(false)
@@ -145,7 +151,36 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
+    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
+  })
+  const attachmentController = usePromptAttachments({
+    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
+    policy: GENERAL_AGENT_ATTACHMENT_POLICY,
+    attachments: promptAttachments,
+    onAttachmentsChange: (next) => {
+      setPromptAttachments(next)
+      form.setValue('input_attachments', next.map((attachment) => (
+        attachment.status === 'uploaded' && attachment.uploadId && attachment.key
+          ? {
+              type: attachment.type,
+              upload_id: attachment.uploadId,
+              key: attachment.key,
+              file_name: attachment.fileName,
+              content_type: attachment.contentType,
+              size: attachment.size,
+              instruction: attachment.instruction,
+              role: attachment.role,
+            }
+          : {
+              type: attachment.type,
+              file_name: attachment.fileName,
+              content_type: attachment.contentType,
+              size: attachment.size,
+              instruction: attachment.instruction,
+              role: attachment.role,
+            }
+      )), { shouldDirty: true, shouldValidate: true })
+    },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
@@ -154,6 +189,7 @@ export default function TasksPage() {
   const isMontageTask = watchedType === 'montage'
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
+  const watchedInputAttachments = useWatch({ control: form.control, name: 'input_attachments' })
   const watchedVideoEditorReferences = useWatch({ control: form.control, name: 'video_editor_input.references' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
@@ -330,6 +366,7 @@ export default function TasksPage() {
       project_id: selectedIntentProject?.id ?? '',
       image_ratio: defaults.imageRatio as CreateTaskFormValues['image_ratio'],
       image_model_key: defaults.imageModelKey,
+      input_attachments: [],
       product_photos: [],
       selected_modules: defaults.selectedModules,
       target_platform: defaults.targetPlatform,
@@ -341,6 +378,7 @@ export default function TasksPage() {
     })
     setQuantity(1)
     setWatermark(false)
+    attachmentController.clear()
     setProjectImageRatio(defaults.imageRatio)
     setHasContentImage(true)
     setHasTailImage(false)
@@ -364,9 +402,10 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_creator_input: undefined, video_editor_input: undefined, montage_input: undefined })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_creator_input: undefined, video_editor_input: undefined, montage_input: undefined })
     setQuantity(1)
     setWatermark(false)
+    attachmentController.clear()
     setGoalMode(false)
     setGoalText('')
     setProjectImageRatio('')
@@ -406,6 +445,7 @@ export default function TasksPage() {
       goal: values.type !== 'ecommerce' && goalMode ? (goalText.trim() || undefined) : undefined,
       has_content_image: values.type === 'seednote' ? hasContentImage : undefined,
       has_tail_image: values.type === 'seednote' ? hasTailImage : undefined,
+      input_attachments: values.input_attachments,
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? articleWithCover : undefined,
       article_with_content_images: values.type === 'article' ? articleWithContentImages : undefined,
@@ -416,12 +456,20 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_creator_input) : undefined,
-      video_editor_input: isVideoEditor(values.type) ? buildVideoInputForSubmit(values.prompt, values.video_editor_input) : undefined,
+      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, { ...values.video_creator_input, brief: values.prompt }) : undefined,
+      video_editor_input: isVideoEditor(values.type) ? buildVideoInputForSubmit(values.prompt, { ...values.video_editor_input, brief: values.prompt }) : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
       // Route to the desktop local executor only when it is running and able to claim now.
       execution_target: values.type !== 'montage' && runThisTaskLocally ? 'local' : undefined,
     }))
+  }
+
+  function handleCreateSubmit(event?: BaseSyntheticEvent) {
+    if (attachmentController.uploading || attachmentController.hasFailures) {
+      event?.preventDefault()
+      return
+    }
+    return form.handleSubmit(onSubmit)(event)
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -471,12 +519,10 @@ export default function TasksPage() {
     },
   }
 
-  const runningCount = tasks.filter((t) => t.status === 'running').length
   const queueStats = useMemo(() => ({
     active: tasks.filter((t) => t.status === 'running' || t.status === 'pending').length,
     failed: tasks.filter((t) => t.status === 'failed').length,
     approval: tasks.filter((t) => t.publish_approval_state === 'pending').length,
-    completed: tasks.filter((t) => t.status === 'completed').length,
   }), [tasks])
 
   const costPreview = taskCreationCostPreview({
@@ -487,7 +533,12 @@ export default function TasksPage() {
     balance: creditsBalance?.balance ?? 0,
   })
 
-  const videoEditorHasSourceMedia = (watchedVideoEditorReferences ?? []).some((ref) => ref.type === 'video_url' && (ref.url || ref.task_file_id))
+  const videoEditorHasStructuredSource = (watchedVideoEditorReferences ?? []).some((ref) => ref.type === 'video_url' && (ref.url || ref.task_file_id))
+  const videoEditorHasPromptVideo = (watchedInputAttachments ?? []).some((attachment) => (
+    attachment.type === 'video'
+    && Boolean((attachment.upload_id && attachment.key) || attachment.url)
+  ))
+  const videoEditorHasSourceMedia = videoEditorHasStructuredSource || videoEditorHasPromptVideo
   const creationBlocker = costPreview.insufficient
     ? { message: '积分不足，补充积分后再创建。', href: '/credits', actionLabel: '查看积分' }
     : watchedType !== 'ecommerce' && goalMode && !goalText.trim()
@@ -498,14 +549,68 @@ export default function TasksPage() {
           ? { message: '视频剪辑后期需要先上传至少一个源视频素材。', href: '', actionLabel: '' }
         : null
 
+  const promptComposer = (
+    <AgentPromptInput
+      value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
+      onChange={(value) => {
+        form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
+        if (isVideoCreator(watchedType)) {
+          form.setValue('video_creator_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        } else if (isVideoEditor(watchedType)) {
+          form.setValue('video_editor_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        } else if (watchedType === 'montage') {
+          form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        }
+        setPromptAttachments(value.attachments)
+      }}
+      onSubmit={() => handleCreateSubmit()}
+      attachmentController={attachmentController}
+      attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
+      submitMode="external"
+      placeholder="描述创作目标、内容要求和素材使用方式..."
+      submitLabel="创建任务"
+      submitting={createMutation.isPending}
+      submitDisabled={Boolean(creationBlocker)}
+      contextBar={(
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <ProjectContextControl
+            mode="select"
+            projects={projects}
+            value={watchedProjectId || null}
+            allowNoProject={false}
+            loading={projectsLoading}
+            placeholder="选择项目"
+            createProjectHref={projectsReturnHref({ type: watchedType, intent: 'new' })}
+            onValueChange={(id) => {
+              form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
+              const project = id ? projects.find((item) => item.id === id) : undefined
+              if (!project) return
+              const defaults = getProjectCreationDefaults(project)
+              setProjectImageRatio(defaults.imageRatio)
+              form.setValue('type', defaults.type)
+              form.setValue('image_ratio', defaults.imageRatio as CreateTaskFormValues['image_ratio'], { shouldDirty: false })
+              form.setValue('selected_modules', defaults.selectedModules, { shouldDirty: false })
+              form.setValue('target_platform', defaults.targetPlatform, { shouldDirty: false })
+              form.setValue('image_model_key', defaults.imageModelKey, { shouldDirty: false })
+              form.setValue('video_creator_input', isVideoCreator(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+              form.setValue('video_editor_input', isVideoEditor(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+              form.setValue('montage_input', defaults.type === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
+            }}
+          />
+          <Badge variant="secondary">{contentTypeLabel[watchedType] || watchedType}</Badge>
+        </div>
+      )}
+    />
+  )
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="任务"
         description={
-          runningCount > 0
-            ? <>跟踪和管理你的内容任务。<span className="ml-1 text-primary">({runningCount} 运行中)</span></>
-            : '跟踪和管理你的内容任务。'
+          queueStats.active > 0 || queueStats.failed > 0 || queueStats.approval > 0
+            ? <>{queueStats.active > 0 ? `${queueStats.active} 个执行中` : '暂无执行中任务'}{queueStats.failed > 0 ? ` · ${queueStats.failed} 个失败待处理` : ''}{queueStats.approval > 0 ? ` · ${queueStats.approval} 个待发布` : ''}</>
+            : '查看进度、产物与发布状态。'
         }
       >
         <Button onClick={openCreate}>
@@ -514,49 +619,22 @@ export default function TasksPage() {
         </Button>
       </PageHeader>
 
-      <section className="rounded-lg border border-border bg-card p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">恢复工作台</h2>
-            <p className="mt-1 text-sm text-muted-foreground">把运行、失败、待发布和最近完成的任务先排成队列。</p>
-          </div>
-          <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/settings" />}>
-            <Settings className="h-4 w-4" />
-            检查设置
-          </Button>
+      {(queueStats.failed > 0 || queueStats.approval > 0) && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-border py-3 text-sm">
+          <span className="font-medium text-foreground">需要处理</span>
+          {queueStats.failed > 0 && (
+            <Link to="/tasks?status=failed" className="inline-flex items-center gap-1.5 text-destructive hover:underline">
+              <AlertTriangle className="h-4 w-4" />
+              {queueStats.failed} 个失败任务
+            </Link>
+          )}
+          {queueStats.approval > 0 && (
+            <Link to="/tasks?status=completed" className="text-primary hover:underline">
+              {queueStats.approval} 个待发布确认
+            </Link>
+          )}
         </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <TaskQueueLink
-            to="/tasks?status=running"
-            icon={Clock3}
-            label="运行队列"
-            value={queueStats.active}
-            description="查看正在推进或等待执行的任务"
-          />
-          <TaskQueueLink
-            to="/tasks?status=failed"
-            icon={AlertTriangle}
-            label="失败待恢复"
-            value={queueStats.failed}
-            description="进入详情查看失败原因，重试或克隆"
-            urgent={queueStats.failed > 0}
-          />
-          <TaskQueueLink
-            to="/tasks?status=completed"
-            icon={Send}
-            label="待发布确认"
-            value={queueStats.approval}
-            description="审核后放行到公众号草稿箱"
-          />
-          <TaskQueueLink
-            to="/tasks?status=completed"
-            icon={CheckCircle2}
-            label="最近完成"
-            value={queueStats.completed}
-            description="下载、发布标记或复用配置"
-          />
-        </div>
-      </section>
+      )}
 
       {/* Filters row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -646,67 +724,68 @@ export default function TasksPage() {
         />
       ) : (
         <>
-        <div className="space-y-2">
-          <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <Button variant="secondary" size="sm" onClick={toggleSelectCompletedOnPage} disabled={completedTasksOnPage.length === 0}>
-                {allCompletedSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                {allCompletedSelected ? '取消全选已完成' : '全选已完成'}
-              </Button>
-              <span className="text-muted-foreground">
-                已选 {selectedTaskIds.length} 个，{selectedCompletedTasks.length} 个可下载
-              </span>
-              {selectedTaskIds.length > selectedCompletedTasks.length && (
-                <span className="text-xs text-muted-foreground">仅打包已完成任务</span>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {selectedTaskIds.length > 0 && (
+        <div className="space-y-3">
+          {selectedTaskIds.length > 0 && (
+            <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-lg border border-primary/30 bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Button variant="secondary" size="sm" onClick={toggleSelectCompletedOnPage} disabled={completedTasksOnPage.length === 0}>
+                  {allCompletedSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                  {allCompletedSelected ? '取消全选已完成' : '全选已完成'}
+                </Button>
+                <span className="text-muted-foreground">
+                  已选 {selectedTaskIds.length} 个，{selectedCompletedTasks.length} 个可下载
+                </span>
+                {selectedTaskIds.length > selectedCompletedTasks.length && (
+                  <span className="text-xs text-muted-foreground">仅打包已完成任务</span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setSelectedTaskIds([])} disabled={bulkAnyPending}>
                   清空选择
                 </Button>
-              )}
-              {/* 批量操作：每个按钮只对它能作用的子集生效（计数即实际提交数），
-                  点击进入二次确认。cancel/clone=outline，delete=destructive 以示不可逆。 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkAction('cancel')}
-                disabled={selectedCancellable.length === 0 || bulkAnyPending}
-              >
-                <Ban className="h-4 w-4" />
-                取消{selectedCancellable.length > 0 ? ` (${selectedCancellable.length})` : ''}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkAction('clone')}
-                disabled={selectedCloneable.length === 0 || bulkAnyPending}
-              >
-                <RotateCcw className="h-4 w-4" />
-                克隆{selectedCloneable.length > 0 ? ` (${selectedCloneable.length})` : ''}
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setBulkAction('delete')}
-                disabled={selectedDeletable.length === 0 || bulkAnyPending}
-              >
-                <Trash2 className="h-4 w-4" />
-                删除{selectedDeletable.length > 0 ? ` (${selectedDeletable.length})` : ''}
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleBulkDownload}
-                loading={bulkDownloadMutation.isPending}
-                disabled={selectedCompletedTasks.length === 0 || bulkAnyPending}
-              >
-                <Download className="h-4 w-4" />
-                下载选中文件
-              </Button>
+                {/* 批量操作：每个按钮只对它能作用的子集生效（计数即实际提交数），
+                    点击进入二次确认。cancel/clone=outline，delete=destructive 以示不可逆。 */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkAction('cancel')}
+                  disabled={selectedCancellable.length === 0 || bulkAnyPending}
+                >
+                  <Ban className="h-4 w-4" />
+                  取消{selectedCancellable.length > 0 ? ` (${selectedCancellable.length})` : ''}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkAction('clone')}
+                  disabled={selectedCloneable.length === 0 || bulkAnyPending}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  克隆{selectedCloneable.length > 0 ? ` (${selectedCloneable.length})` : ''}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setBulkAction('delete')}
+                  disabled={selectedDeletable.length === 0 || bulkAnyPending}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  删除{selectedDeletable.length > 0 ? ` (${selectedDeletable.length})` : ''}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleBulkDownload}
+                  loading={bulkDownloadMutation.isPending}
+                  disabled={selectedCompletedTasks.length === 0 || bulkAnyPending}
+                >
+                  <Download className="h-4 w-4" />
+                  下载选中文件
+                </Button>
+              </div>
             </div>
-          </div>
-          {filteredTasks.map((task) => {
+          )}
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            {filteredTasks.map((task) => {
             const project = projectMap[task.project_id]
             const borderColor = platformBorderColor[task.type] || ''
             const hoverBorderColor = platformHoverBorderColor[task.type] || ''
@@ -714,8 +793,8 @@ export default function TasksPage() {
             const actionSignal = taskActionSignal(task)
 
             return (
-              <Link key={task.id} to={`/tasks/${task.id}`} className="block">
-                <div className={`rounded-lg border border-border bg-card p-4 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-sm active:scale-[0.99]`}>
+              <Link key={task.id} to={`/tasks/${task.id}`} className="block border-b border-border last:border-b-0">
+                <div className={`border-l-2 p-4 ${borderColor} ${hoverBorderColor} transition-colors hover:bg-muted/35`}>
                   <div className="flex items-start gap-3">
                     <button
                       type="button"
@@ -732,19 +811,15 @@ export default function TasksPage() {
                     >
                       {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
-                    <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={task.type} />
+                    <span className="hidden sm:block">
+                      <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={task.type} />
+                    </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
                         <div className="flex shrink-0 items-center gap-1.5">
                           <Badge variant={statusBadgeVariant(task.status)}>
                             {taskStatusLabel[task.status] || task.status}
-                          </Badge>
-                          <Badge
-                            variant={actionSignal.tone === 'risk' ? 'destructive' : actionSignal.tone === 'success' ? 'secondary' : 'outline'}
-                            className="text-[10px]"
-                          >
-                            {actionSignal.label}
                           </Badge>
                         </div>
                       </div>
@@ -755,7 +830,8 @@ export default function TasksPage() {
                         <Badge variant="outline" className="text-[10px]">
                           {contentTypeLabel[task.type] || task.type}
                         </Badge>
-                        <span>{actionSignal.hint}</span>
+                        <span className={actionSignal.tone === 'risk' ? 'text-destructive' : 'text-muted-foreground'}>{actionSignal.label}</span>
+                        {actionSignal.tone !== 'risk' && <span>{actionSignal.hint}</span>}
                         {(task.execution_target === 'local' || task.execution_target === 'local_claimed') && (
                           <span>本地{task.execution_target === 'local' ? '待认领' : '运行中'}</span>
                         )}
@@ -803,7 +879,8 @@ export default function TasksPage() {
                 </div>
               </Link>
             )
-          })}
+            })}
+          </div>
         </div>
 
         {totalPages > 1 && (
@@ -829,7 +906,7 @@ export default function TasksPage() {
             </p>
           </DialogHeader>
           <Form {...form}>
-            <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            <form id="task-create-form" onSubmit={handleCreateSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
               <div className="rounded-lg border border-border bg-muted/30 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -840,42 +917,6 @@ export default function TasksPage() {
                     {contentTypeLabel[watchedType] || watchedType}
                   </Badge>
                 </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">02 项目</p>
-              <FormField control={form.control} name="project_id" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>项目</FormLabel>
-                  <FormControl>
-                    <ProjectSelector
-                      value={field.value || ''}
-                      onChange={(id) => {
-                        field.onChange(id)
-                        if (id) {
-                          const ch = projects.find((c) => c.id === id)
-                          const defaults = getProjectCreationDefaults(ch)
-                          setProjectImageRatio(defaults.imageRatio)
-                          form.setValue('type', defaults.type)
-                          form.setValue('image_ratio', defaults.imageRatio as CreateTaskFormValues['image_ratio'], { shouldDirty: false })
-                          form.setValue('selected_modules', defaults.selectedModules, { shouldDirty: false })
-                          form.setValue('target_platform', defaults.targetPlatform, { shouldDirty: false })
-                          form.setValue('image_model_key', defaults.imageModelKey, { shouldDirty: false })
-                          form.setValue('video_creator_input', isVideoCreator(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
-                          form.setValue('video_editor_input', isVideoEditor(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
-                          form.setValue('montage_input', defaults.type === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
-                        } else {
-                          setProjectImageRatio('')
-                          form.setValue('video_creator_input', undefined, { shouldDirty: false })
-                          form.setValue('video_editor_input', undefined, { shouldDirty: false })
-                          form.setValue('montage_input', undefined, { shouldDirty: false })
-                        }
-                      }}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
               </div>
 
               {selectedProject && watchedType !== 'viral_analysis' && (
@@ -897,15 +938,7 @@ export default function TasksPage() {
 
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">03 目标/提示词</p>
-              {!isVideoTask && !isMontageTask && <FormField control={form.control} name="prompt" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>创作要求（可选）</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="描述你的创作要求，留空则根据项目信息自动生成" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />}
+              {!isVideoTask && !isMontageTask ? promptComposer : null}
               </div>
 
               <div className="pt-1">
@@ -991,21 +1024,7 @@ export default function TasksPage() {
                   fieldRoot={isVideoCreatorTask ? 'video_creator_input' : 'video_editor_input'}
                   selectedProject={selectedProject}
                   title={isVideoCreatorTask ? 'AI 视频生成' : '视频剪辑后期'}
-                  promptField={(
-                    <FormField control={form.control} name="prompt" render={({ field }) => (
-                      <FormItem>
-                        <FormControl>
-                          <Textarea
-                            placeholder={isVideoCreatorTask
-                              ? '描述你想要的视频内容、卖点、镜头风格或禁忌，留空则根据项目自动生成'
-                              : '描述剪辑目标、脚本、字幕、节奏、包装、CapCut 草稿或交付要求'}
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  )}
+                  promptField={promptComposer}
                 />
               )}
 
@@ -1013,6 +1032,7 @@ export default function TasksPage() {
                 <MontageCreationPanel
                   form={form}
                   fieldRoot="montage_input"
+                  briefField={promptComposer}
                 />
               )}
 
@@ -1338,7 +1358,7 @@ export default function TasksPage() {
               type="submit"
               form="task-create-form"
               loading={createMutation.isPending}
-              disabled={Boolean(creationBlocker)}
+              disabled={Boolean(creationBlocker) || attachmentController.uploading || attachmentController.hasFailures}
             >
               {runLocally && !isMontageTask && localExecutorStatus?.state === 'ready_stopped'
                 ? '启动并创建'
@@ -1385,44 +1405,5 @@ export default function TasksPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-function TaskQueueLink({
-  to,
-  icon: Icon,
-  label,
-  value,
-  description,
-  urgent = false,
-}: {
-  to: string
-  icon: LucideIcon
-  label: string
-  value: number
-  description: string
-  urgent?: boolean
-}) {
-  return (
-    <Link
-      to={to}
-      className={`group flex items-start justify-between gap-3 rounded-lg border p-3 transition-colors ${
-        urgent
-          ? 'border-destructive/30 bg-destructive/5 hover:bg-destructive/10'
-          : 'border-border bg-background hover:border-primary/30 hover:bg-accent'
-      }`}
-    >
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <Icon className={`h-4 w-4 ${urgent ? 'text-destructive' : 'text-muted-foreground'}`} />
-          <span className="text-sm font-medium text-foreground">{label}</span>
-        </div>
-        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{description}</p>
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <span className="text-xl font-semibold tabular-nums text-foreground">{value}</span>
-        <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
-      </div>
-    </Link>
   )
 }

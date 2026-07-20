@@ -179,19 +179,19 @@ func TestVideoOverlaySkillFiles(t *testing.T) {
 	}
 }
 
-func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
+func TestAgentDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(root, "Dockerfile.server"))
+	raw, err := os.ReadFile(filepath.Join(root, "Dockerfile.agent"))
 	if err != nil {
-		t.Fatalf("server Dockerfile missing: %v", err)
+		t.Fatalf("agent Dockerfile missing: %v", err)
 	}
 	body := string(raw)
 	for _, want := range []string{
-		"ca-certificates curl git jq fontconfig fonts-noto-cjk python3",
+		"ca-certificates curl gh git jq fontconfig fonts-noto-cjk python3 python3-venv",
 		"git config --global http.version HTTP/1.1",
 		"npx -y skills@latest add heygen-com/hyperframes",
 		"--skill music-to-video",
@@ -204,11 +204,11 @@ func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 		"-y",
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("server Dockerfile should install official video overlay skills, missing %q", want)
+			t.Fatalf("agent Dockerfile should install official video overlay skills, missing %q", want)
 		}
 	}
 	if strings.Index(body, "USER node") > strings.Index(body, "npx -y skills@latest add heygen-com/hyperframes") {
-		t.Fatalf("server Dockerfile should install official skills as the node user")
+		t.Fatalf("agent Dockerfile should install official skills as the node user")
 	}
 }
 
@@ -234,7 +234,7 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 		"video-input-contract.json",
 		"generated visual anchors can supplement user media but cannot replace it",
 		"compose_video_segments",
-		`submit_agent_feedback(agent_name="videocreator"`,
+		`submit_agent_feedback(task_id=$TASK_ID, agent_name="videocreator"`,
 	} {
 		if !strings.Contains(creator, want) {
 			t.Fatalf("videocreator agent missing %q", want)
@@ -279,7 +279,7 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 		"preview.mp4",
 		"final.mp4",
 		"普通素材剪辑不得调用",
-		`submit_agent_feedback(agent_name="videoeditor"`,
+		`submit_agent_feedback(task_id=$TASK_ID, agent_name="videoeditor"`,
 	} {
 		if !strings.Contains(editor, want) {
 			t.Fatalf("videoeditor agent missing %q", want)

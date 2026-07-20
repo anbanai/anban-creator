@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -32,6 +34,15 @@ func filterAgentEnv(env map[string]string) map[string]string {
 		filtered[k] = v
 	}
 	return filtered
+}
+
+func isManagedContainerEnv(key string) bool {
+	switch key {
+	case "HOME", "PATH":
+		return true
+	default:
+		return false
+	}
 }
 
 func montageSubmoduleRuntimePath(pluginDir string) string {
@@ -74,7 +85,7 @@ type UserPromptParams struct {
 }
 
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
-// The agent definition is loaded via WithAgent() (system prompt), so the user
+// The plugin agent runs as the main Claude Code session via --agent, so the user
 // message only needs to provide the topic or an autonomous execution instruction.
 //
 // The prompt is behavioral only — it never carries the visual / writer / author / theme
@@ -135,16 +146,24 @@ func BuildUserPrompt(p UserPromptParams) string {
 // AppendResumeContextToPrompt asks the agent to continue from supplemental
 // operator input when a resumed task wrote .anban-creator/resume/latest.md.
 func AppendResumeContextToPrompt(prompt, workDir string) string {
+	return AppendResumeContextFileToPrompt(prompt, workDir, path.Join(appconfig.ConfigDir, "resume", "latest.md"))
+}
+
+func AppendResumeContextFileToPrompt(prompt, workDir, relativePath string) string {
 	if strings.TrimSpace(workDir) == "" {
 		return prompt
 	}
-	resumePath := filepath.Join(workDir, appconfig.ConfigDir, "resume", "latest.md")
+	relativePath = filepath.ToSlash(strings.TrimSpace(relativePath))
+	if relativePath == "" || path.Clean(relativePath) != relativePath || path.IsAbs(relativePath) || strings.HasPrefix(relativePath, "../") {
+		return prompt
+	}
+	resumePath := filepath.Join(workDir, filepath.FromSlash(relativePath))
 	if info, err := os.Stat(resumePath); err != nil || info.IsDir() {
 		return prompt
 	}
 	return prompt + "\n\n继续执行模式：\n" +
 		"- 这是一个基于原任务工作目录的继续执行，不是全新任务。\n" +
-		"- 请先读取 `.anban-creator/resume/latest.md`，理解用户补充指令、补充文件说明和附件相对路径。\n" +
+		"- 请先读取 `" + relativePath + "`，理解用户补充指令、补充文件说明和附件相对路径。\n" +
 		"- 基于当前工作目录已有草稿、素材和产物继续完成任务；不要清空、删除或整体覆盖已有产物，除非补充指令明确要求替换。\n" +
 		"- 如果补充文件中存在同名或相近用途文件，优先按 latest.md 中的文件说明区分使用。"
 }
@@ -333,10 +352,10 @@ type ExecutionOptions struct {
 	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
 	// AutoMemoryDirectory is the Claude Code-visible memory directory for this task.
 	AutoMemoryDirectory string
-	// Montage runtime configuration is only used for montage tasks. ProviderEnv
+	// Montage runtime configuration is only used for montage tasks. Env
 	// may contain secrets and must only be injected into the agent process env,
 	// never written to workspace files, MCP profile responses, or logs.
-	MontageProviderEnv      map[string]string
+	MontageEnv              map[string]string
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
 }
@@ -353,6 +372,7 @@ type TokenUsage struct {
 type ExecutionResult struct {
 	Success         bool   `json:"success"`
 	Error           string `json:"error,omitempty"`
+	ResultSubtype   string `json:"result_subtype,omitempty"`
 	WorkDir         string `json:"work_dir,omitempty"`
 	RemoteArtifacts bool   `json:"remote_artifacts,omitempty"`
 	LogText         string `json:"log_text,omitempty"`
@@ -473,14 +493,14 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		// Task-level image takes priority over project brand image.
 		// SkipReferenceImage only controls the project brand image, not task-level.
 		if opts.Task.ReferenceImageURL != "" {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.UserID, opts.Task.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
 					Str("task_id", opts.Task.ID).
 					Str("url", opts.Task.ReferenceImageURL).
 					Msg("failed to download task reference image, continuing without it")
 			}
 		} else if opts.Project.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Project.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.UserID, opts.Project.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
 					Str("task_id", opts.Task.ID).
 					Str("url", opts.Project.ReferenceImageURL).
@@ -493,7 +513,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// agent can reference local paths (analyze_image / generate_image ref).
 	if opts.Task.Type == model.PlatformEcommerce {
 		photos := opts.Task.Ecommerce.Data().ProductPhotos
-		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, photos); n == 0 && len(photos) > 0 {
+		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, opts.Task.UserID, photos); n == 0 && len(photos) > 0 {
 			// E-commerce output is a consistency contract on the uploaded product
 			// photos. If none materialized, the agent has no product reference and
 			// would hallucinate inconsistent assets. Fail fast (task error → refund)
@@ -503,10 +523,10 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		}
 	}
 	if attachments := opts.Task.InputAttachments.Data(); len(attachments) > 0 {
-		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, workDir, attachments); err != nil {
+		if _, err := MaterializeResumeInputs(ctx, e.store, e.logger, workDir, opts.Task.UserID, attachments); err != nil {
 			return nil, fmt.Errorf("materialize resume inputs: %w", err)
 		}
-		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, attachments); n == 0 && hasNonResumeInputAttachments(attachments) {
+		if n := DownloadInputAttachments(ctx, e.store, e.logger, workDir, opts.Task.UserID, attachments); n == 0 && hasNonResumeInputAttachments(attachments) {
 			e.logger.Warn().Str("task_id", opts.Task.ID).Int("provided", len(attachments)).Msg("no AI entry input attachments could be materialized")
 		}
 	}
@@ -580,28 +600,34 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	})
 	userPrompt = AppendResumeContextToPrompt(userPrompt, workDir)
 
-	// Load agent definition from plugin directory and pass via WithAgent()
-	// (SDK programmatic subagents) instead of --agent CLI flag lookup.
-	agentDef, agentErr := loadAgentDefinition(e.pluginDir, agentName)
-	if agentErr != nil {
+	// Validate the plugin agent definition before starting it as the main
+	// session. A programmatic WithAgent definition would only register a
+	// delegatable subagent and would not load the agent's declared skills.
+	if _, agentErr := loadAgentDefinition(e.pluginDir, agentName); agentErr != nil {
 		return nil, fmt.Errorf("load agent definition %q: %w", agentName, agentErr)
 	}
+	agentFlag := "anban:" + agentName
 
 	// 6. Build SDK options.
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(maxTurns),
 		claudecode.WithCwd(workDir),
-		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
+		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
 		// Load both user and project setting sources so the per-task CLAUDE.md
 		// written into workDir is picked up by Claude Code as project memory.
 		claudecode.WithSettingSources(claudecode.SettingSourceUser, claudecode.SettingSourceProject),
-		claudecode.WithAgent(agentName, *agentDef),
+		claudecode.WithExtraArgs(map[string]*string{"agent": &agentFlag}),
 		WithManagedAgentRuntimePolicy(),
 	}
 
 	if e.pluginDir != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithLocalPlugin(e.pluginDir))
 	}
+	stopHook, err := ManagedTaskStopHook(opts.Task.Type, workDir, e.pluginDir)
+	if err != nil {
+		return nil, err
+	}
+	sdkOpts = append(sdkOpts, stopHook)
 
 	// Only set model if explicitly configured; otherwise let Claude CLI use env vars.
 	if agentModel != "" {
@@ -622,11 +648,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// Environment variables (auth tokens, API keys, etc.).
-	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
-	sdkOpts = append(sdkOpts, claudecode.WithEnvVar(MontageSubmoduleEnvName, montageSubmoduleRuntimePath(e.pluginDir)))
-	for key, value := range montageProviderEnvForTask(opts) {
+	for key, value := range montageEnvForTask(opts) {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
 	}
+	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
+	sdkOpts = append(sdkOpts, claudecode.WithEnvVar(MontageSubmoduleEnvName, montageSubmoduleRuntimePath(e.pluginDir)))
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
 	// ${ANBAN_API_KEY} for the Anban Creator MCP server.
@@ -653,15 +679,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// Note: WithMcpServers replaces the entire map, so this must be the only call.
 	mcpInjected := e.serverBaseURL != ""
 	if mcpInjected {
-		sdkOpts = append(sdkOpts, claudecode.WithMcpServers(map[string]claudecode.McpServerConfig{
-			"anban": &claudecode.McpHTTPServerConfig{
-				Type: claudecode.McpServerTypeHTTP,
-				URL:  e.serverBaseURL + "/mcp",
-				Headers: map[string]string{
-					"Authorization": "Bearer " + mcpAPIKey,
-				},
-			},
-		}))
+		sdkOpts = append(sdkOpts, WithManagedMCPAccess(e.serverBaseURL, mcpAPIKey))
 	}
 
 	// Log full MCP config snapshot for debugging.
@@ -707,6 +725,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	toolUseSummary := make(map[string]int)
 	var turnNum int
 	var resultMsg *claudecode.ResultMessage
+	pluginInitValidated := false
 
 	// Capture CLI stderr for diagnostics.
 	sdkOpts = append(sdkOpts, claudecode.WithStderrCallback(func(line string) {
@@ -719,13 +738,37 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		}
 	}))
 
-	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
+	err = claudecode.WithClient(ctx, func(client claudecode.Client) error {
+		if mcpInjected {
+			if err := WaitForManagedMCPReady(ctx, client, opts.Task.Type); err != nil {
+				return err
+			}
+		}
 		if err := client.Query(ctx, userPrompt); err != nil {
 			return fmt.Errorf("send query: %w", err)
 		}
 
-		for msg := range client.ReceiveMessages(ctx) {
+		response := client.ReceiveResponse(ctx)
+		defer response.Close()
+		for {
+			msg, receiveErr := response.Next(ctx)
+			if errors.Is(receiveErr, claudecode.ErrNoMoreMessages) {
+				return ValidateManagedPluginResult(pluginInitValidated, nil)
+			}
+			if receiveErr != nil {
+				return fmt.Errorf("receive managed agent stream: %w", receiveErr)
+			}
+			if msg == nil {
+				continue
+			}
 			switch m := msg.(type) {
+			case *claudecode.SystemMessage:
+				if m.Subtype == "init" {
+					if err := ValidateManagedPluginInit(m, opts.Task.Type); err != nil {
+						return err
+					}
+					pluginInitValidated = true
+				}
 			case *claudecode.AssistantMessage:
 				if m.HasError() {
 					e.logger.Error().
@@ -815,10 +858,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			case *claudecode.ResultMessage:
 				resultMsg = m
 				if m.IsError {
-					errMsg := fallbackAgentError("unknown error", lastToolErrorTool, lastToolError)
-					if m.Result != nil {
-						errMsg = *m.Result
-					}
+					errMsg := ResultMessageError(m, lastToolErrorTool, lastToolError)
 					e.logger.Error().
 						Str("task_id", opts.Task.ID).
 						Str("subtype", m.Subtype).
@@ -829,6 +869,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 						Msg("agent returned error result")
 					execErr = fmt.Errorf("agent execution failed: %s", errMsg)
 					return execErr
+				}
+				if err := ValidateManagedPluginResult(pluginInitValidated, m); err != nil {
+					return err
 				}
 				// Log successful execution summary.
 				completeEvt := e.logger.Info().
@@ -871,7 +914,6 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 				return nil
 			}
 		}
-		return nil
 	},
 		sdkOpts...,
 	)
@@ -911,6 +953,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			Model:             agentModel,
 		}
 		if resultMsg != nil {
+			result.ResultSubtype = resultMsg.Subtype
 			result.NumTurns = resultMsg.NumTurns
 			result.SessionID = resultMsg.SessionID
 			result.DurationMs = resultMsg.DurationMs
@@ -940,6 +983,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		Model:             agentModel,
 	}
 	if resultMsg != nil {
+		result.ResultSubtype = resultMsg.Subtype
 		result.NumTurns = resultMsg.NumTurns
 		result.SessionID = resultMsg.SessionID
 		result.DurationMs = resultMsg.DurationMs
@@ -992,16 +1036,13 @@ func writeJSONFile(path string, value any) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-func montageProviderEnvForTask(opts *ExecutionOptions) map[string]string {
+func montageEnvForTask(opts *ExecutionOptions) map[string]string {
 	if opts == nil || opts.Task == nil || !model.IsMontagePlatform(opts.Task.Type) {
 		return nil
 	}
-	env := make(map[string]string, len(opts.MontageProviderEnv))
-	for key, value := range opts.MontageProviderEnv {
+	env := make(map[string]string, len(opts.MontageEnv))
+	for key, value := range opts.MontageEnv {
 		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		if !srvconfig.IsSupportedMontageProviderEnv(key) {
 			continue
 		}
 		env[key] = value

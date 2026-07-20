@@ -187,6 +187,7 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.AgentHandler != nil {
 		agentLimiter := appmiddleware.RateLimit(svc.Redis, 300, 1*time.Minute)
+		app.Post("/api/v1/agent/bootstrap", agentLimiter, svc.AgentHandler.WorkloadAuthMiddleware, svc.AgentHandler.Bootstrap)
 		agentAPI := app.Group("/api/v1/agent", agentLimiter, svc.AgentHandler.AuthMiddleware)
 		agentAPI.Post("/upload", svc.AgentHandler.Upload)
 		agentAPI.Post("/artifacts/prepare", svc.AgentHandler.PrepareArtifactUpload)
@@ -194,6 +195,8 @@ func NewRouter(svc *Services) *fiber.App {
 		agentAPI.Post("/progress", svc.AgentHandler.Progress)
 		agentAPI.Post("/claim", svc.AgentHandler.Claim)
 		agentAPI.Post("/complete", svc.AgentHandler.Complete)
+		adminAgentLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
+		app.Post("/api/v1/admin/agent/executions/:executionID/publishing", adminAgentLimiter, svc.AgentHandler.ResolvePublishing)
 	}
 
 	// ---------------------------------------------------------------------------
@@ -272,6 +275,7 @@ func NewRouter(svc *Services) *fiber.App {
 		designer := apiV1.Group("/designer")
 		designer.Get("/providers", svc.DesignerHandler.GetProviders)
 		designer.Post("/generate", svc.DesignerHandler.Generate)
+		designer.Post("/register-reference", svc.DesignerHandler.RegisterReference)
 		designer.Post("/upload-reference", svc.DesignerHandler.UploadReference)
 		designer.Post("/upload-reference-from-url", svc.DesignerHandler.UploadReferenceFromURL)
 		designer.Get("/history", svc.DesignerHandler.GetHistory)
@@ -338,6 +342,7 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.UploadHandler != nil {
 		apiV1.Post("/uploads/prepare", svc.UploadHandler.Prepare)
+		apiV1.Post("/uploads/resolve-download-url", svc.UploadHandler.ResolveDownloadURL)
 	}
 	if svc.AIEntryHandler != nil {
 		apiV1.Post("/ai-entry/submit", svc.AIEntryHandler.Submit)

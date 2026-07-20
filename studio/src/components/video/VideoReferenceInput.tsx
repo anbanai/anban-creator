@@ -360,6 +360,11 @@ export function VideoReferenceInput({
         const measuredDuration = referenceType === 'video_url'
           ? await measureLocalVideoDuration(file)
           : undefined
+        if (referenceType === 'video_url' && measuredDuration == null) {
+          errors.push(`${file.name}：无法读取视频时长，请转换为浏览器支持的 MP4、MOV 或 WebM 后重试。`)
+          updateProgress(progressId, 100)
+          continue
+        }
         const result = await uploadToOSS({
           purpose: 'video_reference',
           file,
@@ -373,11 +378,8 @@ export function VideoReferenceInput({
           file_name: file.name,
           mime_type: result.contentType || file.type,
           file_size: result.size || file.size,
-          input_duration_seconds: measuredDuration ?? result.inputDurationSeconds,
+          input_duration_seconds: measuredDuration,
         })
-        if (result.warning && referenceType === 'video_url' && measuredDuration == null) {
-          errors.push(`${file.name}：素材已上传，但暂未读取到视频时长，费用将按默认输入时长估算。`)
-        }
       } catch (err: any) {
         updateProgress(progressId, 100)
         errors.push(`${file.name}：${friendlyUploadError(err)}`)

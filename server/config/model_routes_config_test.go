@@ -5,7 +5,58 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestImageGenerationTimeoutDefaults(t *testing.T) {
+	cfg := Config{ModelRoutes: ModelRoutesConfig{ImageGeneration: ImageGenerationRoutesConfig{
+		Designer: map[string]ImageGenerationRouteConfig{"seedream": {}},
+	}}}
+	cfg.applyDefaults()
+	if cfg.MCP.ToolTimeouts.GenerateImage != 10*time.Minute {
+		t.Fatalf("generate_image timeout = %s, want 10m", cfg.MCP.ToolTimeouts.GenerateImage)
+	}
+	if cfg.ModelRoutes.ImageGeneration.Cover.Timeout != 5*time.Minute ||
+		cfg.ModelRoutes.ImageGeneration.Content.Timeout != 5*time.Minute ||
+		cfg.ModelRoutes.ImageGeneration.Designer["seedream"].Timeout != 5*time.Minute {
+		t.Fatalf("image route timeouts = %s/%s/%s, want 5m/5m/5m",
+			cfg.ModelRoutes.ImageGeneration.Cover.Timeout,
+			cfg.ModelRoutes.ImageGeneration.Content.Timeout,
+			cfg.ModelRoutes.ImageGeneration.Designer["seedream"].Timeout)
+	}
+}
+
+func TestImageGenerationRouteTimeoutReachesRuntimeConfig(t *testing.T) {
+	cfg := Config{
+		ModelProviders: map[string]ModelProviderConfig{
+			"volcengine_ark": {BaseURL: "https://ark.example.com", APIKey: "key"},
+		},
+		ModelRoutes: ModelRoutesConfig{
+			ImageGeneration: ImageGenerationRoutesConfig{
+				Cover: ImageGenerationRouteConfig{
+					Provider: "volcengine_ark", Model: "seedream", Timeout: 2 * time.Minute,
+				},
+			},
+		},
+	}
+	if err := cfg.deriveModelRouteRuntimeConfig(); err != nil {
+		t.Fatalf("deriveModelRouteRuntimeConfig() error = %v", err)
+	}
+	if cfg.ImageAPI.Cover == nil || cfg.ImageAPI.Cover.TimeoutSec != 120 {
+		t.Fatalf("cover runtime config = %#v, want timeout_sec 120", cfg.ImageAPI.Cover)
+	}
+}
+
+func TestValidateRejectsImageTimeoutOutsideOperationBudget(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.MCP.ToolTimeouts.GenerateImage = 5 * time.Minute
+	cfg.ModelRoutes.ImageGeneration.Cover = ImageGenerationRouteConfig{
+		Provider: "volcengine_ark", Model: "seedream", Timeout: 5 * time.Minute,
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "mcp.tool_timeouts.generate_image") {
+		t.Fatalf("Validate() error = %v, want timeout relationship error", err)
+	}
+}
 
 func TestSemanticModelConfigRejectsDeprecatedVision(t *testing.T) {
 	dir := t.TempDir()
@@ -123,6 +174,7 @@ model_routes:
         provider: volcengine_ark
         model: doubao-seedream-5-0-pro-260628
         enabled: true
+        quality_rank: 100
         capabilities:
           size_presets: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
           default_size: "1:1"
@@ -139,6 +191,7 @@ model_routes:
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
+        quality_rank: 200
         response_format: url
         capabilities:
           quality_levels: [auto, low, medium, high]
@@ -231,6 +284,13 @@ claude:
 	if len(cfg.ImagePresets) != 1 || cfg.ImagePresets[0].Provider != "openai" || cfg.ImagePresets[0].Endpoint != "http://18.141.196.64:18888/v1" || cfg.ImagePresets[0].APIKey != "wangcai-test" {
 		t.Fatalf("derived image preset route = %#v", cfg.ImagePresets)
 	}
+	preset := cfg.ImagePresets[0]
+	if preset.QualityRank != 200 || !preset.Capabilities.SupportsReference || preset.Capabilities.MaxReferenceImages != 16 {
+		t.Fatalf("derived image preset capabilities = %#v", preset)
+	}
+	if preset.Timeout != 5*time.Minute {
+		t.Fatalf("derived image preset timeout = %s, want 5m", preset.Timeout)
+	}
 	designerRoute := cfg.ModelRoutes.ImageGeneration.Designer["gpt_image_2"]
 	if designerRoute.Capabilities.DefaultSize != "auto" {
 		t.Fatalf("designer default size = %q, want auto", designerRoute.Capabilities.DefaultSize)
@@ -256,6 +316,72 @@ claude:
 	}
 	if !seedreamRoute.Capabilities.Watermark {
 		t.Fatalf("seedream watermark capability = false, want true")
+	}
+}
+
+func TestSemanticModelConfigRequiresUnderstandingRoutePrices(t *testing.T) {
+	t.Setenv("MOONSHOT_API_KEY", "moonshot-test")
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+
+	for _, tc := range []struct {
+		name      string
+		route     string
+		wantRoute string
+		wantPrice string
+	}{
+		{
+			name: "image understanding",
+			route: `
+  image_understanding:
+    provider: moonshot
+    model: kimi-k2.7-code
+    require_usage: true`,
+			wantRoute: "model_routes.image_understanding",
+			wantPrice: "model_prices.token_models.moonshot/kimi-k2.7-code",
+		},
+		{
+			name: "video understanding",
+			route: `
+  video_understanding:
+    provider: moonshot
+    model: kimi-k2.7-code-highspeed
+    require_usage: true`,
+			wantRoute: "model_routes.video_understanding",
+			wantPrice: "model_prices.token_models.moonshot/kimi-k2.7-code-highspeed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfgPath := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "-")+".yaml")
+			body := []byte(`
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_providers:
+  moonshot:
+    protocol: openai_compatible
+    base_url: https://api.moonshot.cn/v1
+    api_key: "${MOONSHOT_API_KEY}"
+model_routes:` + tc.route + `
+claude:
+  plugin_dir: "` + pluginDir + `"
+`)
+			if err := os.WriteFile(cfgPath, body, 0644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			_, err := NewConfig(cfgPath)
+			if err == nil {
+				t.Fatal("NewConfig() succeeded without understanding model price")
+			}
+			for _, want := range []string{tc.wantRoute, tc.wantPrice} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %v, want %q", err, want)
+				}
+			}
+		})
 	}
 }
 
@@ -298,6 +424,7 @@ model_routes:
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
+        quality_rank: 100
 ` + routeExtra + `
 model_prices:
   image_generation:
@@ -325,6 +452,62 @@ claude:
 				t.Fatalf("error = %v, want designer capabilities validation error", err)
 			}
 		})
+	}
+}
+
+func TestSemanticModelConfigRejectsEnabledDesignerRouteWithoutPositiveQualityRank(t *testing.T) {
+	t.Setenv("WANGCAI_OPENAI_API_KEY", "wangcai-test")
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+	cfgPath := filepath.Join(dir, "missing-quality-rank.yaml")
+	body := []byte(`
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_providers:
+  wangcai_openai:
+    protocol: openai_compatible
+    base_url: http://18.141.196.64:18888/v1
+    api_key: "${WANGCAI_OPENAI_API_KEY}"
+model_routes:
+  image_generation:
+    designer:
+      gpt_image_2:
+        alias: GPT Image 2
+        provider: wangcai_openai
+        model: gpt-image-2
+        enabled: true
+        capabilities:
+          size_presets: [auto, 1024x1024]
+          default_size: auto
+          max_batch: 1
+          output_formats: [png]
+model_prices:
+  image_generation:
+    wangcai_openai/gpt-image-2:
+      pricing_type: openai_image_usage
+      currency: USD
+      unit: 1000000
+      require_usage: true
+      text_input: 5.00
+      text_cached_input: 1.25
+      image_input: 8.00
+      image_cached_input: 2.00
+      image_output: 30.00
+      estimate_table:
+        "1024x1024": {medium: 0.053}
+claude:
+  plugin_dir: "` + pluginDir + `"
+`)
+	if err := os.WriteFile(cfgPath, body, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := NewConfig(cfgPath)
+	if err == nil || !strings.Contains(err.Error(), "model_routes.image_generation.designer.gpt_image_2.quality_rank must be positive") {
+		t.Fatalf("error = %v, want positive quality rank validation error", err)
 	}
 }
 
@@ -729,6 +912,7 @@ model_routes:
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
+        quality_rank: 200
         capabilities:
           quality_levels: [auto, low, medium, high]
           size_presets: [auto, 1024x1024, 1536x1024, 1024x1536]

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,14 +31,28 @@ const maxInputAttachmentBytes int64 = 50 << 20 // 50 MB
 var unsafeAttachmentFilenameRunes = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 type MaterializedInputAttachment struct {
-	Index       int    `json:"index"`
-	Type        string `json:"type,omitempty"`
-	URL         string `json:"url,omitempty"`
-	Text        string `json:"text,omitempty"`
-	FileName    string `json:"file_name,omitempty"`
-	ContentType string `json:"content_type,omitempty"`
-	Size        int64  `json:"size,omitempty"`
-	Path        string `json:"path,omitempty"`
+	AttachmentIndex int    `json:"attachment_index"`
+	Type            string `json:"type,omitempty"`
+	URL             string `json:"url,omitempty"`
+	Text            string `json:"text,omitempty"`
+	FileName        string `json:"file_name,omitempty"`
+	ContentType     string `json:"content_type,omitempty"`
+	Size            int64  `json:"size,omitempty"`
+	Path            string `json:"path,omitempty"`
+	Instruction     string `json:"instruction,omitempty"`
+	UploadID        string `json:"upload_id,omitempty"`
+	Key             string `json:"key,omitempty"`
+}
+
+type MaterializedInputAttachmentError struct {
+	AttachmentIndex int    `json:"attachment_index"`
+	Type            string `json:"type,omitempty"`
+	URL             string `json:"url,omitempty"`
+	FileName        string `json:"file_name,omitempty"`
+	Instruction     string `json:"instruction,omitempty"`
+	UploadID        string `json:"upload_id,omitempty"`
+	Key             string `json:"key,omitempty"`
+	Error           string `json:"error"`
 }
 
 // EffectiveProject returns the task snapshot view when a task carries one,
@@ -258,24 +273,45 @@ func TaskToAgent(task *model.Task) string {
 //     HTTP GET. imageURL must be an absolute http(s) URL in this path.
 //
 // logger may be nil; when non-nil, fallbacks from path (1) are logged at warn.
-func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, imageURL string) error {
+func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID, imageURL string) error {
 	destDir := filepath.Join(workDir, appconfig.ConfigDir)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	destPath := filepath.Join(destDir, "reference.png")
+	if key, ok := explicitStorageObjectKey(imageURL); ok {
+		key, err := runtimeStorageObjectKey(key, userID, "", false)
+		if err != nil {
+			return err
+		}
+		if store == nil {
+			return fmt.Errorf("storage provider is required for object key %q", key)
+		}
+		data, err := readStorageObject(ctx, store, key, maxReferenceImageBytes)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(destPath, data, 0o644); err != nil {
+			return fmt.Errorf("write file: %w", err)
+		}
+		return nil
+	}
 
 	if store != nil && store.IsOwnedURL(imageURL) {
 		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
-			data, err := store.Read(ctx, key)
+			key, err := runtimeStorageObjectKey(key, userID, "", false)
+			if err != nil {
+				return err
+			}
+			data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes)
 			if err == nil {
-				if int64(len(data)) > maxReferenceImageBytes {
-					return fmt.Errorf("download: file too large (%d bytes)", len(data))
-				}
 				if err := os.WriteFile(destPath, data, 0o644); err != nil {
 					return fmt.Errorf("write file: %w", err)
 				}
 				return nil
+			}
+			if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
+				return fmt.Errorf("download: %w", err)
 			}
 			if logger != nil {
 				logger.Warn().Err(err).
@@ -330,7 +366,7 @@ func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger 
 // The resolution path mirrors DownloadReferenceImage (store.Read for URLs owned
 // by this backend — works on private OSS buckets; direct HTTP otherwise) so it
 // behaves identically under the local and docker executors.
-func DownloadProductImages(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, urls []string) int {
+func DownloadProductImages(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID string, urls []string) int {
 	if len(urls) == 0 {
 		return 0
 	}
@@ -344,7 +380,7 @@ func DownloadProductImages(ctx context.Context, store storage.Provider, logger *
 
 	names := make([]string, 0, len(urls))
 	for i, imageURL := range urls {
-		data, err := fetchImageBytes(ctx, store, imageURL)
+		data, err := fetchImageBytes(ctx, store, userID, imageURL)
 		if err != nil {
 			if logger != nil {
 				logger.Warn().Err(err).Str("url", imageURL).Int("index", i+1).Msg("failed to download product photo, skipping")
@@ -375,10 +411,7 @@ func DownloadProductImages(ctx context.Context, store storage.Provider, logger *
 
 // DownloadInputAttachments materializes AI-entry attachments into
 // .anban-creator/input-attachments and writes index.json with stable local paths.
-func DownloadInputAttachments(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, attachments []model.EntryAttachment) int {
-	if len(attachments) == 0 {
-		return 0
-	}
+func DownloadInputAttachments(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID string, attachments []model.EntryAttachment) int {
 	destDir := filepath.Join(workDir, appconfig.ConfigDir, "input-attachments")
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		if logger != nil {
@@ -388,27 +421,60 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 	}
 
 	index := make([]MaterializedInputAttachment, 0, len(attachments))
+	failures := make([]MaterializedInputAttachmentError, 0)
 	for i, attachment := range attachments {
 		if model.IsResumeEntryAttachment(attachment) {
 			continue
 		}
+		attachmentIndex := i + 1
+		name := inputAttachmentFilename(attachmentIndex, attachment)
+		path := filepath.Join(destDir, name)
 		var data []byte
 		var err error
-		if strings.TrimSpace(attachment.URL) != "" {
-			data, err = fetchAttachmentBytes(ctx, store, attachment.URL)
+		if rawKey := strings.TrimSpace(attachment.Key); rawKey != "" {
+			key, validKey := explicitStorageObjectKey(rawKey)
+			if !validKey {
+				err = fmt.Errorf("attachment storage key is invalid")
+			} else if key, err = runtimeStorageObjectKey(key, userID, attachment.UploadID, true); err != nil {
+			} else if store == nil {
+				err = fmt.Errorf("storage provider is required for attachment key")
+			} else {
+				data, err = readStorageObject(ctx, store, key, maxInputAttachmentBytes)
+			}
+		} else if strings.TrimSpace(attachment.URL) != "" {
+			data, err = fetchAttachmentBytes(ctx, store, attachment.URL, userID, attachment.UploadID, true)
 		} else if strings.TrimSpace(attachment.Text) != "" {
 			data = []byte(strings.TrimSpace(attachment.Text))
 		} else {
 			continue
 		}
 		if err != nil {
+			failures = append(failures, MaterializedInputAttachmentError{
+				AttachmentIndex: attachmentIndex,
+				Type:            attachment.Type,
+				URL:             attachment.URL,
+				FileName:        attachment.FileName,
+				Instruction:     attachment.Instruction,
+				UploadID:        attachment.UploadID,
+				Key:             attachment.Key,
+				Error:           err.Error(),
+			})
 			if logger != nil {
-				logger.Warn().Err(err).Str("url", attachment.URL).Int("index", i+1).Msg("failed to download input attachment, skipping")
+				logger.Warn().Err(err).Str("url", attachment.URL).Int("index", attachmentIndex).Msg("failed to download input attachment, skipping")
 			}
 			continue
 		}
-		name := inputAttachmentFilename(i+1, attachment)
-		if err := os.WriteFile(filepath.Join(destDir, name), data, 0o644); err != nil {
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			failures = append(failures, MaterializedInputAttachmentError{
+				AttachmentIndex: attachmentIndex,
+				Type:            attachment.Type,
+				URL:             attachment.URL,
+				FileName:        attachment.FileName,
+				Instruction:     attachment.Instruction,
+				UploadID:        attachment.UploadID,
+				Key:             attachment.Key,
+				Error:           err.Error(),
+			})
 			if logger != nil {
 				logger.Warn().Err(err).Str("name", name).Msg("write input attachment failed, skipping")
 			}
@@ -416,22 +482,39 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 		}
 		relPath := filepath.ToSlash(filepath.Join(appconfig.ConfigDir, "input-attachments", name))
 		index = append(index, MaterializedInputAttachment{
-			Index:       i + 1,
-			Type:        attachment.Type,
-			URL:         attachment.URL,
-			Text:        attachment.Text,
-			FileName:    attachment.FileName,
-			ContentType: attachment.ContentType,
-			Size:        attachment.Size,
-			Path:        relPath,
+			AttachmentIndex: attachmentIndex,
+			Type:            attachment.Type,
+			URL:             attachment.URL,
+			Text:            attachment.Text,
+			FileName:        attachment.FileName,
+			ContentType:     attachment.ContentType,
+			Size:            attachment.Size,
+			Path:            relPath,
+			Instruction:     attachment.Instruction,
+			UploadID:        attachment.UploadID,
+			Key:             attachment.Key,
 		})
 	}
-	if len(index) > 0 {
-		if indexBytes, err := json.MarshalIndent(index, "", "  "); err == nil {
-			if err := os.WriteFile(filepath.Join(destDir, "index.json"), indexBytes, 0o644); err != nil && logger != nil {
-				logger.Warn().Err(err).Msg("write input attachments index.json failed")
-			}
+
+	if indexBytes, err := json.MarshalIndent(index, "", "  "); err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("marshal input attachments index.json failed")
 		}
+	} else if err := os.WriteFile(filepath.Join(destDir, "index.json"), indexBytes, 0o644); err != nil && logger != nil {
+		logger.Warn().Err(err).Msg("write input attachments index.json failed")
+	}
+
+	errorsPath := filepath.Join(destDir, "errors.json")
+	if len(failures) > 0 {
+		if failureBytes, err := json.MarshalIndent(failures, "", "  "); err != nil {
+			if logger != nil {
+				logger.Warn().Err(err).Msg("marshal input attachments errors.json failed")
+			}
+		} else if err := os.WriteFile(errorsPath, failureBytes, 0o644); err != nil && logger != nil {
+			logger.Warn().Err(err).Msg("write input attachments errors.json failed")
+		}
+	} else if err := os.Remove(errorsPath); err != nil && !errors.Is(err, os.ErrNotExist) && logger != nil {
+		logger.Warn().Err(err).Msg("remove stale input attachments errors.json failed")
 	}
 	return len(index)
 }
@@ -447,7 +530,7 @@ func hasNonResumeInputAttachments(attachments []model.EntryAttachment) bool {
 
 // MaterializeResumeInputs restores persisted task resume inputs into the
 // workspace location consumed by AppendResumeContextToPrompt.
-func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, attachments []model.EntryAttachment) (int, error) {
+func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID string, attachments []model.EntryAttachment) (int, error) {
 	var latest *model.EntryAttachment
 	files := make([]model.EntryAttachment, 0)
 	for i := range attachments {
@@ -461,30 +544,48 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 	if latest == nil || strings.TrimSpace(latest.Text) == "" {
 		return 0, nil
 	}
-	resumeRoot := filepath.Join(workDir, appconfig.ConfigDir, "resume")
-	stamp := time.Now().Format("20060102-150405.000000000")
-	runDir := filepath.Join(resumeRoot, stamp)
-	attachmentsDir := filepath.Join(runDir, "attachments")
-	if err := os.MkdirAll(attachmentsDir, 0o755); err != nil {
-		if logger != nil {
-			logger.Warn().Err(err).Msg("create resume input dir failed")
+	seenNames := make(map[string]struct{}, len(files))
+	for _, attachment := range files {
+		name, err := CanonicalResumeAttachmentFilename(attachment.FileName)
+		if err != nil {
+			return 0, err
 		}
-		return 0, fmt.Errorf("create resume input dir: %w", err)
+		portableKey := PortableFilenameKey(name)
+		if _, exists := seenNames[portableKey]; exists {
+			return 0, fmt.Errorf("duplicate resume attachment filename %q", name)
+		}
+		seenNames[portableKey] = struct{}{}
 	}
+	resumeRoot := filepath.Join(workDir, appconfig.ConfigDir, "resume")
+	attachmentsDir := filepath.Join(resumeRoot, "attachments")
+	if err := os.MkdirAll(resumeRoot, 0o755); err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("create resume input root failed")
+		}
+		return 0, fmt.Errorf("create resume input root: %w", err)
+	}
+	stagedAttachmentsDir, err := os.MkdirTemp(resumeRoot, ".attachments-")
+	if err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("stage resume input dir failed")
+		}
+		return 0, fmt.Errorf("stage resume input dir: %w", err)
+	}
+	defer os.RemoveAll(stagedAttachmentsDir)
 	written := 0
 	for _, attachment := range files {
-		data, err := fetchResumeAttachmentBytes(ctx, store, attachment)
+		data, err := fetchResumeAttachmentBytes(ctx, store, attachment, userID)
 		if err != nil {
 			if logger != nil {
 				logger.Warn().Err(err).Str("url", attachment.URL).Msg("failed to fetch resume attachment")
 			}
 			return written, fmt.Errorf("fetch resume attachment %q: %w", attachment.FileName, err)
 		}
-		name := filepath.Base(strings.TrimSpace(attachment.FileName))
-		if name == "." || name == "" {
-			name = "attachment"
+		name, err := CanonicalResumeAttachmentFilename(attachment.FileName)
+		if err != nil {
+			return written, err
 		}
-		if err := os.WriteFile(filepath.Join(attachmentsDir, name), data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(stagedAttachmentsDir, name), data, 0o644); err != nil {
 			if logger != nil {
 				logger.Warn().Err(err).Str("name", name).Msg("write resume attachment failed")
 			}
@@ -492,13 +593,13 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 		}
 		written++
 	}
-	body := []byte(latest.Text)
-	if err := os.WriteFile(filepath.Join(runDir, "input.md"), body, 0o644); err != nil {
-		if logger != nil {
-			logger.Warn().Err(err).Msg("write resume input.md failed")
-		}
-		return written, fmt.Errorf("write resume input.md: %w", err)
+	if err := os.RemoveAll(attachmentsDir); err != nil {
+		return written, fmt.Errorf("replace resume attachment directory: %w", err)
 	}
+	if err := os.Rename(stagedAttachmentsDir, attachmentsDir); err != nil {
+		return written, fmt.Errorf("publish resume attachment directory: %w", err)
+	}
+	body := []byte(latest.Text)
 	tmpPath := filepath.Join(resumeRoot, fmt.Sprintf(".latest-%d.tmp", time.Now().UnixNano()))
 	if err := os.WriteFile(tmpPath, body, 0o644); err != nil {
 		if logger != nil {
@@ -516,15 +617,19 @@ func MaterializeResumeInputs(ctx context.Context, store storage.Provider, logger
 	return written + 1, nil
 }
 
-func fetchResumeAttachmentBytes(ctx context.Context, store storage.Provider, attachment model.EntryAttachment) ([]byte, error) {
+func fetchResumeAttachmentBytes(ctx context.Context, store storage.Provider, attachment model.EntryAttachment, userID string) ([]byte, error) {
 	if store != nil && strings.TrimSpace(attachment.Key) != "" {
-		data, err := store.Read(ctx, strings.TrimSpace(attachment.Key))
+		key, err := runtimeStorageObjectKey(attachment.Key, userID, attachment.UploadID, true)
+		if err != nil {
+			return nil, err
+		}
+		data, err := storage.ReadObject(ctx, store, key, maxInputAttachmentBytes)
 		if err == nil {
 			return data, nil
 		}
 	}
 	if strings.TrimSpace(attachment.URL) != "" {
-		return fetchAttachmentBytes(ctx, store, attachment.URL)
+		return fetchAttachmentBytes(ctx, store, attachment.URL, userID, attachment.UploadID, true)
 	}
 	if strings.TrimSpace(attachment.Text) != "" {
 		return []byte(strings.TrimSpace(attachment.Text)), nil
@@ -532,15 +637,18 @@ func fetchResumeAttachmentBytes(ctx context.Context, store storage.Provider, att
 	return nil, fmt.Errorf("resume attachment has no readable source")
 }
 
-func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL string) ([]byte, error) {
+func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL, userID, uploadID string, requireUploadID bool) ([]byte, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if store != nil && store.IsOwnedURL(rawURL) {
 		if key, ok := storage.StorageKeyFromURL(rawURL); ok {
-			if data, err := store.Read(ctx, key); err == nil {
-				if int64(len(data)) > maxInputAttachmentBytes {
-					return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
-				}
+			key, err := runtimeStorageObjectKey(key, userID, uploadID, requireUploadID)
+			if err != nil {
+				return nil, err
+			}
+			if data, err := storage.ReadObject(ctx, store, key, maxInputAttachmentBytes); err == nil {
 				return data, nil
+			} else if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
+				return nil, fmt.Errorf("download: %w", err)
 			}
 		}
 	}
@@ -569,12 +677,13 @@ func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL st
 
 func inputAttachmentFilename(index int, attachment model.EntryAttachment) string {
 	base := sanitizeAttachmentFilename(attachment.FileName)
+	source := firstNonEmptyAttachmentSource(attachment.URL, attachment.Key)
 	if base == "" {
-		base = sanitizeAttachmentFilename(filenameFromURLPath(attachment.URL))
+		base = sanitizeAttachmentFilename(filenameFromURLPath(source))
 	}
 	ext := strings.ToLower(filepath.Ext(base))
 	if ext == "" {
-		ext = inputAttachmentExt(attachment.ContentType, attachment.URL)
+		ext = inputAttachmentExt(attachment.ContentType, source)
 	}
 	if base == "" {
 		base = "attachment" + ext
@@ -582,6 +691,15 @@ func inputAttachmentFilename(index int, attachment model.EntryAttachment) string
 		base += ext
 	}
 	return fmt.Sprintf("attachment_%02d_%s", index, base)
+}
+
+func firstNonEmptyAttachmentSource(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func sanitizeAttachmentFilename(raw string) string {
@@ -663,14 +781,27 @@ func inputAttachmentExt(contentType, rawURL string) string {
 // private buckets); otherwise it downloads via HTTP. Mirrors the resolution logic
 // inside DownloadReferenceImage, extracted here so the multi-file product-photo
 // flow can reuse it without touching the well-tested reference-image path.
-func fetchImageBytes(ctx context.Context, store storage.Provider, imageURL string) ([]byte, error) {
+func fetchImageBytes(ctx context.Context, store storage.Provider, userID, imageURL string) ([]byte, error) {
+	if key, ok := explicitStorageObjectKey(imageURL); ok {
+		key, err := runtimeStorageObjectKey(key, userID, "", false)
+		if err != nil {
+			return nil, err
+		}
+		if store == nil {
+			return nil, fmt.Errorf("storage provider is required for object key %q", key)
+		}
+		return readStorageObject(ctx, store, key, maxReferenceImageBytes)
+	}
 	if store != nil && store.IsOwnedURL(imageURL) {
 		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
-			if data, err := store.Read(ctx, key); err == nil {
-				if int64(len(data)) > maxReferenceImageBytes {
-					return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
-				}
+			key, err := runtimeStorageObjectKey(key, userID, "", false)
+			if err != nil {
+				return nil, err
+			}
+			if data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes); err == nil {
 				return data, nil
+			} else if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
+				return nil, fmt.Errorf("download: %w", err)
 			}
 		}
 	}
@@ -688,6 +819,47 @@ func fetchImageBytes(ctx context.Context, store storage.Provider, imageURL strin
 		return nil, fmt.Errorf("download: HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, maxReferenceImageBytes))
+}
+
+func explicitStorageObjectKey(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.Contains(raw, "://") || strings.HasPrefix(raw, "/") {
+		return "", false
+	}
+	key, ok := storage.StorageKeyFromURL(raw)
+	if !ok {
+		return "", false
+	}
+	key = filepath.ToSlash(strings.TrimPrefix(key, "/"))
+	clean := filepath.ToSlash(filepath.Clean(key))
+	if clean != key || clean == "." || strings.HasPrefix(clean, "../") {
+		return "", false
+	}
+	return key, true
+}
+
+func runtimeStorageObjectKey(raw, userID, uploadID string, requireUploadID bool) (string, error) {
+	parsed, err := storage.ParseRuntimeStorageKey(raw)
+	if err != nil {
+		return "", err
+	}
+	if parsed.FinalizedUpload != nil {
+		if requireUploadID && strings.TrimSpace(uploadID) == "" {
+			return "", storage.ErrFinalizedUploadIdentityMismatch
+		}
+		if err := parsed.ValidateFinalizedUploadIdentity(userID, uploadID); err != nil {
+			return "", err
+		}
+	}
+	return parsed.Key, nil
+}
+
+func readStorageObject(ctx context.Context, store storage.Provider, key string, maxBytes int64) ([]byte, error) {
+	data, err := storage.ReadObject(ctx, store, key, maxBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read storage object: %w", err)
+	}
+	return data, nil
 }
 
 // imageExtFromURL infers a lowercase image extension from the URL path, defaulting

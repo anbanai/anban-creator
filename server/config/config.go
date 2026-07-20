@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
 )
@@ -52,17 +53,46 @@ type Config struct {
 	Memory             MemoryConfig                    `yaml:"memory"`
 }
 
+func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceConfig) []string {
+	var errs []string
+	parsedRequests := make(map[string]resource.Quantity, len(cfg.Requests))
+	parsedLimits := make(map[string]resource.Quantity, len(cfg.Limits))
+	for group, values := range map[string]map[string]string{"requests": cfg.Requests, "limits": cfg.Limits} {
+		for name, raw := range values {
+			quantity, err := resource.ParseQuantity(strings.TrimSpace(raw))
+			if strings.TrimSpace(name) == "" || err != nil || quantity.Sign() <= 0 {
+				errs = append(errs, fmt.Sprintf("%s.%s.%s must be a positive Kubernetes quantity", configPath, group, name))
+				continue
+			}
+			if group == "requests" {
+				parsedRequests[name] = quantity
+			} else {
+				parsedLimits[name] = quantity
+			}
+		}
+	}
+	for name, request := range parsedRequests {
+		if limit, ok := parsedLimits[name]; ok && request.Cmp(limit) > 0 {
+			errs = append(errs, fmt.Sprintf("%s.requests.%s must not exceed its limit", configPath, name))
+		}
+	}
+	return errs
+}
+
 // ImageModelPreset defines a system-managed image model that users can select
 // when creating tasks or plans. Each preset has a minimum tier that gates access.
 type ImageModelPreset struct {
-	Key           string `yaml:"key"`            // unique identifier, e.g. "volcengine-standard"
-	DisplayName   string `yaml:"display_name"`   // user-facing label
-	ProviderRoute string `yaml:"provider_route"` // semantic route, e.g. image_generation.designer.seedream
-	Provider      string `yaml:"provider"`       // derived provider kind or legacy direct provider
-	Model         string `yaml:"model"`          // concrete model id
-	Endpoint      string `yaml:"endpoint"`
-	APIKey        string `yaml:"api_key"`
-	MinTier       string `yaml:"min_tier"` // free / pro / enterprise
+	Key           string                       `yaml:"key"`            // unique identifier, e.g. "volcengine-standard"
+	DisplayName   string                       `yaml:"display_name"`   // user-facing label
+	ProviderRoute string                       `yaml:"provider_route"` // semantic route, e.g. image_generation.designer.seedream
+	Provider      string                       `yaml:"provider"`       // derived provider kind or legacy direct provider
+	Model         string                       `yaml:"model"`          // concrete model id
+	Endpoint      string                       `yaml:"endpoint"`
+	APIKey        string                       `yaml:"api_key"`
+	Timeout       time.Duration                `yaml:"timeout"`
+	MinTier       string                       `yaml:"min_tier"` // free / pro / enterprise
+	QualityRank   int                          `yaml:"quality_rank"`
+	Capabilities  DesignerProviderCapabilities `yaml:"capabilities"`
 }
 
 // maxImageModelKeyLen matches the varchar(50) column size on Task/Plan.ImageModelKey.
@@ -128,8 +158,10 @@ type EmailConfig struct {
 }
 
 type ServerConfig struct {
-	Port int    `yaml:"port"` // default 8080
-	Host string `yaml:"host"` // default "0.0.0.0"
+	Port        int    `yaml:"port"` // default 8080
+	Host        string `yaml:"host"` // default "0.0.0.0"
+	TLSCertFile string `yaml:"tls_cert_file"`
+	TLSKeyFile  string `yaml:"tls_key_file"`
 }
 
 type LoggingConfig struct {
@@ -164,7 +196,12 @@ type WeChatConfig struct {
 
 // MCPConfig holds Model Context Protocol endpoint configuration.
 type MCPConfig struct {
-	APIKey string `yaml:"api_key"` // API key for MCP endpoint authentication
+	APIKey       string                `yaml:"api_key"` // API key for MCP endpoint authentication
+	ToolTimeouts MCPToolTimeoutsConfig `yaml:"tool_timeouts"`
+}
+
+type MCPToolTimeoutsConfig struct {
+	GenerateImage time.Duration `yaml:"generate_image"`
 }
 
 const DefaultVideoAPIBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
@@ -208,7 +245,7 @@ type MontageConfig struct {
 	ExecutionTargets       []string                               `yaml:"execution_targets"`
 	DefaultExecutionTarget string                                 `yaml:"default_execution_target"`
 	CreditCost             int                                    `yaml:"credit_cost"`
-	ProviderEnv            map[string]string                      `yaml:"provider_env"`
+	Env                    map[string]string                      `yaml:"env"`
 	ToolPolicy             map[string]MontageToolCapabilityPolicy `yaml:"tool_policy"`
 	PipelineDefaults       map[string]map[string]any              `yaml:"pipeline_defaults"`
 }
@@ -267,8 +304,8 @@ func (c *MontageConfig) ApplyDefaults() {
 	if c.CreditCost <= 0 {
 		c.CreditCost = 2000
 	}
-	if c.ProviderEnv == nil {
-		c.ProviderEnv = map[string]string{}
+	if c.Env == nil {
+		c.Env = map[string]string{}
 	}
 	if c.ToolPolicy == nil {
 		c.ToolPolicy = map[string]MontageToolCapabilityPolicy{}
@@ -311,41 +348,23 @@ func (c MontageConfig) Validate() error {
 			return fmt.Errorf("montage.execution_targets contains invalid target %q", target)
 		}
 	}
-	for key := range c.ProviderEnv {
-		if !IsSupportedMontageProviderEnv(key) {
-			return fmt.Errorf("montage.provider_env contains unsupported key %q", key)
+	for key, value := range c.Env {
+		if key == "" || strings.ContainsAny(key, "=\x00") {
+			return fmt.Errorf("montage.env contains invalid key %q", key)
+		}
+		if strings.ContainsRune(value, '\x00') {
+			return fmt.Errorf("montage.env value for %q contains a NUL byte", key)
 		}
 	}
 	return nil
 }
 
-func (c MontageConfig) RedactedProviderEnv() map[string]bool {
-	redacted := make(map[string]bool, len(c.ProviderEnv))
-	for key, value := range c.ProviderEnv {
+func (c MontageConfig) RedactedEnv() map[string]bool {
+	redacted := make(map[string]bool, len(c.Env))
+	for key, value := range c.Env {
 		redacted[key] = strings.TrimSpace(value) != ""
 	}
 	return redacted
-}
-
-func IsSupportedMontageProviderEnv(key string) bool {
-	_, ok := supportedMontageProviderEnv[key]
-	return ok
-}
-
-var supportedMontageProviderEnv = map[string]struct{}{
-	"FAL_KEY":                 {},
-	"PEXELS_API_KEY":          {},
-	"PIXABAY_API_KEY":         {},
-	"UNSPLASH_ACCESS_KEY":     {},
-	"SUNO_API_KEY":            {},
-	"ELEVENLABS_API_KEY":      {},
-	"OPENAI_API_KEY":          {},
-	"XAI_API_KEY":             {},
-	"GOOGLE_API_KEY":          {},
-	"HEYGEN_API_KEY":          {},
-	"RUNWAY_API_KEY":          {},
-	"VIDEO_GEN_LOCAL_ENABLED": {},
-	"VIDEO_GEN_LOCAL_MODEL":   {},
 }
 
 func validMontageTarget(target string) bool {
@@ -389,8 +408,10 @@ type VideoUnderstandingRouteConfig struct {
 type ImageGenerationRouteConfig struct {
 	Provider       string                       `yaml:"provider"`
 	Model          string                       `yaml:"model"`
+	Timeout        time.Duration                `yaml:"timeout"`
 	Alias          string                       `yaml:"alias"`
 	Enabled        bool                         `yaml:"enabled"`
+	QualityRank    int                          `yaml:"quality_rank" json:"quality_rank"`
 	ResponseFormat string                       `yaml:"response_format"`
 	Capabilities   DesignerProviderCapabilities `yaml:"capabilities" json:"capabilities"`
 }
@@ -1078,8 +1099,9 @@ func (c FunASRConfig) Complete() bool {
 }
 
 // ClaudeConfig holds configuration for the Claude CLI subprocess.
-// The Env map is passed as environment variables to the CLI process,
-// supporting auth tokens, base URLs, model overrides, etc.
+// The Env map is the single source for Claude subprocess configuration. The
+// Kubernetes executor delivers only the explicit Claude allowlist over its
+// authenticated bootstrap channel; values never enter the Job specification.
 type ClaudeConfig struct {
 	Model          string            `yaml:"model"`    // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
 	Executor       string            `yaml:"executor"` // "local" (default), "docker", or "kubernetes"
@@ -1088,14 +1110,14 @@ type ClaudeConfig struct {
 	Sandbox        bool              `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
 	Kubernetes     KubernetesConfig  `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
-	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 50}
+	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
 	TaskLogDir     string            `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
 	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Image         string `yaml:"image"`          // Docker image name (default: "anban-creator-agent:latest")
+	Image         string `yaml:"image"`          // Docker image name (default: "creator-agent:latest")
 	CPUCores      int64  `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
 	MemoryMB      int64  `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
 	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
@@ -1103,18 +1125,46 @@ type DockerConfig struct {
 	WorkspaceDir  string `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
 }
 
-// KubernetesConfig holds ACK/Kubernetes executor settings for project Agent Pods.
+// KubernetesConfig holds ACK/Kubernetes Job runtime settings.
 type KubernetesConfig struct {
-	Namespace          string                   `yaml:"namespace"`            // Namespace where project Agent Pods run.
-	AgentImage         string                   `yaml:"agent_image"`          // Agent image containing the anban binary and Claude runtime.
-	ServiceAccount     string                   `yaml:"service_account"`      // Service account used by Agent Pods.
-	ImagePullSecret    string                   `yaml:"image_pull_secret"`    // Optional image pull secret for private registries.
-	WorkspaceMountPath string                   `yaml:"workspace_mount_path"` // Container path where NAS is mounted.
-	WorkspacePVCName   string                   `yaml:"workspace_pvc_name"`   // NAS-backed PVC mounted by Agent Pods.
-	PodRevision        string                   `yaml:"pod_revision"`         // Deployment/image revision that forces project Pod recreation when changed.
-	PodTTLSeconds      int                      `yaml:"pod_ttl_seconds"`      // Idle TTL for project Agent Pods.
-	ExecTimeoutSec     int                      `yaml:"exec_timeout_seconds"` // Per-task exec timeout.
-	Resources          KubernetesResourceConfig `yaml:"resources"`            // Agent Pod requests and limits.
+	Namespace            string `yaml:"namespace"`
+	AgentImage           string `yaml:"agent_image"`
+	ServiceAccount       string `yaml:"service_account"`
+	ImagePullSecret      string `yaml:"image_pull_secret"`
+	ServerCASecret       string `yaml:"server_ca_secret"`
+	ExecutionTokenSecret string `yaml:"execution_token_secret"`
+
+	NASStorageClass         string                              `yaml:"nas_storage_class"`
+	ProjectMemorySize       string                              `yaml:"project_memory_size"`
+	TaskWorkspaceSize       string                              `yaml:"task_workspace_size"`
+	ActiveDeadlineSeconds   int64                               `yaml:"active_deadline_seconds"`
+	HeartbeatTimeoutSeconds int64                               `yaml:"heartbeat_timeout_seconds"`
+	CompletionGraceSeconds  int                                 `yaml:"completion_grace_seconds"`
+	completionGraceSet      bool                                `yaml:"-"`
+	TTLSecondsAfterFinished int32                               `yaml:"ttl_seconds_after_finished"`
+	PreStartRetryLimit      int                                 `yaml:"pre_start_retry_limit"`
+	preStartRetryLimitSet   bool                                `yaml:"-"`
+	Resources               KubernetesResourceConfig            `yaml:"resources"`
+	ResourceProfiles        map[string]KubernetesResourceConfig `yaml:"resource_profiles"`
+}
+
+func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawKubernetesConfig KubernetesConfig
+	var raw rawKubernetesConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	*c = KubernetesConfig(raw)
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		switch value.Content[i].Value {
+		case "completion_grace_seconds":
+			c.completionGraceSet = true
+		case "pre_start_retry_limit":
+			c.preStartRetryLimitSet = true
+		}
+	}
+	return nil
 }
 
 // KubernetesResourceConfig mirrors Kubernetes resource maps without importing
@@ -1122,6 +1172,30 @@ type KubernetesConfig struct {
 type KubernetesResourceConfig struct {
 	Requests map[string]string `yaml:"requests"`
 	Limits   map[string]string `yaml:"limits"`
+}
+
+// ResourcesForTask returns a copy of the default resource contract overlaid by
+// the task-specific profile. Profiles may override individual resource keys.
+func (c KubernetesConfig) ResourcesForTask(taskType string) KubernetesResourceConfig {
+	profile := c.ResourceProfiles[strings.TrimSpace(taskType)]
+	return KubernetesResourceConfig{
+		Requests: mergeKubernetesResourceValues(c.Resources.Requests, profile.Requests),
+		Limits:   mergeKubernetesResourceValues(c.Resources.Limits, profile.Limits),
+	}
+}
+
+func mergeKubernetesResourceValues(base, override map[string]string) map[string]string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(base)+len(override))
+	for name, value := range base {
+		merged[name] = value
+	}
+	for name, value := range override {
+		merged[name] = value
+	}
+	return merged
 }
 
 // MemoryConfig holds Claude Code project memory projection settings.
@@ -1409,6 +1483,21 @@ func (c *Config) applyDefaults() {
 	if c.VideoAPI.CreditMultiplier == 0 {
 		c.VideoAPI.CreditMultiplier = 1000
 	}
+	if c.MCP.ToolTimeouts.GenerateImage == 0 {
+		c.MCP.ToolTimeouts.GenerateImage = 10 * time.Minute
+	}
+	if c.ModelRoutes.ImageGeneration.Cover.Timeout == 0 {
+		c.ModelRoutes.ImageGeneration.Cover.Timeout = 5 * time.Minute
+	}
+	if c.ModelRoutes.ImageGeneration.Content.Timeout == 0 {
+		c.ModelRoutes.ImageGeneration.Content.Timeout = 5 * time.Minute
+	}
+	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+		if route.Timeout == 0 {
+			route.Timeout = 5 * time.Minute
+			c.ModelRoutes.ImageGeneration.Designer[key] = route
+		}
+	}
 	c.Montage.ApplyDefaults()
 	if c.ModelPrices.CurrencyRates == nil {
 		c.ModelPrices.CurrencyRates = map[string]CurrencyRate{}
@@ -1571,7 +1660,7 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	if c.Claude.Docker.Image == "" {
-		c.Claude.Docker.Image = "anban-creator-agent:latest"
+		c.Claude.Docker.Image = "creator-agent:latest"
 	}
 	if c.Claude.Docker.CPUCores == 0 {
 		c.Claude.Docker.CPUCores = 2
@@ -1588,20 +1677,29 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.Namespace == "" {
 		c.Claude.Kubernetes.Namespace = "default"
 	}
-	if c.Claude.Kubernetes.WorkspaceMountPath == "" {
-		c.Claude.Kubernetes.WorkspaceMountPath = "/workspace"
+	if c.Claude.Kubernetes.ServerCASecret == "" {
+		c.Claude.Kubernetes.ServerCASecret = "anban-internal-ca"
 	}
-	if c.Claude.Kubernetes.PodRevision == "" {
-		c.Claude.Kubernetes.PodRevision = strings.TrimSpace(os.Getenv("ANBAN_AGENT_POD_REVISION"))
-		if c.Claude.Kubernetes.PodRevision == "" {
-			c.Claude.Kubernetes.PodRevision = strings.TrimSpace(os.Getenv("version_switch"))
-		}
+	if c.Claude.Kubernetes.ProjectMemorySize == "" {
+		c.Claude.Kubernetes.ProjectMemorySize = "1Gi"
 	}
-	if c.Claude.Kubernetes.PodTTLSeconds == 0 {
-		c.Claude.Kubernetes.PodTTLSeconds = 24 * 3600
+	if c.Claude.Kubernetes.TaskWorkspaceSize == "" {
+		c.Claude.Kubernetes.TaskWorkspaceSize = "10Gi"
 	}
-	if c.Claude.Kubernetes.ExecTimeoutSec == 0 {
-		c.Claude.Kubernetes.ExecTimeoutSec = c.Claude.Docker.TimeoutSec
+	if c.Claude.Kubernetes.ActiveDeadlineSeconds == 0 {
+		c.Claude.Kubernetes.ActiveDeadlineSeconds = 3600
+	}
+	if c.Claude.Kubernetes.HeartbeatTimeoutSeconds == 0 {
+		c.Claude.Kubernetes.HeartbeatTimeoutSeconds = 180
+	}
+	if c.Claude.Kubernetes.CompletionGraceSeconds == 0 && !c.Claude.Kubernetes.completionGraceSet {
+		c.Claude.Kubernetes.CompletionGraceSeconds = 30
+	}
+	if c.Claude.Kubernetes.TTLSecondsAfterFinished == 0 {
+		c.Claude.Kubernetes.TTLSecondsAfterFinished = 600
+	}
+	if c.Claude.Kubernetes.PreStartRetryLimit == 0 && !c.Claude.Kubernetes.preStartRetryLimitSet {
+		c.Claude.Kubernetes.PreStartRetryLimit = 1
 	}
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
@@ -1678,6 +1776,9 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		c.ImageAPI.designerOrder = c.ImageAPI.designerOrder[:0]
 		for key, route := range c.ModelRoutes.ImageGeneration.Designer {
 			routeName := "model_routes.image_generation.designer." + key
+			if route.Enabled && route.QualityRank <= 0 {
+				return fmt.Errorf("%s.quality_rank must be positive when enabled", routeName)
+			}
 			if err := validateDesignerProviderCapabilities(routeName+".capabilities", route.Capabilities); err != nil {
 				return err
 			}
@@ -1734,6 +1835,9 @@ func (c *Config) resolveImagePresetRoutes() error {
 		preset.Model = route.Model
 		preset.Endpoint = provider.BaseURL
 		preset.APIKey = provider.APIKey
+		preset.Timeout = route.Timeout
+		preset.QualityRank = route.QualityRank
+		preset.Capabilities = route.Capabilities
 	}
 	return nil
 }
@@ -1819,6 +1923,7 @@ func (c *Config) imageAPIFromRoute(routeName string, route ImageGenerationRouteC
 		BaseURL:        p.BaseURL,
 		Provider:       providerKind(route.Provider),
 		Model:          route.Model,
+		TimeoutSec:     int(route.Timeout / time.Second),
 		ResponseFormat: route.ResponseFormat,
 	}
 	if price, ok := c.ModelPrices.ImageGeneration[route.Provider+"/"+route.Model]; ok {
@@ -2043,8 +2148,67 @@ func (c *Config) Validate() error {
 	}
 
 	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+		if route.Enabled && route.QualityRank <= 0 {
+			errs = append(errs, "model_routes.image_generation.designer."+key+".quality_rank must be positive when enabled")
+		}
 		if err := validateDesignerProviderCapabilities("model_routes.image_generation.designer."+key+".capabilities", route.Capabilities); err != nil {
 			errs = append(errs, err.Error())
+		}
+	}
+
+	imageRoutes := []struct {
+		name  string
+		route ImageGenerationRouteConfig
+	}{
+		{name: "model_routes.image_generation.cover", route: c.ModelRoutes.ImageGeneration.Cover},
+		{name: "model_routes.image_generation.content", route: c.ModelRoutes.ImageGeneration.Content},
+	}
+	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+		imageRoutes = append(imageRoutes, struct {
+			name  string
+			route ImageGenerationRouteConfig
+		}{name: "model_routes.image_generation.designer." + key, route: route})
+	}
+	for _, candidate := range imageRoutes {
+		if strings.TrimSpace(candidate.route.Provider) == "" && strings.TrimSpace(candidate.route.Model) == "" {
+			continue
+		}
+		if candidate.route.Timeout <= 0 {
+			errs = append(errs, candidate.name+".timeout must be positive")
+			continue
+		}
+		minimumOperationTimeout := candidate.route.Timeout + c.ModelRoutes.ImageUnderstanding.Timeout
+		if c.MCP.ToolTimeouts.GenerateImage <= minimumOperationTimeout {
+			errs = append(errs, fmt.Sprintf(
+				"mcp.tool_timeouts.generate_image (%s) must be greater than %s.timeout (%s) plus model_routes.image_understanding.timeout (%s)",
+				c.MCP.ToolTimeouts.GenerateImage, candidate.name, candidate.route.Timeout, c.ModelRoutes.ImageUnderstanding.Timeout))
+		}
+	}
+
+	for _, route := range []struct {
+		name     string
+		provider string
+		model    string
+	}{
+		{
+			name:     "model_routes.image_understanding",
+			provider: c.ModelRoutes.ImageUnderstanding.Provider,
+			model:    c.ModelRoutes.ImageUnderstanding.Model,
+		},
+		{
+			name:     "model_routes.video_understanding",
+			provider: c.ModelRoutes.VideoUnderstanding.Provider,
+			model:    c.ModelRoutes.VideoUnderstanding.Model,
+		},
+	} {
+		provider := strings.TrimSpace(route.provider)
+		modelName := strings.TrimSpace(route.model)
+		if provider == "" || modelName == "" {
+			continue
+		}
+		priceKey := provider + "/" + modelName
+		if _, ok := c.ModelPrices.TokenModels[priceKey]; !ok {
+			errs = append(errs, fmt.Sprintf("%s requires model_prices.token_models.%s", route.name, priceKey))
 		}
 	}
 
@@ -2066,6 +2230,9 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Claude.Executor == "kubernetes" {
+		if strings.TrimSpace(c.Server.TLSCertFile) == "" || strings.TrimSpace(c.Server.TLSKeyFile) == "" {
+			errs = append(errs, "server.tls_cert_file and server.tls_key_file are required when claude.executor is \"kubernetes\"")
+		}
 		if c.Storage.Provider != "oss" {
 			errs = append(errs, "claude.kubernetes requires storage.provider to be \"oss\"")
 		}
@@ -2074,6 +2241,8 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.AgentServerURL) == "" {
 			errs = append(errs, "claude.agent_server_url is required when claude.executor is \"kubernetes\"")
+		} else if !strings.HasPrefix(strings.TrimSpace(c.Claude.AgentServerURL), "https://") {
+			errs = append(errs, "claude.agent_server_url must use https:// when claude.executor is \"kubernetes\"")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.Namespace) == "" {
 			errs = append(errs, "claude.kubernetes.namespace is required")
@@ -2081,20 +2250,57 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Claude.Kubernetes.AgentImage) == "" {
 			errs = append(errs, "claude.kubernetes.agent_image is required")
 		}
-		if strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath) == "" {
-			errs = append(errs, "claude.kubernetes.workspace_mount_path is required")
-		} else if !strings.HasPrefix(strings.TrimSpace(c.Claude.Kubernetes.WorkspaceMountPath), "/") {
-			errs = append(errs, "claude.kubernetes.workspace_mount_path must be absolute")
+		if strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
+			errs = append(errs, "claude.kubernetes.service_account is required")
 		}
-		if strings.TrimSpace(c.Claude.Kubernetes.WorkspacePVCName) == "" {
-			errs = append(errs, "claude.kubernetes.workspace_pvc_name is required")
+		if strings.TrimSpace(c.Claude.Kubernetes.ServerCASecret) == "" {
+			errs = append(errs, "claude.kubernetes.server_ca_secret is required")
 		}
-		if c.Claude.Kubernetes.ExecTimeoutSec <= 0 {
-			errs = append(errs, "claude.kubernetes.exec_timeout_seconds must be positive")
+		if len(c.Claude.Kubernetes.ExecutionTokenSecret) < 32 {
+			errs = append(errs, "claude.kubernetes.execution_token_secret must be at least 32 bytes")
 		}
-		if c.Claude.Kubernetes.PodTTLSeconds <= 0 {
-			errs = append(errs, "claude.kubernetes.pod_ttl_seconds must be positive")
+		if strings.TrimSpace(c.Claude.Kubernetes.NASStorageClass) == "" {
+			errs = append(errs, "claude.kubernetes.nas_storage_class is required")
 		}
+		memorySize, err := resource.ParseQuantity(strings.TrimSpace(c.Claude.Kubernetes.ProjectMemorySize))
+		if err != nil {
+			errs = append(errs, "claude.kubernetes.project_memory_size must be a valid Kubernetes quantity")
+		} else if memorySize.Sign() <= 0 {
+			errs = append(errs, "claude.kubernetes.project_memory_size must be positive")
+		}
+		workspaceSize, err := resource.ParseQuantity(strings.TrimSpace(c.Claude.Kubernetes.TaskWorkspaceSize))
+		if err != nil {
+			errs = append(errs, "claude.kubernetes.task_workspace_size must be a valid Kubernetes quantity")
+		} else if workspaceSize.Sign() <= 0 {
+			errs = append(errs, "claude.kubernetes.task_workspace_size must be positive")
+		}
+		if c.Claude.Kubernetes.ActiveDeadlineSeconds <= 0 {
+			errs = append(errs, "claude.kubernetes.active_deadline_seconds must be positive")
+		}
+		if c.Claude.Kubernetes.HeartbeatTimeoutSeconds < 60 || c.Claude.Kubernetes.HeartbeatTimeoutSeconds >= c.Claude.Kubernetes.ActiveDeadlineSeconds {
+			errs = append(errs, "claude.kubernetes.heartbeat_timeout_seconds must be at least 60 and less than active_deadline_seconds")
+		}
+		if c.Claude.Kubernetes.TTLSecondsAfterFinished <= 0 {
+			errs = append(errs, "claude.kubernetes.ttl_seconds_after_finished must be positive")
+		}
+		if c.Claude.Kubernetes.CompletionGraceSeconds < 0 {
+			errs = append(errs, "claude.kubernetes.completion_grace_seconds must not be negative")
+		}
+		if c.Claude.Kubernetes.PreStartRetryLimit < 0 {
+			errs = append(errs, "claude.kubernetes.pre_start_retry_limit must not be negative")
+		}
+		errs = append(errs, validateKubernetesResourceConfig("claude.kubernetes.resources", c.Claude.Kubernetes.Resources)...)
+		for taskType := range c.Claude.Kubernetes.ResourceProfiles {
+			if strings.TrimSpace(taskType) == "" {
+				errs = append(errs, "claude.kubernetes.resource_profiles contains an empty task type")
+				continue
+			}
+			effective := c.Claude.Kubernetes.ResourcesForTask(taskType)
+			errs = append(errs, validateKubernetesResourceConfig("claude.kubernetes.resource_profiles."+taskType, effective)...)
+		}
+	}
+	if (strings.TrimSpace(c.Server.TLSCertFile) == "") != (strings.TrimSpace(c.Server.TLSKeyFile) == "") {
+		errs = append(errs, "server.tls_cert_file and server.tls_key_file must be configured together")
 	}
 
 	if c.Claude.AgentServerURL != "" {

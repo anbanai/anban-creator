@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -16,28 +17,79 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
+// ImageModelResolver selects one immutable provider/model descriptor before an
+// image request reaches billing or generation.
+type ImageModelResolver interface {
+	ResolveImageModelForGeneration(
+		ctx context.Context,
+		userID string,
+		imageModelKey string,
+		imageType string,
+		referenceCount int,
+	) (*service.ResolvedImageModel, error)
+}
+
+// ImageGenerator is the narrow generation surface used by generate_image.
+// ImageSvc remains concrete because the other image tools need upload,
+// compression, and download methods that are intentionally not part of this
+// request-scoped interface.
+type ImageGenerator interface {
+	GenerateImage(
+		ctx context.Context,
+		userID, projectID, prompt, imageType, outputPath, refPath string,
+		refPaths []string,
+		taskID, size string,
+		resolved *service.ResolvedImageModel,
+		watermark *bool,
+	) (*service.ImageResult, error)
+}
+
+type ImageGenerationBillingDecision struct {
+	Provider        string
+	Model           string
+	Source          string
+	Dynamic         bool
+	DynamicProvider string
+	DynamicModel    string
+	DynamicRoute    string
+}
+
+// ImageGenerationBiller performs static pre-generation charging or records the
+// dynamic route that must be charged from the provider's returned usage.
+type ImageGenerationBiller interface {
+	PrepareImageGeneration(
+		ctx context.Context,
+		userID, taskID, imageType string,
+		resolved *service.ResolvedImageModel,
+	) (ImageGenerationBillingDecision, error)
+}
+
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ProjectSvc        *service.ProjectService
-	Store             storage.Provider
-	TaskSvc           *service.TaskService
-	CreditSvc         *service.CreditService
-	PlanSvc           *service.PlanService
-	ImageSvc          *service.ImageService
-	VideoSvc          *service.VideoService
-	AudioASRSvc       *service.AudioASRService
-	VideoASRSvc       *service.VideoASRService
-	WritingSvc        *service.WritingService
-	PublishingSvc     *service.PublishingService
-	WorkspaceSvc      *service.WorkspaceService
-	TemplateSvc       *service.TemplateService
-	LiveSliceSvc      *service.LiveSliceService
-	SeednoteClient    *seednote.Client
-	SeednoteReadiness service.Readiness
-	TopicPoolSvc      *service.TopicPoolService
-	AgentFeedbackSvc  *service.AgentFeedbackService
-	TingWuConfigured  bool
-	FunASRConfigured  bool
+	ProjectSvc            *service.ProjectService
+	Store                 storage.Provider
+	TaskSvc               *service.TaskService
+	CreditSvc             *service.CreditService
+	PlanSvc               *service.PlanService
+	ImageSvc              *service.ImageService
+	ImageModelResolver    ImageModelResolver
+	ImageGenerator        ImageGenerator
+	ImageGenerationBiller ImageGenerationBiller
+	GenerateImageTimeout  time.Duration
+	VideoSvc              *service.VideoService
+	AudioASRSvc           *service.AudioASRService
+	VideoASRSvc           *service.VideoASRService
+	WritingSvc            *service.WritingService
+	PublishingSvc         *service.PublishingService
+	WorkspaceSvc          *service.WorkspaceService
+	TemplateSvc           *service.TemplateService
+	LiveSliceSvc          *service.LiveSliceService
+	SeednoteClient        *seednote.Client
+	SeednoteReadiness     service.Readiness
+	TopicPoolSvc          *service.TopicPoolService
+	AgentFeedbackSvc      *service.AgentFeedbackService
+	TingWuConfigured      bool
+	FunASRConfigured      bool
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -193,12 +245,12 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "finalize_task_title",
-		Description: "Record the hook-selected final content title for a task. Hooks call this before final delivery so future tasks can deduplicate by canonical title.",
+		Description: "Record the Agent-selected final content title before title-dependent artifacts are generated, so future tasks can deduplicate by canonical title.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"task_id": map[string]any{"type": "string", "description": "Task ID"},
-				"title":   map[string]any{"type": "string", "description": "Final content title selected by the completion hook"},
+				"title":   map[string]any{"type": "string", "description": "Final content title selected by the owning Agent"},
 			},
 			"required": []any{"task_id", "title"},
 		},
@@ -415,6 +467,26 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
 		}
+		if svcs.ImageModelResolver != nil {
+			imageModelKey := ""
+			if task != nil {
+				imageModelKey = task.ImageModelKey
+			}
+			resolved, resolveErr := svcs.ImageModelResolver.ResolveImageModelForGeneration(ctx, userID, imageModelKey, "content", 0)
+			if resolveErr != nil {
+				return nil, fmt.Sprintf("resolve image generation capability: %v", resolveErr)
+			}
+			if resolved == nil {
+				return nil, "resolve image generation capability: resolver returned no descriptor"
+			}
+			info["image_generation"] = map[string]any{
+				"provider":             resolved.Provider,
+				"model":                resolved.Model,
+				"supports_reference":   resolved.SupportsReference,
+				"max_reference_images": resolved.MaxReferenceImages,
+				"selection_reason":     resolved.SelectionReason,
+			}
+		}
 	case "moments":
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
@@ -438,14 +510,11 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		// E-commerce: surface the package config (selected modules, target
 		// platform, brand brief, language) plus the resolved image model and the
 		// workspace path where the executor materialized the product photos.
-		// The server resolves Task.ImageModelKey to a concrete provider/model here
-		// so the agent can adapt its reference-image strategy without selecting or
-		// passing model keys: OpenAI/Gemini accept multiple refs (≤16 via
-		// generate_image's ref_image_paths) for max product fidelity; Volcengine/
-		// Seedream take a single ref (strong i2i), so the agent uses one anchor ref
-		// + product-bible text block. Product photos are downloaded by the executor
-		// into .anban-creator/products/ (see agent.DownloadProductImages); the agent
-		// reads index.json there for the exact filenames.
+		// The agent uses the concrete provider/model only to plan its independent
+		// product-photo workflow; task model keys remain server-owned. Product
+		// photos are downloaded by the executor into .anban-creator/products/ (see
+		// agent.DownloadProductImages); the agent reads index.json there for the
+		// exact filenames.
 		ec := map[string]any{
 			"product_photo_dir": ".anban-creator/products",
 			"consistency_audit": true, // verify_with_vision self-check loop
@@ -455,7 +524,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			ec["image_model"] = map[string]any{
 				"provider": provider,
 				"model":    mdl,
-				"key":      task.ImageModelKey,
 			}
 			cfg := task.Ecommerce.Data()
 			ec["selected_modules"] = cfg.SelectedModules
@@ -525,11 +593,11 @@ func buildMontageProfileBlock(ch *model.Project, task *model.Task) map[string]an
 	if task != nil && model.IsMontagePlatform(task.Type) {
 		input = task.MontageInput.Data()
 	}
-	providerEnv := map[string]bool{}
+	env := map[string]bool{}
 	toolPolicy := map[string]any{}
 	pipelineDefaults := map[string]any{}
 	if billSvc != nil && billSvc.config != nil {
-		providerEnv = billSvc.config.Montage.RedactedProviderEnv()
+		env = billSvc.config.Montage.RedactedEnv()
 		for key, value := range billSvc.config.Montage.ToolPolicy {
 			toolPolicy[key] = value
 		}
@@ -548,7 +616,7 @@ func buildMontageProfileBlock(ch *model.Project, task *model.Task) map[string]an
 		"output_dir":             "output/montage",
 		"required_artifacts":     []string{"final.mp4", "delivery-manifest.json"},
 		"artifact_roles":         []string{"final_video", "delivery_manifest", "source_manifest", "timeline", "subtitles", "audio", "run_log", "failure_diagnosis"},
-		"provider_env":           providerEnv,
+		"env":                    env,
 		"tool_policy":            toolPolicy,
 		"pipeline_defaults":      pipelineDefaults,
 		"runner_contract":        "Agent prepares montage-input.json and montage-project.json, runs the Montage adapter from $ANBAN_MONTAGE_SUBMODULE_PATH when set, otherwise third_party/OpenMontage, then registers task files by artifact role.",
@@ -608,12 +676,11 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 		"references":    input.References,
 		"task_config":   taskConfig,
 		"pricing": map[string]any{
-			"credits_per_cny":          videoCreditMultiplier(),
-			"base_task_fee_rule":       "VideoCreator task/plan creation deducts only credits.task_costs.videocreator as the base service fee.",
-			"operation_billing_rule":   "create_video_generation_job/create_video_generation_task deduct video_gen operation credits independently when the provider job is submitted.",
-			"operation_refund_rule":    "If provider submission or persistence fails immediately, the video_gen operation deduction is refunded; task failure/cancel refunds only the base task fee.",
-			"estimate_rule":            "Server estimates video_gen credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",
-			"insufficient_credit_rule": "If balance cannot cover video_gen at execution time, the MCP operation fails and the task should stop with a recharge hint.",
+			"credits_per_cny":        videoCreditMultiplier(),
+			"base_task_fee_rule":     "VideoCreator task/plan creation deducts only credits.task_costs.videocreator as the base service fee.",
+			"operation_billing_rule": "create_video_generation_job/create_video_generation_task deduct video_gen operation credits independently when the provider job is submitted.",
+			"operation_refund_rule":  "If provider submission or persistence fails immediately, the video_gen operation deduction is refunded; task failure/cancel refunds only the base task fee.",
+			"estimate_rule":          "Server estimates video_gen credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",
 		},
 		"persistent_file_rule": "all server-persistent references and generated results must be OSS-backed task files; local agent files are temporary only",
 		"visual_anchor_generation": map[string]any{
@@ -698,7 +765,7 @@ func buildProjectAgentBrief(ch *model.Project, usesProjectSnapshot bool, videoBl
 			defaults["model_key"], defaults["resolution"], defaults["ratio"], defaults["duration"], defaults["watermark"])
 	}
 	if pricing, ok := videoBlock["pricing"].(map[string]any); ok {
-		fmt.Fprintf(&b, "积分规则：创建/触发 AI 视频生成任务只扣基础任务服务费；提交 video_gen 时按服务端估价独立扣费。%v\n", pricing["insufficient_credit_rule"])
+		fmt.Fprintf(&b, "积分规则：创建/触发 AI 视频生成任务只扣基础任务服务费；提交 video_gen 时按服务端估价独立记录操作扣费（%v）。\n", pricing["operation_billing_rule"])
 	}
 	b.WriteString("模型规则：只能使用本 profile 返回的 videocreator.model_catalog 与 videocreator.policy.allowed_models 中的模型 key；未返回的模型不可使用。")
 	return b.String()
@@ -811,13 +878,17 @@ func titleFinalizeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 }
 
 func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
 		return errorResult("task_id is required"), nil
 	}
+	if _, err := svcs.TaskSvc.ValidateAgentTaskAccess(context.Background(), taskID, userID); err != nil {
+		return errorResult("task not found"), nil
+	}
 
-	files, err := svcs.TaskSvc.GetFiles(context.Background(), taskID)
+	files, err := svcs.TaskSvc.GetVisibleFiles(context.Background(), taskID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("get task files: %v", err)), nil
 	}

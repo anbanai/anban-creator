@@ -9,7 +9,6 @@ import {
   Stamp,
   SlidersHorizontal,
 } from 'lucide-react'
-import DesignerReferenceDock from '@/components/designer/DesignerReferenceDock'
 import ModelSelector from '@/components/designer/ModelSelector'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
@@ -162,7 +161,7 @@ function ResolutionSection({ value, onChange, sectionHeader }: {
   )
 }
 
-export type DesignerSettingsPatch = Partial<Omit<DesignerSettings, 'referenceFiles'>>
+export type DesignerSettingsPatch = Partial<DesignerSettings>
 
 interface DesignerToolbarProps {
   providers: DesignerProvider[]
@@ -172,9 +171,6 @@ interface DesignerToolbarProps {
   settings: DesignerSettings
   onSettingsChange: (patch: DesignerSettingsPatch) => void
   onHistoryToggle: () => void
-  onReferenceFilesAdded: (files: File[]) => void
-  onReferenceFileRemove: (index: number) => void
-  referenceDropActive: boolean
 }
 
 export default function DesignerToolbar({
@@ -185,9 +181,6 @@ export default function DesignerToolbar({
   settings,
   onSettingsChange,
   onHistoryToggle,
-  onReferenceFilesAdded,
-  onReferenceFileRemove,
-  referenceDropActive,
 }: DesignerToolbarProps) {
   const caps = capabilities
 
@@ -204,7 +197,6 @@ export default function DesignerToolbar({
   const showCount = (caps?.maxBatch ?? 1) > 1
   const showQuality = (caps?.qualityLevels.length ?? 0) > 0
   const showFormat = (caps?.outputFormats.length ?? 0) > 1
-  const showRefs = (caps?.supportsReference ?? false) && (caps?.maxReferenceImages ?? 0) > 0
   const configuredSizePresets = caps?.sizePresets ?? []
   const pixelSizePresets = configuredSizePresets.filter((preset) => preset.trim().toLowerCase() === 'auto' || isPixelSizePreset(preset))
   const ratioSizePresets = configuredSizePresets.filter(isRatioSizePreset)
@@ -404,24 +396,6 @@ export default function DesignerToolbar({
               </div>
             )}
 
-            {/* References */}
-            {showRefs && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className={sectionHeader}>参考素材</h4>
-                  <span className="text-[10px] tabular-nums text-muted-foreground">
-                    {settings.referenceFiles.length}/{caps!.maxReferenceImages}
-                  </span>
-                </div>
-                <DesignerReferenceDock
-                  files={settings.referenceFiles}
-                  maxFiles={caps!.maxReferenceImages}
-                  onFilesAdded={onReferenceFilesAdded}
-                  onFileRemove={onReferenceFileRemove}
-                  dropActive={referenceDropActive}
-                />
-              </div>
-            )}
           </div>
 
           {/* Bottom: History */}
@@ -448,17 +422,6 @@ export default function DesignerToolbar({
             selectedProviderId={selectedProviderId}
             onChange={onModelChange}
           />
-
-          {showRefs && (
-            <DesignerReferenceDock
-              files={settings.referenceFiles}
-              maxFiles={caps!.maxReferenceImages}
-              onFilesAdded={onReferenceFilesAdded}
-              onFileRemove={onReferenceFileRemove}
-              dropActive={referenceDropActive}
-              compact
-            />
-          )}
 
           {/* Mobile settings row */}
           <div className="flex gap-1 overflow-x-auto">

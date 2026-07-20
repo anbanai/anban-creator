@@ -378,10 +378,13 @@ func TestHandleExecutionRemoteSeednoteValidatesTaskFilesWithoutWorkDir(t *testin
 	}
 
 	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
-	createRemoteTaskFile(t, repo, store, task.ID, "output/content.md", "text/markdown", "# 标题\n\n正文")
-	createRemoteTaskFile(t, repo, store, task.ID, "output/image-plan.md", "text/markdown", "# 图片规划")
-	createRemoteTaskFile(t, repo, store, task.ID, "output/cover.png", "image/png", "png")
-	createRemoteTaskFile(t, repo, store, task.ID, "output/image_01.png", "image/png", "png")
+	for _, name := range seednoteCompletionArtifactNamesForTest(true, false) {
+		mimeType, body := DetectTaskFileMIME(name), "fixture"
+		if strings.HasSuffix(name, ".png") {
+			body = "png"
+		}
+		createRemoteTaskFile(t, repo, store, task.ID, "output/"+name, mimeType, body)
+	}
 	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
 		Success:         true,
 		RemoteArtifacts: true,

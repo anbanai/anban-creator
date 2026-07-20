@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"regexp"
 	"strconv"
@@ -31,20 +30,10 @@ func NewPlanHandler(svc *service.PlanService, logger *zerolog.Logger) *PlanHandl
 	return &PlanHandler{service: svc, logger: logger}
 }
 
-// SetStore injects a storage provider so the reference image URL can be resolved
-// to a signed, directly-fetchable URL in responses.
+// SetStore injects a storage provider for response-only owned-object key
+// serialization and attachment validation.
 func (h *PlanHandler) SetStore(s storage.Provider) {
 	h.store = s
-}
-
-// signPlanURLs resolves the stored reference-image URL to a directly-fetchable
-// signed URL. No-op when no store is wired (e.g. unit tests) or the URL is
-// external/empty.
-func (h *PlanHandler) signPlanURLs(ctx context.Context, p *model.Plan) {
-	if p == nil {
-		return
-	}
-	p.ReferenceImageURL = service.SignURL(ctx, h.store, h.logger, p.ReferenceImageURL, service.DefaultSignedURLTTL)
 }
 
 // SetImagePresets wires the system-managed image model presets for tier-gated
@@ -91,29 +80,31 @@ type createPlanRequest struct {
 	HasTailImage    *bool `json:"has_tail_image,omitempty"`
 	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
 	// (cover NOT mandatory). nil → fall back to plan model defaults (both on).
-	ArticleWithCover         *bool                  `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool                  `json:"article_with_content_images,omitempty"`
-	VideoCreatorConfig       *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
-	VideoCreatorInput        *model.VideoInput      `json:"video_creator_input,omitempty"`
-	MontageInput             *model.MontageInput    `json:"montage_input,omitempty"`
+	ArticleWithCover         *bool                   `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
+	VideoCreatorConfig       *model.VideoTaskConfig  `json:"video_creator_config,omitempty"`
+	VideoCreatorInput        *model.VideoInput       `json:"video_creator_input,omitempty"`
+	MontageInput             *model.MontageInput     `json:"montage_input,omitempty"`
+	InputAttachments         []model.EntryAttachment `json:"input_attachments,omitempty"`
 }
 
 type updatePlanRequest struct {
-	CronExpr                 string                 `json:"cron_expr"`
-	Prompt                   string                 `json:"prompt"`
-	ImageModelKey            *string                `json:"image_model_key"`
-	SkipReferenceImage       *bool                  `json:"skip_reference_image"`
-	ReferenceImageURL        *string                `json:"reference_image_url"`
-	Watermark                *bool                  `json:"watermark"`
-	Goal                     string                 `json:"goal"`
-	GoalMode                 *bool                  `json:"goal_mode"`
-	HasContentImage          *bool                  `json:"has_content_image,omitempty"`
-	HasTailImage             *bool                  `json:"has_tail_image,omitempty"`
-	ArticleWithCover         *bool                  `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool                  `json:"article_with_content_images,omitempty"`
-	VideoCreatorConfig       *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
-	VideoCreatorInput        *model.VideoInput      `json:"video_creator_input,omitempty"`
-	MontageInput             *model.MontageInput    `json:"montage_input,omitempty"`
+	CronExpr                 string                   `json:"cron_expr"`
+	Prompt                   string                   `json:"prompt"`
+	ImageModelKey            *string                  `json:"image_model_key"`
+	SkipReferenceImage       *bool                    `json:"skip_reference_image"`
+	ReferenceImageURL        *string                  `json:"reference_image_url"`
+	Watermark                *bool                    `json:"watermark"`
+	Goal                     string                   `json:"goal"`
+	GoalMode                 *bool                    `json:"goal_mode"`
+	HasContentImage          *bool                    `json:"has_content_image,omitempty"`
+	HasTailImage             *bool                    `json:"has_tail_image,omitempty"`
+	ArticleWithCover         *bool                    `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool                    `json:"article_with_content_images,omitempty"`
+	VideoCreatorConfig       *model.VideoTaskConfig   `json:"video_creator_config,omitempty"`
+	VideoCreatorInput        *model.VideoInput        `json:"video_creator_input,omitempty"`
+	MontageInput             *model.MontageInput      `json:"montage_input,omitempty"`
+	InputAttachments         *[]model.EntryAttachment `json:"input_attachments,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -153,17 +144,35 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
+	var pending service.PendingUploadRepository
 	if h.repo != nil {
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL}); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		pending = h.repo.PendingUploads()
+	}
+	validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
+		MaxCount:     maxAgentInputAttachments,
+		AllowedTypes: allAgentAttachmentTypes,
+	})
+	if err != nil {
+		return respondInputAttachmentError(c, h.logger, err)
+	}
+	req.InputAttachments = validatedAttachments
+	if h.repo != nil {
+		rewrites, err := finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL})
+		if err != nil {
+			return respondPendingUploadFinalizeError(c, h.logger, err)
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		req.ReferenceImageURL = rewriteFinalizedUploadURL(req.ReferenceImageURL, rewrites)
+		rewrites, err = finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
+		if err != nil {
+			return respondPendingUploadFinalizeError(c, h.logger, err)
 		}
+		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput)); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
+			rewrites, err = finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			if err != nil {
+				return respondPendingUploadFinalizeError(c, h.logger, err)
 			}
+			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
 	}
 
@@ -185,6 +194,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		VideoCreatorConfig:       req.VideoCreatorConfig,
 		VideoCreatorInput:        req.VideoCreatorInput,
 		MontageInput:             req.MontageInput,
+		InputAttachments:         req.InputAttachments,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
@@ -203,8 +213,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
 	}
 
-	h.signPlanURLs(c.Context(), plan)
-	return Success(c, planAPIResponse(plan))
+	return Success(c, planAPIResponse(plan, h.store))
 }
 
 // List handles GET /api/v1/plans.
@@ -231,12 +240,8 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to list plans")
 	}
 
-	for _, p := range plans {
-		h.signPlanURLs(c.Context(), p)
-	}
-
 	return Success(c, fiber.Map{
-		"items": planAPIResponses(plans),
+		"items": planAPIResponses(plans, h.store),
 		"total": total,
 	})
 }
@@ -262,8 +267,7 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this plan")
 	}
 
-	h.signPlanURLs(c.Context(), plan)
-	return Success(c, planAPIResponse(plan))
+	return Success(c, planAPIResponse(plan, h.store))
 }
 
 // Update handles PUT /api/v1/plans/:id.
@@ -316,19 +320,39 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if req.GoalMode != nil && *req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
+	var pending service.PendingUploadRepository
+	if h.repo != nil {
+		pending = h.repo.PendingUploads()
+	}
+	if req.InputAttachments != nil {
+		validatedAttachments, err := validateInputAttachments(c.Context(), h.store, pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
+			MaxCount:     maxAgentInputAttachments,
+			AllowedTypes: allAgentAttachmentTypes,
+		})
+		if err != nil {
+			return respondInputAttachmentError(c, h.logger, err)
+		}
+		req.InputAttachments = &validatedAttachments
+	}
 	if h.repo != nil {
 		if req.ReferenceImageURL != nil {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{*req.ReferenceImageURL}); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
+			rewrites, err := finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{*req.ReferenceImageURL})
+			if err != nil {
+				return respondPendingUploadFinalizeError(c, h.logger, err)
 			}
+			*req.ReferenceImageURL = rewriteFinalizedUploadURL(*req.ReferenceImageURL, rewrites)
 		}
-		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+		rewrites, err := finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
+		if err != nil {
+			return respondPendingUploadFinalizeError(c, h.logger, err)
 		}
+		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if model.IsMontagePlatform(existing.Type) {
-			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput)); err != nil {
-				return Error(c, fiber.StatusBadRequest, err.Error())
+			rewrites, err = finalizePendingURLs(c.Context(), h.store, h.repo.PendingUploads(), userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			if err != nil {
+				return respondPendingUploadFinalizeError(c, h.logger, err)
 			}
+			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
 	}
 
@@ -349,6 +373,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		VideoCreatorConfig:       req.VideoCreatorConfig,
 		VideoCreatorInput:        req.VideoCreatorInput,
 		MontageInput:             req.MontageInput,
+		InputAttachments:         req.InputAttachments,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
@@ -358,8 +383,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")
 	}
 
-	h.signPlanURLs(c.Context(), plan)
-	return Success(c, planAPIResponse(plan))
+	return Success(c, planAPIResponse(plan, h.store))
 }
 
 // Delete handles DELETE /api/v1/plans/:id.

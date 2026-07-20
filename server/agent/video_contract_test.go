@@ -116,15 +116,34 @@ func TestVideoSkillContractsUseVideoCreatorInputReferences(t *testing.T) {
 	}
 }
 
+func TestVideoSkillsDoNotGateExecutionOnCreditBalance(t *testing.T) {
+	for _, path := range []string{
+		"../../claudecode/skills/seedance-20/references/mcp-contract.md",
+		"../../codex/skills/seedance-20/references/mcp-contract.md",
+		"../../openclaw/skills/seedance-20/references/mcp-contract.md",
+		"../../claudecode/skills/seedance-20/references/anban-mcp-contract.md",
+		"../../codex/skills/seedance-20/references/anban-mcp-contract.md",
+		"../../openclaw/skills/seedance-20/references/anban-mcp-contract.md",
+		"../../claudecode/skills/dreamina-video/references/mcp-contract.md",
+		"../../codex/skills/dreamina-video/references/mcp-contract.md",
+		"../../openclaw/skills/dreamina-video/references/mcp-contract.md",
+	} {
+		body := strings.ToLower(readRepoFile(t, path))
+		for _, forbidden := range []string{"balance cannot cover", "insufficient credits", "recharge"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s must not gate workflow execution on %q", path, forbidden)
+			}
+		}
+	}
+}
+
 func TestSplitVideoHookQualityGatesAreRegistered(t *testing.T) {
 	text := readRepoFile(t, "../../claudecode/hooks/hooks.json")
 	for _, want := range []string{
-		`"matcher": "anban:videocreator"`,
-		`"matcher": "anban:videoeditor"`,
+		`"matcher": "^anban:videocreator$"`,
+		`"matcher": "^anban:videoeditor$"`,
 		"videocreator-quality-gate.sh",
 		"videoeditor-quality-gate.sh",
-		`agent_name=\"videocreator\"`,
-		`agent_name=\"videoeditor\"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("claudecode hooks missing %q", want)
@@ -216,20 +235,19 @@ func TestVideoDistributionDoesNotExposeUnifiedVideoAgent(t *testing.T) {
 	}
 }
 
-func TestDockerfilesInstallPluginWithSeedance20Skill(t *testing.T) {
-	for _, path := range []string{"../../Dockerfile.agent", "../../Dockerfile.server"} {
-		text := readRepoFile(t, path)
-		for _, want := range []string{
-			"claude plugin marketplace add /anbanai",
-			"claude plugin install --scope user anban@anbanai",
-		} {
-			if !strings.Contains(text, want) {
-				t.Fatalf("%s missing %q", path, want)
-			}
+func TestAgentDockerfileInstallsPluginWithSeedance20Skill(t *testing.T) {
+	path := "../../Dockerfile.agent"
+	text := readRepoFile(t, path)
+	for _, want := range []string{
+		"claude plugin marketplace add /anbanai",
+		"claude plugin install --scope user anban@anbanai",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("%s missing %q", path, want)
 		}
-		if !strings.Contains(text, "COPY claudecode/") || !strings.Contains(text, "/anbanai/") {
-			t.Fatalf("%s must copy claudecode plugin assets into /anbanai", path)
-		}
+	}
+	if !strings.Contains(text, "COPY claudecode/") || !strings.Contains(text, "/anbanai/") {
+		t.Fatalf("%s must copy claudecode plugin assets into /anbanai", path)
 	}
 
 	if _, err := os.Stat("../../claudecode/skills/seedance-20/SKILL.md"); err != nil {

@@ -72,6 +72,82 @@ func TestReportHeartbeatUpdatesProgressWithoutLogMessage(t *testing.T) {
 	}
 }
 
+func TestReporterIncludesExecutionIdentityForJobAndOmitsItForLocal(t *testing.T) {
+	methods := []struct {
+		name string
+		call func(context.Context, *Reporter) error
+	}{
+		{name: "progress", call: func(ctx context.Context, r *Reporter) error { return r.ReportProgress(ctx, "working") }},
+		{name: "heartbeat", call: func(ctx context.Context, r *Reporter) error { return r.ReportHeartbeat(ctx) }},
+		{name: "result", call: func(ctx context.Context, r *Reporter) error {
+			return r.ReportResult(ctx, &serveragent.ExecutionResult{Success: true})
+		}},
+		{name: "complete", call: func(ctx context.Context, r *Reporter) error {
+			return r.ReportComplete(ctx, &serveragent.ExecutionResult{Success: true})
+		}},
+	}
+	for _, method := range methods {
+		for _, tc := range []struct {
+			name, executionID string
+			want              bool
+		}{
+			{name: "job", executionID: "execution-1", want: true},
+			{name: "local", want: false},
+		} {
+			t.Run(method.name+"/"+tc.name, func(t *testing.T) {
+				var body map[string]any
+				rep, _ := newTestReporter(t, func(w http.ResponseWriter, r *http.Request) {
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Fatal(err)
+					}
+					w.WriteHeader(http.StatusOK)
+				})
+				rep.cfg.ExecutionID = tc.executionID
+				if err := method.call(context.Background(), rep); err != nil {
+					t.Fatal(err)
+				}
+				_, present := body["execution_id"]
+				if present != tc.want || (tc.want && body["execution_id"] != tc.executionID) {
+					t.Fatalf("body=%#v want execution present=%v", body, tc.want)
+				}
+			})
+		}
+	}
+}
+
+func TestReporterOverridesArtifactRequestIdentity(t *testing.T) {
+	var prepare ArtifactPrepareRequest
+	var manifest ArtifactManifestRequest
+	rep, _ := newTestReporter(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agent/artifacts/prepare":
+			if err := json.NewDecoder(r.Body).Decode(&prepare); err != nil {
+				t.Fatal(err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{}})
+		case "/api/v1/agent/artifacts/manifest":
+			if err := json.NewDecoder(r.Body).Decode(&manifest); err != nil {
+				t.Fatal(err)
+			}
+			w.WriteHeader(http.StatusOK)
+		}
+	})
+	rep.cfg.ExecutionID = "execution-1"
+	_, err := rep.PrepareArtifactUpload(context.Background(), ArtifactPrepareRequest{TaskID: "attacker", ExecutionID: "attacker", RelativePath: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rep.ReportArtifactManifest(context.Background(), ArtifactManifestRequest{TaskID: "attacker", ExecutionID: "attacker"}); err != nil {
+		t.Fatal(err)
+	}
+	if prepare.TaskID != "t1" || prepare.ExecutionID != "execution-1" {
+		t.Fatalf("prepare=%+v", prepare)
+	}
+	if manifest.TaskID != "t1" || manifest.ExecutionID != "execution-1" {
+		t.Fatalf("manifest=%+v", manifest)
+	}
+}
+
 func TestPrepareArtifactUploadPostsRequestAndDecodesEnvelope(t *testing.T) {
 	var gotPath string
 	var gotAuth string

@@ -2,11 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
@@ -98,7 +105,7 @@ func TestScanWorkspaceArtifactsPrefersOutputAndSkipsRuntimeFiles(t *testing.T) {
 	writeAgentArtifactTestFile(t, root, "output/node_modules/pkg/index.js", "module.exports = {}")
 	writeAgentArtifactTestFile(t, root, "output/package.json", "{}")
 
-	files, err := ScanWorkspaceArtifacts(root)
+	files, err := ScanWorkspaceArtifacts(context.Background(), root)
 	if err != nil {
 		t.Fatalf("ScanWorkspaceArtifacts: %v", err)
 	}
@@ -116,6 +123,122 @@ func TestScanWorkspaceArtifactsPrefersOutputAndSkipsRuntimeFiles(t *testing.T) {
 			t.Fatalf("rels = %#v, want %#v", rels, want)
 		}
 	}
+}
+
+func TestScanWorkspaceArtifactsSkipsDockerRuntimeHome(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "article.md", "# article")
+	writeAgentArtifactTestFile(t, root, ".anban-runtime-home/secret.md", "runtime state")
+
+	files, err := ScanWorkspaceArtifacts(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ScanWorkspaceArtifacts: %v", err)
+	}
+	if len(files) != 1 || files[0].RelativePath != "article.md" {
+		t.Fatalf("files = %#v, want only article.md", files)
+	}
+}
+
+func TestJobArtifactHashCancellationPreservesCompletionReserve(t *testing.T) {
+	t.Setenv(jobFinalizationTimeoutEnv, "120ms")
+	previousReserve := jobCompletionReserve
+	jobCompletionReserve = 40 * time.Millisecond
+	t.Cleanup(func() { jobCompletionReserve = previousReserve })
+
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/article.md", strings.Repeat("x", 256*1024))
+	previousOpen := openArtifactFile
+	openArtifactFile = func(path string) (io.ReadCloser, error) {
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		return &slowArtifactReader{ReadCloser: file, delay: 10 * time.Millisecond}, nil
+	}
+	t.Cleanup(func() { openArtifactFile = previousOpen })
+
+	var prepared, manifested, completed bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agent/artifacts/prepare":
+			prepared = true
+		case "/api/v1/agent/artifacts/manifest":
+			manifested = true
+		case "/api/v1/agent/complete":
+			completed = true
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := &Config{ServerURL: server.URL, APIKey: "key", TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}
+	reporter := NewReporter(cfg)
+	window := newFinalizationWindow(cfg)
+	workCtx, cancelWork := window.workContext()
+	started := time.Now()
+	err := NewArtifactUploader(cfg, reporter).UploadWorkspaceArtifacts(workCtx, &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	cancelWork()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("UploadWorkspaceArtifacts error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 300*time.Millisecond {
+		t.Fatalf("canceled artifact scan returned after %v", elapsed)
+	}
+	if prepared || manifested {
+		t.Fatalf("canceled scan reached remote artifact calls: prepare=%v manifest=%v", prepared, manifested)
+	}
+
+	completionCtx, cancelCompletion := window.completionContext()
+	defer cancelCompletion()
+	if err := reporter.ReportComplete(completionCtx, &serveragent.ExecutionResult{Success: false}); err != nil {
+		t.Fatalf("ReportComplete: %v", err)
+	}
+	if !completed {
+		t.Fatal("completion reserve did not reach ReportComplete")
+	}
+}
+
+type slowArtifactReader struct {
+	io.ReadCloser
+	delay time.Duration
+}
+
+func TestLocalArtifactFinalizationUsesFreshContextAfterRunCancellation(t *testing.T) {
+	t.Setenv(homeTemplateEnv, "")
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
+
+	var prepared atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/agent/artifacts/prepare" {
+			prepared.Store(true)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{}})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	cancelRun()
+	cfg := &Config{
+		ServerURL: server.URL, APIKey: "key", TaskID: "task-1", TaskType: "article",
+		Topic: "write", Workspace: root, MaxTurns: 1, ArtifactUploadMode: ArtifactUploadDirect,
+	}
+	if err := runAgent(runCtx, cfg, io.Discard, io.Discard); err == nil {
+		t.Fatal("canceled agent run unexpectedly succeeded")
+	}
+	if !prepared.Load() {
+		t.Fatal("local artifact finalization inherited the canceled run context")
+	}
+}
+
+func (r *slowArtifactReader) Read(p []byte) (int, error) {
+	time.Sleep(r.delay)
+	if len(p) > 1024 {
+		p = p[:1024]
+	}
+	return r.ReadCloser.Read(p)
 }
 
 func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
@@ -144,6 +267,62 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	file := reporter.manifest.Files[0]
 	if file.RelativePath != "output/article.md" || file.ObjectKey == "" || file.SHA256 == "" || file.ETag != "etag-1" {
 		t.Fatalf("manifest file = %#v, want relative path, object key, sha, etag", file)
+	}
+}
+
+func TestArtifactUploaderUploadsFailureArtifactsForUnsuccessfulResult(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/failure-state.json", `{"stage":"quality-gate"}`)
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
+	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, _ string, _ string) (string, error) {
+		return "etag-failure", nil
+	}
+
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
+		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
+	}
+	if len(reporter.prepared) != 1 || reporter.prepared[0].RelativePath != "output/failure-state.json" {
+		t.Fatalf("prepared = %#v, want failure-state.json", reporter.prepared)
+	}
+	if len(reporter.manifest.Files) != 1 || reporter.manifest.Files[0].RelativePath != "output/failure-state.json" {
+		t.Fatalf("manifest = %#v, want failure-state.json", reporter.manifest)
+	}
+}
+
+func TestJobArtifactUploaderDoesNotFallbackOutsideOutput(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "content.md", "internal draft")
+	writeAgentArtifactTestFile(t, root, ".task-context", "TASK_ID=task-1")
+	writeAgentArtifactTestFile(t, root, ".anban-creator/settings.json", "{}")
+	writeAgentArtifactTestFile(t, root, ".claude/memory/MEMORY.md", "memory")
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
+	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
+		t.Fatal("job without output must not upload")
+		return "", nil
+	}
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reporter.prepared) != 0 || len(reporter.manifest.Files) != 0 || len(reporter.progress) != 0 {
+		t.Fatalf("job uploaded workspace internals: prepared=%v manifest=%v progress=%v", reporter.prepared, reporter.manifest, reporter.progress)
+	}
+}
+
+func TestJobArtifactUploaderDoesNotFallbackWhenOutputIsEmpty(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "content.md", "internal draft")
+	if err := os.Mkdir(filepath.Join(root, "output"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reporter.prepared) != 0 || len(reporter.manifest.Files) != 0 {
+		t.Fatalf("empty output fell back to workspace: %+v", reporter)
 	}
 }
 

@@ -4,12 +4,13 @@ import "gorm.io/gorm"
 
 // AutoMigrate creates or updates all database tables.
 func AutoMigrate(db *gorm.DB) error {
-	err := db.AutoMigrate(
+	return db.AutoMigrate(
 		&User{},
 		&LoginSession{},
 		&Project{},
 		&Plan{},
 		&Task{},
+		&TaskExecution{},
 		&TaskFile{},
 		&PendingUpload{},
 		&CreditTransaction{},
@@ -24,15 +25,11 @@ func AutoMigrate(db *gorm.DB) error {
 		&TopicPool{},
 		&ImageGeneration{},
 		&ImageGenerationResult{},
+		&DesignerReference{},
 		&VideoGeneration{},
 		&VideoGenerationSegment{},
 		&AgentFeedback{},
 		&IlinkBinding{},
 		&IlinkNotification{},
 	)
-	if err != nil {
-		return err
-	}
-
-	return MigrateDurableTaskWorkspaceSchema(db)
 }

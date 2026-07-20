@@ -15,6 +15,22 @@ const goalSchema = z.string().refine(
   `目标条件不能超过 ${GOAL_TEXT_MAX_LENGTH} 个字符`,
 )
 
+const inputAttachmentSchema = z.object({
+  type: z.enum(["image", "audio", "video", "document", "text"]),
+  url: z.string().optional(),
+  text: z.string().optional(),
+  file_name: z.string().optional(),
+  content_type: z.string().optional(),
+  size: z.number().optional(),
+  role: z.string().optional(),
+  upload_id: z.string().optional(),
+  key: z.string().optional(),
+  instruction: z.string().refine(
+    (value) => unicodeLength(value) <= 1000,
+    "单张素材说明不能超过 1000 个字符",
+  ).optional(),
+})
+
 const videoReferenceSchema = z.object({
   type: z.enum(["text", "image_url", "audio_url", "video_url"]),
   url: z.string().optional(),
@@ -96,6 +112,9 @@ export const createTaskSchema = z.object({
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
+  input_attachments: z.array(inputAttachmentSchema)
+    .max(16, "最多添加 16 个附件")
+    .default([]),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),
@@ -155,7 +174,12 @@ export const createTaskSchema = z.object({
 
   if (data.type === "videoeditor") {
     const refs = data.video_editor_input?.references ?? []
-    const hasVideoSource = refs.some((ref) => ref.type === "video_url" && Boolean(ref.url || ref.task_file_id))
+    const hasStructuredVideoSource = refs.some((ref) => ref.type === "video_url" && Boolean(ref.url || ref.task_file_id))
+    const hasPromptVideoSource = data.input_attachments.some((attachment) => (
+      attachment.type === "video"
+      && Boolean((attachment.upload_id && attachment.key) || attachment.url)
+    ))
+    const hasVideoSource = hasStructuredVideoSource || hasPromptVideoSource
     if (!hasVideoSource) {
       ctx.addIssue({
         code: "custom",
@@ -208,6 +232,9 @@ export const planSchema = z.object({
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
+  input_attachments: z.array(inputAttachmentSchema)
+    .max(16, "最多添加 16 个附件")
+    .default([]),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),

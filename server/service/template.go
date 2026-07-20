@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -99,10 +100,65 @@ func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, user
 	if tmpl.ID == "" {
 		tmpl.ID = uuid.NewString()
 	}
+	prepareTemplateForCreate(tmpl, userID)
+
+	if err := s.repo.Templates().Create(ctx, tmpl); err != nil {
+		return nil, fmt.Errorf("create template: %w", err)
+	}
+	return tmpl, nil
+}
+
+// SaveGlobal idempotently creates an MCP-managed global template. Its stable
+// ID is derived only from the visual fields persisted by save_template.
+func (s *TemplateService) SaveGlobal(ctx context.Context, tmpl *model.Template) (*model.Template, bool, error) {
+	normalized := normalizeGlobalTemplate(tmpl)
+	if normalized.Name == "" {
+		normalized.Name = deriveNameFromStyle(normalized.VisualStyle)
+	}
+	if normalized.Name == "" {
+		return nil, false, ErrTemplateNameMissing
+	}
+
+	fingerprintPayload, err := json.Marshal(struct {
+		Type        string   `json:"type"`
+		Name        string   `json:"name"`
+		Category    string   `json:"category"`
+		VisualStyle string   `json:"style_prompt"`
+		Tags        []string `json:"tags"`
+	}{
+		Type:        normalized.Type,
+		Name:        normalized.Name,
+		Category:    normalized.Category,
+		VisualStyle: normalized.VisualStyle,
+		Tags:        normalized.Tags,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("marshal template fingerprint: %w", err)
+	}
+	normalized.ID = uuid.NewSHA1(uuid.NameSpaceOID, fingerprintPayload).String()
+
+	prepareTemplateForCreate(normalized, "")
+	createErr := s.repo.Templates().Create(ctx, normalized)
+	if createErr == nil {
+		return normalized, true, nil
+	}
+	canonical, findErr := s.repo.Templates().FindByID(ctx, normalized.ID)
+	if findErr != nil {
+		return nil, false, fmt.Errorf("create template: %w", createErr)
+	}
+	ensureTagsNotNil(canonical)
+	if !sameGlobalTemplatePayload(canonical, normalized) {
+		return nil, false, fmt.Errorf("template fingerprint collision for %s", normalized.ID)
+	}
+	return canonical, false, nil
+}
+
+func prepareTemplateForCreate(tmpl *model.Template, userID string) {
+	if tmpl.Visibility != "public" && tmpl.Visibility != "private" {
+		tmpl.Visibility = "public"
+	}
 	tmpl.UserID = userID
 	tmpl.IsActive = true
-	// New template writes are visual-only. Legacy DB columns remain on the model
-	// for old rows, but service writes intentionally clear them.
 	tmpl.Writer = ""
 	tmpl.Theme = ""
 	tmpl.Author = ""
@@ -110,11 +166,45 @@ func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, user
 	tmpl.ExampleContent = nil
 	tmpl.SetEcommerce(model.EcommerceTemplateDefaults{})
 	ensureTagsNotNil(tmpl)
+}
 
-	if err := s.repo.Templates().Create(ctx, tmpl); err != nil {
-		return nil, fmt.Errorf("create template: %w", err)
+func normalizeGlobalTemplate(tmpl *model.Template) *model.Template {
+	normalized := *tmpl
+	normalized.Type = strings.TrimSpace(normalized.Type)
+	normalized.Name = strings.TrimSpace(normalized.Name)
+	normalized.Category = strings.TrimSpace(normalized.Category)
+	normalized.VisualStyle = strings.TrimSpace(strings.ReplaceAll(normalized.VisualStyle, "\r\n", "\n"))
+
+	tagSet := make(map[string]struct{}, len(normalized.Tags))
+	normalized.Tags = make([]string, 0, len(tmpl.Tags))
+	for _, tag := range tmpl.Tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		if _, exists := tagSet[tag]; exists {
+			continue
+		}
+		tagSet[tag] = struct{}{}
+		normalized.Tags = append(normalized.Tags, tag)
 	}
-	return tmpl, nil
+	sort.Strings(normalized.Tags)
+	return &normalized
+}
+
+func sameGlobalTemplatePayload(left, right *model.Template) bool {
+	if left.Type != right.Type || left.Name != right.Name || left.Category != right.Category || left.VisualStyle != right.VisualStyle {
+		return false
+	}
+	if len(left.Tags) != len(right.Tags) {
+		return false
+	}
+	for i := range left.Tags {
+		if left.Tags[i] != right.Tags[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Update modifies an existing template. Only the owner can update. Returns

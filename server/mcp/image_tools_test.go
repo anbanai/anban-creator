@@ -1,25 +1,228 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
+
+type fakeImageModelResolver struct {
+	resolved       *service.ResolvedImageModel
+	err            error
+	calls          int
+	userID         string
+	imageModelKey  string
+	imageType      string
+	referenceCount int
+}
+
+func (f *fakeImageModelResolver) ResolveImageModelForGeneration(
+	_ context.Context,
+	userID string,
+	imageModelKey string,
+	imageType string,
+	referenceCount int,
+) (*service.ResolvedImageModel, error) {
+	f.calls++
+	f.userID = userID
+	f.imageModelKey = imageModelKey
+	f.imageType = imageType
+	f.referenceCount = referenceCount
+	return f.resolved, f.err
+}
+
+type fakeImageGenerationBiller struct {
+	decision  ImageGenerationBillingDecision
+	err       error
+	calls     int
+	userID    string
+	taskID    string
+	imageType string
+	resolved  *service.ResolvedImageModel
+}
+
+func (f *fakeImageGenerationBiller) PrepareImageGeneration(
+	_ context.Context,
+	userID, taskID, imageType string,
+	resolved *service.ResolvedImageModel,
+) (ImageGenerationBillingDecision, error) {
+	f.calls++
+	f.userID = userID
+	f.taskID = taskID
+	f.imageType = imageType
+	f.resolved = resolved
+	return f.decision, f.err
+}
+
+type fakeImageGenerator struct {
+	result          *service.ImageResult
+	err             error
+	calls           int
+	imageType       string
+	refPath         string
+	refPaths        []string
+	resolved        *service.ResolvedImageModel
+	waitForContext  bool
+	returnAfterWait bool
+	started         chan struct{}
+	ctxErr          error
+}
+
+func (f *fakeImageGenerator) GenerateImage(
+	ctx context.Context,
+	_, _, _, imageType, _, refPath string,
+	refPaths []string,
+	_, _ string,
+	resolved *service.ResolvedImageModel,
+	_ *bool,
+) (*service.ImageResult, error) {
+	f.calls++
+	f.imageType = imageType
+	f.refPath = refPath
+	f.refPaths = append([]string(nil), refPaths...)
+	f.resolved = resolved
+	if f.started != nil {
+		close(f.started)
+	}
+	if f.waitForContext {
+		<-ctx.Done()
+		f.ctxErr = ctx.Err()
+		if f.returnAfterWait {
+			return f.result, f.err
+		}
+		return nil, ctx.Err()
+	}
+	return f.result, f.err
+}
+
+func setupTimedGenerateImageHandlerTest(t *testing.T) (context.Context, string, *mcp.CallToolRequest, *fakeImageModelResolver, *service.TaskService) {
+	t.Helper()
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	userID := "user-image-timeout"
+	projectID := "project-image-timeout"
+	taskID := "task-image-timeout"
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID: taskID, UserID: userID, ProjectID: projectID,
+		Type: model.PlatformSeednote, Status: model.TaskStatusRunning,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &fakeImageModelResolver{resolved: &service.ResolvedImageModel{
+		Provider: "volcengine", Model: "seedream", SelectionReason: "preferred",
+	}}
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(fmt.Sprintf(`{
+		"project_id": %q,
+		"task_id": %q,
+		"prompt": "cover",
+		"output_path": "output/cover.png",
+		"image_type": "cover"
+	}`, projectID, taskID))}}
+	return ctx, userID, request, resolver,
+		service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+}
+
+func TestGenerateImageHandlerReturnsOperationTimeout(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+	ctx, userID, request, resolver, taskSvc := setupTimedGenerateImageHandlerTest(t)
+	generator := &fakeImageGenerator{waitForContext: true}
+	svcs = &Services{
+		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
+		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
+		ImageGenerator: generator, GenerateImageTimeout: 20 * time.Millisecond,
+	}
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
+	if err != nil || !res.IsError || !strings.Contains(callToolText(res), `"code":"operation_timeout"`) {
+		t.Fatalf("result/error = %#v/%v text=%s", res, err, callToolText(res))
+	}
+	if !errors.Is(generator.ctxErr, context.DeadlineExceeded) {
+		t.Fatalf("generator context error = %v", generator.ctxErr)
+	}
+}
+
+func TestGenerateImageHandlerClassifiesCallerCancellation(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+	_, userID, request, resolver, taskSvc := setupTimedGenerateImageHandlerTest(t)
+	started := make(chan struct{})
+	generator := &fakeImageGenerator{waitForContext: true, started: started}
+	svcs = &Services{
+		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
+		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
+		ImageGenerator: generator, GenerateImageTimeout: time.Minute,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
+	if err != nil || !res.IsError || !strings.Contains(callToolText(res), `"code":"request_cancelled"`) {
+		t.Fatalf("result/error = %#v/%v text=%s", res, err, callToolText(res))
+	}
+}
+
+func TestGenerateImageHandlerRejectsLateProviderSuccess(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+	ctx, userID, request, resolver, taskSvc := setupTimedGenerateImageHandlerTest(t)
+	generator := &fakeImageGenerator{
+		waitForContext:  true,
+		returnAfterWait: true,
+		result:          &service.ImageResult{DownloadURL: "https://example.com/late.png"},
+	}
+	svcs = &Services{
+		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
+		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
+		ImageGenerator: generator, GenerateImageTimeout: 20 * time.Millisecond,
+	}
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
+	if err != nil || !res.IsError || !strings.Contains(callToolText(res), `"code":"operation_timeout"`) {
+		t.Fatalf("result/error = %#v/%v text=%s", res, err, callToolText(res))
+	}
+}
+
+func TestGenerateImageHandlerReturnsProviderTimeout(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+	ctx, userID, request, resolver, taskSvc := setupTimedGenerateImageHandlerTest(t)
+	generator := &fakeImageGenerator{err: context.DeadlineExceeded}
+	svcs = &Services{
+		TaskSvc: taskSvc, ImageSvc: &service.ImageService{},
+		ImageModelResolver: resolver, ImageGenerationBiller: &fakeImageGenerationBiller{},
+		ImageGenerator: generator, GenerateImageTimeout: time.Minute,
+	}
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), request)
+	if err != nil || !res.IsError || !strings.Contains(callToolText(res), `"code":"provider_timeout"`) {
+		t.Fatalf("result/error = %#v/%v text=%s", res, err, callToolText(res))
+	}
+}
 
 func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {
 	schema := generateImageInputSchema()
@@ -30,12 +233,384 @@ func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {
 	if _, ok := props["image_model_key"]; ok {
 		t.Fatalf("generate_image schema must not expose image_model_key")
 	}
+	for _, forbidden := range []string{"auto", "required", "excluded"} {
+		if _, ok := props[forbidden]; ok {
+			t.Fatalf("generate_image schema must not expose %q reference policy", forbidden)
+		}
+	}
+	for _, key := range []string{"ref_image_path", "ref_image_paths"} {
+		prop, ok := props[key].(map[string]any)
+		if !ok {
+			t.Fatalf("%s schema missing or wrong type: %#v", key, props[key])
+		}
+		description, _ := prop["description"].(string)
+		for _, provider := range []string{"OpenAI", "Gemini", "Volcengine", "Seedream"} {
+			if strings.Contains(description, provider) {
+				t.Fatalf("%s description must be provider-neutral, got %q", key, description)
+			}
+		}
+	}
 	required, ok := schema["required"].([]any)
 	if !ok {
 		t.Fatalf("schema required missing or wrong type: %#v", schema["required"])
 	}
-	if !containsAnyString(required, "task_id") {
-		t.Fatalf("generate_image schema must require task_id, got %#v", required)
+	for _, name := range []string{"task_id", "output_path"} {
+		if !containsAnyString(required, name) {
+			t.Fatalf("generate_image schema must require %s, got %#v", name, required)
+		}
+	}
+}
+
+func TestGenerateImageResolvesModelOnce(t *testing.T) {
+	oldSvcs := svcs
+	oldLog := mcpLog
+	t.Cleanup(func() {
+		svcs = oldSvcs
+		mcpLog = oldLog
+	})
+
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	userID := "user-resolve-image-once"
+	projectID := "project-resolve-image-once"
+	taskID := "task-resolve-image-once"
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote",
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
+		Status: model.TaskStatusRunning, ImageModelKey: "preferred-key",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	resolved := &service.ResolvedImageModel{
+		Key:                "server-only-key",
+		Provider:           "openai",
+		Model:              "gpt-image-2",
+		Source:             "preset:openai-gpt-image",
+		SupportsReference:  true,
+		MaxReferenceImages: 16,
+		SelectionReason:    "reference_compatible_fallback",
+	}
+	resolver := &fakeImageModelResolver{resolved: resolved}
+	biller := &fakeImageGenerationBiller{decision: ImageGenerationBillingDecision{
+		Provider: "must-not-drive-response", Model: "must-not-drive-response", Source: "must-not-drive-response",
+	}}
+	generator := &fakeImageGenerator{result: &service.ImageResult{DownloadURL: "https://example.com/generated.png"}}
+	svcs = &Services{
+		TaskSvc:               service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil),
+		ImageSvc:              &service.ImageService{},
+		ImageModelResolver:    resolver,
+		ImageGenerationBiller: biller,
+		ImageGenerator:        generator,
+	}
+	var logBuffer bytes.Buffer
+	log := zerolog.New(&logBuffer)
+	mcpLog = &log
+
+	ref1 := filepath.Join(t.TempDir(), "ref-1.png")
+	ref2 := filepath.Join(t.TempDir(), "ref-2.png")
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(fmt.Sprintf(`{
+			"project_id": %q,
+			"task_id": %q,
+			"prompt": "generate a cover",
+			"output_path": "output/cover.png",
+			"image_type": "cover",
+			"ref_image_paths": [%q, %q]
+		}`, projectID, taskID, ref1, ref2))},
+	})
+	if err != nil {
+		t.Fatalf("generateImageHandler returned error: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected successful tool result, got %#v (%s)", res, callToolText(res))
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", resolver.calls)
+	}
+	if resolver.userID != userID || resolver.imageModelKey != "preferred-key" || resolver.imageType != "cover" || resolver.referenceCount != 2 {
+		t.Fatalf("resolver args = user %q key %q type %q refs %d", resolver.userID, resolver.imageModelKey, resolver.imageType, resolver.referenceCount)
+	}
+	if biller.calls != 1 || generator.calls != 1 {
+		t.Fatalf("biller/generator calls = %d/%d, want 1/1", biller.calls, generator.calls)
+	}
+	if biller.resolved != resolved || generator.resolved != resolved {
+		t.Fatalf("descriptor pointer was not shared: resolver=%p biller=%p generator=%p", resolved, biller.resolved, generator.resolved)
+	}
+
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(callToolText(res)), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["provider"] != resolved.Provider || payload["model"] != resolved.Model || payload["selection_reason"] != resolved.SelectionReason {
+		t.Fatalf("response model metadata = %#v, want descriptor metadata", payload)
+	}
+	if payload["supports_reference"] != true || payload["max_reference_images"] != float64(16) {
+		t.Fatalf("response capabilities = %#v", payload)
+	}
+	if _, ok := payload["key"]; ok || strings.Contains(callToolText(res), resolved.Key) {
+		t.Fatalf("response must not expose resolved key: %s", callToolText(res))
+	}
+	logs := logBuffer.String()
+	for _, want := range []string{`"provider":"openai"`, `"model":"gpt-image-2"`, `"selection_reason":"reference_compatible_fallback"`} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %s: %s", want, logs)
+		}
+	}
+	if strings.Contains(logs, resolved.Key) {
+		t.Fatalf("logs must not expose resolved key: %s", logs)
+	}
+	if strings.Contains(logs, "must-not-drive-response") {
+		t.Fatalf("logs must use resolved descriptor metadata, not a second billing decision: %s", logs)
+	}
+}
+
+func TestGenerateImagePreservesGeneratedTaskFileWhenDynamicBillingFails(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	userID := "user-dynamic-billing-file"
+	projectID := "project-dynamic-billing-file"
+	taskID := "task-dynamic-billing-file"
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote"}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
+	}
+	generatedPath := filepath.Join(t.TempDir(), "generated.png")
+	if err := os.WriteFile(generatedPath, tinyPNGBytes(), 0o644); err != nil {
+		t.Fatalf("write generated image: %v", err)
+	}
+	resolved := &service.ResolvedImageModel{Provider: "openai", Model: "gpt-image-2"}
+	svcs = &Services{
+		TaskSvc:            service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil),
+		ImageModelResolver: &fakeImageModelResolver{resolved: resolved},
+		ImageGenerationBiller: &fakeImageGenerationBiller{decision: ImageGenerationBillingDecision{
+			Dynamic: true, DynamicProvider: "openai", DynamicModel: "gpt-image-2", DynamicRoute: "content",
+		}},
+		ImageGenerator: &fakeImageGenerator{result: &service.ImageResult{
+			FilePath: "output/generated.png", LocalFilePath: generatedPath, OutputMIME: "image/png",
+		}},
+	}
+
+	args, err := json.Marshal(map[string]any{
+		"project_id":  projectID,
+		"task_id":     taskID,
+		"prompt":      "generate",
+		"output_path": "output/generated.png",
+	})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}})
+	if err != nil {
+		t.Fatalf("generateImageHandler returned error: %v", err)
+	}
+	if res == nil || !res.IsError || !strings.Contains(callToolText(res), "usage is required for billing") {
+		t.Fatalf("expected dynamic billing error, got %#v (%s)", res, callToolText(res))
+	}
+	files, err := repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("list task files: %v", err)
+	}
+	if len(files) != 1 || files[0].FilePath != "output/generated.png" {
+		t.Fatalf("generated task files = %#v, want preserved output/generated.png", files)
+	}
+}
+
+func TestGenerateImageUsesMultiReferenceArrayAsAuthoritativeInput(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	userID := "user-authoritative-refs"
+	projectID := "project-authoritative-refs"
+	taskID := "task-authoritative-refs"
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote"}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	resolved := &service.ResolvedImageModel{Provider: "openai", Model: "gpt-image-2", SupportsReference: true, MaxReferenceImages: 16}
+	resolver := &fakeImageModelResolver{resolved: resolved}
+	biller := &fakeImageGenerationBiller{}
+	generator := &fakeImageGenerator{result: &service.ImageResult{DownloadURL: "https://example.com/generated.png"}}
+	svcs = &Services{
+		TaskSvc:               service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil),
+		ImageModelResolver:    resolver,
+		ImageGenerationBiller: biller,
+		ImageGenerator:        generator,
+	}
+
+	legacyRef := filepath.Join(t.TempDir(), "legacy.png")
+	arrayRef1 := filepath.Join(t.TempDir(), "array-1.png")
+	arrayRef2 := filepath.Join(t.TempDir(), "array-2.png")
+	args, err := json.Marshal(map[string]any{
+		"project_id":      projectID,
+		"task_id":         taskID,
+		"prompt":          "generate",
+		"output_path":     "output/generated.png",
+		"ref_image_path":  legacyRef,
+		"ref_image_paths": []string{arrayRef1, arrayRef2},
+	})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}})
+	if err != nil {
+		t.Fatalf("generateImageHandler returned error: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected successful tool result, got %#v (%s)", res, callToolText(res))
+	}
+	if resolver.referenceCount != 2 {
+		t.Fatalf("resolver reference count = %d, want 2", resolver.referenceCount)
+	}
+	if generator.refPath != "" {
+		t.Fatalf("legacy ref path = %q, want ignored when ref_image_paths is supplied", generator.refPath)
+	}
+	if len(generator.refPaths) != 2 || generator.refPaths[0] != arrayRef1 || generator.refPaths[1] != arrayRef2 {
+		t.Fatalf("generator refs = %#v, want authoritative array", generator.refPaths)
+	}
+}
+
+func TestGenerateImageValidatesVisionPreconditionsBeforeBillingOrGeneration(t *testing.T) {
+	for _, tt := range []struct {
+		name               string
+		verificationPrompt string
+		wantError          string
+	}{
+		{name: "missing prompt", wantError: "verification_prompt is required"},
+		{name: "missing service", verificationPrompt: "verify product identity", wantError: "writing/vision service not available"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			oldSvcs := svcs
+			t.Cleanup(func() { svcs = oldSvcs })
+
+			db := repositoryTestDB(t)
+			repo := repository.New(db)
+			ctx := context.Background()
+			logger := zerolog.New(io.Discard)
+			suffix := strings.ReplaceAll(tt.name, " ", "-")
+			userID := "user-vision-preflight-" + suffix
+			projectID := "project-vision-preflight-" + suffix
+			taskID := "task-vision-preflight-" + suffix
+			if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote"}); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			resolver := &fakeImageModelResolver{resolved: &service.ResolvedImageModel{Provider: "openai", Model: "gpt-image-2"}}
+			biller := &fakeImageGenerationBiller{}
+			generator := &fakeImageGenerator{result: &service.ImageResult{DownloadURL: "https://example.com/generated.png"}}
+			svcs = &Services{
+				TaskSvc:               service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil),
+				ImageModelResolver:    resolver,
+				ImageGenerationBiller: biller,
+				ImageGenerator:        generator,
+			}
+			args, err := json.Marshal(map[string]any{
+				"project_id":          projectID,
+				"task_id":             taskID,
+				"prompt":              "generate",
+				"output_path":         "output/generated.png",
+				"verify_with_vision":  true,
+				"verification_prompt": tt.verificationPrompt,
+			})
+			if err != nil {
+				t.Fatalf("marshal args: %v", err)
+			}
+			res, err := generateImageHandler(withMCPUserID(ctx, userID), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}})
+			if err != nil {
+				t.Fatalf("generateImageHandler returned error: %v", err)
+			}
+			if res == nil || !res.IsError || !strings.Contains(callToolText(res), tt.wantError) {
+				t.Fatalf("result = %#v (%s), want error containing %q", res, callToolText(res), tt.wantError)
+			}
+			if resolver.calls != 0 || biller.calls != 0 || generator.calls != 0 {
+				t.Fatalf("resolver/biller/generator calls = %d/%d/%d, want 0/0/0", resolver.calls, biller.calls, generator.calls)
+			}
+		})
+	}
+}
+
+func TestGenerateImageReturnsActualReferenceLimit(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	userID := "user-image-limit"
+	projectID := "project-image-limit"
+	taskID := "task-image-limit"
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote"}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning, ImageModelKey: "preferred-key"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	resolver := &fakeImageModelResolver{err: &service.ImageReferenceLimitError{Requested: 17, MaxReferenceImages: 16}}
+	biller := &fakeImageGenerationBiller{}
+	generator := &fakeImageGenerator{}
+	svcs = &Services{
+		TaskSvc:               service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil),
+		ImageSvc:              &service.ImageService{},
+		ImageModelResolver:    resolver,
+		ImageGenerationBiller: biller,
+		ImageGenerator:        generator,
+	}
+
+	refs := make([]string, 17)
+	for i := range refs {
+		refs[i] = filepath.Join(t.TempDir(), fmt.Sprintf("ref-%02d.png", i+1))
+	}
+	args, err := json.Marshal(map[string]any{
+		"project_id":      projectID,
+		"task_id":         taskID,
+		"prompt":          "generate",
+		"output_path":     "output/generated.png",
+		"ref_image_paths": refs,
+	})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	res, err := generateImageHandler(withMCPUserID(ctx, userID), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}})
+	if err != nil {
+		t.Fatalf("generateImageHandler returned error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected limit error, got %#v", res)
+	}
+	if got := callToolText(res); !strings.Contains(got, "requested 17") || !strings.Contains(got, "limit of 16") {
+		t.Fatalf("limit response = %q, want actual 17/16 limit", got)
+	}
+	if resolver.calls != 1 || resolver.referenceCount != 17 {
+		t.Fatalf("resolver calls/count = %d/%d, want 1/17", resolver.calls, resolver.referenceCount)
+	}
+	if biller.calls != 0 || generator.calls != 0 {
+		t.Fatalf("biller/generator must not run after preflight failure: %d/%d", biller.calls, generator.calls)
 	}
 }
 
@@ -302,39 +877,6 @@ func TestImageResult_UploadFields_JSONTags(t *testing.T) {
 	}
 }
 
-func TestResolveImageBillingModelUsesTaskSelectedPreset(t *testing.T) {
-	old := billSvc
-	t.Cleanup(func() { billSvc = old })
-
-	billSvc = &billingServices{
-		config: &srvconfig.Config{
-			ImageAPI: srvconfig.ImageAPIConfig{
-				Cover: &appconfig.ImageAPI{Provider: "volcengine", Model: "doubao-seedream", Credits: 9},
-			},
-			ImagePresets: []srvconfig.ImageModelPreset{
-				{
-					Key:      "openai-gpt-image",
-					Provider: "openai",
-					Model:    "gpt-image-2",
-					MinTier:  "free",
-				},
-			},
-		},
-	}
-
-	provider, mdl, source, err := resolveImageBillingModel(context.Background(), "user-1", "openai-gpt-image")
-	if err != nil {
-		t.Fatalf("resolveImageBillingModel returned error: %v", err)
-	}
-
-	if provider != "openai" || mdl != "gpt-image-2" {
-		t.Fatalf("billing model = %s/%s, want openai/gpt-image-2", provider, mdl)
-	}
-	if source != "preset:openai-gpt-image" {
-		t.Fatalf("billing source = %q, want preset:openai-gpt-image", source)
-	}
-}
-
 func containsAnyString(values []any, want string) bool {
 	for _, v := range values {
 		if s, ok := v.(string); ok && s == want {
@@ -358,10 +900,11 @@ func callToolText(res *mcp.CallToolResult) string {
 // is a no-op so tests can exercise both the URL and OSSURL branches of the
 // helper (the real EnrichFilesWithURLs only sets URL when OSSKey != "").
 type fakeTaskFileRegistrar struct {
-	uploadCalls  []fakeUploadCall
-	uploadResult *model.TaskFile
-	uploadErr    error
-	enrichCalled bool
+	uploadCalls          []fakeUploadCall
+	executionUploadCalls []fakeExecutionUploadCall
+	uploadResult         *model.TaskFile
+	uploadErr            error
+	enrichCalled         bool
 }
 
 type fakeUploadCall struct {
@@ -369,9 +912,20 @@ type fakeUploadCall struct {
 	size                          int64
 }
 
+type fakeExecutionUploadCall struct {
+	taskID, userID, executionID, relPath, mime string
+	size                                       int64
+}
+
 func (f *fakeTaskFileRegistrar) UploadTaskFileFromReader(_ context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
 	io.Copy(io.Discard, reader) // drain so the helper's file handle closes cleanly
 	f.uploadCalls = append(f.uploadCalls, fakeUploadCall{taskID, userID, relPath, mimeType, fileSize})
+	return f.uploadResult, f.uploadErr
+}
+
+func (f *fakeTaskFileRegistrar) UploadExecutionTaskFileFromReader(_ context.Context, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	io.Copy(io.Discard, reader)
+	f.executionUploadCalls = append(f.executionUploadCalls, fakeExecutionUploadCall{taskID, userID, executionID, relPath, mimeType, fileSize})
 	return f.uploadResult, f.uploadErr
 }
 
@@ -423,6 +977,27 @@ func TestRegisterGeneratedImageTaskFile_RegistersAndReturnsFetchableURL(t *testi
 	}
 	if !fake.enrichCalled {
 		t.Error("[FAIL] EnrichFilesWithURLs was not called")
+	}
+}
+
+func TestRegisterGeneratedImageTaskFileScopesManagedCallToExecution(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "image_01.png")
+	if err := os.WriteFile(tmp, []byte("fake-png-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeTaskFileRegistrar{uploadResult: &model.TaskFile{URL: "https://cdn.example.com/image_01.png"}}
+	ctx := withMCPExecutionID(context.Background(), "execution-1")
+	result := &service.ImageResult{FilePath: "output/seednote/title/image_01.png", LocalFilePath: tmp, OutputMIME: "image/png"}
+
+	if _, err := registerGeneratedImageTaskFile(ctx, fake, "task-1", "user-1", result); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.uploadCalls) != 0 || len(fake.executionUploadCalls) != 1 {
+		t.Fatalf("legacy calls=%d execution calls=%d", len(fake.uploadCalls), len(fake.executionUploadCalls))
+	}
+	call := fake.executionUploadCalls[0]
+	if call.executionID != "execution-1" || call.relPath != "output/seednote/title/image_01.png" {
+		t.Fatalf("execution upload = %#v", call)
 	}
 }
 
@@ -629,6 +1204,35 @@ func TestRegisterGeneratedImageTaskFile_FallsBackToOSSURL(t *testing.T) {
 	}
 }
 
+func TestRegisterGeneratedImageTaskFile_RejectsMissingFetchableURL(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "image_01.png")
+	if err := os.WriteFile(tmp, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	fake := &fakeTaskFileRegistrar{uploadResult: &model.TaskFile{}}
+	res := &service.ImageResult{FilePath: tmp, OutputMIME: "image/png"}
+
+	_, err := registerGeneratedImageTaskFile(context.Background(), fake, "task-1", "user-1", res)
+	if err == nil || !strings.Contains(err.Error(), "no fetchable URL") {
+		t.Fatalf("error = %v, want missing fetchable URL", err)
+	}
+}
+
+func TestSanitizeTaskImageDownloadURLRemovesInlineBase64(t *testing.T) {
+	result := &service.ImageResult{DownloadURL: "data:image/png;base64," + strings.Repeat("A", 2*1024*1024)}
+	sanitizeTaskImageDownloadURL(result)
+	if result.DownloadURL != "" {
+		t.Fatalf("DownloadURL retained %d inline bytes", len(result.DownloadURL))
+	}
+
+	httpsURL := "https://cdn.example.com/image.png"
+	result.DownloadURL = httpsURL
+	sanitizeTaskImageDownloadURL(result)
+	if result.DownloadURL != httpsURL {
+		t.Fatalf("DownloadURL = %q, want %q", result.DownloadURL, httpsURL)
+	}
+}
+
 func TestRegisterGeneratedImageTaskFile_StatErrorSkipsUpload(t *testing.T) {
 	fake := &fakeTaskFileRegistrar{}
 	res := &service.ImageResult{FilePath: "/does/not/exist/cover.png", OutputMIME: "image/png"}
@@ -661,11 +1265,12 @@ func TestRegisterGeneratedImageTaskFile_UploadErrorPropagates(t *testing.T) {
 }
 
 type fakeRenderedImageRegistrar struct {
-	uploadCalls  []fakeUploadCall
-	uploadResult *model.TaskFile
-	uploadErr    error
-	enrichCalled bool
-	updateCalls  []fakeRenderedImageUpdateCall
+	uploadCalls          []fakeUploadCall
+	executionUploadCalls []fakeExecutionUploadCall
+	uploadResult         *model.TaskFile
+	uploadErr            error
+	enrichCalled         bool
+	updateCalls          []fakeRenderedImageUpdateCall
 }
 
 type fakeRenderedImageUpdateCall struct {
@@ -675,6 +1280,12 @@ type fakeRenderedImageUpdateCall struct {
 func (f *fakeRenderedImageRegistrar) UploadTaskFileFromReader(_ context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
 	io.Copy(io.Discard, reader)
 	f.uploadCalls = append(f.uploadCalls, fakeUploadCall{taskID, userID, relPath, mimeType, fileSize})
+	return f.uploadResult, f.uploadErr
+}
+
+func (f *fakeRenderedImageRegistrar) UploadExecutionTaskFileFromReader(_ context.Context, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	io.Copy(io.Discard, reader)
+	f.executionUploadCalls = append(f.executionUploadCalls, fakeExecutionUploadCall{taskID, userID, executionID, relPath, mimeType, fileSize})
 	return f.uploadResult, f.uploadErr
 }
 

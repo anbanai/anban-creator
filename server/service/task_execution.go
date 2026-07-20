@@ -127,7 +127,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		},
 	}
 	if model.IsMontagePlatform(task.Type) {
-		opts.MontageProviderEnv = s.montageCfg.ProviderEnv
+		opts.MontageEnv = s.montageCfg.Env
 		opts.MontageToolPolicy = s.montageCfg.ToolPolicy
 		opts.MontagePipelineDefaults = s.montageCfg.PipelineDefaults
 	}
@@ -605,6 +605,9 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 	if err != nil {
 		return fmt.Errorf("find task %s: %w", taskID, err)
 	}
+	if s.kubernetesDispatcher != nil {
+		return s.dispatchKubernetes(ctx, task)
+	}
 
 	// Atomic CAS: pending → running (with started_at). Eliminates TOCTOU race.
 	swapped, err := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(ctx, taskID, model.TaskStatusPending, model.TaskStatusRunning)
@@ -849,7 +852,13 @@ func extractArticleDraftFromWorkspace(workDir string) ([]DraftArticleInput, erro
 	// Fallback: find the first HTML file in the workspace.
 	var htmlPath string
 	_ = filepath.WalkDir(scanDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || htmlPath != "" {
+		if err != nil || htmlPath != "" {
+			return nil
+		}
+		if d.IsDir() {
+			if path != scanDir && ShouldSkipTaskFileDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if d.Type()&os.ModeSymlink != 0 {

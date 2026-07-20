@@ -11,8 +11,8 @@ export default function AppLayout() {
         <PageTransition>
           <Outlet />
         </PageTransition>
+        <FeedbackFab />
       </main>
-      <FeedbackFab />
     </div>
   )
 }

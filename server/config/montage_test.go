@@ -39,8 +39,8 @@ func TestMontageConfigDefaults(t *testing.T) {
 	if cfg.DefaultExecutionTarget != "cloud" {
 		t.Fatalf("DefaultExecutionTarget = %q, want cloud", cfg.DefaultExecutionTarget)
 	}
-	if cfg.ProviderEnv == nil {
-		t.Fatal("ProviderEnv = nil, want empty map")
+	if cfg.Env == nil {
+		t.Fatal("Env = nil, want empty map")
 	}
 	if cfg.ToolPolicy == nil {
 		t.Fatal("ToolPolicy = nil, want empty map")
@@ -61,8 +61,8 @@ func TestMontageConfigValidate(t *testing.T) {
 		TimeoutMinutes:         90,
 		ExecutionTargets:       []string{"cloud", "local"},
 		DefaultExecutionTarget: "cloud",
-		ProviderEnv: map[string]string{
-			"FAL_KEY":                 "fal-secret",
+		Env: map[string]string{
+			"NEW_PROVIDER_TOKEN":      "future-secret",
 			"VIDEO_GEN_LOCAL_ENABLED": "false",
 		},
 		ToolPolicy: map[string]MontageToolCapabilityPolicy{
@@ -83,7 +83,7 @@ func TestMontageConfigValidate(t *testing.T) {
 	}
 }
 
-func TestMontageConfigRejectsUnknownProviderEnv(t *testing.T) {
+func TestMontageConfigAcceptsArbitraryEnvKeys(t *testing.T) {
 	cfg := MontageConfig{
 		Enabled:                true,
 		SubmodulePath:          "third_party/OpenMontage",
@@ -94,26 +94,51 @@ func TestMontageConfigRejectsUnknownProviderEnv(t *testing.T) {
 		TimeoutMinutes:         90,
 		ExecutionTargets:       []string{"cloud"},
 		DefaultExecutionTarget: "cloud",
-		ProviderEnv: map[string]string{
-			"NOT_MONTAGE_KEY": "secret",
+		Env: map[string]string{
+			"NEW_PROVIDER_TOKEN": "secret",
 		},
 	}
 
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "montage.provider_env contains unsupported key") {
-		t.Fatalf("Validate error = %v, want unsupported provider env rejection", err)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate error = %v, want arbitrary environment key accepted", err)
 	}
 }
 
-func TestMontageProviderEnvRedactionDoesNotExposeSecrets(t *testing.T) {
-	cfg := MontageConfig{ProviderEnv: map[string]string{
-		"FAL_KEY":        "fal-secret",
-		"RUNWAY_API_KEY": "",
+func TestMontageConfigRejectsMalformedEnvEntries(t *testing.T) {
+	base := MontageConfig{
+		Enabled:                true,
+		SubmodulePath:          "third_party/OpenMontage",
+		DefaultPipeline:        "default",
+		AllowedPipelines:       []string{"default"},
+		MaxDurationSeconds:     600,
+		MaxAssets:              20,
+		TimeoutMinutes:         90,
+		ExecutionTargets:       []string{"cloud"},
+		DefaultExecutionTarget: "cloud",
+	}
+	for _, env := range []map[string]string{
+		{"": "secret"},
+		{"BAD=KEY": "secret"},
+		{"BAD\x00KEY": "secret"},
+		{"NEW_PROVIDER_TOKEN": "bad\x00value"},
+	} {
+		cfg := base
+		cfg.Env = env
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "montage.env") {
+			t.Fatalf("Validate env %#v error = %v, want malformed entry rejection", env, err)
+		}
+	}
+}
+
+func TestMontageEnvRedactionDoesNotExposeSecrets(t *testing.T) {
+	cfg := MontageConfig{Env: map[string]string{
+		"NEW_PROVIDER_TOKEN": "future-secret",
+		"RUNWAY_API_KEY":     "",
 	}}
 
-	redacted := cfg.RedactedProviderEnv()
-	if redacted["FAL_KEY"] != true {
-		t.Fatalf("FAL_KEY configured = %v, want true", redacted["FAL_KEY"])
+	redacted := cfg.RedactedEnv()
+	if redacted["NEW_PROVIDER_TOKEN"] != true {
+		t.Fatalf("NEW_PROVIDER_TOKEN configured = %v, want true", redacted["NEW_PROVIDER_TOKEN"])
 	}
 	if redacted["RUNWAY_API_KEY"] != false {
 		t.Fatalf("RUNWAY_API_KEY configured = %v, want false", redacted["RUNWAY_API_KEY"])
@@ -122,8 +147,18 @@ func TestMontageProviderEnvRedactionDoesNotExposeSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal redacted env: %v", err)
 	}
-	if strings.Contains(string(data), "fal-secret") {
-		t.Fatalf("redacted provider env leaked secret: %s", data)
+	if strings.Contains(string(data), "future-secret") {
+		t.Fatalf("redacted env leaked secret: %s", data)
+	}
+}
+
+func TestMontageConfigDecodesEnv(t *testing.T) {
+	var cfg Config
+	if err := yaml.Unmarshal([]byte("montage:\n  env:\n    NEW_PROVIDER_TOKEN: future-secret\n"), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.Montage.Env["NEW_PROVIDER_TOKEN"] != "future-secret" {
+		t.Fatalf("Env = %#v, want NEW_PROVIDER_TOKEN", cfg.Montage.Env)
 	}
 }
 

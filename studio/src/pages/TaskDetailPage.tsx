@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef, type ChangeEvent } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Streamdown } from 'streamdown'
-import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban, Upload, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -12,7 +11,7 @@ import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
 import { formatUSD } from '@/lib/utils'
-import type { CreditTransaction, TaskFile } from '@/types'
+import type { CreditTransaction, InputAttachment, Task, TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
@@ -24,16 +23,25 @@ import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
+import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
+import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { VideoProductionPanel } from '@/components/video/VideoProductionPanel'
+import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
-import { Input } from '@/components/ui/input'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
+import { ProjectContextControl, type ProjectContextProject } from '@/components/agent-prompt/ProjectContextControl'
+import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
-import { isVideoCreator, isVideoEditor, isVideoPlatform } from '@/lib/video-platforms'
+import { isVideoCreator, isVideoEditor } from '@/lib/video-platforms'
 import { formatCreditDescription } from '@/lib/credit-display'
+import { taskFailureMessage } from '@/lib/studio-ux'
+import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 
 function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): string | null {
   const metadata = tx.metadata
@@ -60,10 +68,243 @@ function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): strin
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
-interface ResumeFileInput {
-  id: string
-  file: File
-  label: string
+const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
+const RESUME_ATTACHMENT_POLICY = {
+  allowedTypes: GENERAL_AGENT_ATTACHMENT_POLICY.allowedTypes,
+  maxCount: GENERAL_AGENT_ATTACHMENT_POLICY.maxCount,
+  maxBytes: {
+    image: RESUME_FILE_MAX_BYTES,
+    audio: RESUME_FILE_MAX_BYTES,
+    video: RESUME_FILE_MAX_BYTES,
+    document: RESUME_FILE_MAX_BYTES,
+    text: RESUME_FILE_MAX_BYTES,
+  },
+} as const
+const CLONE_ATTACHMENT_POLICY = {
+  ...GENERAL_AGENT_ATTACHMENT_POLICY,
+} as const
+
+interface CloneDialogSnapshot {
+  taskId: string
+  prompt: string
+  attachments: InputAttachment[]
+  project: ProjectContextProject | null
+}
+
+function ResumeTaskDialog({
+  taskId,
+  onClose,
+  onSuccess,
+}: {
+  taskId: string
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const [prompt, setPrompt] = useState('')
+  const attachmentController = usePromptAttachments({
+    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
+    policy: RESUME_ATTACHMENT_POLICY,
+  })
+  const resumeMutation = useMutation({
+    mutationFn: () => api.tasks.resume(taskId, {
+      prompt,
+      input_attachments: attachmentController.toInputAttachments(),
+    }),
+    onSuccess: () => {
+      toast.success('已提交，任务将结合已有上下文继续执行')
+      onSuccess()
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '继续执行失败，请稍后再试'))
+    },
+  })
+  const hasInput = Boolean(prompt.trim() || attachmentController.attachments.length > 0)
+
+  return (
+    <Dialog
+      open
+      disablePointerDismissal={resumeMutation.isPending}
+      onOpenChange={(open, eventDetails) => {
+        if (open) return
+        if (resumeMutation.isPending) {
+          eventDetails.cancel()
+          return
+        }
+        onClose()
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl" closeButtonDisabled={resumeMutation.isPending}>
+        <DialogHeader>
+          <DialogTitle>继续执行此任务</DialogTitle>
+          <DialogDescription>
+            提供补充指令和文件后，任务会结合已有上下文继续执行。
+          </DialogDescription>
+        </DialogHeader>
+        <AgentPromptInput
+          value={{ prompt, attachments: attachmentController.attachments }}
+          onChange={(value) => setPrompt(value.prompt)}
+          onSubmit={async () => { await resumeMutation.mutateAsync() }}
+          attachmentController={attachmentController}
+          attachmentPolicy={RESUME_ATTACHMENT_POLICY}
+          placeholder="说明希望 AI 接着做什么，并可添加补充资料或修改意见..."
+          ariaLabel="继续任务要求"
+          submitLabel="提交并继续"
+          submitting={resumeMutation.isPending}
+          submitDisabled={!hasInput}
+          acceptedTypesLabel="图片、音频、视频、文档、文本；最多 5 个，单个不超过 25MB"
+          autoFocus
+        />
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={resumeMutation.isPending} onClick={onClose}>取消</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function CloneTaskDialog({
+  snapshot,
+  onClose,
+  onSuccess,
+}: {
+  snapshot: CloneDialogSnapshot
+  onClose: () => void
+  onSuccess: (task: Task) => void
+}) {
+  const [prompt, setPrompt] = useState(snapshot.prompt)
+  const [validationError, setValidationError] = useState<string>()
+  const attachmentController = usePromptAttachments({
+    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
+    policy: CLONE_ATTACHMENT_POLICY,
+    initialAttachments: snapshot.attachments,
+    onAttachmentsChange: () => setValidationError(undefined),
+  })
+  const cloneMutation = useMutation({
+    mutationFn: (inputAttachments: InputAttachment[]) => api.tasks.clone(snapshot.taskId, {
+      prompt,
+      input_attachments: inputAttachments,
+    }),
+    onSuccess: (task) => {
+      toast.success('已克隆为新任务，配置已保留')
+      onSuccess(task)
+    },
+    onError: (err: unknown) => {
+      const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
+      const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
+      if (status === 402 || code === 40200) {
+        toast.error('积分不足，无法克隆任务')
+      } else {
+        toast.error(getApiErrorMessage(err, '克隆任务失败，请稍后再试'))
+      }
+    },
+  })
+
+  async function handleSubmit() {
+    setValidationError(undefined)
+    const prepared = prepareReusableInputAttachments(attachmentController.toInputAttachments())
+    if (prepared.error) {
+      setValidationError(prepared.error)
+      throw new Error(prepared.error)
+    }
+    await cloneMutation.mutateAsync(prepared.attachments ?? [])
+  }
+
+  return (
+    <Dialog
+      open
+      disablePointerDismissal={cloneMutation.isPending}
+      onOpenChange={(open, eventDetails) => {
+        if (open) return
+        if (cloneMutation.isPending) {
+          eventDetails.cancel()
+          return
+        }
+        onClose()
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl" closeButtonDisabled={cloneMutation.isPending}>
+        <DialogHeader>
+          <DialogTitle>克隆任务</DialogTitle>
+          <DialogDescription>
+            已恢复原任务要求和素材。确认或修改后，将按新任务重新计费并执行。
+          </DialogDescription>
+        </DialogHeader>
+        <AgentPromptInput
+          value={{ prompt, attachments: attachmentController.attachments }}
+          onChange={(value) => {
+            setPrompt(value.prompt)
+            setValidationError(undefined)
+          }}
+          onSubmit={handleSubmit}
+          attachmentController={attachmentController}
+          attachmentPolicy={CLONE_ATTACHMENT_POLICY}
+          contextBar={<ProjectContextControl mode="readonly" project={snapshot.project} />}
+          placeholder="确认或修改任务要求..."
+          ariaLabel="克隆任务要求"
+          submitLabel="确认克隆"
+          submitting={cloneMutation.isPending}
+          attachmentPreviewOwner={{ ownerType: 'task', ownerId: snapshot.taskId }}
+          autoFocus
+        />
+        {validationError ? (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertDescription>{validationError}</AlertDescription>
+          </Alert>
+        ) : null}
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={cloneMutation.isPending} onClick={onClose}>取消</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+const MAX_SSE_LOGS = 500
+const TERMINAL_SSE_EVENTS = new Set(['done', 'completed', 'failed', 'cancelled'])
+
+function appendLog(prev: string[], entry: string): string[] {
+  const next = [...prev, entry]
+  return next.length > MAX_SSE_LOGS ? next.slice(-MAX_SSE_LOGS) : next
+}
+
+function splitLogLines(log: string): string[] {
+  return log
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+}
+
+function appendPollingReplay(prev: string[], replay: string): string[] {
+  const currentLines = prev.flatMap(splitLogLines).slice(-MAX_SSE_LOGS)
+  const replayLines = splitLogLines(replay).slice(-MAX_SSE_LOGS)
+  if (replayLines.length === 0) return prev
+
+  let sharedPrefix = 0
+  while (
+    sharedPrefix < currentLines.length &&
+    sharedPrefix < replayLines.length &&
+    currentLines[sharedPrefix] === replayLines[sharedPrefix]
+  ) {
+    sharedPrefix += 1
+  }
+  if (sharedPrefix > 0) {
+    const newLines = replayLines.slice(sharedPrefix)
+    if (newLines.length === 0) return prev
+    return [...prev, ...newLines].slice(-MAX_SSE_LOGS)
+  }
+
+  const maxOverlap = Math.min(currentLines.length, replayLines.length)
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const currentStart = currentLines.length - overlap
+    if (replayLines.slice(0, overlap).every((line, index) => line === currentLines[currentStart + index])) {
+      const newLines = replayLines.slice(overlap)
+      if (newLines.length === 0) return prev
+      return [...prev, ...newLines].slice(-MAX_SSE_LOGS)
+    }
+  }
+
+  return [...prev, ...replayLines].slice(-MAX_SSE_LOGS)
 }
 
 export default function TaskDetailPage() {
@@ -82,6 +323,7 @@ export default function TaskDetailPage() {
 
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
+  const [sseTaskId, setSseTaskId] = useState<string | null>(null)
   const [liveProgress, setLiveProgress] = useState<{
     percent: number
     stage: string | null
@@ -92,22 +334,19 @@ export default function TaskDetailPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showProjectDialog, setShowProjectDialog] = useState(false)
   const [showResumeDialog, setShowResumeDialog] = useState(false)
+  const [cloneDialogSnapshot, setCloneDialogSnapshot] = useState<CloneDialogSnapshot | null>(null)
   const [showCreditDialog, setShowCreditDialog] = useState(false)
-  const [resumePrompt, setResumePrompt] = useState('')
-  const [resumeFiles, setResumeFiles] = useState<ResumeFileInput[]>([])
+	const [showTaskDetails, setShowTaskDetails] = useState(false)
+	const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
+	const [returnToTaskDetailsAfterCredits, setReturnToTaskDetailsAfterCredits] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
+  const activeSseTaskRef = useRef<string | null>(null)
+  const persistedLogsRef = useRef<string[]>([])
   const logContainerRef = useRef<HTMLDivElement | null>(null)
-  const resumeFileInputRef = useRef<HTMLInputElement | null>(null)
-  const { submit, isSubmitting } = useSubmitLock()
+  const { submit } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
-
-  const MAX_SSE_LOGS = 500
-  function appendLog(prev: string[], entry: string): string[] {
-    const next = [...prev, entry]
-    return next.length > MAX_SSE_LOGS ? next.slice(-MAX_SSE_LOGS) : next
-  }
 
   const { data: task, isLoading, isError, refetch } = useQuery({
     queryKey: ['task', id],
@@ -123,8 +362,11 @@ export default function TaskDetailPage() {
   const { data: files } = useQuery({
     queryKey: ['task-files', id],
     queryFn: () => api.tasks.files(id!),
-    enabled: !!id && task?.status === 'completed',
+    enabled: !!id && !!task && ['completed', 'failed', 'cancelled'].includes(task.status),
   })
+
+  const publishedFiles = files?.filter((file) => file.state !== 'collected') ?? []
+  const collectedFiles = files?.filter((file) => file.state === 'collected') ?? []
 
   // Resolve project info for the task
   const { data: projectDetail } = useQuery({
@@ -137,21 +379,22 @@ export default function TaskDetailPage() {
 
   const MAX_PERSISTED_LOGS = 500
   const persistedLogs = (task?.progress_log
-    ?.split('\n')
-    .map((line) => line.trimEnd())
-    .filter(Boolean) ?? [])
+    ? splitLogLines(task.progress_log)
+    : [])
     .slice(-MAX_PERSISTED_LOGS)
-  const displayLogs = sseLogs.length > 0 ? sseLogs : persistedLogs
-  // 行尾两空格 + \n 是 Markdown 的硬换行语法（<br>），避免单 \n 被 marked 当作 soft break 塌缩成空格。
-  const logMarkdown = displayLogs.join('  \n')
-  const showLogs = displayLogs.length > 0 || Boolean(sseError) || task?.status === 'running'
+  // Lifecycle changes seed from this snapshot; polling updates must not duplicate live entries.
+  persistedLogsRef.current = persistedLogs
+  const isCurrentSseTask = Boolean(task?.id && sseTaskId === task.id)
+  const displayLogs = isCurrentSseTask && sseLogs.length > 0 ? sseLogs : persistedLogs
+  const currentSseError = isCurrentSseTask && task?.status === 'running' ? sseError : null
+  const currentLiveProgress = isCurrentSseTask && task?.status === 'running' ? liveProgress : null
   // progressValue takes the MAX of live SSE and persisted task.progress to
   // guarantee a monotonic bar. task.progress is the server-side high-water
   // mark (UpdateProgressColumn has a monotonic guard); latest_progress.percent
   // is last-writer-wins and can be lower under out-of-order stage emissions,
   // so it must NOT be the sole source — Math.max keeps the bar from regressing.
   const progressValue = Math.max(0, Math.min(100, Math.max(
-    liveProgress?.percent ?? 0,
+    currentLiveProgress?.percent ?? 0,
     task?.progress ?? 0,
   )))
   // Prefer live SSE > server-persisted latest_progress > generic fallback.
@@ -159,9 +402,9 @@ export default function TaskDetailPage() {
   // structured JSON with "Using tool: ..." noise and would leak into the card.
   const fallbackTitle = task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...'
   const persistedProgress = task?.latest_progress
-  const progressTitle = liveProgress?.title ?? persistedProgress?.title ?? fallbackTitle
-  const progressDescription = liveProgress?.description ?? persistedProgress?.description ?? null
-  const progressStage = liveProgress?.stage ?? persistedProgress?.stage ?? null
+  const progressTitle = currentLiveProgress?.title ?? persistedProgress?.title ?? fallbackTitle
+  const progressDescription = currentLiveProgress?.description ?? persistedProgress?.description ?? null
+  const progressStage = currentLiveProgress?.stage ?? persistedProgress?.stage ?? null
   const isRunning = task?.status === 'running'
   const creditTransactions = task?.credit_transactions ?? []
   const creditSummary = task?.credits_summary
@@ -255,55 +498,13 @@ export default function TaskDetailPage() {
     },
   })
 
-  const resumeMutation = useMutation({
-    mutationFn: () => api.tasks.resume(id!, {
-      prompt: resumePrompt,
-      files: resumeFiles.map((item) => item.file),
-      fileLabels: resumeFiles.map((item) => item.label),
-    }),
-    onSuccess: () => {
-      toast.success('已提交，任务将基于原目录继续执行')
-      setShowResumeDialog(false)
-      setResumePrompt('')
-      setResumeFiles([])
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-    },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '继续执行失败，请稍后再试'))
-    },
-  })
+	const handleSSEEvent = useCallback((
+		taskId: string,
+		event: SSEEvent,
+    reconcileProgressReplay = false,
+	): boolean => {
+		if (activeSseTaskRef.current !== taskId) return false
 
-  const connectSSE = async (retries = 0) => {
-    if (!id) return
-    const currentToken = tokenRef.current
-    if (!currentToken) return
-
-    // Abort any existing connection
-    if (abortRef.current) {
-      abortRef.current.abort()
-    }
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    try {
-      for await (const event of streamTaskProgress(id, currentToken, controller.signal)) {
-        handleSSEEvent(event)
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      if (retries < 3 && !controller.signal.aborted) {
-        setSseLogs((prev) => appendLog(prev, `连接断开，正在重试 (${retries + 1}/3)...`))
-        await new Promise((r) => setTimeout(r, 2000 * (retries + 1)))
-        if (controller.signal.aborted) return
-        return connectSSE(retries + 1)
-      }
-      setSseError('连接断开，正在刷新任务状态...')
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-    }
-  }
-
-  function handleSSEEvent(event: SSEEvent) {
     const parsed = typeof event.data === 'string'
       ? (() => { try { return JSON.parse(event.data) } catch { return event.data } })()
       : event.data
@@ -311,7 +512,10 @@ export default function TaskDetailPage() {
     switch (event.event) {
       case 'progress': {
         if (typeof parsed === 'string') {
-          setSseLogs((prev) => appendLog(prev, parsed))
+          setSseLogs((prev) => reconcileProgressReplay
+            ? appendPollingReplay(prev, parsed)
+            : appendLog(prev, parsed))
+          return true
         } else {
           const data = parsed as {
             stage?: string
@@ -344,6 +548,8 @@ export default function TaskDetailPage() {
         }
         break
       }
+      case 'timeout':
+        break
       case 'output': {
         const data = typeof parsed === 'string' ? parsed : (parsed as { text?: string }).text || ''
         if (data) {
@@ -360,8 +566,8 @@ export default function TaskDetailPage() {
       case 'completed':
       case 'failed':
       case 'cancelled': {
-        queryClient.invalidateQueries({ queryKey: ['task', id] })
-        queryClient.invalidateQueries({ queryKey: ['task-files', id] })
+        queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+        queryClient.invalidateQueries({ queryKey: ['task-files', taskId] })
         const statusText = event.event === 'completed' ? '任务完成'
           : event.event === 'failed' ? '任务失败'
             : event.event === 'cancelled' ? '任务取消' : '任务完成'
@@ -375,28 +581,98 @@ export default function TaskDetailPage() {
         }
       }
     }
-  }
+    return false
+  }, [queryClient])
 
-  // Connect SSE only when task status transitions to "running"
-  useEffect(() => {
-    if (task?.status === 'running') {
-      setSseLogs(persistedLogs)
-      setSseError(null)
-      setLiveProgress(null)
-      connectSSE()
-    }
-    return () => {
-      if (abortRef.current) {
-        abortRef.current.abort()
+  const connectSSE = useCallback(async (taskId: string) => {
+    let retries = 0
+    let consecutiveTimeouts = 0
+    while (activeSseTaskRef.current === taskId) {
+      const currentToken = tokenRef.current
+      if (!currentToken) return
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      try {
+        let sawTimeout = false
+        let reconcileNextStringProgress = true
+        for await (const event of streamTaskProgress(taskId, currentToken, controller.signal)) {
+          if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
+          const handledStringProgress = handleSSEEvent(
+            taskId,
+            event,
+            reconcileNextStringProgress,
+          )
+          if (handledStringProgress) reconcileNextStringProgress = false
+          if (TERMINAL_SSE_EVENTS.has(event.event)) return
+          if (event.event === 'timeout') {
+            sawTimeout = true
+          } else {
+            consecutiveTimeouts = 0
+          }
+        }
+        if (sawTimeout) {
+          retries = 0
+          consecutiveTimeouts += 1
+          if (consecutiveTimeouts > 1) {
+            await new Promise((resolve) => setTimeout(
+              resolve,
+              Math.min(2000 * (consecutiveTimeouts - 1), 6000),
+            ))
+            if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
+          }
+          continue
+        }
+        throw new Error('SSE connection closed unexpectedly')
+      } catch (err) {
+        if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        if (retries >= 3) {
+          setSseError('连接断开，正在刷新任务状态...')
+          queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+          return
+        }
+        retries += 1
+        setSseLogs((prev) => appendLog(prev, `连接断开，正在重试 (${retries}/3)...`))
+        await new Promise((resolve) => setTimeout(resolve, 2000 * retries))
+        if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.status])
+  }, [handleSSEEvent, queryClient])
 
   useEffect(() => {
-    if (!autoScrollLogs || !logContainerRef.current) return
-    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
-  }, [displayLogs, autoScrollLogs])
+    const taskId = task?.id ?? null
+    abortRef.current?.abort()
+    abortRef.current = null
+    activeSseTaskRef.current = task?.status === 'running' ? taskId : null
+    setSseTaskId(taskId)
+    setSseLogs(task?.status === 'running' ? persistedLogsRef.current : [])
+    setSseError(null)
+    setLiveProgress(null)
+
+    if (taskId && task?.status === 'running') void connectSSE(taskId)
+
+    return () => {
+      if (activeSseTaskRef.current === taskId) activeSseTaskRef.current = null
+      abortRef.current?.abort()
+      abortRef.current = null
+    }
+  }, [connectSSE, task?.id, task?.status])
+
+  useEffect(() => {
+    setTaskDetailsTab('overview')
+  }, [task?.id])
+
+  useEffect(() => {
+    setShowResumeDialog(false)
+    setCloneDialogSnapshot(null)
+  }, [id])
+
+  function openTaskDetails(tab: TaskDetailsTab) {
+    setTaskDetailsTab(tab)
+    setShowTaskDetails(true)
+  }
 
   if (isLoading) {
     return (
@@ -450,31 +726,17 @@ export default function TaskDetailPage() {
 
   const canCancel = task.status === 'pending' || task.status === 'running'
   const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+  const failureMessage = taskFailureMessage(task)
   const currentTask = task
   const snapshot = task.project_snapshot
-  const showProjectParameters = Boolean(snapshot?.platform || project)
-  const projectParameterName = snapshot?.project_name || project?.name || '—'
-  const projectParameterVisualStyle = snapshot?.visual_style || project?.visual_style || '—'
-  const projectParameterImageRatio = snapshot?.image_ratio || project?.image_ratio || task.image_ratio || '—'
-  const projectParameterImageModel = task.image_model_key || snapshot?.ecommerce_defaults?.image_model_key || project?.ecommerce_defaults?.image_model_key || '—'
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
-  const videoUserInput = isVideoCreator(task.type)
-    ? task.video_creator_input
-    : isVideoEditor(task.type)
-      ? task.video_editor_input
-      : undefined
   const videoResolvedConfig = isVideoCreator(task.type)
     ? task.video_creator_config
     : isVideoEditor(task.type)
       ? task.video_editor_config
       : undefined
-  const videoWorkflowLabel = isVideoEditor(task.type) ? '视频剪辑后期' : 'AI 视频生成'
-  const videoUserBrief = videoUserInput?.brief?.trim() || task.prompt || ''
-  const videoUserReferences = videoUserInput?.references ?? []
-  const videoHardConstraints = videoUserInput?.hard_constraints
-  const showVideoUserInput = isVideoPlatform(task.type) && Boolean(videoUserBrief || videoUserReferences.length > 0 || videoHardConstraints?.ratio || videoHardConstraints?.duration || typeof videoHardConstraints?.watermark === 'boolean')
   const videoTargetDuration = videoResolvedConfig?.target_duration_seconds || videoResolvedConfig?.pricing_breakdown?.output_seconds || videoResolvedConfig?.duration
   const videoSegmentCount = videoResolvedConfig?.segments?.length || videoResolvedConfig?.pricing_breakdown?.segment_count || 0
   const videoSpecSummary = [
@@ -483,30 +745,17 @@ export default function TaskDetailPage() {
     videoTargetDuration ? `目标 ${videoTargetDuration}s` : '目标 —',
     videoSegmentCount > 0 ? `${videoSegmentCount} 段` : null,
   ].filter(Boolean).join(' · ')
-  const videoInputReferences = videoResolvedConfig?.references ?? []
-  const hasVideoResolvedConfig = isVideoPlatform(task.type) && Boolean(
-    videoResolvedConfig && (
-      videoResolvedConfig.model_key ||
-      videoResolvedConfig.model ||
-      videoResolvedConfig.resolution ||
-      videoResolvedConfig.ratio ||
-      videoResolvedConfig.duration ||
-      videoResolvedConfig.estimated_credits ||
-      videoResolvedConfig.pricing_breakdown ||
-      videoResolvedConfig.segments?.length ||
-      videoResolvedConfig.creative_type ||
-      videoResolvedConfig.purpose ||
-      videoResolvedConfig.subject_profile ||
-      videoResolvedConfig.audience ||
-      videoResolvedConfig.single_message ||
-      videoResolvedConfig.references?.length
-    ),
-  )
   const videoCreativeType = videoCreativeTypeLabel(videoResolvedConfig?.creative_type)
   const videoPurpose = videoPurposeLabel(videoResolvedConfig?.purpose)
   const videoSubjectProfile = videoResolvedConfig?.subject_profile?.trim() || '—'
-  const videoAudience = videoResolvedConfig?.audience?.trim() || '—'
-  const videoSingleMessage = videoResolvedConfig?.single_message?.trim() || '—'
+  const hasVideoProductionResult = Boolean(
+    videoProduction
+    && Object.values(videoProduction.artifacts).some((artifact) => artifact.status === 'available'),
+  )
+  const showPendingResultDestination = (task.status === 'pending' || task.status === 'running')
+    && publishedFiles.length === 0
+    && collectedFiles.length === 0
+    && !hasVideoProductionResult
   const renderVideoPreviewDetails = (file: TaskFile) => {
     if (!isVideoTaskFile(file)) return null
     return (
@@ -572,65 +821,24 @@ export default function TaskDetailPage() {
     )
   }
 
-  // Clone this task as a fresh billed task. The server clones the full
-  // configuration (three-dimensional style, author/writer, ecommerce package,
-  // image model, watermark, goal mode…) so nothing is lost — unlike the previous
-  // client-side create() which only forwarded type/prompt/project/ratio.
-  async function handleClone() {
-    await submit(async () => {
-      try {
-        const nextTask = await api.tasks.clone(currentTask.id)
-        toast.success('已克隆为新任务，配置已保留')
-        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-        navigate(`/tasks/${nextTask.id}`)
-      } catch (err: unknown) {
-        const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
-        const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
-        if (status === 402 || code === 40200) {
-          toast.error('积分不足，无法克隆任务')
-        } else {
-          toast.error(getApiErrorMessage(err, '克隆任务失败，请稍后再试'))
-        }
-      }
+  function openCloneDialog() {
+    setCloneDialogSnapshot({
+      taskId: currentTask.id,
+      prompt: currentTask.prompt ?? '',
+      attachments: (currentTask.input_attachments ?? [])
+        .filter((attachment) => attachment.role !== 'resume_latest' && attachment.role !== 'resume_file')
+        .map((attachment) => ({ ...attachment })),
+      project: currentTask.project_id ? {
+        id: currentTask.project_id,
+        name: project?.name || currentTask.project_snapshot?.project_name || '未命名项目',
+        platform: project?.platform || currentTask.project_snapshot?.platform || currentTask.type,
+      } : null,
     })
   }
 
-  function handleVideoRetake(action: string) {
-    toast.info(`已选择返修决策：${action}`)
-    void handleClone()
+  function handleVideoRetake(_action: string) {
+    openCloneDialog()
   }
-
-  function handleResumeFilesChange(event: ChangeEvent<HTMLInputElement>) {
-    const selected = Array.from(event.target.files ?? [])
-    if (selected.length > 0) {
-      setResumeFiles((prev) => [
-        ...prev,
-        ...selected.map((file) => ({
-          id: `${file.name}-${file.size}-${file.lastModified}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          file,
-          label: '',
-        })),
-      ])
-    }
-    event.target.value = ''
-  }
-
-  function updateResumeFileLabel(fileID: string, label: string) {
-    setResumeFiles((prev) => prev.map((item) => item.id === fileID ? { ...item, label } : item))
-  }
-
-  function removeResumeFile(fileID: string) {
-    setResumeFiles((prev) => prev.filter((item) => item.id !== fileID))
-  }
-
-  async function handleResumeSubmit() {
-    if (!resumePrompt.trim() && resumeFiles.length === 0) return
-    await submit(async () => {
-      await resumeMutation.mutateAsync()
-    })
-  }
-
-  const canSubmitResume = Boolean(resumePrompt.trim() || resumeFiles.length > 0)
 
   return (
     <div className="space-y-6">
@@ -670,8 +878,8 @@ export default function TaskDetailPage() {
               <BreadcrumbItem>
                 <BreadcrumbLink render={<Link to="/tasks" />}>任务</BreadcrumbLink>
               </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
+              <BreadcrumbSeparator className="hidden sm:list-item" />
+              <BreadcrumbItem className="hidden sm:inline-flex">
                 <BreadcrumbPage>{task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
@@ -711,10 +919,10 @@ export default function TaskDetailPage() {
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-          {task.status === 'completed' && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {task.status === 'completed' && !task.published && (
             <Button
-              variant={task.published ? 'outline' : 'default'}
+              variant="default"
               size="sm"
               loading={togglePublished.isPending}
               disabled={billingLocked}
@@ -724,7 +932,7 @@ export default function TaskDetailPage() {
               }}
             >
               <Eye className="h-4 w-4" />
-              {task.published ? '已发布' : '标记已发布'}
+              标记已发布
             </Button>
           )}
           {canCancel && (
@@ -737,32 +945,91 @@ export default function TaskDetailPage() {
               取消任务
             </Button>
           )}
-          {!canCancel && (
-            <Button
-              variant="ghost"
-              size="sm"
-              loading={deleteMutation.isPending}
-              onClick={() => setShowDeleteDialog(true)}
-              className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
-            >
-              <Trash2 className="h-4 w-4" />
-              删除
+          {canClone && task.status !== 'failed' && (
+            <Button variant={task.status === 'completed' && !task.published ? 'outline' : 'default'} size="sm" onClick={() => setShowResumeDialog(true)}>
+              <Send className="h-4 w-4" />
+              继续执行
             </Button>
           )}
-          {canClone && (
-            <>
-              <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
-                <Send className="h-4 w-4" />
-                继续执行
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleClone()}>
-                <RefreshCw className="h-4 w-4" />
-                克隆任务
-              </Button>
-            </>
+          {!canCancel && (
+            <DropdownMenu>
+              <DropdownMenuTrigger aria-label="更多任务操作" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                <MoreHorizontal className="h-4 w-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                {task.status === 'completed' && task.published && (
+                  <DropdownMenuItem
+                    disabled={billingLocked || togglePublished.isPending}
+                    onClick={() => {
+                      if (billingLocked) return
+                      void submit(async () => togglePublished.mutateAsync({ published: false })).catch(() => {})
+                    }}
+                  >
+                    <Eye className="h-4 w-4" />
+                    取消发布标记
+                  </DropdownMenuItem>
+                )}
+                {canClone && (
+                  <DropdownMenuItem onClick={openCloneDialog}>
+                    <RefreshCw className="h-4 w-4" />
+                    克隆任务
+                  </DropdownMenuItem>
+                )}
+                {canClone && <DropdownMenuSeparator />}
+                <DropdownMenuItem variant="destructive" onClick={() => setShowDeleteDialog(true)}>
+                  <Trash2 className="h-4 w-4" />
+                  删除任务
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>
+
+      {task.status !== 'completed' && (
+        <section className={`rounded-lg border p-4 ${task.status === 'failed' ? 'border-destructive/35 bg-destructive/5' : 'border-border bg-card'}`}>
+          {task.status === 'failed' ? (
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-foreground">{failureMessage ? '执行失败' : '任务未完成'}</h2>
+                  <p className="mt-1 break-words text-sm text-muted-foreground">
+                    {failureMessage || '服务端没有返回失败详情，可继续执行并补充说明。'}
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" className="shrink-0" onClick={() => setShowResumeDialog(true)}>
+                <Send className="h-4 w-4" />
+                补充信息并继续
+              </Button>
+            </div>
+          ) : task.status === 'cancelled' ? (
+            <div className="flex items-start gap-3">
+              <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">执行已停止</h2>
+                <p className="mt-1 text-sm text-muted-foreground">可继续此任务，已有上下文和文件会被保留。</p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  {isRunning && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
+                  <h2 className="truncate text-sm font-semibold text-foreground">{progressTitle}</h2>
+                </div>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-primary">{progressValue}%</span>
+              </div>
+              <Progress value={progressValue} className="w-full" />
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                {progressStage && <span>{progressStageLabel[progressStage] ?? progressStage}</span>}
+                {progressDescription && <span>{progressDescription}</span>}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {billingLocked && (
         <Card className="border-amber-500/40 bg-amber-500/10">
@@ -857,49 +1124,50 @@ export default function TaskDetailPage() {
         <WorkflowReviewSummary workflow={task.workflow_status} />
       )}
 
-      {/* Details (stats) */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card size="sm" className="bg-card/70">
-          <CardContent>
-            <p className="text-xs text-muted-foreground">创建时间</p>
-            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.created_at)}</p>
-          </CardContent>
-        </Card>
-        <Card size="sm" className="bg-card/70">
-          <CardContent>
-            <p className="text-xs text-muted-foreground">开始时间</p>
-            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.started_at)}</p>
-          </CardContent>
-        </Card>
-        <Card size="sm" className="bg-card/70">
-          <CardContent>
-            <p className="text-xs text-muted-foreground">完成时间</p>
-            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.completed_at)}</p>
-          </CardContent>
-        </Card>
-        <Card size="sm" className="bg-card/70">
-          <CardContent>
-            <p className="text-xs text-muted-foreground">来源</p>
-            <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
-          </CardContent>
-        </Card>
-        {showCreditDetails && (
-          <Card size="sm" className="bg-card/70">
-            <CardContent className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs text-muted-foreground">积分消耗</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{netConsumedCredits.toLocaleString()}</p>
-              </div>
-              <Button size="sm" variant="ghost" onClick={() => setShowCreditDialog(true)}>
-                明细
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      <TaskDetailsSheet
+        open={showTaskDetails}
+        onOpenChange={setShowTaskDetails}
+        selectedTab={taskDetailsTab}
+        onTabChange={setTaskDetailsTab}
+        task={task}
+        project={project}
+        files={publishedFiles}
+        netConsumedCredits={netConsumedCredits}
+        showCreditDetails={showCreditDetails}
+        onOpenCreditDetails={() => {
+          setReturnToTaskDetailsAfterCredits(true)
+          setShowTaskDetails(false)
+          setShowCreditDialog(true)
+        }}
+        logs={displayLogs}
+        sseError={currentSseError}
+        autoScrollLogs={autoScrollLogs}
+        onToggleAutoScroll={() => setAutoScrollLogs((previous) => !previous)}
+        onCopyLogs={() => {
+          navigator.clipboard.writeText(displayLogs.join('\n'))
+          toast.success('已复制执行日志')
+        }}
+        onReconnectLogs={() => {
+          if (task.status !== 'running') return
+          activeSseTaskRef.current = task.id
+          setSseTaskId(task.id)
+          setSseError(null)
+          void connectSSE(task.id)
+        }}
+        logContainerRef={logContainerRef}
+      />
 
       {showCreditDetails && (
-        <Dialog open={showCreditDialog} onOpenChange={setShowCreditDialog}>
+        <Dialog
+          open={showCreditDialog}
+          onOpenChange={(open) => {
+            setShowCreditDialog(open)
+            if (!open && returnToTaskDetailsAfterCredits) {
+              setReturnToTaskDetailsAfterCredits(false)
+              setShowTaskDetails(true)
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle>积分明细</DialogTitle>
@@ -969,228 +1237,12 @@ export default function TaskDetailPage() {
         </Dialog>
       )}
 
-      {task.type === 'seednote' && task.published && (
-        <SeednoteAnalyticsPanel taskId={task.id} />
-      )}
-
-      {showProjectParameters && (
-        <Card size="sm" className="border-border/70">
-          <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">项目参数</p>
-              <h2 className="mt-1 truncate text-base font-semibold text-foreground">
-                {projectParameterName}
-              </h2>
-            </div>
-            <Badge variant="outline" className="w-fit">
-              {contentTypeLabel[snapshot?.platform || project?.platform || task.type] || snapshot?.platform || project?.platform || task.type}
-            </Badge>
-          </div>
-          <CardContent className="space-y-4">
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">视觉风格</p>
-              <p className="mt-1 rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
-                {projectParameterVisualStyle}
-              </p>
-            </div>
-            <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-muted-foreground">图片比例</p>
-                <p className="mt-1 text-sm text-foreground">{projectParameterImageRatio}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">图片模型</p>
-                <p className="mt-1 break-all text-sm text-foreground">{projectParameterImageModel}</p>
-              </div>
-            </div>
-            {task.type === 'article' && snapshot && (
-              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
-                <div>
-                  <p className="text-xs text-muted-foreground">署名</p>
-                  <p className="mt-1 text-sm text-foreground">{snapshot.author || project?.author || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">写作风格</p>
-                  <p className="mt-1 text-sm text-foreground">{snapshot.writer || project?.writer || '默认'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">排版</p>
-                  <p className="mt-1 text-sm text-foreground">{snapshot.theme || project?.theme || '默认'}</p>
-                </div>
-              </div>
-            )}
-            {task.type === 'ecommerce' && (snapshot?.ecommerce_defaults || project?.ecommerce_defaults) && (
-              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div>
-                  <p className="text-xs text-muted-foreground">目标平台</p>
-                  <p className="mt-1 text-sm text-foreground">{snapshot?.ecommerce_defaults?.target_platform || project?.ecommerce_defaults?.target_platform || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">默认模块</p>
-                  <p className="mt-1 text-sm text-foreground">
-                    {(snapshot?.ecommerce_defaults?.default_selected_modules || project?.ecommerce_defaults?.default_selected_modules)
-                      ? Object.entries(snapshot?.ecommerce_defaults?.default_selected_modules || project?.ecommerce_defaults?.default_selected_modules || {}).map(([k, v]) => `${k} x${v}`).join('、')
-                      : '—'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">品牌 brief</p>
-                  <p className="mt-1 line-clamp-3 text-sm text-foreground">{snapshot?.ecommerce_defaults?.brand_brief || project?.ecommerce_defaults?.brand_brief || '—'}</p>
-                </div>
-              </div>
-            )}
-            {isVideoCreator(task.type) && videoResolvedConfig && (
-              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">视频模型</p>
-                  <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(videoResolvedConfig.model_key || videoResolvedConfig.model) || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">规格</p>
-                  <p className="mt-1 text-sm text-foreground">{videoSpecSummary}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">估算积分</p>
-                  <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || videoResolvedConfig.estimated_credits || 0).toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">积分消耗</p>
-                  <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || 0).toLocaleString()}</p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {showVideoUserInput && (
-        <Card size="sm" className="border-border/70">
-          <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground">{videoWorkflowLabel}</p>
-              <h2 className="mt-1 text-base font-semibold text-foreground">用户输入</h2>
-            </div>
-          </div>
-          <CardContent className="space-y-4">
-            <div>
-              <p className="text-xs text-muted-foreground">创作要求</p>
-              <p className="mt-1 whitespace-pre-wrap rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
-                {videoUserBrief || '—'}
-              </p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div>
-                <p className="text-xs text-muted-foreground">比例硬约束</p>
-                <p className="mt-1 text-sm text-foreground">{videoHardConstraints?.ratio || '由 Agent 判断'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">时长硬约束</p>
-                <p className="mt-1 text-sm text-foreground">{videoHardConstraints?.duration ? `${videoHardConstraints.duration}s` : '由 Agent 判断'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">水印硬约束</p>
-                <p className="mt-1 text-sm text-foreground">{typeof videoHardConstraints?.watermark === 'boolean' ? (videoHardConstraints.watermark ? '加水印' : '不加水印') : '由 Agent 判断'}</p>
-              </div>
-            </div>
-            <div className="border-t border-border pt-4">
-              <p className="text-xs text-muted-foreground">参考素材</p>
-              {videoUserReferences.length > 0 ? (
-                <div className="mt-2 divide-y divide-border rounded-md border border-border">
-                  {videoUserReferences.map((ref, index) => (
-                    <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-3 py-2 text-xs">
-                      <p className="truncate text-foreground">{ref.reference_role || '由 Agent 判断'} · {ref.file_name || ref.text || ref.url || '—'}</p>
-                      {ref.input_duration_seconds ? (
-                        <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {hasVideoResolvedConfig && (
-        <Card size="sm" className="border-border/70">
-          <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground">{videoWorkflowLabel}</p>
-              <h2 className="mt-1 text-base font-semibold text-foreground">Agent 解析结果</h2>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {videoResolvedConfig?.creative_type && <Badge variant="outline">{videoCreativeType}</Badge>}
-              {videoResolvedConfig?.purpose && <Badge variant="outline">{videoPurpose}</Badge>}
-            </div>
-          </div>
-          <CardContent className="space-y-4">
-            {(videoResolvedConfig?.subject_profile || videoResolvedConfig?.audience || videoResolvedConfig?.single_message) && (
-              <div className="grid gap-3 sm:grid-cols-3">
-                {videoResolvedConfig?.subject_profile && (
-                  <div>
-                    <p className="text-xs text-muted-foreground">人物 / 主体</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSubjectProfile}</p>
-                  </div>
-                )}
-                {videoResolvedConfig?.audience && (
-                  <div>
-                    <p className="text-xs text-muted-foreground">目标受众</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoAudience}</p>
-                  </div>
-                )}
-                {videoResolvedConfig?.single_message && (
-                  <div>
-                    <p className="text-xs text-muted-foreground">核心信息</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSingleMessage}</p>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <p className="text-xs text-muted-foreground">视频模型</p>
-                <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(videoResolvedConfig?.model_key || videoResolvedConfig?.model) || '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">规格</p>
-                <p className="mt-1 text-sm text-foreground">{videoSpecSummary}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">估算积分</p>
-                <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || videoResolvedConfig?.estimated_credits || 0).toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">积分消耗</p>
-                <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}</p>
-              </div>
-            </div>
-            {videoInputReferences.length > 0 && (
-              <div className="border-t border-border pt-4">
-                <p className="text-xs text-muted-foreground">执行参考素材</p>
-                <div className="mt-2 divide-y divide-border rounded-md border border-border">
-                  {videoInputReferences.map((ref, index) => (
-                    <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-3 py-2 text-xs">
-                      <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
-                      {ref.input_duration_seconds ? (
-                        <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {isVideoCreator(task.type) && videoProduction && (
+      {isVideoCreator(task.type) && hasVideoProductionResult && videoProduction && (
         <Card size="sm" className="border-border/70">
           <CardContent>
             <VideoProductionPanel
               production={videoProduction}
-              retakePending={isSubmitting}
+              retakePending={Boolean(cloneDialogSnapshot)}
               onRetakeAction={handleVideoRetake}
               onNextAction={(action) => toast.info(`已选择交付动作：${action}`)}
             />
@@ -1198,75 +1250,22 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {task.status !== 'completed' && (
-        <Card>
-          <CardContent>
-            {task.status === 'failed' ? (
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">执行中断</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      当前工作目录已保留，可以从失败点补充信息后继续推进。
-                    </p>
-                  </div>
-                </div>
-                {task.error && (
-                  <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
-                    <p className="text-xs font-medium text-destructive">失败原因</p>
-                    <p className="mt-1 text-sm text-foreground">{task.error}</p>
-                  </div>
-                )}
-                <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                  页面顶部可继续执行当前工作目录，或克隆为一个全新任务。
-                </p>
-              </div>
-            ) : task.status === 'cancelled' ? (
-              <div className="flex items-start gap-3">
-                <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">执行已停止</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    当前任务没有继续运行。页面顶部可继续执行当前工作目录，或克隆为一个全新任务。
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  {progressStage ? (
-                    <span className="text-xs text-muted-foreground">
-                      阶段：{progressStageLabel[progressStage] ?? progressStage}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground/60">执行中</span>
-                  )}
-                  <span className="shrink-0 text-sm font-semibold text-primary tabular-nums">
-                    {progressValue}%
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {isRunning && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
-                  <span className="min-w-0 truncate text-base font-semibold text-foreground">
-                    {progressTitle}
-                  </span>
-                </div>
-                <Progress value={progressValue} className="w-full" />
-                {progressDescription && (
-                  <p className="text-xs text-muted-foreground">{progressDescription}</p>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      {showPendingResultDestination && (
+        <section aria-labelledby="task-result-heading" className="border-y border-border py-4">
+          <h2 id="task-result-heading" className="px-4 text-sm font-semibold text-foreground">任务结果</h2>
+          <Empty className="min-h-24 rounded-none border-0 p-4">
+            <EmptyHeader>
+              <EmptyTitle>结果生成后将在这里显示</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        </section>
       )}
 
       {/* Files (top priority - most useful content) */}
-      {files && files.length > 0 && (
+      {publishedFiles.length > 0 && (
         <Card>
           <div className="border-b border-border px-4 py-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">生成文件 ({files.length})</h2>
+            <h2 className="text-sm font-semibold text-foreground">生成文件 ({publishedFiles.length})</h2>
             <Button
               size="sm"
               onClick={async () => {
@@ -1292,7 +1291,7 @@ export default function TaskDetailPage() {
           <div className="p-4 space-y-4">
             {task.type === 'ecommerce' ? (
               <EcommerceFilesGallery
-                files={files}
+                files={publishedFiles}
                 taskId={task.id}
                 accessLocked={billingLocked}
                 lockedMessage={lockedDeliveryMessage}
@@ -1301,7 +1300,7 @@ export default function TaskDetailPage() {
               <>
                 {/* Image files in compact grid */}
                 {(() => {
-                  const imageFiles = files.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
+                  const imageFiles = publishedFiles.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
                   if (imageFiles.length === 0) return null
                   return (
                     <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
@@ -1318,7 +1317,7 @@ export default function TaskDetailPage() {
                 })()}
                 {/* Non-image files share the same full-width preview rows. */}
                 {(() => {
-                  const nonImageFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/'))
+                  const nonImageFiles = publishedFiles.filter((f: TaskFile) => !f.mime_type?.startsWith('image/'))
                   if (nonImageFiles.length === 0) return null
                   return (
                     <div className="space-y-2">
@@ -1339,156 +1338,66 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {/* Live Output / SSE Logs */}
-      {showLogs && (
+      {collectedFiles.length > 0 && (
         <Card>
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold text-foreground">执行日志</h2>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setAutoScrollLogs((prev) => !prev)}
-              >
-                {autoScrollLogs ? '跟随输出' : '暂停跟随'}
-              </Button>
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  navigator.clipboard.writeText(displayLogs.join('\n'))
-                  toast.success('已复制执行日志')
-                }}
-                disabled={displayLogs.length === 0}
-              >
-                <Copy className="h-3.5 w-3.5" />
-                复制
-              </Button>
+          <div className="flex items-start gap-3 border-b border-border px-4 py-3">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">失败执行文件 ({collectedFiles.length})</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">诊断与阶段性产物，不包含在成功交付 ZIP 中。</p>
             </div>
           </div>
-          <div ref={logContainerRef} className="max-h-96 overflow-y-auto bg-background/50 px-4 py-3">
-            {sseError && (
-              <div className="mb-2 flex items-center gap-2">
-                <p className="text-xs text-amber-400">{sseError}</p>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 gap-1 px-2 text-xs text-amber-400 hover:text-amber-300"
-                  onClick={() => {
-                    setSseError(null)
-                    connectSSE(0)
-                  }}
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  重新连接
-                </Button>
-              </div>
-            )}
-            {displayLogs.length === 0 ? (
-              <p className="text-xs text-muted-foreground">等待输出中...</p>
-            ) : (
-              <Streamdown mode="streaming" className="prose prose-sm max-w-none dark:prose-invert">
-                {logMarkdown}
-              </Streamdown>
-            )}
+          <div className="flex flex-col gap-2 p-4">
+            <FilePreviewGallery
+              files={collectedFiles}
+              taskId={task.id}
+              taskType={task.type}
+              renderPreviewDetails={renderVideoPreviewDetails}
+              accessLocked={billingLocked}
+              lockedMessage={lockedDeliveryMessage}
+            />
           </div>
         </Card>
       )}
 
-      {/* Result output for completed tasks */}
-      {task.status === 'completed' && task.result?.output && (
-        <Card>
-          <div className="border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold text-foreground">执行结果</h2>
-          </div>
-          <div className="max-h-64 overflow-y-auto bg-background/50 px-4 py-3 prose prose-sm max-w-none dark:prose-invert">
-            <Streamdown mode="static">
-              {task.result.output}
-            </Streamdown>
-          </div>
-        </Card>
+      {task.type === 'seednote' && task.published && (
+        <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
-      <Dialog open={showResumeDialog} onOpenChange={setShowResumeDialog}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>继续执行此任务</DialogTitle>
-            <DialogDescription>
-              提供补充指令和文件后，任务会基于原工作目录继续执行。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="resume-prompt" className="text-sm font-medium text-foreground">补充指令</label>
-              <Textarea
-                id="resume-prompt"
-                value={resumePrompt}
-                onChange={(event) => setResumePrompt(event.target.value)}
-                placeholder="说明希望 AI 接着做什么，例如：基于现有草稿改成更口语化，并参考我上传的新素材。"
-                className="min-h-28 resize-y"
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <label htmlFor="resume-files" className="text-sm font-medium text-foreground">补充文件</label>
-                <Button type="button" variant="outline" size="sm" onClick={() => resumeFileInputRef.current?.click()}>
-                  <Upload className="h-4 w-4" />
-                  选择文件
-                </Button>
-              </div>
-              <Input
-                ref={resumeFileInputRef}
-                id="resume-files"
-                type="file"
-                multiple
-                className="sr-only"
-                onChange={handleResumeFilesChange}
-              />
-              {resumeFiles.length > 0 ? (
-                <div className="space-y-2">
-                  {resumeFiles.map((item) => (
-                    <div key={item.id} className="grid gap-2 rounded-lg border border-border bg-card/50 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(180px,240px)_auto] sm:items-center">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">{item.file.name}</p>
-                        <p className="text-xs text-muted-foreground">{(item.file.size / 1024).toFixed(1)} KB</p>
-                      </div>
-                      <div className="space-y-1">
-                        <label htmlFor={`resume-file-label-${item.id}`} className="sr-only">文件说明</label>
-                        <Input
-                          id={`resume-file-label-${item.id}`}
-                          value={item.label}
-                          onChange={(event) => updateResumeFileLabel(item.id, event.target.value)}
-                          placeholder="例如：客户反馈、参考图、修改意见、产品参数"
-                        />
-                      </div>
-                      <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeResumeFile(item.id)} aria-label={`移除 ${item.file.name}`}>
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-                  可选上传补充资料、修改意见或参考素材。
-                </div>
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setShowResumeDialog(false)}>
-              取消
-            </Button>
-            <Button
-              type="button"
-              disabled={!canSubmitResume || resumeMutation.isPending}
-              loading={resumeMutation.isPending}
-              onClick={() => void handleResumeSubmit()}
-            >
-              提交并继续
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TaskContextSummary
+        task={task}
+        project={project}
+        files={publishedFiles}
+        logs={displayLogs}
+        progressDescription={progressDescription}
+        netConsumedCredits={netConsumedCredits}
+        sseError={currentSseError}
+        onOpenTab={openTaskDetails}
+      />
+
+      {showResumeDialog ? (
+        <ResumeTaskDialog
+          taskId={currentTask.id}
+          onClose={() => setShowResumeDialog(false)}
+          onSuccess={() => {
+            setShowResumeDialog(false)
+            queryClient.invalidateQueries({ queryKey: ['task', id] })
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+          }}
+        />
+      ) : null}
+
+      {cloneDialogSnapshot ? (
+        <CloneTaskDialog
+          snapshot={cloneDialogSnapshot}
+          onClose={() => setCloneDialogSnapshot(null)}
+          onSuccess={(nextTask) => {
+            setCloneDialogSnapshot(null)
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+            navigate(`/tasks/${nextTask.id}`)
+          }}
+        />
+      ) : null}
 
       {project && (
         <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>

@@ -90,6 +90,9 @@ type Task struct {
 	ImageRatio        string  `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageModelKey     string  `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL string  `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
+	// InputSourceTaskID records the root task whose immutable OSS inputs a clone
+	// may reuse. It is internal ownership provenance, not a client-controlled field.
+	InputSourceTaskID string `gorm:"type:char(36);index" json:"-"`
 	// Overrides is legacy storage for old task-level style/author/theme overrides.
 	// New tasks use ProjectSnapshot as the runtime fact source.
 	Overrides          datatypes.JSONType[StyleOverrides]  `gorm:"type:json" json:"overrides"`
@@ -175,6 +178,7 @@ type Task struct {
 	// unclaimed ones back to cloud so tasks never get stuck when no desktop is
 	// online. ExecutorInfo records which desktop claimed the task (diagnostics).
 	ExecutionTarget    string                           `gorm:"type:varchar(20);default:''" json:"execution_target,omitempty"`
+	CurrentExecutionID *string                          `gorm:"type:char(36);index" json:"current_execution_id,omitempty"`
 	LocalClaimDeadline *time.Time                       `gorm:"index" json:"local_claim_deadline,omitempty"`
 	ExecutorInfo       datatypes.JSONType[ExecutorMeta] `gorm:"type:json" json:"executor_info"`
 

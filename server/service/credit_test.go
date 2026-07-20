@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -105,6 +106,99 @@ func TestDeductForOperationStoresTaskIDAndLongOperationID(t *testing.T) {
 	}
 	if tx.TaskID == nil || *tx.TaskID != taskID {
 		t.Fatalf("transaction task_id = %v, want %q", tx.TaskID, taskID)
+	}
+}
+
+func TestDeductForMCPOperationAllowsNegativeBalance(t *testing.T) {
+	tests := []struct {
+		name   string
+		taskID string
+	}{
+		{name: "unscoped operation"},
+		{name: "task operation", taskID: uuid.New().String()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := setupCreditTestRepo(t)
+			ctx := context.Background()
+			userID := createCreditTestUser(t, repo, 50)
+			operationID := "image_gen:" + uuid.New().String()
+			svc := newTestCreditService(repo)
+			args := []string{operationID}
+			if tt.taskID != "" {
+				args = append(args, tt.taskID)
+			}
+
+			balance, err := svc.DeductForMCPOperation(ctx, userID, model.CreditTypeImageGen, 120, args...)
+			if err != nil {
+				t.Fatalf("deduct operation: %v", err)
+			}
+			if balance != -70 {
+				t.Fatalf("balance = %d, want -70", balance)
+			}
+
+			persistedBalance, err := svc.GetBalance(ctx, userID)
+			if err != nil {
+				t.Fatalf("get balance: %v", err)
+			}
+			if persistedBalance != -70 {
+				t.Fatalf("persisted balance = %d, want -70", persistedBalance)
+			}
+
+			tx, err := repo.Credits().FindDeductionByOperationID(ctx, operationID)
+			if err != nil {
+				t.Fatalf("find deduction by operation id: %v", err)
+			}
+			if tx.BalanceAfter != -70 {
+				t.Fatalf("transaction balance_after = %d, want -70", tx.BalanceAfter)
+			}
+			if tt.taskID == "" && tx.TaskID != nil {
+				t.Fatalf("transaction task_id = %v, want nil", tx.TaskID)
+			}
+			if tt.taskID != "" && (tx.TaskID == nil || *tx.TaskID != tt.taskID) {
+				t.Fatalf("transaction task_id = %v, want %q", tx.TaskID, tt.taskID)
+			}
+		})
+	}
+}
+
+func TestDeductForOperationRejectsNegativeBalanceOutsideMCP(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 50)
+	svc := newTestCreditService(repo)
+
+	_, err := svc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, 120, "designer-generation")
+	if !errors.Is(err, ErrInsufficientCredits) {
+		t.Fatalf("DeductForOperation error = %v, want ErrInsufficientCredits", err)
+	}
+	balance, err := svc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if balance != 50 {
+		t.Fatalf("balance = %d, want unchanged 50", balance)
+	}
+}
+
+func TestDeductForTaskCreationRejectsInsufficientCredits(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 100)
+	svc := newTestCreditService(repo)
+
+	_, err := svc.DeductForTaskCreation(ctx, userID, model.PlatformArticle, uuid.New().String())
+	if !errors.Is(err, ErrInsufficientCredits) {
+		t.Fatalf("DeductForTaskCreation error = %v, want ErrInsufficientCredits", err)
+	}
+
+	balance, err := svc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if balance != 100 {
+		t.Fatalf("balance = %d, want unchanged 100", balance)
 	}
 }
 

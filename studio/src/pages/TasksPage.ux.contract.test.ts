@@ -6,16 +6,22 @@ import { describe, expect, it } from 'vitest'
 const here = dirname(fileURLToPath(import.meta.url))
 
 describe('TasksPage recovery workspace contract', () => {
-  it('renders a recovery queue before the task list', () => {
+  it('keeps recovery signals compact and removes the dashboard-style workbench', () => {
     const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
 
-    expect(source).toContain('恢复工作台')
-    expect(source).toContain('失败待恢复')
+    expect(source).not.toContain('恢复工作台')
+    expect(source).toContain('需要处理')
+    expect(source).toContain('个失败任务')
     expect(source).toContain('待发布确认')
-    expect(source).toContain('放行到公众号草稿箱')
-    expect(source).toContain('最近完成')
-    expect(source).toContain("to=\"/settings\"")
     expect(source).toContain("to=\"/tasks?status=failed\"")
+  })
+
+  it('shows bulk controls only after tasks are selected', () => {
+    const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
+
+    expect(source).toContain('{selectedTaskIds.length > 0 && (')
+    expect(source).toContain('清空选择')
+    expect(source).toContain('下载选中文件')
   })
 
   it('explains why bulk actions skip selected tasks', () => {

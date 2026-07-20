@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 // ValidateAgentTaskAccess loads a task and verifies that the authenticated agent
@@ -24,6 +26,26 @@ func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authe
 	return task, nil
 }
 
+// ValidateAgentExecutionAccess rejects stale execution JWTs even when they
+// belong to the same user and task as the current attempt.
+func (s *TaskService) ValidateAgentExecutionAccess(ctx context.Context, userID, projectID, taskID, executionID string) error {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("find task: %w", err)
+	}
+	if task.UserID != userID || task.ProjectID != projectID || task.Status != model.TaskStatusRunning || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+		return fmt.Errorf("execution token does not match current task execution")
+	}
+	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("find execution: %w", err)
+	}
+	if execution.TaskID != taskID || execution.Status != model.TaskExecutionRunning || !execution.Started || execution.CompletedAt != nil {
+		return fmt.Errorf("execution token is not authorized for an active execution")
+	}
+	return nil
+}
+
 // UpdateHeartbeat refreshes a task's last_heartbeat_at, marking it as actively
 // working. Called by the agent /progress endpoint on every report so long-running
 // local-execution tasks are not force-failed by the stuck-task reaper
@@ -32,6 +54,27 @@ func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authe
 func (s *TaskService) UpdateHeartbeat(ctx context.Context, taskID string) error {
 	if err := s.repo.Tasks().UpdateHeartbeat(ctx, taskID); err != nil {
 		return fmt.Errorf("update heartbeat: %w", err)
+	}
+	return nil
+}
+
+// UpdateAgentHeartbeat atomically refreshes both the task-level compatibility
+// heartbeat and the durable execution heartbeat used by KubernetesReconciler.
+func (s *TaskService) UpdateAgentHeartbeat(ctx context.Context, taskID, executionID string) error {
+	if strings.TrimSpace(executionID) == "" {
+		return s.UpdateHeartbeat(ctx, taskID)
+	}
+	now := time.Now()
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.TaskExecutions().UpdateHeartbeat(ctx, executionID, now); err != nil {
+			return fmt.Errorf("update execution heartbeat: %w", err)
+		}
+		if err := tx.Tasks().UpdateHeartbeat(ctx, taskID); err != nil {
+			return fmt.Errorf("update task heartbeat: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("update agent heartbeat: %w", err)
 	}
 	return nil
 }

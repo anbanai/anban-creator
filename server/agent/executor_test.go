@@ -488,8 +488,10 @@ func TestCountMeaningfulFiles(t *testing.T) {
 			setup: func(t *testing.T, dir string) {
 				os.MkdirAll(filepath.Join(dir, ".anban-creator"), 0755)
 				os.MkdirAll(filepath.Join(dir, ".claude"), 0755)
+				os.MkdirAll(filepath.Join(dir, DockerRuntimeHomeDirName), 0755)
 				os.WriteFile(filepath.Join(dir, ".anban-creator", "settings.json"), []byte("{}"), 0644)
 				os.WriteFile(filepath.Join(dir, ".claude", ".mcp.json"), []byte("{}"), 0644)
+				os.WriteFile(filepath.Join(dir, DockerRuntimeHomeDirName, "state.json"), []byte("{}"), 0644)
 			},
 			want: 0,
 		},
@@ -793,6 +795,22 @@ func TestAppendResumeContextToPrompt(t *testing.T) {
 	withoutResume := AppendResumeContextToPrompt("base prompt", t.TempDir())
 	if withoutResume != "base prompt" {
 		t.Fatalf("prompt without resume = %q, want unchanged", withoutResume)
+	}
+}
+
+func TestAppendResumeContextFileToPromptUsesExecutionScopedInput(t *testing.T) {
+	workDir := t.TempDir()
+	relativePath := ".anban-creator/resume/executions/execution-2/latest.md"
+	fullPath := filepath.Join(workDir, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte("continue"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := AppendResumeContextFileToPrompt("base", workDir, relativePath)
+	if !strings.Contains(got, "`"+relativePath+"`") {
+		t.Fatalf("prompt = %q, want execution-scoped resume path", got)
 	}
 }
 

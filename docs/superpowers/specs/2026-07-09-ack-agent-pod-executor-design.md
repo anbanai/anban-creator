@@ -115,11 +115,11 @@ claude:
   executor: kubernetes
   kubernetes:
     namespace: anban
-    agent_image: registry.example.com/anban-agent:latest
-    service_account: anban-agent-runner
+    agent_image: registry.example.com/creator-agent:latest
+    service_account: creator-agent-runner
     image_pull_secret: ""
     workspace_mount_path: /workspace
-    workspace_pvc_name: anban-agent-nas
+    workspace_pvc_name: anban-creator
     pod_ttl_seconds: 86400
     exec_timeout_seconds: 3600
     resources:
@@ -148,10 +148,10 @@ Add deployment manifests for production:
 - Server ServiceAccount, Role, and RoleBinding with permissions for `pods`,
   `pods/log`, and `pods/exec` in the configured namespace.
 - Agent Pod template labels:
-  - `app.kubernetes.io/name=anban-agent`
+  - `app.kubernetes.io/name=creator-agent`
   - `anban.ai/user-id=<user_id>`
   - `anban.ai/project-id=<project_id>`
-- NAS-backed PVC mounted only by Agent Pods.
+- Existing NAS-backed PVC `anban-creator` is referenced and mounted only by Agent Pods; the runtime manifest does not create it.
 - Resource requests and limits on Agent Pods.
 - Optional image pull secret.
 
@@ -162,7 +162,7 @@ The server deployment does not mount the NAS PVC.
 Pod name is deterministic and sanitized from user and project IDs, for example:
 
 ```text
-anban-agent-u-<short_user_hash>-p-<short_project_hash>
+creator-agent-u-<short_user_hash>-p-<short_project_hash>
 ```
 
 The Kubernetes executor:
@@ -316,7 +316,7 @@ specific message that names the missing artifact role or path.
 2. Add direct-upload task artifact purpose and manifest endpoint.
 3. Add Agent side workspace scanner and OSS direct uploader.
 4. Add Kubernetes executor behind `claude.executor=kubernetes`.
-5. Add ACK manifests for RBAC, Agent Pod template, and NAS PVC mount.
+5. Add ACK manifests for RBAC and the Agent Pod template, referencing the existing NAS PVC without creating it.
 6. Run staging with one internal project and compare outputs against local mode.
 7. Enable per environment through config, then gradually enable production.
 

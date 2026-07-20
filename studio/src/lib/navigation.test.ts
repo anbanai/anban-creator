@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Sparkles } from 'lucide-react'
 
 import {
   allNavItems,
@@ -12,7 +13,8 @@ import {
 
 describe('navigation IA', () => {
   it('groups Studio navigation by creator outcomes', () => {
-    expect(todayItems.map((item) => item.label)).toEqual(['首页'])
+    expect(todayItems.map((item) => item.label)).toEqual(['AI助手'])
+    expect(todayItems[0]?.icon).toBe(Sparkles)
     expect(creationItems.map((item) => item.label)).toEqual(['项目', '任务', '设计师'])
     expect(automationItems.map((item) => item.label)).toEqual(['计划', '时间轴'])
     expect(assetItems.map((item) => item.label)).toEqual(['模板库'])
@@ -20,9 +22,9 @@ describe('navigation IA', () => {
     expect(connectSettingItems.map((item) => item.label)).toEqual(['Claude Code', 'OpenClaw', 'Codex', '设置'])
   })
 
-  it('keeps route compatibility while naming the default workspace as the homepage', () => {
+  it('keeps route compatibility while naming the default workspace as the AI assistant', () => {
     expect(allNavItems.map((item) => item.to)).toContain('/')
-    expect(allNavItems.find((item) => item.to === '/')?.label).toBe('首页')
+    expect(allNavItems.find((item) => item.to === '/')?.label).toBe('AI助手')
     expect(allNavItems.map((item) => item.to)).toEqual(expect.arrayContaining([
       '/projects',
       '/plans',

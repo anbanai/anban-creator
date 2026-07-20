@@ -450,7 +450,11 @@ func TestImageBillingSkipsActualBYOKButChargesSystemPreset(t *testing.T) {
 		t.Fatalf("balance after preset image = %d, want 967", user.CreditsBalance)
 	}
 
-	provider, mdl, source, err := resolveImageBillingModel(context.Background(), userID, "managed-openai-collision")
+	provider, mdl, source, err := resolveImageBillingModel(&service.ResolvedImageModel{
+		Provider: "openai",
+		Model:    "gpt-image-custom",
+		Source:   "preset:managed-openai-collision",
+	})
 	if err != nil {
 		t.Fatalf("resolve managed preset: %v", err)
 	}

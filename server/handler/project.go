@@ -310,9 +310,14 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
-	if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL}); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+	rewrites, err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL})
+	if err != nil {
+		return respondPendingUploadFinalizeError(c, h.logger, err)
 	}
+	req.AvatarURL = rewriteFinalizedUploadURL(req.AvatarURL, rewrites)
+	req.ReferenceImageURL = rewriteFinalizedUploadURL(req.ReferenceImageURL, rewrites)
+	ch.AvatarURL = req.AvatarURL
+	ch.ReferenceImageURL = req.ReferenceImageURL
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
@@ -411,9 +416,14 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
-	if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL}); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+	rewrites, err := finalizePendingURLs(c.Context(), h.store, h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.AvatarURL, req.ReferenceImageURL})
+	if err != nil {
+		return respondPendingUploadFinalizeError(c, h.logger, err)
 	}
+	req.AvatarURL = rewriteFinalizedUploadURL(req.AvatarURL, rewrites)
+	req.ReferenceImageURL = rewriteFinalizedUploadURL(req.ReferenceImageURL, rewrites)
+	ch.AvatarURL = req.AvatarURL
+	ch.ReferenceImageURL = req.ReferenceImageURL
 
 	updated, err := h.service.Update(c.Context(), userID, projectID, ch)
 	if err != nil {

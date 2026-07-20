@@ -2,14 +2,39 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
+
+	serverauth "github.com/anbanai/anban-creator/server/auth"
 )
+
+type executionAuthorizerStub struct {
+	wantUserID      string
+	wantProjectID   string
+	wantTaskID      string
+	wantExecutionID string
+	err             error
+	calls           int
+}
+
+func (s *executionAuthorizerStub) ValidateAgentExecutionAccess(_ context.Context, userID, projectID, taskID, executionID string) error {
+	s.calls++
+	if s.err != nil {
+		return s.err
+	}
+	if userID != s.wantUserID || projectID != s.wantProjectID || taskID != s.wantTaskID || executionID != s.wantExecutionID {
+		return errors.New("unexpected execution identity")
+	}
+	return nil
+}
 
 func TestMCPHandlerInitialize(t *testing.T) {
 	handler := NewMCPHandler(nil, "test-key", nil)
@@ -84,6 +109,120 @@ func TestMCPHandlerInvalidToken(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
+}
+
+func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
+	const (
+		userID      = "user-1"
+		projectID   = "project-1"
+		taskID      = "task-1"
+		executionID = "execution-1"
+	)
+	tokens, err := serverauth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := tokens.Issue(serverauth.ExecutionClaims{
+		UserID: userID, ProjectID: projectID, TaskID: taskID, ExecutionID: executionID,
+	}, time.Now().Add(10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer := &executionAuthorizerStub{
+		wantUserID: userID, wantProjectID: projectID, wantTaskID: taskID, wantExecutionID: executionID,
+	}
+	handler := NewMCPHandler(nil, "admin-key", nil, WithExecutionAuthentication(tokens, authorizer))
+	sessionID := initializeMCPExecutionSession(t, handler, token)
+
+	for _, tt := range []struct {
+		name      string
+		arguments string
+	}{
+		{name: "other task same user", arguments: `{"project_id":"project-1","task_id":"task-2"}`},
+		{name: "other project", arguments: `{"project_id":"project-2","task_id":"task-1"}`},
+		{name: "other execution", arguments: `{"project_id":"project-1","task_id":"task-1","execution_id":"execution-2"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := callMCPToolForScopeTest(handler, token, sessionID, "get_task", tt.arguments)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+	batch := `[{"jsonrpc":"2.0","method":"tools/call","params":{"name":"scope_probe","arguments":{"task_id":"task-1"}},"id":3},{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_task","arguments":{"task_id":"task-2"}},"id":4}]`
+	batchRec := postMCPForScopeTest(handler, token, sessionID, batch)
+	if batchRec.Code != http.StatusForbidden {
+		t.Fatalf("batch cross-task call: expected 403, got %d: %s", batchRec.Code, batchRec.Body.String())
+	}
+	if authorizer.calls != 0 {
+		t.Fatalf("scope mismatch reached current-execution authorizer %d times", authorizer.calls)
+	}
+
+	// A correctly scoped request passes the central guard and reaches MCP
+	// dispatch. The deliberately unknown tool avoids coupling this auth test to
+	// business services while still exercising a real HTTP tools/call request.
+	rec := callMCPToolForScopeTest(handler, token, sessionID, "scope_probe", `{"project_id":"project-1","task_id":"task-1","execution_id":"execution-1"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid scope did not reach MCP dispatch: %d: %s", rec.Code, rec.Body.String())
+	}
+	if authorizer.calls != 1 {
+		t.Fatalf("current-execution authorizer calls = %d, want 1", authorizer.calls)
+	}
+}
+
+func TestMCPHandlerExecutionTokenRejectsSupersededExecution(t *testing.T) {
+	tokens, err := serverauth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := tokens.Issue(serverauth.ExecutionClaims{
+		UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-old",
+	}, time.Now().Add(10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer := &executionAuthorizerStub{err: errors.New("not current")}
+	handler := NewMCPHandler(nil, "admin-key", nil, WithExecutionAuthentication(tokens, authorizer))
+	sessionID := initializeMCPExecutionSession(t, handler, token)
+	rec := callMCPToolForScopeTest(handler, token, sessionID, "scope_probe", `{"project_id":"project-1","task_id":"task-1"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if authorizer.calls != 1 {
+		t.Fatalf("current-execution authorizer calls = %d, want 1", authorizer.calls)
+	}
+}
+
+func initializeMCPExecutionSession(t *testing.T, handler http.Handler, token string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"execution-test","version":"1.0"}},"id":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("initialize: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	return rec.Header().Get("Mcp-Session-Id")
+}
+
+func callMCPToolForScopeTest(handler http.Handler, token, sessionID, toolName, arguments string) *httptest.ResponseRecorder {
+	body := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"` + toolName + `","arguments":` + arguments + `},"id":2}`
+	return postMCPForScopeTest(handler, token, sessionID, body)
+}
+
+func postMCPForScopeTest(handler http.Handler, token, sessionID, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+	if sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
 }
 
 func TestMCPHandlerToolsList(t *testing.T) {

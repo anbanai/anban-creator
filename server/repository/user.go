@@ -6,6 +6,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type userRepository struct {
@@ -19,6 +20,14 @@ func newUserRepository(db *gorm.DB) UserRepository {
 func (r *userRepository) FindByID(ctx context.Context, id string) (*model.User, error) {
 	var user model.User
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *userRepository) LockByID(ctx context.Context, id string) (*model.User, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&user).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil

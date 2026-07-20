@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Download, Paintbrush, ChevronLeft, ChevronRight, Clock } from 'lucide-react'
+import { X, Download, Paintbrush, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { ImageViewerStage } from '@/components/agent-prompt/ImageViewerStage'
 import { downloadBlob, isDesktop, openInExternalWindow, saveUrlToFile } from '@/lib/tauri'
 
 export interface PreviewImage {
@@ -94,8 +95,6 @@ export default function ImagePreview({
   if (images.length === 0) return null
 
   const current = images[Math.min(currentIndex, images.length - 1)]
-  const canPrev = currentIndex > 0
-  const canNext = currentIndex < images.length - 1
   const showNav = images.length > 1
 
   async function handleDownload() {
@@ -165,42 +164,15 @@ export default function ImagePreview({
         </Button>
 
         {/* Image stage */}
-        <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black/60 p-4 md:p-8">
-          <img
+        <div className="flex min-h-0 flex-1 bg-black/60 p-4 md:p-8">
+          <ImageViewerStage
             src={current.url}
             alt="预览图片"
-            className="max-h-[50vh] max-w-full object-contain md:max-h-[88vh]"
+            index={currentIndex}
+            count={images.length}
+            onPrevious={goPrev}
+            onNext={goNext}
           />
-
-          {showNav && (
-            <>
-              <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-black/50 px-3 py-1 text-[11px] font-medium text-white/80 backdrop-blur-sm">
-                {currentIndex + 1} / {images.length}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={!canPrev}
-                onClick={goPrev}
-                className="absolute top-1/2 left-3 size-10 -translate-y-1/2 rounded-full bg-black/40 text-white/80 backdrop-blur-sm hover:bg-black/60 hover:text-white disabled:opacity-30"
-                title="上一张 (←)"
-                aria-label="上一张"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={!canNext}
-                onClick={goNext}
-                className="absolute top-1/2 right-3 size-10 -translate-y-1/2 rounded-full bg-black/40 text-white/80 backdrop-blur-sm hover:bg-black/60 hover:text-white disabled:opacity-30"
-                title="下一张 (→)"
-                aria-label="下一张"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </Button>
-            </>
-          )}
         </div>
 
         {/* Info panel */}
