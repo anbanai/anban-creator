@@ -128,6 +128,9 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 	if execution.FinalizationStatus == model.TaskExecutionFinalizationDone {
 		return nil
 	}
+	if err := s.ensureExecutionAuthority(ctx, task.ID, execution.ID); err != nil {
+		return err
+	}
 	token := uuid.NewString()
 	won, err := s.repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, token, s.cloudFinalizationLease())
 	if err != nil {
@@ -160,6 +163,9 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 		}
 	}
 	for stage != model.TaskExecutionFinalizationDone {
+		if err := s.ensureFinalizationAuthority(leaseCtx, task.ID, execution.ID, leaseLost); err != nil {
+			return err
+		}
 		next, step, err := s.cloudFinalizationStep(task, execution, result, stage)
 		if err != nil {
 			return err
@@ -175,6 +181,9 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 			if err := s.finalizationAfterStage(next); err != nil {
 				return err
 			}
+		}
+		if err := s.ensureFinalizationAuthority(leaseCtx, task.ID, execution.ID, leaseLost); err != nil {
+			return err
 		}
 		if err := finalizationLeaseError(leaseLost); err != nil {
 			return err
@@ -198,6 +207,30 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func (s *TaskService) ensureFinalizationAuthority(ctx context.Context, taskID, executionID string, leaseLost <-chan error) error {
+	if err := finalizationLeaseError(leaseLost); err != nil {
+		return err
+	}
+	if err := s.ensureExecutionAuthority(ctx, taskID, executionID); err != nil {
+		if leaseErr := finalizationLeaseError(leaseLost); leaseErr != nil {
+			return leaseErr
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *TaskService) ensureExecutionAuthority(ctx context.Context, taskID, executionID string) error {
+	latest, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("verify current task execution: %w", err)
+	}
+	if latest.CurrentExecutionID == nil || *latest.CurrentExecutionID != executionID {
+		return ErrStaleTaskExecution
 	}
 	return nil
 }
@@ -536,28 +569,17 @@ func (s *TaskService) advanceExecutionFinalization(ctx context.Context, id, toke
 
 func (s *TaskService) finalizeExecutionTaskStatus(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
 	target, errMsg := taskTerminalFromExecution(execution, result)
-	var won bool
-	var err error
-	if target == model.TaskStatusCompleted {
-		won, err = s.repo.Tasks().CompareAndSwapStatus(ctx, task.ID, model.TaskStatusRunning, target)
-	} else {
-		won, err = s.repo.Tasks().CompareAndSwapStatusAndError(ctx, task.ID, model.TaskStatusRunning, target, errMsg)
-	}
+	won, err := s.repo.Tasks().FinalizeTaskForExecution(ctx, task.ID, execution.ID, target, errMsg)
 	if err != nil {
 		return fmt.Errorf("finalize task status: %w", err)
 	}
 	if !won {
 		latest, findErr := s.repo.Tasks().FindByID(ctx, task.ID)
-		if findErr != nil || latest.Status != target {
+		if findErr != nil || latest.CurrentExecutionID == nil || *latest.CurrentExecutionID != execution.ID || latest.Status != target {
 			return ErrStaleTaskExecution
 		}
 	}
-	if err := s.repo.Tasks().SetCompletedAt(ctx, task.ID); err != nil {
-		return fmt.Errorf("set task completed_at: %w", err)
-	}
-	if target != model.TaskStatusCompleted {
-		task.Status = target
-	}
+	task.Status = target
 	return nil
 }
 

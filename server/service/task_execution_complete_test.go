@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"sync"
@@ -158,6 +159,70 @@ func TestCompleteCloudExecutionFencesEvidenceWhenAttemptBecomesStale(t *testing.
 	}
 	if foundExecution.FinalizationStatus != model.TaskExecutionFinalizationArtifacts {
 		t.Fatalf("stale execution finalization advanced to %q, want %q", foundExecution.FinalizationStatus, model.TaskExecutionFinalizationArtifacts)
+	}
+}
+
+func TestStaleCloudFinalizerStopsBeforeTaskAndSettlementSideEffects(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	ctx := context.Background()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID: task.UserID, Email: task.UserID + "@example.com", Password: "x", InviteCode: uuid.NewString()[:12],
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seedDeduction(t, repo, task.UserID, task.ID, 100)
+	svc.creditSvc = newTestCreditService(repo)
+
+	terminalResult := &agent.ExecutionResult{Success: false, Error: "old attempt failed", RemoteArtifacts: true}
+	encoded, err := json.Marshal(terminalResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	won, err := repo.TaskExecutions().Transition(ctx, execution.ID,
+		[]string{model.TaskExecutionRunning}, model.TaskExecutionFailed,
+		model.ExecutionTransition{
+			TerminalReason:     "old_attempt_failed",
+			Result:             encoded,
+			FinalizationStatus: model.TaskExecutionFinalizationResult,
+		})
+	if err != nil || !won {
+		t.Fatalf("terminalize old execution: won=%v err=%v", won, err)
+	}
+	oldExecution, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 2, Target: "kubernetes",
+		Status: model.TaskExecutionRunning, Started: true,
+	}
+	if err := repo.TaskExecutions().Create(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	if swapped, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, next.ID); err != nil || !swapped {
+		t.Fatalf("switch current execution: swapped=%v err=%v", swapped, err)
+	}
+
+	err = svc.finalizeTaskFromExecution(ctx, task, oldExecution)
+	if !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("stale finalizer error = %v, want ErrStaleTaskExecution", err)
+	}
+	foundTask, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundTask.Status != model.TaskStatusRunning || foundTask.WorkflowStatus != nil || foundTask.CurrentExecutionID == nil || *foundTask.CurrentExecutionID != next.ID {
+		t.Fatalf("stale finalizer mutated current task: status=%q workflow=%v current=%v", foundTask.Status, foundTask.WorkflowStatus, foundTask.CurrentExecutionID)
+	}
+	foundOld, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundOld.FinalizationStatus != model.TaskExecutionFinalizationResult || foundOld.PublishingStatus != "" {
+		t.Fatalf("stale finalizer advanced execution: stage=%q publishing=%q", foundOld.FinalizationStatus, foundOld.PublishingStatus)
+	}
+	if _, err := repo.Credits().FindRefundByTaskID(ctx, task.ID); err == nil {
+		t.Fatal("stale finalizer refunded the old attempt")
 	}
 }
 

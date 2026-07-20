@@ -2,7 +2,12 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -10,6 +15,8 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
+
+var ErrTaskExecutionEvidenceConflict = errors.New("task execution evidence conflict")
 
 type taskRepository struct {
 	db *gorm.DB
@@ -183,7 +190,10 @@ func (r *taskRepository) UpdateExecutionEvidence(ctx context.Context, id, result
 	if res.Error != nil {
 		return false, res.Error
 	}
-	return res.RowsAffected == 1, nil
+	if res.RowsAffected == 1 {
+		return true, nil
+	}
+	return r.classifyUnchangedExecutionEvidence(ctx, id, "", result, usage, costStatus)
 }
 
 // UpdateExecutionEvidenceForExecution prevents a stale cloud attempt from
@@ -199,7 +209,54 @@ func (r *taskRepository) UpdateExecutionEvidenceForExecution(ctx context.Context
 	if res.Error != nil {
 		return false, res.Error
 	}
-	return res.RowsAffected == 1, nil
+	if res.RowsAffected == 1 {
+		return true, nil
+	}
+	return r.classifyUnchangedExecutionEvidence(ctx, id, executionID, result, usage, costStatus)
+}
+
+func (r *taskRepository) classifyUnchangedExecutionEvidence(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	var task model.Task
+	err := r.db.WithContext(ctx).Model(&model.Task{}).
+		Select("id", "current_execution_id", "result", "terminal_model_usage", "cost_status").
+		Where("id = ?", id).
+		Take(&task).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read back unchanged execution evidence: %w", err)
+	}
+	if executionID != "" && (task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID) {
+		return false, nil
+	}
+	if task.Result != nil && jsonValuesEqual(*task.Result, result) &&
+		reflect.DeepEqual(task.TerminalModelUsage.Data(), usage) && task.CostStatus == costStatus {
+		return true, nil
+	}
+	return false, ErrTaskExecutionEvidenceConflict
+}
+
+func jsonValuesEqual(left, right string) bool {
+	decode := func(value string) (any, error) {
+		decoder := json.NewDecoder(strings.NewReader(value))
+		decoder.UseNumber()
+		var decoded any
+		if err := decoder.Decode(&decoded); err != nil {
+			return nil, err
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			if err == nil {
+				return nil, fmt.Errorf("multiple JSON values")
+			}
+			return nil, err
+		}
+		return decoded, nil
+	}
+	leftValue, leftErr := decode(left)
+	rightValue, rightErr := decode(right)
+	return leftErr == nil && rightErr == nil && reflect.DeepEqual(leftValue, rightValue)
 }
 
 // FinalizeLocalTask makes terminal ownership and terminal evidence one CAS.
@@ -214,6 +271,20 @@ func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, status, erro
 			"result":               result,
 			"terminal_model_usage": datatypes.NewJSONType(usage),
 			"cost_status":          costStatus,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND status = ? AND current_execution_id = ?", id, model.TaskStatusRunning, executionID).
+		Updates(map[string]any{
+			"status":        status,
+			"error_message": errorMsg,
+			"completed_at":  time.Now(),
 		})
 	if res.Error != nil {
 		return false, res.Error
@@ -536,6 +607,7 @@ func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID 
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).
 		Where("id = ? AND status IN ?", taskID, model.TerminalTaskStatuses).
+		Where("current_execution_id IS NULL OR EXISTS (SELECT 1 FROM task_executions WHERE task_executions.id = tasks.current_execution_id AND task_executions.finalization_status = ?)", model.TaskExecutionFinalizationDone).
 		Updates(map[string]interface{}{
 			"status":                 model.TaskStatusPending,
 			"started_at":             nil,
@@ -543,6 +615,8 @@ func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID 
 			"last_heartbeat_at":      nil,
 			"error_message":          "",
 			"result":                 nil,
+			"terminal_model_usage":   datatypes.NewJSONType([]model.ModelTokenUsage{}),
+			"cost_status":            "",
 			"progress":               0,
 			"latest_progress":        datatypes.NewJSONType(model.ProgressPayload{}),
 			"workflow_status":        nil,

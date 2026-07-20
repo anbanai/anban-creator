@@ -2660,6 +2660,78 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	}
 }
 
+func TestTaskServiceResumeRejectsUnfinishedCurrentFinalization(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	executionID := uuid.NewString()
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Status: model.TaskExecutionFailed,
+		FinalizationStatus: model.TaskExecutionFinalizationTask,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resumed, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续"})
+	if !errors.Is(err, ErrTaskResumeConflict) || resumed != nil {
+		t.Fatalf("Resume unfinished finalization = task %v err %v, want nil/ErrTaskResumeConflict", resumed, err)
+	}
+	found, findErr := repo.Tasks().FindByID(ctx, task.ID)
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
+	if found.Status != model.TaskStatusFailed || found.CurrentExecutionID == nil || *found.CurrentExecutionID != executionID {
+		t.Fatalf("conflicting resume mutated task: status=%q current=%v", found.Status, found.CurrentExecutionID)
+	}
+}
+
+func TestTaskServiceResumeClearsPreviousTerminalEvidence(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	executionID := uuid.NewString()
+	resultJSON := `{"success":false,"cost_status":"reconciled"}`
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID, Result: &resultJSON,
+		TerminalModelUsage: datatypes.NewJSONType([]model.ModelTokenUsage{{Provider: "provider", Model: "old", InputTokens: 9}}),
+		CostStatus:         agent.CostStatusReconciled,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Status: model.TaskExecutionFailed,
+		FinalizationStatus: model.TaskExecutionFinalizationDone,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resumed, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续"})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if resumed.Result != nil || len(resumed.TerminalModelUsage.Data()) != 0 || resumed.CostStatus != "" {
+		t.Fatalf("returned resumed task exposes old evidence: result=%v usage=%+v cost=%q", resumed.Result, resumed.TerminalModelUsage.Data(), resumed.CostStatus)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Result != nil || len(found.TerminalModelUsage.Data()) != 0 || found.CostStatus != "" {
+		t.Fatalf("persisted resumed task exposes old evidence: result=%v usage=%+v cost=%q", found.Result, found.TerminalModelUsage.Data(), found.CostStatus)
+	}
+}
+
 func TestTaskService_ResumePersistsFilesWithoutResultOrLocalWorkspace(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
