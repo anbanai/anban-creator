@@ -1,0 +1,45 @@
+# Dockerfile.studio builds from the repository root while keeping its context
+# limited to Studio source. Docker always includes the selected Dockerfile and
+# this ignore file, so they remain available to the build engine.
+**
+!studio/
+!studio/**
+
+# Generated dependencies and build output are rebuilt in the image.
+studio/node_modules/
+studio/dist/
+studio/build/
+studio/.cache/
+studio/.vite/
+studio/.next/
+studio/coverage/
+studio/out/
+studio/*.tsbuildinfo
+studio/**/*.tsbuildinfo
+studio/next-env.d.ts
+studio/**/next-env.d.ts
+
+# Local credentials, package-manager state, VCS, and editor artifacts do not
+# affect the frontend build and must not be sent to remote builders.
+studio/.env*
+studio/**/.env*
+studio/*.pem
+studio/**/*.pem
+studio/.vercel/
+studio/.pnp.*
+studio/.yarn/
+studio/.yarnrc*
+studio/npm-debug.log*
+studio/**/npm-debug.log*
+studio/yarn-debug.log*
+studio/**/yarn-debug.log*
+studio/yarn-error.log*
+studio/**/yarn-error.log*
+studio/pnpm-debug.log*
+studio/**/pnpm-debug.log*
+studio/.git/
+studio/.gitignore
+studio/.DS_Store
+studio/.vscode/
+studio/.idea/
+studio/*.log

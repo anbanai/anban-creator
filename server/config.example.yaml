@@ -411,6 +411,13 @@ claude:
   sandbox: true
   # Agent 插件目录，必须包含 agents/、skills/ 等分发资产。
   plugin_dir: "/anbanai"
+  docker:
+    image: "${ANBAN_CLAUDE_DOCKER_IMAGE:-creator-agent:latest}"
+    cpu_cores: 2
+    memory_mb: 4096
+    timeout_sec: 3600
+    container_name: "${ANBAN_CLAUDE_DOCKER_CONTAINER_NAME}"
+    workspace_dir: "${ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR}"
   kubernetes:
     # Agent Job 所在命名空间。
     namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"

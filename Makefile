@@ -6,17 +6,18 @@
 BINARY      := anban-creator-server
 BINDIR      := bin
 AGENT_IMAGE := creator-agent:latest
-MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
 SERVER_IMAGE := anban-creator-server:latest
+WCFLINK_IMAGE := anban-creator-wcflink:latest
 STUDIO_IMAGE := anban-creator-studio:latest
 SERVER_CONFIG := server/config.yaml
+DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
         server-build server-run server-dev server-test git-sync-setup agent-reach-update humanizer-update \
         agent-build-native plugin-binaries \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-montage-agent-image docker-server-image docker-studio-image docker-images
+        docker-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images
 
 # Default target
 all: server-build
@@ -120,9 +121,9 @@ web-build:
 # Docker targets
 # ---------------------------------------------------------------------------
 
-# Start all services (MySQL, Redis, agent, server)
+# Start all Compose services (MySQL, Redis, wcfLink, server, Studio)
 docker-up:
-	@docker compose up -d
+	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
 docker-down:
@@ -139,15 +140,6 @@ docker-agent-image:
 	docker build -f Dockerfile.agent -t $(AGENT_IMAGE) . && \
 	echo "Image build complete: $(AGENT_IMAGE)"
 
-# Build the dedicated Montage Agent image with an immutable OpenMontage template.
-docker-montage-agent-image:
-	@git submodule update --init --recursive third_party/OpenMontage claudecode
-	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
-	docker build -f Dockerfile.agent-montage \
-	  --build-arg OPENMONTAGE_REVISION=$$(git -C third_party/OpenMontage rev-parse HEAD) \
-	  -t $(MONTAGE_AGENT_IMAGE) . && \
-	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
-
 # Build the anban-creator-server Docker image
 docker-server-image:
 	@git submodule update --init --recursive
@@ -155,14 +147,20 @@ docker-server-image:
 	docker build -f Dockerfile.server -t $(SERVER_IMAGE) . && \
 	echo "Image build complete: $(SERVER_IMAGE)"
 
-# Build the Studio Docker image
+# Build the wcfLink sidecar Docker image from its pinned upstream source.
+docker-wcflink-image:
+	@echo "Building $(WCFLINK_IMAGE)..." && \
+	docker build -f Dockerfile.wcflink -t $(WCFLINK_IMAGE) . && \
+	echo "Image build complete: $(WCFLINK_IMAGE)"
+
+# Build the Studio Docker image from the repository-root build context.
 docker-studio-image:
 	@echo "Building $(STUDIO_IMAGE)..." && \
-	docker build -f Dockerfile.studio -t $(STUDIO_IMAGE) studio && \
+	docker build -f Dockerfile.studio -t $(STUDIO_IMAGE) . && \
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
-# Build all application images
-docker-images: docker-agent-image docker-montage-agent-image docker-server-image docker-studio-image
+# Build all supported images.
+docker-images: docker-agent-image docker-server-image docker-wcflink-image docker-studio-image
 
 # Backward-compatible alias (builds agent image)
 docker-image: docker-agent-image
@@ -228,14 +226,14 @@ help:
 	@echo "  make web-build     - Build frontend for production (bun)"
 	@echo ""
 	@echo "Docker targets:"
-	@echo "  make docker-up          - Start all services (MySQL, Redis, agent, server)"
+	@echo "  make docker-up          - Start all Compose services"
 	@echo "  make docker-down        - Stop containers"
 	@echo "  make docker-logs        - Follow container logs"
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
-	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
+	@echo "  make docker-wcflink-image - Build wcfLink sidecar image"
 	@echo "  make docker-studio-image - Build Studio image (Bun + nginx)"
-	@echo "  make docker-images      - Build all application images"
+	@echo "  make docker-images      - Build all supported images"
 	@echo "  make docker-image       - Build agent image (alias)"
 	@echo ""
 	@echo "Desktop (Tauri) targets:"

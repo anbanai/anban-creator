@@ -1,10 +1,10 @@
-# docker/wcflink.Dockerfile
+# syntax=docker/dockerfile:1.7
 #
-# Multi-stage build for the wcfLink WeChat-bot sidecar (github.com/lich0821/wcfLink).
-# The source is fetched from GitHub at build time and pinned by WCFLINK_REF.
+# Multi-stage root-context build for the wcfLink WeChat-bot sidecar
+# (github.com/lich0821/wcfLink). The source is fetched from GitHub at build
+# time and pinned by WCFLINK_REF plus WCFLINK_COMMIT.
 # wcfLink uses modernc.org/sqlite (pure Go), so CGO is disabled and the final
 # image is a static binary on alpine.
-# syntax=docker/dockerfile:1.7
 
 FROM golang:alpine AS builder
 ARG WCFLINK_REPO=https://github.com/lich0821/wcfLink.git
