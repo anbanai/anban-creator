@@ -425,6 +425,68 @@ describe('PlansPage Seednote reference snapshots', () => {
     expect(payload).not.toHaveProperty('reference_image_url')
   })
 
+  it('replaces a plan asset with an upload session selection', async () => {
+    uploadToOSSMock.mockResolvedValueOnce({
+      uploadSessionId: '55555555-5555-4555-8555-555555555555',
+      uploadId: 'upload-plan-reference',
+      key: 'uploads/pending/plan-reference.png',
+      publicUrl: 'https://staging.example/plan-reference.png',
+      previewUrl: 'https://staging.example/plan-reference.png',
+      contentType: 'image/png',
+      size: 9,
+    })
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
+    fireEvent.change(screen.getByLabelText('参考图文件'), {
+      target: { files: [new File(['replacement'], 'plan-replacement.png', { type: 'image/png' })] },
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
+    const payload = vi.mocked(api.plans.update).mock.calls[0][1]
+    expect(payload.reference_image).toEqual({
+      upload_session_id: '55555555-5555-4555-8555-555555555555',
+    })
+    expect(payload).not.toHaveProperty('reference_image_url')
+  })
+
+  it('keeps a replacement selection open when plan finalization fails', async () => {
+    uploadToOSSMock.mockResolvedValueOnce({
+      uploadSessionId: '66666666-6666-4666-8666-666666666666',
+      uploadId: 'upload-expired-plan-reference',
+      key: 'uploads/pending/expired-plan-reference.png',
+      publicUrl: 'https://staging.example/expired-plan-reference.png',
+      previewUrl: 'https://staging.example/expired-plan-reference.png',
+      contentType: 'image/png',
+      size: 9,
+    })
+    vi.mocked(api.plans.update).mockRejectedValueOnce({
+      response: { data: { msg: '参考图上传会话已过期，请重新上传' } },
+    })
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
+    fireEvent.change(screen.getByLabelText('参考图文件'), {
+      target: { files: [new File(['replacement'], 'expired.png', { type: 'image/png' })] },
+    })
+    const preview = await screen.findByRole('img', { name: '参考图' })
+    await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+
+    await waitFor(() => expect(errorMock).toHaveBeenCalledWith('参考图上传会话已过期，请重新上传'))
+    expect(screen.getByRole('dialog', { name: '编辑计划' })).toBeInTheDocument()
+    expect(preview).toBeInTheDocument()
+    const payload = vi.mocked(api.plans.update).mock.calls[0][1]
+    expect(payload.reference_image).toEqual({
+      upload_session_id: '66666666-6666-4666-8666-666666666666',
+    })
+    expect(payload).not.toHaveProperty('reference_image_url')
+  })
+
   it('hydrates edit snapshots and preserves omit, clear, and replace update semantics', async () => {
     render(<PlansPage />)
 

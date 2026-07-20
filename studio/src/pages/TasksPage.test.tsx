@@ -9,7 +9,9 @@ import { createTestQueryClient } from '@/test/test-utils'
 import type { Project, Task } from '@/types'
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), message: vi.fn(), success: vi.fn() } }))
+const { errorMock } = vi.hoisted(() => ({ errorMock: vi.fn() }))
+
+vi.mock('sonner', () => ({ toast: { error: errorMock, message: vi.fn(), success: vi.fn() } }))
 
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
 
@@ -421,6 +423,40 @@ describe('TasksPage Seednote reference materials', () => {
     const payload = vi.mocked(api.tasks.create).mock.calls[0][0]
     expect(payload.reference_image).toEqual({
       upload_session_id: '33333333-3333-4333-8333-333333333333',
+    })
+    expect(payload).not.toHaveProperty('reference_image_url')
+  })
+
+  it('keeps the reference selection open when task finalization fails', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
+    uploadToOSSMock.mockResolvedValueOnce({
+      uploadSessionId: '77777777-7777-4777-8777-777777777777',
+      uploadId: 'upload-expired-task-reference',
+      key: 'uploads/pending/expired-task-reference.png',
+      publicUrl: 'https://staging.example/expired-task-reference.png',
+      previewUrl: 'https://staging.example/expired-task-reference.png',
+      contentType: 'image/png',
+      size: 9,
+    })
+    vi.mocked(api.tasks.create).mockRejectedValueOnce({
+      response: { data: { msg: '任务参考图会话已过期，请重新上传' } },
+    })
+    renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
+
+    await screen.findByRole('dialog', { name: '新建任务' })
+    fireEvent.change(screen.getByLabelText('参考图文件'), {
+      target: { files: [new File(['reference'], 'expired-task.png', { type: 'image/png' })] },
+    })
+    const preview = await screen.findByRole('img', { name: '参考图' })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(errorMock).toHaveBeenCalledWith('任务参考图会话已过期，请重新上传'))
+    expect(screen.getByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(preview).toBeInTheDocument()
+    const payload = vi.mocked(api.tasks.create).mock.calls[0][0]
+    expect(payload.reference_image).toEqual({
+      upload_session_id: '77777777-7777-4777-8777-777777777777',
     })
     expect(payload).not.toHaveProperty('reference_image_url')
   })
