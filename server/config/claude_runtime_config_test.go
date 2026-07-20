@@ -136,6 +136,29 @@ func TestClaudeConfigRejectsLegacyDuplicateUnknownAndInvalidValues(t *testing.T)
 	}
 }
 
+func TestClaudeConfigRejectsWrongRoleModels(t *testing.T) {
+	tests := []struct {
+		role string
+		want string
+	}{
+		{role: "default", want: "doubao-seed-evolving"},
+		{role: "opus", want: "doubao-seed-evolving"},
+		{role: "fable", want: "doubao-seed-evolving"},
+		{role: "sonnet", want: "doubao-seed-2-1-pro-260628"},
+		{role: "haiku", want: "doubao-seed-2-1-turbo-260628"},
+	}
+	for _, test := range tests {
+		t.Run(test.role, func(t *testing.T) {
+			body := strings.Replace(validClaudeConfigYAML, test.role+": "+test.want, test.role+": wrong-model", 1)
+			_, err := loadClaudeConfigYAML(t, body)
+			wantError := "claude.models." + test.role + " must be " + test.want
+			if err == nil || !strings.Contains(err.Error(), wantError) {
+				t.Fatalf("NewConfig() error = %v, want containing %q", err, wantError)
+			}
+		})
+	}
+}
+
 func TestClaudeConfigRedactsAuthTokenFromStringAndJSON(t *testing.T) {
 	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
 	if err != nil {

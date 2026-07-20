@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"reflect"
@@ -166,6 +167,36 @@ func TestBootstrapRejectsTextOnlyResponseWhenSafeLifetimeExpiresDuringBuild(t *t
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "topic", SkipReferenceImage: true}
 	if _, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline); err == nil {
 		t.Fatal("text-only bootstrap issued a token without a positive whole-second lifetime")
+	}
+}
+
+func TestBootstrapRejectsMissingAndInvalidModelUsageAliasesWithSpecificCause(t *testing.T) {
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeEnv, _ := testClaudeBootstrapRuntime()
+	tests := []struct {
+		name    string
+		aliases map[string]serveragent.ModelUsageIdentity
+		want    string
+	}{
+		{name: "missing", want: "Claude model usage aliases are required"},
+		{name: "invalid", aliases: map[string]serveragent.ModelUsageIdentity{
+			"raw-model": {Provider: "", Model: "doubao-seed-evolving"},
+		}, want: `model usage alias "raw-model" provider is invalid`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc := NewAgentBootstrapService(nil, tokens, AgentBootstrapConfig{
+				TokenTTL: time.Minute, RuntimeEnv: runtimeEnv, ModelUsageAliases: test.aliases,
+			}, zerolog.Nop())
+			task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "topic", SkipReferenceImage: true}
+			_, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Minute))
+			if !errors.Is(err, ErrAgentBootstrapUnavailable) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("buildResponse() error = %v, want ErrAgentBootstrapUnavailable containing %q", err, test.want)
+			}
+		})
 	}
 }
 

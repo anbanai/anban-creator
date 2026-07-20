@@ -267,8 +267,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("build Claude runtime environment: %w", err)
 	}
 	aliases := cloneBootstrapModelUsageAliases(s.cfg.ModelUsageAliases)
-	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil || len(aliases) == 0 {
-		return nil, fmt.Errorf("%w: invalid Claude model usage aliases", ErrAgentBootstrapUnavailable)
+	if len(aliases) == 0 {
+		return nil, fmt.Errorf("%w: Claude model usage aliases are required", ErrAgentBootstrapUnavailable)
+	}
+	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil {
+		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
 	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases, Env: s.montageEnv(task), Files: files}, nil
 }

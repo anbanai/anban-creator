@@ -1271,6 +1271,18 @@ func (c ClaudeConfig) Validate() error {
 			configuredModels[item.value] = true
 		}
 	}
+	roleModels := []struct{ role, value, expected string }{
+		{"default", c.Models.Default, "doubao-seed-evolving"},
+		{"opus", c.Models.Opus, "doubao-seed-evolving"},
+		{"fable", c.Models.Fable, "doubao-seed-evolving"},
+		{"sonnet", c.Models.Sonnet, "doubao-seed-2-1-pro-260628"},
+		{"haiku", c.Models.Haiku, "doubao-seed-2-1-turbo-260628"},
+	}
+	for _, role := range roleModels {
+		if role.value != "" && role.value != role.expected {
+			errs = append(errs, "claude.models."+role.role+" must be "+role.expected)
+		}
+	}
 	if c.UsageAliases["doubao-seed-evolving-latest-version"] != "doubao-seed-evolving" {
 		errs = append(errs, "claude.model_usage_aliases.doubao-seed-evolving-latest-version is required and must target doubao-seed-evolving")
 	}
