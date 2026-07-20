@@ -157,7 +157,7 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 	if task.Prompt != plan.Prompt {
 		t.Fatalf("task prompt = %q, want %q", task.Prompt, plan.Prompt)
 	}
-	if !task.SkipReferenceImage || !task.Watermark || task.ReferenceImageAssetID != plan.ReferenceImageAssetID || task.ReferenceImageURL != "" {
+	if !task.SkipReferenceImage || !task.Watermark || task.ReferenceImageAssetID != plan.ReferenceImageAssetID {
 		t.Fatalf("task image settings not copied from plan: %#v", task)
 	}
 

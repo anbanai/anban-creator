@@ -783,8 +783,8 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 		snap.VisualStyle != "旧视觉" || snap.Author != "旧署名" {
 		t.Fatalf("snapshot = %+v, want original project values", snap)
 	}
-	if snap.ReferenceImageURL != "" || snap.ImageRatio != "3:4" {
-		t.Fatalf("snapshot image fields = %q/%q", snap.ReferenceImageURL, snap.ImageRatio)
+	if snap.ReferenceImageAssetID != "" || snap.ImageRatio != "3:4" {
+		t.Fatalf("snapshot image fields = %q/%q", snap.ReferenceImageAssetID, snap.ImageRatio)
 	}
 }
 
@@ -2991,7 +2991,7 @@ func TestTaskServiceCloneAppliesInputOverrides(t *testing.T) {
 		!reflect.DeepEqual(clone.Overrides.Data(), src.Overrides.Data()) {
 		t.Fatalf("frozen structured config changed: snapshot=%#v overrides=%#v", clone.ProjectSnapshot.Data(), clone.Overrides.Data())
 	}
-	if clone.SkipReferenceImage != src.SkipReferenceImage || clone.ReferenceImageAssetID != src.ReferenceImageAssetID || clone.ReferenceImageURL != "" || clone.Watermark != src.Watermark || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode || clone.HasContentImage != src.HasContentImage || clone.HasTailImage != src.HasTailImage || *clone.ArticleWithCover || *clone.ArticleWithContentImages {
+	if clone.SkipReferenceImage != src.SkipReferenceImage || clone.ReferenceImageAssetID != src.ReferenceImageAssetID || clone.Watermark != src.Watermark || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode || clone.HasContentImage != src.HasContentImage || clone.HasTailImage != src.HasTailImage || *clone.ArticleWithCover || *clone.ArticleWithContentImages {
 		t.Fatalf("frozen image/goal config changed: clone=%#v source=%#v", clone, src)
 	}
 

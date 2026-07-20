@@ -1,3 +1,5 @@
+import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
+
 export type ProjectPlatform = 'article' | 'seednote' | 'ecommerce' | 'xls'
 export type ProjectStatus = 'active' | 'archived'
 
@@ -31,7 +33,7 @@ export interface Project {
   persona_avatar?: string
   theme: string
   byline: string
-  reference_image_url: string
+  reference_image?: ReferenceAssetView | null
   image_ratio: string
   layout: string
   image_preset: string
@@ -75,7 +77,7 @@ export interface CreateProjectRequest {
   template_id?: string
   theme?: string
   byline?: string
-  reference_image_url?: string
+  reference_image?: ReferenceImageSelection | null
   image_ratio?: string
   layout?: string
   image_preset?: string
@@ -94,6 +96,8 @@ export interface FileUploadResponse {
   key: string
   size: number
   type: string
+  upload_session_id: string
+  preview_url: string
 }
 
 export interface CreateProjectResponse {

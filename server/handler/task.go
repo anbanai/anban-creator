@@ -227,7 +227,7 @@ type videoProductionArtifact struct {
 
 // Create handles POST /api/v1/tasks.
 func (h *TaskHandler) Create(c fiber.Ctx) error {
-	if err := rejectLegacyReferenceImageURL(c.Body()); err != nil {
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req createTaskRequest
@@ -315,7 +315,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	}
 
 	for _, u := range req.ProductPhotos {
-		if !validReferenceImageURL(u) {
+		if !validAttachmentURL(u) {
 			return Error(c, fiber.StatusBadRequest, "product_photos must be internal file paths or http(s) URLs")
 		}
 	}

@@ -99,7 +99,7 @@ func rewriteFinalizedMontageAssetURLs(input *model.MontageInput, rewrites map[st
 
 func validateMontageSourceAssetURLs(input *model.MontageInput) error {
 	for _, url := range montageSourceAssetURLs(input) {
-		if !validReferenceImageURL(url) {
+		if !validAttachmentURL(url) {
 			return fmt.Errorf("montage_input.source_assets.url must be an internal file path or an http(s) URL")
 		}
 	}

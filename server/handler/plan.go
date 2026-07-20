@@ -88,18 +88,18 @@ func (h *PlanHandler) SetRepository(repo repository.Repository) {
 	h.repo = repo
 }
 
-// validReferenceImageURL checks that a reference image URL is empty, an internal
+// validAttachmentURL checks that a generic attachment URL is empty, an internal
 // /api/v1/files/ path, or an absolute http(s) URL.
-var referenceURLPattern = regexp.MustCompile(`^https?://`)
+var attachmentURLPattern = regexp.MustCompile(`^https?://`)
 
-func validReferenceImageURL(url string) bool {
+func validAttachmentURL(url string) bool {
 	if url == "" {
 		return true
 	}
 	if len(url) > 500 {
 		return false
 	}
-	return strings.HasPrefix(url, "/api/v1/files/") || referenceURLPattern.MatchString(url)
+	return strings.HasPrefix(url, "/api/v1/files/") || attachmentURLPattern.MatchString(url)
 }
 
 // Request types.
@@ -150,7 +150,7 @@ type updatePlanRequest struct {
 
 // Create handles POST /api/v1/plans.
 func (h *PlanHandler) Create(c fiber.Ctx) error {
-	if err := rejectLegacyReferenceImageURL(c.Body()); err != nil {
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req createPlanRequest
@@ -343,7 +343,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	if err := rejectLegacyReferenceImageURL(c.Body()); err != nil {
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req updatePlanRequest

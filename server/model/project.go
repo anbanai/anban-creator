@@ -75,16 +75,13 @@ type Project struct {
 	// CreatedFromTemplateID records the starter template used to create this project
 	// (audit only). Templates are project-creation starters, imported once then
 	// detached — this id does NOT enter the resolution chain.
-	CreatedFromTemplateID string     `gorm:"column:template_id;type:char(36);default:''" json:"created_from_template_id"`
-	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
-	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
-	ReferenceImageSet     bool       `gorm:"-" json:"-"`
-	// ReferenceImageURL remains internal-only until task snapshots and runtimes
-	// complete their asset-ID cutover; project writes and responses never use it.
-	ReferenceImageURL  string        `gorm:"-" json:"-"`
-	ImageRatio         string        `gorm:"type:varchar(10);default:''" json:"image_ratio"`  // 图片比例: "3:4", "1:1", "4:3", "16:9"
-	MaxConcurrentTasks int           `gorm:"type:int;default:10" json:"max_concurrent_tasks"` // 最大并发任务数
-	Config             ProjectConfig `gorm:"type:json;serializer:json" json:"config"`         // 平台特有配置
+	CreatedFromTemplateID string        `gorm:"column:template_id;type:char(36);default:''" json:"created_from_template_id"`
+	ReferenceImageAssetID string        `gorm:"type:char(36);index" json:"-"`
+	ReferenceImage        *AssetView    `gorm:"-" json:"reference_image,omitempty"`
+	ReferenceImageSet     bool          `gorm:"-" json:"-"`
+	ImageRatio            string        `gorm:"type:varchar(10);default:''" json:"image_ratio"`  // 图片比例: "3:4", "1:1", "4:3", "16:9"
+	MaxConcurrentTasks    int           `gorm:"type:int;default:10" json:"max_concurrent_tasks"` // 最大并发任务数
+	Config                ProjectConfig `gorm:"type:json;serializer:json" json:"config"`         // 平台特有配置
 	// EcommerceDefaults carries the reusable e-commerce defaults for platform=
 	// "ecommerce" projects. Zero value for non-ecommerce projects.
 	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`

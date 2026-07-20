@@ -14,10 +14,11 @@ import (
 
 var (
 	errReferenceAssetRequestInvalid = errors.New("reference image request is invalid")
-	errLegacyReferenceImageURL      = fmt.Errorf("%w: reference_image_url is no longer supported; use reference_image", errReferenceAssetRequestInvalid)
+	removedReferenceImageField      = "reference_image_url"
+	errRemovedReferenceImageField   = fmt.Errorf("%w: %s is no longer supported; use reference_image", errReferenceAssetRequestInvalid, removedReferenceImageField)
 )
 
-func rejectLegacyReferenceImageURL(body []byte) error {
+func rejectRemovedReferenceImageField(body []byte) error {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
 		return fmt.Errorf("%w: request body must be a JSON object", errReferenceAssetRequestInvalid)
@@ -34,8 +35,8 @@ func rejectLegacyReferenceImageURL(body []byte) error {
 		return fmt.Errorf("%w: decode request object: %w", errReferenceAssetRequestInvalid, err)
 	}
 	for key := range raw {
-		if strings.EqualFold(key, "reference_image_url") {
-			return errLegacyReferenceImageURL
+		if strings.EqualFold(key, removedReferenceImageField) {
+			return errRemovedReferenceImageField
 		}
 	}
 	return nil
@@ -43,8 +44,8 @@ func rejectLegacyReferenceImageURL(body []byte) error {
 
 func respondReferenceAssetError(c fiber.Ctx, logger *zerolog.Logger, err error) error {
 	switch {
-	case errors.Is(err, errLegacyReferenceImageURL):
-		return Error(c, fiber.StatusBadRequest, errLegacyReferenceImageURL.Error())
+	case errors.Is(err, errRemovedReferenceImageField):
+		return Error(c, fiber.StatusBadRequest, errRemovedReferenceImageField.Error())
 	case errors.Is(err, errReferenceAssetRequestInvalid):
 		return Error(c, fiber.StatusBadRequest, errReferenceAssetRequestInvalid.Error())
 	case errors.Is(err, service.ErrReferenceImageSelectionInvalid):

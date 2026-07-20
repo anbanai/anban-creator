@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
@@ -18,6 +18,13 @@ function assertContains(path, terms) {
   for (const term of terms) {
     assert.equal(body.includes(term), true, `${path} should contain ${term}`)
   }
+}
+
+function filesUnder(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(dir, entry.name)
+    return entry.isDirectory() ? filesUnder(path) : [path]
+  })
 }
 
 for (const path of [
@@ -65,7 +72,8 @@ assertContains('src/types/auth.ts', [
 assertContains('src/types/task.ts', [
   'topic?: string',
   'skip_reference_image?: boolean',
-  'reference_image_url?: string',
+  'reference_image?: ReferenceAssetView | null',
+  'reference_image?: ReferenceImageSelection | null',
   'watermark?: boolean',
 ])
 
@@ -128,21 +136,43 @@ assertContains('src/pages/designer/index.vue', [
 ])
 
 assertContains('src/pages/tasks/create.vue', [
-  'form.skip_reference_image',
-  'form.reference_image_url',
+  'form.reference_image',
+  "uploadImage(filePath, 'task_reference')",
+  'upload_session_id: uploaded.upload_session_id',
   'form.watermark',
   'skip_reference_image: form.skip_reference_image',
-  'reference_image_url: form.reference_image_url',
+  'reference_image: form.reference_image',
   'watermark: form.watermark',
 ])
 
 assertContains('src/pages/plans/create.vue', [
   'skipReferenceImage',
-  'referenceImageUrl',
+  'referenceImage',
+  "uploadImage(filePath, 'task_reference')",
+  'upload_session_id: uploaded.upload_session_id',
   'watermark',
   'skip_reference_image: form.skipReferenceImage',
-  'reference_image_url: form.referenceImageUrl',
+  'reference_image: form.referenceImage',
 ])
+
+assertContains('src/pages/projects/detail.vue', [
+  'form.reference_image',
+  'referencePreviewUrl',
+  'upload_session_id: result.upload_session_id',
+  'reference_image: form.reference_image',
+])
+
+assertContains('src/types/asset.ts', [
+  'export type ReferenceImageSelection',
+  'upload_session_id: string',
+  'export interface ReferenceAssetView',
+  'download_url: string',
+])
+
+for (const path of filesUnder(resolve(root, 'src'))) {
+  if (!/\.(ts|vue)$/.test(path)) continue
+  assert.equal(readFileSync(path, 'utf8').includes('reference_image_url'), false, `${path} still uses the removed reference URL field`)
+}
 
 // === channel→project migration (2026-06-27): miniapp must call /projects, never /channels ===
 // The Go server renamed channels→projects (router/router.go registers only /projects/*,

@@ -22,7 +22,7 @@ func TestReferenceAssetErrorMapper(t *testing.T) {
 		{name: "purpose mismatch", err: service.ErrReferenceAssetPurposeMismatch, wantStatus: fiber.StatusBadRequest, wantText: "reference image purpose is not allowed"},
 		{name: "invalid metadata", err: service.ErrReferenceAssetInvalidMetadata, wantStatus: fiber.StatusBadRequest, wantText: "reference image metadata is invalid"},
 		{name: "invalid request", err: errReferenceAssetRequestInvalid, wantStatus: fiber.StatusBadRequest, wantText: "reference image request is invalid"},
-		{name: "legacy field", err: errLegacyReferenceImageURL, wantStatus: fiber.StatusBadRequest, wantText: "use reference_image"},
+		{name: "legacy field", err: errRemovedReferenceImageField, wantStatus: fiber.StatusBadRequest, wantText: "use reference_image"},
 		{name: "opaque forbidden", err: service.ErrReferenceAssetForbidden, wantStatus: fiber.StatusForbidden, wantText: "reference image is not accessible"},
 		{name: "concurrent finalization", err: service.ErrReferenceAssetConcurrentFinalization, wantStatus: fiber.StatusConflict, wantText: "reference image upload is being finalized"},
 		{name: "expired session", err: service.ErrReferenceAssetExpired, wantStatus: fiber.StatusGone, wantText: "reference image upload has expired"},
@@ -74,14 +74,14 @@ func TestRejectLegacyReferenceImageURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := rejectLegacyReferenceImageURL([]byte(tt.body))
+			err := rejectRemovedReferenceImageField([]byte(tt.body))
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr && !errors.Is(err, errReferenceAssetRequestInvalid) {
 				t.Fatalf("error = %v, want errReferenceAssetRequestInvalid", err)
 			}
-			if tt.wantLegacy && (!errors.Is(err, errLegacyReferenceImageURL) || !strings.Contains(err.Error(), "use reference_image")) {
+			if tt.wantLegacy && (!errors.Is(err, errRemovedReferenceImageField) || !strings.Contains(err.Error(), "use reference_image")) {
 				t.Fatalf("legacy error = %q, want migration hint", err)
 			}
 		})
@@ -89,7 +89,7 @@ func TestRejectLegacyReferenceImageURL(t *testing.T) {
 }
 
 func TestReferenceAssetErrorMapperTreatsMalformedJSONAsBadRequest(t *testing.T) {
-	requestErr := rejectLegacyReferenceImageURL([]byte(`{"reference_image_url":`))
+	requestErr := rejectRemovedReferenceImageField([]byte(`{"reference_image_url":`))
 	app := fiber.New()
 	app.Get("/", func(c fiber.Ctx) error {
 		return respondReferenceAssetError(c, nil, requestErr)

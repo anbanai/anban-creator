@@ -131,42 +131,6 @@ func TestProjectUpdateReferenceImageAssetIDOnlyWhenExplicitlySet(t *testing.T) {
 	}
 }
 
-func TestProjectServiceDoesNotPersistLegacyReferenceImageURL(t *testing.T) {
-	db := setupTaskTestDB(t)
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard)
-	svc := NewProjectService(repo, &logger)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	project := &model.Project{
-		ID: uuid.NewString(), UserID: userID, Name: "brand", Platform: model.PlatformArticle,
-		ReferenceImageURL: "https://legacy.example/create.png", Status: model.ProjectStatusActive,
-	}
-	if err := repo.Projects().Create(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	persisted, err := repo.Projects().FindByID(ctx, project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persisted.ReferenceImageURL != "" {
-		t.Fatalf("legacy URL was persisted on create: %q", persisted.ReferenceImageURL)
-	}
-
-	if _, err := svc.Update(ctx, userID, project.ID, &model.Project{
-		ReferenceImageURL: "https://legacy.example/update.png",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	persisted, err = repo.Projects().FindByID(ctx, project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persisted.ReferenceImageURL != "" {
-		t.Fatalf("legacy URL was persisted on update: %q", persisted.ReferenceImageURL)
-	}
-}
-
 func TestProjectServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWriting(t *testing.T) {
 	base := repository.New(setupTaskTestDB(t))
 	repo := projectCASRepositoryOverride{

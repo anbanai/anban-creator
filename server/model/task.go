@@ -63,20 +63,18 @@ type StyleOverrides struct {
 // creation time. Runtime surfaces (MCP/settings/UI) read this when present so
 // later project edits do not change an already-created task.
 type ProjectSnapshot struct {
-	ProjectName           string `json:"project_name,omitempty"`
-	Platform              string `json:"platform,omitempty"`
-	Instructions          string `json:"instructions,omitempty"`
-	Keywords              string `json:"keywords,omitempty"`
-	VisualStyle           string `json:"visual_style,omitempty"`
-	ReferenceImageAssetID string `json:"reference_image_asset_id,omitempty"`
-	// ReferenceImageURL is a Task 6 compile bridge and is never serialized.
-	ReferenceImageURL string                   `json:"-"`
-	ImageRatio        string                   `json:"image_ratio,omitempty"`
-	Writer            string                   `json:"writer,omitempty"`
-	Theme             string                   `json:"theme,omitempty"`
-	Author            string                   `json:"author,omitempty"`
-	EcommerceDefaults EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
-	MontageDefaults   MontageDefaults          `json:"montage_defaults,omitempty"`
+	ProjectName           string                   `json:"project_name,omitempty"`
+	Platform              string                   `json:"platform,omitempty"`
+	Instructions          string                   `json:"instructions,omitempty"`
+	Keywords              string                   `json:"keywords,omitempty"`
+	VisualStyle           string                   `json:"visual_style,omitempty"`
+	ReferenceImageAssetID string                   `json:"reference_image_asset_id,omitempty"`
+	ImageRatio            string                   `json:"image_ratio,omitempty"`
+	Writer                string                   `json:"writer,omitempty"`
+	Theme                 string                   `json:"theme,omitempty"`
+	Author                string                   `json:"author,omitempty"`
+	EcommerceDefaults     EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
+	MontageDefaults       MontageDefaults          `json:"montage_defaults,omitempty"`
 }
 
 // Task represents a content generation task.
@@ -93,9 +91,6 @@ type Task struct {
 	ImageModelKey         string     `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
-	// ReferenceImageURL is a Task 6 compile bridge for runtime consumers. Task 5
-	// business paths never read, write, persist, or serialize it.
-	ReferenceImageURL string `gorm:"-" json:"-"`
 	// InputSourceTaskID records the root task whose immutable OSS inputs a clone
 	// may reuse. It is internal ownership provenance, not a client-controlled field.
 	InputSourceTaskID string `gorm:"type:char(36);index" json:"-"`
@@ -279,7 +274,6 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.Keywords = snap.Keywords
 	p.VisualStyle = snap.VisualStyle
 	p.ReferenceImageAssetID = snap.ReferenceImageAssetID
-	p.ReferenceImageURL = ""
 	p.ImageRatio = snap.ImageRatio
 	p.Writer = snap.Writer
 	p.Theme = snap.Theme

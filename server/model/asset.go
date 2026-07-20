@@ -16,7 +16,7 @@ type Asset struct {
 	FileName    string    `gorm:"type:varchar(255);not null" json:"file_name"`
 	ContentType string    `gorm:"type:varchar(120);not null" json:"content_type"`
 	Size        int64     `gorm:"not null" json:"size"`
-	ETag        string    `gorm:"type:varchar(255);not null" json:"-"`
+	ETag        string    `gorm:"column:etag;type:varchar(255);not null" json:"-"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 

@@ -97,8 +97,8 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	if found.Prompt != "写一篇新品发布公众号文章" {
 		t.Fatalf("task prompt = %q", found.Prompt)
 	}
-	if found.ReferenceImageAssetID != "" || found.ReferenceImageURL != "" {
-		t.Fatalf("URL-only attachment became a task reference: asset=%q url=%q", found.ReferenceImageAssetID, found.ReferenceImageURL)
+	if found.ReferenceImageAssetID != "" {
+		t.Fatalf("URL-only attachment became a task reference: asset=%q", found.ReferenceImageAssetID)
 	}
 	attachments := found.InputAttachments.Data()
 	if len(attachments) != 1 || attachments[0].FileName != "ref.png" {
@@ -168,8 +168,8 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 			if found.ReferenceImageAssetID != asset.ID {
 				t.Fatalf("reference asset = %q", found.ReferenceImageAssetID)
 			}
-			if found.ReferenceImageURL != "" || result.Task.ReferenceImage.AssetID != asset.ID {
-				t.Fatalf("reference contract = persisted URL %q view %#v", found.ReferenceImageURL, result.Task.ReferenceImage)
+			if result.Task.ReferenceImage.AssetID != asset.ID {
+				t.Fatalf("reference asset view = %#v", result.Task.ReferenceImage)
 			}
 			if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
 				t.Fatalf("signed keys = %#v, want direct attachment only", store.signedKeys)
@@ -797,7 +797,7 @@ func TestAIEntryServiceSubmitRequiresLLM(t *testing.T) {
 	}
 }
 
-func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceImageURL(t *testing.T) {
+func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceAsset(t *testing.T) {
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -829,8 +829,8 @@ func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceImageURL(t *testing.T
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.ReferenceImageURL != "" {
-		t.Fatalf("reference_image_url = %q, want empty", found.ReferenceImageURL)
+	if found.ReferenceImageAssetID != "" {
+		t.Fatalf("reference asset = %q, want empty", found.ReferenceImageAssetID)
 	}
 	attachments := found.InputAttachments.Data()
 	if len(attachments) != 1 || attachments[0].URL != "/api/v1/files/product.png" || attachments[0].Instruction != "保持包装和 Logo" {
@@ -874,8 +874,8 @@ func TestAIEntryArticleAndMomentsDoNotPersistURLOnlyReference(t *testing.T) {
 			if err != nil {
 				t.Fatalf("find task: %v", err)
 			}
-			if found.ReferenceImageAssetID != "" || found.ReferenceImageURL != "" {
-				t.Fatalf("URL-only reference persisted: asset=%q url=%q", found.ReferenceImageAssetID, found.ReferenceImageURL)
+			if found.ReferenceImageAssetID != "" {
+				t.Fatalf("URL-only reference persisted: asset=%q", found.ReferenceImageAssetID)
 			}
 		})
 	}

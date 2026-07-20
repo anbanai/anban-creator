@@ -283,7 +283,7 @@ func taskOwnsStorageKey(task *model.Task, store storage.Provider, key string) bo
 	if task == nil {
 		return false
 	}
-	if attachmentsOwnStorageKey(task.InputAttachments.Data(), store, key) || ownedURLHasKey(store, task.ReferenceImageURL, key) || ownedURLHasKey(store, task.ProjectSnapshot.Data().ReferenceImageURL, key) {
+	if attachmentsOwnStorageKey(task.InputAttachments.Data(), store, key) {
 		return true
 	}
 	for _, rawURL := range task.Ecommerce.Data().ProductPhotos {
@@ -299,7 +299,6 @@ func planOwnsStorageKey(plan *model.Plan, store storage.Provider, key string) bo
 		return false
 	}
 	return attachmentsOwnStorageKey(plan.InputAttachments.Data(), store, key) ||
-		ownedURLHasKey(store, plan.ReferenceImageURL, key) ||
 		referencesOwnStorageKey(plan.VideoInput.Data(), plan.VideoConfig.Data(), plan.MontageInput.Data(), store, key)
 }
 

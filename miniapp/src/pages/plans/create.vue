@@ -205,10 +205,20 @@
 
         <view class="field-spacer">
           <text class="form-section__label">参考图片</text>
-          <AbInput
-            v-model="form.referenceImageUrl"
-            placeholder="可选，输入图片 URL 覆盖账号默认参考图"
+          <image
+            v-if="referencePreviewUrl"
+            :src="referencePreviewUrl"
+            class="reference-preview"
+            mode="aspectFill"
           />
+          <view class="reference-actions">
+            <AbButton type="ghost" size="sm" :loading="referenceUploading" @click="chooseReferenceImage">
+              {{ referencePreviewUrl ? '更换图片' : '上传图片' }}
+            </AbButton>
+            <AbButton v-if="referencePreviewUrl" type="danger" size="sm" @click="clearReferenceImage">
+              清除
+            </AbButton>
+          </view>
         </view>
 
         <view class="switch-row field-spacer">
@@ -264,7 +274,7 @@ import { projectsApi } from '@/api/projects'
 import { templatesApi } from '@/api/templates'
 import { resourcesApi } from '@/api/resources'
 import { contentTypeLabel } from '@/utils/labels'
-import type { Project, Template, ResourceEntry } from '@/types'
+import type { Project, Template, ResourceEntry, ReferenceImageSelection } from '@/types'
 import ProjectSelector from '@/components/business/ProjectSelector.vue'
 import ImageModelSelector from '@/components/business/ImageModelSelector.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
@@ -297,7 +307,7 @@ const form = reactive({
   articleWithCover: true,
   articleWithContentImages: true,
   skipReferenceImage: false,
-  referenceImageUrl: '',
+  referenceImage: null as ReferenceImageSelection | null,
   watermark: false,
   goalMode: false,
   goal: '',
@@ -315,11 +325,40 @@ const submitting = ref(false)
 const pageLoading = ref(false)
 const editingId = ref<string | null>(null)
 const isEditing = computed(() => !!editingId.value)
+const referenceUploading = ref(false)
+const referencePreviewUrl = ref('')
 
 const selectedProject = ref<Project | null>(null)
 // Platform-dependent resources, loaded on project change.
 const platformTemplates = ref<Template[]>([])
 const platformThemes = ref<ResourceEntry[]>([])
+
+function chooseReferenceImage() {
+  if (referenceUploading.value) return
+  uni.chooseImage({
+    count: 1,
+    success: async (chosen) => {
+      const filePath = chosen.tempFilePaths?.[0]
+      if (!filePath) return
+      referenceUploading.value = true
+      try {
+        const uploaded = await projectsApi.uploadImage(filePath, 'task_reference')
+        form.referenceImage = { upload_session_id: uploaded.upload_session_id }
+        referencePreviewUrl.value = uploaded.preview_url
+        uni.showToast({ title: '上传成功', icon: 'success' })
+      } catch (err: any) {
+        uni.showToast({ title: err?.message || '上传失败', icon: 'none' })
+      } finally {
+        referenceUploading.value = false
+      }
+    },
+  })
+}
+
+function clearReferenceImage() {
+  form.referenceImage = null
+  referencePreviewUrl.value = ''
+}
 
 // Weekday labels (starting from Sunday = 0)
 const weekdays = ['日', '一', '二', '三', '四', '五', '六']
@@ -534,7 +573,7 @@ async function handleSubmit() {
       article_with_cover: isArticle.value ? form.articleWithCover : undefined,
       article_with_content_images: isArticle.value ? form.articleWithContentImages : undefined,
       skip_reference_image: form.skipReferenceImage || undefined,
-      reference_image_url: form.referenceImageUrl.trim() || undefined,
+      reference_image: form.referenceImage,
       template_id: form.templateId || undefined,
     }
 
@@ -577,7 +616,10 @@ async function loadPlan(planId: string) {
     form.articleWithCover = plan.article_with_cover ?? true
     form.articleWithContentImages = plan.article_with_content_images ?? true
     form.skipReferenceImage = plan.skip_reference_image || false
-    form.referenceImageUrl = plan.reference_image_url || ''
+    form.referenceImage = plan.reference_image?.asset_id
+      ? { asset_id: plan.reference_image.asset_id }
+      : null
+    referencePreviewUrl.value = plan.reference_image?.download_url || ''
     form.watermark = plan.watermark || false
     form.goalMode = plan.goal_mode || false
     form.goal = plan.goal || ''
@@ -841,5 +883,19 @@ onLoad((query) => {
     color: $ab-warning;
     line-height: 1.5;
   }
+}
+
+.reference-preview {
+  display: block;
+  width: 160rpx;
+  height: 160rpx;
+  margin-top: $ab-space-xs;
+  border-radius: $ab-radius-sm;
+}
+
+.reference-actions {
+  display: flex;
+  gap: $ab-space-sm;
+  margin-top: $ab-space-sm;
 }
 </style>

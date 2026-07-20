@@ -2,12 +2,47 @@ package model
 
 import (
 	"encoding/json"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestReferenceImageURLContractRemoved(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("resolve repository root: %v", err)
+	}
+	for _, dir := range []string{"server/model", "server/repository", "server/service", "server/handler", "server/agent", "server/mcp"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			if strings.Contains(string(raw), "ReferenceImageURL") {
+				t.Errorf("%s still contains ReferenceImageURL", path)
+			}
+			if strings.Contains(string(raw), `json:"reference_image_url`) {
+				t.Errorf("%s still declares the legacy reference image JSON field", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("scan %s: %v", dir, err)
+		}
+	}
+}
 
 func TestPlanAndTaskSchemasDoNotCreateReferenceImageURL(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -27,9 +62,9 @@ func TestPlanAndTaskSchemasDoNotCreateReferenceImageURL(t *testing.T) {
 func TestPlanTaskAndSnapshotSerializeOnlyTransientReferenceView(t *testing.T) {
 	view := &AssetView{AssetID: "asset-1", FileName: "ref.png", ContentType: "image/png", Size: 3}
 	for name, value := range map[string]any{
-		"plan":     &Plan{ReferenceImageAssetID: "asset-1", ReferenceImage: view, ReferenceImageURL: "legacy"},
-		"task":     &Task{ReferenceImageAssetID: "asset-1", ReferenceImage: view, ReferenceImageURL: "legacy"},
-		"snapshot": ProjectSnapshot{ReferenceImageAssetID: "asset-1", ReferenceImageURL: "legacy"},
+		"plan":     &Plan{ReferenceImageAssetID: "asset-1", ReferenceImage: view},
+		"task":     &Task{ReferenceImageAssetID: "asset-1", ReferenceImage: view},
+		"snapshot": ProjectSnapshot{ReferenceImageAssetID: "asset-1"},
 	} {
 		raw, err := json.Marshal(value)
 		if err != nil {
@@ -53,13 +88,13 @@ func TestPlanTaskAndSnapshotSerializeOnlyTransientReferenceView(t *testing.T) {
 }
 
 func TestSnapshotProjectCopiesReferenceImageAssetID(t *testing.T) {
-	project := &Project{Platform: PlatformArticle, ReferenceImageAssetID: "asset-project", ReferenceImageURL: "legacy"}
+	project := &Project{Platform: PlatformArticle, ReferenceImageAssetID: "asset-project"}
 	snapshot := SnapshotProject(project)
-	if snapshot.ReferenceImageAssetID != "asset-project" || snapshot.ReferenceImageURL != "" {
+	if snapshot.ReferenceImageAssetID != "asset-project" {
 		t.Fatalf("snapshot reference = %#v, want asset-project only", snapshot)
 	}
 	restored := ProjectFromSnapshot(&Project{}, snapshot)
-	if restored.ReferenceImageAssetID != "asset-project" || restored.ReferenceImageURL != "" {
+	if restored.ReferenceImageAssetID != "asset-project" {
 		t.Fatalf("restored project reference = %#v, want asset-project only", restored)
 	}
 }

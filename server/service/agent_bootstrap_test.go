@@ -293,7 +293,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	keyFirstUploadID := uuid.NewString()
 	keyFirstKey := fmt.Sprintf("assets/users/%s/%s/key-first.png", userID, keyFirstUploadID)
 	createBootstrapAsset(t, repo, keyFirstUploadID, userID, DirectUploadPurposeAIEntryAttachment, "key-first.png", 321)
-	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning, Prompt: "topic", ReferenceImageURL: "https://bucket.oss-cn-x.aliyuncs.com/" + taskPrefix + "/inputs/reference.png"}
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning, Prompt: "topic"}
 	task.SetInputAttachments([]model.EntryAttachment{
 		{Type: "text", Text: "brief", FileName: "brief.txt"},
 		{Type: "image", URL: "https://bucket.oss-cn-x.aliyuncs.com/" + taskPrefix + "/inputs/input.png", FileName: "input.png"},
@@ -588,7 +588,7 @@ func TestBootstrapDownloadSigningAllowsUserOwnedChannelReference(t *testing.T) {
 	}
 }
 
-func TestBootstrapDownloadSigningValidatesFinalizedPendingUpload(t *testing.T) {
+func TestBootstrapDownloadSigningValidatesFinalizedAsset(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
 	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}}

@@ -28,11 +28,8 @@ type Plan struct {
 	ImageModelKey         string     `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
-	// ReferenceImageURL is a Task 6 compile bridge for runtime consumers. Task 5
-	// business paths never read, write, persist, or serialize it.
-	ReferenceImageURL  string `gorm:"-" json:"-"`
-	SkipReferenceImage bool   `gorm:"default:false" json:"skip_reference_image,omitempty"`
-	Watermark          bool   `gorm:"default:false" json:"watermark,omitempty"`
+	SkipReferenceImage    bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
+	Watermark             bool       `gorm:"default:false" json:"watermark,omitempty"`
 	// HasContentImage / HasTailImage are plan-level seednote image composition
 	// flags copied to Task on CreateFromPlan. Cover is always on; content defaults
 	// to on, tail defaults to off — matches the seednote form default.

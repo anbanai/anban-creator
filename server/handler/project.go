@@ -335,7 +335,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	if err := rejectLegacyReferenceImageURL(c.Body()); err != nil {
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req projectRequest
@@ -472,7 +472,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "project id is required")
 	}
 
-	if err := rejectLegacyReferenceImageURL(c.Body()); err != nil {
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req projectRequest

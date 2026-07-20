@@ -1,3 +1,5 @@
+import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
+
 export type PlanType = 'seednote' | 'article'
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
@@ -14,7 +16,7 @@ export interface Plan {
   project_id: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceAssetView | null
   visual_style?: string
   writer_key?: string
   theme?: string
@@ -46,7 +48,7 @@ export interface CreatePlanRequest {
   project_id?: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceImageSelection | null
   visual_style?: string
   writer_key?: string
   theme?: string
@@ -74,7 +76,7 @@ export interface UpdatePlanRequest {
   project_id?: string
   image_model_key?: string
   skip_reference_image?: boolean
-  reference_image_url?: string
+  reference_image?: ReferenceImageSelection | null
   visual_style?: string
   writer_key?: string
   theme?: string
