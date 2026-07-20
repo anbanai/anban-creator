@@ -1,10 +1,13 @@
 package model
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -36,9 +39,30 @@ const (
 
 type BillingProviderCostStatus string
 
+type BillingProviderCostAdjustmentReasonCode string
+
+type BillingExecutionCostReasonCode string
+
 const (
 	BillingProviderCostStatusReconciled   BillingProviderCostStatus = "reconciled"
 	BillingProviderCostStatusUnreconciled BillingProviderCostStatus = "unreconciled"
+)
+
+const (
+	BillingExecutionCostReasonMissingTerminalModelUsage BillingExecutionCostReasonCode = "missing_terminal_model_usage"
+	BillingExecutionCostReasonInvalidTerminalModelUsage BillingExecutionCostReasonCode = "invalid_terminal_model_usage"
+	BillingExecutionCostReasonMissingProviderUsage      BillingExecutionCostReasonCode = "missing_provider_usage"
+	BillingExecutionCostReasonMissingOutputMetadata     BillingExecutionCostReasonCode = "missing_output_metadata"
+)
+
+const (
+	BillingProviderCostAdjustmentReasonProviderInvoiceReconciliation BillingProviderCostAdjustmentReasonCode = "provider_invoice_reconciliation"
+	BillingProviderCostAdjustmentReasonManualReconciliation          BillingProviderCostAdjustmentReasonCode = "manual_reconciliation"
+)
+
+const (
+	maxProviderCostEvidenceBytes    = 4 * 1024
+	maxProviderCostCalculationBytes = 64 * 1024
 )
 
 // BillingProviderCostEvent is an immutable internal provider-cost fact. It is
@@ -82,8 +106,14 @@ func (e BillingProviderCostEvent) Validate() error {
 	if len(e.RequestFingerprint) != 64 {
 		return fmt.Errorf("provider cost request fingerprint must be a 64-character SHA-256 digest")
 	}
-	if !json.Valid(e.UsageEvidence) || !json.Valid(e.CalculationSnapshot) {
-		return fmt.Errorf("provider cost evidence and calculation snapshot must be valid JSON")
+	if _, err := hex.DecodeString(e.RequestFingerprint); err != nil {
+		return fmt.Errorf("provider cost request fingerprint must be hexadecimal")
+	}
+	if len(e.CalculationSnapshot) == 0 || len(e.CalculationSnapshot) > maxProviderCostCalculationBytes || !json.Valid(e.CalculationSnapshot) {
+		return fmt.Errorf("provider cost calculation snapshot must be valid JSON within %d bytes", maxProviderCostCalculationBytes)
+	}
+	if err := validateProviderCostEvidence(e); err != nil {
+		return err
 	}
 	switch e.EventKind {
 	case BillingProviderCostEventKindBase:
@@ -151,6 +181,127 @@ func (e BillingProviderCostEvent) Validate() error {
 	return nil
 }
 
+func validateProviderCostEvidence(event BillingProviderCostEvent) error {
+	if len(event.UsageEvidence) == 0 || len(event.UsageEvidence) > maxProviderCostEvidenceBytes || !json.Valid(event.UsageEvidence) {
+		return fmt.Errorf("provider cost usage evidence must be valid JSON within %d bytes", maxProviderCostEvidenceBytes)
+	}
+	var envelope struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(event.UsageEvidence, &envelope); err != nil || envelope.Kind == "" {
+		return fmt.Errorf("provider cost usage evidence requires a kind")
+	}
+	switch envelope.Kind {
+	case "token":
+		if event.EventKind != BillingProviderCostEventKindBase {
+			return fmt.Errorf("token evidence is only valid for base provider cost events")
+		}
+		if event.Source != BillingProviderCostSourceClaudeResult && event.Source != BillingProviderCostSourceProviderResponse && event.Source != BillingProviderCostSourceManualReconciliation {
+			return fmt.Errorf("token evidence is incompatible with provider cost source %q", event.Source)
+		}
+		var evidence struct {
+			Kind                     string `json:"kind"`
+			InputTokens              *int64 `json:"input_tokens"`
+			CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
+			OutputTokens             *int64 `json:"output_tokens"`
+		}
+		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
+			return fmt.Errorf("invalid token provider cost evidence: %w", err)
+		}
+		if evidence.Kind != "token" {
+			return fmt.Errorf("token provider cost evidence has mismatched kind %q", evidence.Kind)
+		}
+		counts := []*int64{evidence.InputTokens, evidence.CacheReadInputTokens, evidence.CacheCreationInputTokens, evidence.OutputTokens}
+		for _, count := range counts {
+			if count == nil || *count < 0 {
+				return fmt.Errorf("token provider cost evidence requires all nonnegative token counts")
+			}
+		}
+	case "output_pixels":
+		if event.EventKind != BillingProviderCostEventKindBase {
+			return fmt.Errorf("output pixel evidence is only valid for base provider cost events")
+		}
+		if event.Source != BillingProviderCostSourceProviderResponse && event.Source != BillingProviderCostSourceManualReconciliation {
+			return fmt.Errorf("output pixel evidence is incompatible with provider cost source %q", event.Source)
+		}
+		var evidence struct {
+			Kind   string `json:"kind"`
+			Width  *int64 `json:"width"`
+			Height *int64 `json:"height"`
+			Pixels *int64 `json:"pixels"`
+		}
+		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
+			return fmt.Errorf("invalid output pixel provider cost evidence: %w", err)
+		}
+		if evidence.Kind != "output_pixels" || evidence.Width == nil || evidence.Height == nil || evidence.Pixels == nil {
+			return fmt.Errorf("output pixel provider cost evidence requires kind, width, height, and pixels")
+		}
+		width, height, pixels := *evidence.Width, *evidence.Height, *evidence.Pixels
+		if width <= 0 || height <= 0 || width > math.MaxInt64/height || pixels != width*height {
+			return fmt.Errorf("output pixel provider cost evidence requires consistent positive dimensions and pixels")
+		}
+	case "invoice_adjustment":
+		if event.EventKind != BillingProviderCostEventKindAdjustment {
+			return fmt.Errorf("invoice adjustment evidence requires an adjustment provider cost event")
+		}
+		if event.Source != BillingProviderCostSourceInvoiceAdjustment && event.Source != BillingProviderCostSourceManualReconciliation {
+			return fmt.Errorf("invoice adjustment evidence is incompatible with provider cost source %q", event.Source)
+		}
+		var evidence struct {
+			Kind       string                                  `json:"kind"`
+			ReasonCode BillingProviderCostAdjustmentReasonCode `json:"reason_code"`
+			Delta      *int64                                  `json:"delta_micro_cny"`
+		}
+		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
+			return fmt.Errorf("invalid invoice adjustment provider cost evidence: %w", err)
+		}
+		if evidence.Kind != "invoice_adjustment" || !evidence.ReasonCode.Valid() || evidence.Delta == nil || *evidence.Delta != event.CostMicroCNY {
+			return fmt.Errorf("invoice adjustment evidence requires a supported reason code and matching delta")
+		}
+	default:
+		return fmt.Errorf("unsupported provider cost evidence kind %q", envelope.Kind)
+	}
+	return nil
+}
+
+func decodeStrictProviderCostJSON(data []byte, destination any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("multiple JSON values are not allowed")
+		}
+		return err
+	}
+	return nil
+}
+
+func (c BillingProviderCostAdjustmentReasonCode) Valid() bool {
+	switch c {
+	case BillingProviderCostAdjustmentReasonProviderInvoiceReconciliation,
+		BillingProviderCostAdjustmentReasonManualReconciliation:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c BillingExecutionCostReasonCode) Valid() bool {
+	switch c {
+	case BillingExecutionCostReasonMissingTerminalModelUsage,
+		BillingExecutionCostReasonInvalidTerminalModelUsage,
+		BillingExecutionCostReasonMissingProviderUsage,
+		BillingExecutionCostReasonMissingOutputMetadata:
+		return true
+	default:
+		return false
+	}
+}
+
 // ProviderCostBaseIdentityKey hashes a typed identity tuple. JSON field
 // boundaries prevent delimiter ambiguity and the digest keeps MySQL's unique
 // index narrow even when provider request IDs are long.
@@ -190,12 +341,13 @@ func ProviderCostBaseIdentityKey(kind BillingProviderCostIdentityKind, execution
 // BillingExecutionCostStatus is the mutable reconciliation projection for one
 // execution. Provider cost facts themselves remain append-only.
 type BillingExecutionCostStatus struct {
-	ExecutionID string                    `gorm:"type:varchar(128);primaryKey" json:"execution_id"`
-	TaskID      string                    `gorm:"type:char(36);index" json:"task_id,omitempty"`
-	Status      BillingProviderCostStatus `gorm:"type:varchar(24);index;not null" json:"status"`
-	Reason      string                    `gorm:"type:varchar(128)" json:"reason,omitempty"`
-	CreatedAt   time.Time                 `gorm:"not null" json:"created_at"`
-	UpdatedAt   time.Time                 `gorm:"not null" json:"updated_at"`
+	ExecutionID             string                         `gorm:"type:varchar(128);primaryKey" json:"execution_id"`
+	TaskID                  string                         `gorm:"type:char(36);index" json:"task_id,omitempty"`
+	Status                  BillingProviderCostStatus      `gorm:"type:varchar(24);index;not null" json:"status"`
+	ReasonCode              BillingExecutionCostReasonCode `gorm:"type:varchar(64)" json:"reason_code,omitempty"`
+	FinalizationFingerprint string                         `gorm:"type:char(64)" json:"finalization_fingerprint,omitempty"`
+	CreatedAt               time.Time                      `gorm:"not null" json:"created_at"`
+	UpdatedAt               time.Time                      `gorm:"not null" json:"updated_at"`
 }
 
 func (BillingExecutionCostStatus) TableName() string { return "billing_execution_cost_status" }

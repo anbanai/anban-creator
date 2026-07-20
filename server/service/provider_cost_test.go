@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -166,6 +167,90 @@ func TestProviderCostFinalizeExecutionRecordsAllModelsThenReconcilesOnce(t *test
 	}
 }
 
+func TestProviderCostFinalizeExecutionRejectsSupersetAfterSubset(t *testing.T) {
+	fixture := newProviderCostFixtureWithBundle(t, providerCostBundleWithTurbo())
+	full := executionTokenBatchRequest("exec-set-drift")
+	subset := full
+	subset.Entries = append([]ExecutionTokenCostEntry(nil), full.Entries[:1]...)
+	if _, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), subset); err != nil {
+		t.Fatalf("finalize subset: %v", err)
+	}
+	if _, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), full); !errors.Is(err, repository.ErrProviderCostConflict) {
+		t.Fatalf("superset error = %v, want conflict", err)
+	}
+	events, err := fixture.costRepo.ListEventsByExecution(context.Background(), full.ExecutionID)
+	if err != nil || len(events) != 1 || events[0].Model != subset.Entries[0].Model {
+		t.Fatalf("events after superset rollback = %#v, %v", events, err)
+	}
+}
+
+func TestProviderCostFinalizeExecutionRejectsSubsetAfterSuperset(t *testing.T) {
+	fixture := newProviderCostFixtureWithBundle(t, providerCostBundleWithTurbo())
+	full := executionTokenBatchRequest("exec-reverse-set-drift")
+	if _, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), full); err != nil {
+		t.Fatalf("finalize superset: %v", err)
+	}
+	subset := full
+	subset.Entries = append([]ExecutionTokenCostEntry(nil), full.Entries[:1]...)
+	if _, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), subset); !errors.Is(err, repository.ErrProviderCostConflict) {
+		t.Fatalf("subset error = %v, want conflict", err)
+	}
+}
+
+func TestProviderCostFinalizeExecutionEntryOrderIsSemanticNoop(t *testing.T) {
+	fixture := newProviderCostFixtureWithBundle(t, providerCostBundleWithTurbo())
+	req := executionTokenBatchRequest("exec-order-independent")
+	first, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first finalize: %v", err)
+	}
+	req.Entries[0], req.Entries[1] = req.Entries[1], req.Entries[0]
+	replayed, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reversed replay: %v", err)
+	}
+	if len(replayed) != 2 || replayed[0].ID != first[0].ID || replayed[1].ID != first[1].ID {
+		t.Fatalf("reversed replay order/IDs = %#v, want canonical %#v", replayed, first)
+	}
+}
+
+func TestProviderCostFinalizeExecutionConcurrentDifferentSetsConflict(t *testing.T) {
+	fixture := newProviderCostConcurrentFixture(t, providerCostBundleWithTurbo())
+	full := executionTokenBatchRequest("exec-concurrent-set")
+	subset := full
+	subset.Entries = append([]ExecutionTokenCostEntry(nil), full.Entries[:1]...)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, req := range []FinalizeExecutionTokenCostsRequest{subset, full} {
+		req := req
+		go func() {
+			<-start
+			_, err := fixture.service.FinalizeExecutionTokenCosts(context.Background(), req)
+			results <- err
+		}()
+	}
+	close(start)
+	firstErr, secondErr := <-results, <-results
+	successes, conflicts := 0, 0
+	for _, err := range []error{firstErr, secondErr} {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, repository.ErrProviderCostConflict):
+			conflicts++
+		default:
+			t.Fatalf("concurrent different-set error = %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent results success/conflict = %d/%d", successes, conflicts)
+	}
+	events, err := fixture.costRepo.ListEventsByExecution(context.Background(), full.ExecutionID)
+	if err != nil || (len(events) != 1 && len(events) != 2) {
+		t.Fatalf("winning event set = %#v, %v", events, err)
+	}
+}
+
 func TestProviderCostFinalizeExecutionConcurrentReplay(t *testing.T) {
 	fixture := newProviderCostFixtureWithBundle(t, providerCostBundleWithTurbo())
 	req := executionTokenBatchRequest("exec-concurrent")
@@ -255,7 +340,7 @@ func TestMissingClaudeResultIsUnreconciledAndDoesNotTouchWallet(t *testing.T) {
 	fixture := newProviderCostFixture(t)
 	ctx := context.Background()
 	before := fixture.walletSnapshot(t, "user-1")
-	if err := fixture.service.MarkExecutionUnreconciled(ctx, "exec-1", "missing_terminal_model_usage"); err != nil {
+	if err := fixture.service.MarkExecutionUnreconciled(ctx, "exec-1", model.BillingExecutionCostReasonMissingTerminalModelUsage); err != nil {
 		t.Fatalf("MarkExecutionUnreconciled: %v", err)
 	}
 	after := fixture.walletSnapshot(t, "user-1")
@@ -266,7 +351,7 @@ func TestMissingClaudeResultIsUnreconciledAndDoesNotTouchWallet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindExecutionCostStatus: %v", err)
 	}
-	if status.Status != model.BillingProviderCostStatusUnreconciled || status.Reason != "missing_terminal_model_usage" {
+	if status.Status != model.BillingProviderCostStatusUnreconciled || status.ReasonCode != model.BillingExecutionCostReasonMissingTerminalModelUsage {
 		t.Fatalf("execution cost status = %#v", status)
 	}
 }
@@ -274,7 +359,7 @@ func TestMissingClaudeResultIsUnreconciledAndDoesNotTouchWallet(t *testing.T) {
 func TestProviderCostExecutionCanReconcileAfterMissingUsage(t *testing.T) {
 	fixture := newProviderCostFixture(t)
 	ctx := context.Background()
-	if err := fixture.service.MarkExecutionUnreconciled(ctx, "exec-1", "missing_terminal_model_usage"); err != nil {
+	if err := fixture.service.MarkExecutionUnreconciled(ctx, "exec-1", model.BillingExecutionCostReasonMissingTerminalModelUsage); err != nil {
 		t.Fatalf("mark unreconciled: %v", err)
 	}
 	_, err := fixture.service.RecordTokenUsage(ctx, RecordTokenCostRequest{
@@ -289,7 +374,7 @@ func TestProviderCostExecutionCanReconcileAfterMissingUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find status: %v", err)
 	}
-	if status.Status != model.BillingProviderCostStatusReconciled || status.Reason != "" {
+	if status.Status != model.BillingProviderCostStatusReconciled || status.ReasonCode != "" {
 		t.Fatalf("execution cost status = %#v, want reconciled", status)
 	}
 }
@@ -305,14 +390,14 @@ func TestProviderCostReconciledExecutionCannotBeDowngradedByLateMissingUsage(t *
 	if err != nil {
 		t.Fatalf("record usage: %v", err)
 	}
-	if err := fixture.service.MarkExecutionUnreconciled(ctx, "exec-1", "late_missing_terminal_model_usage"); err != nil {
+	if err := fixture.service.MarkExecutionUnreconciled(ctx, "exec-1", model.BillingExecutionCostReasonMissingProviderUsage); err != nil {
 		t.Fatalf("late MarkExecutionUnreconciled: %v", err)
 	}
 	status, err := fixture.costRepo.FindExecutionCostStatus(ctx, "exec-1")
 	if err != nil {
 		t.Fatalf("find status: %v", err)
 	}
-	if status.Status != model.BillingProviderCostStatusReconciled || status.Reason != "" {
+	if status.Status != model.BillingProviderCostStatusReconciled || status.ReasonCode != "" {
 		t.Fatalf("late missing usage downgraded status: %#v", status)
 	}
 }
@@ -330,7 +415,7 @@ func TestProviderCostAppendInvoiceAdjustmentIsAppendOnly(t *testing.T) {
 	}
 	adjustment, err := fixture.service.AppendInvoiceAdjustment(ctx, AdjustmentRequest{
 		OriginalEventID: base.ID, IdempotencyKey: "invoice-2026-07/line-1", CostDeltaMicroCNY: -133,
-		Reason: "provider_invoice_reconciliation",
+		ReasonCode: model.BillingProviderCostAdjustmentReasonProviderInvoiceReconciliation,
 	})
 	if err != nil {
 		t.Fatalf("AppendInvoiceAdjustment: %v", err)
@@ -375,6 +460,25 @@ func newProviderCostFixtureWithBundle(t *testing.T, bundle *billing.Bundle) prov
 	if err := db.Create(&account).Error; err != nil {
 		t.Fatalf("create wallet: %v", err)
 	}
+	costRepo := repository.NewBillingCostRepository(db)
+	return providerCostFixture{db: db, costRepo: costRepo, service: NewProviderCostService(costRepo, bundle)}
+}
+
+func newProviderCostConcurrentFixture(t *testing.T, bundle *billing.Bundle) providerCostFixture {
+	t.Helper()
+	dsn := "file:" + filepath.Join(t.TempDir(), "provider-cost.db") + "?_busy_timeout=5000&_journal_mode=WAL&_txlock=immediate"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open concurrent database: %v", err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("database pool: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(8)
 	costRepo := repository.NewBillingCostRepository(db)
 	return providerCostFixture{db: db, costRepo: costRepo, service: NewProviderCostService(costRepo, bundle)}
 }

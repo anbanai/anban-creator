@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -133,7 +134,7 @@ func TestProviderCostRepositoryBatchRollsBackFirstEventWhenSecondConflicts(t *te
 	}
 	first := repositoryCostEventForModel("new-first", "exec-batch", "doubao-seed-evolving", "exec-batch/evolving", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	conflictingSecond := repositoryCostEventForModel("new-second", "exec-batch", "doubao-seed-2-1-turbo-260628", "exec-batch/turbo", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
-	status := &model.BillingExecutionCostStatus{ExecutionID: "exec-batch", Status: model.BillingProviderCostStatusReconciled}
+	status := &model.BillingExecutionCostStatus{ExecutionID: "exec-batch", Status: model.BillingProviderCostStatusReconciled, FinalizationFingerprint: strings.Repeat("d", 64)}
 	result, err := repo.AppendEventsAndUpsertExecutionCostStatus(ctx, []*model.BillingProviderCostEvent{first, conflictingSecond}, status)
 	if !errors.Is(err, ErrProviderCostConflict) {
 		t.Fatalf("batch error = %v, want conflict", err)
@@ -168,7 +169,7 @@ func TestProviderCostRepositoryBatchRollsBackOnSecondDatabaseFailure(t *testing.
 	t.Cleanup(func() { _ = db.Callback().Create().Remove(callbackName) })
 	first := repositoryCostEventForModel("new-first", "exec-db-failure", "doubao-seed-evolving", "exec-db-failure/evolving", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	second := repositoryCostEventForModel("new-second", "exec-db-failure", "doubao-seed-2-1-turbo-260628", "exec-db-failure/turbo", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-	status := &model.BillingExecutionCostStatus{ExecutionID: "exec-db-failure", Status: model.BillingProviderCostStatusReconciled}
+	status := &model.BillingExecutionCostStatus{ExecutionID: "exec-db-failure", Status: model.BillingProviderCostStatusReconciled, FinalizationFingerprint: strings.Repeat("d", 64)}
 	result, err := repo.AppendEventsAndUpsertExecutionCostStatus(context.Background(), []*model.BillingProviderCostEvent{first, second}, status)
 	if err == nil {
 		t.Fatal("injected second create failure succeeded")
@@ -219,7 +220,7 @@ func TestProviderCostRepositoryRequestBasedEventCannotCreateExecutionStatus(t *t
 	event.ExecutionID = ""
 	event.ProviderRequestID = "request-2"
 	event.BaseIdentityKey = &requestIdentity
-	status := &model.BillingExecutionCostStatus{ExecutionID: "fabricated-execution", Status: model.BillingProviderCostStatusReconciled}
+	status := &model.BillingExecutionCostStatus{ExecutionID: "fabricated-execution", Status: model.BillingProviderCostStatusReconciled, FinalizationFingerprint: strings.Repeat("d", 64)}
 	if _, err := repo.AppendEventAndUpsertExecutionCostStatus(context.Background(), event, status); err == nil {
 		t.Fatal("request-based provider cost event created execution status")
 	}
@@ -251,7 +252,7 @@ func TestProviderCostRepositoryAppendsAdjustmentWithoutUpdatingBase(t *testing.T
 	adjustment.OriginalEventID = &originalID
 	adjustment.Source = model.BillingProviderCostSourceInvoiceAdjustment
 	adjustment.CostMicroCNY = -133
-	adjustment.UsageEvidence = []byte(`{"kind":"invoice_adjustment","reason":"invoice"}`)
+	adjustment.UsageEvidence = []byte(`{"kind":"invoice_adjustment","reason_code":"provider_invoice_reconciliation","delta_micro_cny":-133}`)
 	appended, err := repo.AppendEvent(ctx, adjustment)
 	if err != nil {
 		t.Fatalf("append adjustment: %v", err)
@@ -265,6 +266,100 @@ func TestProviderCostRepositoryAppendsAdjustmentWithoutUpdatingBase(t *testing.T
 	}
 	if persistedBase.CostMicroCNY != baseCost || persistedBase.OriginalEventID != nil {
 		t.Fatalf("base event was mutated: %#v", persistedBase)
+	}
+}
+
+func TestProviderCostRepositoryExecutionFinalizationFingerprintConflicts(t *testing.T) {
+	repo := NewBillingCostRepository(newProviderCostRepositoryDB(t))
+	ctx := context.Background()
+	first := &model.BillingExecutionCostStatus{
+		ExecutionID: "exec-fingerprint", Status: model.BillingProviderCostStatusReconciled,
+		FinalizationFingerprint: strings.Repeat("a", 64),
+	}
+	if err := repo.UpsertExecutionCostStatus(ctx, first); err != nil {
+		t.Fatalf("first reconciled status: %v", err)
+	}
+	if err := repo.UpsertExecutionCostStatus(ctx, first); err != nil {
+		t.Fatalf("same fingerprint replay: %v", err)
+	}
+	drift := *first
+	drift.FinalizationFingerprint = strings.Repeat("b", 64)
+	if err := repo.UpsertExecutionCostStatus(ctx, &drift); !errors.Is(err, ErrProviderCostConflict) {
+		t.Fatalf("fingerprint drift error = %v, want conflict", err)
+	}
+	for _, invalid := range []*model.BillingExecutionCostStatus{
+		{ExecutionID: "exec-empty-fingerprint", Status: model.BillingProviderCostStatusReconciled},
+		{ExecutionID: "exec-unreconciled-fingerprint", Status: model.BillingProviderCostStatusUnreconciled, ReasonCode: model.BillingExecutionCostReasonMissingTerminalModelUsage, FinalizationFingerprint: strings.Repeat("c", 64)},
+		{ExecutionID: "exec-free-reason", Status: model.BillingProviderCostStatusUnreconciled, ReasonCode: model.BillingExecutionCostReasonCode("free_text")},
+	} {
+		if err := repo.UpsertExecutionCostStatus(ctx, invalid); err == nil {
+			t.Fatalf("invalid status was accepted: %#v", invalid)
+		}
+	}
+}
+
+func TestProviderCostRepositoryRejectsUnsafeOrMalformedEvidence(t *testing.T) {
+	tests := []struct {
+		name     string
+		evidence string
+		mutate   func(*model.BillingProviderCostEvent)
+	}{
+		{name: "prompt field", evidence: `{"kind":"token","input_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":0,"prompt":"secret"}`},
+		{name: "url field", evidence: `{"kind":"output_pixels","width":10,"height":10,"pixels":100,"url":"https://secret"}`},
+		{name: "token field", evidence: `{"kind":"invoice_adjustment","reason_code":"provider_invoice_reconciliation","delta_micro_cny":-1,"token":"secret"}`, mutate: makeRepositoryAdjustment(-1)},
+		{name: "negative token count", evidence: `{"kind":"token","input_tokens":-1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":0}`},
+		{name: "pixel mismatch", evidence: `{"kind":"output_pixels","width":10,"height":10,"pixels":99}`},
+		{name: "unknown reason code", evidence: `{"kind":"invoice_adjustment","reason_code":"free_text","delta_micro_cny":-1}`, mutate: makeRepositoryAdjustment(-1)},
+		{name: "adjustment delta mismatch", evidence: `{"kind":"invoice_adjustment","reason_code":"provider_invoice_reconciliation","delta_micro_cny":-2}`, mutate: makeRepositoryAdjustment(-1)},
+		{name: "invoice source with token evidence", evidence: `{"kind":"token","input_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":0}`, mutate: func(event *model.BillingProviderCostEvent) {
+			event.Source = model.BillingProviderCostSourceInvoiceAdjustment
+		}},
+		{name: "claude source with pixel evidence", evidence: `{"kind":"output_pixels","width":10,"height":10,"pixels":100}`, mutate: func(event *model.BillingProviderCostEvent) {
+			event.Source = model.BillingProviderCostSourceClaudeResult
+		}},
+		{name: "provider source with adjustment evidence", evidence: `{"kind":"invoice_adjustment","reason_code":"provider_invoice_reconciliation","delta_micro_cny":-1}`, mutate: func(event *model.BillingProviderCostEvent) {
+			makeRepositoryAdjustment(-1)(event)
+			event.Source = model.BillingProviderCostSourceProviderResponse
+		}},
+		{name: "oversized evidence", evidence: `{"kind":"token","input_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":0,"padding":"` + strings.Repeat("x", 8_000) + `"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := newProviderCostRepositoryDB(t)
+			event := repositoryCostEvent("unsafe", strings.Repeat("a", 64))
+			if test.mutate != nil {
+				test.mutate(event)
+			}
+			event.UsageEvidence = []byte(test.evidence)
+			if _, err := NewBillingCostRepository(db).AppendEvent(context.Background(), event); err == nil {
+				t.Fatal("unsafe evidence was persisted")
+			}
+			var count int64
+			if err := db.Model(&model.BillingProviderCostEvent{}).Count(&count).Error; err != nil || count != 0 {
+				t.Fatalf("persisted event count = %d, %v", count, err)
+			}
+		})
+	}
+}
+
+func TestProviderCostRepositoryRejectsOversizedCalculationSnapshot(t *testing.T) {
+	db := newProviderCostRepositoryDB(t)
+	event := repositoryCostEvent("oversized-calculation", strings.Repeat("a", 64))
+	event.CalculationSnapshot = []byte(`{"padding":"` + strings.Repeat("x", 70_000) + `"}`)
+	if _, err := NewBillingCostRepository(db).AppendEvent(context.Background(), event); err == nil {
+		t.Fatal("oversized calculation snapshot was persisted")
+	}
+}
+
+func makeRepositoryAdjustment(cost int64) func(*model.BillingProviderCostEvent) {
+	return func(event *model.BillingProviderCostEvent) {
+		originalID := "original-cost"
+		event.EventKind = model.BillingProviderCostEventKindAdjustment
+		event.IdentityKind = ""
+		event.BaseIdentityKey = nil
+		event.OriginalEventID = &originalID
+		event.Source = model.BillingProviderCostSourceInvoiceAdjustment
+		event.CostMicroCNY = cost
 	}
 }
 

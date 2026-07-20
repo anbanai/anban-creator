@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 
@@ -264,7 +265,7 @@ type AdjustmentRequest struct {
 	OriginalEventID   string
 	IdempotencyKey    string
 	CostDeltaMicroCNY int64
-	Reason            string
+	ReasonCode        model.BillingProviderCostAdjustmentReasonCode
 }
 
 type tokenUsageEvidence struct {
@@ -283,9 +284,9 @@ type outputPixelEvidence struct {
 }
 
 type invoiceAdjustmentEvidence struct {
-	Kind          string `json:"kind"`
-	Reason        string `json:"reason"`
-	DeltaMicroCNY int64  `json:"delta_micro_cny"`
+	Kind          string                                        `json:"kind"`
+	ReasonCode    model.BillingProviderCostAdjustmentReasonCode `json:"reason_code"`
+	DeltaMicroCNY int64                                         `json:"delta_micro_cny"`
 }
 
 type invoiceAdjustmentCalculation struct {
@@ -360,8 +361,19 @@ func (s *ProviderCostService) FinalizeExecutionTokenCosts(ctx context.Context, r
 		}
 		events = append(events, event)
 	}
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].Provider != events[j].Provider {
+			return events[i].Provider < events[j].Provider
+		}
+		return events[i].Model < events[j].Model
+	})
+	finalizationFingerprint, err := executionCostFinalizationFingerprint(req.ExecutionID, req.TaskID, req.CatalogID, events)
+	if err != nil {
+		return nil, err
+	}
 	status := &model.BillingExecutionCostStatus{
 		ExecutionID: req.ExecutionID, TaskID: req.TaskID, Status: model.BillingProviderCostStatusReconciled,
+		FinalizationFingerprint: finalizationFingerprint,
 	}
 	return s.repo.AppendEventsAndUpsertExecutionCostStatus(ctx, events, status)
 }
@@ -470,16 +482,16 @@ func (s *ProviderCostService) RecordOutputPixelCost(ctx context.Context, req Rec
 	})
 }
 
-func (s *ProviderCostService) MarkExecutionUnreconciled(ctx context.Context, executionID, reason string) error {
+func (s *ProviderCostService) MarkExecutionUnreconciled(ctx context.Context, executionID string, reasonCode model.BillingExecutionCostReasonCode) error {
 	if s == nil || s.repo == nil {
 		return errors.New("provider cost service is not configured")
 	}
-	executionID, reason = strings.TrimSpace(executionID), strings.TrimSpace(reason)
-	if executionID == "" || reason == "" {
-		return errors.New("unreconciled provider cost requires execution identity and reason")
+	executionID = strings.TrimSpace(executionID)
+	if executionID == "" || !reasonCode.Valid() {
+		return errors.New("unreconciled provider cost requires execution identity and supported reason code")
 	}
 	return s.repo.UpsertExecutionCostStatus(ctx, &model.BillingExecutionCostStatus{
-		ExecutionID: executionID, Status: model.BillingProviderCostStatusUnreconciled, Reason: reason,
+		ExecutionID: executionID, Status: model.BillingProviderCostStatusUnreconciled, ReasonCode: reasonCode,
 	})
 }
 
@@ -489,9 +501,8 @@ func (s *ProviderCostService) AppendInvoiceAdjustment(ctx context.Context, req A
 	}
 	req.OriginalEventID = strings.TrimSpace(req.OriginalEventID)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
-	req.Reason = strings.TrimSpace(req.Reason)
-	if req.OriginalEventID == "" || req.IdempotencyKey == "" || req.Reason == "" || req.CostDeltaMicroCNY == 0 {
-		return nil, errors.New("provider cost adjustment requires original event, idempotency key, nonzero delta, and reason")
+	if req.OriginalEventID == "" || req.IdempotencyKey == "" || !req.ReasonCode.Valid() || req.CostDeltaMicroCNY == 0 {
+		return nil, errors.New("provider cost adjustment requires original event, idempotency key, nonzero delta, and supported reason code")
 	}
 	base, err := s.repo.FindEventByID(ctx, req.OriginalEventID)
 	if err != nil {
@@ -500,7 +511,7 @@ func (s *ProviderCostService) AppendInvoiceAdjustment(ctx context.Context, req A
 	if base.EventKind != model.BillingProviderCostEventKindBase {
 		return nil, errors.New("provider cost adjustment must reference a base event")
 	}
-	evidence := invoiceAdjustmentEvidence{Kind: "invoice_adjustment", Reason: req.Reason, DeltaMicroCNY: req.CostDeltaMicroCNY}
+	evidence := invoiceAdjustmentEvidence{Kind: "invoice_adjustment", ReasonCode: req.ReasonCode, DeltaMicroCNY: req.CostDeltaMicroCNY}
 	calculation := invoiceAdjustmentCalculation{
 		Version: 1, OriginalEventID: base.ID, OriginalCostMicroCNY: base.CostMicroCNY, DeltaMicroCNY: req.CostDeltaMicroCNY,
 	}
@@ -509,8 +520,8 @@ func (s *ProviderCostService) AppendInvoiceAdjustment(ctx context.Context, req A
 	fingerprint, err := providerCostFingerprint(struct {
 		OriginalEventID string
 		DeltaMicroCNY   int64
-		Reason          string
-	}{base.ID, req.CostDeltaMicroCNY, req.Reason})
+		ReasonCode      model.BillingProviderCostAdjustmentReasonCode
+	}{base.ID, req.CostDeltaMicroCNY, req.ReasonCode})
 	if err != nil {
 		return nil, err
 	}
@@ -524,6 +535,27 @@ func (s *ProviderCostService) AppendInvoiceAdjustment(ctx context.Context, req A
 		CostMicroCNY: req.CostDeltaMicroCNY, UsageEvidence: datatypes.JSON(evidenceJSON),
 		CalculationSnapshot: datatypes.JSON(calculationJSON),
 	})
+}
+
+func executionCostFinalizationFingerprint(executionID, taskID, catalogID string, events []*model.BillingProviderCostEvent) (string, error) {
+	type finalizationEvent struct {
+		Provider           string `json:"provider"`
+		Model              string `json:"model"`
+		RequestFingerprint string `json:"request_fingerprint"`
+	}
+	payload := struct {
+		Version     int                 `json:"version"`
+		ExecutionID string              `json:"execution_id"`
+		TaskID      string              `json:"task_id,omitempty"`
+		CatalogID   string              `json:"catalog_id"`
+		Events      []finalizationEvent `json:"events"`
+	}{Version: 1, ExecutionID: executionID, TaskID: taskID, CatalogID: catalogID, Events: make([]finalizationEvent, 0, len(events))}
+	for _, event := range events {
+		payload.Events = append(payload.Events, finalizationEvent{
+			Provider: event.Provider, Model: event.Model, RequestFingerprint: event.RequestFingerprint,
+		})
+	}
+	return providerCostFingerprint(payload)
 }
 
 func providerCostFingerprint(value any) (string, error) {

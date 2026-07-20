@@ -36,7 +36,7 @@ func TestProviderCostEventValidationSeparatesBaseAndAdjustment(t *testing.T) {
 		BaseIdentityKey:    &baseIdentity,
 		RequestFingerprint: "c63d4dd2bc0bfc97cc4f58cf109f0f9cbde560e75fd3a4fdda4a6086863717ee",
 		Source:             BillingProviderCostSourceClaudeResult, Status: BillingProviderCostStatusReconciled,
-		CostMicroCNY: 44_133, UsageEvidence: []byte(`{"kind":"token","input_tokens":4807}`),
+		CostMicroCNY: 44_133, UsageEvidence: []byte(`{"kind":"token","input_tokens":4807,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":0}`),
 		CalculationSnapshot: []byte(`{"catalog_id":"cost-v1","cost_micro_cny":44133}`),
 	}
 	if err := base.Validate(); err != nil {
@@ -51,7 +51,7 @@ func TestProviderCostEventValidationSeparatesBaseAndAdjustment(t *testing.T) {
 	adjustment.BaseIdentityKey = nil
 	adjustment.Source = BillingProviderCostSourceInvoiceAdjustment
 	adjustment.CostMicroCNY = -133
-	adjustment.UsageEvidence = []byte(`{"kind":"invoice_adjustment","reason":"provider_invoice"}`)
+	adjustment.UsageEvidence = []byte(`{"kind":"invoice_adjustment","reason_code":"provider_invoice_reconciliation","delta_micro_cny":-133}`)
 	if err := adjustment.Validate(); err != nil {
 		t.Fatalf("valid adjustment event: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestProviderCostEventSupportsProviderRequestIdentityWithoutExecution(t *tes
 		BaseIdentityKey:    &baseIdentity,
 		RequestFingerprint: "c63d4dd2bc0bfc97cc4f58cf109f0f9cbde560e75fd3a4fdda4a6086863717ee",
 		Source:             BillingProviderCostSourceProviderResponse, Status: BillingProviderCostStatusReconciled,
-		CostMicroCNY: 300_000, UsageEvidence: []byte(`{"kind":"output_pixels","pixels":1048576}`),
+		CostMicroCNY: 300_000, UsageEvidence: []byte(`{"kind":"output_pixels","width":1024,"height":1024,"pixels":1048576}`),
 		CalculationSnapshot: []byte(`{"catalog_id":"cost-v1","cost_micro_cny":300000}`),
 	}
 	if err := event.Validate(); err != nil {

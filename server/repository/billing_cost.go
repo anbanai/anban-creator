@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -54,6 +55,9 @@ func (r *billingCostRepository) AppendEventsAndUpsertExecutionCostStatus(ctx con
 	}
 	if status == nil || strings.TrimSpace(status.ExecutionID) == "" {
 		return nil, fmt.Errorf("execution cost finalization requires execution status")
+	}
+	if err := validateExecutionCostStatus(status); err != nil {
+		return nil, err
 	}
 	for _, event := range events {
 		if event == nil || event.IdentityKind != model.BillingProviderCostIdentityExecutionModel {
@@ -156,20 +160,8 @@ func (r *billingCostRepository) ListEventsByExecution(ctx context.Context, execu
 }
 
 func (r *billingCostRepository) UpsertExecutionCostStatus(ctx context.Context, status *model.BillingExecutionCostStatus) error {
-	if status == nil || strings.TrimSpace(status.ExecutionID) == "" {
-		return fmt.Errorf("execution cost status requires execution_id")
-	}
-	switch status.Status {
-	case model.BillingProviderCostStatusReconciled:
-		if strings.TrimSpace(status.Reason) != "" {
-			return fmt.Errorf("reconciled execution cost status cannot contain a reason")
-		}
-	case model.BillingProviderCostStatusUnreconciled:
-		if strings.TrimSpace(status.Reason) == "" {
-			return fmt.Errorf("unreconciled execution cost status requires a reason")
-		}
-	default:
-		return fmt.Errorf("unsupported execution cost status %q", status.Status)
+	if err := validateExecutionCostStatus(status); err != nil {
+		return err
 	}
 	// Insert first so an unreconciled late arrival can never overwrite an
 	// already-reconciled row through an upsert expression. The guarded update
@@ -179,15 +171,56 @@ func (r *billingCostRepository) UpsertExecutionCostStatus(ctx context.Context, s
 	}
 	query := r.db.WithContext(ctx).Model(&model.BillingExecutionCostStatus{}).
 		Where("execution_id = ?", status.ExecutionID)
-	if status.Status == model.BillingProviderCostStatusUnreconciled {
+	if status.Status == model.BillingProviderCostStatusReconciled {
+		query = query.Where("status <> ? OR finalization_fingerprint = ?", model.BillingProviderCostStatusReconciled, status.FinalizationFingerprint)
+	} else {
 		query = query.Where("status <> ?", model.BillingProviderCostStatusReconciled)
 	}
-	return query.Updates(map[string]any{
-		"task_id":    gorm.Expr("CASE WHEN ? = '' THEN task_id ELSE ? END", status.TaskID, status.TaskID),
-		"status":     status.Status,
-		"reason":     status.Reason,
-		"updated_at": gorm.Expr("CURRENT_TIMESTAMP"),
-	}).Error
+	if err := query.Updates(map[string]any{
+		"task_id":                  gorm.Expr("CASE WHEN ? = '' THEN task_id ELSE ? END", status.TaskID, status.TaskID),
+		"status":                   status.Status,
+		"reason_code":              status.ReasonCode,
+		"finalization_fingerprint": status.FinalizationFingerprint,
+		"updated_at":               gorm.Expr("CURRENT_TIMESTAMP"),
+	}).Error; err != nil {
+		return err
+	}
+	persisted, err := r.FindExecutionCostStatus(ctx, status.ExecutionID)
+	if err != nil {
+		return err
+	}
+	if status.Status == model.BillingProviderCostStatusReconciled && persisted.Status == model.BillingProviderCostStatusReconciled && persisted.FinalizationFingerprint != status.FinalizationFingerprint {
+		return fmt.Errorf("%w: execution %q finalized with a different model set", ErrProviderCostConflict, status.ExecutionID)
+	}
+	return nil
+}
+
+func validateExecutionCostStatus(status *model.BillingExecutionCostStatus) error {
+	if status == nil || strings.TrimSpace(status.ExecutionID) == "" {
+		return fmt.Errorf("execution cost status requires execution_id")
+	}
+	switch status.Status {
+	case model.BillingProviderCostStatusReconciled:
+		if status.ReasonCode != "" {
+			return fmt.Errorf("reconciled execution cost status cannot contain a reason code")
+		}
+		if len(status.FinalizationFingerprint) != 64 {
+			return fmt.Errorf("reconciled execution cost status requires a 64-character finalization fingerprint")
+		}
+		if _, err := hex.DecodeString(status.FinalizationFingerprint); err != nil {
+			return fmt.Errorf("reconciled execution cost finalization fingerprint must be hexadecimal")
+		}
+	case model.BillingProviderCostStatusUnreconciled:
+		if !status.ReasonCode.Valid() {
+			return fmt.Errorf("unreconciled execution cost status requires a supported reason code")
+		}
+		if status.FinalizationFingerprint != "" {
+			return fmt.Errorf("unreconciled execution cost status cannot contain a finalization fingerprint")
+		}
+	default:
+		return fmt.Errorf("unsupported execution cost status %q", status.Status)
+	}
+	return nil
 }
 
 func (r *billingCostRepository) FindExecutionCostStatus(ctx context.Context, executionID string) (*model.BillingExecutionCostStatus, error) {
