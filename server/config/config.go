@@ -17,8 +17,6 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-var immutableContainerImageRE = regexp.MustCompile(`@sha256:[0-9a-fA-F]{64}$`)
-
 // Config holds all server configuration.
 type Config struct {
 	Server             ServerConfig                    `yaml:"server"`
@@ -1802,8 +1800,6 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.AgentImage) == "" {
 			errs = append(errs, "claude.kubernetes.agent_image is required")
-		} else if !immutableContainerImageRE.MatchString(strings.TrimSpace(c.Claude.Kubernetes.AgentImage)) {
-			errs = append(errs, "claude.kubernetes.agent_image must use an immutable sha256 digest")
 		}
 		for taskType, image := range c.Claude.Kubernetes.ImageProfiles {
 			if !isKubernetesImageProfileTaskType(taskType) {
@@ -1811,8 +1807,6 @@ func (c *Config) Validate() error {
 			}
 			if strings.TrimSpace(image) == "" {
 				errs = append(errs, fmt.Sprintf("claude.kubernetes.image_profiles.%s must not be empty", taskType))
-			} else if !immutableContainerImageRE.MatchString(strings.TrimSpace(image)) {
-				errs = append(errs, fmt.Sprintf("claude.kubernetes.image_profiles.%s must use an immutable sha256 digest", taskType))
 			}
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {

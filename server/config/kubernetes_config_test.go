@@ -103,32 +103,29 @@ func TestValidateKubernetesImageProfiles(t *testing.T) {
 	}
 }
 
-func TestValidateKubernetesRequiresImmutableImageDigests(t *testing.T) {
+func TestValidateKubernetesAcceptsTaggedImages(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		mutate func(*Config)
-		want   string
 	}{
 		{
 			name: "default image tag",
 			mutate: func(cfg *Config) {
 				cfg.Claude.Kubernetes.AgentImage = "registry.example.com/content:latest"
 			},
-			want: "claude.kubernetes.agent_image must use an immutable sha256 digest",
 		},
 		{
 			name: "profile image tag",
 			mutate: func(cfg *Config) {
 				cfg.Claude.Kubernetes.ImageProfiles = map[string]string{model.PlatformMontage: "registry.example.com/montage:v1"}
 			},
-			want: "claude.kubernetes.image_profiles.montage must use an immutable sha256 digest",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := baseKubernetesConfigForTest()
 			test.mutate(&cfg)
-			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate() error = %v, want tagged image accepted", err)
 			}
 		})
 	}
