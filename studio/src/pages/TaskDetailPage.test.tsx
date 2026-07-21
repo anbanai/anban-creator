@@ -1129,6 +1129,29 @@ describe('TaskDetailPage', () => {
     expect(within(reopened).queryByText('notes.md')).not.toBeInTheDocument()
   })
 
+  it('submits a prompt-only resume request from the composer', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'failed',
+      result: null,
+    }))
+
+    render(<TaskDetailPage />)
+
+    const dialog = await openResumeDialog()
+    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), {
+      target: { value: 'continue' },
+    })
+    fireEvent.click(within(dialog).getByLabelText('提交并继续'))
+
+    await waitFor(() => {
+      expect(api.tasks.resume).toHaveBeenCalledWith('task-1', {
+        prompt: 'continue',
+        input_attachments: [],
+      })
+    })
+  })
+
   it('keeps the resume dialog mounted and dismiss controls disabled until its request settles', async () => {
     mockTask(taskWith({
       id: 'task-1',

@@ -79,10 +79,9 @@ function ResumeTaskDialog({
     policy: RESUME_ATTACHMENT_POLICY,
   })
   const resumeMutation = useMutation({
-    mutationFn: () => api.tasks.resume(taskId, {
-      prompt,
-      input_attachments: attachmentController.toInputAttachments(),
-    }),
+    mutationFn: (request: { prompt: string; input_attachments: InputAttachment[] }) => (
+      api.tasks.resume(taskId, request)
+    ),
     onSuccess: () => {
       toast.success('已提交，任务将结合已有上下文继续执行')
       onSuccess()
@@ -116,7 +115,12 @@ function ResumeTaskDialog({
         <AgentPromptInput
           value={{ prompt, attachments: attachmentController.attachments }}
           onChange={(value) => setPrompt(value.prompt)}
-          onSubmit={async () => { await resumeMutation.mutateAsync() }}
+          onSubmit={async (value) => {
+            await resumeMutation.mutateAsync({
+              prompt: value.prompt,
+              input_attachments: attachmentController.toInputAttachments(),
+            })
+          }}
           attachmentController={attachmentController}
           attachmentPolicy={RESUME_ATTACHMENT_POLICY}
           placeholder="说明希望 AI 接着做什么，并可添加补充资料或修改意见..."
