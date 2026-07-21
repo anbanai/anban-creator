@@ -251,12 +251,6 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 			return fmt.Errorf("local complete: list montage task files: %w", err)
 		}
 		artifactValidation = validateMontageCompletionArtifacts(files)
-	} else if model.IsVideoPlatform(task.Type) {
-		var err error
-		artifactValidation, err = s.validateVideoCompletionArtifacts(ctx, task)
-		if err != nil {
-			return fmt.Errorf("local complete: validate video artifacts: %w", err)
-		}
 	} else {
 		files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
 		if err != nil {

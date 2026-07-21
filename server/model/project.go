@@ -47,7 +47,7 @@ func (p *Project) SetEcommerceDefaults(ec EcommerceProjectDefaults) {
 type Project struct {
 	ID         string `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID     string `gorm:"type:char(36);index;not null" json:"user_id"`
-	Platform   string `gorm:"type:varchar(20);not null" json:"platform"` // article, seednote, moments, ecommerce, videocreator, videoeditor
+	Platform   string `gorm:"type:varchar(20);not null" json:"platform"` // article, seednote, moments, ecommerce, montage
 	Name       string `gorm:"type:varchar(100);not null" json:"name"`
 	AvatarURL  string `gorm:"type:varchar(500)" json:"avatar_url"`
 	ProfileURL string `gorm:"type:varchar(500)" json:"profile_url"` // 平台主页链接
@@ -86,27 +86,14 @@ type Project struct {
 	// "ecommerce" projects. Zero value for non-ecommerce projects.
 	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`
 	EcommerceDefaultsSet bool                                         `gorm:"-" json:"-"`
-	// VideoDefaults and VideoModelPolicy configure Seedance video generation for
-	// videocreator projects. Plans/tasks copy resolved values into snapshots.
-	VideoDefaults      datatypes.JSONType[VideoDefaults]    `gorm:"type:json" json:"video_defaults"`
-	VideoModelPolicy   datatypes.JSONType[VideoModelPolicy] `gorm:"type:json" json:"video_model_policy"`
-	MontageDefaults    datatypes.JSONType[MontageDefaults]  `gorm:"type:json" json:"montage_defaults"`
-	MontageDefaultsSet bool                                 `gorm:"-" json:"-"`
-	VideoProfileSet    bool                                 `gorm:"-" json:"-"`
-	Status             string                               `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
-	CreatedAt          time.Time                            `json:"created_at"`
-	UpdatedAt          time.Time                            `json:"updated_at"`
+	MontageDefaults      datatypes.JSONType[MontageDefaults]          `gorm:"type:json" json:"montage_defaults"`
+	MontageDefaultsSet   bool                                         `gorm:"-" json:"-"`
+	Status               string                                       `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
+	CreatedAt            time.Time                                    `json:"created_at"`
+	UpdatedAt            time.Time                                    `json:"updated_at"`
 }
 
 func (Project) TableName() string { return "projects" }
-
-func (p *Project) SetVideoDefaults(v VideoDefaults) {
-	p.VideoDefaults = datatypes.NewJSONType(v)
-}
-
-func (p *Project) SetVideoModelPolicy(v VideoModelPolicy) {
-	p.VideoModelPolicy = datatypes.NewJSONType(v)
-}
 
 // GetWechatAppID returns the WeChat App ID from config.
 func (p *Project) GetWechatAppID() string {

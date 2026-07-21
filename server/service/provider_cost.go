@@ -40,11 +40,6 @@ type OpenAIImageUsage struct {
 	ImageOutput      int64 `json:"image_output_tokens"`
 }
 
-type VideoOutputUsage struct {
-	DurationSeconds int64  `json:"duration_seconds"`
-	Resolution      string `json:"resolution"`
-}
-
 type TokenCostCategoryNumerators struct {
 	Input         string `json:"input"`
 	CacheRead     string `json:"cache_read_input"`
@@ -133,24 +128,6 @@ type OpenAIImageCategoryNumerators struct {
 	ImageOutput      string `json:"image_output"`
 }
 
-type VideoOutputCostCalculation struct {
-	Version                  int       `json:"version"`
-	CatalogID                string    `json:"catalog_id"`
-	ModelID                  string    `json:"model_id"`
-	PricingType              string    `json:"pricing_type"`
-	Currency                 string    `json:"currency"`
-	CurrencyRateMicroCNY     int64     `json:"currency_rate_micro_cny"`
-	DurationSeconds          int64     `json:"duration_seconds"`
-	Resolution               string    `json:"resolution"`
-	PricePerSecond           int64     `json:"price_per_second_micro_currency"`
-	CNYConversionNumerator   string    `json:"cny_conversion_numerator"`
-	CNYConversionDenominator string    `json:"cny_conversion_denominator"`
-	MicroCNY                 int64     `json:"cost_micro_cny"`
-	Rounding                 string    `json:"rounding"`
-	OperatorEvidence         string    `json:"operator_evidence"`
-	EffectiveAt              time.Time `json:"effective_at"`
-}
-
 type ProviderCostCalculator struct {
 	catalog billing.CostCatalog
 }
@@ -165,13 +142,6 @@ func NewProviderCostCalculator(catalog billing.CostCatalog) *ProviderCostCalcula
 	}
 	for modelID, price := range catalog.Models {
 		price.Tiers = append([]billing.CostTier(nil), price.Tiers...)
-		if price.ResolutionPrices != nil {
-			cloned := make(map[string]billing.MicroCNY, len(price.ResolutionPrices))
-			for resolution, value := range price.ResolutionPrices {
-				cloned[resolution] = value
-			}
-			price.ResolutionPrices = cloned
-		}
 		snapshot.Models[modelID] = price
 	}
 	return &ProviderCostCalculator{catalog: snapshot}
@@ -213,42 +183,6 @@ func (c *ProviderCostCalculator) OpenAIImageCost(modelID string, usage OpenAIIma
 		CategoryNumerators:     OpenAIImageCategoryNumerators{TextInput: numerators[0].String(), TextCachedInput: numerators[1].String(), ImageInput: numerators[2].String(), ImageCachedInput: numerators[3].String(), ImageOutput: numerators[4].String()},
 		TotalCategoryNumerator: total.String(), CNYConversionNumerator: conversionNumerator.String(), CNYConversionDenominator: conversionDenominator.String(),
 		MicroCNY: cost.Int64(), Rounding: "ceil_once_per_provider_event", OperatorEvidence: price.OperatorEvidence, EffectiveAt: price.EffectiveAt,
-	}, nil
-}
-
-func (c *ProviderCostCalculator) VideoOutputCost(modelID string, usage VideoOutputUsage) (VideoOutputCostCalculation, error) {
-	if c == nil {
-		return VideoOutputCostCalculation{}, errors.New("provider cost calculator is required")
-	}
-	price, ok := c.catalog.Models[modelID]
-	resolution := strings.ToLower(strings.TrimSpace(usage.Resolution))
-	if !ok || price.PricingType != "video_output_seconds" {
-		return VideoOutputCostCalculation{}, fmt.Errorf("provider cost model %q is not video-output-seconds priced", modelID)
-	}
-	if usage.DurationSeconds <= 0 || resolution == "" {
-		return VideoOutputCostCalculation{}, errors.New("provider video output requires positive duration and resolution")
-	}
-	perSecond, ok := price.ResolutionPrices[resolution]
-	if !ok || perSecond <= 0 {
-		return VideoOutputCostCalculation{}, fmt.Errorf("provider cost model %q has no exact price for resolution %q", modelID, resolution)
-	}
-	rate, ok := c.catalog.CurrencyRates[price.Currency]
-	if !ok || rate <= 0 {
-		return VideoOutputCostCalculation{}, fmt.Errorf("provider cost currency %q has no positive CNY rate", price.Currency)
-	}
-	numerator := new(big.Int).Mul(big.NewInt(usage.DurationSeconds), big.NewInt(int64(perSecond)))
-	numerator.Mul(numerator, big.NewInt(int64(rate)))
-	denominator := big.NewInt(1_000_000)
-	cost := ceilPositiveQuotient(numerator, denominator)
-	if !cost.IsInt64() || cost.Sign() < 0 {
-		return VideoOutputCostCalculation{}, errors.New("provider video cost overflows signed micro-CNY")
-	}
-	return VideoOutputCostCalculation{
-		Version: 1, CatalogID: c.catalog.CatalogID, ModelID: modelID, PricingType: price.PricingType,
-		Currency: price.Currency, CurrencyRateMicroCNY: int64(rate), DurationSeconds: usage.DurationSeconds,
-		Resolution: resolution, PricePerSecond: int64(perSecond), CNYConversionNumerator: numerator.String(),
-		CNYConversionDenominator: denominator.String(), MicroCNY: cost.Int64(), Rounding: "ceil_once_per_provider_event",
-		OperatorEvidence: price.OperatorEvidence, EffectiveAt: price.EffectiveAt,
 	}, nil
 }
 
@@ -411,14 +345,6 @@ type RecordOpenAIImageUsageCostRequest struct {
 	Usage                                                                         OpenAIImageUsage
 }
 
-type RecordVideoOutputCostRequest struct {
-	TaskID, Provider, Model, ProviderRequestID, CatalogID, IdempotencyKey, Source string
-	DurationSeconds                                                               int64
-	Resolution                                                                    string
-	HasVideoInput                                                                 bool
-	HasAudioInput                                                                 bool
-}
-
 type RecordImageGenerationCostRequest struct {
 	TaskID, Provider, Model, ProviderRequestID string
 	Width, Height                              int64
@@ -463,14 +389,6 @@ type openAIImageUsageEvidence struct {
 	ImageInputTokens       int64  `json:"image_input_tokens"`
 	ImageCachedInputTokens int64  `json:"image_cached_input_tokens"`
 	ImageOutputTokens      int64  `json:"image_output_tokens"`
-}
-
-type videoOutputEvidence struct {
-	Kind            string `json:"kind"`
-	DurationSeconds int64  `json:"duration_seconds"`
-	Resolution      string `json:"resolution"`
-	HasVideoInput   bool   `json:"has_video_input"`
-	HasAudioInput   bool   `json:"has_audio_input"`
 }
 
 type mediaUnreconciledEvidence struct {
@@ -818,42 +736,6 @@ func (s *ProviderCostService) RecordMediaUnreconciled(ctx context.Context, req R
 		Status:      model.BillingProviderCostStatusUnreconciled,
 		Evidence:    evidence,
 		Calculation: unreconciledCalculation{Version: 1, ReasonCode: req.ReasonCode},
-	})
-}
-
-func (s *ProviderCostService) RecordVideoOutputCost(ctx context.Context, req RecordVideoOutputCostRequest) (*model.BillingProviderCostEvent, error) {
-	if s == nil || s.repo == nil || s.calculator == nil {
-		return nil, errors.New("provider cost service is not configured")
-	}
-	req.TaskID, req.Provider, req.Model = strings.TrimSpace(req.TaskID), strings.TrimSpace(req.Provider), strings.TrimSpace(req.Model)
-	req.ProviderRequestID, req.CatalogID, req.IdempotencyKey = strings.TrimSpace(req.ProviderRequestID), strings.TrimSpace(req.CatalogID), strings.TrimSpace(req.IdempotencyKey)
-	req.Resolution = strings.ToLower(strings.TrimSpace(req.Resolution))
-	if req.Provider == "" || req.Model == "" || req.ProviderRequestID == "" || req.IdempotencyKey == "" || req.DurationSeconds <= 0 || req.Resolution == "" {
-		return nil, errors.New("provider video cost requires provider, model, request, actual duration, resolution, and idempotency identities")
-	}
-	if req.CatalogID != s.catalogID {
-		return nil, fmt.Errorf("provider video cost catalog %q does not match active catalog %q", req.CatalogID, s.catalogID)
-	}
-	if model.BillingProviderCostSource(strings.TrimSpace(req.Source)) != model.BillingProviderCostSourceProviderResponse {
-		return nil, fmt.Errorf("unsupported video cost source %q", req.Source)
-	}
-	if req.HasVideoInput || req.HasAudioInput {
-		return s.RecordMediaUnreconciled(ctx, RecordMediaUnreconciledRequest{
-			TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, ProviderRequestID: req.ProviderRequestID,
-			MediaKind: "video", ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,
-			DurationSeconds: req.DurationSeconds, Resolution: req.Resolution,
-			HasVideoInput: req.HasVideoInput, HasAudioInput: req.HasAudioInput,
-		})
-	}
-	calculation, err := s.calculator.VideoOutputCost(req.Provider+"/"+req.Model, VideoOutputUsage{DurationSeconds: req.DurationSeconds, Resolution: req.Resolution})
-	if err != nil {
-		return nil, err
-	}
-	evidence := videoOutputEvidence{Kind: "video_output", DurationSeconds: req.DurationSeconds, Resolution: req.Resolution, HasVideoInput: false, HasAudioInput: false}
-	return s.appendProviderRequestEvent(ctx, providerRequestEvent{
-		TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, ProviderRequestID: req.ProviderRequestID,
-		CatalogID: req.CatalogID, IdempotencyKey: req.IdempotencyKey, Source: model.BillingProviderCostSourceProviderResponse,
-		Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: calculation.MicroCNY, Evidence: evidence, Calculation: calculation,
 	})
 }
 

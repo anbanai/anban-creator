@@ -173,8 +173,6 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 		"moments":       {"moments", "humanizer"},
 		"montage":       {"montage"},
 		"seednote":      {"agent-reach", "seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
-		"videocreator":  nil,
-		"videoeditor":   {"video-use", "hyperframes-video-overlays", "remotion-video-overlays", "manim-video-overlays", "pil-video-overlays", "capcut-draft"},
 		"wechatarticle": {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-publishing", "article-viral-strategy"},
 	}
 
@@ -228,6 +226,9 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 			continue
 		}
 		name := entry.Name()
+		if _, err := os.Stat(filepath.Join(skillsRoot, name, "SKILL.md")); os.IsNotExist(err) {
+			continue
+		}
 		if !referenced[name] && !userEntrypoints[name] {
 			t.Fatalf("Claude Skill %q has no Agent reference or declared user entrypoint; remove it or assign a runtime owner", name)
 		}

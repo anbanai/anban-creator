@@ -45,13 +45,10 @@ import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextC
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
-import { buildVideoInputForSubmit, initialVideoInput } from '@/lib/video-form'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
-import { isVideoCreator, isVideoEditor, isVideoPlatform } from '@/lib/video-platforms'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
-import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { getProjectCreationDefaults, taskActionSignal, taskCreationCostPreview } from '@/lib/studio-ux'
@@ -188,13 +185,9 @@ export default function TasksPage() {
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
-  const isVideoCreatorTask = isVideoCreator(watchedType)
-  const isVideoTask = isVideoPlatform(watchedType)
   const isMontageTask = watchedType === 'montage'
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
-  const watchedInputAttachments = useWatch({ control: form.control, name: 'input_attachments' })
-  const watchedVideoEditorReferences = useWatch({ control: form.control, name: 'video_editor_input.references' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
@@ -377,8 +370,6 @@ export default function TasksPage() {
       target_platform: defaults.targetPlatform,
       selling_points: '',
       language: '',
-      video_creator_input: isVideoCreator(defaultType) ? initialVideoInput('') : undefined,
-      video_editor_input: isVideoEditor(defaultType) ? initialVideoInput('') : undefined,
       montage_input: defaultType === 'montage'
         ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
         : undefined,
@@ -411,7 +402,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', reference_image: null, input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', video_creator_input: undefined, video_editor_input: undefined, montage_input: undefined })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', reference_image: null, input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', montage_input: undefined })
     setQuantity(1)
     setWatermark(false)
     setReferenceUploading(false)
@@ -468,8 +459,6 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, { ...values.video_creator_input, brief: values.prompt }) : undefined,
-      video_editor_input: isVideoEditor(values.type) ? buildVideoInputForSubmit(values.prompt, { ...values.video_editor_input, brief: values.prompt }) : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
       // Route to the desktop local executor only when it is running and able to claim now.
       execution_target: values.type !== 'montage' && runThisTaskLocally ? 'local' : undefined,
@@ -544,12 +533,6 @@ export default function TasksPage() {
     balance: billingWallet?.balance ?? 0,
   })
 
-  const videoEditorHasStructuredSource = (watchedVideoEditorReferences ?? []).some((ref) => ref.type === 'video_url' && (ref.url || ref.task_file_id))
-  const videoEditorHasPromptVideo = (watchedInputAttachments ?? []).some((attachment) => (
-    attachment.type === 'video'
-    && Boolean((attachment.upload_id && attachment.key) || attachment.url)
-  ))
-  const videoEditorHasSourceMedia = videoEditorHasStructuredSource || videoEditorHasPromptVideo
   const creationBlocker = !costPreview.priceAvailable
     ? { message: '固定价格目录暂不可用，请稍后重试。', href: '', actionLabel: '' }
     : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
@@ -558,8 +541,6 @@ export default function TasksPage() {
       ? { message: '强目标模式需要填写目标条件。', href: '', actionLabel: '' }
       : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
         ? { message: '电商出图需要先上传产品图。', href: '', actionLabel: '' }
-        : isVideoEditor(watchedType) && !videoEditorHasSourceMedia
-          ? { message: '视频剪辑后期需要先上传至少一个源视频素材。', href: '', actionLabel: '' }
         : null
 
   const promptComposer = (
@@ -567,11 +548,7 @@ export default function TasksPage() {
       value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
       onChange={(value) => {
         form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
-        if (isVideoCreator(watchedType)) {
-          form.setValue('video_creator_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
-        } else if (isVideoEditor(watchedType)) {
-          form.setValue('video_editor_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
-        } else if (watchedType === 'montage') {
+        if (watchedType === 'montage') {
           form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
         }
         setPromptAttachments(value.attachments)
@@ -606,8 +583,6 @@ export default function TasksPage() {
               form.setValue('selected_modules', defaults.selectedModules, { shouldDirty: false })
               form.setValue('target_platform', defaults.targetPlatform, { shouldDirty: false })
               form.setValue('image_model_key', defaults.imageModelKey, { shouldDirty: false })
-              form.setValue('video_creator_input', isVideoCreator(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
-              form.setValue('video_editor_input', isVideoEditor(defaults.type) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
               form.setValue('montage_input', defaults.type === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, project.montage_defaults) : undefined, { shouldDirty: false })
             }}
           />
@@ -937,7 +912,7 @@ export default function TasksPage() {
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 space-y-1">
                   <p className="text-xs font-medium text-foreground/80">将使用项目「{selectedProject.name}」的快照</p>
                   <p className="text-xs text-muted-foreground">
-                    {isVideoTask || isMontageTask ? (
+                    {isMontageTask ? (
                       <>项目定位 {selectedProject.instructions || selectedProject.positioning || '—'}</>
                     ) : (
                       <>视觉风格 {selectedProject.visual_style || '—'}</>
@@ -952,14 +927,14 @@ export default function TasksPage() {
 
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">03 目标/提示词</p>
-              {!isVideoTask && !isMontageTask ? promptComposer : null}
+              {!isMontageTask ? promptComposer : null}
               </div>
 
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">04 图片/高级</p>
 
               {/* Quantity selector (ecommerce creates one guided package task at qty=1) */}
-              {watchedType !== 'ecommerce' && !isVideoTask && !isMontageTask && (
+              {watchedType !== 'ecommerce' && !isMontageTask && (
               <div className="space-y-2">
                 <FormLabel>数量</FormLabel>
                 <div className="flex gap-2">
@@ -979,7 +954,7 @@ export default function TasksPage() {
               )}
 
               {/* Image ratio selector (ecommerce uses per-module ratios from platform specs) */}
-              {watchedType !== 'ecommerce' && !isVideoTask && !isMontageTask && (
+              {watchedType !== 'ecommerce' && !isMontageTask && (
               <FormField control={form.control} name="image_ratio" render={({ field }) => {
                 const defaultRatio = projectImageRatio || platformDefaultRatio[watchedType] || '3:4'
                 const defaultLabel = platformRatioLabel[watchedType] || `${defaultRatio}（默认）`
@@ -1014,7 +989,7 @@ export default function TasksPage() {
               )}
 
               {/* Image model selector */}
-              {!isVideoTask && !isMontageTask && <FormField control={form.control} name="image_model_key" render={({ field }) => (
+              {!isMontageTask && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
                   <FormLabel>图像模型</FormLabel>
                   <FormControl>
@@ -1032,7 +1007,7 @@ export default function TasksPage() {
                 </FormItem>
               )} />}
 
-              {!isVideoTask && !isMontageTask && (
+              {!isMontageTask && (
                 <FormField control={form.control} name="reference_image" render={({ field }) => (
                   <FormItem>
                     <FormLabel>任务参考图</FormLabel>
@@ -1049,16 +1024,6 @@ export default function TasksPage() {
                 )} />
               )}
 
-              {isVideoTask && (
-                <VideoCreationPanel
-                  form={form}
-                  fieldRoot={isVideoCreatorTask ? 'video_creator_input' : 'video_editor_input'}
-                  selectedProject={selectedProject}
-                  title={isVideoCreatorTask ? 'AI 视频生成' : '视频剪辑后期'}
-                  promptField={promptComposer}
-                />
-              )}
-
               {isMontageTask && (
                 <MontageCreationPanel
                   form={form}
@@ -1069,7 +1034,7 @@ export default function TasksPage() {
               )}
 
               {/* Watermark toggle */}
-              {!isVideoTask && !isMontageTask && <button
+              {!isMontageTask && <button
                 type="button"
                 onClick={() => setWatermark(!watermark)}
                 className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${

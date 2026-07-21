@@ -18,11 +18,6 @@ func providerCostBundleWithMedia() *billing.Bundle {
 		ImageCachedInput: 2_000_000, ImageOutput: 30_000_000,
 		OperatorEvidence: "test-openai-image-price", EffectiveAt: time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC),
 	}
-	bundle.Costs.Models["volcengine_ark/doubao-seedance-2-0-mini-260615"] = billing.ModelCostConfig{
-		PricingType: "video_output_seconds", Currency: "CNY",
-		ResolutionPrices: map[string]billing.MicroCNY{"480p": 232_000, "720p": 496_000},
-		OperatorEvidence: "test-video-price", EffectiveAt: time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC),
-	}
 	return bundle
 }
 
@@ -50,37 +45,5 @@ func TestProviderCostOpenAIImageUsageUsesAllFiveCategoriesExactly(t *testing.T) 
 		if _, exists := evidence[forbidden]; exists {
 			t.Fatalf("unsafe evidence key %q persisted: %#v", forbidden, evidence)
 		}
-	}
-}
-
-func TestProviderCostVideoOutputUsesActualDurationAndResolution(t *testing.T) {
-	fixture := newProviderCostFixtureWithBundle(t, providerCostBundleWithMedia())
-	event, err := fixture.service.RecordVideoOutputCost(context.Background(), RecordVideoOutputCostRequest{
-		TaskID: "task-video", Provider: "volcengine_ark", Model: "doubao-seedance-2-0-mini-260615",
-		ProviderRequestID: "ark-job-1", CatalogID: "cost-v1", IdempotencyKey: "ark-job-1",
-		DurationSeconds: 5, Resolution: "720p", HasVideoInput: false,
-		Source: string(model.BillingProviderCostSourceProviderResponse),
-	})
-	if err != nil {
-		t.Fatalf("RecordVideoOutputCost: %v", err)
-	}
-	if event.CostMicroCNY != 2_480_000 {
-		t.Fatalf("cost_micro_cny = %d, want 2480000", event.CostMicroCNY)
-	}
-}
-
-func TestProviderCostVideoInputRangeStaysUnreconciled(t *testing.T) {
-	fixture := newProviderCostFixtureWithBundle(t, providerCostBundleWithMedia())
-	event, err := fixture.service.RecordVideoOutputCost(context.Background(), RecordVideoOutputCostRequest{
-		TaskID: "task-video", Provider: "volcengine_ark", Model: "doubao-seedance-2-0-mini-260615",
-		ProviderRequestID: "ark-job-input", CatalogID: "cost-v1", IdempotencyKey: "ark-job-input",
-		DurationSeconds: 5, Resolution: "720p", HasVideoInput: true,
-		Source: string(model.BillingProviderCostSourceProviderResponse),
-	})
-	if err != nil {
-		t.Fatalf("RecordVideoOutputCost: %v", err)
-	}
-	if event.Status != model.BillingProviderCostStatusUnreconciled || event.CostMicroCNY != 0 {
-		t.Fatalf("video input event = status %q cost %d, want unreconciled zero", event.Status, event.CostMicroCNY)
 	}
 }

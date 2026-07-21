@@ -19,9 +19,7 @@ type managedStopGate struct {
 }
 
 var managedStopGates = map[string]managedStopGate{
-	"seednote":     {agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
-	"videocreator": {agentType: "anban:videocreator", script: "videocreator-quality-gate.sh"},
-	"videoeditor":  {agentType: "anban:videoeditor", script: "videoeditor-quality-gate.sh"},
+	"seednote": {agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
 }
 
 // ManagedTaskStopHook returns a task-specific SDK Stop hook for sessions that

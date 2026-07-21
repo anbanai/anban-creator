@@ -24,7 +24,6 @@ import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
-import { VideoProductionPanel } from '@/components/video/VideoProductionPanel'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -36,8 +35,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { taskStatusLabel, contentTypeLabel, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
-import { videoCreativeTypeLabel, videoPurposeLabel } from '@/lib/video-display'
-import { isVideoCreator, isVideoEditor } from '@/lib/video-platforms'
 import { taskFailureMessage } from '@/lib/studio-ux'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 
@@ -350,7 +347,6 @@ export default function TaskDetailPage() {
     enabled: !!task?.project_id,
   })
   const project = projectDetail?.project
-  const isVideoTaskFile = (file: TaskFile) => file.mime_type?.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.file_name)
 
   const MAX_PERSISTED_LOGS = 500
   const persistedLogs = (task?.progress_log
@@ -381,12 +377,6 @@ export default function TaskDetailPage() {
   const progressDescription = currentLiveProgress?.description ?? persistedProgress?.description ?? null
   const progressStage = currentLiveProgress?.stage ?? persistedProgress?.stage ?? null
   const isRunning = task?.status === 'running'
-  const { data: videoProduction } = useQuery({
-    queryKey: ['task-video-production', id],
-    queryFn: () => api.tasks.videoProduction(id!),
-    enabled: !!id && isVideoCreator(task?.type),
-  })
-
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
     onSuccess: () => {
@@ -691,83 +681,9 @@ export default function TaskDetailPage() {
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
-  const videoResolvedConfig = isVideoCreator(task.type)
-    ? task.video_creator_config
-    : isVideoEditor(task.type)
-      ? task.video_editor_config
-      : undefined
-  const videoTargetDuration = videoResolvedConfig?.target_duration_seconds || videoResolvedConfig?.duration
-  const videoSegmentCount = videoResolvedConfig?.segments?.length || 0
-  const videoSpecSummary = [
-    videoResolvedConfig?.resolution || '—',
-    videoResolvedConfig?.ratio || '—',
-    videoTargetDuration ? `目标 ${videoTargetDuration}s` : '目标 —',
-    videoSegmentCount > 0 ? `${videoSegmentCount} 段` : null,
-  ].filter(Boolean).join(' · ')
-  const videoCreativeType = videoCreativeTypeLabel(videoResolvedConfig?.creative_type)
-  const videoPurpose = videoPurposeLabel(videoResolvedConfig?.purpose)
-  const videoSubjectProfile = videoResolvedConfig?.subject_profile?.trim() || '—'
-  const hasVideoProductionResult = Boolean(
-    videoProduction
-    && Object.values(videoProduction.artifacts).some((artifact) => artifact.status === 'available'),
-  )
   const showPendingResultDestination = (task.status === 'pending' || task.status === 'running')
     && publishedFiles.length === 0
     && collectedFiles.length === 0
-    && !hasVideoProductionResult
-  const renderVideoPreviewDetails = (file: TaskFile) => {
-    if (!isVideoTaskFile(file)) return null
-    return (
-      <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
-        <p className="text-sm font-medium text-foreground">创作参数</p>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <p className="text-xs text-muted-foreground">内容类型</p>
-            <p className="mt-1 text-foreground">{videoCreativeType}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">商业目标</p>
-            <p className="mt-1 text-foreground">{videoPurpose}</p>
-          </div>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">人物 / 主体</p>
-          <p className="mt-1 whitespace-pre-wrap text-foreground">{videoSubjectProfile}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <p className="text-xs text-muted-foreground">生成任务 ID</p>
-            <p className="mt-1 break-all text-foreground">{task.video_generation_id || '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">规格</p>
-            <p className="mt-1 text-foreground">{videoSpecSummary}</p>
-          </div>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">任务固定价</p>
-          <p className="mt-1 text-foreground">{task.billing_price_credits.toLocaleString()} 积分</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">参考素材</p>
-          {videoResolvedConfig?.references && videoResolvedConfig.references.length > 0 ? (
-            <div className="mt-1 divide-y divide-border rounded-md border border-border">
-              {videoResolvedConfig.references.map((ref, index) => (
-                <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-2 py-1.5 text-xs">
-                  <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
-                  {ref.input_duration_seconds && (
-                    <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
-          )}
-        </div>
-      </div>
-    )
-  }
 
   function openCloneDialog() {
     setCloneDialogSnapshot({
@@ -782,10 +698,6 @@ export default function TaskDetailPage() {
         platform: project?.platform || currentTask.project_snapshot?.platform || currentTask.type,
       } : null,
     })
-  }
-
-  function handleVideoRetake(_action: string) {
-    openCloneDialog()
   }
 
   return (
@@ -1072,19 +984,6 @@ export default function TaskDetailPage() {
         logContainerRef={logContainerRef}
       />
 
-      {isVideoCreator(task.type) && hasVideoProductionResult && videoProduction && (
-        <Card size="sm" className="border-border/70">
-          <CardContent>
-            <VideoProductionPanel
-              production={videoProduction}
-              retakePending={Boolean(cloneDialogSnapshot)}
-              onRetakeAction={handleVideoRetake}
-              onNextAction={(action) => toast.info(`已选择交付动作：${action}`)}
-            />
-          </CardContent>
-        </Card>
-      )}
-
       {showPendingResultDestination && (
         <section aria-labelledby="task-result-heading" className="border-y border-border py-4">
           <h2 id="task-result-heading" className="px-4 text-sm font-semibold text-foreground">任务结果</h2>
@@ -1154,7 +1053,6 @@ export default function TaskDetailPage() {
                         files={nonImageFiles}
                         taskId={task.id}
                         taskType={task.type}
-                        renderPreviewDetails={renderVideoPreviewDetails}
                       />
                     </div>
                   )
@@ -1179,7 +1077,6 @@ export default function TaskDetailPage() {
               files={collectedFiles}
               taskId={task.id}
               taskType={task.type}
-              renderPreviewDetails={renderVideoPreviewDetails}
             />
           </div>
         </Card>

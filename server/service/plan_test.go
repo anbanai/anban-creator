@@ -104,7 +104,6 @@ func setupTestPlanService(t *testing.T) (*PlanService, repository.Repository) {
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
 	svc := NewPlanService(repo, &logger)
-	svc.SetVideoCatalog(DefaultVideoModelCatalog())
 	return svc, repo
 }
 
@@ -120,37 +119,6 @@ func createTestProject(t *testing.T, repo repository.Repository, userID, platfor
 	}
 	if err := repo.Projects().Create(context.Background(), ch); err != nil {
 		t.Fatalf("create test project: %v", err)
-	}
-	return ch.ID
-}
-
-func createTestVideoProject(t *testing.T, repo repository.Repository, userID string) string {
-	t.Helper()
-	watermark := false
-	ch := &model.Project{
-		ID:       uuid.New().String(),
-		UserID:   userID,
-		Platform: model.PlatformVideoCreator,
-		Name:     "Test Video Project",
-		Status:   model.ProjectStatusActive,
-	}
-	ch.SetVideoDefaults(model.VideoDefaults{
-		Purpose:    VideoPurposePlanting,
-		ModelKey:   "seedance-2.0-mini",
-		Resolution: "720p",
-		Ratio:      "9:16",
-		Duration:   5,
-		Watermark:  &watermark,
-		Preflight:  true,
-	})
-	ch.SetVideoModelPolicy(model.VideoModelPolicy{
-		AllowedModels: []string{"seedance-2.0", "seedance-2.0-mini"},
-		DefaultModel:  "seedance-2.0-mini",
-		MaxResolution: "1080p",
-		MaxDuration:   15,
-	})
-	if err := repo.Projects().Create(context.Background(), ch); err != nil {
-		t.Fatalf("create test video project: %v", err)
 	}
 	return ch.ID
 }
@@ -634,135 +602,6 @@ func TestPlanService_Update(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected error for invalid cron expression")
-	}
-}
-
-func TestPlanService_UpdateVideoConfigStoresVideoInputOnly(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	projectID := createTestVideoProject(t, repo, "user-1")
-	created, err := svc.Create(ctx, CreatePlanParams{
-		UserID:    "user-1",
-		ProjectID: projectID,
-		CronExpr:  "0 9 * * *",
-		Prompt:    "old video prompt",
-		VideoCreatorInput: &model.VideoInput{
-			Brief: "old video prompt",
-		},
-	})
-	if err != nil {
-		t.Fatalf("create video plan: %v", err)
-	}
-	watermark := true
-	updated, err := svc.Update(ctx, UpdatePlanParams{
-		ID:     created.ID,
-		Prompt: "updated video prompt",
-		VideoCreatorInput: &model.VideoInput{
-			Brief: "updated video prompt",
-			References: []model.VideoReferenceAsset{{
-				Type: "image_url",
-				URL:  "https://cdn.example.com/cup.png",
-			}},
-			HardConstraints: model.VideoHardConstraints{
-				Ratio:     "16:9",
-				Duration:  5,
-				Watermark: &watermark,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("update video plan: %v", err)
-	}
-	vi := updated.VideoInput.Data()
-	if vi.Brief != "updated video prompt" || vi.HardConstraints.Ratio != "16:9" || vi.HardConstraints.Duration != 5 || vi.HardConstraints.Watermark == nil || !*vi.HardConstraints.Watermark {
-		t.Fatalf("video input = %#v", vi)
-	}
-	if len(vi.References) != 1 || vi.References[0].URL != "https://cdn.example.com/cup.png" {
-		t.Fatalf("video input references = %#v", vi.References)
-	}
-	if vc := updated.VideoConfig.Data(); vc.ModelKey != "" {
-		t.Fatalf("video config should stay empty before agent/MCP execution, got %#v", vc)
-	}
-}
-
-func TestPlanService_UpdateVideoInputRejectsNonVideoPlans(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	projectID := createTestProject(t, repo, "user-1", model.PlatformArticle)
-	created, err := svc.Create(ctx, CreatePlanParams{
-		UserID:    "user-1",
-		ProjectID: projectID,
-		CronExpr:  "0 9 * * *",
-		Prompt:    "article prompt",
-	})
-	if err != nil {
-		t.Fatalf("create article plan: %v", err)
-	}
-
-	_, err = svc.Update(ctx, UpdatePlanParams{
-		ID: created.ID,
-		VideoCreatorInput: &model.VideoInput{
-			Brief: "should not attach to article plan",
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "video_creator_input can only be set on videocreator plans") {
-		t.Fatalf("Update error = %v, want video_creator_input rejection for non-video plan", err)
-	}
-
-	found, err := repo.Plans().FindByID(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("find plan: %v", err)
-	}
-	if vi := found.VideoInput.Data(); vi.Brief != "" {
-		t.Fatalf("article plan video creator input = %#v, want empty", vi)
-	}
-}
-
-func TestPlanService_CreateRejectsVideoEditorPlans(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	projectID := createTestProject(t, repo, "user-1", model.PlatformVideoEditor)
-
-	_, err := svc.Create(ctx, CreatePlanParams{
-		UserID:    "user-1",
-		ProjectID: projectID,
-		CronExpr:  "0 9 * * *",
-		Prompt:    "把素材剪成一条短视频",
-	})
-	if err == nil || !strings.Contains(err.Error(), "plans are not supported for video editor projects") {
-		t.Fatalf("Create error = %v, want videoeditor plan rejection", err)
-	}
-}
-
-func TestPlanService_CreateVideoPlanDoesNotRequireLegacyMinimumBalance(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	userID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{
-		ID:         userID,
-		Email:      userID + "@example.com",
-		Password:   "hashed",
-		InviteCode: "invite-" + userID[:8],
-	}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	projectID := createTestVideoProject(t, repo, userID)
-
-	created, err := svc.Create(ctx, CreatePlanParams{
-		UserID:    userID,
-		ProjectID: projectID,
-		CronExpr:  "0 9 * * *",
-		Prompt:    "计划生成视频",
-	})
-	if err != nil {
-		t.Fatalf("Create video plan: %v", err)
-	}
-	vi := created.VideoInput.Data()
-	if vi.Brief != "计划生成视频" {
-		t.Fatalf("video input brief = %q, want prompt copied", vi.Brief)
-	}
-	if vc := created.VideoConfig.Data(); vc.ModelKey != "" {
-		t.Fatalf("video config should stay empty before agent/MCP execution, got %#v", vc)
 	}
 }
 

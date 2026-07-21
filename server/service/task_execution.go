@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
@@ -272,14 +271,6 @@ func (s *TaskService) handleExecution(ctx context.Context, task *model.Task, pro
 			return nil
 		}
 		artifactValidation = validateMontageCompletionArtifacts(files)
-	} else if model.IsVideoPlatform(task.Type) {
-		var err error
-		artifactValidation, err = s.validateVideoCompletionArtifacts(persistCtx, task)
-		if err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("list video task files for artifact validation")
-			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("list video task files: %w", err))
-			return nil
-		}
 	} else if remoteArtifacts {
 		files, err := s.repo.TaskFiles().FindByTaskID(persistCtx, task.ID)
 		if err != nil {
@@ -420,101 +411,6 @@ func (s *TaskService) handleExecution(ctx context.Context, task *model.Task, pro
 	return nil
 }
 
-func (s *TaskService) validateVideoCompletionArtifacts(ctx context.Context, task *model.Task) (agent.ArtifactValidation, error) {
-	files, err := s.repo.TaskFiles().FindByTaskID(ctx, task.ID)
-	if err != nil {
-		return agent.ArtifactValidation{}, err
-	}
-	if model.IsVideoEditorPlatform(task.Type) {
-		return validateVideoEditorCompletionArtifacts(files), nil
-	}
-	if model.IsVideoCreatorPlatform(task.Type) {
-		return s.validateVideoCreatorCompletionArtifacts(ctx, task, files)
-	}
-	return agent.ValidateTaskArtifactsFromTaskFiles(task, files), nil
-}
-
-func (s *TaskService) validateVideoCreatorCompletionArtifacts(ctx context.Context, task *model.Task, files []*model.TaskFile) (agent.ArtifactValidation, error) {
-	gen, err := s.videoGenerationForTask(ctx, task)
-	if err != nil {
-		return agent.ArtifactValidation{}, err
-	}
-	if gen == nil {
-		return agent.ArtifactValidation{Reason: "videocreator missing final_video task file"}, nil
-	}
-	var ids map[string]string
-	if len(gen.TaskFileIDs) > 0 {
-		_ = json.Unmarshal(gen.TaskFileIDs, &ids)
-	}
-	finalID := strings.TrimSpace(ids["final_video"])
-	if finalID == "" {
-		return agent.ArtifactValidation{Reason: "videocreator missing final_video task file"}, nil
-	}
-	for _, file := range files {
-		if file != nil && file.ID == finalID {
-			if !isVideoTaskFile(file) {
-				return agent.ArtifactValidation{Reason: "videocreator missing final_video task file"}, nil
-			}
-			return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: 1}, nil
-		}
-	}
-	return agent.ArtifactValidation{Reason: "videocreator missing final_video task file"}, nil
-}
-
-func validateVideoEditorCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
-	hasEDL := false
-	hasRenderedVideo := false
-	hasDraftInfo := false
-	hasDraftMeta := false
-	meaningful := 0
-	for _, file := range files {
-		if file == nil || file.FileSize <= 0 {
-			continue
-		}
-		name := normalizeVideoDeliveryPath(file.FileName)
-		path := normalizeVideoDeliveryPath(file.FilePath)
-		if name == "edit/edl.json" || path == "edit/edl.json" {
-			hasEDL = true
-			meaningful++
-			continue
-		}
-		if (name == "final.mp4" || name == "preview.mp4" || path == "final.mp4" || path == "preview.mp4") && isVideoTaskFile(file) {
-			hasRenderedVideo = true
-			meaningful++
-			continue
-		}
-		if isVideoEditorDraftInfoPath(name) || isVideoEditorDraftInfoPath(path) {
-			hasDraftInfo = true
-			meaningful++
-			continue
-		}
-		if isVideoEditorDraftMetaPath(name) || isVideoEditorDraftMetaPath(path) {
-			hasDraftMeta = true
-			meaningful++
-		}
-	}
-	hasRenderedDelivery := hasEDL && hasRenderedVideo
-	hasDraftPackage := hasDraftInfo && hasDraftMeta
-	if hasRenderedDelivery || hasDraftPackage {
-		return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
-	}
-	var missing []string
-	if !hasRenderedDelivery {
-		missing = append(missing, "edit/edl.json plus final.mp4 or preview.mp4")
-	}
-	if !hasDraftPackage {
-		missing = append(missing, "CapCut draft package")
-	}
-	if len(missing) > 0 {
-		return agent.ArtifactValidation{
-			MeaningfulFileCount: meaningful,
-			Missing:             missing,
-			Reason:              "videoeditor missing required deliverables: " + strings.Join(missing, " or "),
-		}
-	}
-	return agent.ArtifactValidation{Reason: "videoeditor missing required deliverables"}
-}
-
 func validateMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
 	hasFinal := false
 	hasManifest := false
@@ -559,69 +455,6 @@ func isMontageFinalVideoPath(path string) bool {
 	default:
 		return false
 	}
-}
-
-func normalizeVideoDeliveryPath(path string) string {
-	path = filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(path), "./"))
-	return strings.TrimPrefix(path, "output/")
-}
-
-func isVideoEditorDraftInfoPath(path string) bool {
-	return isVideoEditorDraftPackagePath(path, "draft_info.json")
-}
-
-func isVideoEditorDraftMetaPath(path string) bool {
-	return isVideoEditorDraftPackagePath(path, "draft_meta_info.json")
-}
-
-func isVideoEditorDraftPackagePath(path, base string) bool {
-	if filepath.Base(path) != base {
-		return false
-	}
-	return strings.HasPrefix(path, "capcut/") || strings.HasPrefix(path, "capcut-draft/")
-}
-
-func isVideoTaskFile(file *model.TaskFile) bool {
-	if file == nil || file.FileSize <= 0 {
-		return false
-	}
-	mime := strings.ToLower(strings.TrimSpace(file.MimeType))
-	name := strings.ToLower(strings.TrimSpace(file.FileName))
-	path := strings.ToLower(strings.TrimSpace(file.FilePath))
-	if strings.HasPrefix(mime, "video/") {
-		return true
-	}
-	for _, value := range []string{name, path} {
-		switch filepath.Ext(value) {
-		case ".mp4", ".mov", ".webm", ".m4v":
-			return true
-		}
-	}
-	return false
-}
-
-func (s *TaskService) videoGenerationForTask(ctx context.Context, task *model.Task) (*model.VideoGeneration, error) {
-	if s == nil || s.repo == nil || s.repo.VideoGenerations() == nil || task == nil {
-		return nil, nil
-	}
-	if id := strings.TrimSpace(task.VideoGenerationID); id != "" {
-		gen, err := s.repo.VideoGenerations().FindByID(ctx, id)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		return gen, nil
-	}
-	gen, err := s.repo.VideoGenerations().FindLatestByTaskID(ctx, task.ID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return gen, nil
 }
 
 // HandleExecutionFromPayload is a convenience method that loads the task from the DB

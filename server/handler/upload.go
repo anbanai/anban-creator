@@ -291,7 +291,7 @@ func taskOwnsStorageKey(task *model.Task, store storage.Provider, key string) bo
 			return true
 		}
 	}
-	return referencesOwnStorageKey(task.VideoInput.Data(), task.VideoConfig.Data(), task.MontageInput.Data(), store, key)
+	return montageOwnsStorageKey(task.MontageInput.Data(), store, key)
 }
 
 func planOwnsStorageKey(plan *model.Plan, store storage.Provider, key string) bool {
@@ -299,7 +299,7 @@ func planOwnsStorageKey(plan *model.Plan, store storage.Provider, key string) bo
 		return false
 	}
 	return attachmentsOwnStorageKey(plan.InputAttachments.Data(), store, key) ||
-		referencesOwnStorageKey(plan.VideoInput.Data(), plan.VideoConfig.Data(), plan.MontageInput.Data(), store, key)
+		montageOwnsStorageKey(plan.MontageInput.Data(), store, key)
 }
 
 func attachmentsOwnStorageKey(attachments []model.EntryAttachment, store storage.Provider, key string) bool {
@@ -311,17 +311,7 @@ func attachmentsOwnStorageKey(attachments []model.EntryAttachment, store storage
 	return false
 }
 
-func referencesOwnStorageKey(video model.VideoInput, config model.VideoTaskConfig, montage model.MontageInput, store storage.Provider, key string) bool {
-	for _, reference := range video.References {
-		if ownedURLHasKey(store, reference.URL, key) {
-			return true
-		}
-	}
-	for _, reference := range config.References {
-		if ownedURLHasKey(store, reference.URL, key) {
-			return true
-		}
-	}
+func montageOwnsStorageKey(montage model.MontageInput, store storage.Provider, key string) bool {
 	for _, asset := range montage.SourceAssets {
 		if ownedURLHasKey(store, asset.URL, key) {
 			return true

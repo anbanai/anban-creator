@@ -41,9 +41,7 @@ type Plan struct {
 	ArticleWithCover         *bool                                 `gorm:"default:true;not null" json:"article_with_cover"`
 	ArticleWithContentImages *bool                                 `gorm:"default:true;not null" json:"article_with_content_images"`
 	InputAttachments         datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
-	VideoInput               datatypes.JSONType[VideoInput]        `gorm:"type:json" json:"video_input"`
 	MontageInput             datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
-	VideoConfig              datatypes.JSONType[VideoTaskConfig]   `gorm:"type:json" json:"video_config"`
 
 	// Legacy style/author/theme columns. New code no longer writes or reads these;
 	// task runtime config is frozen from the owning project into Task.ProjectSnapshot.
@@ -66,12 +64,4 @@ func (Plan) TableName() string { return "plans" }
 
 func (p *Plan) SetInputAttachments(attachments []EntryAttachment) {
 	p.InputAttachments = datatypes.NewJSONType(attachments)
-}
-
-func (p *Plan) SetVideoConfig(vc VideoTaskConfig) {
-	p.VideoConfig = datatypes.NewJSONType(vc)
-}
-
-func (p *Plan) SetVideoInput(input VideoInput) {
-	p.VideoInput = datatypes.NewJSONType(input)
 }

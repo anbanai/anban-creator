@@ -575,87 +575,9 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 }
 
 // ShouldCollectTaskFile reports whether a workspace file should become a
-// user-facing task file. Videocreator/videoeditor use explicit delivery
-// allowlists so runtime project files never leak into task deliverables.
-func ShouldCollectTaskFile(task *model.Task, relPath string) bool {
-	if task == nil || !model.IsVideoPlatform(task.Type) {
-		return true
-	}
-	normalized := filepath.ToSlash(strings.TrimPrefix(relPath, "./"))
-	noOutput := strings.TrimPrefix(normalized, "output/")
-	ext := strings.ToLower(filepath.Ext(noOutput))
-
-	if model.IsVideoEditorPlatform(task.Type) {
-		if isVideoFileExtension(ext) {
-			return isVideoEditingDeliveryVideo(noOutput)
-		}
-		return isVideoEditingDeliveryFile(noOutput)
-	}
-	if isVideoFileExtension(ext) {
-		return true
-	}
-	return isVideoGenerationDeliveryFile(noOutput)
-}
-
-func isVideoFileExtension(ext string) bool {
-	switch ext {
-	case ".mp4", ".mov", ".webm", ".m4v":
-		return true
-	default:
-		return false
-	}
-}
-
-func isVideoEditingDeliveryVideo(path string) bool {
-	switch path {
-	case "final.mp4", "preview.mp4":
-		return true
-	default:
-		return false
-	}
-}
-
-func isVideoGenerationDeliveryFile(path string) bool {
-	switch path {
-	case "input-manifest.md",
-		"reference-anchors.md",
-		"script.md",
-		"shot-plan.md",
-		"generation-plan.json",
-		"video-generation-plan.md",
-		"video-task-submit.json",
-		"video-task-result.json",
-		"delivery-manifest.json",
-		"quality-review.md",
-		"iteration-log.md":
-		return true
-	default:
-		return false
-	}
-}
-
-func isVideoEditingDeliveryFile(path string) bool {
-	switch path {
-	case "input-manifest.md",
-		"clip_results.json",
-		"render-report.md",
-		"quality-review.md",
-		"edit/edl.json",
-		"edit/media-manifest.json",
-		"edit/takes_packed.md",
-		"edit/edit-candidates.json":
-		return true
-	}
-	if strings.HasPrefix(path, "edit/transcripts/") && strings.HasSuffix(path, ".json") {
-		return true
-	}
-	if strings.HasPrefix(path, "capcut/") && strings.HasSuffix(path, ".json") {
-		return true
-	}
-	if strings.HasPrefix(path, "capcut-draft/") && strings.HasSuffix(path, ".json") {
-		return true
-	}
-	return false
+// user-facing task file.
+func ShouldCollectTaskFile(_ *model.Task, _ string) bool {
+	return true
 }
 
 // VerifyFileBelongsToTask checks that a file belongs to the specified task.

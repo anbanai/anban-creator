@@ -51,13 +51,11 @@ const (
 
 // Config scope constants.
 const (
-	ScopeArticle      = "article"
-	ScopeSeednote     = "seednote"
-	ScopeMoments      = "moments"
-	ScopeEcommerce    = "ecommerce"
-	ScopeVideoCreator = "videocreator"
-	ScopeVideoEditor  = "videoeditor"
-	ScopeMontage      = "montage"
+	ScopeArticle   = "article"
+	ScopeSeednote  = "seednote"
+	ScopeMoments   = "moments"
+	ScopeEcommerce = "ecommerce"
+	ScopeMontage   = "montage"
 )
 
 // File role constants.
@@ -85,26 +83,12 @@ const (
 
 // Platform constants.
 const (
-	PlatformArticle      = "article"
-	PlatformSeednote     = "seednote"
-	PlatformMoments      = "moments"
-	PlatformEcommerce    = "ecommerce"
-	PlatformVideoCreator = "videocreator"
-	PlatformVideoEditor  = "videoeditor"
-	PlatformMontage      = "montage"
+	PlatformArticle   = "article"
+	PlatformSeednote  = "seednote"
+	PlatformMoments   = "moments"
+	PlatformEcommerce = "ecommerce"
+	PlatformMontage   = "montage"
 )
-
-func IsVideoPlatform(platform string) bool {
-	return platform == PlatformVideoCreator || platform == PlatformVideoEditor
-}
-
-func IsVideoCreatorPlatform(platform string) bool {
-	return platform == PlatformVideoCreator
-}
-
-func IsVideoEditorPlatform(platform string) bool {
-	return platform == PlatformVideoEditor
-}
 
 func IsMontagePlatform(platform string) bool {
 	return platform == PlatformMontage

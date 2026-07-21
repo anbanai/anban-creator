@@ -42,31 +42,6 @@ const inputAttachmentSchema = z.object({
   ).optional(),
 })
 
-const videoReferenceSchema = z.object({
-  type: z.enum(["text", "image_url", "audio_url", "video_url"]),
-  url: z.string().optional(),
-  text: z.string().optional(),
-  task_file_id: z.string().optional(),
-  reference_role: z.string().optional(),
-  must_keep: z.array(z.string()).optional(),
-  can_change: z.array(z.string()).optional(),
-  must_not_transfer: z.array(z.string()).optional(),
-  file_name: z.string().optional(),
-  mime_type: z.string().optional(),
-  file_size: z.number().optional(),
-  input_duration_seconds: z.number().optional(),
-})
-
-const videoInputSchema = z.object({
-  brief: promptSchema.optional(),
-  references: z.array(videoReferenceSchema).optional(),
-  hard_constraints: z.object({
-    ratio: z.string().optional(),
-    duration: z.number().int().min(1).max(600).optional(),
-    watermark: z.boolean().optional(),
-  }).optional(),
-}).optional()
-
 const montageAssetSchema = z.object({
   type: z.enum(["text", "image_url", "video_url", "audio_url", "document_url"]),
   url: z.string().optional(),
@@ -112,7 +87,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
-  type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "videocreator", "videoeditor", "montage"]),
+  type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "montage"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -145,8 +120,6 @@ export const createTaskSchema = z.object({
   target_platform: z.string().optional(),
   selling_points: z.string().max(2000, "卖点不能超过 2000 个字符").optional(),
   language: z.string().optional(),
-  video_creator_input: videoInputSchema,
-  video_editor_input: videoInputSchema,
   montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
@@ -176,23 +149,6 @@ export const createTaskSchema = z.object({
         code: "custom",
         message: "请至少上传一张产品图",
         path: ["product_photos"],
-      })
-    }
-  }
-
-  if (data.type === "videoeditor") {
-    const refs = data.video_editor_input?.references ?? []
-    const hasStructuredVideoSource = refs.some((ref) => ref.type === "video_url" && Boolean(ref.url || ref.task_file_id))
-    const hasPromptVideoSource = data.input_attachments.some((attachment) => (
-      attachment.type === "video"
-      && Boolean((attachment.upload_id && attachment.key) || attachment.url)
-    ))
-    const hasVideoSource = hasStructuredVideoSource || hasPromptVideoSource
-    if (!hasVideoSource) {
-      ctx.addIssue({
-        code: "custom",
-        message: "请至少上传一个源视频素材",
-        path: ["video_editor_input", "references"],
       })
     }
   }
@@ -231,7 +187,7 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
 export const planSchema = z.object({
   project_id: z.string().optional(),
-  type: z.enum(["seednote", "article", "videocreator", "montage"]),
+  type: z.enum(["seednote", "article", "montage"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   image_model_key: z.string().max(50).optional(),
@@ -250,7 +206,6 @@ export const planSchema = z.object({
   // article tasks inherit them; non-article plans ignore them server-side.
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
-  video_creator_input: videoInputSchema,
   montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
   if (data.type === "montage") {
@@ -278,7 +233,7 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-  platform: z.enum(["seednote", "article", "moments", "ecommerce", "videocreator", "videoeditor", "montage"]),
+  platform: z.enum(["seednote", "article", "moments", "ecommerce", "montage"]),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
@@ -303,22 +258,6 @@ export const projectSchema = z.object({
     preferences: montagePreferencesSchema,
     asset_guidance: z.string().max(2000).optional(),
     delivery_targets: z.array(z.string()).default([]),
-  }).optional(),
-  video_defaults: z.object({
-    purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).default("planting"),
-    model_key: z.string().default(""),
-    resolution: z.string().min(1).default("720p"),
-    ratio: z.string().min(1).default("9:16"),
-    duration: z.number().int().min(1).max(600).default(15),
-    watermark: z.boolean().default(false),
-    preflight: z.boolean().default(true),
-  }).optional(),
-  video_model_policy: z.object({
-    allowed_models: z.array(z.string()).default([]),
-    default_model: z.string().default(""),
-    allow_auto_downgrade: z.boolean().default(false),
-    max_resolution: z.string().default("720p"),
-    max_duration: z.number().int().min(1).max(600).default(120),
   }).optional(),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).optional(),

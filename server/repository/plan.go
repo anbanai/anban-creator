@@ -84,7 +84,6 @@ func planEditableUpdates(plan *model.Plan, scheduleChanged bool) map[string]inte
 		"article_with_cover":          plan.ArticleWithCover,
 		"article_with_content_images": plan.ArticleWithContentImages,
 		"input_attachments":           plan.InputAttachments,
-		"video_input":                 plan.VideoInput,
 		"montage_input":               plan.MontageInput,
 		"updated_at":                  now,
 	}

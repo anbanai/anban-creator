@@ -18,7 +18,7 @@ import (
 
 func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
-	task := model.Task{ID: "task-1", Type: model.PlatformVideoEditor, Prompt: "topic"}
+	task := model.Task{ID: "task-1", Type: model.PlatformArticle, Prompt: "topic"}
 
 	cmd, err := e.buildAgentCommand(&ExecutionOptions{Task: &task}, "sonnet", 100, "/workspace", "key")
 	if err != nil {
@@ -30,7 +30,7 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	if got, want := cmd[1], "run"; got != want {
 		t.Fatalf("agent subcommand = %q, want %q", got, want)
 	}
-	if got, want := flagValue(cmd, "--agent-flag"), "anban:videoeditor"; got != want {
+	if got, want := flagValue(cmd, "--agent-flag"), "anban:wechatarticle"; got != want {
 		t.Fatalf("--agent-flag = %q, want %q", got, want)
 	}
 

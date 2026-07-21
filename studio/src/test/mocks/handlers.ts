@@ -314,26 +314,6 @@ export const handlers = [
     })
   }),
 
-  http.get('/api/v1/videocreator/playbooks', async () => {
-    return HttpResponse.json({
-      code: 0,
-      msg: 'ok',
-      data: {
-        items: [{
-          key: 'live_selling',
-          label: '直播带货',
-          creative_type: 'product_demo',
-          purpose: 'ecommerce',
-          required_reference_roles: ['product appearance', 'action', 'voice tone'],
-          default_ratio: '9:16',
-          prompt_scaffold: '黄金三秒开场、一个核心卖点、亲手展示、明确 CTA。',
-          qc_focus: ['产品保真', '口播可信', 'CTA'],
-          risk_notes: ['卖点必须来自用户 brief。'],
-        }],
-      },
-    })
-  }),
-
   http.post('/api/v1/viral-analyses', async () => {
     return HttpResponse.json({
       code: 0,

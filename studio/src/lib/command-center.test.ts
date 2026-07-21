@@ -148,15 +148,15 @@ describe('command center rules', () => {
     expect(createTaskHref({ type: 'article', projectId: 'project-1', intent: 'schedule' })).toBe(
       '/tasks?create=true&type=article&project_id=project-1&intent=schedule',
     )
-    expect(projectsReturnHref({ type: 'videocreator', intent: 'new' })).toBe(
-      '/projects?return_to=%2Ftasks&create=true&type=videocreator&intent=new',
+    expect(projectsReturnHref({ type: 'seednote', intent: 'new' })).toBe(
+      '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
     )
     expect(projectCreatedReturnHref({
       returnTo: '/tasks',
-      type: 'videocreator',
+      type: 'seednote',
       projectId: 'project-1',
       intent: 'new',
-    })).toBe('/tasks?create=true&type=videocreator&project_id=project-1&intent=new')
+    })).toBe('/tasks?create=true&type=seednote&project_id=project-1&intent=new')
     expect(projectCreatedReturnHref({
       returnTo: '//evil.example/path',
       type: 'article',

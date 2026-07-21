@@ -66,10 +66,6 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.imageModels,
         list: vi.fn().mockResolvedValue({ items: [], tier: 'pro' }),
       },
-      videoCreator: {
-        ...actual.api.videoCreator,
-        models: vi.fn().mockResolvedValue({ items: [] }),
-      },
     },
   }
 })

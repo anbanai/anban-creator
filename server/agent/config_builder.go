@@ -242,10 +242,6 @@ func TaskTypeToAgent(taskType string) string {
 		return "moments"
 	case model.ScopeEcommerce:
 		return "ecommerce"
-	case model.ScopeVideoCreator:
-		return "videocreator"
-	case model.ScopeVideoEditor:
-		return "videoeditor"
 	case model.ScopeMontage:
 		return "montage"
 	default:

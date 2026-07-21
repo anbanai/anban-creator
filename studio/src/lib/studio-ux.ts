@@ -2,7 +2,6 @@ import type { BillingCatalog, Project, ProjectStats, Task, TaskType } from '@/ty
 import { projectsReturnHref } from '@/lib/command-center'
 import { platformDefaultRatio } from '@/lib/labels'
 import { taskCostFor } from '@/lib/pricing'
-import { isVideoCreator, isVideoPlatform } from '@/lib/video-platforms'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
 
 export interface DashboardBlocker {
@@ -140,14 +139,11 @@ export function buildProjectReadinessSummary(project: Project, stats?: ProjectSt
     const duration = project.montage_defaults?.preferences?.duration_seconds
     details.push(pipeline ? `Pipeline ${pipeline}` : '使用系统默认 Pipeline')
     details.push(duration ? `默认 ${duration} 秒` : '使用系统默认时长')
-  } else if (!isVideoPlatform(project.platform)) {
+  } else {
     details.push(project.visual_style ? '视觉已配置' : '补视觉配置')
   }
   if (project.platform === 'ecommerce') {
     details.push(project.ecommerce_defaults?.target_platform ? `投放 ${project.ecommerce_defaults.target_platform}` : '补投放平台')
-  }
-  if (isVideoCreator(project.platform)) {
-    details.push(project.video_defaults?.model_key ? '视频默认已配置' : '补视频模型')
   }
   if (stats && stats.total_tasks > 0) {
     details.push(`成功率 ${(stats.success_rate * 100).toFixed(0)}%`)

@@ -134,7 +134,7 @@ describe('uploadToOSS', () => {
   it('uses multipart upload for large video references and reports progress', async () => {
     const progress: number[] = []
     await uploadToOSS({
-      purpose: 'video_reference',
+      purpose: 'ai_entry_attachment',
       file: fileOf(12 * 1024 * 1024, 'video/mp4'),
       onProgress: (percent) => progress.push(percent),
     })
@@ -182,12 +182,12 @@ describe('uploadToOSS', () => {
     })
 
     const result = await uploadToOSS({
-      purpose: 'video_reference',
+      purpose: 'ai_entry_attachment',
       file: fileOf(1024, '', 'sound.m4a'),
     })
 
     expect(http.post).toHaveBeenCalledWith('/uploads/prepare', {
-      purpose: 'video_reference',
+      purpose: 'ai_entry_attachment',
       filename: 'sound.m4a',
       content_type: '',
       size: 1024,
@@ -325,7 +325,7 @@ describe('uploadToOSS', () => {
     cancelMock.mockImplementation(() => rejectUpload(new Error('cancelled by SDK')))
     abortMultipartUploadMock.mockReturnValueOnce(cleanup.promise)
     const promise = uploadToOSS({
-      purpose: 'video_reference',
+      purpose: 'ai_entry_attachment',
       file: fileOf(12 * 1024 * 1024, 'video/mp4'),
       signal: controller.signal,
     })
@@ -364,7 +364,7 @@ describe('uploadToOSS', () => {
     cancelMock.mockImplementation(() => rejectUpload(new Error('cancelled by SDK')))
     abortMultipartUploadMock.mockReturnValueOnce(cleanup.promise)
     const promise = uploadToOSS({
-      purpose: 'video_reference',
+      purpose: 'ai_entry_attachment',
       file: fileOf(12 * 1024 * 1024, 'video/mp4'),
       signal: controller.signal,
     })
@@ -404,7 +404,7 @@ describe('uploadToOSS', () => {
     }))
     cancelMock.mockImplementation(() => rejectUpload(new Error('cancelled by SDK')))
     const promise = uploadToOSS({
-      purpose: 'video_reference',
+      purpose: 'ai_entry_attachment',
       file: fileOf(12 * 1024 * 1024, 'video/mp4'),
       signal: controller.signal,
     })

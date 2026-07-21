@@ -66,7 +66,6 @@ export type {
   BillingWalletEventKind,
   BillingTransaction,
   BillingTransactions,
-  BillingSKUSelectors,
   BillingSKU,
   BillingCatalog,
   BillingReferralProgram,
@@ -98,25 +97,6 @@ export type { ResourceEntry, ResourceListResponse } from './resource'
 
 // Image Model
 export type { ImageModelOption, ImageModelListResponse } from './imageModel'
-
-export type {
-  VideoDefaults,
-  VideoHardConstraints,
-  VideoEstimateRequest,
-  VideoEstimateResponse,
-  VideoInput,
-  VideoCreativeType,
-  VideoModelPolicy,
-  VideoModelSpec,
-  VideoPlaybookSpec,
-  VideoProductionArtifact,
-  VideoProductionMode,
-  VideoProductionResponse,
-  VideoPurpose,
-  VideoReferenceAsset,
-  VideoReferenceType,
-  VideoTaskConfig,
-} from './video'
 
 export type {
   MontageAsset,

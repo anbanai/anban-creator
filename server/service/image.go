@@ -329,17 +329,6 @@ func resolveProjectImageAPI(
 			}
 		}
 	}
-	if apiCfg == nil && model.IsVideoCreatorPlatform(platform) {
-		// Video visual anchors behave like content assets, so Content wins and
-		// Cover remains the compatibility fallback.
-		if effectiveCfg != nil {
-			if effectiveCfg.Content != nil {
-				apiCfg = effectiveCfg.Content
-			} else if effectiveCfg.Cover != nil {
-				apiCfg = effectiveCfg.Cover
-			}
-		}
-	}
 	return apiCfg
 }
 

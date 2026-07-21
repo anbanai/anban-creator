@@ -58,9 +58,6 @@ type Services struct {
 	ProviderCostSvc      *service.ProviderCostService
 	BillingCatalogSvc    *service.BillingCatalogService
 	GenerateImageTimeout time.Duration
-	VideoSvc             *service.VideoService
-	AudioASRSvc          *service.AudioASRService
-	VideoASRSvc          *service.VideoASRService
 	WritingSvc           *service.WritingService
 	PublishingSvc        *service.PublishingService
 	WorkspaceSvc         *service.WorkspaceService
@@ -71,7 +68,6 @@ type Services struct {
 	TopicPoolSvc         *service.TopicPoolService
 	AgentFeedbackSvc     *service.AgentFeedbackService
 	TingWuConfigured     bool
-	FunASRConfigured     bool
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -80,8 +76,6 @@ func RegisterTools(server *mcp.Server) {
 	registerTaskTools(server)
 	registerPlanTools(server)
 	registerImageTools(server)
-	registerVideoTools(server)
-	registerVideoASRTools(server)
 	registerWritingTools(server)
 	registerPublishingTools(server)
 	registerWorkspaceTools(server)
@@ -90,6 +84,7 @@ func RegisterTools(server *mcp.Server) {
 	registerResourceTools(server)
 	registerSeednoteTools(server)
 	registerMediaPipelineTools(server)
+	registerFileUploadTools(server)
 	registerLiveSliceTools(server)
 	registerTopicPoolTools(server)
 	registerProgressTools(server)
@@ -141,7 +136,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"status":   map[string]any{"type": "string", "enum": []any{"active", "archived"}, "description": "Filter by status"},
-				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "videocreator", "videoeditor", "montage"}, "description": "Filter by platform type"},
+				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage"}, "description": "Filter by platform type"},
 			},
 		},
 	}, projectListHandler)
@@ -160,12 +155,12 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get the resolved project runtime profile for AI content generation. This is the single project facts entrypoint: the server applies task snapshots, sanitizes secrets, resolves style/theme/author dimensions, and returns platform-specific blocks such as videocreator, videoeditor, ecommerce, or montage. Videocreator projects include resolved_profile, agent_brief, defaults, policy, model_catalog, pricing, and references; videoeditor projects expose editing-source and delivery requirements; montage projects expose montage defaults and task input. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials or unavailable models.",
+		Description: "Get the resolved project runtime profile for AI content generation. The server applies task snapshots, sanitizes secrets, resolves style/theme/author dimensions, and returns platform-specific blocks such as ecommerce or montage. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "videocreator", "videoeditor", "montage"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, reads the task's frozen project_snapshot so historical tasks stay reproducible. The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists."},
 			},
 			"required": []any{"project_id"},
@@ -377,10 +372,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			usesProjectSnapshot = true
 		}
 	}
-	if model.IsVideoCreatorPlatform(ch.Platform) {
-		service.SanitizeProjectVideoProfile(ch, videoModelCatalog())
-	}
-
 	// The dimensions are independent — the writer key never drives the visual
 	// style, the author never equals the writer persona — and each carries its
 	// provenance.
@@ -522,18 +513,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	case model.PlatformMontage:
 		info["montage"] = buildMontageProfileBlock(ch, task)
 	}
-	if model.IsVideoCreatorPlatform(ch.Platform) {
-		videoBlock := buildVideoProfileBlock(ch, task)
-		info["videocreator"] = videoBlock
-		info["agent_brief"] = buildProjectAgentBrief(ch, usesProjectSnapshot, videoBlock)
-	} else if model.IsVideoEditorPlatform(ch.Platform) {
-		info["videoeditor"] = map[string]any{
-			"input_attachment_dir":  ".anban-creator/input-attachments",
-			"requires_source_media": true,
-			"delivery":              []string{"final.mp4", "preview.mp4", "capcut draft"},
-		}
-	}
-
 	// Available resource options for the platform (best-effort; the embedded
 	// resource manager may be nil in some test contexts).
 	mgr := resources.Manager()
@@ -608,85 +587,7 @@ func profileSource(usesProjectSnapshot bool) string {
 }
 
 func creativeConstraintsForProfile(platform, visualStyle string) string {
-	if model.IsVideoPlatform(platform) {
-		return ""
-	}
 	return visualStyle
-}
-
-func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any {
-	defaults := ch.VideoDefaults.Data()
-	policy := ch.VideoModelPolicy.Data()
-	catalog := filterVideoCatalogForPolicy(videoModelCatalog(), policy)
-	taskConfig := model.VideoTaskConfig{}
-	input := model.VideoInput{}
-	if task != nil && model.IsVideoCreatorPlatform(task.Type) {
-		taskConfig = task.VideoConfig.Data()
-		input = task.VideoInput.Data()
-	}
-	resolvedDefaults := map[string]any{
-		"purpose":         firstNonEmpty(taskConfig.Purpose, defaults.Purpose),
-		"creative_type":   firstNonEmpty(taskConfig.CreativeType, defaults.CreativeType),
-		"subject_profile": firstNonEmpty(taskConfig.SubjectProfile, defaults.SubjectProfile),
-		"audience":        firstNonEmpty(taskConfig.Audience, defaults.Audience),
-		"single_message":  firstNonEmpty(taskConfig.SingleMessage, defaults.SingleMessage),
-		"model_key":       firstNonEmpty(taskConfig.ModelKey, defaults.ModelKey, policy.DefaultModel),
-		"resolution":      firstNonEmpty(taskConfig.Resolution, defaults.Resolution),
-		"ratio":           firstNonEmpty(taskConfig.Ratio, defaults.Ratio),
-		"duration":        firstPositiveInt64(taskConfig.Duration, defaults.Duration),
-		"watermark":       firstBoolPtr(taskConfig.Watermark, defaults.Watermark),
-		"preflight":       taskOrDefaultPreflight(taskConfig, defaults, task != nil && model.IsVideoCreatorPlatform(task.Type)),
-	}
-	return map[string]any{
-		"defaults": resolvedDefaults,
-		"policy": map[string]any{
-			"allowed_models":       policy.AllowedModels,
-			"default_model":        policy.DefaultModel,
-			"allow_auto_downgrade": policy.AllowAutoDowngrade,
-			"max_resolution":       policy.MaxResolution,
-			"max_duration":         policy.MaxDuration,
-			"model_selection_rule": "Only keys present in model_catalog and allowed_models are usable; the server rejects unavailable models.",
-			"auto_downgrade_label": "参数不支持时自动降到可用分辨率",
-		},
-		"model_catalog": catalog,
-		"input":         input,
-		"references":    input.References,
-		"task_config":   taskConfig,
-		"pricing": map[string]any{
-			"retail_model":             "fixed_sku",
-			"base_task_fee_rule":       "VideoCreator task admission uses the fixed task SKU.",
-			"operation_billing_rule":   "Each provider segment pins a fixed SKU before dispatch; its accepted-task charge is enqueued only after the matching provider output is durably persisted as a task file.",
-			"operation_debt_rule":      "Accepted task segment charges may create debt and never invalidate a durable successful video result.",
-			"sku_selectors":            []string{"model_key", "resolution", "duration_tier", "input_mode"},
-			"provider_cost_separation": "Provider usage is internal cost evidence and never determines retail credits.",
-		},
-		"persistent_file_rule": "all server-persistent references and generated results must be OSS-backed task files; local agent files are temporary only",
-		"visual_anchor_generation": map[string]any{
-			"available":           true,
-			"default_image_type":  "content",
-			"max_auto_anchors":    3,
-			"verify_with_vision":  "Required for generated visual anchors; accept only verification.passed=true and score >= 0.75 when a score is present.",
-			"register_tool":       "After a generated anchor passes vision verification, call register_video_reference(type=\"image_url\", file_path=<generated file_path>, reference_role=\"subject identity\" | \"product appearance\" | \"first frame\").",
-			"fallback":            "If generate_image is unavailable or the main anchor fails two verification attempts, use text-only anchors for ordinary videos or stop and request user reference media for high-consistency tasks.",
-			"derived_anchor_rule": "When generating 2-3 anchors, derive later anchors from the approved main anchor with ref_image_path; do not independently regenerate the same subject.",
-		},
-	}
-}
-
-func filterVideoCatalogForPolicy(catalog service.VideoModelCatalog, policy model.VideoModelPolicy) service.VideoModelCatalog {
-	if catalog == nil {
-		catalog = service.VideoModelCatalog{}
-	}
-	if len(policy.AllowedModels) == 0 {
-		return catalog
-	}
-	filtered := service.VideoModelCatalog{}
-	for _, key := range policy.AllowedModels {
-		if spec, ok := catalog[key]; ok {
-			filtered[key] = spec
-		}
-	}
-	return filtered
 }
 
 func firstNonEmpty(values ...string) string {
@@ -696,57 +597,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func firstPositiveInt64(values ...int64) int64 {
-	for _, value := range values {
-		if value > 0 {
-			return value
-		}
-	}
-	return 0
-}
-
-func firstBoolPtr(values ...*bool) any {
-	for _, value := range values {
-		if value != nil {
-			return *value
-		}
-	}
-	return nil
-}
-
-func taskOrDefaultPreflight(taskConfig model.VideoTaskConfig, defaults model.VideoDefaults, hasVideoTask bool) bool {
-	if hasVideoTask && taskConfig.Preflight {
-		return true
-	}
-	return defaults.Preflight
-}
-
-func buildProjectAgentBrief(ch *model.Project, usesProjectSnapshot bool, videoBlock map[string]any) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "项目：%s\n", ch.Name)
-	fmt.Fprintf(&b, "平台：%s\n", ch.Platform)
-	if ch.Instructions != "" {
-		fmt.Fprintf(&b, "项目定位：%s\n", ch.Instructions)
-	}
-	if ch.Keywords != "" {
-		fmt.Fprintf(&b, "关键词：%s\n", ch.Keywords)
-	}
-	b.WriteString("分析入口：项目长期定位只读取工作区 CLAUDE.md / project.instructions；本次需求读取 task.prompt、video_creator_input（profile 中为 videocreator.input）的 brief、references 与 hard_constraints。\n")
-	b.WriteString("Studio 不再提供视频玩法、商业目标、制作模式、内容类型、主体、受众或核心信息；这些业务判断必须由 videocreator agent 自主分析并落盘到 video_creator_config。\n")
-	if usesProjectSnapshot {
-		b.WriteString("配置来源：任务创建时冻结的项目快照\n")
-	}
-	if defaults, ok := videoBlock["defaults"].(map[string]any); ok {
-		fmt.Fprintf(&b, "视频默认参数：model=%v, resolution=%v, ratio=%v, duration=%v, watermark=%v\n",
-			defaults["model_key"], defaults["resolution"], defaults["ratio"], defaults["duration"], defaults["watermark"])
-	}
-	if pricing, ok := videoBlock["pricing"].(map[string]any); ok {
-		fmt.Fprintf(&b, "积分规则：任务准入使用固定任务 SKU；每个视频片段在提交前固定操作 SKU，仅在对应 provider 输出持久化为任务文件后排队扣费；已接受任务允许形成欠款且不影响成功视频结果（%v）。\n", pricing["operation_billing_rule"])
-	}
-	b.WriteString("模型规则：只能使用本 profile 返回的 videocreator.model_catalog 与 videocreator.policy.allowed_models 中的模型 key；未返回的模型不可使用。")
-	return b.String()
 }
 
 func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -799,7 +649,6 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 		"started_at":    task.StartedAt,
 		"completed_at":  task.CompletedAt,
 	}
-	rewriteMCPVideoFields(resp, task.Type, task.VideoInput.Data(), task.VideoConfig.Data())
 	return textResult(resp)
 }
 

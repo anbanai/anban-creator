@@ -9,53 +9,6 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-func rejectLegacyVideoFields(body []byte) error {
-	if hasJSONField(body, "video_input") || hasJSONField(body, "video_config") {
-		return fmt.Errorf("video_input/video_config are not accepted; use video_creator_input/video_creator_config or video_editor_input/video_editor_config")
-	}
-	return nil
-}
-
-func rejectPlanVideoFields(body []byte) error {
-	if err := rejectLegacyVideoFields(body); err != nil {
-		return err
-	}
-	if hasJSONField(body, "video_editor_input") || hasJSONField(body, "video_editor_config") {
-		return fmt.Errorf("video_editor_input/video_editor_config are not accepted on plans; use video_creator_input/video_creator_config")
-	}
-	return nil
-}
-
-func rejectVideoCreatorOnlyFields(body []byte) error {
-	if err := rejectLegacyVideoFields(body); err != nil {
-		return err
-	}
-	if hasJSONField(body, "video_editor_input") || hasJSONField(body, "video_editor_config") {
-		return fmt.Errorf("video_editor_input/video_editor_config are not accepted on video creator requests; use video_creator_input/video_creator_config")
-	}
-	return nil
-}
-
-func validateSplitVideoTaskFields(creatorCfg *model.VideoTaskConfig, creatorInput *model.VideoInput, editorCfg *model.VideoTaskConfig, editorInput *model.VideoInput) error {
-	hasCreator := creatorCfg != nil || creatorInput != nil
-	hasEditor := editorCfg != nil || editorInput != nil
-	if hasCreator && hasEditor {
-		return fmt.Errorf("video_creator_* and video_editor_* fields cannot be set on the same task")
-	}
-	return nil
-}
-
-func splitVideoReferenceURLs(creatorCfg *model.VideoTaskConfig, creatorInput *model.VideoInput, editorCfg *model.VideoTaskConfig, editorInput *model.VideoInput) []string {
-	var urls []string
-	for _, cfg := range []*model.VideoTaskConfig{
-		videoConfigForReferenceURLs(creatorCfg, creatorInput),
-		videoConfigForReferenceURLs(editorCfg, editorInput),
-	} {
-		urls = append(urls, videoReferenceURLs(cfg)...)
-	}
-	return urls
-}
-
 func montageSourceAssetURLs(input *model.MontageInput) []string {
 	if input == nil || len(input.SourceAssets) == 0 {
 		return nil
@@ -67,25 +20,6 @@ func montageSourceAssetURLs(input *model.MontageInput) []string {
 		}
 	}
 	return urls
-}
-
-func rewriteFinalizedVideoReferenceURLs(rewrites map[string]string, creatorCfg *model.VideoTaskConfig, creatorInput *model.VideoInput, editorCfg *model.VideoTaskConfig, editorInput *model.VideoInput) {
-	for _, cfg := range []*model.VideoTaskConfig{creatorCfg, editorCfg} {
-		if cfg == nil {
-			continue
-		}
-		for i := range cfg.References {
-			cfg.References[i].URL = rewriteFinalizedUploadURL(cfg.References[i].URL, rewrites)
-		}
-	}
-	for _, input := range []*model.VideoInput{creatorInput, editorInput} {
-		if input == nil {
-			continue
-		}
-		for i := range input.References {
-			input.References[i].URL = rewriteFinalizedUploadURL(input.References[i].URL, rewrites)
-		}
-	}
 }
 
 func rewriteFinalizedMontageAssetURLs(input *model.MontageInput, rewrites map[string]string) {
@@ -119,7 +53,6 @@ func taskAPIResponse(task *model.Task, store storage.Provider) map[string]any {
 		return nil
 	}
 	resp := modelAPIMap(task)
-	rewriteVideoAPIFields(resp, task.Type, task.VideoInput.Data(), task.VideoConfig.Data())
 	rewriteMontageAPIField(resp, task.Type, task.MontageInput.Data())
 	enrichOwnedObjectKeys(resp, store)
 	return resp
@@ -138,14 +71,11 @@ func planAPIResponse(plan *model.Plan, store storage.Provider) map[string]any {
 		return nil
 	}
 	resp := modelAPIMap(plan)
-	rewriteVideoAPIFields(resp, plan.Type, plan.VideoInput.Data(), plan.VideoConfig.Data())
 	rewriteMontageAPIField(resp, plan.Type, plan.MontageInput.Data())
 	enrichOwnedObjectKeys(resp, store)
 	return resp
 }
 
-// enrichOwnedObjectKeys adds stable object keys to response-only attachment
-// maps. It never mutates the model and never creates temporary download URLs.
 func enrichOwnedObjectKeys(resp map[string]any, store storage.Provider) {
 	if resp == nil || store == nil {
 		return
@@ -191,19 +121,6 @@ func modelAPIMap(value any) map[string]any {
 		return map[string]any{}
 	}
 	return resp
-}
-
-func rewriteVideoAPIFields(resp map[string]any, platform string, input model.VideoInput, cfg model.VideoTaskConfig) {
-	delete(resp, "video_input")
-	delete(resp, "video_config")
-	switch {
-	case model.IsVideoCreatorPlatform(platform):
-		resp["video_creator_input"] = modelAPIMap(input)
-		resp["video_creator_config"] = modelAPIMap(cfg)
-	case model.IsVideoEditorPlatform(platform):
-		resp["video_editor_input"] = modelAPIMap(input)
-		resp["video_editor_config"] = modelAPIMap(cfg)
-	}
 }
 
 func rewriteMontageAPIField(resp map[string]any, platform string, input model.MontageInput) {

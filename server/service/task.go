@@ -71,7 +71,6 @@ type TaskService struct {
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
 	cancelFuncs              sync.Map           // taskID → context.CancelFunc
 	seednoteTrackingSvc      PublishedTrackingService
-	videoCatalog             VideoModelCatalog
 	montageCfg               srvconfig.MontageConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
@@ -196,13 +195,6 @@ func (s *TaskService) SetBillingCatalogService(catalog *BillingCatalogService) {
 	}
 }
 
-func (s *TaskService) SetVideoCatalog(catalog VideoModelCatalog) {
-	if s == nil {
-		return
-	}
-	s.videoCatalog = catalog
-}
-
 func (s *TaskService) SetMontageConfig(cfg srvconfig.MontageConfig) {
 	if s == nil {
 		return
@@ -218,13 +210,6 @@ func defaultMontageServiceConfig() srvconfig.MontageConfig {
 
 func (s *TaskService) montageCloudAvailable() bool {
 	return s != nil && (s.enqueuer != nil || s.executor != nil)
-}
-
-func (s *TaskService) resolvedVideoCatalog() VideoModelCatalog {
-	if s != nil && s.videoCatalog != nil {
-		return s.videoCatalog
-	}
-	return VideoModelCatalog{}
 }
 
 // Close stops the Redis pub/sub subscriber goroutine.
@@ -422,21 +407,8 @@ type CreateManualParams struct {
 	// otherwise. When set, the task is billed once as a single package at the sum
 	// of selected module prices and quantity is forced to 1.
 	Ecommerce *model.EcommerceConfig
-	// VideoCreatorConfig/VideoCreatorInput carry generation intake for
-	// videocreator tasks. VideoConfig remains agent-owned resolved execution
-	// state; user-authored creation input is persisted through Task.VideoInput.
-	VideoCreatorConfig *model.VideoTaskConfig
-	VideoCreatorInput  *model.VideoInput
-	// VideoEditorConfig/VideoEditorInput carry edit/post-production intake for
-	// videoeditor tasks. They are rejected for creator projects and vice versa.
-	VideoEditorConfig *model.VideoTaskConfig
-	VideoEditorInput  *model.VideoInput
-	// FrozenVideoConfig is clone-only resolved video state. Ordinary creation
-	// leaves it nil so the agent can resolve a fresh execution configuration.
-	FrozenVideoConfig *model.VideoTaskConfig
 	// MontageInput carries the Montage-specific creation contract.
-	// It is independent from video creator/editor payloads and is only valid
-	// for montage projects.
+	// It is only valid for montage projects.
 	MontageInput *model.MontageInput
 	// ExecutionTarget, when model.ExecutionTargetLocal, routes the task to a
 	// desktop local executor instead of cloud Asynq/Docker. The task is created
@@ -544,13 +516,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if p.FrozenTaskType != "" {
 		taskType = p.FrozenTaskType
 	}
-	videoCfg, videoInput, err := p.videoPayloadForTask(taskType)
-	if err != nil {
-		return nil, err
-	}
-	if model.IsVideoPlatform(taskType) {
-		videoInput = videoInputWithAttachmentReferences(p.Prompt, videoInput, p.InputAttachments)
-	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
 		return nil, fmt.Errorf("%w: montage_input can only be set on montage tasks", ErrMontageInput)
 	}
@@ -579,9 +544,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			effectiveImageModelKey = projEc.ImageModelKey
 		}
 	}
-	if model.IsVideoPlatform(taskType) {
-		quantity = 1
-	}
 	if model.IsMontagePlatform(taskType) {
 		quantity = 1
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
@@ -600,9 +562,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			}
 			p.ExecutionTarget = target
 		}
-	}
-	if model.IsVideoEditorPlatform(taskType) && !hasVideoEditorSourceVideo(videoInput, p.InputAttachments) {
-		return nil, fmt.Errorf("videoeditor task requires at least one source video")
 	}
 	if taskType == model.PlatformEcommerce {
 		// E-commerce creates one deliverable package task. Selected modules
@@ -696,18 +655,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 		if len(p.InputAttachments) > 0 {
 			task.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
-		}
-		if model.IsVideoPlatform(taskType) {
-			if videoInput != nil {
-				task.SetVideoInput(*videoInput)
-			} else if videoCfg != nil {
-				task.SetVideoInput(videoInputFromTaskConfig(taskPrompt, videoCfg))
-			} else if model.IsVideoCreatorPlatform(taskType) && strings.TrimSpace(taskPrompt) != "" {
-				task.SetVideoInput(model.VideoInput{Brief: taskPrompt})
-			}
-			if p.FrozenVideoConfig != nil {
-				task.SetVideoConfig(*p.FrozenVideoConfig)
-			}
 		}
 		if model.IsMontagePlatform(taskType) && p.MontageInput != nil {
 			task.SetMontageInput(*p.MontageInput)
@@ -814,229 +761,6 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 	})
 }
 
-func (p CreateManualParams) videoPayloadForTask(taskType string) (*model.VideoTaskConfig, *model.VideoInput, error) {
-	hasCreatorPayload := p.VideoCreatorConfig != nil || p.VideoCreatorInput != nil
-	hasEditorPayload := p.VideoEditorConfig != nil || p.VideoEditorInput != nil
-
-	switch {
-	case model.IsVideoCreatorPlatform(taskType):
-		if hasEditorPayload {
-			return nil, nil, fmt.Errorf("%w: video_editor_input/video_editor_config can only be set on videoeditor tasks", ErrVideoTaskInput)
-		}
-		return p.VideoCreatorConfig, p.VideoCreatorInput, nil
-	case model.IsVideoEditorPlatform(taskType):
-		if hasCreatorPayload {
-			return nil, nil, fmt.Errorf("%w: video_creator_input/video_creator_config can only be set on videocreator tasks", ErrVideoTaskInput)
-		}
-		return p.VideoEditorConfig, p.VideoEditorInput, nil
-	default:
-		if hasCreatorPayload || hasEditorPayload {
-			return nil, nil, fmt.Errorf("%w: video_creator_input/video_editor_input can only be set on videocreator or videoeditor tasks", ErrVideoTaskInput)
-		}
-		return nil, nil, nil
-	}
-}
-
-func hasVideoEditorSourceVideo(input *model.VideoInput, attachments []model.EntryAttachment) bool {
-	if input != nil {
-		for _, ref := range input.References {
-			if ref.Type == VideoReferenceVideo || ref.Type == "video_url" {
-				if strings.TrimSpace(ref.URL) != "" || strings.TrimSpace(ref.TaskFileID) != "" {
-					return true
-				}
-			}
-		}
-	}
-	for _, attachment := range attachments {
-		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && strings.TrimSpace(attachment.URL) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func videoInputWithAttachmentReferences(prompt string, input *model.VideoInput, attachments []model.EntryAttachment) *model.VideoInput {
-	attachmentRefs := videoReferencesFromEntryAttachments(attachments)
-	if input == nil && len(attachmentRefs) == 0 {
-		return nil
-	}
-	result := model.VideoInput{Brief: strings.TrimSpace(prompt)}
-	if input != nil {
-		result = *input
-		if strings.TrimSpace(result.Brief) == "" {
-			result.Brief = strings.TrimSpace(prompt)
-		}
-		result.References = cloneVideoReferenceAssets(input.References)
-	}
-	seen := make(map[string]struct{}, len(result.References)+len(attachmentRefs))
-	for _, ref := range result.References {
-		seen[videoReferenceAssetIdentity(ref)] = struct{}{}
-	}
-	for _, ref := range attachmentRefs {
-		identity := videoReferenceAssetIdentity(ref)
-		if _, exists := seen[identity]; exists {
-			continue
-		}
-		seen[identity] = struct{}{}
-		result.References = append(result.References, ref)
-	}
-	return &result
-}
-
-func cloneVideoReferenceAssets(references []model.VideoReferenceAsset) []model.VideoReferenceAsset {
-	cloned := make([]model.VideoReferenceAsset, len(references))
-	for i, ref := range references {
-		cloned[i] = ref
-		cloned[i].MustKeep = append([]string(nil), ref.MustKeep...)
-		cloned[i].CanChange = append([]string(nil), ref.CanChange...)
-		cloned[i].MustNotTransfer = append([]string(nil), ref.MustNotTransfer...)
-	}
-	return cloned
-}
-
-func videoReferenceAssetIdentity(ref model.VideoReferenceAsset) string {
-	typ := strings.ToLower(strings.TrimSpace(ref.Type))
-	switch typ {
-	case "image":
-		typ = VideoReferenceImage
-	case "audio":
-		typ = VideoReferenceAudio
-	case "video":
-		typ = VideoReferenceVideo
-	case "text":
-		typ = VideoReferenceText
-	}
-	return strings.Join([]string{typ, strings.TrimSpace(ref.URL), strings.TrimSpace(ref.TaskFileID), strings.TrimSpace(ref.Text)}, "\x00")
-}
-
-func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) VideoGenerationRequest {
-	req := VideoGenerationRequest{Prompt: prompt}
-	if cfg == nil {
-		return req
-	}
-	req.ScenarioKey = cfg.ScenarioKey
-	req.ProductionMode = cfg.ProductionMode
-	req.Purpose = cfg.Purpose
-	req.CreativeType = cfg.CreativeType
-	req.SubjectProfile = cfg.SubjectProfile
-	req.Audience = cfg.Audience
-	req.SingleMessage = cfg.SingleMessage
-	req.Model = cfg.ModelKey
-	req.Resolution = cfg.Resolution
-	req.Ratio = cfg.Ratio
-	req.Duration = cfg.Duration
-	req.TargetDurationReason = cfg.TargetDurationReason
-	req.Watermark = cfg.Watermark
-	req.Preflight = &cfg.Preflight
-	req.RetakeBudget = cfg.RetakeBudget
-	req.DeliveryTargets = cfg.DeliveryTargets
-	req.ReferenceSet = videoReferencesFromAssets(cfg.References)
-	return req
-}
-
-func videoInputFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) model.VideoInput {
-	input := model.VideoInput{Brief: strings.TrimSpace(prompt)}
-	if cfg == nil {
-		return input
-	}
-	input.References = cfg.References
-	input.HardConstraints = model.VideoHardConstraints{
-		Ratio:     cfg.Ratio,
-		Duration:  cfg.Duration,
-		Watermark: cfg.Watermark,
-	}
-	return input
-}
-
-func videoReferencesFromAssets(assets []model.VideoReferenceAsset) []VideoReferenceInput {
-	if len(assets) == 0 {
-		return nil
-	}
-	refs := make([]VideoReferenceInput, 0, len(assets))
-	for _, asset := range assets {
-		refs = append(refs, VideoReferenceInput{
-			Type:                 asset.Type,
-			URL:                  asset.URL,
-			Text:                 asset.Text,
-			ReferenceRole:        asset.ReferenceRole,
-			MustKeep:             asset.MustKeep,
-			CanChange:            asset.CanChange,
-			MustNotTransfer:      asset.MustNotTransfer,
-			InputDurationSeconds: asset.InputDurationSeconds,
-		})
-	}
-	return refs
-}
-
-func videoAssetsFromReferences(refs []VideoReferenceInput) []model.VideoReferenceAsset {
-	if len(refs) == 0 {
-		return nil
-	}
-	assets := make([]model.VideoReferenceAsset, 0, len(refs))
-	for _, ref := range refs {
-		assets = append(assets, model.VideoReferenceAsset{
-			Type:                 ref.Type,
-			URL:                  ref.URL,
-			Text:                 ref.Text,
-			ReferenceRole:        ref.ReferenceRole,
-			MustKeep:             ref.MustKeep,
-			CanChange:            ref.CanChange,
-			MustNotTransfer:      ref.MustNotTransfer,
-			InputDurationSeconds: ref.InputDurationSeconds,
-		})
-	}
-	return assets
-}
-
-func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
-	return model.VideoTaskConfig{
-		ScenarioKey:               plan.ScenarioKey,
-		ProductionMode:            plan.ProductionMode,
-		Purpose:                   plan.Purpose,
-		CreativeType:              plan.CreativeType,
-		SubjectProfile:            plan.SubjectProfile,
-		Audience:                  plan.Audience,
-		SingleMessage:             plan.SingleMessage,
-		ModelKey:                  plan.ModelKey,
-		Model:                     plan.Model,
-		Resolution:                plan.Resolution,
-		Ratio:                     plan.Ratio,
-		Duration:                  plan.Duration,
-		TargetDurationSeconds:     plan.TargetDurationSeconds,
-		TargetDurationSource:      plan.TargetDurationSource,
-		TargetDurationReason:      plan.TargetDurationReason,
-		SegmentMaxDurationSeconds: plan.SegmentMaxDurationSeconds,
-		SegmentMinDurationSeconds: plan.SegmentMinDurationSeconds,
-		Segments:                  videoTaskSegmentsFromPlan(plan.Segments),
-		Watermark:                 plan.Watermark,
-		Preflight:                 plan.Preflight,
-		References:                videoAssetsFromReferences(plan.References),
-		RetakeBudget:              plan.RetakeBudget,
-		DeliveryTargets:           plan.DeliveryTargets,
-	}
-}
-
-func videoTaskSegmentsFromPlan(segments []VideoGenerationSegmentPlan) []model.VideoTaskSegmentConfig {
-	if len(segments) == 0 {
-		return nil
-	}
-	out := make([]model.VideoTaskSegmentConfig, 0, len(segments))
-	for _, seg := range segments {
-		out = append(out, model.VideoTaskSegmentConfig{
-			Index:       seg.Index,
-			StartSecond: seg.StartSecond,
-			EndSecond:   seg.EndSecond,
-			Duration:    seg.Duration,
-			Prompt:      seg.Prompt,
-			ModelKey:    seg.ModelKey,
-			Model:       seg.Model,
-			Resolution:  seg.Resolution,
-			Ratio:       seg.Ratio,
-		})
-	}
-	return out
-}
-
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
 //
 // The plan's scheduling-adjacent "what to produce" params (image model,
@@ -1073,14 +797,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil); err != nil {
 		return nil, err
-	}
-	var planVideoInput *model.VideoInput
-	if model.IsVideoCreatorPlatform(taskType) {
-		vi := plan.VideoInput.Data()
-		if vi.Brief == "" && prompt != "" {
-			vi.Brief = prompt
-		}
-		planVideoInput = &vi
 	}
 	var planMontageInput *model.MontageInput
 	montageExecutionTarget := model.ExecutionTargetCloud
@@ -1128,9 +844,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 	if project != nil {
 		task.SetProjectSnapshot(model.SnapshotProject(project))
-	}
-	if planVideoInput != nil {
-		task.SetVideoInput(*planVideoInput)
 	}
 	if planMontageInput != nil {
 		task.SetMontageInput(*planMontageInput)

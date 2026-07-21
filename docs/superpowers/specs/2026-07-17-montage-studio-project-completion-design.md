@@ -13,8 +13,8 @@ gap is the standard Studio project path:
 - Task and plan forms expose only part of the stable Montage input and do not
   provide source asset uploads or inherit project defaults.
 
-This change completes those missing product paths. Existing `videocreator` and
-`videoeditor` behavior remains unchanged.
+This change completes those missing product paths while keeping Montage scoped
+to its own project, task, and plan contracts.
 
 ## Goals
 
@@ -31,8 +31,7 @@ This change completes those missing product paths. Existing `videocreator` and
 
 ## Non-Goals
 
-- Do not remove, disable, or alter video generation or video editing.
-- Do not merge Montage into either existing video workflow.
+- Keep Montage on its dedicated agent, runtime, and artifact contracts.
 - Do not expose `montage_input.advanced` as a raw Studio editor.
 - Do not expose cloud/local execution target selection.
 - Do not add a server-driven dynamic form or pipeline catalog API.

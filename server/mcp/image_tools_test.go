@@ -1257,7 +1257,7 @@ func TestResolveTaskWorkspaceReadablePathRestoresTaskFileWhenWorkspaceMissing(t 
 	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, Prompt: "task"}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	store := &fakeVideoReferenceStorage{files: map[string][]byte{"user/task/output/cover.png": tinyPNGBytes()}}
+	store := &fakeObjectStorage{files: map[string][]byte{"user/task/output/cover.png": tinyPNGBytes()}}
 	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, t.TempDir(), nil, nil)
 	svcs = &Services{TaskSvc: taskSvc, Store: store}
 	if _, err := repo.TaskFiles().Upsert(ctx, &model.TaskFile{

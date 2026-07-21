@@ -74,13 +74,13 @@ func TestMarginReconciliationProjectsRevenueReceivablesCostAndAdjustments(t *tes
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	baseIdentity, err := model.ProviderCostBaseIdentityKey(model.BillingProviderCostIdentityProviderRequest, "", "volcengine_ark", "seedance", "ark-margin-cost")
+	baseIdentity, err := model.ProviderCostBaseIdentityKey(model.BillingProviderCostIdentityProviderRequest, "", "volcengine_ark", "doubao-seed-evolving", "ark-margin-cost")
 	if err != nil {
 		t.Fatal(err)
 	}
 	baseCost := &model.BillingProviderCostEvent{
 		ID: uuid.NewString(), EventKind: model.BillingProviderCostEventKindBase, IdentityKind: model.BillingProviderCostIdentityProviderRequest,
-		ProviderRequestID: "ark-margin-cost", TaskID: taskID, Provider: "volcengine_ark", Model: "seedance", CatalogID: "cost-v1",
+		ProviderRequestID: "ark-margin-cost", TaskID: taskID, Provider: "volcengine_ark", Model: "doubao-seed-evolving", CatalogID: "cost-v1",
 		IdempotencyScope: "provider-cost", IdempotencyKey: "ark-margin-cost", BaseIdentityKey: &baseIdentity,
 		RequestFingerprint: strings.Repeat("e", 64), Source: model.BillingProviderCostSourceProviderResponse,
 		Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: 200_000,

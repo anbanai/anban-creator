@@ -64,11 +64,6 @@ type aiEntryIntent struct {
 	Language        string         `json:"language"`
 	ImageRatio      string         `json:"image_ratio"`
 	ImageModelKey   string         `json:"image_model_key"`
-	VideoCreator    struct {
-		Ratio     string `json:"ratio"`
-		Duration  int64  `json:"duration"`
-		Watermark *bool  `json:"watermark"`
-	} `json:"video_creator"`
 }
 
 var aiEntryEcommerceModuleMax = map[string]int{
@@ -185,26 +180,6 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			SellingPoints:   firstNonEmptyString(intent.SellingPoints, req.Text),
 			Language:        intent.Language,
 		}
-	case model.PlatformVideoCreator:
-		params.VideoCreatorInput = &model.VideoInput{
-			Brief:      prompt,
-			References: videoReferencesFromEntryAttachments(req.Attachments),
-			HardConstraints: model.VideoHardConstraints{
-				Ratio:     normalizeAIEntryVideoRatio(intent.VideoCreator.Ratio),
-				Duration:  normalizeAIEntryVideoDuration(intent.VideoCreator.Duration),
-				Watermark: intent.VideoCreator.Watermark,
-			},
-		}
-	case model.PlatformVideoEditor:
-		videoRefs := videoReferencesFromEntryAttachments(req.Attachments)
-		videoInput := model.VideoInput{
-			Brief:      prompt,
-			References: videoRefs,
-		}
-		if !hasVideoEditorSourceVideo(&videoInput, nil) {
-			return aiEntryNeedsConfiguration("创建视频剪辑任务需要至少上传一个视频素材。", aiEntryTaskCreateActionURL(model.PlatformVideoEditor, project.ID)), nil
-		}
-		params.VideoEditorInput = &videoInput
 	default:
 		return aiEntryNeedsConfiguration("当前项目平台暂不支持 AI 入口创建任务。", "/projects/"+project.ID), nil
 	}
@@ -259,8 +234,7 @@ func (s *AIEntryService) parseIntent(ctx context.Context, llm LLMClient, project
   "selected_modules": {"main_images": 1},
   "target_platform": "电商平台，可选",
   "language": "语言，可选",
-  "image_ratio": "3:4|1:1|4:3|16:9，可选",
-  "video_creator": {"ratio": "9:16|16:9|1:1，可选", "duration": 12, "watermark": false}
+  "image_ratio": "3:4|1:1|4:3|16:9，可选"
 }
 缺失字段请省略。`)
 	userPrompt := aiEntryPrompt(project, req)
@@ -318,7 +292,6 @@ func parseAIEntryIntentJSON(raw string) (aiEntryIntent, error) {
 	intent.Language = strings.TrimSpace(intent.Language)
 	intent.ImageRatio = strings.TrimSpace(intent.ImageRatio)
 	intent.ImageModelKey = strings.TrimSpace(intent.ImageModelKey)
-	intent.VideoCreator.Ratio = strings.TrimSpace(intent.VideoCreator.Ratio)
 	return intent, nil
 }
 
@@ -401,22 +374,6 @@ func normalizeAIEntrySelectedModules(modules map[string]int) map[string]int {
 	return out
 }
 
-func normalizeAIEntryVideoRatio(ratio string) string {
-	switch strings.TrimSpace(ratio) {
-	case "9:16", "16:9", "1:1":
-		return strings.TrimSpace(ratio)
-	default:
-		return ""
-	}
-}
-
-func normalizeAIEntryVideoDuration(duration int64) int64 {
-	if duration < 1 || duration > 600 {
-		return 0
-	}
-	return duration
-}
-
 func firstImageAttachmentUploadSessionID(attachments []model.EntryAttachment) string {
 	for _, attachment := range attachments {
 		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "image" {
@@ -436,57 +393,6 @@ func imageAttachmentURLs(attachments []model.EntryAttachment) []string {
 		}
 	}
 	return urls
-}
-
-func videoAttachmentURLs(attachments []model.EntryAttachment) []string {
-	urls := []string{}
-	for _, a := range attachments {
-		if normalizeEntryAttachmentType(a.Type, a.ContentType) == "video" {
-			if source := entryAttachmentStorageSource(a); source != "" {
-				urls = append(urls, source)
-			}
-		}
-	}
-	return urls
-}
-
-func videoReferencesFromEntryAttachments(attachments []model.EntryAttachment) []model.VideoReferenceAsset {
-	refs := []model.VideoReferenceAsset{}
-	for _, a := range attachments {
-		typ := normalizeEntryAttachmentType(a.Type, a.ContentType)
-		source := entryAttachmentStorageSource(a)
-		ref := model.VideoReferenceAsset{
-			URL:      source,
-			Text:     strings.TrimSpace(a.Text),
-			FileName: strings.TrimSpace(a.FileName),
-			MimeType: strings.TrimSpace(a.ContentType),
-			FileSize: a.Size,
-		}
-		switch typ {
-		case "image":
-			ref.Type = VideoReferenceImage
-		case "audio":
-			ref.Type = VideoReferenceAudio
-		case "video":
-			ref.Type = VideoReferenceVideo
-		case "text":
-			ref.Type = VideoReferenceText
-			if ref.Text == "" {
-				ref.Text = ref.URL
-			}
-		default:
-			continue
-		}
-		if ref.Type == VideoReferenceText {
-			if ref.Text == "" {
-				continue
-			}
-		} else if ref.URL == "" {
-			continue
-		}
-		refs = append(refs, ref)
-	}
-	return refs
 }
 
 func entryAttachmentStorageSource(attachment model.EntryAttachment) string {

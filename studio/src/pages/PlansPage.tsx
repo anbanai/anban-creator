@@ -31,16 +31,13 @@ import { planStatusLabel, contentTypeLabel, formatDateTimeCN, cronToHuman, getBa
 import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
-import { buildVideoInputForSubmit, initialVideoInput } from '@/lib/video-form'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
-import { isVideoCreator } from '@/lib/video-platforms'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
-import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { cn } from '@/lib/utils'
 import { parseCreationIntent } from '@/lib/command-center'
@@ -53,7 +50,6 @@ import { referenceSelectionFromValue } from '@/lib/reference-image'
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
-  { value: 'videocreator', label: 'AI 视频生成' },
   { value: 'montage', label: 'Montage' },
 ]
 
@@ -74,7 +70,6 @@ function planToFormValues(plan: Plan): PlanFormValues {
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
-    video_creator_input: isVideoCreator(plan.type) ? initialVideoInput(plan.prompt || '', plan.video_creator_input) : undefined,
     montage_input: plan.type === 'montage' ? initialMontageInput(plan.prompt || '', plan.montage_input) : undefined,
   }
 }
@@ -116,7 +111,6 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_creator_input: undefined,
       montage_input: undefined,
     },
   })
@@ -278,7 +272,7 @@ export default function PlansPage() {
   })
 
   const openCreate = useCallback(() => {
-    const requestedType: PlanType = createIntent.type === 'article' || createIntent.type === 'montage' || isVideoCreator(createIntent.type)
+    const requestedType: PlanType = createIntent.type === 'article' || createIntent.type === 'montage'
       ? createIntent.type
       : 'seednote'
     const selectedIntentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
@@ -303,7 +297,6 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_creator_input: isVideoCreator(requestedType) ? initialVideoInput('') : undefined,
       montage_input: requestedType === 'montage'
         ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
         : undefined,
@@ -364,7 +357,6 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_creator_input: undefined,
       montage_input: undefined,
     })
   }
@@ -402,7 +394,6 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      video_creator_input: isVideoCreator(values.type) ? buildVideoInputForSubmit(values.prompt, { ...values.video_creator_input, brief: values.prompt }) : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
@@ -434,9 +425,7 @@ export default function PlansPage() {
       value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
       onChange={(value) => {
         form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
-        if (isVideoCreator(watchedType)) {
-          form.setValue('video_creator_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
-        } else if (watchedType === 'montage') {
+        if (watchedType === 'montage') {
           form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
         }
         if (value.attachments !== promptAttachments) setPromptAttachments(value.attachments)
@@ -466,7 +455,6 @@ export default function PlansPage() {
             const nextType = project.platform as PlanType
             const fullProject = projectMap[id]
             form.setValue('type', nextType, { shouldDirty: true })
-            form.setValue('video_creator_input', isVideoCreator(nextType) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: false })
             form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
           }}
         />
@@ -493,7 +481,7 @@ export default function PlansPage() {
           <ProjectSelector
             value={projectFilter}
             onChange={(id) => setProjectFilter(id)}
-            excludePlatforms={['moments', 'ecommerce', 'videoeditor']}
+            excludePlatforms={['moments', 'ecommerce']}
           />
         </div>
         <div className="w-full sm:w-48 sm:ml-auto">
@@ -637,7 +625,6 @@ export default function PlansPage() {
                         const nextType = v as PlanType
                         field.onChange(nextType)
                         setMontageUploading(false)
-                        form.setValue('video_creator_input', isVideoCreator(nextType) ? initialVideoInput(form.getValues('prompt') || '') : undefined, { shouldDirty: true })
                         form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: true })
                       }}
                       disabled={!!editingPlan || !!form.watch('project_id')}
@@ -669,9 +656,9 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              {!isVideoCreator(watchedType) && !isMontagePlan ? promptComposer : null}
+              {!isMontagePlan ? promptComposer : null}
 
-              {!isVideoCreator(watchedType) && !isMontagePlan && <FormField control={form.control} name="image_model_key" render={({ field }) => (
+              {!isMontagePlan && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
                   <FormLabel>图像模型</FormLabel>
                   <FormControl>
@@ -689,7 +676,7 @@ export default function PlansPage() {
                 </FormItem>
               )} />}
 
-              {!isVideoCreator(watchedType) && !isMontagePlan && (
+              {!isMontagePlan && (
                 <FormField control={form.control} name="reference_image" render={({ field }) => (
                   <FormItem>
                     <FormLabel>任务参考图</FormLabel>
@@ -710,16 +697,6 @@ export default function PlansPage() {
                 )} />
               )}
 
-              {isVideoCreator(watchedType) && (
-                <VideoCreationPanel
-                  form={form}
-                  fieldRoot="video_creator_input"
-                  selectedProject={selectedProject}
-                  title="AI 视频生成计划"
-                  promptField={promptComposer}
-                />
-              )}
-
               {isMontagePlan && (
                 <MontageCreationPanel
                   form={form}
@@ -729,7 +706,7 @@ export default function PlansPage() {
                 />
               )}
 
-              {!isVideoCreator(watchedType) && !isMontagePlan && <FormField control={form.control} name="watermark" render={({ field }) => (
+              {!isMontagePlan && <FormField control={form.control} name="watermark" render={({ field }) => (
                 <FormItem>
                   <button
                     type="button"

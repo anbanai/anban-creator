@@ -22,8 +22,6 @@ func TestManagedTaskStopHookRunsTaskGateForMainAgent(t *testing.T) {
 		script    string
 	}{
 		{name: "seednote", taskType: "seednote", agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
-		{name: "videocreator", taskType: "videocreator", agentType: "anban:videocreator", script: "videocreator-quality-gate.sh"},
-		{name: "videoeditor", taskType: "videoeditor", agentType: "anban:videoeditor", script: "videoeditor-quality-gate.sh"},
 	}
 
 	for _, tt := range tests {

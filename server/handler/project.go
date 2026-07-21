@@ -140,7 +140,7 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrProjectUpdateConflict) {
 		return Error(c, fiber.StatusConflict, "project reference changed concurrently; retry the update")
 	}
-	if errors.Is(err, service.ErrVideoModelUnavailable) || errors.Is(err, service.ErrProjectMontageDefaults) {
+	if errors.Is(err, service.ErrProjectMontageDefaults) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
@@ -189,8 +189,6 @@ type projectRequest struct {
 	InstructionsSet       bool                             `json:"-"`
 	EcommerceDefaults     *model.EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
 	MontageDefaults       *model.MontageDefaults           `json:"montage_defaults,omitempty"`
-	VideoDefaults         *model.VideoDefaults             `json:"video_defaults,omitempty"`
-	VideoModelPolicy      *model.VideoModelPolicy          `json:"video_model_policy,omitempty"`
 	// Config fields for platform-specific credentials.
 	WechatAppID            string `json:"wechat_app_id"`
 	WechatSecret           string `json:"wechat_secret"`
@@ -246,15 +244,6 @@ func (req *projectRequest) toProject() *model.Project {
 	if req.MontageDefaults != nil {
 		p.SetMontageDefaults(*req.MontageDefaults)
 		p.MontageDefaultsSet = true
-	}
-	if req.VideoDefaults != nil || req.VideoModelPolicy != nil {
-		if req.VideoDefaults != nil {
-			p.SetVideoDefaults(*req.VideoDefaults)
-		}
-		if req.VideoModelPolicy != nil {
-			p.SetVideoModelPolicy(*req.VideoModelPolicy)
-		}
-		p.VideoProfileSet = true
 	}
 	return p
 }
@@ -399,7 +388,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
-		if errors.Is(err, service.ErrVideoModelUnavailable) || errors.Is(err, service.ErrProjectMontageDefaults) {
+		if errors.Is(err, service.ErrProjectMontageDefaults) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")

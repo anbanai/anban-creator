@@ -11,7 +11,7 @@ import (
 func TestMaterializeHomeTemplateCopiesNestedStateAndSeedsOnlyMissingFiles(t *testing.T) {
 	templateRoot := canonicalTempDir(t)
 	homeRoot := canonicalTempDir(t)
-	skillPath := filepath.Join(".claude", "skills", "music-to-video", "SKILL.md")
+	skillPath := filepath.Join(".claude", "skills", "example", "SKILL.md")
 	pluginPath := filepath.Join(".claude", "plugins", "installed_plugins.json")
 	writeHomeTemplateFile(t, templateRoot, skillPath, "skill-v1", 0o444)
 	writeHomeTemplateFile(t, templateRoot, pluginPath, "image-plugin-state", 0o600)

@@ -25,11 +25,10 @@ import (
 )
 
 const (
-	maxTaskPromptCharacters         = 5120
-	maxGoalTextCharacters           = 4000
-	maxTaskResumeFiles              = maxAgentInputAttachments
-	maxTaskResumeFileBytes          = 25 * 1024 * 1024
-	maxVideoProductionArtifactBytes = 512 * 1024
+	maxTaskPromptCharacters = 5120
+	maxGoalTextCharacters   = 4000
+	maxTaskResumeFiles      = maxAgentInputAttachments
+	maxTaskResumeFileBytes  = 25 * 1024 * 1024
 )
 
 // TaskHandler handles task-related HTTP endpoints.
@@ -146,17 +145,13 @@ type createTaskRequest struct {
 	// fee, and selected modules only guide later image/vision MCP usage.
 	// ProductPhotos are server-owned storage URLs materialized into the agent
 	// workspace by the executor.
-	ProductPhotos            []string               `json:"product_photos,omitempty"`
-	SelectedModules          map[string]int         `json:"selected_modules,omitempty"`
-	TargetPlatform           string                 `json:"target_platform,omitempty"`
-	SellingPoints            string                 `json:"selling_points,omitempty"`
-	Language                 string                 `json:"language,omitempty"`
-	ProviderStrategyOverride string                 `json:"provider_strategy_override,omitempty"`
-	VideoCreatorConfig       *model.VideoTaskConfig `json:"video_creator_config,omitempty"`
-	VideoCreatorInput        *model.VideoInput      `json:"video_creator_input,omitempty"`
-	VideoEditorConfig        *model.VideoTaskConfig `json:"video_editor_config,omitempty"`
-	VideoEditorInput         *model.VideoInput      `json:"video_editor_input,omitempty"`
-	MontageInput             *model.MontageInput    `json:"montage_input,omitempty"`
+	ProductPhotos            []string            `json:"product_photos,omitempty"`
+	SelectedModules          map[string]int      `json:"selected_modules,omitempty"`
+	TargetPlatform           string              `json:"target_platform,omitempty"`
+	SellingPoints            string              `json:"selling_points,omitempty"`
+	Language                 string              `json:"language,omitempty"`
+	ProviderStrategyOverride string              `json:"provider_strategy_override,omitempty"`
+	MontageInput             *model.MontageInput `json:"montage_input,omitempty"`
 	// ExecutionTarget, when "local", routes non-Montage tasks to the caller's
 	// desktop local executor. Montage ignores this user input and resolves cloud
 	// vs local from server policy and runtime capability.
@@ -199,25 +194,6 @@ type bulkTasksResponse struct {
 	Results   []bulkTaskResult `json:"results"`
 }
 
-type videoProductionResponse struct {
-	TaskID         string                             `json:"task_id"`
-	ScenarioKey    string                             `json:"scenario_key,omitempty"`
-	ProductionMode string                             `json:"production_mode,omitempty"`
-	Artifacts      map[string]videoProductionArtifact `json:"artifacts"`
-	RetakeActions  []string                           `json:"retake_actions"`
-	NextActions    []string                           `json:"next_actions"`
-}
-
-type videoProductionArtifact struct {
-	Status     string         `json:"status"`
-	FileID     string         `json:"file_id,omitempty"`
-	FileName   string         `json:"file_name"`
-	URL        string         `json:"url,omitempty"`
-	Content    string         `json:"content,omitempty"`
-	ParsedJSON map[string]any `json:"parsed_json,omitempty"`
-	Error      string         `json:"error,omitempty"`
-}
-
 // Create handles POST /api/v1/tasks.
 func (h *TaskHandler) Create(c fiber.Ctx) error {
 	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
@@ -227,13 +203,6 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	if err := rejectLegacyVideoFields(c.Body()); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-	if err := validateSplitVideoTaskFields(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
@@ -345,11 +314,6 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 			return respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		rewriteFinalizedUploadURLSlice(req.ProductPhotos, rewrites)
-		rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput))
-		if err != nil {
-			return respondUploadSessionFinalizeError(c, h.logger, err)
-		}
-		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, req.VideoEditorConfig, req.VideoEditorInput)
 		if model.IsMontagePlatform(project.Platform) {
 			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
@@ -392,10 +356,6 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		Ecommerce:                ecommerceCfg,
-		VideoCreatorConfig:       req.VideoCreatorConfig,
-		VideoCreatorInput:        req.VideoCreatorInput,
-		VideoEditorConfig:        req.VideoEditorConfig,
-		VideoEditorInput:         req.VideoEditorInput,
 		MontageInput:             req.MontageInput,
 		ExecutionTarget:          req.ExecutionTarget,
 	})
@@ -407,7 +367,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
+		if errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
@@ -611,7 +571,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
 		h.logger.Error().Err(err).Str("task_id", id).Msg("clone task failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
+		if errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
@@ -1050,115 +1010,6 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to get task files")
 	}
 	return Success(c, files)
-}
-
-// GetVideoProduction handles GET /api/v1/tasks/:id/video-production.
-func (h *TaskHandler) GetVideoProduction(c fiber.Ctx) error {
-	id, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
-	}
-
-	task, err := h.verifyTaskOwnership(c, id)
-	if err != nil {
-		return nil
-	}
-	if !model.IsVideoCreatorPlatform(task.Type) {
-		return Error(c, fiber.StatusBadRequest, "task is not a video creator task")
-	}
-	files, err := h.service.GetFiles(c.Context(), id)
-	if err != nil {
-		h.logger.Error().Err(err).Str("task_id", id).Msg("get task files for video production failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to get task files")
-	}
-
-	filesByArtifact := videoProductionFilesByName(files)
-	artifacts := make(map[string]videoProductionArtifact, len(service.VideoProductionArtifactNames()))
-	for _, artifactName := range service.VideoProductionArtifactNames() {
-		file := filesByArtifact[artifactName]
-		if file == nil {
-			artifacts[artifactName] = videoProductionArtifact{
-				Status:   "missing",
-				FileName: artifactName,
-			}
-			continue
-		}
-		artifacts[artifactName] = h.readVideoProductionArtifact(c.Context(), file, artifactName)
-	}
-
-	cfg := task.VideoConfig.Data()
-	return Success(c, videoProductionResponse{
-		TaskID:         task.ID,
-		ScenarioKey:    cfg.ScenarioKey,
-		ProductionMode: cfg.ProductionMode,
-		Artifacts:      artifacts,
-		RetakeActions:  service.VideoRetakeActions(),
-		NextActions:    service.VideoNextActions(),
-	})
-}
-
-func videoProductionFilesByName(files []*model.TaskFile) map[string]*model.TaskFile {
-	result := map[string]*model.TaskFile{}
-	expected := map[string]bool{}
-	for _, name := range service.VideoProductionArtifactNames() {
-		expected[name] = true
-	}
-	for _, file := range files {
-		if file == nil {
-			continue
-		}
-		candidates := []string{
-			file.FileName,
-			file.FilePath,
-			filepath.Base(file.FilePath),
-		}
-		for _, candidate := range candidates {
-			clean := strings.TrimSpace(candidate)
-			if !expected[clean] || result[clean] != nil {
-				continue
-			}
-			result[clean] = file
-		}
-	}
-	return result
-}
-
-func (h *TaskHandler) readVideoProductionArtifact(ctx context.Context, file *model.TaskFile, artifactName string) videoProductionArtifact {
-	artifact := videoProductionArtifact{
-		Status:   "available",
-		FileID:   file.ID,
-		FileName: artifactName,
-		URL:      file.URL,
-	}
-	stream, _, err := h.service.GetFileStream(ctx, file.ID)
-	if err != nil {
-		artifact.Status = "error"
-		artifact.Error = "failed to read artifact"
-		return artifact
-	}
-	defer stream.Close()
-
-	data, err := io.ReadAll(io.LimitReader(stream, maxVideoProductionArtifactBytes+1))
-	if err != nil {
-		artifact.Status = "error"
-		artifact.Error = "failed to read artifact"
-		return artifact
-	}
-	if len(data) > maxVideoProductionArtifactBytes {
-		artifact.Content = string(data[:maxVideoProductionArtifactBytes])
-		artifact.Error = "artifact content truncated at 512KB"
-		return artifact
-	}
-	artifact.Content = string(data)
-	if strings.EqualFold(filepath.Ext(artifactName), ".json") {
-		var parsed map[string]any
-		if err := json.Unmarshal(data, &parsed); err != nil {
-			artifact.Error = "failed to parse JSON artifact"
-		} else {
-			artifact.ParsedJSON = parsed
-		}
-	}
-	return artifact
 }
 
 // Stream handles GET /api/v1/tasks/:id/stream — SSE endpoint for real-time progress.

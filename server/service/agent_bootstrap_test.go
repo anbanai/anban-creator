@@ -647,8 +647,8 @@ func TestBootstrapDownloadSigningValidatesFinalizedAsset(t *testing.T) {
 			createBootstrapAsset(t, repo, "victim-upload", "victim", DirectUploadPurposeAIEntryAttachment, "secret.png", 0)
 		}, source: bootstrapDownloadSource{URL: "https://bucket.oss-cn-x.aliyuncs.com/assets/users/victim/victim-upload/secret.png", AssertedKey: "assets/users/victim/victim-upload/secret.png", UploadID: "victim-upload", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}},
 		{name: "wrong purpose", seed: func() {
-			createBootstrapAsset(t, repo, "wrong-purpose", task.UserID, DirectUploadPurposeVideoReference, "video.mp4", 0)
-		}, source: bootstrapDownloadSource{URL: "https://bucket.oss-cn-x.aliyuncs.com/assets/users/user-1/wrong-purpose/video.mp4", UploadID: "wrong-purpose", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}},
+			createBootstrapAsset(t, repo, "wrong-purpose", task.UserID, DirectUploadPurposeDesignerReference, "image.png", 0)
+		}, source: bootstrapDownloadSource{URL: "https://bucket.oss-cn-x.aliyuncs.com/assets/users/user-1/wrong-purpose/image.png", UploadID: "wrong-purpose", AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment}}},
 		{name: "not finalized", seed: func() {
 			if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
 				ID: "still-pending", UserID: task.UserID, Purpose: DirectUploadPurposeAIEntryAttachment,

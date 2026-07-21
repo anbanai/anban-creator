@@ -13,7 +13,7 @@
 ## File Map
 
 - Modify `server/model/task.go`: immutable task SKU/quote/charge identity and terminal billing reason.
-- Modify `server/model/image.go` and video generation models: operation SKU/charge identity.
+- Modify media operation models: operation SKU/charge identity.
 - Modify `server/service/task.go`: atomic quote admission, task insertion, and charge.
 - Modify `server/service/plan.go` and scheduler: quote each execution at run admission.
 - Modify agent execution services: remove runtime wallet settlement and add terminal task reversal policy.
@@ -26,7 +26,7 @@
 **Files:**
 - Modify: `server/model/task.go`
 - Modify: `server/model/image.go`
-- Modify: relevant video generation models
+- Modify: relevant media operation models
 - Modify: `server/database/database.go`
 - Add: matching model tests
 

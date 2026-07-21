@@ -50,7 +50,7 @@ func newAgentCommand(stdout, stderr io.Writer, run runAgentFunc) *cli.Command {
 
 	return &cli.Command{
 		Name:           "anban",
-		Usage:          "Anban agent runner and local media tools",
+		Usage:          "Anban agent runner",
 		Writer:         stdout,
 		ErrWriter:      stderr,
 		ExitErrHandler: func(context.Context, *cli.Command, error) {},
@@ -60,7 +60,6 @@ func newAgentCommand(stdout, stderr io.Writer, run runAgentFunc) *cli.Command {
 		Commands: []*cli.Command{
 			newRunCommand(run),
 			newJobCommand(BootstrapJob, run),
-			newVideoCommand(stdout),
 		},
 	}
 }

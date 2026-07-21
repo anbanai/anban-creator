@@ -1,5 +1,5 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse, VideoProductionResponse, InputAttachment } from '@/types'
+import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment } from '@/types'
 
 export interface ResumeTaskRequest {
   prompt?: string
@@ -64,9 +64,6 @@ export const tasksApi = {
 
   files: (id: string) =>
     unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),
-
-  videoProduction: (id: string) =>
-    unwrap<VideoProductionResponse>(http.get(`/tasks/${id}/video-production`)),
 
   streamUrl: (id: string) => `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/tasks/${id}/stream`,
 

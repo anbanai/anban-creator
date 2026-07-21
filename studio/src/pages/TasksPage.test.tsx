@@ -128,15 +128,9 @@ vi.mock('@/lib/api', async () => {
             { id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
             { id: 'task.seednote.v1', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
             { id: 'task.ecommerce.v1', operation: 'task.ecommerce', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
-            { id: 'task.videocreator.v1', operation: 'task.videocreator', charge_policy: 'task_admission', price_credits: 8000, delivery: 'video_artifacts_verified' },
-            { id: 'task.videoeditor.v1', operation: 'task.videoeditor', charge_policy: 'task_admission', price_credits: 8000, delivery: 'video_artifacts_verified' },
             { id: 'task.montage.v1', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
           ],
         }),
-      },
-      videoCreator: {
-        ...actual.api.videoCreator,
-        estimate: vi.fn(),
       },
     },
   }
@@ -213,63 +207,6 @@ describe('TasksPage unified prompt composer', () => {
     expect(await screen.findByRole('alertdialog', { name: '放弃编辑？' })).toBeInTheDocument()
   })
 
-  it('keeps the latest prompt authoritative after switching to a video project', async () => {
-    vi.mocked(api.tasks.create).mockClear()
-    const videoProject = { ...fixtures.project, id: 'video-project', platform: 'videocreator', name: '视频项目' } as Project
-    vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project, videoProject])
-    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 100000, promotional: 0, debt: 0, balance: 100000 })
-    vi.mocked(api.tasks.create).mockResolvedValue({ ...fixtures.failedTask, id: 'video-task', type: 'videocreator', project_id: videoProject.id } as Task)
-    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
-
-    await screen.findByRole('dialog', { name: '新建任务' })
-    const prompt = screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')
-    fireEvent.change(prompt, { target: { value: '切换前的文章要求' } })
-    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
-    fireEvent.click(await screen.findByRole('option', { name: /视频项目/ }))
-    fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
-      target: { value: '切换后的视频要求' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '创建' }))
-
-    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
-      prompt: '切换后的视频要求',
-      video_creator_input: expect.objectContaining({ brief: '切换后的视频要求' }),
-    })))
-  })
-
-  it('accepts an uploaded prompt video as the video editor source', async () => {
-    vi.mocked(api.tasks.create).mockClear()
-    const videoEditorProject = { ...fixtures.project, id: 'video-editor-project', platform: 'videoeditor', name: '视频剪辑项目' } as Project
-    vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project, videoEditorProject])
-    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 100000, promotional: 0, debt: 0, balance: 100000 })
-    vi.mocked(api.tasks.create).mockResolvedValue({ ...fixtures.failedTask, id: 'video-editor-task', type: 'videoeditor', project_id: videoEditorProject.id } as Task)
-    uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
-      uploadId: `upload-${file.name}`,
-      key: `uploads/pending/user/${file.name}`,
-      publicUrl: '',
-      contentType: file.type,
-      size: file.size,
-    }))
-    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
-
-    await screen.findByRole('dialog', { name: '新建任务' })
-    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
-    fireEvent.click(await screen.findByRole('option', { name: /视频剪辑项目/ }))
-    const source = new File(['video'], 'source.mp4', { type: 'video/mp4' })
-    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [source] } })
-    await screen.findByRole('button', { name: '预览 source.mp4' })
-
-    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'videoeditor',
-      input_attachments: [expect.objectContaining({
-        type: 'video',
-        upload_id: 'upload-source.mp4',
-        key: 'uploads/pending/user/source.mp4',
-      })],
-    })))
-  })
 })
 
 describe('TasksPage URL-driven recovery filters', () => {

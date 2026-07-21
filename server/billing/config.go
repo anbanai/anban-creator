@@ -83,23 +83,12 @@ type ProductCatalog struct {
 }
 
 type SKUConfig struct {
-	ID           string        `yaml:"id" json:"id"`
-	Operation    string        `yaml:"operation" json:"operation"`
-	ChargePolicy string        `yaml:"charge_policy" json:"charge_policy"`
-	PriceCredits int64         `yaml:"price_credits" json:"price_credits"`
-	Route        string        `yaml:"route" json:"route,omitempty"`
-	Delivery     string        `yaml:"delivery" json:"delivery"`
-	Selectors    *SKUSelectors `yaml:"selectors" json:"selectors,omitempty"`
-}
-
-// SKUSelectors are immutable retail dimensions. They select a published
-// price; provider usage and provider-cost formulas never participate in SKU
-// resolution.
-type SKUSelectors struct {
-	ModelKey     string `yaml:"model_key" json:"model_key"`
-	Resolution   string `yaml:"resolution" json:"resolution"`
-	DurationTier string `yaml:"duration_tier" json:"duration_tier"`
-	InputMode    string `yaml:"input_mode" json:"input_mode"`
+	ID           string `yaml:"id" json:"id"`
+	Operation    string `yaml:"operation" json:"operation"`
+	ChargePolicy string `yaml:"charge_policy" json:"charge_policy"`
+	PriceCredits int64  `yaml:"price_credits" json:"price_credits"`
+	Route        string `yaml:"route" json:"route,omitempty"`
+	Delivery     string `yaml:"delivery" json:"delivery"`
 }
 
 type rawCostCatalog struct {
@@ -109,22 +98,21 @@ type rawCostCatalog struct {
 }
 
 type rawModelConfig struct {
-	PricingType        string                   `yaml:"pricing_type"`
-	Currency           string                   `yaml:"currency"`
-	Unit               int64                    `yaml:"unit"`
-	Input              decimalString            `yaml:"input"`
-	CacheReadInput     decimalString            `yaml:"cache_read_input"`
-	CacheCreationInput decimalString            `yaml:"cache_creation_input"`
-	Output             decimalString            `yaml:"output"`
-	TextInput          decimalString            `yaml:"text_input"`
-	TextCachedInput    decimalString            `yaml:"text_cached_input"`
-	ImageInput         decimalString            `yaml:"image_input"`
-	ImageCachedInput   decimalString            `yaml:"image_cached_input"`
-	ImageOutput        decimalString            `yaml:"image_output"`
-	Tiers              []rawCostTier            `yaml:"tiers"`
-	ResolutionPrices   map[string]decimalString `yaml:"resolution_prices"`
-	OperatorEvidence   string                   `yaml:"operator_evidence"`
-	EffectiveAt        string                   `yaml:"effective_at"`
+	PricingType        string        `yaml:"pricing_type"`
+	Currency           string        `yaml:"currency"`
+	Unit               int64         `yaml:"unit"`
+	Input              decimalString `yaml:"input"`
+	CacheReadInput     decimalString `yaml:"cache_read_input"`
+	CacheCreationInput decimalString `yaml:"cache_creation_input"`
+	Output             decimalString `yaml:"output"`
+	TextInput          decimalString `yaml:"text_input"`
+	TextCachedInput    decimalString `yaml:"text_cached_input"`
+	ImageInput         decimalString `yaml:"image_input"`
+	ImageCachedInput   decimalString `yaml:"image_cached_input"`
+	ImageOutput        decimalString `yaml:"image_output"`
+	Tiers              []rawCostTier `yaml:"tiers"`
+	OperatorEvidence   string        `yaml:"operator_evidence"`
+	EffectiveAt        string        `yaml:"effective_at"`
 }
 
 type rawCostTier struct {
@@ -152,7 +140,6 @@ type ModelCostConfig struct {
 	ImageCachedInput   MicroCNY
 	ImageOutput        MicroCNY
 	Tiers              []CostTier
-	ResolutionPrices   map[string]MicroCNY
 	OperatorEvidence   string
 	EffectiveAt        time.Time
 }
@@ -338,7 +325,6 @@ func validateBundle(bundle *Bundle) error {
 		operation    string
 		chargePolicy string
 		route        string
-		selectors    string
 	}
 	seenBillableIdentities := make(map[billableIdentity]string, len(bundle.Products.SKUs))
 	for index, sku := range bundle.Products.SKUs {
@@ -348,12 +334,6 @@ func validateBundle(bundle *Bundle) error {
 		sku.ChargePolicy = strings.TrimSpace(sku.ChargePolicy)
 		sku.Route = strings.TrimSpace(sku.Route)
 		sku.Delivery = strings.TrimSpace(sku.Delivery)
-		if sku.Selectors != nil {
-			sku.Selectors.ModelKey = strings.TrimSpace(sku.Selectors.ModelKey)
-			sku.Selectors.Resolution = strings.ToLower(strings.TrimSpace(sku.Selectors.Resolution))
-			sku.Selectors.DurationTier = strings.TrimSpace(sku.Selectors.DurationTier)
-			sku.Selectors.InputMode = strings.TrimSpace(sku.Selectors.InputMode)
-		}
 		bundle.Products.SKUs[index] = sku
 		if sku.ID == "" || sku.Operation == "" || sku.ChargePolicy == "" || sku.Delivery == "" {
 			return configError("products.yaml", field, errors.New("id, operation, charge_policy, and delivery are required"))
@@ -374,29 +354,10 @@ func validateBundle(bundle *Bundle) error {
 		default:
 			return configError("products.yaml", field+".charge_policy", fmt.Errorf("unsupported value %q", sku.ChargePolicy))
 		}
-		selectorIdentity := ""
-		if sku.Route == "video_generation" {
-			if sku.Operation != "mcp.generate_video" || sku.ChargePolicy != "accepted_task_operation" || sku.Delivery != "persisted_video" {
-				return configError("products.yaml", field, errors.New("video_generation requires operation mcp.generate_video, accepted_task_operation, and persisted_video delivery"))
-			}
-			if sku.Selectors == nil || sku.Selectors.ModelKey == "" || sku.Selectors.Resolution == "" || sku.Selectors.DurationTier == "" || sku.Selectors.InputMode == "" {
-				return configError("products.yaml", field+".selectors", errors.New("model_key, resolution, duration_tier, and input_mode are required for video_generation"))
-			}
-			if sku.Selectors.DurationTier != "1-5" && sku.Selectors.DurationTier != "6-10" && sku.Selectors.DurationTier != "11-15" {
-				return configError("products.yaml", field+".selectors.duration_tier", fmt.Errorf("unsupported value %q", sku.Selectors.DurationTier))
-			}
-			if sku.Selectors.InputMode != "no_input" && sku.Selectors.InputMode != "media_input" {
-				return configError("products.yaml", field+".selectors.input_mode", fmt.Errorf("unsupported value %q", sku.Selectors.InputMode))
-			}
-			selectorIdentity = strings.Join([]string{sku.Selectors.ModelKey, sku.Selectors.Resolution, sku.Selectors.DurationTier, sku.Selectors.InputMode}, "\x00")
-		} else if sku.Selectors != nil {
-			return configError("products.yaml", field+".selectors", errors.New("selectors are only supported for video_generation"))
-		}
 		identity := billableIdentity{
 			operation:    sku.Operation,
 			chargePolicy: sku.ChargePolicy,
 			route:        sku.Route,
-			selectors:    selectorIdentity,
 		}
 		if existingID, exists := seenBillableIdentities[identity]; exists {
 			return configError("products.yaml", field, fmt.Errorf("SKU %q duplicates billable identity of %q", sku.ID, existingID))
@@ -496,14 +457,14 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 		}
 		switch pricingType {
 		case "token":
-			if rawModel.Unit <= 0 || rawModel.Input == "" || rawModel.CacheReadInput == "" || rawModel.CacheCreationInput == "" || rawModel.Output == "" || len(rawModel.Tiers) != 0 || len(rawModel.ResolutionPrices) != 0 || rawModel.TextInput != "" || rawModel.TextCachedInput != "" || rawModel.ImageInput != "" || rawModel.ImageCachedInput != "" || rawModel.ImageOutput != "" {
+			if rawModel.Unit <= 0 || rawModel.Input == "" || rawModel.CacheReadInput == "" || rawModel.CacheCreationInput == "" || rawModel.Output == "" || len(rawModel.Tiers) != 0 || rawModel.TextInput != "" || rawModel.TextCachedInput != "" || rawModel.ImageInput != "" || rawModel.ImageCachedInput != "" || rawModel.ImageOutput != "" {
 				return costs, configError("costs.yaml", field, errors.New("token pricing requires positive unit and input, cache_read_input, cache_creation_input, and output prices and forbids tiers"))
 			}
 			if model.Input <= 0 || model.CacheReadInput <= 0 || model.CacheCreationInput <= 0 || model.Output <= 0 {
 				return costs, configError("costs.yaml", field, errors.New("token prices must be positive"))
 			}
 		case "output_pixel_tier":
-			if len(rawModel.Tiers) == 0 || rawModel.Unit != 0 || rawModel.Input != "" || rawModel.Output != "" || rawModel.CacheReadInput != "" || rawModel.CacheCreationInput != "" || len(rawModel.ResolutionPrices) != 0 || rawModel.TextInput != "" || rawModel.TextCachedInput != "" || rawModel.ImageInput != "" || rawModel.ImageCachedInput != "" || rawModel.ImageOutput != "" {
+			if len(rawModel.Tiers) == 0 || rawModel.Unit != 0 || rawModel.Input != "" || rawModel.Output != "" || rawModel.CacheReadInput != "" || rawModel.CacheCreationInput != "" || rawModel.TextInput != "" || rawModel.TextCachedInput != "" || rawModel.ImageInput != "" || rawModel.ImageCachedInput != "" || rawModel.ImageOutput != "" {
 				return costs, configError("costs.yaml", field, errors.New("output_pixel_tier pricing requires tiers and forbids token fields"))
 			}
 			var previousMaxPixels int64
@@ -535,27 +496,11 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 				model.Tiers = append(model.Tiers, CostTier{MaxPixels: rawTier.MaxPixels, Price: parsed})
 			}
 		case "openai_image_usage":
-			if rawModel.Unit <= 0 || rawModel.TextInput == "" || rawModel.TextCachedInput == "" || rawModel.ImageInput == "" || rawModel.ImageCachedInput == "" || rawModel.ImageOutput == "" || rawModel.Input != "" || rawModel.CacheReadInput != "" || rawModel.CacheCreationInput != "" || rawModel.Output != "" || len(rawModel.Tiers) != 0 || len(rawModel.ResolutionPrices) != 0 {
-				return costs, configError("costs.yaml", field, errors.New("openai_image_usage pricing requires positive unit and all five image usage prices and forbids token, tier, and resolution fields"))
+			if rawModel.Unit <= 0 || rawModel.TextInput == "" || rawModel.TextCachedInput == "" || rawModel.ImageInput == "" || rawModel.ImageCachedInput == "" || rawModel.ImageOutput == "" || rawModel.Input != "" || rawModel.CacheReadInput != "" || rawModel.CacheCreationInput != "" || rawModel.Output != "" || len(rawModel.Tiers) != 0 {
+				return costs, configError("costs.yaml", field, errors.New("openai_image_usage pricing requires positive unit and all five image usage prices and forbids token and tier fields"))
 			}
 			if model.TextInput <= 0 || model.TextCachedInput <= 0 || model.ImageInput <= 0 || model.ImageCachedInput <= 0 || model.ImageOutput <= 0 {
 				return costs, configError("costs.yaml", field, errors.New("openai image usage prices must be positive"))
-			}
-		case "video_output_seconds":
-			if len(rawModel.ResolutionPrices) == 0 || rawModel.Unit != 0 || rawModel.Input != "" || rawModel.CacheReadInput != "" || rawModel.CacheCreationInput != "" || rawModel.Output != "" || rawModel.TextInput != "" || rawModel.TextCachedInput != "" || rawModel.ImageInput != "" || rawModel.ImageCachedInput != "" || rawModel.ImageOutput != "" || len(rawModel.Tiers) != 0 {
-				return costs, configError("costs.yaml", field, errors.New("video_output_seconds pricing requires resolution_prices and forbids token and tier fields"))
-			}
-			model.ResolutionPrices = make(map[string]MicroCNY, len(rawModel.ResolutionPrices))
-			for rawResolution, rawPrice := range rawModel.ResolutionPrices {
-				resolution := strings.ToLower(strings.TrimSpace(rawResolution))
-				if resolution == "" || resolution != rawResolution {
-					return costs, configError("costs.yaml", field+".resolution_prices", errors.New("resolution keys must be canonical lowercase values"))
-				}
-				price, err := ParseMicroCNY(string(rawPrice))
-				if err != nil || price <= 0 {
-					return costs, configError("costs.yaml", field+".resolution_prices."+resolution, errors.New("price must be positive"))
-				}
-				model.ResolutionPrices[resolution] = price
 			}
 		default:
 			return costs, configError("costs.yaml", field+".pricing_type", fmt.Errorf("unsupported value %q", pricingType))

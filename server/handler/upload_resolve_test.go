@@ -318,13 +318,9 @@ func TestResolveAttachmentDownloadURLByOwner(t *testing.T) {
 	planID := uuid.NewString()
 	taskKey := "uploads/finalized/" + userID + "/task/input.png"
 	planKey := "uploads/finalized/" + userID + "/plan/reference.png"
-	videoKey := "uploads/finalized/" + userID + "/task/video.mp4"
-	configKey := "uploads/finalized/" + userID + "/task/config-reference.png"
 
-	task := &model.Task{ID: taskID, UserID: userID, Type: model.PlatformVideoCreator, Status: model.TaskStatusPending}
+	task := &model.Task{ID: taskID, UserID: userID, Type: model.PlatformArticle, Status: model.TaskStatusPending}
 	task.SetInputAttachments([]model.EntryAttachment{{Type: "image", Key: taskKey, URL: "/api/v1/files/" + taskKey}})
-	task.SetVideoInput(model.VideoInput{References: []model.VideoReferenceAsset{{Type: "video_url", URL: "https://owned.example.com/" + videoKey}, {Type: "image_url", URL: "https://external.example.com/public.png"}}})
-	task.SetVideoConfig(model.VideoTaskConfig{References: []model.VideoReferenceAsset{{Type: "image_url", URL: "/api/v1/files/" + configKey}}})
 	if err := repo.Tasks().Create(t.Context(), task); err != nil {
 		t.Fatal(err)
 	}
@@ -347,8 +343,6 @@ func TestResolveAttachmentDownloadURLByOwner(t *testing.T) {
 		wantKey    string
 	}{
 		{name: "task attachment key", payload: fmt.Sprintf(`{"key":%q,"owner_type":"task","owner_id":%q}`, taskKey, taskID), wantStatus: fiber.StatusOK, wantKey: taskKey},
-		{name: "task owned legacy video URL", payload: fmt.Sprintf(`{"key":%q,"owner_type":"task","owner_id":%q}`, videoKey, taskID), wantStatus: fiber.StatusOK, wantKey: videoKey},
-		{name: "task video config reference", payload: fmt.Sprintf(`{"key":%q,"owner_type":"task","owner_id":%q}`, configKey, taskID), wantStatus: fiber.StatusOK, wantKey: configKey},
 		{name: "plan key without attachment ignored", payload: fmt.Sprintf(`{"key":%q,"owner_type":"plan","owner_id":%q}`, planKey, planID), wantStatus: fiber.StatusForbidden},
 		{name: "unrelated key", payload: fmt.Sprintf(`{"key":"uploads/finalized/unrelated.png","owner_type":"task","owner_id":%q}`, taskID), wantStatus: fiber.StatusForbidden},
 		{name: "external URL key not accepted", payload: fmt.Sprintf(`{"key":"public.png","owner_type":"task","owner_id":%q}`, taskID), wantStatus: fiber.StatusForbidden},
@@ -394,9 +388,8 @@ func TestAttachmentAPIResponseEmitsOwnedKeysWithoutSigningOrMutation(t *testing.
 	store := &resolveDownloadStore{}
 	ownedKey := "uploads/finalized/user-1/owned.png"
 	externalURL := "https://external.example.com/public.png"
-	task := &model.Task{ID: "task-1", Type: model.PlatformVideoCreator}
+	task := &model.Task{ID: "task-1", Type: model.PlatformArticle}
 	task.SetInputAttachments([]model.EntryAttachment{{Type: "image", URL: "/api/v1/files/" + ownedKey}, {Type: "image", URL: externalURL}})
-	task.SetVideoInput(model.VideoInput{References: []model.VideoReferenceAsset{{Type: "image_url", URL: "/api/v1/files/" + ownedKey}}})
 	plan := &model.Plan{ID: "plan-1", Type: model.PlatformArticle}
 	plan.SetInputAttachments([]model.EntryAttachment{{Type: "image", URL: "/api/v1/files/" + ownedKey}, {Type: "image", URL: externalURL}})
 
@@ -429,9 +422,5 @@ func TestAttachmentAPIResponseEmitsOwnedKeysWithoutSigningOrMutation(t *testing.
 	planRaw, _ := json.Marshal(plan.InputAttachments.Data())
 	if strings.Contains(string(taskRaw), `"key"`) || strings.Contains(string(planRaw), `"key"`) || len(store.calls) != 0 {
 		t.Fatalf("serialization mutated models or signed URLs: task=%s plan=%s calls=%v", taskRaw, planRaw, store.calls)
-	}
-	videoRaw, _ := json.Marshal(taskResp["video_creator_input"])
-	if !strings.Contains(string(videoRaw), `"key":"`+ownedKey+`"`) {
-		t.Fatalf("video reference is not key-first: %s", videoRaw)
 	}
 }

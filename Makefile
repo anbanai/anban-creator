@@ -15,7 +15,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
         server-build server-run server-dev server-test git-sync-setup agent-reach-update humanizer-update \
-        agent-build-native plugin-binaries \
+        agent-build-native \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
         docker-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images
@@ -198,12 +198,6 @@ agent-build-native:
 	done
 	@echo "Agent native build complete: $(ARCHES)"
 
-# Build a fixed plugin-local anban binary into each plugin distribution.
-# Override PLUGIN_GOOS/PLUGIN_GOARCH when preparing a platform-specific plugin
-# package, e.g. `make plugin-binaries PLUGIN_GOOS=darwin PLUGIN_GOARCH=arm64`.
-plugin-binaries:
-	@PLUGIN_GOOS="$(PLUGIN_GOOS)" PLUGIN_GOARCH="$(PLUGIN_GOARCH)" scripts/build-plugin-binaries.sh
-
 # ---------------------------------------------------------------------------
 # Help
 # ---------------------------------------------------------------------------
@@ -249,4 +243,3 @@ help:
 	@echo ""
 	@echo "Desktop (Tauri) targets:"
 	@echo "  make agent-build-native - Build anban natively (desktop sidecar)"
-	@echo "  make plugin-binaries    - Bundle anban into claudecode/codex bin/"

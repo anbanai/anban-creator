@@ -212,7 +212,7 @@ func TestHandleExecutionPersistsPartialResultBeforeExecutorFailure(t *testing.T)
 	workDir := t.TempDir()
 	writeWorkspaceFile(t, workDir, "output/partial.md", "# partial result")
 	result := &agent.ExecutionResult{WorkDir: workDir, Model: "partial-model"}
-	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{}}
 	svc := NewTaskService(repo, &fakeTaskExecutor{
 		result: result,
 		err:    errors.New("executor failed after producing output"),
@@ -333,7 +333,7 @@ func TestHandleExecutionRemoteArtifactsSkipsHostWorkspaceUpload(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{}}
 	createRemoteTaskFile(t, repo, store, task.ID, "output/article.md", "text/markdown", "# remote article")
 	workDir := t.TempDir()
 	writeWorkspaceFile(t, workDir, "output/local-only.md", "# should not be uploaded by server")
@@ -393,7 +393,7 @@ func TestHandleExecutionRemoteSeednoteValidatesTaskFilesWithoutWorkDir(t *testin
 		t.Fatalf("create task: %v", err)
 	}
 
-	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{}}
 	for _, name := range seednoteCompletionArtifactNamesForTest(true, false) {
 		mimeType, body := DetectTaskFileMIME(name), "fixture"
 		if strings.HasSuffix(name, ".png") {
@@ -456,7 +456,7 @@ func TestHandleExecutionRemoteArticleApprovalReadsDraftFromTaskFiles(t *testing.
 		t.Fatalf("create task: %v", err)
 	}
 
-	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{}}
 	createRemoteTaskFile(t, repo, store, task.ID, "output/draft.json", "application/json", `{"articles":[{"title":"远端标题","content":"<p>远端正文</p>"}]}`)
 	pubSvc := NewPublishingService(repo, &logger)
 	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
@@ -511,7 +511,7 @@ func TestHandleExecutionRemoteArtifactsMergesRemoteProjectMemory(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{}}
+	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{}}
 	createRemoteTaskFile(t, repo, store, task.ID, "output/article.md", "text/markdown", "# remote article")
 	memoryArchive := mustRemoteMemoryArchive(t, map[string]string{
 		"MEMORY.md": "# Remote memory\n",
@@ -549,7 +549,7 @@ func TestHandleExecutionRemoteArtifactsMergesRemoteProjectMemory(t *testing.T) {
 	}
 }
 
-func createRemoteTaskFile(t *testing.T, repo repository.Repository, store *fakeAudioASRStorage, taskID, relPath, mimeType, body string) {
+func createRemoteTaskFile(t *testing.T, repo repository.Repository, store *fakeTaskStorage, taskID, relPath, mimeType, body string) {
 	t.Helper()
 	key := "uploads/test/" + taskID + "/" + relPath
 	if store.files == nil {

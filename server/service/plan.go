@@ -24,7 +24,6 @@ var (
 type PlanService struct {
 	repo            repository.Repository
 	logger          *zerolog.Logger
-	videoCatalog    VideoModelCatalog
 	referenceAssets *ReferenceAssetService
 }
 
@@ -33,24 +32,10 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 	return &PlanService{repo: repo, logger: logger}
 }
 
-func (s *PlanService) SetVideoCatalog(catalog VideoModelCatalog) {
-	if s == nil {
-		return
-	}
-	s.videoCatalog = catalog
-}
-
 func (s *PlanService) SetReferenceAssetService(referenceAssets *ReferenceAssetService) {
 	if s != nil {
 		s.referenceAssets = referenceAssets
 	}
-}
-
-func (s *PlanService) resolvedVideoCatalog() VideoModelCatalog {
-	if s != nil && s.videoCatalog != nil {
-		return s.videoCatalog
-	}
-	return VideoModelCatalog{}
 }
 
 // CreatePlanParams holds the inputs for PlanService.Create. Pointer-typed optional
@@ -79,8 +64,6 @@ type CreatePlanParams struct {
 	// non-nil honors explicit user choice.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	VideoCreatorConfig       *model.VideoTaskConfig
-	VideoCreatorInput        *model.VideoInput
 	MontageInput             *model.MontageInput
 	InputAttachments         []model.EntryAttachment
 }
@@ -130,11 +113,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		return nil, fmt.Errorf("plans are not supported for e-commerce projects: %w", ErrUnsupportedPlanPlatform)
 	case model.PlatformMoments:
 		return nil, fmt.Errorf("plans are not supported for moments projects: %w", ErrUnsupportedPlanPlatform)
-	case model.PlatformVideoEditor:
-		return nil, fmt.Errorf("plans are not supported for video editor projects: %w", ErrUnsupportedPlanPlatform)
-	}
-	if !model.IsVideoCreatorPlatform(project.Platform) && (p.VideoCreatorInput != nil || p.VideoCreatorConfig != nil) {
-		return nil, fmt.Errorf("%w: video_creator_input/video_creator_config can only be set on videocreator plans", ErrVideoTaskInput)
 	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(project.Platform) {
 		return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrMontageInput)
@@ -193,15 +171,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ArticleWithContentImages: &articleContent,
 	}
 	plan.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
-	if model.IsVideoCreatorPlatform(project.Platform) {
-		if p.VideoCreatorInput != nil {
-			plan.SetVideoInput(*p.VideoCreatorInput)
-		} else if p.VideoCreatorConfig != nil {
-			plan.SetVideoInput(videoInputFromTaskConfig(p.Prompt, p.VideoCreatorConfig))
-		} else if p.Prompt != "" {
-			plan.SetVideoInput(model.VideoInput{Brief: p.Prompt})
-		}
-	}
 	if model.IsMontagePlatform(project.Platform) && p.MontageInput != nil {
 		plan.SetMontageInput(*p.MontageInput)
 	}
@@ -247,7 +216,6 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
-//   - VideoCreatorInput: nil = leave unchanged; non-nil = update the user-authored creator intake
 //
 // ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
 // unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
@@ -265,8 +233,6 @@ type UpdatePlanParams struct {
 	HasTailImage             *bool
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	VideoCreatorConfig       *model.VideoTaskConfig
-	VideoCreatorInput        *model.VideoInput
 	MontageInput             *model.MontageInput
 	InputAttachments         *[]model.EntryAttachment
 }
@@ -357,25 +323,6 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 	}
 	if p.InputAttachments != nil {
 		plan.SetInputAttachments(cloneEntryAttachments(*p.InputAttachments))
-	}
-	if p.VideoCreatorInput != nil {
-		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
-		if err != nil {
-			return nil, fmt.Errorf("find project: %w", err)
-		}
-		if !model.IsVideoCreatorPlatform(project.Platform) {
-			return nil, fmt.Errorf("%w: video_creator_input can only be set on videocreator plans", ErrVideoTaskInput)
-		}
-		plan.SetVideoInput(*p.VideoCreatorInput)
-	} else if p.VideoCreatorConfig != nil {
-		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
-		if err != nil {
-			return nil, fmt.Errorf("find project: %w", err)
-		}
-		if !model.IsVideoCreatorPlatform(project.Platform) {
-			return nil, fmt.Errorf("%w: video_creator_config can only be set on videocreator plans", ErrVideoTaskInput)
-		}
-		plan.SetVideoInput(videoInputFromTaskConfig(plan.Prompt, p.VideoCreatorConfig))
 	}
 	if p.MontageInput != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)

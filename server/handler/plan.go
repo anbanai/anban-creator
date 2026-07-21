@@ -122,8 +122,6 @@ type createPlanRequest struct {
 	// (cover NOT mandatory). nil → fall back to plan model defaults (both on).
 	ArticleWithCover         *bool                   `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
-	VideoCreatorConfig       *model.VideoTaskConfig  `json:"video_creator_config,omitempty"`
-	VideoCreatorInput        *model.VideoInput       `json:"video_creator_input,omitempty"`
 	MontageInput             *model.MontageInput     `json:"montage_input,omitempty"`
 	InputAttachments         []model.EntryAttachment `json:"input_attachments,omitempty"`
 }
@@ -142,8 +140,6 @@ type updatePlanRequest struct {
 	HasTailImage             *bool                            `json:"has_tail_image,omitempty"`
 	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool                            `json:"article_with_content_images,omitempty"`
-	VideoCreatorConfig       *model.VideoTaskConfig           `json:"video_creator_config,omitempty"`
-	VideoCreatorInput        *model.VideoInput                `json:"video_creator_input,omitempty"`
 	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
 	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments,omitempty"`
 }
@@ -157,10 +153,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	if err := rejectPlanVideoFields(c.Body()); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
@@ -214,13 +206,8 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	}
 	req.InputAttachments = validatedAttachments
 	if h.repo != nil {
-		rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
-		if err != nil {
-			return respondUploadSessionFinalizeError(c, h.logger, err)
-		}
-		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			rewrites, err = finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
 				return respondUploadSessionFinalizeError(c, h.logger, err)
 			}
@@ -243,8 +230,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
-		VideoCreatorConfig:       req.VideoCreatorConfig,
-		VideoCreatorInput:        req.VideoCreatorInput,
 		MontageInput:             req.MontageInput,
 		InputAttachments:         req.InputAttachments,
 	})
@@ -253,7 +238,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
+		if errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
@@ -350,10 +335,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	if err := rejectPlanVideoFields(c.Body()); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
@@ -417,13 +398,8 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		req.InputAttachments = &validatedAttachments
 	}
 	if h.repo != nil {
-		rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeVideoReference, splitVideoReferenceURLs(req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil))
-		if err != nil {
-			return respondUploadSessionFinalizeError(c, h.logger, err)
-		}
-		rewriteFinalizedVideoReferenceURLs(rewrites, req.VideoCreatorConfig, req.VideoCreatorInput, nil, nil)
 		if model.IsMontagePlatform(existing.Type) {
-			rewrites, err = finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
+			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
 				return respondUploadSessionFinalizeError(c, h.logger, err)
 			}
@@ -445,8 +421,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
-		VideoCreatorConfig:       req.VideoCreatorConfig,
-		VideoCreatorInput:        req.VideoCreatorInput,
 		MontageInput:             req.MontageInput,
 		InputAttachments:         req.InputAttachments,
 	}
@@ -485,7 +459,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 			return Error(c, fiber.StatusConflict, "plan changed concurrently; please retry")
 		}
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
-		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
+		if errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")

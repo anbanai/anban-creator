@@ -84,32 +84,6 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "image_ratio", Label: "图片比例", Placeholder: "3:4（朋友圈默认）", Type: "select", Group: "advanced"},
 		},
 	},
-	PlatformVideoCreator: {
-		ID:                 PlatformVideoCreator,
-		Label:              "AI 视频生成",
-		BadgeVariant:       "default",
-		SupportsPublishing: false,
-		SupportsAutoFetch:  false,
-		DefaultImageRatio:  "9:16",
-		Fields: []PlatformFieldConfig{
-			{Key: "name", Label: "项目名称", Placeholder: "例如 咖啡杯带货视频", Required: true, Type: "text", Group: "basic"},
-			{Key: "instructions", Label: "项目定位", Placeholder: "例如 面向露营人群的短视频种草项目", Type: "textarea", Group: "basic"},
-			{Key: "keywords", Label: "关键词", Placeholder: "例如 短视频, 种草, 带货", Type: "textarea", Group: "advanced"},
-		},
-	},
-	PlatformVideoEditor: {
-		ID:                 PlatformVideoEditor,
-		Label:              "视频剪辑后期",
-		BadgeVariant:       "secondary",
-		SupportsPublishing: false,
-		SupportsAutoFetch:  false,
-		DefaultImageRatio:  "9:16",
-		Fields: []PlatformFieldConfig{
-			{Key: "name", Label: "项目名称", Placeholder: "例如 口播素材剪辑", Required: true, Type: "text", Group: "basic"},
-			{Key: "instructions", Label: "剪辑定位", Placeholder: "例如 去口癖、加字幕、适合小红书短视频", Type: "textarea", Group: "basic"},
-			{Key: "keywords", Label: "关键词", Placeholder: "例如 剪辑, 字幕, 口播", Type: "textarea", Group: "advanced"},
-		},
-	},
 }
 
 // GetPlatformConfig returns the config for a given platform, or nil if not found.
@@ -119,7 +93,7 @@ func GetPlatformConfig(platform string) *PlatformConfig {
 
 // GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-	order := []string{PlatformSeednote, PlatformMoments, PlatformArticle, PlatformEcommerce, PlatformVideoCreator, PlatformVideoEditor}
+	order := []string{PlatformSeednote, PlatformMoments, PlatformArticle, PlatformEcommerce}
 	configs := make([]*PlatformConfig, 0, len(order))
 	for _, key := range order {
 		if pc, ok := PlatformConfigs[key]; ok {

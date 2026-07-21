@@ -66,28 +66,10 @@ vi.mock('@/lib/api', async () => {
           skus: [
             { id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
             { id: 'task.seednote.v1', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.videocreator.v1', operation: 'task.videocreator', charge_policy: 'task_admission', price_credits: 8000, delivery: 'video_artifacts_verified' },
             { id: 'task.montage.v1', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
           ],
         }),
         wallet: vi.fn().mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 }),
-      },
-      videoCreator: {
-        ...actual.api.videoCreator,
-        estimate: vi.fn().mockResolvedValue({
-          available_models: [{ key: 'seedance-2.0-mini', display_name: 'Seedance Mini' }],
-          resolved_creator_config: {
-            purpose: 'planting',
-            model_key: 'seedance-2.0-mini',
-            resolution: '720p',
-            ratio: '9:16',
-            duration: 10,
-          },
-          estimated_credits: 2480,
-          balance: 200000,
-          min_balance: 0,
-          meets_min_balance: true,
-        }),
       },
     },
   }
@@ -183,86 +165,6 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(await screen.findByRole('option', { name: '公众号文章' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: '种草笔记' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
-  })
-
-  it('locks the project selector when editing a video plan because project changes are immutable', async () => {
-    vi.mocked(api.plans.list).mockResolvedValue({
-      items: [{
-        id: 'plan-video-1',
-        type: 'videocreator',
-        title: '视频计划',
-        description: '',
-        cron_expr: '0 9 * * 1',
-        prompt: '生成新品视频',
-        video_creator_input: { brief: '陈旧的嵌套 brief' },
-        status: 'active',
-        next_run_at: '2025-01-20T09:00:00Z',
-        project_id: 'video-project-1',
-        video_creator_config: {
-          purpose: 'planting',
-          model_key: 'seedance-2.0-mini',
-          resolution: '720p',
-          ratio: '9:16',
-          duration: 10,
-          references: [],
-        },
-        created_at: '2025-01-10T00:00:00Z',
-        updated_at: '2025-01-10T00:00:00Z',
-      }],
-      total: 1,
-    })
-    vi.mocked(api.projects.list).mockResolvedValue([{
-      id: 'video-project-1',
-      user_id: '1',
-      platform: 'videocreator',
-      name: '视频项目',
-      avatar_url: '',
-      profile_url: '',
-      instructions: '视频定位',
-      keywords: '',
-      visual_style: '',
-      writer: '',
-      theme: '',
-      author: '',
-      template_id: '',
-      image_ratio: '9:16',
-      video_defaults: {
-        purpose: 'planting',
-        model_key: 'seedance-2.0-mini',
-        resolution: '720p',
-        ratio: '9:16',
-        duration: 10,
-        watermark: false,
-        preflight: true,
-      },
-      video_model_policy: {
-        allowed_models: ['seedance-2.0-mini'],
-        default_model: 'seedance-2.0-mini',
-        max_resolution: '720p',
-        max_duration: 10,
-      },
-      max_concurrent_tasks: 2,
-      config: {},
-      status: 'active',
-      created_at: '2025-01-01T00:00:00Z',
-      updated_at: '2025-01-01T00:00:00Z',
-    }])
-
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-
-    const [projectSelector] = await screen.findAllByRole('combobox')
-    expect(projectSelector).toBeDisabled()
-
-    fireEvent.change(screen.getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
-      target: { value: '当前可见的视频计划要求' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith('plan-video-1', expect.objectContaining({
-      prompt: '当前可见的视频计划要求',
-      video_creator_input: expect.objectContaining({ brief: '当前可见的视频计划要求' }),
-    })))
   })
 
   it('highlights a plan addressed by the timeline highlight parameter', async () => {

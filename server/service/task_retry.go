@@ -91,24 +91,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	} else if attachments := cloneOriginalInputAttachments(src.InputAttachments.Data()); len(attachments) > 0 {
 		params.InputAttachments = attachments
 	}
-	if model.IsVideoCreatorPlatform(src.Type) {
-		input := src.VideoInput.Data()
-		if cloneParams.Prompt != nil {
-			input.Brief = prompt
-		}
-		config := src.VideoConfig.Data()
-		params.VideoCreatorInput = &input
-		params.FrozenVideoConfig = &config
-	}
-	if model.IsVideoEditorPlatform(src.Type) {
-		input := src.VideoInput.Data()
-		if cloneParams.Prompt != nil {
-			input.Brief = prompt
-		}
-		config := src.VideoConfig.Data()
-		params.VideoEditorInput = &input
-		params.FrozenVideoConfig = &config
-	}
 	if model.IsMontagePlatform(src.Type) {
 		input := src.MontageInput.Data()
 		if cloneParams.Prompt != nil {

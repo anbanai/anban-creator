@@ -1,9 +1,8 @@
-import type { VideoInput, VideoTaskConfig } from './video'
 import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 
-export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'montage'
+export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'montage'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection
@@ -85,12 +84,7 @@ export interface Task {
   project_snapshot?: ProjectSnapshot
   // E-commerce package config (only present for platform=ecommerce tasks).
   ecommerce?: EcommerceTaskConfig
-  video_creator_input?: VideoInput
-  video_creator_config?: VideoTaskConfig
-  video_editor_input?: VideoInput
-  video_editor_config?: VideoTaskConfig
   montage_input?: MontageInput
-  video_generation_id?: string
   billing_quote_id?: string
   billing_catalog_id?: string
   billing_sku_id?: string
@@ -204,10 +198,6 @@ export interface CreateTaskRequest {
   target_platform?: string
   selling_points?: string
   language?: string
-  video_creator_input?: VideoInput
-  video_creator_config?: VideoTaskConfig
-  video_editor_input?: VideoInput
-  video_editor_config?: VideoTaskConfig
   montage_input?: MontageInput
   // ''/'cloud' (default) → cloud execution; 'local' → claim by the desktop
   // local executor and run on the user's machine (enables ffmpeg/local-shell).

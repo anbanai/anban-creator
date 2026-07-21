@@ -15,7 +15,7 @@ func registerAgentFeedbackTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"task_id":       map[string]any{"type": "string", "description": "Task ID"},
-				"agent_name":    map[string]any{"type": "string", "description": "Agent name (designer, ecommerce, live-slicer, moments, montage, seednote, videocreator, videoeditor, or wechatarticle)"},
+				"agent_name":    map[string]any{"type": "string", "description": "Agent name (designer, ecommerce, live-slicer, moments, montage, seednote, or wechatarticle)"},
 				"scores":        map[string]any{"type": "string", "description": "JSON object with score dimensions, e.g. {\"quality\":8,\"completeness\":9,\"efficiency\":7}"},
 				"errors":        map[string]any{"type": "string", "description": "Errors encountered during execution (optional)"},
 				"optimizations": map[string]any{"type": "string", "description": "Optimization suggestions for future runs (optional)"},

@@ -133,37 +133,6 @@ model_routes:
           has_background: true
           has_compression: true
           watermark: false
-  video_generation:
-    provider: "volcengine_ark"
-    timeout: 10m
-    default_model: "seedance-2.0-mini"
-    model_catalog:
-      - key: "seedance-2.0"
-        display_name: "Doubao Seedance 2.0"
-        model: "doubao-seedance-2-0-260128"
-        supported_resolutions: ["480p", "720p", "1080p", "4k"]
-        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
-        min_duration: 1
-        max_duration: 15
-        supports_video_input: true
-        supports_4k: true
-      - key: "seedance-2.0-fast"
-        display_name: "Doubao Seedance 2.0 Fast"
-        model: "doubao-seedance-2-0-fast-260128"
-        supported_resolutions: ["480p", "720p"]
-        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
-        min_duration: 1
-        max_duration: 15
-        supports_video_input: true
-      - key: "seedance-2.0-mini"
-        display_name: "Doubao Seedance 2.0 Mini"
-        model: "doubao-seedance-2-0-mini-260615"
-        supported_resolutions: ["480p", "720p"]
-        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
-        min_duration: 1
-        max_duration: 15
-        supports_video_input: true
-
 # Montage 视频工作流配置。
 # 生产建议：
 # - 保持 enabled=true。

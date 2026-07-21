@@ -105,7 +105,6 @@ func (h *FileHandler) validatePendingFileAccess(c fiber.Ctx, userID, cleanKey st
 		service.DirectUploadPurposeProjectReference,
 		service.DirectUploadPurposeTaskReference,
 		service.DirectUploadPurposeEcommercePhoto,
-		service.DirectUploadPurposeVideoReference,
 		service.DirectUploadPurposeMontageAsset,
 		service.DirectUploadPurposeDesignerReference,
 		service.DirectUploadPurposeAIEntryAttachment,

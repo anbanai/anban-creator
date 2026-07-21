@@ -608,7 +608,7 @@ func TestPrepareDirectUploadCreatesPendingScopedSTSSession(t *testing.T) {
 		Now:              func() time.Time { return time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC) },
 	}, DirectUploadPrepareRequest{
 		UserID:      "user-1",
-		Purpose:     DirectUploadPurposeVideoReference,
+		Purpose:     DirectUploadPurposeMontageAsset,
 		Filename:    "test.MP4",
 		ContentType: "video/mp4",
 		Size:        42 * 1024 * 1024,
@@ -718,7 +718,7 @@ func TestPrepareDirectUploadInfersGenericContentTypeFromExtension(t *testing.T) 
 
 	result, err := PrepareDirectUpload(context.Background(), store, repo, cfg, DirectUploadPrepareRequest{
 		UserID:      "u",
-		Purpose:     DirectUploadPurposeVideoReference,
+		Purpose:     DirectUploadPurposeMontageAsset,
 		Filename:    "voice.m4a",
 		ContentType: "application/octet-stream",
 		Size:        1024,
@@ -760,7 +760,7 @@ func TestPrepareDirectUploadRejectsInvalidPurposeSizeAndMIME(t *testing.T) {
 	cases := []DirectUploadPrepareRequest{
 		{UserID: "u", Purpose: "bad", Filename: "a.png", ContentType: "image/png", Size: 1},
 		{UserID: "u", Purpose: DirectUploadPurposeProjectReference, Filename: "a.mp4", ContentType: "video/mp4", Size: 1},
-		{UserID: "u", Purpose: DirectUploadPurposeVideoReference, Filename: "a.mp4", ContentType: "video/mp4", Size: 51 * 1024 * 1024},
+		{UserID: "u", Purpose: DirectUploadPurposeMontageAsset, Filename: "a.mp4", ContentType: "video/mp4", Size: 51 * 1024 * 1024},
 		{UserID: "u", Purpose: DirectUploadPurposeAIEntryAttachment, Filename: "brief.exe", ContentType: "application/x-msdownload", Size: 1},
 		{UserID: "u", Purpose: DirectUploadPurposeAIEntryAttachment, Filename: "brief.pdf", ContentType: "application/pdf", Size: 26 * 1024 * 1024},
 	}
@@ -873,7 +873,7 @@ func TestFinalizeUploadSessionURLsRequiresRepositoryIdentity(t *testing.T) {
 	t.Run("owned staging URL finalizes and rewrites", func(t *testing.T) {
 		repo := newDirectUploadTestRepository(t)
 		session := &model.UploadSession{
-			ID: "url-session", UserID: "user-1", Purpose: DirectUploadPurposeVideoReference,
+			ID: "url-session", UserID: "user-1", Purpose: DirectUploadPurposeMontageAsset,
 			StagingKey: "uploads/pending/user-1/url-session/clip.mp4", FileName: "clip.mp4",
 			ContentType: "video/mp4", Size: 12, Status: model.UploadSessionPending, ExpiresAt: now.Add(time.Hour),
 		}
@@ -904,7 +904,7 @@ func TestFinalizeUploadSessionURLsRequiresRepositoryIdentity(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newDirectUploadTestRepository(t)
 			session := &model.UploadSession{
-				ID: "url-session", UserID: "user-1", Purpose: DirectUploadPurposeVideoReference,
+				ID: "url-session", UserID: "user-1", Purpose: DirectUploadPurposeMontageAsset,
 				StagingKey: "uploads/pending/user-1/url-session/clip.mp4", FileName: "clip.mp4",
 				ContentType: "video/mp4", Size: 12, Status: model.UploadSessionPending, ExpiresAt: now.Add(time.Hour),
 			}

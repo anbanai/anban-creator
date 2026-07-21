@@ -46,7 +46,6 @@ type Services struct {
 	AgentHandler             *handler.AgentHandler
 	BillingHandler           *handler.BillingHandler
 	BillingAdminHandler      *handler.BillingAdminHandler
-	VideoHandler             *handler.VideoHandler
 	ProjectHandler           *handler.ProjectHandler
 	TimelineHandler          *handler.TimelineHandler
 	APIKeyHandler            *handler.APIKeyHandler
@@ -325,7 +324,6 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/tasks/bulk-cancel", svc.TaskHandler.BulkCancel)
 		apiV1.Post("/tasks/bulk-clone", svc.TaskHandler.BulkClone)
 		apiV1.Post("/tasks/bulk-delete", svc.TaskHandler.BulkDelete)
-		apiV1.Get("/tasks/:id/video-production", svc.TaskHandler.GetVideoProduction)
 		apiV1.Get("/tasks/:id", svc.TaskHandler.GetByID)
 		if svc.SeednoteAnalyticsHandler != nil {
 			apiV1.Get("/tasks/:id/seednote-analytics", svc.SeednoteAnalyticsHandler.GetTaskAnalytics)
@@ -363,12 +361,6 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 	if svc.AIEntryHandler != nil {
 		apiV1.Post("/ai-entry/submit", svc.AIEntryHandler.Submit)
-	}
-
-	if svc.VideoHandler != nil {
-		apiV1.Get("/videocreator/models", svc.VideoHandler.Models)
-		apiV1.Get("/videocreator/playbooks", svc.VideoHandler.Playbooks)
-		apiV1.Post("/videocreator/estimate", svc.VideoHandler.Estimate)
 	}
 
 	// ---------------------------------------------------------------------------

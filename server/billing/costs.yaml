@@ -13,7 +13,6 @@ models:
     output: "30.00"
     operator_evidence: "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13"
     effective_at: "2026-07-13T00:00:00+08:00"
-
   volcengine_ark/doubao-seed-2-1-pro-260628:
     pricing_type: "token"
     currency: "CNY"
@@ -78,33 +77,4 @@ models:
     image_cached_input: "2.00"
     image_output: "30.00"
     operator_evidence: "pricing-snapshot:wangcai-openai:gpt-image-2-t-usage-prices:2026-07-13"
-    effective_at: "2026-07-13T00:00:00+08:00"
-
-  volcengine_ark/doubao-seedance-2-0-260128:
-    pricing_type: "video_output_seconds"
-    currency: "CNY"
-    resolution_prices:
-      480p: "0.462"
-      720p: "0.994"
-      1080p: "2.478"
-      4k: "5.054"
-    operator_evidence: "pricing-snapshot:volcengine-ark:seedance-no-input-output-second-prices:2026-07-13"
-    effective_at: "2026-07-13T00:00:00+08:00"
-
-  volcengine_ark/doubao-seedance-2-0-fast-260128:
-    pricing_type: "video_output_seconds"
-    currency: "CNY"
-    resolution_prices:
-      480p: "0.372"
-      720p: "0.800"
-    operator_evidence: "pricing-snapshot:volcengine-ark:seedance-no-input-output-second-prices:2026-07-13"
-    effective_at: "2026-07-13T00:00:00+08:00"
-
-  volcengine_ark/doubao-seedance-2-0-mini-260615:
-    pricing_type: "video_output_seconds"
-    currency: "CNY"
-    resolution_prices:
-      480p: "0.232"
-      720p: "0.496"
-    operator_evidence: "pricing-snapshot:volcengine-ark:seedance-no-input-output-second-prices:2026-07-13"
     effective_at: "2026-07-13T00:00:00+08:00"

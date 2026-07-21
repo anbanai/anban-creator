@@ -43,25 +43,6 @@ describe('ProjectsPage layout contracts', () => {
     expect(source).not.toContain("selectedPlatform !== 'seednote'")
   })
 
-  it('does not hardcode Seedance video model choices in the project form', () => {
-    const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
-
-    expect(source).toContain('api.videoCreator.models')
-    expect(source).toContain('videoModelDisplayName')
-    expect(source).not.toContain('model.display_name || model.key')
-    expect(source).not.toContain("allowed_models: ['seedance-2.0'")
-    expect(source).not.toContain('<SelectItem value="seedance-2.0"')
-    expect(source).not.toContain("['seedance-2.0', 'Seedance 2.0']")
-  })
-
-  it('keeps video project positioning in instructions instead of a visual style field', () => {
-    const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
-
-    expect(source).toContain("isVideoPlatform(values.platform) || values.platform === 'montage' ? undefined : values.visual_style")
-    expect(source).toContain('品牌定位、账号人设、产品基础信息、画面偏好、禁忌与长期要求')
-    expect(source).not.toContain('视频风格与禁忌')
-  })
-
   it('keeps project cards focused on creation readiness', () => {
     const cardSource = readFileSync(join(here, '../components/ProjectCard.tsx'), 'utf8')
     const pageSource = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')

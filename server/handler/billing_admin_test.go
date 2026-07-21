@@ -19,13 +19,13 @@ import (
 func TestBillingAdminReportsRequireAdminAuthAndExposeIntegerAccounting(t *testing.T) {
 	f := newBillingHandlerFixture(t)
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	identity, err := model.ProviderCostBaseIdentityKey(model.BillingProviderCostIdentityProviderRequest, "", "volcengine_ark", "seedance", "admin-report-cost")
+	identity, err := model.ProviderCostBaseIdentityKey(model.BillingProviderCostIdentityProviderRequest, "", "volcengine_ark", "doubao-seed-evolving", "admin-report-cost")
 	if err != nil {
 		t.Fatal(err)
 	}
 	event := &model.BillingProviderCostEvent{
 		ID: uuid.NewString(), EventKind: model.BillingProviderCostEventKindBase, IdentityKind: model.BillingProviderCostIdentityProviderRequest,
-		ProviderRequestID: "admin-report-cost", Provider: "volcengine_ark", Model: "seedance", CatalogID: "cost-v1",
+		ProviderRequestID: "admin-report-cost", Provider: "volcengine_ark", Model: "doubao-seed-evolving", CatalogID: "cost-v1",
 		IdempotencyScope: "admin-report-cost", IdempotencyKey: "admin-report-cost", BaseIdentityKey: &identity,
 		RequestFingerprint: strings.Repeat("a", 64), Source: model.BillingProviderCostSourceProviderResponse,
 		Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: 123_000,

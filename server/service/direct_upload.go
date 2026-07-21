@@ -26,7 +26,6 @@ const (
 	DirectUploadPurposeProjectReference  = "project_reference"
 	DirectUploadPurposeTaskReference     = "task_reference"
 	DirectUploadPurposeEcommercePhoto    = "ecommerce_product_photo"
-	DirectUploadPurposeVideoReference    = "video_reference"
 	DirectUploadPurposeMontageAsset      = "montage_asset"
 	DirectUploadPurposeDesignerReference = "designer_reference"
 	DirectUploadPurposeAIEntryAttachment = "ai_entry_attachment"
@@ -150,7 +149,6 @@ var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeTaskReference:     {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeEcommercePhoto:    {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeDesignerReference: {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
-	DirectUploadPurposeVideoReference:    {maxSize: 50 * 1024 * 1024, validate: isDirectUploadVideoReference},
 	DirectUploadPurposeMontageAsset:      {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeAIEntryAttachment: {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
 }
@@ -1029,15 +1027,6 @@ func ClassifyDirectUploadFile(contentType, ext string) string {
 
 func isDirectUploadImage(contentType, ext string) bool {
 	return directUploadFileKind(contentType, ext) == "image"
-}
-
-func isDirectUploadVideoReference(contentType, ext string) bool {
-	switch directUploadFileKind(contentType, ext) {
-	case "image", "audio", "video":
-		return true
-	default:
-		return false
-	}
 }
 
 func isDirectUploadAIEntryAttachment(contentType, ext string) bool {

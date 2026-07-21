@@ -80,8 +80,6 @@ Expected: FAIL because agent bodies do not yet share the contract.
 - Modify: `claudecode/agents/moments.md`
 - Modify: `claudecode/agents/montage.md`
 - Modify: `claudecode/agents/seednote.md`
-- Modify: `claudecode/agents/videocreator.md`
-- Modify: `claudecode/agents/videoeditor.md`
 - Modify: `claudecode/agents/wechatarticle.md`
 
 - [ ] **Step 1: Add the official permission mode**

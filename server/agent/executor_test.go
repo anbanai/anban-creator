@@ -362,8 +362,6 @@ func TestTaskTypeToAgent(t *testing.T) {
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},
-		{model.ScopeVideoCreator, "videocreator"},
-		{model.ScopeVideoEditor, "videoeditor"},
 		{"unknown", "seednote"},
 	}
 
@@ -372,38 +370,6 @@ func TestTaskTypeToAgent(t *testing.T) {
 			got := TaskTypeToAgent(tt.taskType)
 			if got != tt.want {
 				t.Errorf("TaskTypeToAgent(%q) = %q, want %q", tt.taskType, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestTaskToAgentRoutesSplitVideoTasks(t *testing.T) {
-	tests := []struct {
-		name string
-		task *model.Task
-		want string
-	}{
-		{
-			name: "video creator uses dedicated agent",
-			task: &model.Task{Type: model.ScopeVideoCreator},
-			want: "videocreator",
-		},
-		{
-			name: "video editor uses dedicated agent",
-			task: &model.Task{Type: model.ScopeVideoEditor},
-			want: "videoeditor",
-		},
-		{
-			name: "article unchanged",
-			task: &model.Task{Type: model.ScopeArticle},
-			want: "wechatarticle",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := TaskToAgent(tt.task); got != tt.want {
-				t.Fatalf("TaskToAgent() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -664,9 +630,6 @@ func TestBuildUserPrompt(t *testing.T) {
 				if strings.Contains(got, sub) {
 					t.Errorf("BuildUserPrompt() = %q, should NOT contain %q", got, sub)
 				}
-			}
-			if strings.Contains(got, "video") || strings.Contains(got, "Merge the generated images") {
-				t.Errorf("BuildUserPrompt() = %q, should not mention video generation", got)
 			}
 		})
 	}

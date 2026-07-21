@@ -1,8 +1,7 @@
-import type { VideoDefaults, VideoModelPolicy } from './video'
 import type { MontagePreferences } from './montage'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 
-export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'videocreator' | 'videoeditor' | 'montage'
+export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'montage'
 export type ProjectStatus = 'active' | 'archived'
 
 export interface ProjectConfig {
@@ -36,8 +35,6 @@ export interface Project {
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults
-  video_defaults?: VideoDefaults
-  video_model_policy?: VideoModelPolicy
   max_concurrent_tasks: number
   config: ProjectConfig
   status: ProjectStatus
@@ -93,8 +90,6 @@ export interface CreateProjectRequest {
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults
-  video_defaults?: VideoDefaults
-  video_model_policy?: VideoModelPolicy
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string

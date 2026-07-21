@@ -1,4 +1,4 @@
-import { BookOpen, Clapperboard, MessageCircle, Scissors, ShoppingBag, Signature, Video } from 'lucide-react'
+import { BookOpen, Clapperboard, MessageCircle, ShoppingBag, Signature } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { TaskType } from '@/types'
 
@@ -8,8 +8,6 @@ export const platformIcon: Record<TaskType, LucideIcon> = {
   moments: MessageCircle,
   ecommerce: ShoppingBag,
   viral_analysis: BookOpen,
-  videocreator: Video,
-  videoeditor: Scissors,
   montage: Clapperboard,
 }
 
@@ -19,8 +17,6 @@ export const platformIconColor: Record<TaskType, string> = {
   moments: 'text-[#2F855A]',
   ecommerce: 'text-[#FF6A00]',
   viral_analysis: 'text-[#7C3AED]',
-  videocreator: 'text-[#2563EB]',
-  videoeditor: 'text-[#0F766E]',
   montage: 'text-[#9333EA]',
 }
 
@@ -30,8 +26,6 @@ export const platformBorderColor: Record<string, string> = {
   moments: 'border-l-[#2F855A]',
   ecommerce: 'border-l-[#FF6A00]',
   viral_analysis: 'border-l-[#7C3AED]',
-  videocreator: 'border-l-[#2563EB]',
-  videoeditor: 'border-l-[#0F766E]',
   montage: 'border-l-[#9333EA]',
 }
 
@@ -41,8 +35,6 @@ export const platformHoverBorderColor: Record<string, string> = {
   moments: 'hover:border-l-[#2F855A]/50',
   ecommerce: 'hover:border-l-[#FF6A00]/50',
   viral_analysis: 'hover:border-l-[#7C3AED]/50',
-  videocreator: 'hover:border-l-[#2563EB]/50',
-  videoeditor: 'hover:border-l-[#0F766E]/50',
   montage: 'hover:border-l-[#9333EA]/50',
 }
 
@@ -52,8 +44,6 @@ export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'des
   moments: 'secondary',
   ecommerce: 'default',
   viral_analysis: 'outline',
-  videocreator: 'outline',
-  videoeditor: 'secondary',
   montage: 'outline',
 }
 
@@ -63,8 +53,6 @@ export const platformBgColor: Record<string, string> = {
   moments: 'bg-[#2F855A]/10',
   ecommerce: 'bg-[#FF6A00]/10',
   viral_analysis: 'bg-[#7C3AED]/10',
-  videocreator: 'bg-[#2563EB]/10',
-  videoeditor: 'bg-[#0F766E]/10',
   montage: 'bg-[#9333EA]/10',
 }
 

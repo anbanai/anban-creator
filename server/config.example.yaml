@@ -131,37 +131,6 @@ model_routes:
           has_background: true
           has_compression: true
           watermark: false
-  video_generation:
-    provider: "volcengine_ark"
-    timeout: 10m
-    default_model: "seedance-2.0-mini"
-    model_catalog:
-      - key: "seedance-2.0"
-        display_name: "Doubao Seedance 2.0"
-        model: "doubao-seedance-2-0-260128"
-        supported_resolutions: ["480p", "720p", "1080p", "4k"]
-        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
-        min_duration: 1
-        max_duration: 15
-        supports_video_input: true
-        supports_4k: true
-      - key: "seedance-2.0-fast"
-        display_name: "Doubao Seedance 2.0 Fast"
-        model: "doubao-seedance-2-0-fast-260128"
-        supported_resolutions: ["480p", "720p"]
-        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
-        min_duration: 1
-        max_duration: 15
-        supports_video_input: true
-      - key: "seedance-2.0-mini"
-        display_name: "Doubao Seedance 2.0 Mini"
-        model: "doubao-seedance-2-0-mini-260615"
-        supported_resolutions: ["480p", "720p"]
-        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
-        min_duration: 1
-        max_duration: 15
-        supports_video_input: true
-
 # Montage 视频工作流配置。
 # 生产建议：
 # - 保持 enabled=true。
@@ -345,12 +314,6 @@ claude:
       ecommerce:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
-      videocreator:
-        requests: { cpu: "2", memory: "4Gi" }
-        limits: { cpu: "4", memory: "7Gi" }
-      videoeditor:
-        requests: { cpu: "2", memory: "4Gi" }
-        limits: { cpu: "4", memory: "7Gi" }
       montage:
         requests: { cpu: "2", memory: "4Gi" }
         limits: { cpu: "4", memory: "7Gi" }
@@ -360,8 +323,6 @@ claude:
     # 热门内容研究、多图生成与交付需要更完整的 Agent 工具调用预算。
     seednote: 100
     article: 60
-    videocreator: 80
-    videoeditor: 80
     ecommerce: 90
     # Montage pipeline 编排通常会调用多轮 MCP/文件登记，生产建议 90 起。
     montage: 90
@@ -382,12 +343,6 @@ email:
   from_name: "Anban 智能创作助手"
   code_ttl: 5m
   code_length: 6
-
-funasr:
-  base_url: "${ANBAN_FUNASR_BASE_URL}"
-  api_key: "${ANBAN_FUNASR_API_KEY}"
-  model: "fun-asr"
-  timeout: 10m
 
 seednote:
   base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://seednote:18060}"

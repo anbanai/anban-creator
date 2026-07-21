@@ -246,16 +246,16 @@ func TestBuildTaskWorkspacePVCUsesTaskIdentityAndNASStorageClass(t *testing.T) {
 func TestBuildKubernetesJobUsesTaskResourceProfile(t *testing.T) {
 	cfg := testJobConfig()
 	cfg.ResourceProfiles = map[string]srvconfig.KubernetesResourceConfig{
-		model.PlatformVideoCreator: {
+		model.PlatformArticle: {
 			Requests: map[string]string{"cpu": "2", "memory": "4Gi"},
 			Limits:   map[string]string{"cpu": "4", "memory": "7Gi"},
 		},
 	}
 	task := testTask()
-	task.Type = model.PlatformVideoCreator
+	task.Type = model.PlatformArticle
 	resources := buildKubernetesJob(cfg, testExecution(), task).Spec.Template.Spec.Containers[0].Resources
 	if resources.Requests.Cpu().String() != "2" || resources.Requests.Memory().String() != "4Gi" || resources.Limits.Cpu().String() != "4" || resources.Limits.Memory().String() != "7Gi" {
-		t.Fatalf("video resources = %#v, want task profile", resources)
+		t.Fatalf("article resources = %#v, want task profile", resources)
 	}
 
 	task.Type = "future-task"

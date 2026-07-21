@@ -7,10 +7,10 @@ import (
 )
 
 func TestPrepareFileUploadRejectsUnsupportedStorage(t *testing.T) {
-	store := &fakeAudioASRStorage{name: "local"}
+	store := &fakeTaskStorage{name: "local"}
 
 	_, err := PrepareFileUpload(context.Background(), store, FileUploadPrepareRequest{
-		Purpose:     FileUploadPurposeVideoAudio,
+		Purpose:     FileUploadPurposeLiveAudio,
 		Filename:    "take.wav",
 		ContentType: "audio/wav",
 	})
@@ -20,10 +20,10 @@ func TestPrepareFileUploadRejectsUnsupportedStorage(t *testing.T) {
 }
 
 func TestPrepareFileUploadRejectsNonAudioMIME(t *testing.T) {
-	store := &fakeAudioASRStorage{name: "oss"}
+	store := &fakeTaskStorage{name: "oss"}
 
 	_, err := PrepareFileUpload(context.Background(), store, FileUploadPrepareRequest{
-		Purpose:     FileUploadPurposeVideoAudio,
+		Purpose:     FileUploadPurposeLiveAudio,
 		Filename:    "take.png",
 		ContentType: "image/png",
 	})
@@ -33,7 +33,7 @@ func TestPrepareFileUploadRejectsNonAudioMIME(t *testing.T) {
 }
 
 func TestPrepareFileUploadAcceptsLiveAudioPurpose(t *testing.T) {
-	store := &fakeAudioASRStorage{name: "oss"}
+	store := &fakeTaskStorage{name: "oss"}
 
 	result, err := PrepareFileUpload(context.Background(), store, FileUploadPrepareRequest{
 		Purpose:     FileUploadPurposeLiveAudio,

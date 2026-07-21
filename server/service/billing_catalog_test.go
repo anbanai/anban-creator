@@ -156,30 +156,6 @@ func TestBillingCatalogParsesProductionAndResolvesExactRoute(t *testing.T) {
 	}
 }
 
-func TestBillingCatalogResolvesExactVideoSelectors(t *testing.T) {
-	bundle, err := billing.LoadBundle(filepath.Join("..", "billing"))
-	if err != nil {
-		t.Fatalf("LoadBundle: %v", err)
-	}
-	repo := newBillingServiceRepository(t)
-	svc := NewBillingCatalogService(repo, bundle, BillingCatalogOptions{})
-	if _, err := svc.Publish(context.Background()); err != nil {
-		t.Fatalf("Publish production catalog: %v", err)
-	}
-
-	sku, err := svc.ResolveVideoSKU(context.Background(), "", billing.SKUSelectors{
-		ModelKey: "seedance-2.0-mini", Resolution: "720P", DurationTier: "6-10", InputMode: "media_input",
-	})
-	if err != nil || sku.SKUID != "video.seedance-2-0-mini.720p.6-10.media-input.v1" || sku.PriceCredits != 19000 {
-		t.Fatalf("ResolveVideoSKU = %+v, %v", sku, err)
-	}
-	if _, err := svc.ResolveVideoSKU(context.Background(), "", billing.SKUSelectors{
-		ModelKey: "seedance-2.0-mini", Resolution: "1080p", DurationTier: "6-10", InputMode: "media_input",
-	}); !errors.Is(err, ErrBillingSKUNotFound) {
-		t.Fatalf("unsupported selector error = %v, want ErrBillingSKUNotFound", err)
-	}
-}
-
 func TestBillingCatalogQuoteReplayAndConflict(t *testing.T) {
 	ctx := context.Background()
 	repo := newBillingServiceRepository(t)

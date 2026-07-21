@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig, Template, TemplateType, VideoDefaults, VideoModelPolicy, VideoModelSpec } from '@/types'
+import type { Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig, Template, TemplateType } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ProjectCard } from '@/components/ProjectCard'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -35,9 +35,7 @@ import EmptyState from '@/components/EmptyState'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
 import { useImageModels } from '@/hooks/useImageModels'
-import { videoModelDisplayName } from '@/lib/video-display'
 import { createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
-import { isVideoCreator, isVideoPlatform } from '@/lib/video-platforms'
 import { MontageProjectDefaultsPanel } from '@/components/montage/MontageProjectDefaultsPanel'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 
@@ -46,8 +44,6 @@ const platformOptions = [
   { value: 'article', label: '公众号' },
   { value: 'moments', label: '朋友圈' },
   { value: 'ecommerce', label: '电商出图' },
-  { value: 'videocreator', label: 'AI 视频生成' },
-  { value: 'videoeditor', label: '视频剪辑后期' },
   { value: 'montage', label: 'Montage' },
 ]
 
@@ -88,30 +84,11 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
     asset_guidance: '',
     delivery_targets: [],
   },
-  video_defaults: {
-    purpose: 'planting',
-    model_key: '',
-    resolution: '720p',
-    ratio: '9:16',
-    duration: 15,
-    watermark: false,
-    preflight: true,
-  },
-  video_model_policy: {
-    allowed_models: [],
-    default_model: '',
-    allow_auto_downgrade: false,
-    max_resolution: '720p',
-    max_duration: 120,
-  },
   reference_image: null,
   image_ratio: '',
   enable_publishing: false,
   require_publish_approval: false,
 }
-
-const defaultVideoDefaults = CHANNEL_FORM_DEFAULTS.video_defaults!
-const defaultVideoPolicy = CHANNEL_FORM_DEFAULTS.video_model_policy!
 
 function projectPlatformFromIntent(type?: string): ProjectPlatform {
   switch (type) {
@@ -119,8 +96,6 @@ function projectPlatformFromIntent(type?: string): ProjectPlatform {
     case 'seednote':
     case 'moments':
     case 'ecommerce':
-    case 'videocreator':
-    case 'videoeditor':
     case 'montage':
       return type
     default:
@@ -128,19 +103,7 @@ function projectPlatformFromIntent(type?: string): ProjectPlatform {
   }
 }
 
-function projectToForm(ch: Project, configuredVideoModels: VideoModelSpec[] = []): ProjectFormValues {
-  const configuredKeys = new Set(configuredVideoModels.map((model) => model.key))
-  const videoDefaults = { ...defaultVideoDefaults, ...(ch.video_defaults || {}) }
-  const videoPolicy = { ...defaultVideoPolicy, ...(ch.video_model_policy || {}) }
-  if (configuredKeys.size > 0) {
-    if (videoDefaults.model_key && !configuredKeys.has(videoDefaults.model_key)) {
-      videoDefaults.model_key = ''
-    }
-    videoPolicy.allowed_models = (videoPolicy.allowed_models || []).filter((key) => configuredKeys.has(key))
-    if (videoPolicy.default_model && !configuredKeys.has(videoPolicy.default_model)) {
-      videoPolicy.default_model = ''
-    }
-  }
+function projectToForm(ch: Project): ProjectFormValues {
   return {
     platform: ch.platform,
     name: ch.name || '',
@@ -168,8 +131,6 @@ function projectToForm(ch: Project, configuredVideoModels: VideoModelSpec[] = []
       },
       delivery_targets: ch.montage_defaults?.delivery_targets || [],
     },
-    video_defaults: videoDefaults,
-    video_model_policy: videoPolicy,
     reference_image: ch.reference_image ?? null,
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
     enable_publishing: ch.config?.enable_publishing ?? false,
@@ -212,8 +173,6 @@ export default function ProjectsPage() {
   const isMoments = selectedPlatform === 'moments'
   const isEcommerce = selectedPlatform === 'ecommerce'
   const isMontage = selectedPlatform === 'montage'
-  const isVideo = isVideoPlatform(selectedPlatform)
-  const isVideoCreatorProject = isVideoCreator(selectedPlatform)
   const visualTemplateType: TemplateType | null = isWechat ? 'article' : isSeednote ? 'seednote' : isEcommerce ? 'ecommerce' : null
   const supportsVisualReference = !!visualTemplateType || isMoments
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
@@ -224,35 +183,6 @@ export default function ProjectsPage() {
   const themeValue = useWatch({ control: form.control, name: 'theme' })
   const ecommerceModules = useWatch({ control: form.control, name: 'ecommerce_default_selected_modules' })
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
-
-  const { data: videoModelsResponse, isLoading: videoModelsLoading } = useQuery({
-    queryKey: ['video-models'],
-    queryFn: () => api.videoCreator.models(),
-    staleTime: 60_000,
-  })
-  const configuredVideoModels = videoModelsResponse?.items ?? []
-  const configuredVideoModelKeys = useMemo(() => new Set(configuredVideoModels.map((model) => model.key)), [configuredVideoModels])
-  const defaultConfiguredVideoModel = configuredVideoModels[0]?.key || ''
-
-  useEffect(() => {
-    if (!isVideoCreatorProject || configuredVideoModels.length === 0) return
-    const currentDefaults: VideoDefaults = form.getValues('video_defaults') || {}
-    const currentPolicy: VideoModelPolicy = form.getValues('video_model_policy') || {}
-    const allowed = (currentPolicy.allowed_models || []).filter((key: string) => configuredVideoModelKeys.has(key))
-    const nextAllowed = allowed.length > 0 ? allowed : configuredVideoModels.map((model) => model.key)
-    const nextDefault = configuredVideoModelKeys.has(currentPolicy.default_model || '')
-      ? currentPolicy.default_model || ''
-      : (configuredVideoModelKeys.has(currentDefaults.model_key || '') ? currentDefaults.model_key || '' : defaultConfiguredVideoModel)
-    if (!currentDefaults.model_key || !configuredVideoModelKeys.has(currentDefaults.model_key)) {
-      form.setValue('video_defaults.model_key', nextDefault, { shouldDirty: false })
-    }
-    if (JSON.stringify(currentPolicy.allowed_models || []) !== JSON.stringify(nextAllowed)) {
-      form.setValue('video_model_policy.allowed_models', nextAllowed, { shouldDirty: false })
-    }
-    if (currentPolicy.default_model !== nextDefault) {
-      form.setValue('video_model_policy.default_model', nextDefault, { shouldDirty: false })
-    }
-  }, [isVideoCreatorProject, configuredVideoModels, configuredVideoModelKeys, defaultConfiguredVideoModel, form])
 
   const setEcommerceModuleQty = (key: string, qty: number) => {
     const cur = form.getValues('ecommerce_default_selected_modules') ?? {}
@@ -502,7 +432,7 @@ export default function ProjectsPage() {
     setProfileFetchHint(null)
     setReferenceAnalysisUrl('')
     setReferenceUploading(false)
-    form.reset(projectToForm(project, configuredVideoModels))
+    form.reset(projectToForm(project))
     skipAutoFetchRef.current = true
     setSelectedTemplate(null)
     setModalOpen(true)
@@ -563,7 +493,7 @@ export default function ProjectsPage() {
       avatar_url: values.avatar_url?.trim() || undefined,
       keywords: values.keywords?.trim() || undefined,
       instructions: values.instructions?.trim() || undefined,
-      visual_style: isVideoPlatform(values.platform) || values.platform === 'montage' ? undefined : values.visual_style?.trim() || undefined,
+      visual_style: values.platform === 'montage' ? undefined : values.visual_style?.trim() || undefined,
       writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
@@ -597,23 +527,6 @@ export default function ProjectsPage() {
         delivery_targets: values.montage_defaults?.delivery_targets || [],
       }
     }
-    if (isVideoCreator(values.platform)) {
-      const allowedModels = (values.video_model_policy?.allowed_models || []).filter((key) => configuredVideoModelKeys.has(key))
-      const modelKey = configuredVideoModelKeys.has(values.video_defaults?.model_key || '') ? values.video_defaults?.model_key : ''
-      const defaultModel = configuredVideoModelKeys.has(values.video_model_policy?.default_model || '')
-        ? values.video_model_policy?.default_model
-        : modelKey
-      payload.video_defaults = {
-        ...values.video_defaults,
-        model_key: modelKey,
-      }
-      payload.video_model_policy = {
-        ...values.video_model_policy,
-        allowed_models: allowedModels,
-        default_model: defaultModel,
-      }
-    }
-
     // Auto-set image_ratio based on platform if not specified
     if (!payload.image_ratio) {
       if (payload.platform === 'article') {
@@ -848,7 +761,7 @@ export default function ProjectsPage() {
                   <FormLabel>项目定位</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder={isVideo ? '例如 品牌定位、账号人设、产品基础信息、画面偏好、禁忌与长期要求' : '例如 面向开发者的实用 AI 教程'}
+                      placeholder="例如 面向开发者的实用 AI 教程"
                       {...field}
                     />
                   </FormControl>
@@ -998,7 +911,7 @@ export default function ProjectsPage() {
                 </div>
               )}
 
-              {!isVideo && !isMontage ? (
+              {!isMontage ? (
                 <FormField control={form.control} name="visual_style" render={({ field }) => (
                   <FormItem>
                     <FormLabel>视觉风格</FormLabel>
@@ -1120,160 +1033,6 @@ export default function ProjectsPage() {
                     )} />
                   </div>
                 </>
-              )}
-
-              {isVideoCreatorProject && (
-                <div className="space-y-3 rounded-lg border border-border p-3">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">视频生成默认配置</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">新建视频任务会读取这里的模型策略与参数默认值，任务和计划可覆盖但不会反写项目。</p>
-                    {!videoModelsLoading && configuredVideoModels.length === 0 && (
-                      <p className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-                        当前服务端没有配置可用视频模型，无法创建视频项目策略。
-                      </p>
-                    )}
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <FormField control={form.control} name="video_defaults.model_key" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>默认模型</FormLabel>
-                        <Select value={configuredVideoModelKeys.has(field.value || '') ? field.value : ''} onValueChange={(v) => {
-                          const next = v || ''
-                          field.onChange(next)
-                          form.setValue('video_model_policy.default_model', next, { shouldDirty: true })
-                        }}>
-                          <FormControl><SelectTrigger><SelectValue placeholder={videoModelsLoading ? '加载模型...' : '选择已配置模型'} /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            {configuredVideoModels.map((model) => (
-                              <SelectItem key={model.key} value={model.key} label={videoModelDisplayName(model)}>{videoModelDisplayName(model)}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_defaults.resolution" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>默认分辨率</FormLabel>
-                        <Select value={field.value || '720p'} onValueChange={field.onChange}>
-                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            <SelectItem value="480p">480p</SelectItem>
-                            <SelectItem value="720p">720p</SelectItem>
-                            <SelectItem value="1080p">1080p</SelectItem>
-                            <SelectItem value="4k">4K</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_defaults.ratio" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>默认比例</FormLabel>
-                        <Select value={field.value || '9:16'} onValueChange={field.onChange}>
-                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            <SelectItem value="9:16">9:16</SelectItem>
-                            <SelectItem value="16:9">16:9</SelectItem>
-                            <SelectItem value="1:1">1:1</SelectItem>
-                            <SelectItem value="4:3">4:3</SelectItem>
-                            <SelectItem value="3:4">3:4</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_defaults.duration" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>兜底目标时长（秒）</FormLabel>
-                        <FormControl>
-                          <Input type="number" min={1} max={600} value={field.value ?? 15} onChange={(e) => field.onChange(Number(e.target.value))} />
-                        </FormControl>
-                        <p className="text-xs text-muted-foreground">仅在用户未指定时长且无参考视频时使用；不会限制模型单段生成长度。</p>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_model_policy.max_resolution" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>最高分辨率</FormLabel>
-                        <Select value={field.value || '720p'} onValueChange={field.onChange}>
-                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            <SelectItem value="480p">480p</SelectItem>
-                            <SelectItem value="720p">720p</SelectItem>
-                            <SelectItem value="1080p">1080p</SelectItem>
-                            <SelectItem value="4k">4K</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_model_policy.max_duration" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>成片最高时长（秒）</FormLabel>
-                        <FormControl>
-                          <Input type="number" min={1} max={600} value={field.value ?? 120} onChange={(e) => field.onChange(Number(e.target.value))} />
-                        </FormControl>
-                        <p className="text-xs text-muted-foreground">服务端会按模型单段上限自动拆分镜头。</p>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  </div>
-                  <FormField control={form.control} name="video_model_policy.allowed_models" render={({ field }) => {
-                    const selected = new Set((field.value || []).filter((key) => configuredVideoModelKeys.has(key)))
-                    const toggle = (model: string) => {
-                      const next = new Set(selected)
-                      if (next.has(model)) {
-                        next.delete(model)
-                      } else {
-                        next.add(model)
-                      }
-                      field.onChange(Array.from(next))
-                    }
-                    return (
-                      <FormItem>
-                        <FormLabel>允许模型</FormLabel>
-                        <div className="flex flex-wrap gap-2">
-                          {configuredVideoModels.map((model) => (
-                            <Button
-                              key={model.key}
-                              type="button"
-                              variant={selected.has(model.key) ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => toggle(model.key)}
-                            >
-                              {videoModelDisplayName(model)}
-                            </Button>
-                          ))}
-                        </div>
-                        {configuredVideoModels.length === 0 && (
-                          <p className="text-xs text-muted-foreground">没有可选模型。请先在服务端配置视频模型 catalog。</p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )
-                  }} />
-                  <div className="flex flex-wrap items-center gap-4">
-                    <FormField control={form.control} name="video_defaults.watermark" render={({ field }) => (
-                      <FormItem className="flex items-center gap-2 space-y-0">
-                        <FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl>
-                        <FormLabel className="text-sm">水印</FormLabel>
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_defaults.preflight" render={({ field }) => (
-                      <FormItem className="flex items-center gap-2 space-y-0">
-                        <FormControl><Switch checked={field.value !== false} onCheckedChange={field.onChange} className="sr-only" /></FormControl>
-                        <FormLabel className="text-sm text-muted-foreground">创建前自动校验参数和费用</FormLabel>
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_model_policy.allow_auto_downgrade" render={({ field }) => (
-                      <FormItem className="flex items-center gap-2 space-y-0">
-                        <FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl>
-                        <FormLabel className="text-sm">参数不支持时自动降到可用分辨率</FormLabel>
-                      </FormItem>
-                    )} />
-                  </div>
-                </div>
               )}
 
               {isWechat && (

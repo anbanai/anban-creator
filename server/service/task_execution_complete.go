@@ -101,10 +101,6 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 		switch {
 		case model.IsMontagePlatform(task.Type):
 			validation = validateMontageCompletionArtifacts(files)
-		case model.IsVideoEditorPlatform(task.Type):
-			validation = validateVideoEditorCompletionArtifacts(files)
-		case model.IsVideoCreatorPlatform(task.Type):
-			validation, err = s.validateVideoCreatorCompletionArtifacts(ctx, task, files)
 		default:
 			validation = agent.ValidateTaskArtifactsFromTaskFiles(task, files)
 		}

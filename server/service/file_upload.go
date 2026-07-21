@@ -13,9 +13,8 @@ import (
 )
 
 const (
-	FileUploadPurposeVideoAudio = "video_audio"
-	FileUploadPurposeLiveAudio  = "live_audio"
-	defaultFileUploadURLTTL     = 24 * 3600
+	FileUploadPurposeLiveAudio = "live_audio"
+	defaultFileUploadURLTTL    = 24 * 3600
 )
 
 type fileUploadPurposePolicy struct {
@@ -24,8 +23,7 @@ type fileUploadPurposePolicy struct {
 }
 
 var fileUploadPurposePolicies = map[string]fileUploadPurposePolicy{
-	FileUploadPurposeVideoAudio: {keyPrefix: "uploads/video-audio/", validate: isAllowedAudioContentType},
-	FileUploadPurposeLiveAudio:  {keyPrefix: "uploads/live-audio/", validate: isAllowedAudioContentType},
+	FileUploadPurposeLiveAudio: {keyPrefix: "uploads/live-audio/", validate: isAllowedAudioContentType},
 }
 
 type PreparedFileUpload struct {

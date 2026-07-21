@@ -37,13 +37,6 @@ export interface BillingTransactions {
   limit: number
 }
 
-export interface BillingSKUSelectors {
-  model_key?: string
-  resolution?: string
-  duration_tier?: string
-  input_mode?: string
-}
-
 export interface BillingSKU {
   id: string
   operation: string
@@ -51,7 +44,6 @@ export interface BillingSKU {
   price_credits: number
   route?: string
   delivery: string
-  selectors?: BillingSKUSelectors
 }
 
 export interface BillingCatalog {

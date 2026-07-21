@@ -84,7 +84,7 @@ func TestUploadPrepareReturnsDirectUploadCredentials(t *testing.T) {
 	})
 	app.Post("/uploads/prepare", h.Prepare)
 
-	body := bytes.NewBufferString(`{"purpose":"video_reference","filename":"test.mp4","content_type":"video/mp4","size":1234}`)
+	body := bytes.NewBufferString(`{"purpose":"montage_asset","filename":"test.mp4","content_type":"video/mp4","size":1234}`)
 	req := httptest.NewRequest(http.MethodPost, "/uploads/prepare", body)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)

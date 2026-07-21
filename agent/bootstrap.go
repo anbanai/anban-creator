@@ -387,7 +387,7 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 
 func validBootstrapTaskType(taskType string) bool {
 	switch taskType {
-	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformVideoCreator, model.PlatformVideoEditor, model.PlatformMontage:
+	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage:
 		return true
 	default:
 		return false

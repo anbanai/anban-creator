@@ -203,11 +203,6 @@ func TestAgentDockerfileUsesOpenHandsAgentRuntime(t *testing.T) {
 		`"$AGENT_REACH_VENV/bin/agent-reach" --version`,
 		`ENV PATH="${AGENT_REACH_VENV}/bin:${PATH}"`,
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
-		"npx -y skills@latest add heygen-com/hyperframes",
-		"--skill music-to-video",
-		"--skill slideshow",
-		"npx -y skills@latest add remotion-dev/skills",
-		"--skill remotion-best-practices",
 		"claude plugin install --scope user anban@anbanai",
 	} {
 		if !strings.Contains(body, want) {
@@ -428,7 +423,7 @@ func TestDockerRuntimeAgentImageAndKubernetesJobAgreeOnNumericIdentity(t *testin
 	}
 	homeAt := strings.Index(body, "ENV HOME=/home/node")
 	userAt := strings.Index(body, "USER 1000:1000")
-	installAt := strings.Index(body, "npx -y skills@latest add")
+	installAt := strings.Index(body, "claude plugin install --scope user anban@anbanai")
 	if homeAt < 0 || userAt < homeAt || installAt < userAt {
 		t.Fatalf("HOME/numeric USER/install order is invalid: HOME=%d USER=%d install=%d", homeAt, userAt, installAt)
 	}
@@ -477,9 +472,6 @@ func TestDockerRuntimeAgentImageSnapshotsInstalledHomeState(t *testing.T) {
 		"ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template",
 		`printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"`,
 		`install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"`,
-		`for skill in music-to-video slideshow remotion-best-practices; do`,
-		`test -f "$HOME/.claude/skills/$skill/SKILL.md"`,
-		`cp -a "$HOME/.claude/skills/$skill/." "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill/"`,
 		`for file in known_marketplaces.json installed_plugins.json; do`,
 		`cp -a "$HOME/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"`,
 		`test -d "$HOME/.claude/plugins/cache/anbanai"`,
@@ -493,7 +485,7 @@ func TestDockerRuntimeAgentImageSnapshotsInstalledHomeState(t *testing.T) {
 		}
 	}
 	installAt := strings.Index(body, "claude plugin install --scope user anban@anbanai")
-	snapshotAt := strings.Index(body, `for skill in music-to-video slideshow remotion-best-practices; do`)
+	snapshotAt := strings.Index(body, `for file in known_marketplaces.json installed_plugins.json; do`)
 	if installAt < 0 || snapshotAt < installAt {
 		t.Fatalf("home snapshot must occur after all node-user plugin installation: install=%d snapshot=%d", installAt, snapshotAt)
 	}

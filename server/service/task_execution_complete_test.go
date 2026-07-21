@@ -535,7 +535,7 @@ func TestCloudPublishingAmbiguityNeverCallsProviderTwice(t *testing.T) {
 	if err := repo.TaskExecutions().Create(ctx, execution); err != nil {
 		t.Fatal(err)
 	}
-	store := &fakeAudioASRStorage{name: "oss", files: map[string][]byte{"draft-key": []byte(`{"articles":[{"title":"T","content":"<p>body</p>"}]}`)}}
+	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{"draft-key": []byte(`{"articles":[{"title":"T","content":"<p>body</p>"}]}`)}}
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/draft.json", FileName: "draft.json", FileSize: 50, OSSKey: "draft-key", StorageProvider: "oss"}); err != nil {
 		t.Fatal(err)
 	}

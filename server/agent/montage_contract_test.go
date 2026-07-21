@@ -190,17 +190,6 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 			t.Fatalf("claudecode montage agent missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{
-		"create_video_generation_job",
-		"validate_video_delivery",
-		"- video-use",
-		"skills/video-use/SKILL.md",
-	} {
-		if strings.Contains(claudeAgent, forbidden) {
-			t.Fatalf("claudecode montage agent must not reference existing video workflow %q", forbidden)
-		}
-	}
-
 	codexAgent := readRepoFile(t, filepath.Join(root, "codex", "agents", "montage.toml"))
 	for _, want := range []string{
 		`name = "montage"`,
@@ -256,7 +245,6 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 		"env_keys",
 		"delivery-manifest.json",
 		"third_party/OpenMontage",
-		"Do not call `create_video_generation_job`",
 		"Do not modify files under `third_party/OpenMontage`",
 	} {
 		if !strings.Contains(canonical, want) {

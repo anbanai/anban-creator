@@ -1,7 +1,5 @@
-import { VideoTaskConfigurationDetails } from '@/components/tasks/VideoTaskConfigurationDetails'
 import { Separator } from '@/components/ui/separator'
 import { contentTypeLabel } from '@/lib/labels'
-import { isVideoPlatform } from '@/lib/video-platforms'
 import { cn } from '@/lib/utils'
 import type { Project, Task } from '@/types'
 
@@ -114,12 +112,6 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
         <>
           <Separator />
           <EcommerceSnapshot task={task} project={project} hasSnapshot={hasSnapshot} />
-        </>
-      ) : null}
-      {isVideoPlatform(task.type) ? (
-        <>
-          <Separator />
-          <VideoTaskConfigurationDetails task={task} />
         </>
       ) : null}
     </div>

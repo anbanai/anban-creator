@@ -227,35 +227,6 @@ func TestBuildLocalExecutionConfigCarriesArticleImageSwitches(t *testing.T) {
 	}
 }
 
-func TestBuildLocalExecutionConfigRoutesSplitVideoAgents(t *testing.T) {
-	svc, _ := setupTaskServiceWithEnqueuer(t)
-	tests := []struct {
-		name string
-		task *model.Task
-		want string
-	}{
-		{
-			name: "creator",
-			task: &model.Task{ID: "task-video-creator-local", Type: model.PlatformVideoCreator, Prompt: "生成一条短视频"},
-			want: "anban:videocreator",
-		},
-		{
-			name: "editor",
-			task: &model.Task{ID: "task-video-editor-local", Type: model.PlatformVideoEditor, Prompt: "给素材加字幕并剪成短视频"},
-			want: "anban:videoeditor",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := svc.buildLocalExecutionConfig(tt.task)
-			if cfg.AgentFlag != tt.want {
-				t.Fatalf("AgentFlag = %q, want %s", cfg.AgentFlag, tt.want)
-			}
-		})
-	}
-}
-
 func TestBuildLocalExecutionConfigDefaultsArticleImageSwitchesOn(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
 	task := &model.Task{

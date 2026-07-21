@@ -37,8 +37,6 @@ export const taskTypeLabelCN: Record<string, string> = {
   moments: '朋友圈',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
-  videocreator: 'AI 视频生成',
-  videoeditor: '视频剪辑后期',
   montage: 'Montage',
 }
 
@@ -53,8 +51,6 @@ export const contentTypeLabel: Record<string, string> = {
   moments: '朋友圈',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
-  videocreator: 'AI 视频生成',
-  videoeditor: '视频剪辑后期',
   montage: 'Montage',
 }
 
@@ -91,8 +87,6 @@ export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
   { value: 'moments', label: '朋友圈' },
-  { value: 'videocreator', label: 'AI 视频生成' },
-  { value: 'videoeditor', label: '视频剪辑后期' },
   { value: 'montage', label: 'Montage' },
   { value: 'ecommerce', label: '电商出图' },
 ]
@@ -102,8 +96,6 @@ export const platformLabels: Record<string, string> = {
   article: '公众号',
   moments: '朋友圈',
   ecommerce: '电商出图',
-  videocreator: 'AI 视频生成',
-  videoeditor: '视频剪辑后期',
   montage: 'Montage',
 }
 
@@ -112,8 +104,6 @@ export const platformDefaultRatio: Record<string, string> = {
   seednote: '3:4',
   moments: '3:4',
   ecommerce: '1:1',
-  videocreator: '9:16',
-  videoeditor: '9:16',
   montage: '9:16',
 }
 

@@ -132,10 +132,7 @@ type Task struct {
 	// tasks. Read by the agent via get_project_profile(task_id, scope="ecommerce").
 	Ecommerce             datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
 	InputAttachments      datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
-	VideoInput            datatypes.JSONType[VideoInput]        `gorm:"type:json" json:"video_input"`
 	MontageInput          datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
-	VideoConfig           datatypes.JSONType[VideoTaskConfig]   `gorm:"type:json" json:"video_config"`
-	VideoGenerationID     string                                `gorm:"type:varchar(100);default:''" json:"video_generation_id,omitempty"`
 	ProgressLog           string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Progress              int                                   `gorm:"default:0" json:"progress,omitempty"`
 	LatestProgress        datatypes.JSONType[ProgressPayload]   `gorm:"type:json" json:"latest_progress"`
@@ -239,14 +236,6 @@ func (t *Task) SetEcommerce(ec EcommerceConfig) {
 
 func (t *Task) SetInputAttachments(attachments []EntryAttachment) {
 	t.InputAttachments = datatypes.NewJSONType(attachments)
-}
-
-func (t *Task) SetVideoConfig(vc VideoTaskConfig) {
-	t.VideoConfig = datatypes.NewJSONType(vc)
-}
-
-func (t *Task) SetVideoInput(input VideoInput) {
-	t.VideoInput = datatypes.NewJSONType(input)
 }
 
 // SetOverrides stores legacy per-task style/author/theme overrides.

@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -129,53 +128,5 @@ func TestTingWuConfigDoesNotRequireCredentialsWhenUnused(t *testing.T) {
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("validate without TingWu config: %v", err)
-	}
-}
-
-func TestFunASRConfigDoesNotRequireCredentialsWhenUnused(t *testing.T) {
-	cfg := &Config{
-		Database: DatabaseConfig{DSN: "root:pass@tcp(localhost:3306)/test"},
-		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   validClaudeConfigForTest(),
-	}
-	cfg.applyDefaults()
-
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("validate without FunASR config: %v", err)
-	}
-}
-
-func TestFunASRConfigRejectsPartialConfig(t *testing.T) {
-	cfg := &Config{
-		Database: DatabaseConfig{DSN: "root:pass@tcp(localhost:3306)/test"},
-		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   validClaudeConfigForTest(),
-		FunASR:   FunASRConfig{APIKey: "not-needed"},
-	}
-	cfg.applyDefaults()
-
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("expected partial FunASR config to fail validation")
-	}
-	if got := err.Error(); !strings.Contains(got, "funasr.base_url is required") || strings.Contains(got, "funasr.model is required") {
-		t.Fatalf("unexpected validation error: %s", got)
-	}
-}
-
-func TestFunASRConfigComplete(t *testing.T) {
-	cfg := &Config{
-		Database: DatabaseConfig{DSN: "root:pass@tcp(localhost:3306)/test"},
-		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   validClaudeConfigForTest(),
-		FunASR: FunASRConfig{
-			BaseURL: "https://workspace.cn-beijing.maas.aliyuncs.com",
-			APIKey:  "dashscope-key",
-		},
-	}
-	cfg.applyDefaults()
-
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("validate complete FunASR config: %v", err)
 	}
 }

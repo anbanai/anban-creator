@@ -204,19 +204,6 @@ model_routes:
           output_formats: [png, jpeg, webp]
           has_background: true
           has_compression: true
-  video_generation:
-    provider: volcengine_ark
-    timeout: 10m
-    default_model: seedance-2.0-mini
-    model_catalog:
-      - key: seedance-2.0-mini
-        display_name: Doubao Seedance 2.0 Mini
-        model: doubao-seedance-2-0-mini-260615
-        supported_resolutions: [480p, 720p]
-        supported_ratios: ["16:9", "9:16"]
-        min_duration: 1
-        max_duration: 15
-        supports_video_input: true
 image_presets:
   - key: openai-standard
     display_name: GPT Image 2
@@ -256,9 +243,6 @@ claude:
 	}
 	if cfg.ImageAPI.Cover == nil || cfg.ImageAPI.Cover.Provider != "volcengine" || cfg.ImageAPI.Cover.Model != "doubao-seedream-5-0-pro-260628" {
 		t.Fatalf("derived image cover config = %#v", cfg.ImageAPI.Cover)
-	}
-	if cfg.VideoAPI.Key != "ark-test" || len(cfg.VideoAPI.ModelCatalog) != 1 || cfg.VideoAPI.ModelCatalog[0].ModelID != "doubao-seedance-2-0-mini-260615" {
-		t.Fatalf("derived video api config = %#v", cfg.VideoAPI)
 	}
 	if len(cfg.ImagePresets) != 1 || cfg.ImagePresets[0].Provider != "openai" || cfg.ImagePresets[0].Endpoint != "http://18.141.196.64:18888/v1" || cfg.ImagePresets[0].APIKey != "wangcai-test" {
 		t.Fatalf("derived image preset route = %#v", cfg.ImagePresets)

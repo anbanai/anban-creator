@@ -288,13 +288,9 @@ func main() {
 	var referenceAssetSvc *service.ReferenceAssetService
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService()
-	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalog)
-
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
-		planSvc.SetVideoCatalog(videoCatalog)
 		projectSvc = service.NewProjectService(repo, log)
-		projectSvc.SetVideoCatalog(videoCatalog)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
 		templateSvc = service.NewTemplateService(repo, log)
@@ -319,7 +315,6 @@ func main() {
 		taskSvc.SetBillingWalletService(fixedBilling.Wallet)
 		taskSvc.SetBillingCatalogService(fixedBilling.Catalog)
 		taskSvc.SetProjectMemoryManager(memoryMgr)
-		taskSvc.SetVideoCatalog(videoCatalog)
 		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		// Wire executor defaults so local-executor claim responses carry the same
@@ -475,7 +470,6 @@ func main() {
 	var agentHandler *handler.AgentHandler
 	var projectHandler *handler.ProjectHandler
 	var timelineHandler *handler.TimelineHandler
-	var videoHandler *handler.VideoHandler
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
 	var uploadHandler *handler.UploadHandler
@@ -530,7 +524,6 @@ func main() {
 		projectHandler.SetSeednoteClient(seednoteClient)
 		projectHandler.SetSeednoteReadiness(seednoteMonitor)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
-		videoHandler = handler.NewVideoHandler(repo, videoCatalog, log)
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
@@ -596,8 +589,6 @@ func main() {
 	if projectSvc != nil && taskSvc != nil && planSvc != nil {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
-		var videoSvc *service.VideoService
-		var audioASRSvc *service.AudioASRService
 		var writingSvc *service.WritingService
 		var liveSliceSvc *service.LiveSliceService
 
@@ -605,23 +596,6 @@ func main() {
 			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, log)
 			if modelConfigSvc != nil {
 				imageSvc.SetModelConfigService(modelConfigSvc)
-			}
-		}
-		if cfg.VideoAPI.Key != "" {
-			videoSvc = service.NewVideoService(&cfg.VideoAPI)
-		} else {
-			log.Warn().Msg("video generation service not configured (set model_routes.video_generation provider/model_catalog), video tools unavailable")
-		}
-		if cfg.FunASR.Complete() {
-			var err error
-			audioASRSvc, err = service.NewAudioASRService(cfg.FunASR, store, log)
-			if err != nil {
-				log.Warn().Err(err).Msg("audio ASR service unavailable")
-			} else {
-				log.Info().
-					Bool("funasr_configured", cfg.FunASR.Complete()).
-					Bool("storage_configured", store != nil).
-					Msg("audio ASR service initialized")
 			}
 		}
 		if mysqlDB != nil && imageSvc != nil {
@@ -683,8 +657,6 @@ func main() {
 			ProviderCostSvc:      fixedBilling.Cost,
 			BillingCatalogSvc:    fixedBilling.Catalog,
 			GenerateImageTimeout: cfg.MCP.ToolTimeouts.GenerateImage,
-			VideoSvc:             videoSvc,
-			AudioASRSvc:          audioASRSvc,
 			WritingSvc:           writingSvc,
 			PublishingSvc:        publishingSvc,
 			WorkspaceSvc:         workspaceSvc,
@@ -695,7 +667,6 @@ func main() {
 			TopicPoolSvc:         topicPoolSvc,
 			AgentFeedbackSvc:     agentFeedbackSvc,
 			TingWuConfigured:     cfg.TingWu.Complete(),
-			FunASRConfigured:     cfg.FunASR.Complete(),
 		})
 		mcp.SetBillingServices(modelConfigSvc, cfg)
 		mcp.SetLogger(log)
@@ -703,7 +674,6 @@ func main() {
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
-			Bool("video_tools", videoSvc != nil).
 			Bool("writing_tools", writingSvc != nil).
 			Bool("live_slice_tools", liveSliceSvc != nil).
 			Bool("publishing_tools", publishingSvc != nil).
@@ -787,7 +757,6 @@ func main() {
 		AgentHandler:             agentHandler,
 		BillingHandler:           fixedBilling.Handler,
 		BillingAdminHandler:      fixedBilling.AdminHandler,
-		VideoHandler:             videoHandler,
 		TimelineHandler:          timelineHandler,
 		APIKeyHandler:            apiKeyHandler,
 		FileHandler:              fileHandler,

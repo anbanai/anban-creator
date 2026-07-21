@@ -146,7 +146,7 @@ Operational limits protect task stability and platform capacity; they are not mo
 - maximum Agent turns;
 - task retry count;
 - per-task image generation calls;
-- per-task video generation or segmentation calls;
+- per-task media operation calls;
 - image/video understanding calls;
 - provider timeout and output-size limits.
 

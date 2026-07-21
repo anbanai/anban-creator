@@ -248,6 +248,9 @@ func trackedFiles(t *testing.T, root string) []string {
 		if line == "" || line == "go.sum" {
 			continue
 		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(line))); os.IsNotExist(err) {
+			continue
+		}
 		out = append(out, filepath.FromSlash(line))
 	}
 	return out

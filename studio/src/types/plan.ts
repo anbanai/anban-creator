@@ -1,9 +1,8 @@
-import type { VideoInput, VideoTaskConfig } from './video'
 import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 
-export type PlanType = 'seednote' | 'article' | 'videocreator' | 'montage'
+export type PlanType = 'seednote' | 'article' | 'montage'
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
 export interface Plan {
@@ -30,8 +29,6 @@ export interface Plan {
   // toggleable. Both default true; spawned article tasks inherit them.
   article_with_cover?: boolean
   article_with_content_images?: boolean
-  video_creator_input?: VideoInput
-  video_creator_config?: VideoTaskConfig
   montage_input?: MontageInput
   created_at: string
   updated_at: string
@@ -56,8 +53,6 @@ export interface CreatePlanRequest {
   // toggleable; both default true. Server ignores for non-article plans.
   article_with_cover?: boolean
   article_with_content_images?: boolean
-  video_creator_input?: VideoInput
-  video_creator_config?: VideoTaskConfig
   montage_input?: MontageInput
 }
 
@@ -76,7 +71,5 @@ export interface UpdatePlanRequest {
   // Article image toggles (公众号文章): leave-unchanged when omitted.
   article_with_cover?: boolean
   article_with_content_images?: boolean
-  video_creator_input?: VideoInput
-  video_creator_config?: VideoTaskConfig
   montage_input?: MontageInput
 }

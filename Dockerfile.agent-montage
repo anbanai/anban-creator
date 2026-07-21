@@ -88,20 +88,6 @@ RUN set -eux; \
     install -d "$HOME/.config/yt-dlp"; \
     printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"
 
-RUN npx -y skills@latest add heygen-com/hyperframes \
-        --agent claude-code \
-        --skill music-to-video \
-        --skill slideshow \
-        --copy \
-        -g \
-        -y && \
-    npx -y skills@latest add remotion-dev/skills \
-        --agent claude-code \
-        --skill remotion-best-practices \
-        --copy \
-        -g \
-        -y
-
 RUN claude plugin marketplace add /anbanai && \
     claude plugin install --scope user anban@anbanai
 
@@ -109,11 +95,6 @@ USER root
 RUN set -eux; \
     install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp"; \
     install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"; \
-    for skill in music-to-video slideshow remotion-best-practices; do \
-      test -f "$HOME/.claude/skills/$skill/SKILL.md"; \
-      install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill"; \
-      cp -a "$HOME/.claude/skills/$skill/." "$ANBAN_HOME_TEMPLATE/.claude/skills/$skill/"; \
-    done; \
     for file in known_marketplaces.json installed_plugins.json; do \
       test -f "$HOME/.claude/plugins/$file"; \
       cp -a "$HOME/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"; \

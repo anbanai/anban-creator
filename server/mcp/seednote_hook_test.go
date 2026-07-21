@@ -123,22 +123,18 @@ func TestActiveRuntimeFeedbackScoresAreSerialized(t *testing.T) {
 	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
 	paths := []string{
 		"claudecode/agents/moments.md",
-		"claudecode/agents/videoeditor.md",
 		"claudecode/agents/seednote.md",
 		"claudecode/agents/live-slicer.md",
 		"claudecode/agents/ecommerce.md",
 		"claudecode/agents/designer.md",
 		"claudecode/agents/wechatarticle.md",
-		"claudecode/agents/videocreator.md",
 		"claudecode/agents/montage.md",
 		"codex/agents/moments.toml",
-		"codex/agents/videoeditor.toml",
 		"codex/agents/seednote.toml",
 		"codex/agents/live-slicer.toml",
 		"codex/agents/ecommerce.toml",
 		"codex/agents/designer.toml",
 		"codex/agents/wechatarticle.toml",
-		"codex/agents/videocreator.toml",
 		"codex/agents/montage.toml",
 	}
 	for _, relativePath := range paths {

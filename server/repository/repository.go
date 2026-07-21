@@ -29,7 +29,6 @@ type Repository interface {
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
-	VideoGenerations() VideoGenerationRepository
 	ImageGenerations() ImageGenerationRepository
 	AgentFeedbacks() AgentFeedbackRepository
 	IlinkBindings() IlinkBindingRepository
@@ -284,19 +283,6 @@ type AgentFeedbackRepository interface {
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.AgentFeedback, error)
 }
 
-// VideoGenerationRepository provides access to video_generations.
-type VideoGenerationRepository interface {
-	Create(ctx context.Context, gen *model.VideoGeneration) error
-	CreateSegment(ctx context.Context, segment *model.VideoGenerationSegment) error
-	FindByID(ctx context.Context, id string) (*model.VideoGeneration, error)
-	FindByArkTaskID(ctx context.Context, arkTaskID string) (*model.VideoGeneration, error)
-	FindSegmentByArkTaskID(ctx context.Context, arkTaskID string) (*model.VideoGenerationSegment, error)
-	FindLatestByTaskID(ctx context.Context, taskID string) (*model.VideoGeneration, error)
-	ListSegments(ctx context.Context, generationID string) ([]*model.VideoGenerationSegment, error)
-	Update(ctx context.Context, gen *model.VideoGeneration) error
-	UpdateSegment(ctx context.Context, segment *model.VideoGenerationSegment) error
-}
-
 type ImageGenerationRepository interface {
 	Create(ctx context.Context, generation *model.ImageGeneration) error
 	FindByID(ctx context.Context, id string) (*model.ImageGeneration, error)
@@ -327,7 +313,6 @@ type repository struct {
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
-	videoGenerations        VideoGenerationRepository
 	imageGenerations        ImageGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
@@ -355,7 +340,6 @@ func New(db *gorm.DB) Repository {
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
-	videoGenerations := newVideoGenerationRepository(db)
 	imageGenerations := newImageGenerationRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
 	ilinkBindings := newIlinkBindingRepository(db)
@@ -382,7 +366,6 @@ func New(db *gorm.DB) Repository {
 		viralAnalyses:           viralAnalyses,
 		posterTasks:             posterTasks,
 		topicPools:              topicPools,
-		videoGenerations:        videoGenerations,
 		imageGenerations:        imageGenerations,
 		agentFeedbacks:          agentFeedbacks,
 		ilinkBindings:           ilinkBindings,
@@ -412,10 +395,7 @@ func (r *repository) ViralAnalyses() ViralAnalysisRepository  { return r.viralAn
 func (r *repository) PosterTasks() PosterTaskRepository       { return r.posterTasks }
 func (r *repository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
-func (r *repository) TopicPools() TopicPoolRepository { return r.topicPools }
-func (r *repository) VideoGenerations() VideoGenerationRepository {
-	return r.videoGenerations
-}
+func (r *repository) TopicPools() TopicPoolRepository             { return r.topicPools }
 func (r *repository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
 
 func (r *repository) IlinkBindings() IlinkBindingRepository {
@@ -469,7 +449,6 @@ type txRepository struct {
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
-	videoGenerations        VideoGenerationRepository
 	imageGenerations        ImageGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
@@ -498,7 +477,6 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		viralAnalyses:           newViralAnalysisRepository(tx),
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
-		videoGenerations:        newVideoGenerationRepository(tx),
 		imageGenerations:        newImageGenerationRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
 		ilinkBindings:           newIlinkBindingRepository(tx),
@@ -528,10 +506,7 @@ func (r *txRepository) ViralAnalyses() ViralAnalysisRepository  { return r.viral
 func (r *txRepository) PosterTasks() PosterTaskRepository       { return r.posterTasks }
 func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
-func (r *txRepository) TopicPools() TopicPoolRepository { return r.topicPools }
-func (r *txRepository) VideoGenerations() VideoGenerationRepository {
-	return r.videoGenerations
-}
+func (r *txRepository) TopicPools() TopicPoolRepository             { return r.topicPools }
 func (r *txRepository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
 
 func (r *txRepository) IlinkBindings() IlinkBindingRepository {

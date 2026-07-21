@@ -28,7 +28,6 @@ type Config struct {
 	Storage            StorageConfig                   `yaml:"storage"`
 	MCP                MCPConfig                       `yaml:"mcp"`
 	ImageAPI           ImageAPIConfig                  `yaml:"image_api"`
-	VideoAPI           VideoAPIConfig                  `yaml:"video_api"`
 	Montage            MontageConfig                   `yaml:"montage"`
 	ImagePresets       []ImageModelPreset              `yaml:"image_presets"`
 	Writing            WritingConfig                   `yaml:"writing"`
@@ -40,7 +39,6 @@ type Config struct {
 	ImageUnderstanding UnderstandingRuntimeConfig      `yaml:"-"`
 	VideoUnderstanding VideoUnderstandingRuntimeConfig `yaml:"-"`
 	TingWu             TingWuConfig                    `yaml:"tingwu"`
-	FunASR             FunASRConfig                    `yaml:"funasr"`
 	Claude             ClaudeConfig                    `yaml:"claude"`
 	CORS               CORSConfig                      `yaml:"cors"`
 	Asynq              AsynqConfig                     `yaml:"asynq"`
@@ -200,31 +198,6 @@ type MCPConfig struct {
 
 type MCPToolTimeoutsConfig struct {
 	GenerateImage time.Duration `yaml:"generate_image"`
-}
-
-const DefaultVideoAPIBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
-
-// VideoAPIConfig holds global Volcengine Ark content-generation settings.
-// Business defaults live on Project.VideoDefaults/VideoModelPolicy so plans and
-// tasks can snapshot them.
-type VideoAPIConfig struct {
-	Key          string                   `yaml:"key"`
-	BaseURL      string                   `yaml:"base_url"`
-	Timeout      time.Duration            `yaml:"timeout"`
-	ModelCatalog []VideoModelCatalogEntry `yaml:"model_catalog"`
-}
-
-type VideoModelCatalogEntry struct {
-	Key                  string   `yaml:"key"`
-	DisplayName          string   `yaml:"display_name"`
-	Model                string   `yaml:"model"`
-	ModelID              string   `yaml:"model_id"`
-	SupportedResolutions []string `yaml:"supported_resolutions"`
-	SupportedRatios      []string `yaml:"supported_ratios"`
-	MinDuration          int64    `yaml:"min_duration"`
-	MaxDuration          int64    `yaml:"max_duration"`
-	SupportsVideoInput   bool     `yaml:"supports_video_input"`
-	Supports4K           bool     `yaml:"supports_4k"`
 }
 
 type MontageConfig struct {
@@ -426,19 +399,11 @@ type DesignerProviderCapabilities struct {
 	Watermark          bool     `yaml:"watermark" json:"watermark"`
 }
 
-type VideoGenerationRouteConfig struct {
-	Provider     string                   `yaml:"provider"`
-	Timeout      time.Duration            `yaml:"timeout"`
-	DefaultModel string                   `yaml:"default_model"`
-	ModelCatalog []VideoModelCatalogEntry `yaml:"model_catalog"`
-}
-
 type ModelRoutesConfig struct {
 	Writing            RouteConfig                   `yaml:"writing"`
 	ImageUnderstanding UnderstandingRouteConfig      `yaml:"image_understanding"`
 	VideoUnderstanding VideoUnderstandingRouteConfig `yaml:"video_understanding"`
 	ImageGeneration    ImageGenerationRoutesConfig   `yaml:"image_generation"`
-	VideoGeneration    VideoGenerationRouteConfig    `yaml:"video_generation"`
 }
 
 type UnderstandingRuntimeConfig struct {
@@ -619,27 +584,6 @@ func (c TingWuConfig) Complete() bool {
 		strings.TrimSpace(c.AppKey) != "" &&
 		strings.TrimSpace(c.AccessKey) != "" &&
 		strings.TrimSpace(c.AccessSecret) != ""
-}
-
-// FunASRConfig holds Aliyun Fun-ASR recorded speech HTTP configuration.
-type FunASRConfig struct {
-	BaseURL string        `yaml:"base_url"`
-	APIKey  string        `yaml:"api_key"`
-	Model   string        `yaml:"model"`
-	Timeout time.Duration `yaml:"timeout"`
-}
-
-// Empty reports whether no FunASR settings are configured.
-func (c FunASRConfig) Empty() bool {
-	return strings.TrimSpace(c.BaseURL) == "" &&
-		strings.TrimSpace(c.APIKey) == "" &&
-		strings.TrimSpace(c.Model) == ""
-}
-
-// Complete reports whether all required settings for Aliyun Fun-ASR HTTP calls exist.
-func (c FunASRConfig) Complete() bool {
-	return strings.TrimSpace(c.BaseURL) != "" &&
-		strings.TrimSpace(c.APIKey) != ""
 }
 
 // ClaudeConfig owns the direct provider contract for every Claude runtime.
@@ -885,8 +829,6 @@ func isKubernetesImageProfileTaskType(taskType string) bool {
 		model.PlatformSeednote,
 		model.PlatformMoments,
 		model.PlatformEcommerce,
-		model.PlatformVideoCreator,
-		model.PlatformVideoEditor,
 		model.PlatformMontage:
 		return true
 	default:
@@ -1040,7 +982,6 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"vision":    "model_routes.image_understanding and model_routes.video_understanding",
 		"writing":   "model_routes.writing",
 		"image_api": "model_routes.image_generation",
-		"video_api": "model_routes.video_generation",
 	}
 	for key, replacement := range deprecated {
 		if _, ok := top[key]; ok {
@@ -1062,7 +1003,6 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"model_routes":    true,
 		"billing_runtime": true,
 		"tingwu":          true,
-		"funasr":          true,
 		"claude":          true,
 		"cors":            true,
 		"asynq":           true,
@@ -1167,12 +1107,6 @@ func (c *Config) applyDefaults() {
 	if c.Memory.LockTTL == 0 {
 		c.Memory.LockTTL = time.Minute
 	}
-	if c.VideoAPI.BaseURL == "" {
-		c.VideoAPI.BaseURL = DefaultVideoAPIBaseURL
-	}
-	if c.VideoAPI.Timeout == 0 {
-		c.VideoAPI.Timeout = 10 * time.Minute
-	}
 	if c.MCP.ToolTimeouts.GenerateImage == 0 {
 		c.MCP.ToolTimeouts.GenerateImage = 10 * time.Minute
 	}
@@ -1220,10 +1154,6 @@ func (c *Config) applyDefaults() {
 	if c.Writing.Timeout == 0 {
 		c.Writing.Timeout = 10 * time.Minute
 	}
-	if c.FunASR.Timeout == 0 {
-		c.FunASR.Timeout = 10 * time.Minute
-	}
-
 	// Seednote sidecar defaults.
 	if c.Seednote.BaseURL == "" {
 		c.Seednote.BaseURL = "http://localhost:18060"
@@ -1258,8 +1188,6 @@ func (c *Config) applyDefaults() {
 		"viral_analysis": 30,
 		"seednote":       50,
 		"article":        60,
-		"videocreator":   80,
-		"videoeditor":    80,
 		"ecommerce":      90,
 	}
 	if c.Claude.MaxTurns == nil {
@@ -1404,21 +1332,6 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 	}
 	if err := c.resolveImagePresetRoutes(); err != nil {
 		return err
-	}
-	if c.ModelRoutes.VideoGeneration.Provider != "" || len(c.ModelRoutes.VideoGeneration.ModelCatalog) > 0 {
-		p, err := provider("model_routes.video_generation", c.ModelRoutes.VideoGeneration.Provider)
-		if err != nil {
-			return err
-		}
-		c.VideoAPI.Key = p.APIKey
-		c.VideoAPI.BaseURL = p.BaseURL
-		c.VideoAPI.Timeout = c.ModelRoutes.VideoGeneration.Timeout
-		c.VideoAPI.ModelCatalog = c.ModelRoutes.VideoGeneration.ModelCatalog
-		for i := range c.VideoAPI.ModelCatalog {
-			if c.VideoAPI.ModelCatalog[i].ModelID == "" {
-				c.VideoAPI.ModelCatalog[i].ModelID = c.VideoAPI.ModelCatalog[i].Model
-			}
-		}
 	}
 	return nil
 }
@@ -1713,15 +1626,6 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.TingWu.AccessSecret) == "" {
 			errs = append(errs, "tingwu.access_secret is required when any TingWu setting is configured")
-		}
-	}
-
-	if !c.FunASR.Empty() {
-		if strings.TrimSpace(c.FunASR.BaseURL) == "" {
-			errs = append(errs, "funasr.base_url is required when any FunASR setting is configured")
-		}
-		if strings.TrimSpace(c.FunASR.APIKey) == "" {
-			errs = append(errs, "funasr.api_key is required when any FunASR setting is configured")
 		}
 	}
 

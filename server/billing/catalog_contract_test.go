@@ -55,16 +55,13 @@ func TestProductionCostCatalogHasExactEvidencedProfiles(t *testing.T) {
 		output      MicroCNY
 	}
 	want := map[string]expectedCost{
-		"volcengine_ark/doubao-seed-evolving":            {"token", "CNY", 6_000_000, 1_200_000, 6_000_000, 30_000_000},
-		"volcengine_ark/doubao-seed-2-1-pro-260628":      {"token", "CNY", 6_000_000, 1_200_000, 6_000_000, 30_000_000},
-		"volcengine_ark/doubao-seed-2-1-turbo-260628":    {"token", "CNY", 3_000_000, 600_000, 3_000_000, 15_000_000},
-		"moonshot/kimi-k2.7-code":                        {"token", "USD", 950_000, 190_000, 950_000, 4_000_000},
-		"moonshot/kimi-k2.7-code-highspeed":              {"token", "USD", 1_900_000, 380_000, 1_900_000, 8_000_000},
-		"volcengine_ark/doubao-seedream-5-0-pro-260628":  {pricingType: "output_pixel_tier", currency: "CNY"},
-		"wangcai_openai/gpt-image-2-t":                   {pricingType: "openai_image_usage", currency: "USD"},
-		"volcengine_ark/doubao-seedance-2-0-260128":      {pricingType: "video_output_seconds", currency: "CNY"},
-		"volcengine_ark/doubao-seedance-2-0-fast-260128": {pricingType: "video_output_seconds", currency: "CNY"},
-		"volcengine_ark/doubao-seedance-2-0-mini-260615": {pricingType: "video_output_seconds", currency: "CNY"},
+		"volcengine_ark/doubao-seed-evolving":           {"token", "CNY", 6_000_000, 1_200_000, 6_000_000, 30_000_000},
+		"volcengine_ark/doubao-seed-2-1-pro-260628":     {"token", "CNY", 6_000_000, 1_200_000, 6_000_000, 30_000_000},
+		"volcengine_ark/doubao-seed-2-1-turbo-260628":   {"token", "CNY", 3_000_000, 600_000, 3_000_000, 15_000_000},
+		"moonshot/kimi-k2.7-code":                       {"token", "USD", 950_000, 190_000, 950_000, 4_000_000},
+		"moonshot/kimi-k2.7-code-highspeed":             {"token", "USD", 1_900_000, 380_000, 1_900_000, 8_000_000},
+		"volcengine_ark/doubao-seedream-5-0-pro-260628": {pricingType: "output_pixel_tier", currency: "CNY"},
+		"wangcai_openai/gpt-image-2-t":                  {pricingType: "openai_image_usage", currency: "USD"},
 	}
 	bundle := loadProductionBundle(t)
 	if bundle.Costs.CurrencyRates["CNY"] != 1_000_000 || bundle.Costs.CurrencyRates["USD"] != 7_200_000 || len(bundle.Costs.CurrencyRates) != 2 {
@@ -95,10 +92,6 @@ func TestProductionCostCatalogHasExactEvidencedProfiles(t *testing.T) {
 		case "openai_image_usage":
 			if model.Unit != 1_000_000 || model.TextInput != 5_000_000 || model.TextCachedInput != 1_250_000 || model.ImageInput != 8_000_000 || model.ImageCachedInput != 2_000_000 || model.ImageOutput != 30_000_000 {
 				t.Fatalf("OpenAI image cost profile = %#v", model)
-			}
-		case "video_output_seconds":
-			if len(model.ResolutionPrices) == 0 {
-				t.Fatalf("video cost profile has no resolution prices: %#v", model)
 			}
 		}
 	}
@@ -189,14 +182,6 @@ func TestInitialRetailCatalogContractRejectsUnsupportedAdditions(t *testing.T) {
 				PriceCredits: 1, Route: "extra.arbitrary", Delivery: "extra",
 			},
 			want: "unexpected SKU",
-		},
-		{
-			name: "extra video SKU outside exact catalog",
-			sku: SKUConfig{
-				ID: "video.pre-cutover.v1", Operation: "other.operation", ChargePolicy: "standalone_operation",
-				PriceCredits: 1, Route: "video_generation", Delivery: "video",
-			},
-			want: "unexpected SKU ID",
 		},
 	}
 	for _, tt := range tests {
@@ -330,16 +315,13 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		return fmt.Errorf("promotion catalog ID = %q", bundle.Promotions.CatalogID)
 	}
 	wantEvidence := map[string]string{
-		"volcengine_ark/doubao-seed-evolving":            "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
-		"volcengine_ark/doubao-seed-2-1-pro-260628":      "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
-		"volcengine_ark/doubao-seed-2-1-turbo-260628":    "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
-		"moonshot/kimi-k2.7-code":                        "pricing-snapshot:moonshot:model-token-prices:2026-07-13",
-		"moonshot/kimi-k2.7-code-highspeed":              "pricing-snapshot:moonshot:model-token-prices:2026-07-13",
-		"volcengine_ark/doubao-seedream-5-0-pro-260628":  "pricing-snapshot:volcengine-ark:seedream-output-pixel-prices:2026-07-13",
-		"wangcai_openai/gpt-image-2-t":                   "pricing-snapshot:wangcai-openai:gpt-image-2-t-usage-prices:2026-07-13",
-		"volcengine_ark/doubao-seedance-2-0-260128":      "pricing-snapshot:volcengine-ark:seedance-no-input-output-second-prices:2026-07-13",
-		"volcengine_ark/doubao-seedance-2-0-fast-260128": "pricing-snapshot:volcengine-ark:seedance-no-input-output-second-prices:2026-07-13",
-		"volcengine_ark/doubao-seedance-2-0-mini-260615": "pricing-snapshot:volcengine-ark:seedance-no-input-output-second-prices:2026-07-13",
+		"volcengine_ark/doubao-seed-evolving":           "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
+		"volcengine_ark/doubao-seed-2-1-pro-260628":     "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
+		"volcengine_ark/doubao-seed-2-1-turbo-260628":   "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
+		"moonshot/kimi-k2.7-code":                       "pricing-snapshot:moonshot:model-token-prices:2026-07-13",
+		"moonshot/kimi-k2.7-code-highspeed":             "pricing-snapshot:moonshot:model-token-prices:2026-07-13",
+		"volcengine_ark/doubao-seedream-5-0-pro-260628": "pricing-snapshot:volcengine-ark:seedream-output-pixel-prices:2026-07-13",
+		"wangcai_openai/gpt-image-2-t":                  "pricing-snapshot:wangcai-openai:gpt-image-2-t-usage-prices:2026-07-13",
 	}
 	wantEffectiveAt := time.Date(2026, time.July, 13, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	if len(bundle.Costs.Models) != len(wantEvidence) {
@@ -367,57 +349,18 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		route        string
 		delivery     string
 		priceCredits int64
-		selectors    string
 	}
 	want := map[string]skuSnapshot{
 		"task.article.standard.v1":        {operation: "task.article", chargePolicy: "task_admission", priceCredits: 6000, delivery: "article_artifacts_verified"},
 		"task.seednote.standard.v1":       {operation: "task.seednote", chargePolicy: "task_admission", priceCredits: 5000, delivery: "seednote_artifacts_verified"},
 		"task.moments.standard.v1":        {operation: "task.moments", chargePolicy: "task_admission", priceCredits: 3000, delivery: "moments_artifacts_verified"},
 		"task.ecommerce.standard.v1":      {operation: "task.ecommerce", chargePolicy: "task_admission", priceCredits: 3000, delivery: "ecommerce_artifacts_verified"},
-		"task.videocreator.standard.v1":   {operation: "task.videocreator", chargePolicy: "task_admission", priceCredits: 2000, delivery: "final_video_verified"},
-		"task.videoeditor.standard.v1":    {operation: "task.videoeditor", chargePolicy: "task_admission", priceCredits: 2000, delivery: "edited_video_verified"},
 		"task.montage.standard.v1":        {operation: "task.montage", chargePolicy: "task_admission", priceCredits: 2000, delivery: "montage_artifacts_verified"},
 		"task.viral-analysis.standard.v1": {operation: "task.viral_analysis", chargePolicy: "task_admission", priceCredits: 1200, delivery: "viral_analysis_report_verified"},
 		"image.seedream.cover.v1":         {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.cover", delivery: "persisted_image"},
 		"image.seedream.content.v1":       {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.content", delivery: "persisted_image"},
 		"image.seedream.designer.v1":      {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.seedream", delivery: "persisted_image"},
 		"image.gpt-image-2.designer.v1":   {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.gpt_image_2", delivery: "persisted_image"},
-	}
-	type videoPriceRow struct {
-		modelKey, resolution string
-		noInput, mediaInput  [3]int64
-	}
-	videoRows := []videoPriceRow{
-		{"seedance-2.0", "480p", [3]int64{4000, 7500, 11000}, [3]int64{9000, 17500, 26000}},
-		{"seedance-2.0", "720p", [3]int64{8000, 15500, 23000}, [3]int64{19000, 37500, 56000}},
-		{"seedance-2.0", "1080p", [3]int64{19500, 38500, 57500}, [3]int64{46500, 93000, 139500}},
-		{"seedance-2.0", "4k", [3]int64{39000, 78000, 117000}, [3]int64{96000, 191500, 287500}},
-		{"seedance-2.0-fast", "480p", [3]int64{3000, 6000, 9000}, [3]int64{7000, 14000, 20500}},
-		{"seedance-2.0-fast", "720p", [3]int64{6500, 12500, 18500}, [3]int64{15000, 29500, 44000}},
-		{"seedance-2.0-mini", "480p", [3]int64{2000, 4000, 5500}, [3]int64{4500, 9000, 13000}},
-		{"seedance-2.0-mini", "720p", [3]int64{4000, 8000, 11500}, [3]int64{9500, 19000, 28000}},
-	}
-	tiers := []string{"1-5", "6-10", "11-15"}
-	videoSelectorCount := 0
-	for _, row := range videoRows {
-		idModel := strings.ReplaceAll(row.modelKey, ".", "-")
-		for index, tier := range tiers {
-			for _, input := range []struct {
-				mode, id string
-				prices   [3]int64
-			}{{"no_input", "no-input", row.noInput}, {"media_input", "media-input", row.mediaInput}} {
-				id := fmt.Sprintf("video.%s.%s.%s.%s.v1", idModel, row.resolution, tier, input.id)
-				want[id] = skuSnapshot{
-					operation: "mcp.generate_video", chargePolicy: "accepted_task_operation", route: "video_generation",
-					delivery: "persisted_video", priceCredits: input.prices[index],
-					selectors: strings.Join([]string{row.modelKey, row.resolution, tier, input.mode}, "/"),
-				}
-				videoSelectorCount++
-			}
-		}
-	}
-	if videoSelectorCount != 48 {
-		return fmt.Errorf("video selector matrix count = %d, want 48", videoSelectorCount)
 	}
 	if catalog.CatalogID != "retail-2026-07-20-v2" || catalog.Currency != "credits" {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
@@ -431,9 +374,6 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		actual := skuSnapshot{
 			operation: sku.Operation, chargePolicy: sku.ChargePolicy, route: sku.Route,
 			delivery: sku.Delivery, priceCredits: sku.PriceCredits,
-		}
-		if sku.Selectors != nil {
-			actual.selectors = strings.Join([]string{sku.Selectors.ModelKey, sku.Selectors.Resolution, sku.Selectors.DurationTier, sku.Selectors.InputMode}, "/")
 		}
 		if actual != expected {
 			return fmt.Errorf("SKU %q snapshot = %#v, want %#v", sku.ID, actual, expected)

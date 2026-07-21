@@ -17,7 +17,6 @@ var (
 	ErrProjectOwnedByUser     = errors.New("project not owned by user")
 	ErrProjectDeleteConflict  = errors.New("project delete conflict")
 	ErrProjectUpdateConflict  = errors.New("project update conflict")
-	ErrVideoModelUnavailable  = errors.New("video model unavailable")
 	ErrProjectMontageDefaults = errors.New("invalid montage project defaults")
 )
 
@@ -35,13 +34,11 @@ func (e projectDeleteConflictError) Is(target error) bool {
 
 // validPlatforms defines the allowed platform values.
 var validPlatforms = map[string]bool{
-	model.PlatformArticle:      true,
-	model.PlatformSeednote:     true,
-	model.PlatformMoments:      true,
-	model.PlatformEcommerce:    true,
-	model.PlatformVideoCreator: true,
-	model.PlatformVideoEditor:  true,
-	model.PlatformMontage:      true,
+	model.PlatformArticle:   true,
+	model.PlatformSeednote:  true,
+	model.PlatformMoments:   true,
+	model.PlatformEcommerce: true,
+	model.PlatformMontage:   true,
 }
 
 func validateProjectMontageDefaults(project *model.Project) error {
@@ -60,11 +57,10 @@ func validateProjectMontageDefaults(project *model.Project) error {
 
 // ProjectService handles project CRUD operations with ownership verification.
 type ProjectService struct {
-	repo         repository.Repository
-	logger       *zerolog.Logger
-	templateSvc  *TemplateService
-	videoCatalog VideoModelCatalog
-	memory       ProjectMemoryLifecycle
+	repo        repository.Repository
+	logger      *zerolog.Logger
+	templateSvc *TemplateService
+	memory      ProjectMemoryLifecycle
 }
 
 type ProjectMemoryLifecycle interface {
@@ -81,22 +77,8 @@ func (s *ProjectService) SetTemplateService(svc *TemplateService) {
 	s.templateSvc = svc
 }
 
-func (s *ProjectService) SetVideoCatalog(catalog VideoModelCatalog) {
-	if s == nil {
-		return
-	}
-	s.videoCatalog = catalog
-}
-
 func (s *ProjectService) SetProjectMemoryLifecycle(memory ProjectMemoryLifecycle) {
 	s.memory = memory
-}
-
-func (s *ProjectService) resolvedVideoCatalog() VideoModelCatalog {
-	if s != nil && s.videoCatalog != nil {
-		return s.videoCatalog
-	}
-	return VideoModelCatalog{}
 }
 
 // Create creates a new project for the given user.
@@ -116,10 +98,6 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	if ch.Instructions == "" && ch.Positioning != "" {
 		ch.Instructions = ch.Positioning
 	}
-	if model.IsVideoPlatform(ch.Platform) {
-		ch.VisualStyle = ""
-	}
-
 	// Platform-specific validation.
 	pc := model.GetPlatformConfig(ch.Platform)
 	if pc != nil {
@@ -127,10 +105,6 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 			ch.ImageRatio = pc.DefaultImageRatio
 		}
 	}
-	if err := s.validateVideoProfile(ch); err != nil {
-		return nil, err
-	}
-
 	ch.ID = uuid.New().String()
 	ch.UserID = userID
 	ch.Status = model.ProjectStatusActive
@@ -283,16 +257,6 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if ch.MontageDefaultsSet {
 		existing.MontageDefaults = ch.MontageDefaults
 	}
-	if ch.VideoProfileSet {
-		existing.VideoDefaults = ch.VideoDefaults
-		existing.VideoModelPolicy = ch.VideoModelPolicy
-	}
-	if model.IsVideoPlatform(existing.Platform) {
-		existing.VisualStyle = ""
-	}
-	if err := s.validateVideoProfile(existing); err != nil {
-		return nil, err
-	}
 	// Merge Config: unconditionally update AppID to support credential clearing.
 	// Only update Secret if non-empty to preserve existing secret during edits.
 	existing.Config.WechatAppID = ch.Config.WechatAppID
@@ -302,37 +266,6 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 		existing.Config.WechatSecret = ch.Config.WechatSecret
 	}
 	return existing, nil
-}
-
-func (s *ProjectService) validateVideoProfile(ch *model.Project) error {
-	if ch == nil || !model.IsVideoCreatorPlatform(ch.Platform) {
-		return nil
-	}
-	catalog := s.resolvedVideoCatalog()
-	defaults := ch.VideoDefaults.Data()
-	policy := ch.VideoModelPolicy.Data()
-	for _, key := range policy.AllowedModels {
-		if _, ok := catalog[key]; !ok {
-			return fmt.Errorf("模型未配置或不可用: %s: %w", key, ErrVideoModelUnavailable)
-		}
-	}
-	if policy.DefaultModel != "" {
-		if _, ok := catalog[policy.DefaultModel]; !ok {
-			return fmt.Errorf("模型未配置或不可用: %s: %w", policy.DefaultModel, ErrVideoModelUnavailable)
-		}
-		if len(policy.AllowedModels) > 0 && !stringIn(policy.DefaultModel, policy.AllowedModels) {
-			return fmt.Errorf("默认模型不在项目允许模型中: %s", policy.DefaultModel)
-		}
-	}
-	if defaults.ModelKey != "" {
-		if _, ok := catalog[defaults.ModelKey]; !ok {
-			return fmt.Errorf("模型未配置或不可用: %s: %w", defaults.ModelKey, ErrVideoModelUnavailable)
-		}
-		if len(policy.AllowedModels) > 0 && !stringIn(defaults.ModelKey, policy.AllowedModels) {
-			return fmt.Errorf("默认视频模型不在项目允许模型中: %s", defaults.ModelKey)
-		}
-	}
-	return nil
 }
 
 // Archive sets a project's status to "archived" after verifying ownership.
@@ -411,49 +344,7 @@ func SanitizeProject(ch *model.Project) {
 	ch.Config.WechatSecret = ""
 }
 
-// SanitizeProjectVideoProfile removes historical video model keys that are no
-// longer present in the server-configured catalog before returning a project to
-// Studio or agents. Persistence remains unchanged; create/update/estimate/task
-// execution still fail closed through the service validation paths.
-func SanitizeProjectVideoProfile(ch *model.Project, catalog VideoModelCatalog) {
-	if ch == nil || !model.IsVideoCreatorPlatform(ch.Platform) {
-		return
-	}
-	if catalog == nil {
-		catalog = VideoModelCatalog{}
-	}
-	defaults := ch.VideoDefaults.Data()
-	policy := ch.VideoModelPolicy.Data()
-	if defaults.ModelKey != "" {
-		if _, ok := catalog[defaults.ModelKey]; !ok {
-			defaults.ModelKey = ""
-		}
-	}
-	allowed := make([]string, 0, len(policy.AllowedModels))
-	allowedSet := map[string]bool{}
-	for _, key := range policy.AllowedModels {
-		if _, ok := catalog[key]; !ok {
-			continue
-		}
-		allowed = append(allowed, key)
-		allowedSet[key] = true
-	}
-	policy.AllowedModels = allowed
-	if policy.DefaultModel != "" {
-		if _, ok := catalog[policy.DefaultModel]; !ok || (len(allowedSet) > 0 && !allowedSet[policy.DefaultModel]) {
-			policy.DefaultModel = ""
-		}
-	}
-	if defaults.ModelKey != "" && len(allowedSet) > 0 && !allowedSet[defaults.ModelKey] {
-		defaults.ModelKey = ""
-	}
-	ch.SetVideoDefaults(defaults)
-	ch.SetVideoModelPolicy(policy)
-}
-
-// SanitizeProjectForResponse clears secrets and hides unavailable video models
-// according to this service's configured catalog.
+// SanitizeProjectForResponse clears project secrets before API responses.
 func (s *ProjectService) SanitizeProjectForResponse(ch *model.Project) {
 	SanitizeProject(ch)
-	SanitizeProjectVideoProfile(ch, s.resolvedVideoCatalog())
 }
