@@ -218,7 +218,7 @@ func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
 		skills   []any
 		missing  string
 	}{
-		{taskType: "seednote", skills: []any{"anban:seednote", "anban:humanizer"}, missing: "anban:seednote"},
+		{taskType: "seednote", skills: []any{"anban:seednote"}, missing: "anban:seednote"},
 		{taskType: "article", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},
 		{taskType: "ecommerce", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},
 	} {

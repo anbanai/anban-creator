@@ -507,12 +507,12 @@ func validateSeednoteFinalizationContract(body string) error {
 	titleStageAt := strings.Index(body, "#### 步骤 7b：标题终稿锁定")
 	imageStageAt := strings.Index(body, "### 图片生成")
 	if titleStageAt < 0 || imageStageAt <= titleStageAt {
-		return fmt.Errorf("seednote must finalize the title after writing/humanizer and before image generation")
+		return fmt.Errorf("seednote must finalize the title after isolated writing and before image generation")
 	}
-	lastHumanizerAt := strings.LastIndex(body[:titleStageAt], "humanizer")
+	lastWritingAt := strings.LastIndex(body[:titleStageAt], "action=write_and_humanize")
 	finalizeCall := regexp.MustCompile(`finalize_task_title\s*\(`).FindStringIndex(titleStage)
-	if lastHumanizerAt < 0 || finalizeCall == nil {
-		return fmt.Errorf("seednote must finalize the title after writing/humanizer and before image generation")
+	if lastWritingAt < 0 || finalizeCall == nil {
+		return fmt.Errorf("seednote must finalize the title after isolated writing and before image generation")
 	}
 	for _, phrase := range []string{"最多进行 3 次调用尝试", "连续 3 次均返回重复标题"} {
 		if !strings.Contains(titleStage, phrase) {
@@ -522,11 +522,11 @@ func validateSeednoteFinalizationContract(body string) error {
 	duplicateAt := strings.Index(titleStage, "返回 `duplicate title` 错误时")
 	contentAt := indexAfter(titleStage, "`$DIR/content.md`", duplicateAt)
 	firstLineAt := indexAfter(titleStage, "第一行更新为新标题", contentAt)
-	humanizerAt := indexAfter(titleStage, "humanizer", firstLineAt)
-	complianceAt := indexAfter(titleStage, "标题合规", humanizerAt)
+	humanizeAt := indexAfter(titleStage, "轻量去 AI", firstLineAt)
+	complianceAt := indexAfter(titleStage, "标题合规", humanizeAt)
 	retryAt := indexAfter(titleStage, "重试", complianceAt)
-	if duplicateAt < 0 || contentAt <= duplicateAt || firstLineAt <= contentAt || humanizerAt <= firstLineAt || complianceAt <= humanizerAt || retryAt <= complianceAt {
-		return fmt.Errorf("seednote duplicate handling must update content.md, rerun humanizer/title compliance, then retry before image generation")
+	if duplicateAt < 0 || contentAt <= duplicateAt || firstLineAt <= contentAt || humanizeAt <= firstLineAt || complianceAt <= humanizeAt || retryAt <= complianceAt {
+		return fmt.Errorf("seednote duplicate handling must update content.md, rerun built-in de-AI/title compliance, then retry before image generation")
 	}
 	for _, code := range []string{`error_code="finalize_title_failed"`, `error_code="duplicate_title_exhausted"`} {
 		if !strings.Contains(titleStage, code) {

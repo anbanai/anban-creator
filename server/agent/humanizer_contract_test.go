@@ -85,7 +85,6 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 func TestHumanizerIsDiscoverableAndLoadedOnDemand(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
-		"claudecode/agents/seednote.md",
 		"claudecode/agents/wechatarticle.md",
 		"claudecode/agents/ecommerce.md",
 	} {
@@ -97,6 +96,11 @@ func TestHumanizerIsDiscoverableAndLoadedOnDemand(t *testing.T) {
 		if !strings.Contains(body, "`anban:humanizer`") || !strings.Contains(body, "`Skill`") {
 			t.Fatalf("%s must load the discoverable Humanizer Skill on demand", relPath)
 		}
+	}
+
+	seednoteAgent := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "seednote.md"))
+	if strings.Contains(seednoteAgent, "anban:humanizer") || strings.Contains(seednoteAgent, "using the `humanizer` skill") {
+		t.Fatal("Claude Seednote must use its compact built-in de-AI pass instead of loading the general Humanizer Skill")
 	}
 
 	for _, relPath := range []string{

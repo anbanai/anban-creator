@@ -1341,6 +1341,47 @@ func TestSanitizeTaskImageDownloadURLRemovesInlineBase64(t *testing.T) {
 	}
 }
 
+func TestImageOperationResultSnapshotKeepsMCPResponseCompact(t *testing.T) {
+	large := strings.Repeat("provider-output-", 128*1024)
+	result := &service.ImageResult{
+		FilePath:        "output/seednote/cover.png",
+		DownloadURL:     "data:image/png;base64," + large,
+		Size:            "3:4",
+		Width:           1536,
+		Height:          2048,
+		ImageType:       "cover",
+		Provider:        "volcengine",
+		Model:           "doubao-seedream-4-0",
+		SelectionReason: "configured_default",
+		Prompt:          large,
+		RevisedPrompt:   large,
+		ResponsePreview: large,
+		Verification: &service.VisionVerification{
+			Passed: true,
+			Score:  "high",
+			Notes:  large,
+			Raw:    large,
+		},
+	}
+
+	snapshot := imageOperationResultSnapshot("operation-1", &model.BillingSKU{
+		CatalogID: "retail-v1", SKUID: "image.cover.v1", PriceCredits: 500,
+	}, result)
+	snapshot.DownloadURL = "https://cdn.example.com/tasks/task-1/cover.png"
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) > 4*1024 {
+		t.Fatalf("generate_image customer response is %d bytes, want <= 4096", len(payload))
+	}
+	for _, secret := range []string{"data:image", "provider-output-"} {
+		if bytes.Contains(payload, []byte(secret)) {
+			t.Fatalf("generate_image customer response leaked %q", secret)
+		}
+	}
+}
+
 func TestRegisterGeneratedImageTaskFile_StatErrorSkipsUpload(t *testing.T) {
 	fake := &fakeTaskFileRegistrar{}
 	res := &service.ImageResult{FilePath: "/does/not/exist/cover.png", OutputMIME: "image/png"}
