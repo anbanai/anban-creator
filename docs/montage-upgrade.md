@@ -29,21 +29,23 @@ cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.co
 
 ## Runtime Images
 
-Production uses two immutable Agent images:
+Production uses three immutable Agent images:
 
-- `ANBAN_AGENT_IMAGE`: the default content runtime.
+- `ANBAN_AGENT_IMAGE`: the minimal default content runtime.
+- `ANBAN_SEEDNOTE_AGENT_IMAGE`: the Seednote runtime with Python, Agent-Reach, and mcporter.
 - `ANBAN_MONTAGE_AGENT_IMAGE`: the Montage runtime with an embedded OpenMontage template.
 
-Build both images with:
+Build all three images with:
 
 ```bash
 make docker-agent-image
+make docker-seednote-agent-image
 make docker-montage-agent-image
 ```
 
 The Montage build passes the pinned submodule commit as `OPENMONTAGE_REVISION`
 and writes it to `/app/third_party/OpenMontage/.anban-source-revision`. Publish
-both images by digest. Do not deploy mutable tags as the persisted
+all three images by digest. Do not deploy mutable tags as the persisted
 `task_executions.runtime_image` value.
 
 ## Workspace And Resume

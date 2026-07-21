@@ -257,7 +257,11 @@ claude:
   # Agent 插件目录，必须包含 agents/、skills/ 等分发资产。
   plugin_dir: "/anbanai"
   docker:
-    image: "${ANBAN_CLAUDE_DOCKER_IMAGE:-creator-agent:latest}"
+    # 持久容器使用最小 content 镜像；依赖更重的任务由一次性专用容器执行。
+    image: "${ANBAN_CLAUDE_DOCKER_IMAGE:-creator-agent-content:latest}"
+    image_profiles:
+      seednote: "${ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE:-creator-agent-seednote:latest}"
+      montage: "${ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE:-creator-agent-montage:latest}"
     cpu_cores: 2
     memory_mb: 4096
     timeout_sec: 3600
@@ -267,11 +271,13 @@ claude:
     # Agent Job 所在命名空间。
     namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"
     # 默认 content Agent 镜像。支持版本标签或 sha256 digest；生产推荐 digest，
-    # 但发布流水线也可以注入唯一版本标签。镜像必须包含 anban agent 二进制、
-    # Claude/Codex 运行时、Anban 插件资产、ffmpeg/浏览器/Node/Python。
+    # 但发布流水线也可以注入唯一版本标签。镜像只包含通用内容创作运行时；
+    # Seednote 外部研究与 Montage 视频合成依赖由专用镜像承载。
     agent_image: "${ANBAN_AGENT_IMAGE}"
-    # 任务类型专用镜像；Montage 镜像额外包含固定 revision 的 OpenMontage runtime。
+    # 必需的任务类型专用镜像。Seednote 镜像包含 Agent-Reach/Python；
+    # Montage 镜像包含固定 revision 的 OpenMontage/Remotion/ffmpeg runtime。
     image_profiles:
+      seednote: "${ANBAN_SEEDNOTE_AGENT_IMAGE}"
       montage: "${ANBAN_MONTAGE_AGENT_IMAGE}"
     # Agent Job 使用的 Kubernetes ServiceAccount。
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"

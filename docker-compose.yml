@@ -113,9 +113,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.agent
-    image: creator-agent:latest
+      target: content
+    image: creator-agent-content:latest
     pull_policy: build
-    container_name: creator-agent
+    container_name: creator-agent-content
     restart: unless-stopped
     entrypoint: ["tini", "--"]
     command: ["sleep", "infinity"]
@@ -150,8 +151,10 @@ services:
       ANBAN_BILLING_ADMIN_API_KEY: "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}"
       ANBAN_CLAUDE_EXECUTOR: "docker"
       ANBAN_CLAUDE_AGENT_SERVER_URL: "http://server:8080"
-      ANBAN_CLAUDE_DOCKER_IMAGE: "creator-agent:latest"
-      ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: "creator-agent"
+      ANBAN_CLAUDE_DOCKER_IMAGE: "creator-agent-content:latest"
+      ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE: "creator-agent-seednote:latest"
+      ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE: "creator-agent-montage:latest"
+      ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: "creator-agent-content"
       ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: "/app/data/workspace"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"

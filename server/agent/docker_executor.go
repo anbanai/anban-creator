@@ -79,7 +79,7 @@ func NewDockerExecutor(
 		return nil, fmt.Errorf("docker client init: %w", err)
 	}
 	if _, err := cli.ImageInspect(context.Background(), dockerCfg.Image); err != nil {
-		return nil, fmt.Errorf("docker image %q not found locally (run 'make docker-image' to build it): %w", dockerCfg.Image, err)
+		return nil, fmt.Errorf("docker image %q not found locally (run 'make docker-agent-image' to build it): %w", dockerCfg.Image, err)
 	}
 
 	return &DockerExecutor{
@@ -263,12 +263,20 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		return nil, err
 	}
 	env := e.buildAgentEnv(opts, dockerRuntimeHome(workDirInContainer))
+	runtime := e.dockerCfg.ImageForTask(opts.Task.Type)
 
 	var execRes execResult
-	if e.dockerCfg.ContainerName != "" {
+	if e.dockerCfg.ContainerName != "" && runtime.Profile == "content" {
 		execRes = e.executeViaExec(ctx, opts.Task.ID, workDirInContainer, runtimeUser, cmd, env, opts.HeartbeatFunc)
 	} else {
-		execRes = e.executeInNewContainer(ctx, opts.Task.ID, workDir, runtimeUser, cmd, env)
+		if _, err := e.dockerCLI.ImageInspect(ctx, runtime.Image); err != nil {
+			buildTarget := "docker-agent-image"
+			if runtime.Profile != "content" {
+				buildTarget = "docker-" + runtime.Profile + "-agent-image"
+			}
+			return nil, fmt.Errorf("docker %s image %q not found locally (run 'make %s' to build it): %w", runtime.Profile, runtime.Image, buildTarget, err)
+		}
+		execRes = e.executeInNewContainer(ctx, opts.Task.ID, workDir, runtimeUser, cmd, env, runtime.Image, e.dockerCfg.ContainerName)
 	}
 
 	if opts.LogWriter != nil {
@@ -393,7 +401,7 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions, runtimeHome strin
 		}
 		env = upsertContainerEnv(env, k, v)
 	}
-	env = upsertContainerEnv(env, "PATH", ContainerRuntimePath)
+	env = upsertContainerEnv(env, "PATH", containerRuntimePath(opts.Task.Type))
 	env = upsertContainerEnv(env, "HOME", runtimeHome)
 	if opts.Project != nil {
 		env = upsertContainerEnv(env, "ANBAN_DEFAULT_PROJECT", opts.Project.ID)
@@ -541,6 +549,26 @@ func dockerAgentContainerConfig(image string, cmd, env []string, runtimeUser str
 	}
 }
 
+func dockerAgentHostConfig(workDir, volumeDonor string, cfg srvconfig.DockerConfig) *container.HostConfig {
+	hostConfig := &container.HostConfig{
+		Resources: container.Resources{
+			NanoCPUs: cfg.CPUCores * 1e9,
+			Memory:   cfg.MemoryMB * 1024 * 1024,
+		},
+		ExtraHosts: []string{"host.docker.internal:host-gateway"},
+	}
+	if volumeDonor != "" {
+		hostConfig.VolumesFrom = []string{volumeDonor}
+		return hostConfig
+	}
+	hostConfig.Mounts = []mount.Mount{{
+		Type:   mount.TypeBind,
+		Source: workDir,
+		Target: "/workspace",
+	}}
+	return hostConfig
+}
+
 func (e *DockerExecutor) killExecProcess(execID, containerName string) {
 	inspect, err := e.dockerCLI.ContainerExecInspect(context.Background(), execID)
 	if err != nil || !inspect.Running || inspect.Pid == 0 {
@@ -593,20 +621,9 @@ func (e *DockerExecutor) waitForDone(done chan error, execID, containerName stri
 	}
 }
 
-func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, workDir, runtimeUser string, cmd []string, env []string) execResult {
-	containerConfig := dockerAgentContainerConfig(e.dockerCfg.Image, cmd, env, runtimeUser)
-	hostConfig := &container.HostConfig{
-		Mounts: []mount.Mount{{
-			Type:   mount.TypeBind,
-			Source: workDir,
-			Target: "/workspace",
-		}},
-		Resources: container.Resources{
-			NanoCPUs: e.dockerCfg.CPUCores * 1e9,
-			Memory:   e.dockerCfg.MemoryMB * 1024 * 1024,
-		},
-		ExtraHosts: []string{"host.docker.internal:host-gateway"},
-	}
+func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, workDir, runtimeUser string, cmd []string, env []string, image, volumeDonor string) execResult {
+	containerConfig := dockerAgentContainerConfig(image, cmd, env, runtimeUser)
+	hostConfig := dockerAgentHostConfig(workDir, volumeDonor, e.dockerCfg)
 
 	containerName := EphemeralContainerName(taskID)
 	resp, err := e.dockerCLI.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)

@@ -63,8 +63,16 @@ The Studio build runs `tsc -b && vite build`.
 make docker-up
 make docker-down
 make docker-agent-image
+make docker-seednote-agent-image
+make docker-montage-agent-image
 make docker-server-image
 ```
+
+The managed runtime is split into three images: `creator-agent-content` for the
+minimal shared runtime, `creator-agent-seednote` for Python/Agent-Reach, and
+`creator-agent-montage` for OpenMontage/Remotion/ffmpeg. Keep the canonical
+plugin tree intact in every image; image selection controls system dependencies,
+not which Skills are distributed.
 
 ## Architecture
 

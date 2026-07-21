@@ -5,7 +5,8 @@
 
 BINARY      := anban-creator-server
 BINDIR      := bin
-AGENT_IMAGE := creator-agent:latest
+AGENT_IMAGE := creator-agent-content:latest
+SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
 SERVER_IMAGE := anban-creator-server:latest
 WCFLINK_IMAGE := anban-creator-wcflink:latest
@@ -18,7 +19,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-build-native \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images
+        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images
 
 # Default target
 all: server-build
@@ -122,8 +123,9 @@ web-build:
 # Docker targets
 # ---------------------------------------------------------------------------
 
-# Start all Compose services (MySQL, Redis, wcfLink, server, Studio)
-docker-up:
+# Build task-specific runtimes, then start all Compose services. The content
+# image is built by Compose itself; profile images are launched on demand.
+docker-up: docker-seednote-agent-image docker-montage-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
@@ -134,16 +136,23 @@ docker-down:
 docker-logs:
 	@docker compose logs -f
 
-# Build the Anban agent Docker image (required for executor: docker)
+# Build the minimal content Agent image.
 docker-agent-image:
-	@git submodule update --init --recursive
+	@git submodule update --init --recursive third_party/claude-agent-sdk-go
 	@echo "Building $(AGENT_IMAGE)..." && \
-	docker build -f Dockerfile.agent -t $(AGENT_IMAGE) . && \
+	docker build -f Dockerfile.agent --target content -t $(AGENT_IMAGE) . && \
 	echo "Image build complete: $(AGENT_IMAGE)"
+
+# Build the Seednote Agent image with Agent-Reach and its Python runtime.
+docker-seednote-agent-image:
+	@git submodule update --init --recursive third_party/claude-agent-sdk-go third_party/Agent-Reach
+	@echo "Building $(SEEDNOTE_AGENT_IMAGE)..." && \
+	docker build -f Dockerfile.agent --target seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
+	echo "Image build complete: $(SEEDNOTE_AGENT_IMAGE)"
 
 # Build the dedicated Montage Agent image with an immutable OpenMontage template.
 docker-montage-agent-image:
-	@git submodule update --init --recursive third_party/OpenMontage
+	@git submodule update --init --recursive third_party/claude-agent-sdk-go third_party/OpenMontage
 	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
 	docker build -f Dockerfile.agent-montage \
 	  --build-arg OPENMONTAGE_REVISION=$$(git -C third_party/OpenMontage rev-parse HEAD) \
@@ -170,7 +179,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image
+docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image
 
 # Backward-compatible alias (builds agent image)
 docker-image: docker-agent-image
@@ -234,6 +243,7 @@ help:
 	@echo "  make docker-down        - Stop containers"
 	@echo "  make docker-logs        - Follow container logs"
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
+	@echo "  make docker-seednote-agent-image - Build Seednote agent image with Agent-Reach"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
 	@echo "  make docker-wcflink-image - Build wcfLink sidecar image"

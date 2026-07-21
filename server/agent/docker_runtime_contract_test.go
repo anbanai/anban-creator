@@ -21,11 +21,11 @@ func TestCreatorAgentImageNamingContract(t *testing.T) {
 }
 
 func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.T) {
-	validMakefile := "AGENT_IMAGE := creator-agent:latest\n"
+	validMakefile := "AGENT_IMAGE := creator-agent-content:latest\n"
 	validCompose := `services:
   agent:
-    image: creator-agent:latest
-    container_name: creator-agent
+    image: creator-agent-content:latest
+    container_name: creator-agent-content
 `
 
 	for _, tc := range []struct {
@@ -35,12 +35,12 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 	}{
 		{
 			name:     "Make variable name decoy",
-			makefile: "LEGACY_AGENT_IMAGE := creator-agent:latest\n",
+			makefile: "LEGACY_AGENT_IMAGE := creator-agent-content:latest\n",
 			compose:  validCompose,
 		},
 		{
 			name:     "commented Make assignment",
-			makefile: "# AGENT_IMAGE := creator-agent:latest\n",
+			makefile: "# AGENT_IMAGE := creator-agent-content:latest\n",
 			compose:  validCompose,
 		},
 		{
@@ -63,8 +63,8 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 			makefile: validMakefile,
 			compose: `services:
   worker:
-    image: creator-agent:latest
-    container_name: creator-agent
+    image: creator-agent-content:latest
+    container_name: creator-agent-content
 `,
 		},
 		{
@@ -107,8 +107,8 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 		return fmt.Errorf("Makefile must not retain anban-creator-agent or anban-agent identities")
 	}
 	makeValues := makeVariableAssignments(makefile, "AGENT_IMAGE")
-	if len(makeValues) != 1 || makeValues[0] != "creator-agent:latest" {
-		return fmt.Errorf("Makefile must define AGENT_IMAGE exactly once with value creator-agent:latest")
+	if len(makeValues) != 1 || makeValues[0] != "creator-agent-content:latest" {
+		return fmt.Errorf("Makefile must define AGENT_IMAGE exactly once with value creator-agent-content:latest")
 	}
 
 	if containsRetiredAgentIdentity(compose) {
@@ -144,8 +144,8 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 			}
 		}
 	}
-	if agentBlockCount != 1 || len(imageValues) != 1 || imageValues[0] != "creator-agent:latest" || len(containerNameValues) != 1 || containerNameValues[0] != "creator-agent" {
-		return fmt.Errorf("docker-compose.yml must define exactly one agent service with one image creator-agent:latest and one container_name creator-agent")
+	if agentBlockCount != 1 || len(imageValues) != 1 || imageValues[0] != "creator-agent-content:latest" || len(containerNameValues) != 1 || containerNameValues[0] != "creator-agent-content" {
+		return fmt.Errorf("docker-compose.yml must define exactly one agent service with one image creator-agent-content:latest and one container_name creator-agent-content")
 	}
 	return nil
 }
@@ -178,30 +178,20 @@ func makeVariableAssignments(text, variable string) []string {
 	return values
 }
 
-func TestAgentDockerfileUsesOpenHandsAgentRuntime(t *testing.T) {
+func TestAgentDockerfileSeparatesContentAndSeednoteDependencies(t *testing.T) {
 	root := repositoryRoot(t)
 	path := filepath.Join(root, "Dockerfile.agent")
 	body := readTextFile(t, path)
 	for _, want := range []string{
-		"FROM ghcr.io/openhands/agent-server:latest-python",
-		"apt-get install -y --no-install-recommends ca-certificates curl gh git jq fontconfig fonts-noto-cjk python3 python3-venv",
-		"https://deb.nodesource.com/setup_22.x",
-		"if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then",
-		"apt-get install -y --no-install-recommends ffmpeg",
+		"FROM node:22-bookworm-slim AS runtime-core",
+		"FROM runtime-core AS content",
+		"FROM runtime-core AS seednote",
+		"FROM content AS default",
+		"apt-get install -y --no-install-recommends ca-certificates curl git jq tini",
 		"ARG CLAUDE_CODE_VERSION=2.1.208",
-		"ARG MCPORTER_VERSION=0.9.0",
-		`npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "mcporter@${MCPORTER_VERSION}"`,
+		`npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"`,
 		"claude --version",
-		"mcporter --version",
-		"gh --version",
 		"COPY plugins/anban/",
-		"COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/",
-		"ENV AGENT_REACH_VENV=/opt/agent-reach-venv",
-		`python3 -m venv "$AGENT_REACH_VENV"`,
-		`--constraint /app/third_party/Agent-Reach/constraints.txt`,
-		`/app/third_party/Agent-Reach`,
-		`"$AGENT_REACH_VENV/bin/agent-reach" --version`,
-		`ENV PATH="${AGENT_REACH_VENV}/bin:${PATH}"`,
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 		"claude plugin install --scope user anban@anbanai",
 	} {
@@ -209,9 +199,27 @@ func TestAgentDockerfileUsesOpenHandsAgentRuntime(t *testing.T) {
 			t.Fatalf("%s missing %q", path, want)
 		}
 	}
+	runtimeCoreStart := strings.Index(body, "FROM node:22-bookworm-slim AS runtime-core")
+	contentStart := strings.Index(body, "FROM runtime-core AS content")
+	seednoteStart := strings.Index(body, "FROM runtime-core AS seednote")
+	if runtimeCoreStart < 0 || contentStart <= runtimeCoreStart || seednoteStart <= contentStart {
+		t.Fatalf("%s has invalid content/seednote stage order", path)
+	}
+	content := body[runtimeCoreStart:seednoteStart]
+	for _, forbidden := range []string{"Agent-Reach", "python3", "mcporter", "ffmpeg", "fonts-noto-cjk", "OpenMontage"} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("%s content stage must not contain heavyweight dependency %q", path, forbidden)
+		}
+	}
+	seednote := body[seednoteStart:]
+	for _, want := range []string{"python3 python3-venv", "ARG MCPORTER_VERSION=0.9.0", "mcporter --version", "COPY third_party/Agent-Reach/", `python3 -m venv "$AGENT_REACH_VENV"`} {
+		if !strings.Contains(seednote, want) {
+			t.Fatalf("%s seednote stage missing %q", path, want)
+		}
+	}
 	for _, forbidden := range []string{"COPY third_party/OpenMontage/", "ANBAN_MONTAGE_SUBMODULE_PATH"} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("%s content runtime must not contain Montage dependency %q", path, forbidden)
+			t.Fatalf("%s must not contain Montage dependency %q", path, forbidden)
 		}
 	}
 }
@@ -273,6 +281,11 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("%s missing %q", path, want)
+		}
+	}
+	for _, forbidden := range []string{"Agent-Reach", "MCPORTER_VERSION", "mcporter", "gh --version", " ca-certificates curl gh git"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("%s must not contain Seednote-only dependency %q", path, forbidden)
 		}
 	}
 }
@@ -344,20 +357,20 @@ func TestServerComposeInjectsBillingAdminKeyAndDocumentsIt(t *testing.T) {
 	}
 }
 
-func TestOpenHandsAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
+func TestContentAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
 	path := filepath.Join(repositoryRoot(t), "Dockerfile.agent")
 	body := readTextFile(t, path)
-	from := strings.Index(body, "FROM ghcr.io/openhands/agent-server:latest-python")
+	from := strings.Index(body, "FROM node:22-bookworm-slim AS runtime-core")
 	if from < 0 {
-		t.Fatalf("%s missing OpenHands runtime stage", path)
+		t.Fatalf("%s missing content runtime core stage", path)
 	}
 	apt := strings.Index(body[from:], "apt-get update")
 	if apt < 0 {
-		t.Fatalf("%s missing apt-get update in OpenHands runtime stage", path)
+		t.Fatalf("%s missing apt-get update in content runtime core stage", path)
 	}
 	beforeApt := body[from : from+apt]
 	if !strings.Contains(beforeApt, "USER root") {
-		t.Fatalf("%s must switch to USER root before apt-get update because the OpenHands base image may default to a non-root user", path)
+		t.Fatalf("%s must switch to USER root before apt-get update", path)
 	}
 }
 
@@ -379,12 +392,15 @@ func TestAgentReachIsBuildInstalledAndRuntimeReadOnly(t *testing.T) {
 		}
 	}
 	installAt := strings.Index(body, `python3 -m venv "$AGENT_REACH_VENV"`)
-	runtimeUserAt := strings.Index(body, "USER 1000:1000")
+	runtimeUserAt := strings.Index(body[installAt:], "USER 1000:1000")
+	if runtimeUserAt >= 0 {
+		runtimeUserAt += installAt
+	}
 	if installAt < 0 || runtimeUserAt < installAt {
 		t.Fatalf("Agent-Reach must be installed before switching to runtime user: install=%d user=%d", installAt, runtimeUserAt)
 	}
-	if ContainerRuntimePath != "/opt/agent-reach-venv/bin:/usr/local/bin:/usr/bin:/bin" {
-		t.Fatalf("ContainerRuntimePath = %q, want Agent-Reach venv first", ContainerRuntimePath)
+	if ContainerSeednoteRuntimePath != "/opt/agent-reach-venv/bin:/usr/local/bin:/usr/bin:/bin" {
+		t.Fatalf("ContainerSeednoteRuntimePath = %q, want Agent-Reach venv first", ContainerSeednoteRuntimePath)
 	}
 }
 
@@ -439,7 +455,7 @@ func TestDockerRuntimeAgentSourceUsesResolvedLocalIdentity(t *testing.T) {
 		"currentDockerRuntimeUser()",
 		"dockerWorkspacePreparationExecOptions(workDirInContainer, runtimeUser)",
 		"dockerAgentExecOptions(cmd, env, workDirInContainer, runtimeUser)",
-		"dockerAgentContainerConfig(e.dockerCfg.Image, cmd, env, runtimeUser)",
+		"dockerAgentContainerConfig(image, cmd, env, runtimeUser)",
 	} {
 		if !strings.Contains(dockerExecutor, want) {
 			t.Fatalf("Docker executor missing resolved local identity flow %q", want)
@@ -584,7 +600,7 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 	}{
 		{
 			path: filepath.Join(root, "Dockerfile.agent"),
-			want: []string{"FROM golang:alpine AS builder", "FROM ghcr.io/openhands/agent-server:latest-python"},
+			want: []string{"FROM golang:alpine AS builder", "FROM node:22-bookworm-slim AS runtime-core"},
 		},
 		{
 			path: filepath.Join(root, "Dockerfile.server"),
@@ -769,11 +785,14 @@ func TestComposeAndMakefileUseRootDockerfileBuilds(t *testing.T) {
 	for _, want := range []string{
 		"WCFLINK_IMAGE := anban-creator-wcflink:latest",
 		"STUDIO_IMAGE := anban-creator-studio:latest",
-		"docker-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images",
+		"docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images",
+		"docker-seednote-agent-image:",
 		"docker-montage-agent-image:",
 		"docker-wcflink-image:",
 		"docker-studio-image:",
-		"docker-images: docker-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image",
+		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image",
+		"docker build -f Dockerfile.agent --target content",
+		"docker build -f Dockerfile.agent --target seednote",
 		"docker build -f Dockerfile.agent-montage",
 		"docker build -f Dockerfile.wcflink -t $(WCFLINK_IMAGE) .",
 		"docker build -f Dockerfile.studio -t $(STUDIO_IMAGE) .",
@@ -793,14 +812,16 @@ func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
-		"pull_policy: build\n    container_name: creator-agent",
+		"pull_policy: build\n    container_name: creator-agent-content",
 		"entrypoint: [\"tini\", \"--\"]\n    command: [\"sleep\", \"infinity\"]",
 		"- ./data/workspace:/workspace",
 		"agent:\n        condition: service_started",
 		"ANBAN_CLAUDE_EXECUTOR: \"docker\"",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL: \"http://server:8080\"",
-		"ANBAN_CLAUDE_DOCKER_IMAGE: \"creator-agent:latest\"",
-		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: \"creator-agent\"",
+		"ANBAN_CLAUDE_DOCKER_IMAGE: \"creator-agent-content:latest\"",
+		"ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE: \"creator-agent-seednote:latest\"",
+		"ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE: \"creator-agent-montage:latest\"",
+		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: \"creator-agent-content\"",
 		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: \"/app/data/workspace\"",
 		"- ./data/workspace:/app/data/workspace",
 		"- /var/run/docker.sock:/var/run/docker.sock",
@@ -814,7 +835,9 @@ func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
 	for _, configPath := range []string{"server/config.yaml", "server/config.example.yaml"} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
-			"image: \"${ANBAN_CLAUDE_DOCKER_IMAGE:-creator-agent:latest}\"",
+			"image: \"${ANBAN_CLAUDE_DOCKER_IMAGE:-creator-agent-content:latest}\"",
+			"seednote: \"${ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE:-creator-agent-seednote:latest}\"",
+			"montage: \"${ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE:-creator-agent-montage:latest}\"",
 			"container_name: \"${ANBAN_CLAUDE_DOCKER_CONTAINER_NAME}\"",
 			"workspace_dir: \"${ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR}\"",
 		} {

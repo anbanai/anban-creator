@@ -13,6 +13,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
 
@@ -40,7 +41,7 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	if got, want := EphemeralContainerName(task.ID), "creator-agent-task-task-1"; got != want {
 		t.Fatalf("container name = %q, want %q", got, want)
 	}
-	if got, want := DockerAgentImageDefault, "creator-agent:latest"; got != want {
+	if got, want := DockerAgentImageDefault, "creator-agent-content:latest"; got != want {
 		t.Fatalf("Docker Agent image default = %q, want %q", got, want)
 	}
 }
@@ -226,8 +227,8 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 			t.Fatalf("env = %#v, want one managed %s=%s", env, key, want)
 		}
 	}
-	if !slices.Contains(env, "PATH="+ContainerRuntimePath) {
-		t.Fatalf("env = %#v, want Agent-Reach venv on managed PATH", env)
+	if !slices.Contains(env, "PATH="+ContainerMontageRuntimePath) {
+		t.Fatalf("env = %#v, want OpenMontage venv on managed PATH", env)
 	}
 
 }
@@ -242,6 +243,39 @@ func TestDockerExecutorDoesNotExposeMontageEnvToOtherTasks(t *testing.T) {
 
 	if slices.Contains(env, "NEW_PROVIDER_TOKEN=future-secret") {
 		t.Fatalf("env = %#v, non-Montage task must not receive Montage env", env)
+	}
+	if !slices.Contains(env, "PATH="+ContainerContentRuntimePath) {
+		t.Fatalf("env = %#v, want minimal content PATH", env)
+	}
+
+	seednoteEnv := e.buildAgentEnv(&ExecutionOptions{
+		Task: &model.Task{ID: "task-2", Type: model.PlatformSeednote},
+	}, dockerRuntimeHome("/workspace/task-2"))
+	if !slices.Contains(seednoteEnv, "PATH="+ContainerSeednoteRuntimePath) {
+		t.Fatalf("env = %#v, want Agent-Reach PATH", seednoteEnv)
+	}
+}
+
+func TestDockerProfileContainerInheritsPersistentWorkspaceVolume(t *testing.T) {
+	cfg := dockerAgentHostConfig("/host/workspace/task-1", "creator-agent-content", config.DockerConfig{CPUCores: 3, MemoryMB: 5120})
+	if !slices.Equal(cfg.VolumesFrom, []string{"creator-agent-content"}) {
+		t.Fatalf("VolumesFrom = %#v, want persistent content container", cfg.VolumesFrom)
+	}
+	if len(cfg.Mounts) != 0 {
+		t.Fatalf("profile container mounts = %#v, want inherited workspace volume only", cfg.Mounts)
+	}
+	if cfg.NanoCPUs != 3e9 || cfg.Memory != 5120*1024*1024 {
+		t.Fatalf("resources = cpu %d memory %d", cfg.NanoCPUs, cfg.Memory)
+	}
+}
+
+func TestStandaloneDockerContainerBindsTaskWorkspace(t *testing.T) {
+	cfg := dockerAgentHostConfig("/host/workspace/task-1", "", config.DockerConfig{})
+	if len(cfg.VolumesFrom) != 0 || len(cfg.Mounts) != 1 {
+		t.Fatalf("host config = %#v", cfg)
+	}
+	if cfg.Mounts[0].Source != "/host/workspace/task-1" || cfg.Mounts[0].Target != "/workspace" {
+		t.Fatalf("workspace mount = %#v", cfg.Mounts[0])
 	}
 }
 

@@ -10,6 +10,10 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 - **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
 - **Plugin Assets** — Claude Code and Codex share one plugin source under `plugins/anban/`, with native manifests and host adapters for each harness.
 
+Managed execution uses separate `creator-agent-content`, `creator-agent-seednote`,
+and `creator-agent-montage` images. They share the same plugin tree while keeping
+Python/Agent-Reach and OpenMontage/Remotion/ffmpeg out of the standard image.
+
 ## Quick Start
 
 ```bash
@@ -18,6 +22,7 @@ cp .env.example .env
 # Set ANBAN_BILLING_ADMIN_API_KEY in .env before starting Compose.
 
 # Start infra and services with Docker Compose
+# (builds the Seednote and Montage profile images before startup)
 make docker-up
 
 # Or run server and web separately during development

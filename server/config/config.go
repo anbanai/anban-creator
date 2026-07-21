@@ -778,12 +778,13 @@ func (c ClaudeConfig) Validate() error {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Image         string `yaml:"image"`          // Docker image name (default: "creator-agent:latest")
-	CPUCores      int64  `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
-	MemoryMB      int64  `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
-	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
-	ContainerName string `yaml:"container_name"` // Name of a persistent container to reuse via docker exec (empty = create+destroy per task)
-	WorkspaceDir  string `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
+	Image         string            `yaml:"image"`          // Default content image (default: "creator-agent-content:latest")
+	ImageProfiles map[string]string `yaml:"image_profiles"` // Images for task types with additional runtime dependencies
+	CPUCores      int64             `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
+	MemoryMB      int64             `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
+	TimeoutSec    int               `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
+	ContainerName string            `yaml:"container_name"` // Persistent content container; profile tasks use one-shot containers and inherit its volumes
+	WorkspaceDir  string            `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
 }
 
 // KubernetesConfig holds ACK/Kubernetes Job runtime settings.
@@ -815,15 +816,23 @@ type RuntimeImageSelection struct {
 	Image   string
 }
 
-func (c KubernetesConfig) ImageForTask(taskType string) RuntimeImageSelection {
+func imageForTask(defaultImage string, profiles map[string]string, taskType string) RuntimeImageSelection {
 	taskType = strings.TrimSpace(taskType)
-	if image := strings.TrimSpace(c.ImageProfiles[taskType]); image != "" {
+	if image := strings.TrimSpace(profiles[taskType]); image != "" {
 		return RuntimeImageSelection{Profile: taskType, Image: image}
 	}
-	return RuntimeImageSelection{Profile: "content", Image: strings.TrimSpace(c.AgentImage)}
+	return RuntimeImageSelection{Profile: "content", Image: strings.TrimSpace(defaultImage)}
 }
 
-func isKubernetesImageProfileTaskType(taskType string) bool {
+func (c DockerConfig) ImageForTask(taskType string) RuntimeImageSelection {
+	return imageForTask(c.Image, c.ImageProfiles, taskType)
+}
+
+func (c KubernetesConfig) ImageForTask(taskType string) RuntimeImageSelection {
+	return imageForTask(c.AgentImage, c.ImageProfiles, taskType)
+}
+
+func isAgentImageProfileTaskType(taskType string) bool {
 	switch taskType {
 	case model.PlatformArticle,
 		model.PlatformSeednote,
@@ -1200,7 +1209,16 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	if c.Claude.Docker.Image == "" {
-		c.Claude.Docker.Image = "creator-agent:latest"
+		c.Claude.Docker.Image = "creator-agent-content:latest"
+	}
+	if c.Claude.Docker.ImageProfiles == nil {
+		c.Claude.Docker.ImageProfiles = map[string]string{}
+	}
+	if _, ok := c.Claude.Docker.ImageProfiles[model.PlatformSeednote]; !ok {
+		c.Claude.Docker.ImageProfiles[model.PlatformSeednote] = "creator-agent-seednote:latest"
+	}
+	if _, ok := c.Claude.Docker.ImageProfiles[model.PlatformMontage]; !ok {
+		c.Claude.Docker.ImageProfiles[model.PlatformMontage] = "creator-agent-montage:latest"
 	}
 	if c.Claude.Docker.CPUCores == 0 {
 		c.Claude.Docker.CPUCores = 2
@@ -1682,6 +1700,22 @@ func (c *Config) Validate() error {
 				"claude.docker.timeout_sec (%ds) must be >= asynq.content_generate_timeout (%s); otherwise the container is killed before the task deadline",
 				c.Claude.Docker.TimeoutSec, c.Asynq.ContentGenerateTimeout))
 		}
+		if strings.TrimSpace(c.Claude.Docker.Image) == "" {
+			errs = append(errs, "claude.docker.image is required")
+		}
+		for _, taskType := range []string{model.PlatformSeednote, model.PlatformMontage} {
+			if strings.TrimSpace(c.Claude.Docker.ImageProfiles[taskType]) == "" {
+				errs = append(errs, fmt.Sprintf("claude.docker.image_profiles.%s is required", taskType))
+			}
+		}
+		for taskType, image := range c.Claude.Docker.ImageProfiles {
+			if !isAgentImageProfileTaskType(taskType) {
+				errs = append(errs, fmt.Sprintf("claude.docker.image_profiles contains unsupported task type %q", taskType))
+			}
+			if strings.TrimSpace(image) == "" {
+				errs = append(errs, fmt.Sprintf("claude.docker.image_profiles.%s must not be empty", taskType))
+			}
+		}
 	}
 
 	if c.Claude.Executor == "kubernetes" {
@@ -1705,8 +1739,13 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Claude.Kubernetes.AgentImage) == "" {
 			errs = append(errs, "claude.kubernetes.agent_image is required")
 		}
+		for _, taskType := range []string{model.PlatformSeednote, model.PlatformMontage} {
+			if strings.TrimSpace(c.Claude.Kubernetes.ImageProfiles[taskType]) == "" {
+				errs = append(errs, fmt.Sprintf("claude.kubernetes.image_profiles.%s is required", taskType))
+			}
+		}
 		for taskType, image := range c.Claude.Kubernetes.ImageProfiles {
-			if !isKubernetesImageProfileTaskType(taskType) {
+			if !isAgentImageProfileTaskType(taskType) {
 				errs = append(errs, fmt.Sprintf("claude.kubernetes.image_profiles contains unsupported task type %q", taskType))
 			}
 			if strings.TrimSpace(image) == "" {

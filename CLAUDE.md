@@ -33,7 +33,9 @@ make server-run               # Build and run server with config
 make server-dev               # Run server via go run (development)
 make server-test              # Run server tests (go test -v ./server/...)
 
-make docker-agent-image       # Build agent Docker image (Claude Code + plugin)
+make docker-agent-image       # Build minimal content Agent image
+make docker-seednote-agent-image # Build Seednote image (Python + Agent-Reach)
+make docker-montage-agent-image  # Build Montage image (OpenMontage + Remotion + ffmpeg)
 make docker-server-image      # Build server Docker image (Go binary)
 make docker-wcflink-image     # Build pinned wcfLink sidecar Docker image
 make docker-studio-image      # Build Studio Docker image (Bun + nginx)
@@ -82,7 +84,7 @@ cd desktop && bun run build    # Build desktop installers (tauri build)
 ### Docker Infrastructure
 
 ```bash
-make docker-up                # Start all services: MySQL 8.0, Redis 7, agent, server
+make docker-up                # Build all Agent profiles, then start Compose services
 make docker-down              # Stop all containers
 make docker-logs              # Follow container logs
 ```
@@ -91,7 +93,7 @@ make docker-logs              # Follow container logs
 
 ### Agent (`agent/`)
 
-Standalone Go binary that executes Claude Code tasks in Docker containers. The server dispatches tasks; the agent runs them in isolation.
+Standalone Go binary that executes Claude Code tasks in Docker containers. The server dispatches tasks and selects one of three dependency profiles: `creator-agent-content`, `creator-agent-seednote`, or `creator-agent-montage`. All profiles contain the same canonical plugin; only their system runtimes differ.
 
 - `main.go` — Entry point, orchestrates run lifecycle
 - `runner.go` — Creates and manages Claude Code CLI subprocess
@@ -201,7 +203,7 @@ Two loading modes: `Load()`/`LoadWithDefaults()` (full validation) vs `LoadMinim
 
 ### Task Execution (server → agent)
 
-1. Server creates task, dispatches to agent via Docker container
+1. Server creates a task and selects the content, Seednote, or Montage runtime image
 2. Agent downloads workspace, runs Claude Code CLI subprocess
 3. Claude Code executes skill-based workflows using the plugin system
 4. Agent reports results back to server

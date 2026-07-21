@@ -15,7 +15,7 @@ USER root
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl gh git jq fontconfig fonts-noto-cjk python3 python3-venv tini; \
+    apt-get install -y --no-install-recommends ca-certificates curl git jq fontconfig fonts-noto-cjk python3 python3-venv tini; \
     if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1 || ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 20 || (major === 20 && minor >= 11) ? 0 : 1)'; then \
       curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource-setup.sh; \
       bash /tmp/nodesource-setup.sh; \
@@ -31,32 +31,21 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 ARG CLAUDE_CODE_VERSION=2.1.208
-ARG MCPORTER_VERSION=0.9.0
-RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "mcporter@${MCPORTER_VERSION}" && \
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
     claude --version && \
-    mcporter --version && \
-    gh --version
+    npm cache clean --force && \
+    rm -rf /root/.npm
 
 COPY --from=builder /out/anban /usr/local/bin/anban
 COPY plugins/anban/ /anbanai/
-COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/
 COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
 
 ARG OPENMONTAGE_REVISION
-ENV AGENT_REACH_VENV=/opt/agent-reach-venv
 ENV OPENMONTAGE_VENV=/opt/openmontage-venv
 
 RUN set -eux; \
     test -n "$OPENMONTAGE_REVISION"; \
     printf '%s\n' "$OPENMONTAGE_REVISION" > /app/third_party/OpenMontage/.anban-source-revision; \
-    python3 -m venv "$AGENT_REACH_VENV"; \
-    "$AGENT_REACH_VENV/bin/pip" install \
-      --no-cache-dir \
-      --constraint /app/third_party/Agent-Reach/constraints.txt \
-      /app/third_party/Agent-Reach; \
-    "$AGENT_REACH_VENV/bin/agent-reach" --version; \
-    "$AGENT_REACH_VENV/bin/agent-reach" doctor --json | \
-      "$AGENT_REACH_VENV/bin/python" -c 'import json, sys; data = json.load(sys.stdin); xhs = data["xiaohongshu"]; assert {"status", "active_backend", "message"} <= set(xhs)'; \
     python3 -m venv "$OPENMONTAGE_VENV"; \
     "$OPENMONTAGE_VENV/bin/pip" install --no-cache-dir -r /app/third_party/OpenMontage/requirements.txt; \
     test -f /app/third_party/OpenMontage/remotion-composer/package-lock.json; \
@@ -65,8 +54,10 @@ RUN set -eux; \
     cd /app/third_party/OpenMontage; \
     "$OPENMONTAGE_VENV/bin/python" -c "from tools.tool_registry import registry; registry.discover(); summary = registry.provider_menu_summary(); assert isinstance(summary, dict)"; \
     "$OPENMONTAGE_VENV/bin/python" -c "from lib.pipeline_loader import load_pipeline; manifest = load_pipeline('cinematic'); assert manifest.get('name') or manifest.get('display_name')"; \
-    chown -R root:root /app/third_party/Agent-Reach "$AGENT_REACH_VENV" /app/third_party/OpenMontage "$OPENMONTAGE_VENV"; \
-    chmod -R a=rX /app/third_party/Agent-Reach "$AGENT_REACH_VENV" /app/third_party/OpenMontage "$OPENMONTAGE_VENV"
+    npm cache clean --force; \
+    rm -rf /root/.npm; \
+    chown -R root:root /app/third_party/OpenMontage "$OPENMONTAGE_VENV"; \
+    chmod -R a=rX /app/third_party/OpenMontage "$OPENMONTAGE_VENV"
 
 RUN set -eux; \
     if [ -n "$(find /anbanai -type l -print -quit)" ]; then \
@@ -80,21 +71,17 @@ ENV CLAUDE_PLUGIN_ROOT=/anbanai
 ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template
 ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage
 ENV HOME=/home/node
-ENV PATH="${OPENMONTAGE_VENV}/bin:${AGENT_REACH_VENV}/bin:${PATH}"
+ENV PATH="${OPENMONTAGE_VENV}/bin:${PATH}"
 
 USER 1000:1000
 RUN git config --global http.version HTTP/1.1
-RUN set -eux; \
-    install -d "$HOME/.config/yt-dlp"; \
-    printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"
 
 RUN claude plugin marketplace add /anbanai && \
     claude plugin install --scope user anban@anbanai
 
 USER root
 RUN set -eux; \
-    install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp"; \
-    install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"; \
+    install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache"; \
     for file in known_marketplaces.json installed_plugins.json; do \
       test -f "$HOME/.claude/plugins/$file"; \
       cp -a "$HOME/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"; \
