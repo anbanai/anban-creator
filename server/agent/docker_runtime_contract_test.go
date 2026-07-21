@@ -239,6 +239,29 @@ func TestDockerRuntimeProfiles(t *testing.T) {
 	}
 }
 
+func TestGoDockerfilesStageLocalSDKModuleBeforeDependencyDownload(t *testing.T) {
+	root := repositoryRoot(t)
+	const sdkModuleCopy = "COPY third_party/claude-agent-sdk-go/go.mod ./third_party/claude-agent-sdk-go/go.mod"
+	const dependencyDownload = "RUN go mod download"
+
+	for _, name := range []string{"Dockerfile.agent", "Dockerfile.agent-montage", "Dockerfile.server"} {
+		t.Run(name, func(t *testing.T) {
+			body := readTextFile(t, filepath.Join(root, name))
+			copyIndex := strings.Index(body, sdkModuleCopy)
+			downloadIndex := strings.Index(body, dependencyDownload)
+			if copyIndex < 0 {
+				t.Fatalf("%s must copy the repository-local Claude Agent SDK module before resolving the root go.mod", name)
+			}
+			if downloadIndex < 0 {
+				t.Fatalf("%s missing %q", name, dependencyDownload)
+			}
+			if copyIndex > downloadIndex {
+				t.Fatalf("%s copies the repository-local Claude Agent SDK module after dependency download", name)
+			}
+		})
+	}
+}
+
 func TestMontageRuntimeImageContract(t *testing.T) {
 	path := filepath.Join(repositoryRoot(t), "Dockerfile.agent-montage")
 	body := readTextFile(t, path)
