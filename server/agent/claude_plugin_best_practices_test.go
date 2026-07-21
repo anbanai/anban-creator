@@ -559,7 +559,7 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 	allowed := map[string]bool{
 		"name": true, "description": true, "model": true, "effort": true,
 		"maxTurns": true, "tools": true, "disallowedTools": true,
-		"memory": true, "background": true, "isolation": true, "color": true,
+		"skills": true, "memory": true, "background": true, "isolation": true, "color": true,
 	}
 	ignoredForPluginAgents := map[string]bool{
 		"hooks": true, "mcpServers": true, "permissionMode": true,
@@ -594,11 +594,20 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 		if frontmatterString(fm["description"]) == "" {
 			t.Fatalf("%s must set description so Claude Code can delegate appropriately", path)
 		}
-		if _, ok := fm["skills"]; ok {
-			t.Fatalf("%s uses skills startup injection; phase Skills must load on demand through the Skill tool", path)
+		for _, skill := range frontmatterStringList(fm["skills"]) {
+			skillPath := filepath.Join(repoRoot(t), "claudecode", "skills", skill, "SKILL.md")
+			if _, err := os.Stat(skillPath); err != nil {
+				t.Fatalf("%s preloads missing Skill %q: %v", path, skill, err)
+			}
 		}
 		if isolation := frontmatterString(fm["isolation"]); isolation != "" && isolation != "worktree" {
 			t.Fatalf("%s isolation = %q, the only plugin-supported value is worktree", path, isolation)
+		}
+		body := readRepoFile(t, path)
+		for _, forbidden := range []string{"按需 Skill 契约", "不要在 Agent frontmatter 预加载", "未列出仍可发现", "context: fork", "只接收短回执"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s contains obsolete Skill loading prompt %q", path, forbidden)
+			}
 		}
 	}
 }

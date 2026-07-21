@@ -97,9 +97,8 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 	for _, want := range []string{
 		"name: live-slicer",
 		"直播切片",
-		"`Skill`",
-		"`anban:live-slice`",
-		"`anban:capcut-draft`",
+		"  - live-slice",
+		"  - capcut-draft",
 		"插件级 `.mcp.json`",
 		"- TaskCreate",
 		"- TaskUpdate",
@@ -158,8 +157,8 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 	if strings.Contains(frontmatter, "\nmcpServers:") {
 		t.Fatal("live-slicer agent must not define mcpServers; plugin subagents inherit the plugin-level MCP server")
 	}
-	if strings.Contains(frontmatter, "\nskills:") {
-		t.Fatal("live-slicer agent must load phase Skills on demand instead of injecting them at startup")
+	if !strings.Contains(frontmatter, "\nskills:") {
+		t.Fatal("live-slicer agent must preload its specialized Skills")
 	}
 	for _, banned := range []string{
 		"Python",

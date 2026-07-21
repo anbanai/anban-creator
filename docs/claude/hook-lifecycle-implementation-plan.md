@@ -28,7 +28,6 @@ Excluded:
 - Skill preload reduction.
 - Memory and `maxTurns` tuning.
 - New mechanical gates for Agent types that do not already have scripts.
-- `seedance-20` changes or third-party migration.
 - Codex hook redesign. Its hook runtime needs a separate platform-specific audit.
 
 ## File Map
@@ -612,7 +611,7 @@ git -C claudecode status --short
 git status --short --ignore-submodules=all
 ```
 
-Expected: no whitespace errors; both repositories are clean except unrelated pre-existing user changes. Do not add or modify `skills/seedance-20/`.
+Expected: no whitespace errors; both repositories are clean except unrelated pre-existing user changes.
 
 - [ ] **Step 6: Verify release metadata and ownership mechanically**
 

@@ -734,7 +734,7 @@ func buildProjectAgentBrief(ch *model.Project, usesProjectSnapshot bool, videoBl
 		fmt.Fprintf(&b, "关键词：%s\n", ch.Keywords)
 	}
 	b.WriteString("分析入口：项目长期定位只读取工作区 CLAUDE.md / project.instructions；本次需求读取 task.prompt、video_creator_input（profile 中为 videocreator.input）的 brief、references 与 hard_constraints。\n")
-	b.WriteString("Studio 不再提供视频玩法、商业目标、制作模式、内容类型、主体、受众或核心信息；这些业务判断必须由 videocreator agent 使用 seedance-20 SKILL 自主分析并落盘到 video_creator_config。\n")
+	b.WriteString("Studio 不再提供视频玩法、商业目标、制作模式、内容类型、主体、受众或核心信息；这些业务判断必须由 videocreator agent 自主分析并落盘到 video_creator_config。\n")
 	if usesProjectSnapshot {
 		b.WriteString("配置来源：任务创建时冻结的项目快照\n")
 	}

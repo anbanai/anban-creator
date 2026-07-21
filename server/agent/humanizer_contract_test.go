@@ -82,19 +82,17 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 	}
 }
 
-func TestHumanizerIsDiscoverableAndLoadedOnDemand(t *testing.T) {
+func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
 		"claudecode/agents/wechatarticle.md",
 		"claudecode/agents/ecommerce.md",
+		"claudecode/agents/moments.md",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		frontmatter := frontmatterBlock(t, body)
-		if strings.Contains(frontmatter, "\nskills:") {
-			t.Fatalf("%s must not inject full Skill bodies at Agent startup", relPath)
-		}
-		if !strings.Contains(body, "`anban:humanizer`") || !strings.Contains(body, "`Skill`") {
-			t.Fatalf("%s must load the discoverable Humanizer Skill on demand", relPath)
+		if !strings.Contains(frontmatter, "\n  - humanizer") {
+			t.Fatalf("%s must preload its Humanizer capability", relPath)
 		}
 	}
 
@@ -104,14 +102,18 @@ func TestHumanizerIsDiscoverableAndLoadedOnDemand(t *testing.T) {
 	}
 
 	for _, relPath := range []string{
-		"codex/agents/seednote.toml",
 		"codex/agents/wechatarticle.toml",
 		"codex/agents/ecommerce.toml",
+		"codex/agents/moments.toml",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		if !strings.Contains(body, `path = "__PLUGIN_ROOT__/skills/humanizer/SKILL.md"`) {
 			t.Fatalf("%s must inject the bundled humanizer skill", relPath)
 		}
+	}
+	codexSeednote := readRepoFile(t, filepath.Join(root, "codex", "agents", "seednote.toml"))
+	if strings.Contains(codexSeednote, `skills/humanizer/SKILL.md`) {
+		t.Fatal("Codex Seednote must use seednote-writing's built-in de-AI pass instead of preloading Humanizer")
 	}
 
 	dockerfile := readRepoFile(t, filepath.Join(root, "Dockerfile.agent"))

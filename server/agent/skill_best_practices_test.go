@@ -113,7 +113,7 @@ func TestSkillUpstreamIndexDocumentsMirroredSourceBoundaries(t *testing.T) {
 func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 	root := repoRoot(t)
 	agentsRoot := filepath.Join(root, "claudecode", "agents")
-	forbiddenPluginAgentFields := []string{"hooks", "mcpServers", "permissionMode", "skills"}
+	forbiddenPluginAgentFields := []string{"hooks", "mcpServers", "permissionMode"}
 
 	err := filepath.WalkDir(agentsRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -148,11 +148,14 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 		}
 		for _, field := range forbiddenPluginAgentFields {
 			if _, ok := fm[field]; ok {
-				t.Fatalf("%s declares %q; plugin agents must avoid ignored fields and full-text Skill startup injection", path, field)
+				t.Fatalf("%s declares %q; Claude Code ignores this field for plugin agents", path, field)
 			}
 		}
-		if !strings.Contains(body, "`Skill`") || !strings.Contains(body, "anban:") {
-			t.Fatalf("%s must invoke plugin Skills on demand through the namespaced Claude Code Skill tool", path)
+		for _, skill := range frontmatterStringValues(fm["skills"]) {
+			skillPath := filepath.Join(root, "claudecode", "skills", skill, "SKILL.md")
+			if _, err := os.Stat(skillPath); err != nil {
+				t.Fatalf("%s preloads missing Skill %q: %v", path, skill, err)
+			}
 		}
 		return nil
 	})
@@ -161,13 +164,36 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 	}
 }
 
+func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
+	root := repoRoot(t)
+	expected := map[string][]string{
+		"designer":      {"line-art-coloring"},
+		"ecommerce":     {"ecommerce-product-analysis", "ecommerce-copywriting", "humanizer", "ecommerce-visual-design", "ecommerce-platform-specs"},
+		"live-slicer":   {"live-slice", "capcut-draft"},
+		"moments":       {"moments", "humanizer"},
+		"montage":       {"montage"},
+		"seednote":      {"agent-reach", "seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
+		"videocreator":  nil,
+		"videoeditor":   {"video-use", "hyperframes-video-overlays", "remotion-video-overlays", "manim-video-overlays", "pil-video-overlays", "capcut-draft"},
+		"wechatarticle": {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-publishing", "article-viral-strategy"},
+	}
+
+	for agentName, want := range expected {
+		path := filepath.Join(root, "claudecode", "agents", agentName+".md")
+		body := readRepoFile(t, path)
+		fm := parseSkillFrontmatter(t, path, body)
+		got := frontmatterStringValues(fm["skills"])
+		if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+			t.Fatalf("%s skills = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 	root := repoRoot(t)
 	agentsRoot := filepath.Join(root, "claudecode", "agents")
 	skillsRoot := filepath.Join(root, "claudecode", "skills")
 	referenced := map[string]bool{}
-	qualifiedSkillRE := regexp.MustCompile(`anban:([a-z0-9-]+)`)
-
 	agents, err := os.ReadDir(agentsRoot)
 	if err != nil {
 		t.Fatalf("read Claude agents: %v", err)
@@ -176,9 +202,11 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
 			continue
 		}
-		body := readRepoFile(t, filepath.Join(agentsRoot, entry.Name()))
-		for _, match := range qualifiedSkillRE.FindAllStringSubmatch(body, -1) {
-			referenced[match[1]] = true
+		path := filepath.Join(agentsRoot, entry.Name())
+		body := readRepoFile(t, path)
+		fm := parseSkillFrontmatter(t, path, body)
+		for _, skill := range frontmatterStringValues(fm["skills"]) {
+			referenced[skill] = true
 		}
 	}
 
@@ -230,6 +258,22 @@ func TestCodexAgentSkillConfigsPointToBundledSkills(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk codex agents: %v", err)
+	}
+}
+
+func TestCodexAgentsDoNotPreloadDuplicateUmbrellaSkills(t *testing.T) {
+	root := repoRoot(t)
+	for agentName, umbrellaSkill := range map[string]string{
+		"ecommerce":     "ecommerce",
+		"seednote":      "seednote",
+		"wechatarticle": "article",
+	} {
+		path := filepath.Join(root, "codex", "agents", agentName+".toml")
+		body := readRepoFile(t, path)
+		config := `path = "__PLUGIN_ROOT__/skills/` + umbrellaSkill + `/SKILL.md"`
+		if strings.Contains(body, config) {
+			t.Fatalf("%s preloads duplicate umbrella Skill %q", path, umbrellaSkill)
+		}
 	}
 }
 

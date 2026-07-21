@@ -226,8 +226,7 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 	creator := string(creatorRaw)
 	for _, want := range []string{
 		"name: videocreator",
-		"`Skill`",
-		"`anban:seedance-20`",
+		"直接使用平台 MCP 工具完成视频策划",
 		"register_video_reference",
 		"prepare_video_generation_inputs",
 		"create_video_generation_job",
@@ -248,9 +247,9 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 		t.Fatal("videocreator agent must not define tools or mcpServers")
 	}
 	if strings.Contains(creatorFrontmatter, "\nskills:") {
-		t.Fatal("videocreator agent must load seedance-20 on demand instead of injecting it at startup")
+		t.Fatal("videocreator agent must own its workflow without preloaded Skills")
 	}
-	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task", "create_video_asr_task", "pack_video_transcripts", "video-use"} {
+	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task", "create_video_asr_task", "pack_video_transcripts", "video-use", "seedance-20"} {
 		if strings.Contains(creator, banned) {
 			t.Fatalf("videocreator agent should not mention %q", banned)
 		}
@@ -263,13 +262,12 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 	editor := string(editorRaw)
 	for _, want := range []string{
 		"name: videoeditor",
-		"`Skill`",
-		"`anban:video-use`",
-		"`anban:hyperframes-video-overlays`",
-		"`anban:remotion-video-overlays`",
-		"`anban:manim-video-overlays`",
-		"`anban:pil-video-overlays`",
-		"`anban:capcut-draft`",
+		"  - video-use",
+		"  - hyperframes-video-overlays",
+		"  - remotion-video-overlays",
+		"  - manim-video-overlays",
+		"  - pil-video-overlays",
+		"  - capcut-draft",
 		"prepare_file_upload",
 		"create_video_asr_task",
 		"prepare_video_transcript_download",
@@ -295,8 +293,8 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 	if strings.Contains(editorFrontmatter, "\nmcpServers:") || strings.Contains(editorFrontmatter, "\ntools:") {
 		t.Fatal("videoeditor agent must not define tools or mcpServers")
 	}
-	if strings.Contains(editorFrontmatter, "\nskills:") {
-		t.Fatal("videoeditor agent must load phase Skills on demand instead of injecting them at startup")
+	if !strings.Contains(editorFrontmatter, "\nskills:") {
+		t.Fatal("videoeditor agent must preload its specialized Skills")
 	}
 	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task", "create_video_generation_job", "prepare_video_generation_inputs", "seedance-20"} {
 		if strings.Contains(editor, banned) {
@@ -311,7 +309,7 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 	codexCreator := string(codexCreatorRaw)
 	for _, want := range []string{
 		`name = "videocreator"`,
-		"skills/seedance-20/SKILL.md",
+		"直接使用平台 MCP 工具完成视频策划",
 		"prepare_video_generation_inputs",
 		"video-input-contract.json",
 		"compose_video_segments",
@@ -320,6 +318,9 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 		if !strings.Contains(codexCreator, want) {
 			t.Fatalf("codex videocreator agent missing %q", want)
 		}
+	}
+	if strings.Contains(codexCreator, "[[skills.config]]") || strings.Contains(codexCreator, "seedance-20") {
+		t.Fatal("codex videocreator must own its workflow without a Seedance Skill")
 	}
 
 	codexEditorRaw, err := os.ReadFile(filepath.Join(root, "codex", "agents", "videoeditor.toml"))

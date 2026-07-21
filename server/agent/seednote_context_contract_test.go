@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestClaudeSeednotePhaseSkillsRunInForkedContexts(t *testing.T) {
+func TestClaudeSeednotePhaseSkillsUseFileBackedContracts(t *testing.T) {
 	root := repoRoot(t)
 	for _, skill := range []string{
 		"seednote-research",
@@ -17,36 +17,47 @@ func TestClaudeSeednotePhaseSkillsRunInForkedContexts(t *testing.T) {
 		path := filepath.Join(root, "claudecode", "skills", skill, "SKILL.md")
 		body := readRepoFile(t, path)
 		frontmatter := parseSkillFrontmatter(t, path, body)
-		if got := frontmatterStringValue(frontmatter["context"]); got != "fork" {
-			t.Fatalf("%s context = %q, want fork", path, got)
+		if got := frontmatterStringValue(frontmatter["context"]); got != "" {
+			t.Fatalf("%s context = %q, want no forked context", path, got)
 		}
-		for _, want := range []string{"$ARGUMENTS", "task_id", "project_id", "work_dir", "不超过"} {
-			if !strings.Contains(body, want) {
-				t.Fatalf("%s missing isolated execution contract %q", path, want)
+		for _, forbidden := range []string{"$ARGUMENTS", "context: fork", "隔离执行契约", "只接收短回执"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s contains obsolete invocation boilerplate %q", path, forbidden)
 			}
 		}
 	}
 }
 
-func TestClaudeSeednoteAgentPassesExplicitForkInputs(t *testing.T) {
+func TestClaudeSeednoteAgentDeclaresPhaseSkillsWithoutInvocationBoilerplate(t *testing.T) {
 	path := filepath.Join(repoRoot(t), "claudecode", "agents", "seednote.md")
 	body := readRepoFile(t, path)
+	frontmatter := frontmatterBlock(t, body)
 	for _, want := range []string{
-		"context: fork",
-		"task_id=$TASK_ID project_id=$PROJECT_ID work_dir=$DIR",
-		"action=write_and_humanize",
-		"action=compliance_check",
-		"content_file=$DIR/content.md",
-		"attachments_index=.anban-creator/input-attachments/index.json",
-		"outputs=$DIR/image-plan.md,$DIR/image-prompts.md,$DIR/image-review.md",
+		"  - agent-reach",
+		"  - seednote-research",
+		"  - seednote-viral-analysis",
+		"  - seednote-writing",
+		"  - seednote-visual-design",
 	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("%s missing explicit fork invocation contract %q", path, want)
+		if !strings.Contains(frontmatter, want) {
+			t.Fatalf("%s missing declared phase Skill %q", path, want)
 		}
 	}
-	for _, banned := range []string{"anban:humanizer", "using the `humanizer` skill"} {
+	for _, want := range []string{
+		"$DIR/topic-analysis.md",
+		"$DIR/source-analysis.md",
+		"$DIR/viral-template.json",
+		"$DIR/content.md",
+		"$DIR/image-plan.md",
+		"$DIR/image-review.md",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s missing file-backed phase contract %q", path, want)
+		}
+	}
+	for _, banned := range []string{"context: fork", "$ARGUMENTS", "只接收短回执", "anban:humanizer", "using the `humanizer` skill"} {
 		if strings.Contains(body, banned) {
-			t.Fatalf("%s still loads unused Seednote Skill %q", path, banned)
+			t.Fatalf("%s contains obsolete Seednote invocation contract %q", path, banned)
 		}
 	}
 }

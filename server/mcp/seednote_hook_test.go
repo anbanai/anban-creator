@@ -495,12 +495,12 @@ func validateSeednoteFinalizationContract(body string) error {
 	titleStageAt := strings.Index(body, "#### 步骤 7b：标题终稿锁定")
 	imageStageAt := strings.Index(body, "### 图片生成")
 	if titleStageAt < 0 || imageStageAt <= titleStageAt {
-		return fmt.Errorf("seednote must finalize the title after isolated writing and before image generation")
+		return fmt.Errorf("seednote must finalize the title after writing and before image generation")
 	}
-	lastWritingAt := strings.LastIndex(body[:titleStageAt], "action=write_and_humanize")
+	lastWritingAt := strings.LastIndex(body[:titleStageAt], "**产出**：`$DIR/content.md`")
 	finalizeCall := regexp.MustCompile(`finalize_task_title\s*\(`).FindStringIndex(titleStage)
 	if lastWritingAt < 0 || finalizeCall == nil {
-		return fmt.Errorf("seednote must finalize the title after isolated writing and before image generation")
+		return fmt.Errorf("seednote must finalize the title after writing and before image generation")
 	}
 	for _, phrase := range []string{"最多进行 3 次调用尝试", "连续 3 次均返回重复标题"} {
 		if !strings.Contains(titleStage, phrase) {
@@ -509,7 +509,7 @@ func validateSeednoteFinalizationContract(body string) error {
 	}
 	duplicateAt := strings.Index(titleStage, "返回 `duplicate title` 错误时")
 	contentAt := indexAfter(titleStage, "`$DIR/content.md`", duplicateAt)
-	firstLineAt := indexAfter(titleStage, "第一行更新为新标题", contentAt)
+	firstLineAt := indexAfter(titleStage, "第一行为新标题", contentAt)
 	humanizeAt := indexAfter(titleStage, "轻量去 AI", firstLineAt)
 	complianceAt := indexAfter(titleStage, "标题合规", humanizeAt)
 	retryAt := indexAfter(titleStage, "重试", complianceAt)

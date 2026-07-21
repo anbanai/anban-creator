@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestDesignerAgentKeepsMCPAndSkillLoadingContract(t *testing.T) {
+func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 	root := repoRoot(t)
 	agentPath := filepath.Join(root, "claudecode", "agents", "designer.md")
 
@@ -26,8 +26,7 @@ func TestDesignerAgentKeepsMCPAndSkillLoadingContract(t *testing.T) {
 	}
 
 	required := []string{
-		"`Skill`",
-		"`anban:line-art-coloring`",
+		"  - line-art-coloring",
 		"插件级 `.mcp.json`",
 		"Claude Code subagent 的 `tools:` 字段是 allowlist",
 		"不要在本 agent frontmatter 中声明 `tools:`",
@@ -42,16 +41,20 @@ func TestDesignerAgentKeepsMCPAndSkillLoadingContract(t *testing.T) {
 		"无法看到 `generate_image` 等 MCP 能力",
 		"停止并报告 MCP 工具未注入",
 		"不要绕过 MCP",
-		"不要猜路径或直接读取插件缓存",
 		"prepare_workspace 返回的 path 可能是相对路径",
 		"如果为空，调用 `list_projects`",
 	}
-	if strings.Contains(frontmatter, "\nskills:") {
-		t.Fatal("designer agent must load line-art-coloring on demand instead of injecting it at startup")
+	if !strings.Contains(frontmatter, "\nskills:") {
+		t.Fatal("designer agent must preload line-art-coloring")
 	}
 	for _, term := range required {
 		if !strings.Contains(body, term) {
 			t.Fatalf("designer agent missing required term %q", term)
+		}
+	}
+	for _, forbidden := range []string{"`Skill` 工具", "anban:line-art-coloring", "不要在 Agent frontmatter 预加载"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("designer agent contains obsolete Skill loading instruction %q", forbidden)
 		}
 	}
 }

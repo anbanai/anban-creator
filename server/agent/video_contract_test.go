@@ -25,7 +25,7 @@ func TestVideoAgentsUseDedicatedCreatorAndEditorContracts(t *testing.T) {
 	}
 	for _, want := range []string{
 		"name: videocreator",
-		"seedance-20",
+		"workflow=`videocreator`",
 		"analyze_video_reference",
 		"video-understanding.json",
 		"深层意图",
@@ -66,7 +66,7 @@ func TestVideoAgentsUseDedicatedCreatorAndEditorContracts(t *testing.T) {
 
 	codexCreator := readRepoFile(t, "../../codex/agents/videocreator.toml")
 	codexEditor := readRepoFile(t, "../../codex/agents/videoeditor.toml")
-	for _, want := range []string{`name = "videocreator"`, "seedance-20", "analyze_video_reference", "video-understanding.json", "深层意图", "submit_agent_feedback(agent_name=\"videocreator\""} {
+	for _, want := range []string{`name = "videocreator"`, "workflow=videocreator", "analyze_video_reference", "video-understanding.json", "深层意图", "submit_agent_feedback(agent_name=\"videocreator\""} {
 		if !strings.Contains(codexCreator, want) {
 			t.Fatalf("codex videocreator.toml missing %q", want)
 		}
@@ -74,55 +74,6 @@ func TestVideoAgentsUseDedicatedCreatorAndEditorContracts(t *testing.T) {
 	for _, want := range []string{`name = "videoeditor"`, "skills/video-use/SKILL.md", "submit_agent_feedback(agent_name=\"videoeditor\""} {
 		if !strings.Contains(codexEditor, want) {
 			t.Fatalf("codex videoeditor.toml missing %q", want)
-		}
-	}
-}
-
-func TestVideoSkillContractsUseVideoCreatorInputReferences(t *testing.T) {
-	for _, path := range []string{
-		"../../claudecode/skills/seedance-20/references/mcp-contract.md",
-		"../../codex/skills/seedance-20/references/mcp-contract.md",
-		"../../claudecode/skills/seedance-20/references/anban-mcp-contract.md",
-		"../../codex/skills/seedance-20/references/anban-mcp-contract.md",
-	} {
-		text := readRepoFile(t, path)
-		for _, want := range []string{
-			"videocreator.input",
-			"video_creator_input.references",
-			"deep_intent",
-			"must_keep_meaning",
-			"Never fall back to frame sampling",
-		} {
-			if !strings.Contains(text, want) {
-				t.Fatalf("%s missing %q", path, want)
-			}
-		}
-		for _, forbidden := range []string{
-			"video_input.references",
-			"task/plan `video_config.references`",
-			"task/plan video_config.references",
-			"task or plan has `video_config.references`",
-			"metadata from task/plan `video_config.references`",
-		} {
-			if strings.Contains(text, forbidden) {
-				t.Fatalf("%s still points user references at generic video config: %q", path, forbidden)
-			}
-		}
-	}
-}
-
-func TestVideoSkillsDoNotGateExecutionOnCreditBalance(t *testing.T) {
-	for _, path := range []string{
-		"../../claudecode/skills/seedance-20/references/mcp-contract.md",
-		"../../codex/skills/seedance-20/references/mcp-contract.md",
-		"../../claudecode/skills/seedance-20/references/anban-mcp-contract.md",
-		"../../codex/skills/seedance-20/references/anban-mcp-contract.md",
-	} {
-		body := strings.ToLower(readRepoFile(t, path))
-		for _, forbidden := range []string{"balance cannot cover", "insufficient credits", "recharge"} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("%s must not gate workflow execution on %q", path, forbidden)
-			}
 		}
 	}
 }
@@ -155,12 +106,12 @@ func TestCodexSplitVideoHookQualityGatesAreRegistered(t *testing.T) {
 	}
 
 	creatorScript := readRepoFile(t, "../../codex/hooks/videocreator-quality-gate.sh")
-	for _, want := range []string{"videocreator", "seedance-20", "task_id not in text"} {
+	for _, want := range []string{"videocreator", "视频生成工作流", "task_id not in text"} {
 		if !strings.Contains(creatorScript, want) {
 			t.Fatalf("codex videocreator quality gate missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"output/video/$task_id", "selected_skill=.*seedance-20", "dreamina-video\" \"$manifest\""} {
+	for _, forbidden := range []string{"output/video/$task_id", "seedance-20", "dreamina-video\" \"$manifest\""} {
 		if strings.Contains(creatorScript, forbidden) {
 			t.Fatalf("codex videocreator quality gate must not use legacy/generic manifest discovery %q", forbidden)
 		}
@@ -176,24 +127,18 @@ func TestCodexSplitVideoHookQualityGatesAreRegistered(t *testing.T) {
 	}
 }
 
-func TestCodexVideoCreatorAgentUsesSeedance20Skill(t *testing.T) {
-	text := readRepoFile(t, "../../codex/agents/videocreator.toml")
-	for _, want := range []string{
-		"seedance-20",
-		"__PLUGIN_ROOT__/skills/seedance-20/SKILL.md",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("codex videocreator.toml missing %q", want)
+func TestVideoCreatorAgentsOwnWorkflowWithoutSkill(t *testing.T) {
+	for _, path := range []string{"../../claudecode/agents/videocreator.md", "../../codex/agents/videocreator.toml"} {
+		text := readRepoFile(t, path)
+		for _, want := range []string{"workflow", "videocreator", "create_video_generation_job", "validate_video_delivery"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing agent-owned workflow term %q", path, want)
+			}
 		}
-	}
-	for _, forbidden := range []string{
-		"using dreamina-video skill",
-		"path = \"__PLUGIN_ROOT__/skills/dreamina-video/SKILL.md\"",
-		"path = \"__PLUGIN_ROOT__/skills/capcut-draft/SKILL.md\"",
-		"workflow=dreamina-video",
-	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("codex videocreator.toml should not keep dreamina-video as primary workflow: %q", forbidden)
+		for _, forbidden := range []string{"seedance-20", "skills/dreamina-video/SKILL.md"} {
+			if strings.Contains(text, forbidden) {
+				t.Fatalf("%s still depends on removed video Skill %q", path, forbidden)
+			}
 		}
 	}
 }
@@ -225,7 +170,7 @@ func TestVideoDistributionDoesNotExposeUnifiedVideoAgent(t *testing.T) {
 	}
 }
 
-func TestAgentDockerfileInstallsPluginWithSeedance20Skill(t *testing.T) {
+func TestAgentDockerfileInstallsPluginWithoutRemovedVideoSkills(t *testing.T) {
 	path := "../../Dockerfile.agent"
 	text := readRepoFile(t, path)
 	for _, want := range []string{
@@ -240,8 +185,10 @@ func TestAgentDockerfileInstallsPluginWithSeedance20Skill(t *testing.T) {
 		t.Fatalf("%s must copy claudecode plugin assets into /anbanai", path)
 	}
 
-	if _, err := os.Stat("../../claudecode/skills/seedance-20/SKILL.md"); err != nil {
-		t.Fatalf("Docker-installed Claude plugin must include seedance-20 skill: %v", err)
+	for _, path := range []string{"../../claudecode/skills/seedance-20", "../../codex/skills/seedance-20"} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("removed video Skill must not be distributed at %s", path)
+		}
 	}
 }
 

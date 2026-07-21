@@ -1321,7 +1321,7 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 		t.Fatalf("videocreator.pricing must not expose an execution-time balance gate: %#v", pricing)
 	}
 	brief, ok := info["agent_brief"].(string)
-	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "面向露营人群的咖啡杯项目") || !strings.Contains(brief, "CLAUDE.md") || !strings.Contains(brief, "video_creator_input") || !strings.Contains(brief, "seedance-20") || !strings.Contains(brief, "固定任务 SKU") {
+	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "面向露营人群的咖啡杯项目") || !strings.Contains(brief, "CLAUDE.md") || !strings.Contains(brief, "video_creator_input") || !strings.Contains(brief, "videocreator agent 自主分析") || !strings.Contains(brief, "固定任务 SKU") {
 		t.Fatalf("agent_brief missing video project context: %#v", info["agent_brief"])
 	}
 	if strings.Contains(strings.ToLower(brief), "recharge") || strings.Contains(brief, "余额不足") || strings.Contains(brief, "充值") {

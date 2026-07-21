@@ -1354,7 +1354,7 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFile(t *tes
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
 	workDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workDir, "input-manifest.md"), []byte("workflow: seedance-20"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workDir, "input-manifest.md"), []byte("workflow: videocreator"), 0644); err != nil {
 		t.Fatalf("write input manifest: %v", err)
 	}
 	task := &model.Task{
