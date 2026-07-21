@@ -154,12 +154,12 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		if err != nil {
 			return fmt.Errorf("allocate task execution attempt: %w", err)
 		}
-		parent, resumeSessionID, err := resumeExecutionLineage(ctx, txRepo, task)
+		parent, resumeSessionID, refreshRuntime, err := resumeExecutionLineage(ctx, txRepo, task)
 		if err != nil {
 			return err
 		}
 		var runtime srvconfig.RuntimeImageSelection
-		if parent != nil {
+		if parent != nil && !refreshRuntime {
 			runtime = srvconfig.RuntimeImageSelection{
 				Profile: strings.TrimSpace(parent.RuntimeProfile),
 				Image:   strings.TrimSpace(parent.RuntimeImage),
@@ -212,32 +212,35 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 	return execution, created, nil
 }
 
-func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, error) {
+func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, bool, error) {
 	if task == nil || task.CurrentExecutionID == nil || !taskHasResumeInput(task) {
-		return nil, "", nil
+		return nil, "", false, nil
 	}
 	parentID := strings.TrimSpace(*task.CurrentExecutionID)
 	if parentID == "" {
-		return nil, "", nil
+		return nil, "", false, nil
 	}
 	parent, err := repo.TaskExecutions().FindByID(ctx, parentID)
 	if err != nil {
-		return nil, "", fmt.Errorf("load resume parent execution: %w", err)
+		return nil, "", false, fmt.Errorf("load resume parent execution: %w", err)
 	}
 	if parent.TaskID != task.ID || !isTerminalExecution(parent.Status) {
-		return nil, "", fmt.Errorf("resume parent execution %s is not a terminal attempt of task %s", parent.ID, task.ID)
+		return nil, "", false, fmt.Errorf("resume parent execution %s is not a terminal attempt of task %s", parent.ID, task.ID)
 	}
 	if len(parent.Result) == 0 {
-		return parent, "", nil
+		return parent, "", false, nil
 	}
 	var result agent.ExecutionResult
 	if err := json.Unmarshal(parent.Result, &result); err != nil {
-		return nil, "", fmt.Errorf("decode resume parent execution result: %w", err)
+		return nil, "", false, fmt.Errorf("decode resume parent execution result: %w", err)
 	}
 	if isAutocompactThrashingError(result.Error) {
-		return parent, "", nil
+		// The old session and runtime image jointly produced an unrecoverable
+		// context shape. Keep lineage, but use the currently deployed image so
+		// a workflow/config fix can take effect on resume.
+		return parent, "", true, nil
 	}
-	return parent, strings.TrimSpace(result.SessionID), nil
+	return parent, strings.TrimSpace(result.SessionID), false, nil
 }
 
 func isAutocompactThrashingError(message string) bool {

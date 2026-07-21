@@ -354,8 +354,11 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 	}
 }
 
-func TestDispatchAutocompactThrashingStartsFreshClaudeSession(t *testing.T) {
-	svc, repo, _, _, task := setupDispatchTest(t)
+func TestDispatchAutocompactThrashingStartsFreshClaudeSessionAndRuntime(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{
+		Profile: "content", Image: "registry/content@sha256:current",
+	}
 	ctx := context.Background()
 	result, err := json.Marshal(&agent.ExecutionResult{
 		Success:   false,
@@ -388,8 +391,8 @@ func TestDispatchAutocompactThrashingStartsFreshClaudeSession(t *testing.T) {
 	if current.ResumeSessionID != "" {
 		t.Fatalf("resume session = %q, want a fresh Claude session after autocompact thrashing", current.ResumeSessionID)
 	}
-	if current.RuntimeProfile != parent.RuntimeProfile || current.RuntimeImage != parent.RuntimeImage {
-		t.Fatalf("resumed runtime = %q %q, want parent %q %q", current.RuntimeProfile, current.RuntimeImage, parent.RuntimeProfile, parent.RuntimeImage)
+	if current.RuntimeProfile != "content" || current.RuntimeImage != "registry/content@sha256:current" {
+		t.Fatalf("resumed runtime = %q %q, want current deployed runtime", current.RuntimeProfile, current.RuntimeImage)
 	}
 }
 
