@@ -640,9 +640,9 @@ Run:
 rg -n "archive_workspace|ARCHIVE_DIR|archive-seednote-workspace|output/seednote/\{标题\}|output/ecommerce/\{产品名\}|归档全链路|归档前|归档目录|成功归档|归档整理|归档与|与归档|归档交付|→ 归档" \
   server claudecode codex openclaw \
   --glob '!docs/superpowers/**' \
-  --glob '!claudecode/docs/agent-skill-optimization-audit.md' \
-  --glob '!claudecode/docs/gpt-5.6-prompt-guidance.md' \
-  --glob '!claudecode/docs/hook-lifecycle-implementation-plan.md'
+  --glob '!docs/claude/agent-skill-optimization-audit.md' \
+  --glob '!docs/claude/gpt-5.6-prompt-guidance.md' \
+  --glob '!docs/claude/hook-lifecycle-implementation-plan.md'
 ```
 
 Expected: no matches in runtime code, tests, tracked workflow assets, or supported-tool documentation. Historical plan documents and preserved user-owned untracked docs are intentionally excluded.
