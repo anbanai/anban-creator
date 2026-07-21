@@ -308,7 +308,7 @@ func cloneCatalogMetadataBundle(source *Bundle) Bundle {
 }
 
 func initialCatalogMetadataContractError(bundle *Bundle) error {
-	if bundle.Costs.CatalogID != "provider-cost-2026-07-20-v2" {
+	if bundle.Costs.CatalogID != "provider-cost-2026-07-22-v3" {
 		return fmt.Errorf("cost catalog ID = %q", bundle.Costs.CatalogID)
 	}
 	if bundle.Promotions.CatalogID != "promotion-2026-07-17-v1" {
@@ -362,7 +362,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		"image.seedream.designer.v1":      {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.seedream", delivery: "persisted_image"},
 		"image.gpt-image-2.designer.v1":   {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.gpt_image_2", delivery: "persisted_image"},
 	}
-	if catalog.CatalogID != "retail-2026-07-20-v2" || catalog.Currency != "credits" {
+	if catalog.CatalogID != "retail-2026-07-22-v3" || catalog.Currency != "credits" {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
 	}
 	seen := make(map[string]int, len(catalog.SKUs))

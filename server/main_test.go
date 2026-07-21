@@ -7,9 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/service"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
@@ -138,8 +140,31 @@ func TestBuildBillingRuntime(t *testing.T) {
 		if err != nil || runtime == nil || runtime.Handler == nil || runtime.AdminHandler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil || runtime.Cost == nil || runtime.Margin == nil {
 			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
 		}
-		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-20-v2"); err != nil {
+		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-22-v3"); err != nil {
 			t.Fatalf("published production catalog: %v", err)
+		}
+	})
+
+	t.Run("roll forward from previous catalog", func(t *testing.T) {
+		db, repo := newRepo(t)
+		previous, err := serverbilling.LoadBundle(catalogDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous.Products.CatalogID = "retail-2026-07-20-v2"
+		previous.Products.SKUs[0].PriceCredits++
+		if _, err := service.NewBillingCatalogService(repo, previous, service.BillingCatalogOptions{}).Publish(t.Context()); err != nil {
+			t.Fatalf("publish previous catalog: %v", err)
+		}
+
+		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
+		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err != nil {
+			t.Fatalf("buildBillingRuntime with previous catalog: %v", err)
+		}
+		for _, catalogID := range []string{"retail-2026-07-20-v2", "retail-2026-07-22-v3"} {
+			if _, err := repo.Billing().FindCatalogVersion(t.Context(), catalogID); err != nil {
+				t.Fatalf("catalog %s not preserved: %v", catalogID, err)
+			}
 		}
 	})
 }
