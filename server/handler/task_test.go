@@ -1,11 +1,9 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -843,10 +841,17 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	store, err := storage.NewLocalProvider(t.TempDir())
-	if err != nil {
-		t.Fatalf("create local storage: %v", err)
+	uploadID := "resume-upload"
+	pendingKey := "uploads/pending/" + userID + "/" + uploadID + "/notes.md"
+	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
+		StagingKey: pendingKey, FileName: "notes.md", ContentType: "text/markdown", Size: int64(len("# notes")),
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create upload session: %v", err)
 	}
+	store := uploadSessionStatStore(repo.UploadSessions())
+	store.data = map[string][]byte{pendingKey: []byte("# notes")}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
@@ -860,31 +865,15 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 		return h.Resume(c)
 	})
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("prompt", "继续写结论"); err != nil {
-		t.Fatalf("write prompt: %v", err)
-	}
-	if err := writer.WriteField("file_labels", `["修改意见"]`); err != nil {
-		t.Fatalf("write labels: %v", err)
-	}
-	part, err := writer.CreateFormFile("files", "notes.md")
-	if err != nil {
-		t.Fatalf("create file: %v", err)
-	}
-	if _, err := part.Write([]byte("# notes")); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/resume", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{
+		"prompt":"继续写结论",
+		"input_attachments":[{
+			"type":"text","upload_id":"`+uploadID+`","key":"`+pendingKey+`",
+			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999,
+			"instruction":"修改意见"
+		}]
+	}`)
+	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -912,6 +901,56 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	}
 	if !latest || !file {
 		t.Fatalf("resume attachments latest=%v file=%v: %#v", latest, file, resumed.InputAttachments.Data())
+	}
+	upload, err := repo.UploadSessions().FindByID(ctx, uploadID)
+	if err != nil || upload.Status != model.UploadSessionFinalized || upload.AssetID == "" {
+		t.Fatalf("upload session = %#v err=%v, want finalized", upload, err)
+	}
+}
+
+func TestResumeTask_AcceptsJSONPromptOnly(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "resume-prompt@example.com", Password: "hashed", InviteCode: "resumeprompt"}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.NewString()
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusFailed}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc.SetNASResumeEnabled(true)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks/:id/resume", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Resume(c)
+	})
+
+	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{"prompt":"继续","input_attachments":[]}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 200", resp.StatusCode, body)
+	}
+	resumed, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("find resumed task: %v", err)
+	}
+	if resumed.Status != model.TaskStatusPending {
+		t.Fatalf("task status = %q, want pending", resumed.Status)
+	}
+	attachments := resumed.InputAttachments.Data()
+	if len(attachments) != 1 || attachments[0].Role != model.EntryAttachmentRoleResumeLatest || !strings.Contains(attachments[0].Text, "继续") {
+		t.Fatalf("resume attachments = %#v, want latest prompt", attachments)
 	}
 }
 
@@ -942,24 +981,13 @@ func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
 		return h.Resume(c)
 	})
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("files", "notes.md")
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := part.Write([]byte("notes")); err != nil {
-		t.Fatalf("write form file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/resume", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{
+		"input_attachments":[{
+			"type":"text","upload_id":"resume-storage-upload",
+			"key":"uploads/pending/`+userID+`/resume-storage-upload/notes.md"
+		}]
+	}`)
+	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}

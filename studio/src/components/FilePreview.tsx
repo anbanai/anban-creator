@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight, Video } from 'lucide-react'
+import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight, Video, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import type { TaskFile } from '@/types'
 import { api } from '../lib/api'
@@ -27,6 +27,20 @@ function isMarkdownFile(fileName: string): boolean {
 
 function isVideoFile(file: TaskFile): boolean {
   return file.mime_type?.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.file_name)
+}
+
+function isTextPreviewFile(file: TaskFile): boolean {
+  return Boolean(
+    !file.mime_type?.startsWith('image/')
+    && !isVideoFile(file)
+    && file.mime_type !== 'text/html'
+    && (file.mime_type?.startsWith('text/') || /\.(md|txt|json|yaml|yml|csv|log)$/i.test(file.file_name)),
+  )
+}
+
+function fileRequestErrorMessage(error: unknown, fallback: string): string {
+  const status = (error as { response?: { status?: number } })?.response?.status
+  return status === 429 ? '请求过于频繁，请稍后再试' : fallback
 }
 
 function filePreviewTone(file: TaskFile) {
@@ -81,18 +95,31 @@ function FilePreviewModalContent({
   const [htmlContent, setHtmlContent] = useState('')
   const [textContent, setTextContent] = useState('')
   const [imgSrc, setImgSrc] = useState('')
+  const [previewError, setPreviewError] = useState('')
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [downloading, setDownloading] = useState(false)
   const blobUrlRef = useRef('')
 
   const isImage = file.mime_type?.startsWith('image/')
   const isVideo = isVideoFile(file)
   const isHTML = file.mime_type === 'text/html'
-  const isText = !isImage && !isVideo && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
+  const isText = isTextPreviewFile(file)
   const isMD = isText && isMarkdownFile(file.file_name)
 
   useEffect(() => {
     let cancelled = false
 
     async function load() {
+      setLoading(false)
+      setPreviewError('')
+      setHtmlContent('')
+      setTextContent('')
+      setImgSrc('')
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = ''
+      }
+
       if (isImage || isVideo) {
         const url = file.url || ''
         if (!url) {
@@ -104,6 +131,7 @@ function FilePreviewModalContent({
           return
         }
         if (url.startsWith('/api/v1/files/')) {
+          setLoading(true)
           try {
             const blob = await api.tasks.downloadFileBlob(taskId, file.id)
             if (cancelled) return
@@ -113,8 +141,13 @@ function FilePreviewModalContent({
             setImgSrc(newUrl)
             if (oldUrl) URL.revokeObjectURL(oldUrl)
           } catch (err) {
+            if (cancelled) return
             console.error('Failed to fetch preview:', err)
-            toast.error('文件预览加载失败')
+            const message = fileRequestErrorMessage(err, '文件预览加载失败')
+            setPreviewError(message)
+            toast.error(message)
+          } finally {
+            if (!cancelled) setLoading(false)
           }
         } else {
           // Keep blobUrlRef mirroring the displayed src — unmount cleanup
@@ -140,15 +173,18 @@ function FilePreviewModalContent({
           setTextContent(await blob.text())
         }
       } catch (err) {
+        if (cancelled) return
         console.error('Failed to fetch preview:', err)
-        toast.error('文件预览加载失败')
+        const message = fileRequestErrorMessage(err, '文件预览加载失败')
+        setPreviewError(message)
+        toast.error(message)
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
     void load()
     return () => { cancelled = true }
-  }, [file, taskId, isImage, isVideo, isHTML, isText])
+  }, [file.id, file.url, taskId, isImage, isVideo, isHTML, isText, loadAttempt])
 
   useEffect(() => {
     return () => {
@@ -160,6 +196,8 @@ function FilePreviewModalContent({
   }, [])
 
   const handleDownload = async () => {
+    if (downloading) return
+    setDownloading(true)
     try {
       if (isDesktop() && /^https?:\/\//i.test(file.url || '') && await saveUrlToFile(file.url, file.file_name)) {
         return
@@ -170,7 +208,9 @@ function FilePreviewModalContent({
       await downloadBlob(file.file_name, blob)
     } catch (err) {
       console.error('Failed to download file:', err)
-      toast.error('文件下载失败')
+      toast.error(fileRequestErrorMessage(err, '文件下载失败'))
+    } finally {
+      setDownloading(false)
     }
   }
 
@@ -196,6 +236,16 @@ function FilePreviewModalContent({
         <div className={isImage || isVideo ? 'flex items-center justify-center py-16' : 'flex min-h-[70vh] items-center justify-center rounded-lg border border-border bg-background'}>
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           <span className="ml-2 text-sm text-muted-foreground">加载中...</span>
+        </div>
+      )}
+
+      {!loading && previewError && (
+        <div role="alert" className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-6 text-center">
+          <p className="text-sm text-destructive">{previewError}</p>
+          <Button type="button" variant="outline" size="sm" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+            <RefreshCw className="h-3.5 w-3.5" />
+            重试
+          </Button>
         </div>
       )}
 
@@ -321,9 +371,9 @@ function FilePreviewModalContent({
             复制 HTML
           </Button>
         )}
-        <Button variant="secondary" size="sm" onClick={handleDownload}>
-          <Download className="h-3.5 w-3.5" />
-          下载
+        <Button variant="secondary" size="sm" disabled={downloading} onClick={handleDownload}>
+          {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+          {downloading ? '下载中' : '下载'}
         </Button>
       </div>
       {children}
@@ -462,9 +512,12 @@ function FilePreviewInline({
   const isImage = file.mime_type?.startsWith('image/')
   const isVideo = isVideoFile(file)
   const isHTML = file.mime_type === 'text/html'
-  const isText = !isImage && !isVideo && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
+  const isText = isTextPreviewFile(file)
+  const [downloading, setDownloading] = useState(false)
 
   const handleDownload = async () => {
+    if (downloading) return
+    setDownloading(true)
     try {
       if (isDesktop() && /^https?:\/\//i.test(file.url || '') && await saveUrlToFile(file.url, file.file_name)) {
         return
@@ -475,7 +528,9 @@ function FilePreviewInline({
       await downloadBlob(file.file_name, blob)
     } catch (err) {
       console.error('Failed to download file:', err)
-      toast.error('文件下载失败')
+      toast.error(fileRequestErrorMessage(err, '文件下载失败'))
+    } finally {
+      setDownloading(false)
     }
   }
 
@@ -564,11 +619,12 @@ function FilePreviewInline({
           )}
           <button
             onClick={handleDownload}
+            disabled={downloading}
             className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
             aria-label={`下载 ${file.file_name}`}
           >
-            <Download className="h-3.5 w-3.5" />
-            下载
+            {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {downloading ? '下载中' : '下载'}
           </button>
         </div>
       </div>

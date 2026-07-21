@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FilePreviewGallery } from './FilePreview'
@@ -66,5 +66,49 @@ describe('FilePreviewGallery', () => {
     )
 
     expect(screen.getByText(/最终视频/)).toBeInTheDocument()
+  })
+
+  it('loads a failed JSON preview once and only retries on demand', async () => {
+    const error = Object.assign(new Error('too many requests'), { response: { status: 429 } })
+    vi.mocked(api.tasks.downloadFileBlob).mockRejectedValue(error)
+    const failureFile = fileWith({
+      file_name: 'failure-state.json',
+      mime_type: 'application/json',
+      url: '/api/v1/files/failure-state.json',
+    })
+
+    const view = render(<FilePreviewGallery files={[failureFile]} taskId="task-1" />)
+    fireEvent.click(screen.getByRole('button', { name: /预览/ }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('请求过于频繁，请稍后再试')
+    expect(api.tasks.downloadFileBlob).toHaveBeenCalledTimes(1)
+
+    view.rerender(<FilePreviewGallery files={[{ ...failureFile }]} taskId="task-1" />)
+    await act(async () => { await Promise.resolve() })
+    expect(api.tasks.downloadFileBlob).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(api.tasks.downloadFileBlob).toHaveBeenCalledTimes(2))
+  })
+
+  it('renders a JSON preview with one download request', async () => {
+    vi.mocked(api.tasks.downloadFileBlob).mockResolvedValue(new Blob([
+      '{"stage":"failed","recoverable":true}',
+    ], { type: 'application/json' }))
+
+    render(
+      <FilePreviewGallery
+        files={[fileWith({
+          file_name: 'failure-state.json',
+          mime_type: 'application/json',
+          url: '/api/v1/files/failure-state.json',
+        })]}
+        taskId="task-1"
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /预览/ }))
+
+    expect(await screen.findByText('{"stage":"failed","recoverable":true}')).toBeInTheDocument()
+    expect(api.tasks.downloadFileBlob).toHaveBeenCalledTimes(1)
   })
 })

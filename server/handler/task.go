@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -167,6 +166,11 @@ type createTaskRequest struct {
 type cloneTaskRequest struct {
 	Prompt           *string                  `json:"prompt"`
 	InputAttachments *[]model.EntryAttachment `json:"input_attachments"`
+}
+
+type resumeTaskRequest struct {
+	Prompt           string                  `json:"prompt"`
+	InputAttachments []model.EntryAttachment `json:"input_attachments"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -644,52 +648,46 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	prompt := strings.TrimSpace(c.FormValue("prompt"))
+	var req resumeTaskRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	prompt := strings.TrimSpace(req.Prompt)
 	if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
 		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充指令不能超过 %d 个字符", maxTaskPromptCharacters))
 	}
-
-	var labels []string
-	if raw := strings.TrimSpace(c.FormValue("file_labels")); raw != "" {
-		if err := json.Unmarshal([]byte(raw), &labels); err != nil {
-			return Error(c, fiber.StatusBadRequest, "file_labels must be a JSON string array")
-		}
+	if len(req.InputAttachments) > maxTaskResumeFiles {
+		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("at most %d attachments are allowed", maxTaskResumeFiles))
 	}
 
-	form, _ := c.MultipartForm()
-	fileHeaders := formFiles(form, "files")
-	if len(fileHeaders) > maxTaskResumeFiles {
-		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充文件最多上传 %d 个", maxTaskResumeFiles))
+	resumeStore := h.service.Storage()
+	if len(req.InputAttachments) > 0 && resumeStore == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "补充文件存储暂不可用，请稍后重试")
 	}
-
-	files := make([]service.ResumeTaskFile, 0, len(fileHeaders))
-	opened := make([]io.Closer, 0, len(fileHeaders))
-	defer func() {
-		for _, file := range opened {
-			_ = file.Close()
-		}
-	}()
-	for i, header := range fileHeaders {
-		if header == nil {
-			continue
-		}
-		if header.Size > maxTaskResumeFileBytes {
-			return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充文件不能超过 %dMB", maxTaskResumeFileBytes/(1024*1024)))
-		}
-		src, err := header.Open()
-		if err != nil {
-			return Error(c, fiber.StatusBadRequest, "读取补充文件失败")
-		}
-		opened = append(opened, src)
-		label := ""
-		if i < len(labels) {
-			label = labels[i]
+	var pending repository.Repository
+	if h.repo != nil {
+		pending = h.repo
+	}
+	validatedAttachments, err := validateInputAttachments(c.Context(), resumeStore, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
+		MaxCount:     maxTaskResumeFiles,
+		MaxBytes:     maxTaskResumeFileBytes,
+		AllowedTypes: allAgentAttachmentTypes,
+	})
+	if err != nil {
+		return respondInputAttachmentError(c, h.logger, err)
+	}
+	files := make([]service.ResumeTaskFile, 0, len(validatedAttachments))
+	for i, attachment := range validatedAttachments {
+		if attachment.UploadID == "" || attachment.Key == "" {
+			return Error(c, fiber.StatusBadRequest, fmt.Sprintf("attachment %d requires upload_id and key", i+1))
 		}
 		files = append(files, service.ResumeTaskFile{
-			OriginalName: header.Filename,
-			Label:        label,
-			Reader:       src,
-			Size:         header.Size,
+			OriginalName: attachment.FileName,
+			Label:        attachment.Instruction,
+			Key:          attachment.Key,
+			Type:         attachment.Type,
+			ContentType:  attachment.ContentType,
+			Size:         attachment.Size,
 		})
 	}
 
@@ -721,13 +719,6 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 	task.ReferenceImage = referenceView
 
 	return Success(c, taskAPIResponse(task, h.store))
-}
-
-func formFiles(form *multipart.Form, key string) []*multipart.FileHeader {
-	if form == nil || form.File == nil {
-		return nil
-	}
-	return form.File[key]
 }
 
 // PublishApprove handles POST /api/v1/tasks/:id/publish-approve: resumes a held
