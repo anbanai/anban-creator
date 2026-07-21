@@ -30,7 +30,7 @@ func TestHumanizerSkillMirrorsPinnedUpstream(t *testing.T) {
 		}
 	}
 
-	for _, distro := range []string{"claudecode", "codex", "openclaw"} {
+	for _, distro := range []string{"claudecode", "codex"} {
 		skillDir := filepath.Join(root, distro, "skills", "humanizer")
 		path := filepath.Join(skillDir, "SKILL.md")
 		if got := readRepoFile(t, path); got != upstream {
@@ -66,7 +66,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 	for _, want := range []string{
 		"git -C \"$submodule_path\" fetch --prune origin \"$branch\"",
 		"git -C \"$submodule_path\" checkout --detach \"origin/$branch\"",
-		"for distro in claudecode codex openclaw; do",
+		"for distro in claudecode codex; do",
 		"rm -rf \"$skill_dir/references\"",
 		"cp \"$source_skill\" \"$destination\"",
 	} {
@@ -114,11 +114,6 @@ func TestHumanizerIsDiscoverableAndLoadedOnDemand(t *testing.T) {
 		}
 	}
 
-	openClawManifest := readRepoFile(t, filepath.Join(root, "openclaw", "openclaw.plugin.json"))
-	if !strings.Contains(openClawManifest, `"skills": ["skills"]`) {
-		t.Fatal("OpenClaw manifest must expose the plugin skills directory")
-	}
-
 	dockerfile := readRepoFile(t, filepath.Join(root, "Dockerfile.agent"))
 	for _, want := range []string{
 		"COPY claudecode/   /anbanai/",
@@ -143,7 +138,6 @@ func TestHumanizerBusinessConstraintsStayInOwningWorkflows(t *testing.T) {
 			relPaths: []string{
 				"claudecode/skills/seednote-writing/SKILL.md",
 				"codex/skills/seednote-writing/SKILL.md",
-				"openclaw/skills/seednote-writing/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "仍 ≤1000 字", "不得在改写中引入新的违禁词"},
 		},
@@ -152,7 +146,6 @@ func TestHumanizerBusinessConstraintsStayInOwningWorkflows(t *testing.T) {
 			relPaths: []string{
 				"claudecode/skills/article/SKILL.md",
 				"codex/skills/article/SKILL.md",
-				"openclaw/skills/article/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "覆盖原文全部信息点", "不得引入新的违禁词或导流风险"},
 		},
@@ -161,7 +154,6 @@ func TestHumanizerBusinessConstraintsStayInOwningWorkflows(t *testing.T) {
 			relPaths: []string{
 				"claudecode/skills/ecommerce-copywriting/SKILL.md",
 				"codex/skills/ecommerce-copywriting/SKILL.md",
-				"openclaw/skills/ecommerce-copywriting/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "FABE 信息点", "先去 AI，后合规"},
 		},

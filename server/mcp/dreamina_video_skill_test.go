@@ -14,7 +14,7 @@ func TestSeedance20SkillFiles(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	var firstBody string
-	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		skillDir := filepath.Join(root, plugin, "skills", "seedance-20")
 		skillPath := filepath.Join(skillDir, "SKILL.md")
 		raw, err := os.ReadFile(skillPath)
@@ -220,7 +220,7 @@ func TestDreaminaVideoCompatibilitySkillIsNotDistributed(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
-	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		skillDir := filepath.Join(root, plugin, "skills", "dreamina-video")
 		if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
 			t.Fatalf("%s must not distribute obsolete dreamina-video compatibility Skill, stat err = %v", plugin, err)

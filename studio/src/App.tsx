@@ -31,7 +31,6 @@ const TemplatesPage = React.lazy(() => import('@/pages/TemplatesPage'))
 
 const DesignerPage = React.lazy(() => import('@/pages/DesignerPage'))
 const ClaudeCodeGuidePage = React.lazy(() => import('@/pages/ConnectGuidePage'))
-const OpenClawGuidePage = React.lazy(() => import('@/pages/OpenClawGuidePage'))
 const CodexGuidePage = React.lazy(() => import('@/pages/CodexGuidePage'))
 
 function LoadingSpinner() {
@@ -143,7 +142,6 @@ function AppRoutes() {
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
           <Route path="connect/claude-code" element={<LazyPage component={ClaudeCodeGuidePage} />} />
-          <Route path="connect/openclaw" element={<LazyPage component={OpenClawGuidePage} />} />
           <Route path="connect/codex" element={<LazyPage component={CodexGuidePage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />

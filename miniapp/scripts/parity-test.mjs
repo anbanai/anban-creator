@@ -55,7 +55,6 @@ for (const path of [
   'src/types/topic-pool.ts',
   'src/pages/designer/index.vue',
   'src/pages/connect/claude-code.vue',
-  'src/pages/connect/openclaw.vue',
   'src/pages/settings/api-keys.vue',
   'src/pages/settings/model-config.vue',
   'src/pages/settings/password.vue',
@@ -66,7 +65,6 @@ for (const path of [
 assertContains('src/pages.json', [
   '"path": "pages/designer/index"',
   '"path": "pages/connect/claude-code"',
-  '"path": "pages/connect/openclaw"',
   '"path": "pages/settings/api-keys"',
   '"path": "pages/settings/model-config"',
   '"path": "pages/settings/password"',

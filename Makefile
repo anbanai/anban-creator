@@ -249,4 +249,4 @@ help:
 	@echo ""
 	@echo "Desktop (Tauri) targets:"
 	@echo "  make agent-build-native - Build anban natively (desktop sidecar)"
-	@echo "  make plugin-binaries    - Bundle anban into claudecode/codex/openclaw bin/"
+	@echo "  make plugin-binaries    - Bundle anban into claudecode/codex bin/"

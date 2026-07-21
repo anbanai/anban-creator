@@ -146,12 +146,6 @@
 			}
 		},
 		{
-			"path": "pages/connect/openclaw",
-			"style": {
-				"navigationBarTitleText": "OpenClaw"
-			}
-		},
-		{
 			"path": "pages/connect/codex",
 			"style": {
 				"navigationBarTitleText": "Codex 接入指南"

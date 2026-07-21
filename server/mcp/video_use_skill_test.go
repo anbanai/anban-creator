@@ -41,7 +41,7 @@ func TestVideoUseSkillFiles(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	var firstBody string
-	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		skillDir := filepath.Join(root, plugin, "skills", "video-use")
 		skillPath := filepath.Join(skillDir, "SKILL.md")
 		raw, err := os.ReadFile(skillPath)
@@ -145,7 +145,7 @@ func TestVideoOverlaySkillFiles(t *testing.T) {
 	}
 	for _, skill := range skills {
 		var firstBody string
-		for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+		for _, plugin := range []string{"claudecode", "codex"} {
 			skillPath := filepath.Join(root, plugin, "skills", skill, "SKILL.md")
 			raw, err := os.ReadFile(skillPath)
 			if err != nil {

@@ -535,7 +535,6 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 	for _, want := range []string{
 		"desktop/",
 		"miniapp/",
-		"openclaw/",
 		"codex/",
 		"**/node_modules/",
 		"**/dist/",
@@ -927,7 +926,7 @@ func dockerignoreRuleIndex(t *testing.T, rules []string, want string) int {
 func ownedDockerContractPath(path string) bool {
 	for _, segment := range strings.Split(filepath.ToSlash(path), "/") {
 		switch segment {
-		case ".git", ".worktrees", "claudecode", "codex", "openclaw", "third_party", "vendor", "node_modules", "dist", "build", "coverage", ".cache", ".vite", ".next", "bin", "data", "release":
+		case ".git", ".worktrees", "claudecode", "codex", "third_party", "vendor", "node_modules", "dist", "build", "coverage", ".cache", ".vite", ".next", "bin", "data", "release":
 			return false
 		}
 	}

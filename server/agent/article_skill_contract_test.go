@@ -29,20 +29,6 @@ func TestArticleSkillContracts_ImageControlsSizesAndTextPolicy(t *testing.T) {
 			},
 		},
 		{
-			name: "openclaw article visual skill",
-			path: filepath.Join(root, "openclaw", "skills", "article-visual-design", "SKILL.md"),
-			required: []string{
-				`size="21:9"`,
-				`size="4:3"`,
-				`size="1:1"`,
-				"受控文字策略",
-				"article_image_mode",
-				"cover_only",
-				"text_only",
-				"不依赖项目级/任务级 image ratio",
-			},
-		},
-		{
 			name: "codex article visual skill",
 			path: filepath.Join(root, "codex", "skills", "article-visual-design", "SKILL.md"),
 			required: []string{
@@ -59,16 +45,6 @@ func TestArticleSkillContracts_ImageControlsSizesAndTextPolicy(t *testing.T) {
 		{
 			name: "claudecode cover skill",
 			path: filepath.Join(root, "claudecode", "skills", "article-cover-design", "SKILL.md"),
-			required: []string{
-				`size="21:9"`,
-				"受控文字策略",
-				"article_image_mode",
-				"content_only",
-			},
-		},
-		{
-			name: "openclaw cover skill",
-			path: filepath.Join(root, "openclaw", "skills", "article-cover-design", "SKILL.md"),
 			required: []string{
 				`size="21:9"`,
 				"受控文字策略",
@@ -98,7 +74,6 @@ func TestArticleSkillContracts_NoUnconditionalImageRequirements(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "claudecode", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "article", "SKILL.md"),
 	}
 	for _, path := range paths {
@@ -148,8 +123,6 @@ func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testin
 		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
 		filepath.Join(root, "claudecode", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "claudecode", "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "article-visual-design", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "article-visual-design", "SKILL.md"),
 	}
@@ -178,7 +151,6 @@ func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "claudecode", "skills", "content-writing", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "content-writing", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "content-writing", "SKILL.md"),
 	}
 	for _, path := range paths {
@@ -216,7 +188,6 @@ func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	contentWritingPaths := []string{
 		filepath.Join(root, "claudecode", "skills", "content-writing", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "content-writing", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "content-writing", "SKILL.md"),
 	}
 	for _, path := range contentWritingPaths {
@@ -242,7 +213,6 @@ func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
 
 	articlePaths := []string{
 		filepath.Join(root, "claudecode", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
 		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
@@ -270,10 +240,8 @@ func TestArticleSkillContracts_WechatVisualsForbidDiversionCues(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "claudecode", "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "article-visual-design", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "article-visual-design", "SKILL.md"),
 		filepath.Join(root, "claudecode", "skills", "article-cover-design", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "article-cover-design", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "article-cover-design", "SKILL.md"),
 	}
 	for _, path := range paths {
@@ -335,7 +303,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 
 	for _, path := range []string{
 		filepath.Join(root, "claudecode", "skills", "article-cover-design", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "article-cover-design", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "article-cover-design", "SKILL.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -384,7 +351,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 
 	for _, path := range []string{
 		filepath.Join(root, "claudecode", "skills", "article-visual-design", "references", "cover.md"),
-		filepath.Join(root, "openclaw", "skills", "article-visual-design", "references", "cover.md"),
 		filepath.Join(root, "codex", "skills", "article-visual-design", "references", "cover.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -400,7 +366,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 
 	for _, path := range []string{
 		filepath.Join(root, "claudecode", "skills", "article-visual-design", "references", "content.md"),
-		filepath.Join(root, "openclaw", "skills", "article-visual-design", "references", "content.md"),
 		filepath.Join(root, "codex", "skills", "article-visual-design", "references", "content.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -420,7 +385,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 
 	for _, path := range []string{
 		filepath.Join(root, "claudecode", "skills", "article-cover-design", "references", "examples.md"),
-		filepath.Join(root, "openclaw", "skills", "article-cover-design", "references", "examples.md"),
 		filepath.Join(root, "codex", "skills", "article-cover-design", "references", "examples.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -448,7 +412,7 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 func TestArticleSkillContracts_WechatCoverEffectivenessReference(t *testing.T) {
 	root := articleContractRepoRoot(t)
 
-	for _, plugin := range []string{"claudecode", "openclaw", "codex"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		t.Run(plugin, func(t *testing.T) {
 			main := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "article-cover-design", "SKILL.md"))
 			if !strings.Contains(main, "references/cover-effectiveness.md") {
@@ -484,7 +448,6 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
 		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
 		filepath.Join(root, "claudecode", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "openclaw", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "codex", "skills", "article", "SKILL.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -545,7 +508,7 @@ func TestArticleSkillsDoNotReferenceRemovedGenerationMCPTools(t *testing.T) {
 		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
 		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
 	}
-	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		for _, skill := range []string{"content-writing", "topic-research", "seo-optimization"} {
 			files = append(files, filepath.Join(root, plugin, "skills", skill, "SKILL.md"))
 		}
@@ -565,7 +528,7 @@ func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *test
 	root := articleContractRepoRoot(t)
 	requiredSections := []string{"## Intent Routing", "## Discovery First", "## Configuration Boundaries", "## Output Contract", "## Failure Handling"}
 
-	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		content := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "content-writing", "SKILL.md"))
 		assertArticleContractContainsAll(t, plugin+" content-writing", content, append(requiredSections,
 			"get_project_profile",

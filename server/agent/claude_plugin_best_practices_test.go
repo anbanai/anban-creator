@@ -902,7 +902,7 @@ func TestClaudeCodeSkillsHaveProgressiveExamples(t *testing.T) {
 			}
 		}
 
-		for _, mirror := range []string{"openclaw", "codex"} {
+		for _, mirror := range []string{"codex"} {
 			mirrorPath := filepath.Join(root, mirror, "skills", skill, "SKILL.md")
 			if _, err := os.Stat(mirrorPath); err == nil {
 				mirrorSkillBody := readRepoFile(t, mirrorPath)

@@ -3,11 +3,6 @@
 	url = https://github.com/anbanai/anban-creator-claudecode.git
 	syncPush = true
 	syncRemote = origin
-[submodule "openclaw"]
-	path = openclaw
-	url = https://github.com/anbanai/anban-creator-openclaw.git
-	syncPush = true
-	syncRemote = origin
 [submodule "codex"]
 	path = codex
 	url = https://github.com/anbanai/anban-creator-codex.git

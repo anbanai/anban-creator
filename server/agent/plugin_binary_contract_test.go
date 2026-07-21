@@ -41,7 +41,6 @@ func TestPluginBootstrapInstallsAnbanBinary(t *testing.T) {
 		filepath.Join(root, "scripts", "bootstrap.sh"),
 		filepath.Join(root, "claudecode", "scripts", "bootstrap.sh"),
 		filepath.Join(root, "codex", "scripts", "bootstrap.sh"),
-		filepath.Join(root, "openclaw", "scripts", "bootstrap.sh"),
 	}
 
 	var first string
@@ -155,7 +154,7 @@ func TestPluginBinaryPackagingBuildsFixedAnbanFiles(t *testing.T) {
 	for _, want := range []string{
 		"go build",
 		"./agent",
-		"for plugin in claudecode codex openclaw",
+		"for plugin in claudecode codex",
 		"/bin/anban",
 		"GOOS",
 		"GOARCH",
@@ -193,7 +192,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "claudecode",
 			path:        filepath.Join(root, "claudecode", "hooks", "hooks.json"),
-			wantVersion: "2.10.69",
+			wantVersion: "2.10.70",
 			wantSnippets: []string{
 				"SessionStart",
 				"${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh",
@@ -202,20 +201,10 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "codex",
 			path:        filepath.Join(root, "codex", "install", "install-subagents.sh"),
-			wantVersion: "2.10.59",
+			wantVersion: "2.10.60",
 			wantSnippets: []string{
 				"ANBAN_PLUGIN_ROOT=\"$PLUGIN_ROOT\"",
 				"scripts/bootstrap.sh",
-			},
-		},
-		{
-			name:        "openclaw",
-			path:        filepath.Join(root, "openclaw", "src", "index.ts"),
-			wantVersion: "2.7.51",
-			wantSnippets: []string{
-				"bootstrapAnbanBinary(api)",
-				"scripts/bootstrap.sh",
-				"ANBAN_PLUGIN_ROOT",
 			},
 		},
 	} {
@@ -238,7 +227,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 func TestAnbanSetupEnsuresPluginLocalCLI(t *testing.T) {
 	root := repositoryRoot(t)
 	var firstSharedSection string
-	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		path := filepath.Join(root, plugin, "skills", "anban-setup", "SKILL.md")
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -315,7 +304,6 @@ func assertPluginVersion(t *testing.T, root, plugin, want string) {
 	paths := map[string]string{
 		"claudecode": filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"),
 		"codex":      filepath.Join(root, "codex", ".codex-plugin", "plugin.json"),
-		"openclaw":   filepath.Join(root, "openclaw", "openclaw.plugin.json"),
 	}
 	raw, err := os.ReadFile(paths[plugin])
 	if err != nil {

@@ -9,7 +9,6 @@ import {
   Coins,
   Activity,
   Terminal,
-  Puzzle,
   LayoutGrid,
   Palette,
   Boxes,
@@ -48,7 +47,6 @@ export const businessItems: NavItem[] = [
 
 export const platformItems: NavItem[] = [
   { to: '/connect/claude-code', label: 'Claude Code', icon: Terminal },
-  { to: '/connect/openclaw', label: 'OpenClaw', icon: Puzzle },
   { to: '/connect/codex', label: 'Codex', icon: Boxes },
 ]
 

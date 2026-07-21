@@ -239,7 +239,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 	root := repoRoot(t)
 	canonical := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "montage", "SKILL.md"))
-	for _, distro := range []string{"codex", "openclaw"} {
+	for _, distro := range []string{"codex"} {
 		path := filepath.Join(root, distro, "skills", "montage", "SKILL.md")
 		if got := readRepoFile(t, path); got != canonical {
 			t.Fatalf("%s must match claudecode montage skill", path)
@@ -292,7 +292,6 @@ func TestMontagePluginManifestsAdvertiseSupport(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"),
 		filepath.Join(root, "codex", ".codex-plugin", "plugin.json"),
-		filepath.Join(root, "openclaw", "openclaw.plugin.json"),
 	} {
 		body := readRepoFile(t, path)
 		if !strings.Contains(body, "Montage") {

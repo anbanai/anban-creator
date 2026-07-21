@@ -17,13 +17,11 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		"claudecode/agents/ecommerce.md",
 		"claudecode/agents/moments.md",
 		"claudecode/agents/wechatarticle.md",
-		"claudecode/skills/seednote/SKILL.md",
 		"claudecode/skills/ecommerce/SKILL.md",
 		"claudecode/skills/article/SKILL.md",
 		"claudecode/skills/seednote-visual-design/SKILL.md",
 		"claudecode/skills/ecommerce-visual-design/SKILL.md",
 		"claudecode/skills/ecommerce-platform-specs/SKILL.md",
-		"claudecode/skills/seednote/references/examples.md",
 		"claudecode/hooks/hooks.json",
 		"claudecode/README.md",
 		"claudecode/docs/plugin-development.md",
@@ -31,25 +29,14 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		"codex/agents/ecommerce.toml",
 		"codex/agents/moments.toml",
 		"codex/agents/wechatarticle.toml",
-		"codex/skills/seednote/SKILL.md",
 		"codex/skills/ecommerce/SKILL.md",
 		"codex/skills/article/SKILL.md",
 		"codex/skills/seednote-visual-design/SKILL.md",
 		"codex/skills/ecommerce-visual-design/SKILL.md",
 		"codex/skills/ecommerce-platform-specs/SKILL.md",
-		"codex/skills/seednote/references/examples.md",
 		"codex/hooks/hooks.json",
 		"codex/CODEX.md",
 		"codex/install/agents-registration.toml",
-		"openclaw/skills/seednote/SKILL.md",
-		"openclaw/skills/ecommerce/SKILL.md",
-		"openclaw/skills/article/SKILL.md",
-		"openclaw/skills/seednote-visual-design/SKILL.md",
-		"openclaw/skills/ecommerce-visual-design/SKILL.md",
-		"openclaw/skills/ecommerce-platform-specs/SKILL.md",
-		"openclaw/skills/seednote/references/examples.md",
-		"openclaw/src/hooks/handler.ts",
-		"openclaw/README.md",
 	}
 	forbidden := []string{
 		"archive_workspace",
@@ -84,19 +71,14 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		"claudecode/agents/ecommerce.md",
 		"claudecode/agents/moments.md",
 		"claudecode/agents/wechatarticle.md",
-		"claudecode/skills/seednote/SKILL.md",
 		"claudecode/skills/ecommerce/SKILL.md",
 		"claudecode/skills/article/SKILL.md",
 		"codex/agents/seednote.toml",
 		"codex/agents/ecommerce.toml",
 		"codex/agents/moments.toml",
 		"codex/agents/wechatarticle.toml",
-		"codex/skills/seednote/SKILL.md",
 		"codex/skills/ecommerce/SKILL.md",
 		"codex/skills/article/SKILL.md",
-		"openclaw/skills/seednote/SKILL.md",
-		"openclaw/skills/ecommerce/SKILL.md",
-		"openclaw/skills/article/SKILL.md",
 	}
 	for _, relativePath := range workflowPaths {
 		t.Run(relativePath+"/canonical-output", func(t *testing.T) {
@@ -120,14 +102,10 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 	for _, relativePath := range []string{
 		"claudecode/agents/seednote.md",
 		"claudecode/agents/ecommerce.md",
-		"claudecode/skills/seednote/SKILL.md",
 		"claudecode/skills/ecommerce/SKILL.md",
 		"codex/agents/seednote.toml",
 		"codex/agents/ecommerce.toml",
-		"codex/skills/seednote/SKILL.md",
 		"codex/skills/ecommerce/SKILL.md",
-		"openclaw/skills/seednote/SKILL.md",
-		"openclaw/skills/ecommerce/SKILL.md",
 	} {
 		t.Run(relativePath+"/mode-aware-progress", func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
@@ -145,7 +123,6 @@ func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 		"claudecode/skills/ecommerce/SKILL.md",
 		"codex/agents/ecommerce.toml",
 		"codex/skills/ecommerce/SKILL.md",
-		"openclaw/skills/ecommerce/SKILL.md",
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
@@ -165,50 +142,6 @@ func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestOpenClawSeednotePreparesWorkspaceBeforeArtifactWrites(t *testing.T) {
-	body := readRepoFile(t, filepath.Join(repoRoot(t), "openclaw", "skills", "seednote", "SKILL.md"))
-	preparePattern := `prepare_workspace(content_type="seednote", task_id="$TASK_ID")`
-	if count := strings.Count(body, preparePattern); count != 1 {
-		t.Fatalf("OpenClaw Seednote must use one shared workspace preparation, got %d", count)
-	}
-	prepareAt := strings.Index(body, preparePattern)
-	flows := []struct {
-		heading   string
-		artifacts []string
-	}{
-		{heading: "## 原创模式流程（默认）", artifacts: []string{"$DIR/topic-analysis.md", "$DIR/content.md"}},
-		{heading: "## 复刻模式流程（用户提供笔记 ID 或链接时）", artifacts: []string{"$DIR/source-note.md", "$DIR/source-analysis.md", "$DIR/content.md"}},
-	}
-	for _, flow := range flows {
-		flowAt := strings.Index(body, flow.heading)
-		if flowAt < 0 {
-			t.Fatalf("OpenClaw Seednote missing flow %q", flow.heading)
-		}
-		for _, artifact := range flow.artifacts {
-			relativeAt := strings.Index(body[flowAt:], artifact)
-			artifactAt := -1
-			if relativeAt >= 0 {
-				artifactAt = flowAt + relativeAt
-			}
-			if artifactAt < 0 || prepareAt >= artifactAt {
-				t.Errorf("OpenClaw Seednote prepares workspace at %d after %s artifact %s at %d", prepareAt, flow.heading, artifact, artifactAt)
-			}
-		}
-	}
-}
-
-func TestCodexSeednoteSkillTracksTitleFinalizationInStepTable(t *testing.T) {
-	body := readRepoFile(t, filepath.Join(repoRoot(t), "codex", "skills", "seednote", "SKILL.md"))
-	tableAt := strings.Index(body, "## 子技能调用顺序")
-	if tableAt < 0 {
-		t.Fatal("Codex Seednote skill missing step table")
-	}
-	table := body[tableAt:]
-	if !strings.Contains(table, "标题终稿锁定") || !strings.Contains(table, "finalize_task_title") {
-		t.Fatal("Codex Seednote step table omits title finalization")
 	}
 }
 
@@ -354,7 +287,6 @@ func TestArchiveWorkspaceImplementationIsAbsent(t *testing.T) {
 	for _, relativePath := range []string{
 		"claudecode/scripts/archive-seednote-workspace.sh",
 		"codex/scripts/archive-seednote-workspace.sh",
-		"openclaw/scripts/archive-seednote-workspace.sh",
 	} {
 		path := filepath.Join(root, filepath.FromSlash(relativePath))
 		if _, err := os.Stat(path); !os.IsNotExist(err) {

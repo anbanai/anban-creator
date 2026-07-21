@@ -29,7 +29,7 @@ Excluded:
 - Memory and `maxTurns` tuning.
 - New mechanical gates for Agent types that do not already have scripts.
 - `seedance-20` changes or third-party migration.
-- Codex/OpenClaw hook redesign. Their hook runtimes need separate platform-specific audits.
+- Codex hook redesign. Its hook runtime needs a separate platform-specific audit.
 
 ## File Map
 
@@ -391,7 +391,6 @@ The final plugin version/changelog commit may squash this commit later if the re
 - Modify: `claudecode/agents/seednote.md`
 - Modify: `claudecode/agents/designer.md`
 - Modify: `claudecode/agents/live-slicer.md`
-- Modify: `claudecode/skills/seednote/SKILL.md`
 - Modify: `server/agent/claude_plugin_best_practices_test.go`
 - Modify: `server/mcp/seednote_hook_test.go`
 
@@ -462,13 +461,8 @@ submit_agent_feedback(
 
 - [ ] **Step 5: Remove the obsolete Seednote Skill claim**
 
-In `claudecode/skills/seednote/SKILL.md`, replace “由 seednote 完成 hook 统一负责，本 skill 不直接上报标题” with a single ownership reference:
-
-```text
-最终标题排重与入库由 seednote Agent 的归档阶段负责；本专业流程不另建 Hook 副本。
-```
-
-Do not copy the finalization algorithm into this Skill. P0-2 will later collapse the umbrella Skill into a thin entrypoint.
+The duplicate Seednote umbrella Skill has since been deleted. Keep final title
+deduplication and persistence owned only by the Seednote Agent archive stage.
 
 - [ ] **Step 6: Run ownership and affected contract tests**
 

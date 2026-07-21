@@ -16,19 +16,14 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertJSONField(t, filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"), "name", "anban")
 	assertClaudePluginUserConfig(t, filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"))
 	assertJSONField(t, filepath.Join(root, "codex", ".codex-plugin", "plugin.json"), "name", "anban")
-	assertJSONField(t, filepath.Join(root, "openclaw", "openclaw.plugin.json"), "id", "anban")
-	assertJSONField(t, filepath.Join(root, "openclaw", "openclaw.plugin.json"), "name", "Anban 智能创作助手")
 	assertClaudeMarketplacePlugin(t, filepath.Join(root, "claudecode", ".claude-plugin", "marketplace.json"))
 
 	for _, path := range []string{
 		filepath.Join(root, "claudecode", ".mcp.json"),
 		filepath.Join(root, "codex", ".mcp.json"),
-		filepath.Join(root, "openclaw", ".mcp.json"),
 	} {
 		assertOnlyMCPServerKey(t, path, "creator")
 	}
-
-	assertFileContains(t, filepath.Join(root, "openclaw", "src", "index.ts"), `id: "anban"`)
 
 	for _, path := range []string{
 		filepath.Join(root, "CLAUDE.md"),
@@ -234,7 +229,6 @@ func businessLayerMCPDocs(t *testing.T, root string) []string {
 	addTree(filepath.Join("claudecode", "agents"))
 	addTree(filepath.Join("claudecode", "skills"))
 	addTree(filepath.Join("codex", "skills"))
-	addTree(filepath.Join("openclaw", "skills"))
 	addTree(filepath.Join("studio", "src", "components", "connect"))
 	addTree(filepath.Join("miniapp", "src", "pages", "connect"))
 	return out

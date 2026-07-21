@@ -9,7 +9,7 @@ import (
 
 func TestGuizangSocialCardSkillIsNotDistributed(t *testing.T) {
 	root := repoRoot(t)
-	for _, plugin := range []string{"claudecode", "openclaw", "codex"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		t.Run(plugin, func(t *testing.T) {
 			dir := filepath.Join(root, plugin, "skills", "guizang-social-card")
 			if _, err := os.Stat(dir); !os.IsNotExist(err) {
@@ -28,8 +28,8 @@ func TestGuizangSocialCardRoutingIsRemoved(t *testing.T) {
 		filepath.Join(root, "codex", "agents", "seednote.toml"),
 		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
 	}
-	for _, plugin := range []string{"claudecode", "openclaw", "codex"} {
-		for _, skill := range []string{"moments", "seednote", "seednote-visual-design", "article-visual-design", "article-cover-design"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
+		for _, skill := range []string{"moments", "seednote-visual-design", "article-visual-design", "article-cover-design"} {
 			files = append(files, filepath.Join(root, plugin, "skills", skill, "SKILL.md"))
 		}
 		files = append(files, filepath.Join(root, plugin, "skills", "seednote-visual-design", "references", "content.md"))

@@ -14,7 +14,7 @@ var agentSkillNameRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?
 
 func TestDistributedSkillsFollowAgentSkillsBestPractices(t *testing.T) {
 	root := repoRoot(t)
-	for _, distro := range []string{"claudecode", "codex", "openclaw"} {
+	for _, distro := range []string{"claudecode", "codex"} {
 		skillsRoot := filepath.Join(root, distro, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -48,7 +48,7 @@ func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
 		"INSTALLATION_GUIDE.md": true,
 		"QUICK_REFERENCE.md":    true,
 	}
-	for _, distro := range []string{"claudecode", "codex", "openclaw"} {
+	for _, distro := range []string{"claudecode", "codex"} {
 		skillsRoot := filepath.Join(root, distro, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -71,7 +71,7 @@ func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
 func TestDistributedWriterSkillReferencesStayMirrored(t *testing.T) {
 	root := repoRoot(t)
 	canonical := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "writers", "references", "writer-style-schema.md"))
-	for _, distro := range []string{"codex", "openclaw"} {
+	for _, distro := range []string{"codex"} {
 		path := filepath.Join(root, distro, "skills", "writers", "references", "writer-style-schema.md")
 		if got := readRepoFile(t, path); got != canonical {
 			t.Fatalf("%s must match claudecode writer-style-schema.md", path)
@@ -95,14 +95,13 @@ func TestSkillUpstreamIndexDocumentsMirroredSourceBoundaries(t *testing.T) {
 		}
 	}
 
-	for _, distro := range []string{"codex", "openclaw"} {
+	for _, distro := range []string{"codex"} {
 		readme := readRepoFile(t, filepath.Join(root, distro, "README.md"))
 		for _, want := range []string{
 			"../claudecode/README.md",
 			"../docs/claude/",
 			"claudecode/skills",
 			"codex/skills",
-			"openclaw/skills",
 		} {
 			if !strings.Contains(readme, want) {
 				t.Fatalf("%s README source-index pointer missing %q", distro, want)
@@ -189,7 +188,6 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 		"config":                 true,
 		"ecommerce":              true,
 		"portrait-pose-variants": true,
-		"seednote":               true,
 		"short-video-cover":      true,
 		"writers":                true,
 	}
@@ -284,7 +282,7 @@ func assertAgentSkillBestPractice(t *testing.T, path string) {
 
 func TestLongSkillReferencesUseDirectProgressiveDisclosure(t *testing.T) {
 	root := repoRoot(t)
-	for _, distro := range []string{"claudecode", "codex", "openclaw"} {
+	for _, distro := range []string{"claudecode", "codex"} {
 		skillsRoot := filepath.Join(root, distro, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

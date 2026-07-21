@@ -1,6 +1,6 @@
 # Anban 智能创作助手
 
-Anban is a Studio-first content creation platform for WeChat articles and Seednote-oriented creation workflows. It combines a Web Studio, MCP tools, Claude/OpenClaw agent execution, AI image generation, publishing helpers, task tracking, and credits into one repeatable creator workspace.
+Anban is a Studio-first content creation platform for WeChat articles and Seednote-oriented creation workflows. It combines a Web Studio, MCP tools, Claude Code agent execution, AI image generation, publishing helpers, task tracking, and credits into one repeatable creator workspace.
 
 ## Product Surfaces
 
@@ -8,7 +8,7 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 - **MCP Server** — exposes writing, image, publishing, billing, workspace, and Seednote formatting tools to connected agents.
 - **Agent Runtime** — executes `wechatarticle`, `seednote`, and related content agents locally or in Docker.
 - **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
-- **Plugin Assets** — Claude/OpenClaw skills, agents, themes, and writer styles live under `claudecode/` and `openclaw/`.
+- **Plugin Assets** — Claude Code and Codex agents, skills, hooks, themes, and writer styles live under `claudecode/` and `codex/`.
 
 ## Quick Start
 
@@ -88,7 +88,7 @@ Server configuration lives in `server/config.yaml`; use `server/config.example.y
 Important sections:
 
 - database and Redis
-- Claude/OpenClaw executor
+- Claude Code executor
 - storage provider
 - image generation providers
 - writing model defaults
@@ -109,7 +109,6 @@ studio/       React Web Studio
 desktop/      Tauri v2 desktop shell (local-execution client wrapping Studio)
 miniapp/      WeChat Mini Program parity client
 claudecode/   Claude Code plugin assets: agents, skills, themes, writer styles
-openclaw/     OpenClaw plugin distribution assets
 codex/        Codex plugin distribution assets (skills + subagents)
 docs/         Design specs and implementation plans
 ```

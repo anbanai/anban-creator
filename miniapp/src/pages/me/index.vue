@@ -237,7 +237,6 @@ const otherItems: MenuItem[] = [
   { icon: '设', title: '设置', path: '/pages/settings/index' },
   { icon: '钥', title: '平台密钥', path: '/pages/settings/api-keys' },
   { icon: '接', title: 'Claude Code 接入', path: '/pages/connect/claude-code' },
-  { icon: '爪', title: 'OpenClaw 接入', path: '/pages/connect/openclaw' },
   { icon: 'C', title: 'Codex 接入', path: '/pages/connect/codex' },
   { icon: '馈', title: '意见反馈', action: () => { showFeedback.value = true } },
   { icon: '享', title: '分享给好友', action: () => { /* handled by onShareAppMessage */ } },

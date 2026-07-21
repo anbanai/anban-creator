@@ -82,10 +82,8 @@ func TestVideoSkillContractsUseVideoCreatorInputReferences(t *testing.T) {
 	for _, path := range []string{
 		"../../claudecode/skills/seedance-20/references/mcp-contract.md",
 		"../../codex/skills/seedance-20/references/mcp-contract.md",
-		"../../openclaw/skills/seedance-20/references/mcp-contract.md",
 		"../../claudecode/skills/seedance-20/references/anban-mcp-contract.md",
 		"../../codex/skills/seedance-20/references/anban-mcp-contract.md",
-		"../../openclaw/skills/seedance-20/references/anban-mcp-contract.md",
 	} {
 		text := readRepoFile(t, path)
 		for _, want := range []string{
@@ -117,10 +115,8 @@ func TestVideoSkillsDoNotGateExecutionOnCreditBalance(t *testing.T) {
 	for _, path := range []string{
 		"../../claudecode/skills/seedance-20/references/mcp-contract.md",
 		"../../codex/skills/seedance-20/references/mcp-contract.md",
-		"../../openclaw/skills/seedance-20/references/mcp-contract.md",
 		"../../claudecode/skills/seedance-20/references/anban-mcp-contract.md",
 		"../../codex/skills/seedance-20/references/anban-mcp-contract.md",
-		"../../openclaw/skills/seedance-20/references/anban-mcp-contract.md",
 	} {
 		body := strings.ToLower(readRepoFile(t, path))
 		for _, forbidden := range []string{"balance cannot cover", "insufficient credits", "recharge"} {

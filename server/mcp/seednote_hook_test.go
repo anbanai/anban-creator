@@ -87,19 +87,12 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 		}
 	})
 
-	t.Run("skill assigns finalization to the agent", func(t *testing.T) {
-		skillPath := filepath.Join(root, "claudecode", "skills", "seednote", "SKILL.md")
-		skillRaw, err := os.ReadFile(skillPath)
-		if err != nil {
-			t.Fatalf("read %s: %v", skillPath, err)
-		}
-		skillBody := string(skillRaw)
-		if strings.Contains(skillBody, "hook 统一负责") {
-			t.Error("seednote skill must not assign finalization ownership to hooks")
-		}
-		const ownershipStatement = "最终标题排重与入库由 seednote Agent 的 title_finalization 阶段负责；本专业流程不另建 Hook 副本。"
-		if !strings.Contains(skillBody, ownershipStatement) {
-			t.Errorf("seednote skill missing canonical Agent ownership statement %q", ownershipStatement)
+	t.Run("duplicate umbrella skills are absent", func(t *testing.T) {
+		for _, distro := range []string{"claudecode", "codex"} {
+			skillPath := filepath.Join(root, distro, "skills", "seednote", "SKILL.md")
+			if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
+				t.Errorf("%s must not ship a duplicate top-level Seednote Skill", skillPath)
+			}
 		}
 	})
 }
@@ -147,8 +140,6 @@ func TestActiveRuntimeFeedbackScoresAreSerialized(t *testing.T) {
 		"codex/agents/wechatarticle.toml",
 		"codex/agents/videocreator.toml",
 		"codex/agents/montage.toml",
-		"openclaw/skills/seednote/SKILL.md",
-		"openclaw/skills/ecommerce/SKILL.md",
 	}
 	for _, relativePath := range paths {
 		t.Run(relativePath, func(t *testing.T) {
@@ -174,8 +165,6 @@ func TestChangedRuntimeFeedbackOwnership(t *testing.T) {
 		{path: "codex/agents/ecommerce.toml", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
 		{path: "codex/agents/moments.toml", reportMarker: "最终摘要包含"},
 		{path: "codex/agents/wechatarticle.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
-		{path: "openclaw/skills/seednote/SKILL.md", reportMarker: "## 最终报告"},
-		{path: "openclaw/skills/ecommerce/SKILL.md", reportMarker: "### 步骤 8：生成 manifest 与最终报告"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -286,7 +275,6 @@ func TestSeednoteRuntimeDeliveryContracts(t *testing.T) {
 	paths := []string{
 		filepath.Join(root, "claudecode", "agents", "seednote.md"),
 		filepath.Join(root, "codex", "agents", "seednote.toml"),
-		filepath.Join(root, "openclaw", "skills", "seednote", "SKILL.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {

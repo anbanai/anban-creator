@@ -90,11 +90,6 @@
           <text class="list-item__title">Claude Code 接入</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
-        <view class="list-item" @tap="navigateTo('/pages/connect/openclaw')">
-          <text class="list-item__icon">爪</text>
-          <text class="list-item__title">OpenClaw 接入</text>
-          <text class="list-item__arrow">&#8250;</text>
-        </view>
         <view class="list-item" @tap="navigateTo('/pages/connect/codex')">
           <text class="list-item__icon">C</text>
           <text class="list-item__title">Codex 接入</text>

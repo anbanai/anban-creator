@@ -225,7 +225,13 @@ func ValidateManagedPluginInit(message *claudecode.SystemMessage, taskType strin
 func managedRequiredPluginSkills(taskType string) []string {
 	switch strings.TrimSpace(taskType) {
 	case "seednote":
-		return []string{"anban:seednote"}
+		return []string{
+			"anban:agent-reach",
+			"anban:seednote-research",
+			"anban:seednote-viral-analysis",
+			"anban:seednote-writing",
+			"anban:seednote-visual-design",
+		}
 	case "article", "ecommerce":
 		return []string{"anban:humanizer"}
 	default:

@@ -88,7 +88,6 @@ describe('Sidebar', () => {
 
     expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'OpenClaw' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Codex' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
   })
@@ -99,7 +98,6 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: '收起侧边栏' }))
 
     expect(screen.getByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'OpenClaw' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Codex' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
   })

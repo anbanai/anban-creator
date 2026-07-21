@@ -37,10 +37,6 @@
         <text>Claude Code</text>
         <text>›</text>
       </view>
-      <view class="guide-link" @tap="goGuide('/pages/connect/openclaw')">
-        <text>OpenClaw</text>
-        <text>›</text>
-      </view>
       <view class="guide-link" @tap="goGuide('/pages/connect/codex')">
         <text>Codex</text>
         <text>›</text>

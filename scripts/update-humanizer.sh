@@ -36,7 +36,7 @@ test -f "$source_skill" || {
   exit 1
 }
 
-for distro in claudecode codex openclaw; do
+for distro in claudecode codex; do
   skill_dir=$distro/skills/humanizer
   destination=$skill_dir/SKILL.md
   test -d "$skill_dir" || {

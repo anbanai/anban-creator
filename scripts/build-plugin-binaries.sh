@@ -17,7 +17,7 @@ OUT="$TMPDIR/anban$EXT"
 echo "Building anban for ${TARGET_GOOS}/${TARGET_GOARCH}..."
 CGO_ENABLED=0 GOOS="$TARGET_GOOS" GOARCH="$TARGET_GOARCH" go build -trimpath -o "$OUT" ./agent
 
-for plugin in claudecode codex openclaw; do
+for plugin in claudecode codex; do
   mkdir -p "$plugin/bin"
   cp "$OUT" "$plugin/bin/anban$EXT"
   chmod +x "$plugin/bin/anban$EXT" 2>/dev/null || true

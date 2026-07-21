@@ -84,7 +84,7 @@ Claude Code 会把 Agent frontmatter `skills:` 中列出的 Skill 全文注入 A
 1. 所有 Agent 均移除 `skills:`，不在启动时注入阶段性 Skill 正文。
 2. 专业 Skill 在对应阶段开始时通过 Claude Code 官方 `Skill` 工具按需加载，并使用 `anban:<skill>` 插件限定名。
 3. `humanizer` 保持上游原文不变，仅在写作定稿阶段按需加载。
-4. 总控 `article`、`seednote`、`ecommerce` Skill 保留为用户入口，不在对应 Agent 内重复加载整条编排。
+4. `article`、`ecommerce` 保留用户入口；Seednote 只保留 Agent 入口，不再维护重复的总控 Skill。
 5. 契约测试拒绝 `skills:` 启动注入，并验证 Agent 正文包含 namespaced `Skill` 调用。
 
 验收：
@@ -98,7 +98,7 @@ Claude Code 会把 Agent frontmatter `skills:` 中列出的 Skill 全文注入 A
 证据：
 
 - [`claudecode/agents/wechatarticle.md`](../../claudecode/agents/wechatarticle.md) 和 [`claudecode/skills/article/SKILL.md`](../../claudecode/skills/article/SKILL.md) 都定义 10 步文章流水线、错误处理、成功标准、红旗清单和任务追踪。
-- [`claudecode/agents/seednote.md`](../../claudecode/agents/seednote.md) 与 [`claudecode/skills/seednote/SKILL.md`](../../claudecode/skills/seednote/SKILL.md) 都定义项目选择、研究、写作、视觉、合规、归档及参考素材契约。
+- Seednote 曾同时由 [`claudecode/agents/seednote.md`](../../claudecode/agents/seednote.md) 与同名总控 Skill 定义完整流程；现已删除总控 Skill，由 Agent 单独拥有编排。
 - [`claudecode/agents/ecommerce.md`](../../claudecode/agents/ecommerce.md) 与 [`claudecode/skills/ecommerce/SKILL.md`](../../claudecode/skills/ecommerce/SKILL.md) 都定义产品档案、FABE、视觉生成、合规和归档。
 
 问题：
@@ -111,7 +111,7 @@ Claude Code 会把 Agent frontmatter `skills:` 中列出的 Skill 全文注入 A
 
 - Agent 是端到端流程的唯一所有者。
 - 专业 Skill 只拥有一个领域能力，例如选题、写作、视觉、发布或合规。
-- `article`、`seednote`、`ecommerce` 总控 Skill 不再保留完整流水线。
+- `article`、`ecommerce` 总控 Skill 不再保留完整流水线；Seednote 总控 Skill 直接删除。
 - 如果仍需要 `/anban:article` 这类用户入口，把总控 Skill 收缩为薄入口：只描述任务、输入、目标 Agent 和交付预期，不复制流程。
 - 实施薄入口前，先用目标 Claude Code 版本验证 `context: fork` + plugin agent 的命名与调用行为；验证不通过时，直接由 Agent 承担入口，不保留第二套编排作为兼容路径。
 

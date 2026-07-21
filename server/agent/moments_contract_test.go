@@ -98,21 +98,6 @@ func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 		t.Fatal("codex hooks must not submit agent-owned feedback")
 	}
 
-	openclawHooks := readRepoFile(t, filepath.Join(root, "openclaw", "src", "hooks", "handler.ts"))
-	for _, want := range []string{
-		`case "publish_draft":`,
-		`case "draft":`,
-		"summarizePublish",
-	} {
-		if !strings.Contains(openclawHooks, want) {
-			t.Fatalf("openclaw hooks missing publication summary term %q", want)
-		}
-	}
-	for _, forbidden := range []string{`case "moments":`, "summarizeMomentsDelivery", "summarizeArchive"} {
-		if strings.Contains(openclawHooks, forbidden) {
-			t.Fatalf("openclaw hooks still contain removed workspace summary term %q", forbidden)
-		}
-	}
 }
 
 func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
@@ -120,7 +105,7 @@ func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 	claudeSkill := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "moments", "SKILL.md"))
 	claudeExamples := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "moments", "references", "examples.md"))
 
-	for _, plugin := range []string{"claudecode", "openclaw", "codex"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		t.Run(plugin, func(t *testing.T) {
 			skillPath := filepath.Join(root, plugin, "skills", "moments", "SKILL.md")
 			body := readRepoFile(t, skillPath)
@@ -173,7 +158,7 @@ func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 
 func TestMomentsSkillDoesNotVendorReferenceRepository(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, plugin := range []string{"claudecode", "openclaw", "codex"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		dir := filepath.Join(root, plugin, "skills", "moments")
 		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

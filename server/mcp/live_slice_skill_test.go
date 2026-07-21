@@ -15,7 +15,7 @@ func TestLiveSliceSkillFiles(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	var firstBody string
-	for _, plugin := range []string{"claudecode", "openclaw", "codex"} {
+	for _, plugin := range []string{"claudecode", "codex"} {
 		skillDir := filepath.Join(root, plugin, "skills", "live-slice")
 		skillPath := filepath.Join(skillDir, "SKILL.md")
 		legacyPythonHelper := "live_slice_media" + ".py"

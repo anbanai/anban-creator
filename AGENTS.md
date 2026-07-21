@@ -16,9 +16,9 @@ The current repository is not a standalone Cobra CLI. It has four main surfaces:
 Plugin assets live in two distributions:
 
 - `claudecode/`: Claude Code agents, skills, hooks, themes, and writer styles.
-- `openclaw/`: OpenClaw plugin distribution assets.
+- `codex/`: Codex skills, hooks, and separately installed subagents.
 
-Keep `claudecode/skills/*` and matching `openclaw/skills/*` files synchronized when tests assert distribution parity.
+Keep shared `claudecode/skills/*` and `codex/skills/*` contracts synchronized when tests assert distribution parity.
 
 ## Build And Test Commands
 
@@ -77,7 +77,7 @@ The server follows a layered structure:
 - `server/repository`: GORM persistence layer.
 - `server/model`: database models.
 - `server/mcp`: MCP tools exposed to connected agents.
-- `server/agent`: Claude/OpenClaw execution support and config builders.
+- `server/agent`: Claude Code execution support and config builders.
 - `server/resources`: embedded themes, layouts, writer configs, and image presets.
 - `server/scheduler`: Asynq/cron-style plan checking.
 - `server/storage`: local and OSS storage implementations.
@@ -126,7 +126,7 @@ Prefer route-level lazy loading and explicit vendor chunking for heavy dependenc
 
 ## Skills And Agents
 
-The project ships agent-facing workflows in `claudecode/agents` and `claudecode/skills`, with OpenClaw mirrors under `openclaw/skills`.
+The project ships agent-facing workflows in `claudecode/agents` and `claudecode/skills`, with Codex subagents and Skills under `codex/`.
 
 Current major agents:
 
@@ -141,8 +141,8 @@ Development rules:
 - Local media work in live-slicer uses `ffmpeg` and `ffprobe`.
 - Do not reintroduce legacy Python helper scripts for live slicing.
 - Keep generated task artifacts explicit and file-backed, especially JSON returned by MCP tools.
-- When a skill exists in both `claudecode/skills` and `openclaw/skills`, update both unless the intended distribution difference is backed by tests.
-- When changing plugin distribution assets under `claudecode/`, `openclaw/`, or `codex/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update the affected plugin manifest `version` in the same change: `claudecode/.claude-plugin/plugin.json`, `openclaw/openclaw.plugin.json`, and/or `codex/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
+- When a skill exists in both `claudecode/skills` and `codex/skills`, update both unless the intended distribution difference is backed by tests.
+- When changing plugin distribution assets under `claudecode/` or `codex/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update the affected plugin manifest `version` in the same change: `claudecode/.claude-plugin/plugin.json` and/or `codex/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
 
 ## Testing Patterns
 
