@@ -174,8 +174,8 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 	claudeAgent := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "montage.md"))
 	for _, want := range []string{
 		"name: montage",
-		"skills:",
-		"- montage",
+		"`Skill`",
+		"`anban:montage`",
 		"montage-input.json",
 		"montage-tool-policy.json",
 		"montage-pipeline-defaults.json",

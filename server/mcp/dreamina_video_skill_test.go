@@ -214,39 +214,16 @@ func TestSeedance20SkillFiles(t *testing.T) {
 	}
 }
 
-func TestDreaminaVideoSkillIsCompatibilityAlias(t *testing.T) {
+func TestDreaminaVideoCompatibilitySkillIsNotDistributed(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
-	var firstBody string
 	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
-		skillPath := filepath.Join(root, plugin, "skills", "dreamina-video", "SKILL.md")
-		raw, err := os.ReadFile(skillPath)
-		if err != nil {
-			t.Fatalf("%s dreamina-video compatibility SKILL.md missing: %v", plugin, err)
-		}
-		body := string(raw)
-		requireValidSkillFrontmatter(t, plugin, "dreamina-video", body)
-		for _, want := range []string{
-			"name: dreamina-video",
-			"compatibility",
-			"seedance-20",
-			"Do not maintain separate Dreamina-only workflow logic here",
-			"agent_name=\"videocreator\"",
-		} {
-			if !strings.Contains(body, want) {
-				t.Fatalf("%s dreamina-video alias missing %q", plugin, want)
-			}
-		}
-		if strings.Contains(body, "## Workflow") || strings.Contains(body, "完整 AI 视频生成流程") {
-			t.Fatalf("%s dreamina-video alias should not keep a separate full workflow", plugin)
-		}
-		if firstBody == "" {
-			firstBody = body
-		} else if body != firstBody {
-			t.Fatalf("dreamina-video compatibility SKILL.md differs between plugins")
+		skillDir := filepath.Join(root, plugin, "skills", "dreamina-video")
+		if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
+			t.Fatalf("%s must not distribute obsolete dreamina-video compatibility Skill, stat err = %v", plugin, err)
 		}
 	}
 }

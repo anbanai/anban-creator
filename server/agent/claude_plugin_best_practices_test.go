@@ -559,11 +559,10 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 	allowed := map[string]bool{
 		"name": true, "description": true, "model": true, "effort": true,
 		"maxTurns": true, "tools": true, "disallowedTools": true,
-		"skills": true, "memory": true, "background": true, "isolation": true,
-		"color": true, "permissionMode": true,
+		"memory": true, "background": true, "isolation": true, "color": true,
 	}
 	ignoredForPluginAgents := map[string]bool{
-		"hooks": true, "mcpServers": true,
+		"hooks": true, "mcpServers": true, "permissionMode": true,
 	}
 
 	root := filepath.Join(repoRoot(t), "claudecode", "agents")
@@ -595,8 +594,8 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 		if frontmatterString(fm["description"]) == "" {
 			t.Fatalf("%s must set description so Claude Code can delegate appropriately", path)
 		}
-		if got := frontmatterString(fm["permissionMode"]); got != "dontAsk" {
-			t.Fatalf("%s permissionMode = %q, want dontAsk for managed zero-interaction execution", path, got)
+		if _, ok := fm["skills"]; ok {
+			t.Fatalf("%s uses skills startup injection; phase Skills must load on demand through the Skill tool", path)
 		}
 		if isolation := frontmatterString(fm["isolation"]); isolation != "" && isolation != "worktree" {
 			t.Fatalf("%s isolation = %q, the only plugin-supported value is worktree", path, isolation)

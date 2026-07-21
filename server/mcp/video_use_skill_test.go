@@ -226,8 +226,8 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 	creator := string(creatorRaw)
 	for _, want := range []string{
 		"name: videocreator",
-		"skills:",
-		"- seedance-20",
+		"`Skill`",
+		"`anban:seedance-20`",
 		"register_video_reference",
 		"prepare_video_generation_inputs",
 		"create_video_generation_job",
@@ -247,6 +247,9 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 	if strings.Contains(creatorFrontmatter, "\nmcpServers:") || strings.Contains(creatorFrontmatter, "\ntools:") {
 		t.Fatal("videocreator agent must not define tools or mcpServers")
 	}
+	if strings.Contains(creatorFrontmatter, "\nskills:") {
+		t.Fatal("videocreator agent must load seedance-20 on demand instead of injecting it at startup")
+	}
 	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task", "create_video_asr_task", "pack_video_transcripts", "video-use"} {
 		if strings.Contains(creator, banned) {
 			t.Fatalf("videocreator agent should not mention %q", banned)
@@ -260,13 +263,13 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 	editor := string(editorRaw)
 	for _, want := range []string{
 		"name: videoeditor",
-		"skills:",
-		"- video-use",
-		"- hyperframes-video-overlays",
-		"- remotion-video-overlays",
-		"- manim-video-overlays",
-		"- pil-video-overlays",
-		"- capcut-draft",
+		"`Skill`",
+		"`anban:video-use`",
+		"`anban:hyperframes-video-overlays`",
+		"`anban:remotion-video-overlays`",
+		"`anban:manim-video-overlays`",
+		"`anban:pil-video-overlays`",
+		"`anban:capcut-draft`",
 		"prepare_file_upload",
 		"create_video_asr_task",
 		"prepare_video_transcript_download",
@@ -291,6 +294,9 @@ func TestSplitVideoAgentsReplaceShortVideoStudio(t *testing.T) {
 	}
 	if strings.Contains(editorFrontmatter, "\nmcpServers:") || strings.Contains(editorFrontmatter, "\ntools:") {
 		t.Fatal("videoeditor agent must not define tools or mcpServers")
+	}
+	if strings.Contains(editorFrontmatter, "\nskills:") {
+		t.Fatal("videoeditor agent must load phase Skills on demand instead of injecting them at startup")
 	}
 	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task", "create_video_generation_job", "prepare_video_generation_inputs", "seedance-20"} {
 		if strings.Contains(editor, banned) {

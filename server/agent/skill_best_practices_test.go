@@ -114,8 +114,7 @@ func TestSkillUpstreamIndexDocumentsMirroredSourceBoundaries(t *testing.T) {
 func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 	root := repoRoot(t)
 	agentsRoot := filepath.Join(root, "claudecode", "agents")
-	skillsRoot := filepath.Join(root, "claudecode", "skills")
-	forbiddenPluginAgentFields := []string{"hooks", "mcpServers"}
+	forbiddenPluginAgentFields := []string{"hooks", "mcpServers", "permissionMode", "skills"}
 
 	err := filepath.WalkDir(agentsRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -148,25 +147,64 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 		if strings.ContainsAny(description, "<>") {
 			t.Fatalf("%s description must not contain XML angle brackets", path)
 		}
-		if got := frontmatterStringValue(fm["permissionMode"]); got != "dontAsk" {
-			t.Fatalf("%s permissionMode = %q, want dontAsk for managed zero-interaction execution", path, got)
-		}
-
 		for _, field := range forbiddenPluginAgentFields {
 			if _, ok := fm[field]; ok {
-				t.Fatalf("%s declares %q, but Claude Code plugin agents ignore unsupported security-sensitive fields", path, field)
+				t.Fatalf("%s declares %q; plugin agents must avoid ignored fields and full-text Skill startup injection", path, field)
 			}
 		}
-		for _, skillName := range frontmatterStringValues(fm["skills"]) {
-			skillPath := filepath.Join(skillsRoot, skillName, "SKILL.md")
-			if _, err := os.Stat(skillPath); err != nil {
-				t.Fatalf("%s references missing plugin skill %q at %s", path, skillName, skillPath)
-			}
+		if !strings.Contains(body, "`Skill`") || !strings.Contains(body, "anban:") {
+			t.Fatalf("%s must invoke plugin Skills on demand through the namespaced Claude Code Skill tool", path)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk claudecode agents: %v", err)
+	}
+}
+
+func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
+	root := repoRoot(t)
+	agentsRoot := filepath.Join(root, "claudecode", "agents")
+	skillsRoot := filepath.Join(root, "claudecode", "skills")
+	referenced := map[string]bool{}
+	qualifiedSkillRE := regexp.MustCompile(`anban:([a-z0-9-]+)`)
+
+	agents, err := os.ReadDir(agentsRoot)
+	if err != nil {
+		t.Fatalf("read Claude agents: %v", err)
+	}
+	for _, entry := range agents {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		body := readRepoFile(t, filepath.Join(agentsRoot, entry.Name()))
+		for _, match := range qualifiedSkillRE.FindAllStringSubmatch(body, -1) {
+			referenced[match[1]] = true
+		}
+	}
+
+	userEntrypoints := map[string]bool{
+		"anban-setup":            true,
+		"article":                true,
+		"config":                 true,
+		"ecommerce":              true,
+		"portrait-pose-variants": true,
+		"seednote":               true,
+		"short-video-cover":      true,
+		"writers":                true,
+	}
+	entries, err := os.ReadDir(skillsRoot)
+	if err != nil {
+		t.Fatalf("read Claude skills: %v", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !referenced[name] && !userEntrypoints[name] {
+			t.Fatalf("Claude Skill %q has no Agent reference or declared user entrypoint; remove it or assign a runtime owner", name)
+		}
 	}
 }
 

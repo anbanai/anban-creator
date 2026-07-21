@@ -354,6 +354,45 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 	}
 }
 
+func TestDispatchAutocompactThrashingStartsFreshClaudeSession(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	ctx := context.Background()
+	result, err := json.Marshal(&agent.ExecutionResult{
+		Success:   false,
+		Error:     "Autocompact is thrashing: the context refilled to the limit within 3 turns",
+		SessionID: "bloated-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed, Result: result,
+		RuntimeProfile: model.PlatformMontage, RuntimeImage: "registry/montage@sha256:parent",
+	}
+	if err := repo.TaskExecutions().Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	task.CurrentExecutionID = &parent.ID
+	task.SetInputAttachments([]model.EntryAttachment{{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue"}})
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	current := mustCurrentExecution(t, repo, task.ID)
+	if current.ParentExecutionID != parent.ID {
+		t.Fatalf("parent execution = %q, want %q", current.ParentExecutionID, parent.ID)
+	}
+	if current.ResumeSessionID != "" {
+		t.Fatalf("resume session = %q, want a fresh Claude session after autocompact thrashing", current.ResumeSessionID)
+	}
+	if current.RuntimeProfile != parent.RuntimeProfile || current.RuntimeImage != parent.RuntimeImage {
+		t.Fatalf("resumed runtime = %q %q, want parent %q %q", current.RuntimeProfile, current.RuntimeImage, parent.RuntimeProfile, parent.RuntimeImage)
+	}
+}
+
 func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "content", Image: "registry/content@sha256:new"}

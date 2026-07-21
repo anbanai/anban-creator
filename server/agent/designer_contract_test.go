@@ -26,8 +26,8 @@ func TestDesignerAgentKeepsMCPAndSkillLoadingContract(t *testing.T) {
 	}
 
 	required := []string{
-		"skills:",
-		"- line-art-coloring",
+		"`Skill`",
+		"`anban:line-art-coloring`",
 		"插件级 `.mcp.json`",
 		"Claude Code subagent 的 `tools:` 字段是 allowlist",
 		"不要在本 agent frontmatter 中声明 `tools:`",
@@ -42,11 +42,12 @@ func TestDesignerAgentKeepsMCPAndSkillLoadingContract(t *testing.T) {
 		"无法看到 `generate_image` 等 MCP 能力",
 		"停止并报告 MCP 工具未注入",
 		"不要绕过 MCP",
-		"插件 skill 路径解析",
-		"~/.claude/plugins/cache/anbanai/anban",
-		"claudecode/skills/line-art-coloring/SKILL.md",
+		"不要猜路径或直接读取插件缓存",
 		"prepare_workspace 返回的 path 可能是相对路径",
 		"如果为空，调用 `list_projects`",
+	}
+	if strings.Contains(frontmatter, "\nskills:") {
+		t.Fatal("designer agent must load line-art-coloring on demand instead of injecting it at startup")
 	}
 	for _, term := range required {
 		if !strings.Contains(body, term) {

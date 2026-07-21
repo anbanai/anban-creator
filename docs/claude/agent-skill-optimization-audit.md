@@ -7,17 +7,19 @@
 > 范围：`claudecode/agents`、顶层 `claudecode/skills`、`claudecode/hooks` 和相关开发文档。
 >
 > 依据：[GPT-5.6 Prompt Guidance](./gpt-5.6-prompt-guidance.md)、Claude Code 官方 [Subagents](https://code.claude.com/docs/en/sub-agents)、[Skills](https://code.claude.com/docs/en/skills) 与 [Hooks](https://code.claude.com/docs/en/hooks-guide)。
+>
+> 实施状态：P0-1 已于 2026-07-21 完成。9 个 Agent 已移除 `skills:` 启动注入，改用 namespaced `Skill` 工具按阶段加载。
 
 ## 范围与例外
 
-本轮盘点包含 9 个 Agent 和 37 个顶层 Skill。
+本轮盘点包含 9 个 Agent 和 36 个顶层 Skill。
 
 以下资产不进入本轮自研优化范围：
 
 - `skills/seedance-20/`：计划迁移为 third-party 类型，本审计不提出正文拆分、描述改写或 eval 调整。
 - `skills/humanizer/`：来自上游的字节级镜像。即使当前 `SKILL.md` 超过 500 行，也不在仓库内改写；业务约束继续留在各自工作流中。
 
-`dreamina-video` 是 `seedance-20` 的兼容入口。后续 third-party 迁移时应与 `seedance-20` 一并决定保留、重定向或删除，不在本轮单独优化。
+`dreamina-video` 兼容入口已于 2026-07-21 删除；即梦/Dreamina 产品表面继续由 canonical `seedance-20` Skill 处理。
 
 ## 总体判断
 
@@ -57,9 +59,11 @@ Claude Code 会把 Agent frontmatter `skills:` 中列出的 Skill 全文注入 A
 
 `videocreator` 的数据包含即将迁移的 `seedance-20`，只作为现状记录，不作为本轮优化目标。
 
+2026-07-21 调整后，9 个 Agent 的固定文本合计为 184,020 B；调整前 Agent 与预加载 Skill 固定文本合计为 665,658 B，减少 481,638 B（约 72.4%）。这仍不包含系统提示、工具 schema、项目指令、memory、任务输入和运行中按需加载的 Skill，因此不能直接换算为最终 token 占用。
+
 ## P0：优先处理
 
-### P0-1 降低 Agent 启动固定上下文
+### P0-1 降低 Agent 启动固定上下文（已完成）
 
 证据：
 
@@ -75,13 +79,13 @@ Claude Code 会把 Agent frontmatter `skills:` 中列出的 Skill 全文注入 A
 - 总控 Skill 又包含一套完整业务流程，和 Agent body 重复。
 - Skill 全文会在 compaction 后按预算重新附着，固定成本不仅发生一次。
 
-建议：
+实施：
 
-1. Agent `skills:` 只保留从第一轮起就必须作为系统知识存在的最小 Skill；默认不预加载阶段性 Skill。
-2. 专业 Skill 在对应阶段开始时通过 Claude Code 官方 Skill 调用机制按需加载。
-3. `humanizer` 保持上游原文不变，但改为写作定稿阶段按需加载。
-4. 更新 [`claudecode/docs/plugin-development.md`](../../claudecode/docs/plugin-development.md) 中“使用 `using the ... skill` 短语而不是 Skill tool”的旧约定；官方当前语义应成为权威行为。
-5. `system/init` 继续验证 Skill 可发现和可加载，不把“已安装”错误等同于“必须全部预加载”。
+1. 所有 Agent 均移除 `skills:`，不在启动时注入阶段性 Skill 正文。
+2. 专业 Skill 在对应阶段开始时通过 Claude Code 官方 `Skill` 工具按需加载，并使用 `anban:<skill>` 插件限定名。
+3. `humanizer` 保持上游原文不变，仅在写作定稿阶段按需加载。
+4. 总控 `article`、`seednote`、`ecommerce` Skill 保留为用户入口，不在对应 Agent 内重复加载整条编排。
+5. 契约测试拒绝 `skills:` 启动注入，并验证 Agent 正文包含 namespaced `Skill` 调用。
 
 验收：
 

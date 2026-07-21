@@ -1,5 +1,7 @@
 # Managed Agent DontAsk Implementation Plan
 
+> Superseded on 2026-07-21: Claude Code ignores `permissionMode` in plugin Agent definitions. The implemented contract removes that field and keeps zero-interaction enforcement in `server/agent/runtime_policy.go`. The remaining content is retained as historical implementation context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make every managed Claude Code plugin agent explicitly headless with official `permissionMode: dontAsk` plus a deterministic no-question behavioral contract.

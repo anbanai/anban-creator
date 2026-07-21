@@ -4,7 +4,7 @@
 
 ## Summary
 
-Anban is a one-click creation platform. Managed Claude Code executions must not pause for permission prompts, clarification questions, or upstream creative approval gates. The platform will enforce a zero-interaction execution contract at both the agent-definition layer and the managed runtime layer.
+Anban is a one-click creation platform. Managed Claude Code executions must not pause for permission prompts, clarification questions, or upstream creative approval gates. The platform enforces a zero-interaction execution contract through Agent behavior and the managed runtime policy.
 
 Kubernetes Agent Jobs will select an immutable runtime image by task type. The initial profiles are `content` for the existing content workflows and `montage` for OpenMontage. Every task keeps a task-scoped NAS workspace so a later execution attempt can resume the same Claude session and file-backed workflow state.
 
@@ -13,7 +13,7 @@ The recovery contract covers all state required to resume correctly. It does not
 ## Goals
 
 - Make every managed Claude Code agent complete without asking the user questions.
-- Use the official Claude Code `dontAsk` agent permission mode when supported by the pinned CLI.
+- Keep permission enforcement in the managed Agent SDK runtime because plugin Agent frontmatter ignores `permissionMode`.
 - Keep the server-owned tool allowlist and deny policy as the authoritative security boundary.
 - Give Montage a dedicated image containing the full OpenMontage runtime and dependencies.
 - Run OpenMontage from a writable OpenMontage project root under the task NAS workspace.
@@ -33,13 +33,7 @@ The recovery contract covers all state required to resume correctly. It does not
 
 ### Agent Definition
 
-Every managed Claude Code agent under `claudecode/agents/` declares:
-
-```yaml
-permissionMode: dontAsk
-```
-
-Each agent prompt also carries a behavioral zero-interaction contract because permission mode alone only denies interactive tools; it does not prevent an agent from printing a question and ending its turn.
+Every managed Claude Code agent under `claudecode/agents/` carries a behavioral zero-interaction contract. Plugin Agent definitions do not declare `permissionMode` because Claude Code ignores that field for plugin-shipped Agents.
 
 The behavioral contract is:
 
@@ -49,11 +43,11 @@ The behavioral contract is:
 4. Continue automatically when the selected path stays inside the configured provider, capability, budget, and safety envelope.
 5. Stop with a structured, terminal diagnosis when execution cannot continue safely or correctly.
 
-Plugin distribution contract tests will treat `permissionMode` as a supported frontmatter field. The Claude Code version pinned in the runtime image must support `dontAsk` before an image is published.
+Plugin distribution contract tests reject ignored `permissionMode`, `mcpServers`, and `hooks` fields. The runtime policy remains authoritative for headless execution.
 
 ### Managed Runtime Boundary
 
-Agent frontmatter is defense in depth, not the platform security boundary. The runner continues to set:
+Agent behavior is defense in depth, not the platform security boundary. The runner sets:
 
 - an explicit allowed tool surface;
 - `Agent`, `ScheduleWakeup`, and `AskUserQuestion` as disallowed tools;
@@ -61,7 +55,7 @@ Agent frontmatter is defense in depth, not the platform security boundary. The r
 - a permission callback that denies unresolved tool requests;
 - pre-tool hooks that enforce MCP and filesystem boundaries.
 
-When the Go SDK exposes `PermissionModeDontAsk`, the runner will also set it at session level. Until then, the CLI-native agent frontmatter supplies `dontAsk` while the existing allowlist and deny callback keep executions headless. `bypassPermissions` is prohibited because it approves tools outside the allowlist.
+The current Go SDK does not expose `PermissionModeDontAsk`. The explicit allowlist, disallowed tools, and deterministic deny callback keep executions headless. `bypassPermissions` is prohibited because it approves tools outside the allowlist.
 
 ### OpenMontage Approval Policy
 
@@ -202,7 +196,7 @@ Backlot-compatible files remain useful as a structured source for a future nativ
 - A permission request outside the allowlist is denied and logged with the tool name.
 - A workflow that attempts to ask a user question is treated as an agent contract violation.
 - Missing required task defaults use the deterministic resolution order; unresolved hard requirements fail terminally.
-- A missing resume PVC, parent execution, SessionID-dependent state, or pinned runtime image fails closed.
+- A missing resume PVC, parent execution, or pinned runtime image fails closed. Autocompact thrashing preserves workspace lineage but intentionally starts a fresh Claude session; other resumable failures reuse the parent SessionID when available.
 - Image/profile mismatch is a permanent dispatch failure, not a retry on another profile.
 - OpenMontage revision mismatch during resume produces a diagnosis and preserves the workspace for inspection.
 - Artifact upload failure does not delete the NAS workspace.
@@ -211,7 +205,7 @@ Backlot-compatible files remain useful as a structured source for a future nativ
 
 ### Agent Contracts
 
-- Every managed Claude agent declares `permissionMode: dontAsk`.
+- Every managed Claude agent omits ignored `permissionMode` frontmatter.
 - No managed agent or invoked skill instructs Claude to call `AskUserQuestion`.
 - Agent prompts contain the deterministic zero-interaction decision contract.
 - Montage records full-run preauthorization and never treats an upstream approval gate as a reason to end successfully without final deliverables.
@@ -221,7 +215,7 @@ Backlot-compatible files remain useful as a structured source for a future nativ
 - Allowed tools run without a permission callback prompt.
 - `AskUserQuestion` and unresolved tools are denied.
 - `bypassPermissions` is absent from managed execution paths.
-- The pinned Claude Code CLI accepts agent-level `dontAsk`.
+- Plugin Agent definitions do not rely on agent-level `dontAsk`; the Agent SDK allowlist, deny list, and permission callback enforce zero interaction.
 
 ### Image Routing
 

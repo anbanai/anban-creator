@@ -82,7 +82,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 	}
 }
 
-func TestHumanizerIsInjectedIntoAgentRuntimes(t *testing.T) {
+func TestHumanizerIsDiscoverableAndLoadedOnDemand(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
 		"claudecode/agents/seednote.md",
@@ -90,8 +90,12 @@ func TestHumanizerIsInjectedIntoAgentRuntimes(t *testing.T) {
 		"claudecode/agents/ecommerce.md",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
-		if !strings.Contains(body, "skills:\n") || !strings.Contains(body, "  - humanizer\n") {
-			t.Fatalf("%s must inject humanizer through Claude agent skills", relPath)
+		frontmatter := frontmatterBlock(t, body)
+		if strings.Contains(frontmatter, "\nskills:") {
+			t.Fatalf("%s must not inject full Skill bodies at Agent startup", relPath)
+		}
+		if !strings.Contains(body, "`anban:humanizer`") || !strings.Contains(body, "`Skill`") {
+			t.Fatalf("%s must load the discoverable Humanizer Skill on demand", relPath)
 		}
 	}
 

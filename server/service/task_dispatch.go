@@ -19,6 +19,8 @@ var ErrDispatchInProgress = errors.New("Kubernetes dispatch is already in progre
 
 const defaultKubernetesDispatchLease = time.Minute
 
+const autocompactThrashingErrorPrefix = "Autocompact is thrashing:"
+
 func (s *TaskService) SetKubernetesDispatcher(dispatcher agent.KubernetesDispatcher) {
 	s.kubernetesDispatcher = dispatcher
 }
@@ -232,7 +234,14 @@ func resumeExecutionLineage(ctx context.Context, repo repository.Repository, tas
 	if err := json.Unmarshal(parent.Result, &result); err != nil {
 		return nil, "", fmt.Errorf("decode resume parent execution result: %w", err)
 	}
+	if isAutocompactThrashingError(result.Error) {
+		return parent, "", nil
+	}
 	return parent, strings.TrimSpace(result.SessionID), nil
+}
+
+func isAutocompactThrashingError(message string) bool {
+	return strings.HasPrefix(strings.TrimSpace(message), autocompactThrashingErrorPrefix)
 }
 
 func taskHasResumeInput(task *model.Task) bool {
