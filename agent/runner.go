@@ -41,12 +41,17 @@ func NewRunner(cfg *Config, reporter *Reporter, downloader *Downloader) *Runner 
 
 func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) {
 	result := &serveragent.ExecutionResult{
-		Success: false,
-		WorkDir: r.cfg.Workspace,
+		Success:    false,
+		WorkDir:    r.cfg.Workspace,
+		CostStatus: serveragent.CostStatusUnreconciled,
+		CostDiagnostics: []serveragent.CostDiagnostic{{
+			Code: serveragent.CostDiagnosticMissingTerminalModelUsage,
+		}},
 	}
 
 	sdkOpts, err := r.buildSDKOptions(ctx)
 	if err != nil {
+		result.TerminalReason = model.TaskBillingTerminalPlatformError
 		return result, err
 	}
 
@@ -123,6 +128,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 					}
 				}
 			case *claudecode.ResultMessage:
+				r.populateTerminalModelUsage(result, m)
 				result.Success = !m.IsError
 				result.ResultSubtype = m.Subtype
 				result.LogText = resultText
@@ -135,14 +141,13 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				result.LastToolErrorTool = lastToolErrorTool
 				result.LastToolError = lastToolError
 				if m.IsError {
+					result.TerminalReason = model.TaskBillingTerminalProviderError
 					result.Error = serveragent.ResultMessageError(m, lastToolErrorTool, lastToolError)
-					serveragent.PopulateUsageFields(result, m)
 					return errors.New(result.Error)
 				}
 				if err := serveragent.ValidateManagedPluginResult(pluginInitValidated, m); err != nil {
 					return err
 				}
-				serveragent.PopulateUsageFields(result, m)
 				if toolUseCount == 0 {
 					result.AgentLikelyFailed = true
 				}
@@ -151,6 +156,11 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		}
 	}, sdkOpts...)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			result.TerminalReason = model.TaskBillingTerminalExecutionTimeout
+		} else if result.TerminalReason == "" {
+			result.TerminalReason = model.TaskBillingTerminalProviderError
+		}
 		if result.Error == "" {
 			result.Error = err.Error()
 		}
@@ -173,6 +183,10 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		result.AgentLikelyFailed = true
 	}
 	return result, nil
+}
+
+func (r *Runner) populateTerminalModelUsage(result *serveragent.ExecutionResult, message claudecode.Message) {
+	serveragent.PopulateTerminalModelUsage(result, message, r.cfg.ModelUsageAliases)
 }
 
 func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, error) {

@@ -60,16 +60,18 @@ export type {
 // Timeline
 export type { TimelineItemType, TimelineItem, TimelineResponse } from './timeline'
 
-// Credits
+// Billing
 export type {
-  CreditTransactionType,
-  CreditBalance,
-  CreditPricing,
-  RechargeTier,
-  SignInStatus,
-  CreditTransaction,
-  AdminGrantRequest,
-} from './credits'
+  BillingWallet,
+  BillingWalletEventKind,
+  BillingTransaction,
+  BillingTransactions,
+  BillingSKUSelectors,
+  BillingSKU,
+  BillingCatalog,
+  BillingReferralProgram,
+  BillingReferral,
+} from './billing'
 
 // API Key
 export type { APIKey, CreateAPIKeyResponse } from './api-key'
@@ -107,7 +109,6 @@ export type {
   VideoModelPolicy,
   VideoModelSpec,
   VideoPlaybookSpec,
-  VideoPricingBreakdown,
   VideoProductionArtifact,
   VideoProductionMode,
   VideoProductionResponse,

@@ -28,7 +28,7 @@ func TestUploadMissingTaskFilesVideoGenerationUsesDeliveryAllowlist(t *testing.T
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeAudioASRStorage{name: "oss"}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformVideoCreator)
@@ -108,7 +108,7 @@ func TestUploadMissingTaskFilesRefreshesExistingPathWhenContentChanges(t *testin
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeAudioASRStorage{name: "oss"}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	task := &model.Task{

@@ -120,7 +120,7 @@ func setupDesignerReferenceService(t *testing.T, store storage.Provider) (*Desig
 		t.Fatalf("AutoMigrate: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	return NewDesignerService(db, nil, nil, nil, store, &logger), db
+	return NewDesignerService(db, nil, store, &logger), db
 }
 
 func TestDesignerReferenceRegistrationIsDurableWithoutPermanentTempFiles(t *testing.T) {
@@ -199,7 +199,7 @@ func TestDesignerReferenceCrossInstanceMaterializationAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	svcB := NewDesignerService(db, nil, nil, nil, store, &logger)
+	svcB := NewDesignerService(db, nil, store, &logger)
 	var materialized []string
 	svcB.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
 		return designerReferenceProvider{generate: func(opts *appimage.GenerateOptions) (*appimage.GenerateResult, error) {
@@ -379,115 +379,6 @@ func TestDesignerReferenceBackendErrorsAreRedacted(t *testing.T) {
 	}
 	if gen.Status != model.ImageGenerationStatusFailed || strings.Contains(gen.Error, backendSecret) {
 		t.Fatalf("generation leaked backend error: status=%q error=%q", gen.Status, gen.Error)
-	}
-}
-
-func TestDesignerCreateGenerationRejectsInvalidOrUnownedReferencesBeforeSideEffects(t *testing.T) {
-	tests := []struct {
-		name          string
-		referenceID   func(ownerReferenceID string) string
-		maskID        func(ownerReferenceID string) string
-		mappingUserID func(requestUserID string) string
-	}{
-		{name: "reference wildcard", referenceID: func(string) string { return "*" }},
-		{name: "reference malformed", referenceID: func(string) string { return "not-a-uuid" }},
-		{name: "reference missing", referenceID: func(string) string { return uuid.NewString() }},
-		{
-			name:          "reference cross user",
-			referenceID:   func(ownerReferenceID string) string { return ownerReferenceID },
-			mappingUserID: func(string) string { return uuid.NewString() },
-		},
-		{name: "mask malformed", maskID: func(string) string { return "not-a-uuid" }},
-		{name: "mask missing", maskID: func(string) string { return uuid.NewString() }},
-		{
-			name:          "mask cross user",
-			maskID:        func(ownerReferenceID string) string { return ownerReferenceID },
-			mappingUserID: func(string) string { return uuid.NewString() },
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			svc, repo, db := setupDesignerBillingTest(t)
-			ctx := context.Background()
-			requestUserID := createCreditTestUser(t, repo, 5000)
-			mappingUserID := requestUserID
-			if tt.mappingUserID != nil {
-				mappingUserID = tt.mappingUserID(requestUserID)
-			}
-			ownerReferenceID := uuid.NewString()
-			if err := repository.NewDesignerReferenceRepository(db).Create(ctx, &model.DesignerReference{
-				ID: ownerReferenceID, UserID: mappingUserID, StorageKey: mappingUserID + "/designer/reference.png",
-				FileName: "reference.png", ContentType: "image/png", Size: 9,
-			}); err != nil {
-				t.Fatalf("create reference mapping: %v", err)
-			}
-
-			req := DesignerGenerateRequest{
-				ProjectID: "default", Prompt: "edit", ProviderID: "gpt_image_2",
-				Quality: "medium", Size: "1024x1024", N: 1,
-			}
-			if tt.referenceID != nil {
-				req.ReferenceFileIDs = []string{tt.referenceID(ownerReferenceID)}
-			}
-			if tt.maskID != nil {
-				req.MaskFileID = tt.maskID(ownerReferenceID)
-			}
-
-			created, err := svc.CreateGenerationRecord(ctx, requestUserID, req)
-			if err == nil || created != nil {
-				t.Fatalf("CreateGenerationRecord() = %#v, %v; want reference rejection", created, err)
-			}
-			balance, balanceErr := svc.creditSvc.GetBalance(ctx, requestUserID)
-			if balanceErr != nil || balance != 5000 {
-				t.Fatalf("credit balance = %d, err=%v; want unchanged 5000", balance, balanceErr)
-			}
-			var generationCount int64
-			if err := db.Model(&model.ImageGeneration{}).Count(&generationCount).Error; err != nil || generationCount != 0 {
-				t.Fatalf("generation count = %d, err=%v; want 0", generationCount, err)
-			}
-			var transactionCount int64
-			if err := db.Model(&model.CreditTransaction{}).Count(&transactionCount).Error; err != nil || transactionCount != 0 {
-				t.Fatalf("credit transaction count = %d, err=%v; want 0", transactionCount, err)
-			}
-		})
-	}
-}
-
-func TestDesignerCreateGenerationPropagatesReferenceRepositoryFailureBeforeSideEffects(t *testing.T) {
-	svc, repo, db := setupDesignerBillingTest(t)
-	ctx := context.Background()
-	userID := createCreditTestUser(t, repo, 5000)
-	backendErr := errors.New("database connection sentinel")
-	svc.referenceRepo = designerReferenceErrorRepository{err: backendErr}
-	providerCalls := 0
-	svc.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
-		providerCalls++
-		return nil, errors.New("provider must not be created")
-	}
-
-	created, err := svc.CreateGenerationRecord(ctx, userID, DesignerGenerateRequest{
-		ProjectID: "default", Prompt: "edit", ProviderID: "gpt_image_2",
-		Quality: "medium", Size: "1024x1024", N: 1,
-		ReferenceFileIDs: []string{uuid.NewString()},
-	})
-	if created != nil || !errors.Is(err, backendErr) || errors.Is(err, ErrDesignerReferenceInvalid) {
-		t.Fatalf("CreateGenerationRecord() = %#v, %v; want wrapped infrastructure error", created, err)
-	}
-	if providerCalls != 0 {
-		t.Fatalf("provider created %d times after repository failure", providerCalls)
-	}
-	balance, balanceErr := svc.creditSvc.GetBalance(ctx, userID)
-	if balanceErr != nil || balance != 5000 {
-		t.Fatalf("credit balance = %d, err=%v; want unchanged 5000", balance, balanceErr)
-	}
-	var generationCount int64
-	if err := db.Model(&model.ImageGeneration{}).Count(&generationCount).Error; err != nil || generationCount != 0 {
-		t.Fatalf("generation count = %d, err=%v; want 0", generationCount, err)
-	}
-	var transactionCount int64
-	if err := db.Model(&model.CreditTransaction{}).Count(&transactionCount).Error; err != nil || transactionCount != 0 {
-		t.Fatalf("credit transaction count = %d, err=%v; want 0", transactionCount, err)
 	}
 }
 

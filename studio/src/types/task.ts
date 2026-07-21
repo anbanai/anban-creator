@@ -1,5 +1,4 @@
 import type { VideoInput, VideoTaskConfig } from './video'
-import type { CreditTransaction } from './credits'
 import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
@@ -8,7 +7,7 @@ export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | '
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection
-// affects later MCP image/vision usage; creation billing uses task_costs.ecommerce.
+// affects later MCP image/vision usage; task admission uses the fixed ecommerce SKU.
 export interface EcommerceTaskConfig {
   selected_modules?: Record<string, number>
   product_photos?: string[]
@@ -92,23 +91,12 @@ export interface Task {
   video_editor_config?: VideoTaskConfig
   montage_input?: MontageInput
   video_generation_id?: string
-  video_estimated_credits?: number
-  video_credits_charged?: number
-  // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）。运行/失败/完成
-  // 态可能填充；刚创建的 pending 任务为空。用于取消对话框展示「已消耗不退还」。
-  total_cost_usd?: number | null
-  billing_status?: 'settled' | 'payment_required' | string
-  billing_shortfall_credits?: number
-  // The upfront task credit deduction returned by task detail when a matching
-  // credit transaction exists. Older rows or responses may omit it.
-  credits_charged?: number | null
-  credits_summary?: {
-    task_consumed: number
-    operation_consumed: number
-    refunded: number
-    net_consumed: number
-  } | null
-  credit_transactions?: CreditTransaction[] | null
+  billing_quote_id?: string
+  billing_catalog_id?: string
+  billing_sku_id?: string
+  billing_charge_id?: string
+  billing_price_credits: number
+  billing_terminal_reason?: string
   // Where the task runs (mirrors server model.ExecutionTarget*):
   // ''/'cloud' = cloud Asynq/Docker; 'local' = awaiting a desktop local-executor
   // claim; 'local_claimed' = a desktop claimed it and is running it on the user's

@@ -15,7 +15,6 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
-	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -54,7 +53,7 @@ func TestTaskHandlerRejectsInvalidReferenceBeforePersistenceOrCredits(t *testing
 			repo := repository.New(db)
 			logger := zerolog.New(io.Discard)
 			userID := "user"
-			if err := repo.Users().Create(t.Context(), &model.User{ID: userID, OpenID: "openid-" + tt.name, CreditsBalance: 10_000}); err != nil {
+			if err := repo.Users().Create(t.Context(), &model.User{ID: userID, OpenID: "openid-" + tt.name}); err != nil {
 				t.Fatal(err)
 			}
 			project := &model.Project{ID: uuid.NewString(), UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
@@ -67,8 +66,7 @@ func TestTaskHandlerRejectsInvalidReferenceBeforePersistenceOrCredits(t *testing
 				}
 			}
 			store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
-			creditSvc := service.NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4000}}, &logger)
-			taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, creditSvc, &logger, "", nil, "", nil, nil)
+			taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 			referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
 			h := NewTaskHandler(taskSvc, &logger)
@@ -84,14 +82,6 @@ func TestTaskHandlerRejectsInvalidReferenceBeforePersistenceOrCredits(t *testing
 			_, total, _ := taskSvc.List(t.Context(), userID, 0, 10, "", "", "")
 			if total != 0 {
 				t.Fatalf("tasks = %d, want 0", total)
-			}
-			txCount, _ := repo.Credits().CountByUserID(t.Context(), userID)
-			if txCount != 0 {
-				t.Fatalf("credit transactions = %d, want 0", txCount)
-			}
-			user, _ := repo.Users().FindByID(t.Context(), userID)
-			if user.CreditsBalance != 10_000 {
-				t.Fatalf("balance = %d", user.CreditsBalance)
 			}
 		})
 	}
@@ -161,7 +151,7 @@ func TestPlanAndTaskReadResponsesPresentRepositoryAssets(t *testing.T) {
 	planSvc.SetReferenceAssetService(referenceSvc)
 	planHandler := NewPlanHandler(planSvc, &logger)
 	planHandler.SetReferenceAssetService(referenceSvc)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	taskHandler := NewTaskHandler(taskSvc, &logger)
 	taskHandler.SetRepository(repo)
@@ -205,7 +195,7 @@ func TestBulkCloneSigningFailureDoesNotCreateOrCharge(t *testing.T) {
 	ctx := t.Context()
 	userID := uuid.NewString()
 	projectID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "bulk-clone-user", CreditsBalance: 10_000}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "bulk-clone-user"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}); err != nil {
@@ -221,8 +211,7 @@ func TestBulkCloneSigningFailureDoesNotCreateOrCharge(t *testing.T) {
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	creditSvc := service.NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4000}}, &logger)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, creditSvc, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -239,14 +228,6 @@ func TestBulkCloneSigningFailureDoesNotCreateOrCharge(t *testing.T) {
 	_, total, err := taskSvc.List(ctx, userID, 0, 10, "", "", "")
 	if err != nil || total != 1 {
 		t.Fatalf("tasks = %d, %v; want source only", total, err)
-	}
-	txCount, _ := repo.Credits().CountByUserID(ctx, userID)
-	if txCount != 0 {
-		t.Fatalf("credit transactions = %d, want 0", txCount)
-	}
-	user, _ := repo.Users().FindByID(ctx, userID)
-	if user.CreditsBalance != 10_000 {
-		t.Fatalf("balance = %d, want unchanged", user.CreditsBalance)
 	}
 }
 
@@ -390,7 +371,7 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	ctx := t.Context()
 	userID := uuid.NewString()
 	projectID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "task-sign-user", CreditsBalance: 10_000}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "task-sign-user"}); err != nil {
 		t.Fatal(err)
 	}
 	asset := cutoverAsset("project-sign-asset", userID, service.DirectUploadPurposeProjectReference, "ref.png", "image/png")
@@ -402,8 +383,7 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	creditSvc := service.NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4000}}, &logger)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, creditSvc, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -420,10 +400,6 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	_, total, err := taskSvc.List(ctx, userID, 0, 10, "", "", "")
 	if err != nil || total != 0 {
 		t.Fatalf("tasks after signing failure = %d, %v", total, err)
-	}
-	txCount, _ := repo.Credits().CountByUserID(ctx, userID)
-	if txCount != 0 {
-		t.Fatalf("credit transactions = %d, want 0", txCount)
 	}
 }
 
@@ -473,7 +449,7 @@ func TestTaskCreateProjectLookupFailsClosedBeforeMutation(t *testing.T) {
 			ctx := t.Context()
 			userID := uuid.NewString()
 			projectID := uuid.NewString()
-			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "project-lookup-" + tt.name, CreditsBalance: 10_000}); err != nil {
+			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "project-lookup-" + tt.name}); err != nil {
 				t.Fatal(err)
 			}
 			projects := &taskHandlerProjectRepository{ProjectRepository: base.Projects()}
@@ -485,8 +461,7 @@ func TestTaskCreateProjectLookupFailsClosedBeforeMutation(t *testing.T) {
 			}
 			repo := &taskHandlerRepositoryOverride{Repository: base, projects: projects}
 			logger := zerolog.New(io.Discard)
-			creditSvc := service.NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4_000}}, &logger)
-			taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
+			taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 			taskSvc.SetReferenceAssetService(service.NewReferenceAssetService(repo, nil, time.Now))
 			h := NewTaskHandler(taskSvc, &logger)
 			h.SetRepository(repo)
@@ -509,14 +484,6 @@ func TestTaskCreateProjectLookupFailsClosedBeforeMutation(t *testing.T) {
 			_, total, listErr := taskSvc.List(ctx, userID, 0, 10, "", "", "")
 			if listErr != nil || total != 0 {
 				t.Fatalf("tasks = %d, %v", total, listErr)
-			}
-			txCount, _ := base.Credits().CountByUserID(ctx, userID)
-			if txCount != 0 {
-				t.Fatalf("credit transactions = %d", txCount)
-			}
-			user, _ := base.Users().FindByID(ctx, userID)
-			if user.CreditsBalance != 10_000 {
-				t.Fatalf("balance = %d", user.CreditsBalance)
 			}
 		})
 	}
@@ -541,7 +508,7 @@ func TestTaskCreateInheritedProjectReferenceFreezesPreflightSnapshotAndAttachesV
 	repo := &taskHandlerRepositoryOverride{Repository: base, projects: projects}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -586,7 +553,7 @@ func TestCloneResponseAttachesSignedReferenceView(t *testing.T) {
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -627,7 +594,7 @@ func TestResumeSigningFailureDoesNotMutateTask(t *testing.T) {
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)

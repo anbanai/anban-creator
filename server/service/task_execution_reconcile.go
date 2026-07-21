@@ -64,7 +64,7 @@ func (s *TaskService) ResumeExecutionFinalization(ctx context.Context, execution
 		return err
 	}
 	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID {
-		return nil
+		return ErrStaleTaskExecution
 	}
 	return s.finalizeTaskFromExecution(ctx, task, execution)
 }

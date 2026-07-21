@@ -7,65 +7,26 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
 type VideoHandler struct {
-	repo             repository.Repository
-	creditSvc        *service.CreditService
-	catalog          service.VideoModelCatalog
-	creditMultiplier int
-	billing          srvconfig.BillingConfig
-	logger           *zerolog.Logger
+	repo    repository.Repository
+	catalog service.VideoModelCatalog
+	logger  *zerolog.Logger
 }
 
-func NewVideoHandler(repo repository.Repository, creditSvc *service.CreditService, catalog service.VideoModelCatalog, creditMultiplier int, logger *zerolog.Logger) *VideoHandler {
+func NewVideoHandler(repo repository.Repository, catalog service.VideoModelCatalog, logger *zerolog.Logger) *VideoHandler {
 	if catalog == nil {
 		catalog = service.VideoModelCatalog{}
 	}
-	if creditMultiplier <= 0 {
-		creditMultiplier = 1000
-	}
 	return &VideoHandler{
-		repo:             repo,
-		creditSvc:        creditSvc,
-		catalog:          catalog,
-		creditMultiplier: creditMultiplier,
-		logger:           logger,
+		repo:    repo,
+		catalog: catalog,
+		logger:  logger,
 	}
-}
-
-func (h *VideoHandler) SetBillingConfig(billing srvconfig.BillingConfig) {
-	if h == nil {
-		return
-	}
-	h.billing = billing
-}
-
-func (h *VideoHandler) videoBillingOptions(ctx fiber.Ctx, userID string) service.VideoBillingOptions {
-	fallback := h.creditMultiplier
-	tier := model.TierFree
-	userMultiplier := 1.0
-	if h.creditSvc == nil || userID == "" {
-		return service.VideoBillingOptionsFromConfig(h.billing, fallback, tier, userMultiplier)
-	}
-	if foundTier, err := h.creditSvc.GetUserTier(ctx.Context(), userID); err == nil {
-		tier = foundTier
-	} else if h.logger != nil {
-		h.logger.Warn().Err(err).Str("user_id", userID).Msg("video tier lookup failed")
-	}
-	foundMultiplier, err := h.creditSvc.GetUserBillingMultiplier(ctx.Context(), userID)
-	if err != nil {
-		if h.logger != nil {
-			h.logger.Warn().Err(err).Str("user_id", userID).Msg("video billing multiplier lookup failed")
-		}
-	} else if foundMultiplier > 0 {
-		userMultiplier = foundMultiplier
-	}
-	return service.VideoBillingOptionsFromConfig(h.billing, fallback, tier, userMultiplier)
 }
 
 type videoEstimateRequest struct {
@@ -77,16 +38,10 @@ type videoEstimateRequest struct {
 type videoEstimateResponse struct {
 	AvailableModels       []service.VideoModelSpec       `json:"available_models"`
 	ResolvedCreatorConfig model.VideoTaskConfig          `json:"resolved_creator_config"`
-	EstimatedCredits      int                            `json:"estimated_credits"`
-	PricingBreakdown      *model.VideoPricingBreakdown   `json:"pricing_breakdown,omitempty"`
-	Balance               int                            `json:"balance"`
-	MinBalance            int                            `json:"min_balance"`
-	MeetsMinBalance       bool                           `json:"meets_min_balance"`
 	Warnings              []string                       `json:"warnings,omitempty"`
 	MissingReferenceRoles []string                       `json:"missing_reference_roles,omitempty"`
 	ExpectedArtifacts     []string                       `json:"expected_artifacts,omitempty"`
 	SegmentPlan           []model.VideoTaskSegmentConfig `json:"segment_plan,omitempty"`
-	AffordableTakes       int                            `json:"affordable_takes"`
 }
 
 func (h *VideoHandler) Estimate(c fiber.Ctx) error {
@@ -117,39 +72,22 @@ func (h *VideoHandler) Estimate(c fiber.Ctx) error {
 
 	policy := project.VideoModelPolicy.Data()
 	available, warnings := h.availableModels(policy)
-	plan, err := service.ResolveVideoGenerationPlanWithBilling(
+	plan, err := service.ResolveVideoGenerationPlan(
 		videoGenerationRequestFromConfig(req.Prompt, req.VideoCreatorConfig),
 		project.VideoDefaults.Data(),
 		policy,
 		h.catalog,
-		h.videoBillingOptions(c, userID),
 	)
 	if err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	balance := 0
-	if h.creditSvc != nil {
-		balance, err = h.creditSvc.GetBalance(c.Context(), userID)
-		if err != nil {
-			if h.logger != nil {
-				h.logger.Error().Err(err).Str("user_id", userID).Msg("video estimate balance lookup failed")
-			}
-			return Error(c, fiber.StatusInternalServerError, "failed to get credit balance")
-		}
-	}
 	return Success(c, videoEstimateResponse{
 		AvailableModels:       available,
 		ResolvedCreatorConfig: videoTaskConfigFromGenerationPlan(plan),
-		EstimatedCredits:      plan.EstimatedCredits,
-		PricingBreakdown:      plan.PricingBreakdown,
-		Balance:               balance,
-		MinBalance:            0,
-		MeetsMinBalance:       true,
 		Warnings:              warnings,
 		MissingReferenceRoles: videoMissingReferenceRoles(plan),
 		ExpectedArtifacts:     service.VideoProductionArtifactNames(),
 		SegmentPlan:           videoTaskSegmentsFromPlan(plan.Segments),
-		AffordableTakes:       affordableVideoTakes(balance, plan.EstimatedCredits, plan.RetakeBudget),
 	})
 }
 
@@ -226,24 +164,22 @@ func videoGenerationRequestFromConfig(prompt string, cfg *model.VideoTaskConfig)
 
 func videoTaskConfigFromGenerationPlan(plan service.VideoGenerationPlan) model.VideoTaskConfig {
 	cfg := model.VideoTaskConfig{
-		ScenarioKey:      plan.ScenarioKey,
-		ProductionMode:   plan.ProductionMode,
-		Purpose:          plan.Purpose,
-		CreativeType:     plan.CreativeType,
-		SubjectProfile:   plan.SubjectProfile,
-		Audience:         plan.Audience,
-		SingleMessage:    plan.SingleMessage,
-		ModelKey:         plan.ModelKey,
-		Model:            plan.Model,
-		Resolution:       plan.Resolution,
-		Ratio:            plan.Ratio,
-		Duration:         plan.Duration,
-		Watermark:        plan.Watermark,
-		Preflight:        plan.Preflight,
-		RetakeBudget:     plan.RetakeBudget,
-		DeliveryTargets:  plan.DeliveryTargets,
-		EstimatedCredits: plan.EstimatedCredits,
-		PricingBreakdown: plan.PricingBreakdown,
+		ScenarioKey:     plan.ScenarioKey,
+		ProductionMode:  plan.ProductionMode,
+		Purpose:         plan.Purpose,
+		CreativeType:    plan.CreativeType,
+		SubjectProfile:  plan.SubjectProfile,
+		Audience:        plan.Audience,
+		SingleMessage:   plan.SingleMessage,
+		ModelKey:        plan.ModelKey,
+		Model:           plan.Model,
+		Resolution:      plan.Resolution,
+		Ratio:           plan.Ratio,
+		Duration:        plan.Duration,
+		Watermark:       plan.Watermark,
+		Preflight:       plan.Preflight,
+		RetakeBudget:    plan.RetakeBudget,
+		DeliveryTargets: plan.DeliveryTargets,
 	}
 	for _, ref := range plan.References {
 		cfg.References = append(cfg.References, model.VideoReferenceAsset{
@@ -272,28 +208,16 @@ func videoTaskSegmentsFromPlan(segments []service.VideoGenerationSegmentPlan) []
 	result := make([]model.VideoTaskSegmentConfig, 0, len(segments))
 	for _, seg := range segments {
 		result = append(result, model.VideoTaskSegmentConfig{
-			Index:            seg.Index,
-			StartSecond:      seg.StartSecond,
-			EndSecond:        seg.EndSecond,
-			Duration:         seg.Duration,
-			Prompt:           seg.Prompt,
-			ModelKey:         seg.ModelKey,
-			Model:            seg.Model,
-			Resolution:       seg.Resolution,
-			Ratio:            seg.Ratio,
-			EstimatedCredits: seg.EstimatedCredits,
+			Index:       seg.Index,
+			StartSecond: seg.StartSecond,
+			EndSecond:   seg.EndSecond,
+			Duration:    seg.Duration,
+			Prompt:      seg.Prompt,
+			ModelKey:    seg.ModelKey,
+			Model:       seg.Model,
+			Resolution:  seg.Resolution,
+			Ratio:       seg.Ratio,
 		})
 	}
 	return result
-}
-
-func affordableVideoTakes(balance, estimatedCredits, retakeBudget int) int {
-	if estimatedCredits <= 0 || balance <= 0 {
-		return 0
-	}
-	affordable := balance / estimatedCredits
-	if retakeBudget > 0 && affordable > retakeBudget {
-		return retakeBudget
-	}
-	return affordable
 }

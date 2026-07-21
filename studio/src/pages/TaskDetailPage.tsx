@@ -10,8 +10,7 @@ import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
-import { formatUSD } from '@/lib/utils'
-import type { CreditTransaction, InputAttachment, Task, TaskFile } from '@/types'
+import type { InputAttachment, Task, TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
@@ -35,38 +34,12 @@ import { ProjectContextControl, type ProjectContextProject } from '@/components/
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
+import { taskStatusLabel, contentTypeLabel, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
-import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
+import { videoCreativeTypeLabel, videoPurposeLabel } from '@/lib/video-display'
 import { isVideoCreator, isVideoEditor } from '@/lib/video-platforms'
-import { formatCreditDescription } from '@/lib/credit-display'
 import { taskFailureMessage } from '@/lib/studio-ux'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
-
-function transactionUsageSummary(tx: Pick<CreditTransaction, 'metadata'>): string | null {
-  const metadata = tx.metadata
-  if (!metadata) return null
-  const parts: string[] = []
-  if (metadata.provider || metadata.model) {
-    parts.push([metadata.provider, metadata.model].filter(Boolean).join('/'))
-  }
-  if (metadata.total_tokens) {
-    parts.push(`${metadata.total_tokens.toLocaleString()} tokens`)
-  } else if (metadata.cache_read_input_tokens || metadata.cache_creation_input_tokens) {
-    const cacheTokens = (metadata.cache_read_input_tokens ?? 0) + (metadata.cache_creation_input_tokens ?? 0)
-    parts.push(`${cacheTokens.toLocaleString()} cache tokens`)
-  }
-  if (metadata.num_turns) {
-    parts.push(`${metadata.num_turns} turns`)
-  }
-  if (metadata.total_cost_usd) {
-    parts.push(`$${metadata.total_cost_usd.toFixed(4)}`)
-  }
-  if (metadata.final_credits) {
-    parts.push(`${metadata.final_credits.toLocaleString()} 积分`)
-  }
-  return parts.length > 0 ? parts.join(' · ') : null
-}
 
 const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
 const RESUME_ATTACHMENT_POLICY = {
@@ -335,10 +308,8 @@ export default function TaskDetailPage() {
   const [showProjectDialog, setShowProjectDialog] = useState(false)
   const [showResumeDialog, setShowResumeDialog] = useState(false)
   const [cloneDialogSnapshot, setCloneDialogSnapshot] = useState<CloneDialogSnapshot | null>(null)
-  const [showCreditDialog, setShowCreditDialog] = useState(false)
-	const [showTaskDetails, setShowTaskDetails] = useState(false)
-	const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
-	const [returnToTaskDetailsAfterCredits, setReturnToTaskDetailsAfterCredits] = useState(false)
+  const [showTaskDetails, setShowTaskDetails] = useState(false)
+  const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
   const activeSseTaskRef = useRef<string | null>(null)
@@ -406,27 +377,11 @@ export default function TaskDetailPage() {
   const progressDescription = currentLiveProgress?.description ?? persistedProgress?.description ?? null
   const progressStage = currentLiveProgress?.stage ?? persistedProgress?.stage ?? null
   const isRunning = task?.status === 'running'
-  const creditTransactions = task?.credit_transactions ?? []
-  const creditSummary = task?.credits_summary
-  const taskConsumedCredits = creditSummary?.task_consumed ?? task?.credits_charged ?? 0
-  const operationConsumedCredits = creditSummary?.operation_consumed ?? 0
-  const refundedCredits = creditSummary?.refunded ?? 0
-  const netConsumedCredits = creditSummary?.net_consumed ?? task?.credits_charged ?? 0
-  const billingShortfallCredits = task?.billing_shortfall_credits ?? 0
-  const billingLocked = task?.billing_status === 'payment_required' || billingShortfallCredits > 0
-  const lockedDeliveryMessage = '交付已锁定，充值后可恢复下载、预览和发布。'
   const { data: videoProduction } = useQuery({
     queryKey: ['task-video-production', id],
     queryFn: () => api.tasks.videoProduction(id!),
-    enabled: !!id && isVideoCreator(task?.type) && !billingLocked,
+    enabled: !!id && isVideoCreator(task?.type),
   })
-  const showCreditDetails = Boolean(
-    task && (
-      typeof task.credits_charged === 'number' ||
-      creditSummary ||
-      creditTransactions.length > 0
-    ),
-  )
 
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
@@ -737,8 +692,8 @@ export default function TaskDetailPage() {
     : isVideoEditor(task.type)
       ? task.video_editor_config
       : undefined
-  const videoTargetDuration = videoResolvedConfig?.target_duration_seconds || videoResolvedConfig?.pricing_breakdown?.output_seconds || videoResolvedConfig?.duration
-  const videoSegmentCount = videoResolvedConfig?.segments?.length || videoResolvedConfig?.pricing_breakdown?.segment_count || 0
+  const videoTargetDuration = videoResolvedConfig?.target_duration_seconds || videoResolvedConfig?.duration
+  const videoSegmentCount = videoResolvedConfig?.segments?.length || 0
   const videoSpecSummary = [
     videoResolvedConfig?.resolution || '—',
     videoResolvedConfig?.ratio || '—',
@@ -786,19 +741,8 @@ export default function TaskDetailPage() {
           </div>
         </div>
         <div>
-          <p className="text-xs text-muted-foreground">费用明细</p>
-          <p className="mt-1 text-foreground">
-            估算 {(task.video_estimated_credits || videoResolvedConfig?.estimated_credits || 0).toLocaleString()} ·
-            已消耗 {(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}
-          </p>
-          {videoResolvedConfig?.pricing_breakdown && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              {videoModelDisplayName(videoResolvedConfig.pricing_breakdown.model_key)} · {videoResolvedConfig.pricing_breakdown.resolution} · 输出 {videoResolvedConfig.pricing_breakdown.output_seconds}s
-              {videoResolvedConfig.pricing_breakdown.input_video && typeof videoResolvedConfig.pricing_breakdown.input_seconds === 'number'
-                ? ` · 输入视频 ${videoResolvedConfig.pricing_breakdown.input_seconds}s`
-                : ''}
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">任务固定价</p>
+          <p className="mt-1 text-foreground">{task.billing_price_credits.toLocaleString()} 积分</p>
         </div>
         <div>
           <p className="text-xs text-muted-foreground">参考素材</p>
@@ -925,9 +869,7 @@ export default function TaskDetailPage() {
               variant="default"
               size="sm"
               loading={togglePublished.isPending}
-              disabled={billingLocked}
               onClick={() => {
-                if (billingLocked) return
                 void submit(async () => togglePublished.mutateAsync({ published: !task.published })).catch(() => {})
               }}
             >
@@ -959,9 +901,8 @@ export default function TaskDetailPage() {
               <DropdownMenuContent align="end" className="w-40">
                 {task.status === 'completed' && task.published && (
                   <DropdownMenuItem
-                    disabled={billingLocked || togglePublished.isPending}
+                    disabled={togglePublished.isPending}
                     onClick={() => {
-                      if (billingLocked) return
                       void submit(async () => togglePublished.mutateAsync({ published: false })).catch(() => {})
                     }}
                   >
@@ -1031,27 +972,6 @@ export default function TaskDetailPage() {
         </section>
       )}
 
-      {billingLocked && (
-        <Card className="border-amber-500/40 bg-amber-500/10">
-          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <Ban className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-              <div>
-                <p className="text-sm font-medium text-foreground">交付已锁定</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {billingShortfallCredits > 0
-                    ? `待补积分 ${billingShortfallCredits.toLocaleString()}，充值后系统会恢复下载、预览和发布。`
-                    : '充值后系统会恢复下载、预览和发布。'}
-                </p>
-              </div>
-            </div>
-            <Button size="sm" nativeButton={false} render={<Link to="/credits" />}>
-              去充值
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Publish-approval gate (Batch 4A): the project requires human review
           before publishing, so a completed article draft is held here until the
           user explicitly approves (→ WeChat draft box) or rejects it. */}
@@ -1071,9 +991,7 @@ export default function TaskDetailPage() {
               <Button
                 size="sm"
                 loading={approvePublish.isPending}
-                disabled={billingLocked}
                 onClick={() => {
-                  if (billingLocked) return
                   void submit(async () => approvePublish.mutateAsync()).catch(() => {})
                 }}
               >
@@ -1132,13 +1050,6 @@ export default function TaskDetailPage() {
         task={task}
         project={project}
         files={publishedFiles}
-        netConsumedCredits={netConsumedCredits}
-        showCreditDetails={showCreditDetails}
-        onOpenCreditDetails={() => {
-          setReturnToTaskDetailsAfterCredits(true)
-          setShowTaskDetails(false)
-          setShowCreditDialog(true)
-        }}
         logs={displayLogs}
         sseError={currentSseError}
         autoScrollLogs={autoScrollLogs}
@@ -1156,86 +1067,6 @@ export default function TaskDetailPage() {
         }}
         logContainerRef={logContainerRef}
       />
-
-      {showCreditDetails && (
-        <Dialog
-          open={showCreditDialog}
-          onOpenChange={(open) => {
-            setShowCreditDialog(open)
-            if (!open && returnToTaskDetailsAfterCredits) {
-              setReturnToTaskDetailsAfterCredits(false)
-              setShowTaskDetails(true)
-            }
-          }}
-        >
-          <DialogContent className="sm:max-w-3xl">
-            <DialogHeader>
-              <DialogTitle>积分明细</DialogTitle>
-              <DialogDescription>本任务累计积分消耗、退还与净消耗。</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">积分消耗</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{taskConsumedCredits.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">操作消耗</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{operationConsumedCredits.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">退还积分</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{refundedCredits.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">净消耗</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{netConsumedCredits.toLocaleString()}</p>
-                </div>
-              </div>
-              {creditTransactions.length > 0 && (
-                <div className="overflow-x-auto border-t border-border pt-3">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs text-muted-foreground">
-                        <th className="py-2 pr-3 font-medium">类型</th>
-                        <th className="py-2 pr-3 font-medium">数额</th>
-                        <th className="py-2 pr-3 font-medium">余额</th>
-                        <th className="py-2 pr-3 font-medium">描述</th>
-                        <th className="py-2 font-medium">时间</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {creditTransactions.map((tx) => {
-                        const usageSummary = transactionUsageSummary(tx)
-                        return (
-                          <tr key={tx.id} className="border-t border-border">
-                            <td className="py-2 pr-3">
-                              <Badge variant={tx.amount < 0 ? 'destructive' : 'secondary'}>
-                                {transactionTypeLabel[tx.type] || tx.type}
-                              </Badge>
-                            </td>
-                            <td className={`py-2 pr-3 font-medium ${tx.amount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                              {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
-                            </td>
-                            <td className="py-2 pr-3 text-muted-foreground">{tx.balance_after.toLocaleString()}</td>
-                            <td className="max-w-[260px] py-2 pr-3 text-muted-foreground">
-                              <div className="truncate">{formatCreditDescription(tx)}</div>
-                              {usageSummary && (
-                                <div className="mt-0.5 truncate text-xs text-muted-foreground/80">{usageSummary}</div>
-                              )}
-                            </td>
-                            <td className="whitespace-nowrap py-2 text-xs text-muted-foreground">{formatFullDateTimeCN(tx.created_at)}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
 
       {isVideoCreator(task.type) && hasVideoProductionResult && videoProduction && (
         <Card size="sm" className="border-border/70">
@@ -1269,7 +1100,6 @@ export default function TaskDetailPage() {
             <Button
               size="sm"
               onClick={async () => {
-                if (billingLocked) return
                 try {
                   const blob = await api.tasks.downloadZipBlob(task.id)
                   const url = URL.createObjectURL(blob)
@@ -1282,7 +1112,6 @@ export default function TaskDetailPage() {
                   toast.error('下载 ZIP 失败，请稍后重试')
                 }
               }}
-              disabled={billingLocked}
             >
               <Download className="h-4 w-4" />
               下载全部 (ZIP)
@@ -1293,8 +1122,6 @@ export default function TaskDetailPage() {
               <EcommerceFilesGallery
                 files={publishedFiles}
                 taskId={task.id}
-                accessLocked={billingLocked}
-                lockedMessage={lockedDeliveryMessage}
               />
             ) : (
               <>
@@ -1309,8 +1136,6 @@ export default function TaskDetailPage() {
                         taskId={task.id}
                         taskType={task.type}
                         inlineItemClassName="shrink-0 snap-start"
-                        accessLocked={billingLocked}
-                        lockedMessage={lockedDeliveryMessage}
                       />
                     </div>
                   )
@@ -1326,8 +1151,6 @@ export default function TaskDetailPage() {
                         taskId={task.id}
                         taskType={task.type}
                         renderPreviewDetails={renderVideoPreviewDetails}
-                        accessLocked={billingLocked}
-                        lockedMessage={lockedDeliveryMessage}
                       />
                     </div>
                   )
@@ -1353,8 +1176,6 @@ export default function TaskDetailPage() {
               taskId={task.id}
               taskType={task.type}
               renderPreviewDetails={renderVideoPreviewDetails}
-              accessLocked={billingLocked}
-              lockedMessage={lockedDeliveryMessage}
             />
           </div>
         </Card>
@@ -1370,7 +1191,6 @@ export default function TaskDetailPage() {
         files={publishedFiles}
         logs={displayLogs}
         progressDescription={progressDescription}
-        netConsumedCredits={netConsumedCredits}
         sseError={currentSseError}
         onOpenTab={openTaskDetails}
       />
@@ -1492,19 +1312,7 @@ export default function TaskDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确定取消此任务？</AlertDialogTitle>
             <AlertDialogDescription>
-              {task.status === 'pending' ? (
-                <>此任务尚未开始执行，取消后将<strong className="text-foreground">全额退还已扣除积分</strong>，不会产生任何费用。{' '}</>
-              ) : (
-                <>
-                  任务正在执行中，取消后将立即停止未完成的步骤。
-                  {task.total_cost_usd && task.total_cost_usd > 0 ? (
-                    <>已完成步骤（AI 写作、图片生成等）已消耗约 <strong className="text-foreground">{formatUSD(task.total_cost_usd)}</strong>，<strong className="text-foreground">不予退还</strong>；其余将退还。{' '}</>
-                  ) : (
-                    <>已完成步骤（如 AI 写作、图片生成）的费用<strong className="text-foreground">不予退还</strong>，其余将退还。{' '}</>
-                  )}
-                </>
-              )}
-              此操作不可撤销。
+              取消后会立即停止尚未完成的执行步骤。用户主动取消不撤销已确认的任务固定价；已成功交付的增值操作也会保留对应费用。此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

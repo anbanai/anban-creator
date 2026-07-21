@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/config"
@@ -97,7 +99,7 @@ func newTaskArtifactTestService(t *testing.T) (*TaskService, repository.Reposito
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeTaskArtifactStorage{name: "oss"}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{
@@ -217,6 +219,53 @@ func TestFinalizeTaskArtifactManifestPreservesExecutionMCPArtifacts(t *testing.T
 	}
 	if validation := serveragent.ValidateTaskArtifactsFromTaskFiles(task, pending); !validation.Valid {
 		t.Fatalf("merged execution artifacts are invalid: %#v", validation)
+	}
+}
+
+func TestUploadExecutionTaskFileWithSettlementPersistsArtifactAndOutboxAtomically(t *testing.T) {
+	fixture := newBillingWalletFixture(t, 500, 0, 0)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	store := &fakeTaskArtifactStorage{name: "oss"}
+	svc := NewTaskService(fixture.repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc.SetBillingWalletService(fixture.wallet)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	executionID := uuid.NewString()
+	if err := fixture.repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true}); err != nil {
+		t.Fatal(err)
+	}
+	if won, err := fixture.repo.Tasks().SetCurrentExecution(ctx, task.ID, executionID); err != nil || !won {
+		t.Fatalf("set current execution: won=%v err=%v", won, err)
+	}
+
+	file, err := svc.UploadExecutionTaskFileWithSettlementFromReader(ctx, task.ID, task.UserID, executionID, "output/cover.png", strings.NewReader("image"), "image/png", 5, TaskFileOperationSettlement{
+		CatalogID: "retail-test-v1", SKUID: "image.cover.v1", ToolCallID: "internal:image:call-1", RequestFingerprint: billingFingerprint("call-1"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement, err := fixture.repo.Billing().FindSettlementByKey(ctx, "mcp-image-settlement", billingFingerprint(task.ID, executionID, "internal:image:call-1"))
+	if err != nil || settlement.ResourceID != file.ID || settlement.TaskID == nil || *settlement.TaskID != task.ID {
+		t.Fatalf("settlement = %#v err=%v", settlement, err)
+	}
+
+	broken := NewTaskService(fixture.repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	_, err = broken.UploadExecutionTaskFileWithSettlementFromReader(ctx, task.ID, task.UserID, executionID, "output/content.png", strings.NewReader("other"), "image/png", 5, TaskFileOperationSettlement{
+		CatalogID: "retail-test-v1", SKUID: "image.cover.v1", ToolCallID: "internal:image:call-2", RequestFingerprint: billingFingerprint("call-2"),
+	})
+	if err == nil {
+		t.Fatal("missing wallet did not fail settlement transaction")
+	}
+	pending, findErr := fixture.repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if findErr != nil || len(pending) != 1 || pending[0].FilePath != "output/cover.png" {
+		t.Fatalf("artifact transaction leaked pending rows: files=%#v err=%v", pending, findErr)
+	}
+	if settlement, findErr := fixture.repo.Billing().FindSettlementByKey(ctx, "mcp-image-settlement", billingFingerprint(task.ID, executionID, "internal:image:call-2")); !errors.Is(findErr, gorm.ErrRecordNotFound) || settlement != nil {
+		t.Fatalf("outbox committed without artifact: settlement=%#v err=%v", settlement, findErr)
 	}
 }
 

@@ -3,9 +3,43 @@ package main
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
+
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
+
+func TestParseConfigModelUsageAliases(t *testing.T) {
+	err := newAgentCommand(nil, nil, func(_ context.Context, cfg *Config) error {
+		want := map[string]serveragent.ModelUsageIdentity{
+			"doubao-seed-evolving":                {Provider: "volcengine_ark", Model: "doubao-seed-evolving"},
+			"doubao-seed-evolving-latest-version": {Provider: "volcengine_ark", Model: "doubao-seed-evolving"},
+		}
+		if !reflect.DeepEqual(cfg.ModelUsageAliases, want) {
+			t.Fatalf("ModelUsageAliases = %#v, want %#v", cfg.ModelUsageAliases, want)
+		}
+		return nil
+	}).Run(context.Background(), []string{
+		"anban", "run", "--server-url", "http://localhost:18060", "--api-key", "key",
+		"--task-id", "task-1", "--task-type", "article",
+		"--model-usage-alias", "doubao-seed-evolving=volcengine_ark/doubao-seed-evolving",
+		"--model-usage-alias", "doubao-seed-evolving-latest-version=volcengine_ark/doubao-seed-evolving",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseConfigRejectsInvalidModelUsageAlias(t *testing.T) {
+	err := newAgentCommand(nil, nil, func(_ context.Context, _ *Config) error { return nil }).Run(context.Background(), []string{
+		"anban", "run", "--server-url", "http://localhost:18060", "--api-key", "key",
+		"--task-id", "task-1", "--task-type", "article", "--model-usage-alias", "raw=missing-provider",
+	})
+	if err == nil || !strings.Contains(err.Error(), "model-usage-alias") {
+		t.Fatalf("error = %v, want model-usage-alias validation error", err)
+	}
+}
 
 func TestConfigUserPrompt_ArticleImageFlagsDefaultOn(t *testing.T) {
 	cfg := &Config{

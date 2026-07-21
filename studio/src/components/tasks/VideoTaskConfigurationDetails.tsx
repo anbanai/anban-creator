@@ -10,7 +10,6 @@ import { isVideoCreator, isVideoEditor } from '@/lib/video-platforms'
 import { cn } from '@/lib/utils'
 import type {
   Task,
-  VideoPricingBreakdown,
   VideoReferenceAsset,
   VideoTaskConfig,
 } from '@/types'
@@ -26,7 +25,6 @@ interface DetailProps {
 }
 
 type VideoSegment = NonNullable<VideoTaskConfig['segments']>[number]
-type VideoPricingSegment = NonNullable<VideoPricingBreakdown['segments']>[number]
 
 function Detail({ label, value, wide = false }: DetailProps) {
   return (
@@ -115,9 +113,6 @@ function configuredBoolean(value: boolean | undefined): string {
 
 function VideoSegmentDetails({ segment }: { segment: VideoSegment }) {
   const model = videoModelDisplayName(segment.model_key || segment.model) || '—'
-  const credits = typeof segment.estimated_credits === 'number'
-    ? `${segment.estimated_credits.toLocaleString()} 积分`
-    : '积分 —'
 
   return (
     <div className="flex flex-col gap-1 py-2 text-xs">
@@ -125,7 +120,7 @@ function VideoSegmentDetails({ segment }: { segment: VideoSegment }) {
         #{segment.index} · {segment.start_second}–{segment.end_second}s · 时长 {segment.duration}s
       </p>
       <p className="break-words text-muted-foreground">
-        {model} · {segment.resolution || '—'} · {segment.ratio || '—'} · {credits}
+        {model} · {segment.resolution || '—'} · {segment.ratio || '—'}
       </p>
       {segment.prompt ? (
         <p className="whitespace-pre-wrap text-foreground">{segment.prompt}</p>
@@ -152,71 +147,6 @@ function VideoSegmentList({ segments }: { segments: VideoSegment[] }) {
   )
 }
 
-function VideoPricingSegmentDetails({ segment }: { segment: VideoPricingSegment }) {
-  return (
-    <p className="py-2 text-xs text-foreground">
-      #{segment.index} · {segment.seconds}s · {segment.cny.toLocaleString()} CNY · {segment.credits.toLocaleString()} 积分
-    </p>
-  )
-}
-
-function VideoPricingDetails({ pricing }: { pricing?: VideoPricingBreakdown }) {
-  if (!pricing) return null
-
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-xs font-medium text-foreground">计价明细</p>
-      <dl className="grid gap-3 sm:grid-cols-2">
-        <Detail label="计价金额" value={`${pricing.cny.toLocaleString()} CNY`} />
-        <Detail label="每元积分" value={pricing.credits_per_cny.toLocaleString()} />
-        <Detail
-          label="积分倍率"
-          value={typeof pricing.credit_multiplier === 'number'
-            ? pricing.credit_multiplier.toLocaleString()
-            : '—'}
-        />
-        <Detail
-          label="档位倍率"
-          value={typeof pricing.tier_multiplier === 'number'
-            ? pricing.tier_multiplier.toLocaleString()
-            : '—'}
-        />
-        <Detail
-          label="用户倍率"
-          value={typeof pricing.user_multiplier === 'number'
-            ? pricing.user_multiplier.toLocaleString()
-            : '—'}
-        />
-        <Detail label="输入视频" value={configuredBoolean(pricing.input_video)} />
-        <Detail
-          label="计价输入时长"
-          value={typeof pricing.input_seconds === 'number' ? `${pricing.input_seconds}s` : '—'}
-        />
-        <Detail label="计价输出时长" value={`${pricing.output_seconds}s`} />
-        <Detail
-          label="计价分段数"
-          value={typeof pricing.segment_count === 'number'
-            ? pricing.segment_count.toLocaleString()
-            : '—'}
-        />
-      </dl>
-      {pricing.segments && pricing.segments.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs text-muted-foreground">计价分段</p>
-          <div className="flex flex-col border-y border-border">
-            {pricing.segments.map((segment, index) => (
-              <Fragment key={`${segment.index}-${segment.seconds}-${index}`}>
-                {index > 0 ? <Separator /> : null}
-                <VideoPricingSegmentDetails segment={segment} />
-              </Fragment>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 export function VideoTaskConfigurationDetails({ task }: VideoTaskConfigurationDetailsProps) {
   const input = isVideoCreator(task.type)
     ? task.video_creator_input
@@ -231,13 +161,11 @@ export function VideoTaskConfigurationDetails({ task }: VideoTaskConfigurationDe
   const references = input?.references ?? []
   const constraints = input?.hard_constraints
   const resolvedReferences = config?.references ?? []
-  const pricing = config?.pricing_breakdown
-  const resolvedModel = config?.model_key || config?.model || pricing?.model_key
-  const resolvedResolution = config?.resolution || pricing?.resolution || '—'
-  const resolvedRatio = config?.ratio || pricing?.ratio || '—'
+  const resolvedModel = config?.model_key || config?.model
+  const resolvedResolution = config?.resolution || '—'
+  const resolvedRatio = config?.ratio || '—'
   const resolvedDuration = config?.target_duration_seconds
     ?? config?.duration
-    ?? pricing?.output_seconds
   const resolvedSpec = [
     resolvedResolution,
     resolvedRatio,
@@ -292,12 +220,8 @@ export function VideoTaskConfigurationDetails({ task }: VideoTaskConfigurationDe
               <Detail label="目标受众" value={config?.audience?.trim() || '—'} wide />
               <Detail label="核心信息" value={config?.single_message?.trim() || '—'} wide />
               <Detail
-                label="估算积分"
-                value={(task.video_estimated_credits ?? config?.estimated_credits ?? 0).toLocaleString()}
-              />
-              <Detail
-                label="积分消耗"
-                value={(task.video_credits_charged ?? task.credits_charged ?? 0).toLocaleString()}
+                label="任务固定价"
+                value={`${task.billing_price_credits.toLocaleString()} 积分`}
               />
             </dl>
             <dl className="grid gap-3 sm:grid-cols-2">
@@ -336,7 +260,6 @@ export function VideoTaskConfigurationDetails({ task }: VideoTaskConfigurationDe
               />
             </dl>
             <VideoSegmentList segments={config?.segments ?? []} />
-            <VideoPricingDetails pricing={pricing} />
             <div className="flex flex-col gap-2">
               <p className="text-xs text-muted-foreground">执行参考素材</p>
               <VideoReferenceList emptyLabel="未解析参考素材" references={resolvedReferences} />

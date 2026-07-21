@@ -1,0 +1,424 @@
+catalog_id: "retail-2026-07-20-v2"
+currency: "credits"
+skus:
+  - id: "task.article.standard.v1"
+    operation: "task.article"
+    charge_policy: "task_admission"
+    price_credits: 6000
+    delivery: "article_artifacts_verified"
+
+  - id: "task.seednote.standard.v1"
+    operation: "task.seednote"
+    charge_policy: "task_admission"
+    price_credits: 5000
+    delivery: "seednote_artifacts_verified"
+
+  - id: "task.moments.standard.v1"
+    operation: "task.moments"
+    charge_policy: "task_admission"
+    price_credits: 3000
+    delivery: "moments_artifacts_verified"
+
+  - id: "task.ecommerce.standard.v1"
+    operation: "task.ecommerce"
+    charge_policy: "task_admission"
+    price_credits: 3000
+    delivery: "ecommerce_artifacts_verified"
+
+  - id: "task.videocreator.standard.v1"
+    operation: "task.videocreator"
+    charge_policy: "task_admission"
+    price_credits: 2000
+    delivery: "final_video_verified"
+
+  - id: "task.videoeditor.standard.v1"
+    operation: "task.videoeditor"
+    charge_policy: "task_admission"
+    price_credits: 2000
+    delivery: "edited_video_verified"
+
+  - id: "task.montage.standard.v1"
+    operation: "task.montage"
+    charge_policy: "task_admission"
+    price_credits: 2000
+    delivery: "montage_artifacts_verified"
+
+  - id: "task.viral-analysis.standard.v1"
+    operation: "task.viral_analysis"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    delivery: "viral_analysis_report_verified"
+
+  - id: "image.seedream.cover.v1"
+    operation: "mcp.generate_image"
+    charge_policy: "accepted_task_operation"
+    price_credits: 500
+    route: "image_generation.cover"
+    delivery: "persisted_image"
+
+  - id: "image.seedream.content.v1"
+    operation: "mcp.generate_image"
+    charge_policy: "accepted_task_operation"
+    price_credits: 500
+    route: "image_generation.content"
+    delivery: "persisted_image"
+
+  - id: "image.seedream.designer.v1"
+    operation: "designer.generate_image"
+    charge_policy: "standalone_operation"
+    price_credits: 500
+    route: "image_generation.designer.seedream"
+    delivery: "persisted_image"
+
+  - id: "image.gpt-image-2.designer.v1"
+    operation: "designer.generate_image"
+    charge_policy: "standalone_operation"
+    price_credits: 500
+    route: "image_generation.designer.gpt_image_2"
+    delivery: "persisted_image"
+
+  # Video prices are fixed retail SKUs. Duration tiers use their upper bound;
+  # any audio or video reference selects media_input.
+  - id: "video.seedance-2-0.480p.1-5.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 4000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "480p", duration_tier: "1-5", input_mode: "no_input"}
+  - id: "video.seedance-2-0.480p.1-5.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 9000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "480p", duration_tier: "1-5", input_mode: "media_input"}
+  - id: "video.seedance-2-0.480p.6-10.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 7500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "480p", duration_tier: "6-10", input_mode: "no_input"}
+  - id: "video.seedance-2-0.480p.6-10.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 17500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "480p", duration_tier: "6-10", input_mode: "media_input"}
+  - id: "video.seedance-2-0.480p.11-15.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 11000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "480p", duration_tier: "11-15", input_mode: "no_input"}
+  - id: "video.seedance-2-0.480p.11-15.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 26000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "480p", duration_tier: "11-15", input_mode: "media_input"}
+
+  - id: "video.seedance-2-0.720p.1-5.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 8000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "720p", duration_tier: "1-5", input_mode: "no_input"}
+  - id: "video.seedance-2-0.720p.1-5.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 19000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "720p", duration_tier: "1-5", input_mode: "media_input"}
+  - id: "video.seedance-2-0.720p.6-10.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 15500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "720p", duration_tier: "6-10", input_mode: "no_input"}
+  - id: "video.seedance-2-0.720p.6-10.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 37500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "720p", duration_tier: "6-10", input_mode: "media_input"}
+  - id: "video.seedance-2-0.720p.11-15.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 23000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "720p", duration_tier: "11-15", input_mode: "no_input"}
+  - id: "video.seedance-2-0.720p.11-15.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 56000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "720p", duration_tier: "11-15", input_mode: "media_input"}
+
+  - id: "video.seedance-2-0.1080p.1-5.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 19500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "1080p", duration_tier: "1-5", input_mode: "no_input"}
+  - id: "video.seedance-2-0.1080p.1-5.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 46500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "1080p", duration_tier: "1-5", input_mode: "media_input"}
+  - id: "video.seedance-2-0.1080p.6-10.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 38500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "1080p", duration_tier: "6-10", input_mode: "no_input"}
+  - id: "video.seedance-2-0.1080p.6-10.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 93000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "1080p", duration_tier: "6-10", input_mode: "media_input"}
+  - id: "video.seedance-2-0.1080p.11-15.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 57500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "1080p", duration_tier: "11-15", input_mode: "no_input"}
+  - id: "video.seedance-2-0.1080p.11-15.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 139500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "1080p", duration_tier: "11-15", input_mode: "media_input"}
+
+  - id: "video.seedance-2-0.4k.1-5.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 39000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "4k", duration_tier: "1-5", input_mode: "no_input"}
+  - id: "video.seedance-2-0.4k.1-5.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 96000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "4k", duration_tier: "1-5", input_mode: "media_input"}
+  - id: "video.seedance-2-0.4k.6-10.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 78000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "4k", duration_tier: "6-10", input_mode: "no_input"}
+  - id: "video.seedance-2-0.4k.6-10.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 191500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "4k", duration_tier: "6-10", input_mode: "media_input"}
+  - id: "video.seedance-2-0.4k.11-15.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 117000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "4k", duration_tier: "11-15", input_mode: "no_input"}
+  - id: "video.seedance-2-0.4k.11-15.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 287500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0", resolution: "4k", duration_tier: "11-15", input_mode: "media_input"}
+
+  - id: "video.seedance-2-0-fast.480p.1-5.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 3000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "480p", duration_tier: "1-5", input_mode: "no_input"}
+  - id: "video.seedance-2-0-fast.480p.1-5.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 7000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "480p", duration_tier: "1-5", input_mode: "media_input"}
+  - id: "video.seedance-2-0-fast.480p.6-10.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 6000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "480p", duration_tier: "6-10", input_mode: "no_input"}
+  - id: "video.seedance-2-0-fast.480p.6-10.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 14000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "480p", duration_tier: "6-10", input_mode: "media_input"}
+  - id: "video.seedance-2-0-fast.480p.11-15.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 9000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "480p", duration_tier: "11-15", input_mode: "no_input"}
+  - id: "video.seedance-2-0-fast.480p.11-15.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 20500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "480p", duration_tier: "11-15", input_mode: "media_input"}
+
+  - id: "video.seedance-2-0-fast.720p.1-5.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 6500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "720p", duration_tier: "1-5", input_mode: "no_input"}
+  - id: "video.seedance-2-0-fast.720p.1-5.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 15000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "720p", duration_tier: "1-5", input_mode: "media_input"}
+  - id: "video.seedance-2-0-fast.720p.6-10.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 12500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "720p", duration_tier: "6-10", input_mode: "no_input"}
+  - id: "video.seedance-2-0-fast.720p.6-10.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 29500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "720p", duration_tier: "6-10", input_mode: "media_input"}
+  - id: "video.seedance-2-0-fast.720p.11-15.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 18500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "720p", duration_tier: "11-15", input_mode: "no_input"}
+  - id: "video.seedance-2-0-fast.720p.11-15.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 44000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-fast", resolution: "720p", duration_tier: "11-15", input_mode: "media_input"}
+
+  - id: "video.seedance-2-0-mini.480p.1-5.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 2000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "480p", duration_tier: "1-5", input_mode: "no_input"}
+  - id: "video.seedance-2-0-mini.480p.1-5.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 4500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "480p", duration_tier: "1-5", input_mode: "media_input"}
+  - id: "video.seedance-2-0-mini.480p.6-10.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 4000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "480p", duration_tier: "6-10", input_mode: "no_input"}
+  - id: "video.seedance-2-0-mini.480p.6-10.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 9000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "480p", duration_tier: "6-10", input_mode: "media_input"}
+  - id: "video.seedance-2-0-mini.480p.11-15.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 5500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "480p", duration_tier: "11-15", input_mode: "no_input"}
+  - id: "video.seedance-2-0-mini.480p.11-15.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 13000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "480p", duration_tier: "11-15", input_mode: "media_input"}
+
+  - id: "video.seedance-2-0-mini.720p.1-5.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 4000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "720p", duration_tier: "1-5", input_mode: "no_input"}
+  - id: "video.seedance-2-0-mini.720p.1-5.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 9500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "720p", duration_tier: "1-5", input_mode: "media_input"}
+  - id: "video.seedance-2-0-mini.720p.6-10.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 8000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "720p", duration_tier: "6-10", input_mode: "no_input"}
+  - id: "video.seedance-2-0-mini.720p.6-10.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 19000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "720p", duration_tier: "6-10", input_mode: "media_input"}
+  - id: "video.seedance-2-0-mini.720p.11-15.no-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 11500
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "720p", duration_tier: "11-15", input_mode: "no_input"}
+  - id: "video.seedance-2-0-mini.720p.11-15.media-input.v1"
+    operation: "mcp.generate_video"
+    charge_policy: "accepted_task_operation"
+    price_credits: 28000
+    route: "video_generation"
+    delivery: "persisted_video"
+    selectors: {model_key: "seedance-2.0-mini", resolution: "720p", duration_tier: "11-15", input_mode: "media_input"}

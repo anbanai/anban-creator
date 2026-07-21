@@ -40,12 +40,12 @@ type Services struct {
 	Executor                 agent.TaskExecutor
 	PlanService              *service.PlanService
 	TaskService              *service.TaskService
-	CreditService            *service.CreditService
 	PlanHandler              *handler.PlanHandler
 	TaskHandler              *handler.TaskHandler
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	AgentHandler             *handler.AgentHandler
-	CreditHandler            *handler.CreditHandler
+	BillingHandler           *handler.BillingHandler
+	BillingAdminHandler      *handler.BillingAdminHandler
 	VideoHandler             *handler.VideoHandler
 	ProjectHandler           *handler.ProjectHandler
 	TimelineHandler          *handler.TimelineHandler
@@ -222,8 +222,23 @@ func NewRouter(svc *Services) *fiber.App {
 
 	authMiddleware := appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger)
 	rateLimiter := appmiddleware.RateLimit(svc.Redis, 100, 1*time.Minute)
-
 	apiV1 := app.Group("/api/v1", authMiddleware, rateLimiter)
+	if svc.BillingHandler != nil {
+		billingAPI := apiV1.Group("/billing")
+		billingAPI.Get("/wallet", svc.BillingHandler.Wallet)
+		billingAPI.Get("/catalog", svc.BillingHandler.Catalog)
+		billingAPI.Get("/transactions", svc.BillingHandler.Transactions)
+		billingAPI.Post("/quotes", svc.BillingHandler.CreateQuote)
+		billingAPI.Get("/referral", svc.BillingHandler.Referral)
+
+		adminBillingLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
+		app.Post("/api/admin/billing/topups", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingHandler.AdminTopUp)
+		if svc.BillingAdminHandler != nil {
+			app.Get("/api/admin/billing/costs", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Costs)
+			app.Get("/api/admin/billing/margins", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Margins)
+			app.Get("/api/admin/billing/reconciliation", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Reconciliation)
+		}
+	}
 
 	if svc.AuthHandler != nil {
 		apiV1.Get("/auth/me", svc.AuthHandler.Me)
@@ -274,6 +289,7 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.DesignerHandler != nil {
 		designer := apiV1.Group("/designer")
 		designer.Get("/providers", svc.DesignerHandler.GetProviders)
+		designer.Post("/quote", svc.DesignerHandler.Quote)
 		designer.Post("/generate", svc.DesignerHandler.Generate)
 		designer.Post("/register-reference", svc.DesignerHandler.RegisterReference)
 		designer.Post("/upload-reference", svc.DesignerHandler.UploadReference)
@@ -361,25 +377,6 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.TimelineHandler != nil {
 		apiV1.Get("/timeline", svc.TimelineHandler.GetTimeline)
-	}
-
-	// ---------------------------------------------------------------------------
-	// Credits endpoints
-	// ---------------------------------------------------------------------------
-
-	if svc.CreditHandler != nil {
-		credits := apiV1.Group("/credits")
-		credits.Get("/balance", svc.CreditHandler.Balance)
-		credits.Get("/sign-in/status", svc.CreditHandler.SignInStatus)
-		credits.Post("/sign-in", svc.CreditHandler.SignIn)
-		credits.Get("/transactions", svc.CreditHandler.Transactions)
-		credits.Get("/pricing", svc.CreditHandler.Pricing)
-	}
-
-	// Admin credits endpoint (outside JWT auth group, uses API key auth).
-	if svc.CreditHandler != nil {
-		adminLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
-		app.Post("/api/v1/admin/credits/grant", adminLimiter, svc.CreditHandler.AdminGrant)
 	}
 
 	// ---------------------------------------------------------------------------

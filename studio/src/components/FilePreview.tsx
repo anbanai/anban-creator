@@ -71,15 +71,11 @@ function FilePreviewModalContent({
   taskId,
   details,
   children,
-  accessLocked = false,
-  lockedMessage = '交付已锁定，充值后可恢复下载、预览和发布。',
 }: {
   file: TaskFile
   taskId: string
   details?: React.ReactNode
   children?: React.ReactNode
-  accessLocked?: boolean
-  lockedMessage?: string
 }) {
   const [loading, setLoading] = useState(false)
   const [htmlContent, setHtmlContent] = useState('')
@@ -97,17 +93,6 @@ function FilePreviewModalContent({
     let cancelled = false
 
     async function load() {
-      if (accessLocked) {
-        setLoading(false)
-        setHtmlContent('')
-        setTextContent('')
-        setImgSrc('')
-        if (blobUrlRef.current) {
-          URL.revokeObjectURL(blobUrlRef.current)
-          blobUrlRef.current = ''
-        }
-        return
-      }
       if (isImage || isVideo) {
         const url = file.url || ''
         if (!url) {
@@ -163,7 +148,7 @@ function FilePreviewModalContent({
     }
     void load()
     return () => { cancelled = true }
-  }, [file, taskId, isImage, isVideo, isHTML, isText, accessLocked])
+  }, [file, taskId, isImage, isVideo, isHTML, isText])
 
   useEffect(() => {
     return () => {
@@ -175,7 +160,6 @@ function FilePreviewModalContent({
   }, [])
 
   const handleDownload = async () => {
-    if (accessLocked) return
     try {
       if (isDesktop() && /^https?:\/\//i.test(file.url || '') && await saveUrlToFile(file.url, file.file_name)) {
         return
@@ -208,12 +192,6 @@ function FilePreviewModalContent({
         </DialogDescription>
       </DialogHeader>
 
-      {accessLocked && (
-        <div className="flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-          {lockedMessage}
-        </div>
-      )}
-
       {loading && (
         <div className={isImage || isVideo ? 'flex items-center justify-center py-16' : 'flex min-h-[70vh] items-center justify-center rounded-lg border border-border bg-background'}>
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -221,7 +199,7 @@ function FilePreviewModalContent({
         </div>
       )}
 
-      {!accessLocked && !loading && isImage && imgSrc && (
+      {!loading && isImage && imgSrc && (
         <div className="flex items-center justify-center">
           <img
             src={imgSrc}
@@ -231,7 +209,7 @@ function FilePreviewModalContent({
         </div>
       )}
 
-      {!accessLocked && !loading && isVideo && imgSrc && (
+      {!loading && isVideo && imgSrc && (
         <div className="grid max-h-[80vh] gap-4 sm:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0">
             <video
@@ -248,7 +226,7 @@ function FilePreviewModalContent({
         </div>
       )}
 
-      {!accessLocked && !loading && isHTML && htmlContent && (
+      {!loading && isHTML && htmlContent && (
         <iframe
           srcDoc={htmlContent}
           sandbox="allow-scripts"
@@ -258,7 +236,7 @@ function FilePreviewModalContent({
         />
       )}
 
-      {!accessLocked && !loading && isMD && textContent && (
+      {!loading && isMD && textContent && (
         <div className="h-[70vh] overflow-y-auto rounded-lg border border-border bg-background p-6">
           <article className="prose prose-sm dark:prose-invert max-w-none prose-headings:font-semibold prose-a:text-primary prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-pre:bg-muted prose-pre:p-4 prose-table:border prose-th:border prose-th:p-2 prose-td:border prose-td:p-2">
             <Markdown remarkPlugins={[remarkGfm]}>{textContent}</Markdown>
@@ -266,14 +244,14 @@ function FilePreviewModalContent({
         </div>
       )}
 
-      {!accessLocked && !loading && isText && !isMD && textContent && (
+      {!loading && isText && !isMD && textContent && (
         <pre className="h-[70vh] overflow-auto rounded-lg border border-border bg-muted/50 p-4 text-sm text-foreground whitespace-pre-wrap break-words">
           {textContent}
         </pre>
       )}
 
       <div className="flex items-center justify-end gap-2 pt-2">
-        {!accessLocked && isMD && textContent && (
+        {isMD && textContent && (
           <Button
             variant="secondary"
             size="sm"
@@ -304,7 +282,7 @@ function FilePreviewModalContent({
             复制纯文本
           </Button>
         )}
-        {!accessLocked && isMD && textContent && (
+        {isMD && textContent && (
           <Button
             variant="secondary"
             size="sm"
@@ -317,7 +295,7 @@ function FilePreviewModalContent({
             复制 Markdown
           </Button>
         )}
-        {!accessLocked && isText && !isMD && textContent && (
+        {isText && !isMD && textContent && (
           <Button
             variant="secondary"
             size="sm"
@@ -330,7 +308,7 @@ function FilePreviewModalContent({
             复制文本
           </Button>
         )}
-        {!accessLocked && isHTML && htmlContent && (
+        {isHTML && htmlContent && (
           <Button
             variant="secondary"
             size="sm"
@@ -343,7 +321,7 @@ function FilePreviewModalContent({
             复制 HTML
           </Button>
         )}
-        <Button variant="secondary" size="sm" onClick={handleDownload} disabled={accessLocked}>
+        <Button variant="secondary" size="sm" onClick={handleDownload}>
           <Download className="h-3.5 w-3.5" />
           下载
         </Button>
@@ -361,16 +339,12 @@ export function FilePreviewGallery({
   taskType,
   inlineItemClassName,
   renderPreviewDetails,
-  accessLocked = false,
-  lockedMessage = '交付已锁定，充值后可恢复下载、预览和发布。',
 }: {
   files: TaskFile[]
   taskId: string
   taskType?: string
   inlineItemClassName?: string
   renderPreviewDetails?: (file: TaskFile) => React.ReactNode
-  accessLocked?: boolean
-  lockedMessage?: string
 }) {
   const [open, setOpen] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -386,10 +360,9 @@ export function FilePreviewGallery({
   }, [files.length])
 
   const handleOpen = useCallback((index: number) => {
-    if (accessLocked) return
     setCurrentIndex(index)
     setOpen(true)
-  }, [accessLocked])
+  }, [])
 
   // Keyboard navigation
   useEffect(() => {
@@ -420,8 +393,6 @@ export function FilePreviewGallery({
               file={file}
               taskId={taskId}
               taskType={taskType}
-              accessLocked={accessLocked}
-              lockedMessage={lockedMessage}
               onClick={() => handleOpen(index)}
             />
           </div>
@@ -431,8 +402,6 @@ export function FilePreviewGallery({
             file={file}
             taskId={taskId}
             taskType={taskType}
-            accessLocked={accessLocked}
-            lockedMessage={lockedMessage}
             onClick={() => handleOpen(index)}
           />
         )
@@ -443,8 +412,6 @@ export function FilePreviewGallery({
             file={currentFile}
             taskId={taskId}
             details={renderPreviewDetails?.(currentFile)}
-            accessLocked={accessLocked}
-            lockedMessage={lockedMessage}
           >
             {hasMultiple && (
               <>
@@ -485,15 +452,11 @@ function FilePreviewInline({
   file,
   taskId,
   taskType,
-  accessLocked = false,
-  lockedMessage = '交付已锁定，充值后可恢复下载、预览和发布。',
   onClick,
 }: {
   file: TaskFile
   taskId: string
   taskType?: string
-  accessLocked?: boolean
-  lockedMessage?: string
   onClick: () => void
 }) {
   const isImage = file.mime_type?.startsWith('image/')
@@ -502,7 +465,6 @@ function FilePreviewInline({
   const isText = !isImage && !isVideo && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
 
   const handleDownload = async () => {
-    if (accessLocked) return
     try {
       if (isDesktop() && /^https?:\/\//i.test(file.url || '') && await saveUrlToFile(file.url, file.file_name)) {
         return
@@ -521,14 +483,6 @@ function FilePreviewInline({
   const blobUrlRef = useRef<string>('')
   useEffect(() => {
     if (!isImage && !isVideo) return
-    if (accessLocked) {
-      setImgSrc('')
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current)
-        blobUrlRef.current = ''
-      }
-      return
-    }
     const url = file.url || ''
     if (!url) {
       setImgSrc('')
@@ -559,16 +513,12 @@ function FilePreviewInline({
       }
       setImgSrc(url)
     }
-  }, [isImage, isVideo, file.url, taskId, file.id, accessLocked])
+  }, [isImage, isVideo, file.url, taskId, file.id])
 
   if (isImage) {
     return (
       <div className="space-y-1">
-        {accessLocked ? (
-          <div className="flex h-48 w-36 items-center justify-center rounded-md border border-dashed border-border bg-muted/30 px-3 text-center text-xs text-muted-foreground">
-            {lockedMessage}
-          </div>
-        ) : imgSrc ? (
+        {imgSrc ? (
           <img
             src={imgSrc}
             alt={file.file_name}
@@ -605,8 +555,7 @@ function FilePreviewInline({
           {canPreview && (
           <button
             onClick={onClick}
-              disabled={accessLocked}
-              className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
               aria-label={`预览 ${file.file_name}`}
             >
               <Eye className="h-3.5 w-3.5" />
@@ -615,8 +564,7 @@ function FilePreviewInline({
           )}
           <button
             onClick={handleDownload}
-            disabled={accessLocked}
-            className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
             aria-label={`下载 ${file.file_name}`}
           >
             <Download className="h-3.5 w-3.5" />

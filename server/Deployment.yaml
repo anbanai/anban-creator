@@ -67,6 +67,11 @@ spec:
                 secretKeyRef:
                   name: anban-agent-execution-token
                   key: token-secret
+            - name: ANBAN_BILLING_ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-billing-admin-api-key
+                  key: api-key
             - name: ANBAN_AGENT_IMAGE_PULL_SECRET
               value: ${imagePullSecret}
           name: ${micro_service_name}-${version_switch}
@@ -83,8 +88,10 @@ spec:
               memory: ${limits_memory}
               ephemeral-storage: 2Gi
           volumeMounts:
-            - mountPath: /app/conf
+            - mountPath: /app/conf/config.yaml
               name: ${micro_service_name}-config
+              subPath: config.yaml
+              readOnly: true
             - mountPath: /var/run/secrets/anban-server-tls
               name: anban-server-tls
               readOnly: true

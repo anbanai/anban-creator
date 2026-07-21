@@ -74,27 +74,6 @@ export interface VideoModelPolicy {
   max_duration?: number
 }
 
-export interface VideoPricingBreakdown {
-  cny: number
-  credits_per_cny: number
-  credit_multiplier?: number
-  tier_multiplier?: number
-  user_multiplier?: number
-  input_video: boolean
-  input_seconds?: number
-  output_seconds: number
-  segment_count?: number
-  resolution: string
-  ratio: string
-  model_key: string
-  segments?: Array<{
-    index: number
-    seconds: number
-    cny: number
-    credits: number
-  }>
-}
-
 export interface VideoTaskConfig extends VideoDefaults {
   model?: string
   references?: VideoReferenceAsset[]
@@ -108,10 +87,7 @@ export interface VideoTaskConfig extends VideoDefaults {
     model?: string
     resolution?: string
     ratio?: string
-    estimated_credits?: number
   }>
-  estimated_credits?: number
-  pricing_breakdown?: VideoPricingBreakdown
 }
 
 export interface VideoModelSpec {
@@ -135,11 +111,6 @@ export interface VideoEstimateRequest {
 export interface VideoEstimateResponse {
   available_models: VideoModelSpec[]
   resolved_creator_config: VideoTaskConfig
-  estimated_credits: number
-  pricing_breakdown?: VideoPricingBreakdown
-  balance: number
-  min_balance: number
-  meets_min_balance: boolean
   warnings?: string[]
   missing_reference_roles?: string[]
   expected_artifacts?: string[]
@@ -153,9 +124,7 @@ export interface VideoEstimateResponse {
     model?: string
     resolution?: string
     ratio?: string
-    estimated_credits?: number
   }>
-  affordable_takes?: number
 }
 
 export interface VideoProductionArtifact {

@@ -86,8 +86,8 @@ func (w *TaskLogWriter) WriteError(msg string) {
 	w.writeLine("[%s] [ERROR] %s", w.timeStr(), msg)
 }
 
-// WriteResult writes the execution summary block.
-func (w *TaskLogWriter) WriteResult(success bool, durationMs, numTurns int, costUSD *float64, tokenUsage *TokenUsage) {
+// WriteResult writes execution metadata without non-authoritative Claude billing fields.
+func (w *TaskLogWriter) WriteResult(success bool, durationMs, numTurns int) {
 	status := "Success"
 	if !success {
 		status = "Failed"
@@ -95,15 +95,6 @@ func (w *TaskLogWriter) WriteResult(success bool, durationMs, numTurns int, cost
 	w.writeLine("")
 	w.writeLine("[%s] [RESULT] %s", w.timeStr(), status)
 	w.writeLine("  Duration: %dms | Turns: %d", durationMs, numTurns)
-	if costUSD != nil {
-		w.writeLine("  Cost: $%.4f", *costUSD)
-	}
-	if tokenUsage != nil {
-		w.writeLine("  Input tokens: %d | Output tokens: %d", tokenUsage.InputTokens, tokenUsage.OutputTokens)
-		if tokenUsage.CacheReadTokens > 0 {
-			w.writeLine("  Cache read: %d | Cache creation: %d", tokenUsage.CacheReadTokens, tokenUsage.CacheCreationTokens)
-		}
-	}
 	w.writeLine("")
 	w.writeLine("=== Task %s completed at %s ===", w.taskID, time.Now().Format(time.RFC3339))
 }

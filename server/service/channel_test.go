@@ -244,9 +244,6 @@ func TestProjectServiceRejectsUnconfiguredVideoPolicyOnCreateAndUpdate(t *testin
 			SupportedRatios:      []string{"9:16"},
 			MinDuration:          1,
 			MaxDuration:          15,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
 		},
 	})
 

@@ -16,7 +16,6 @@ import (
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
-	"github.com/anbanai/anban-creator/server/repository"
 )
 
 var ErrExecutionTerminalPersistence = errors.New("execution terminal persistence failed")
@@ -167,6 +166,8 @@ func (s *TaskService) handleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	result, execErr := s.executor.Execute(execCtx, opts)
+	missingResult := result == nil
+	result = normalizeTerminalExecutionResult(result)
 
 	// Post-execution persistence uses a fresh, bounded context that is decoupled
 	// from the asynq execution ctx. If the pipeline overruns the asynq deadline,
@@ -178,11 +179,6 @@ func (s *TaskService) handleExecution(ctx context.Context, task *model.Task, pro
 	// Store result.
 	if err := s.UpdateExecutionResult(persistCtx, taskID, result); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to persist task result")
-	}
-	if s.creditSvc != nil {
-		if err := s.creditSvc.SettleAgentRuntime(persistCtx, task, result); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to settle agent runtime billing")
-		}
 	}
 
 	remoteArtifacts := result != nil && result.RemoteArtifacts
@@ -208,12 +204,34 @@ func (s *TaskService) handleExecution(ctx context.Context, task *model.Task, pro
 	// mark as cancelled rather than attempting retry or marking as failed.
 	// This handles both CancelAllRunning (shutdown) and Cancel (user-initiated).
 	if execCtx.Err() != nil {
-		s.finalizeCancelledExecution(persistCtx, task, execCtx.Err())
+		errMsg := "task cancelled: " + execCtx.Err().Error()
+		s.logger.Info().Str("task_id", taskID).Msg(errMsg)
+		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndError(
+			persistCtx, taskID, model.TaskStatusRunning, model.TaskStatusCancelled, errMsg,
+		)
+		if swapped {
+			if err := s.repo.Tasks().SetCompletedAt(persistCtx, taskID); err != nil {
+				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on cancelled task")
+			}
+			if err := s.repo.Tasks().UpdateBillingTerminalReason(persistCtx, taskID, model.TaskBillingTerminalUserCancelled); err != nil {
+				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to record cancellation billing reason")
+			}
+			// Notify the task owner's WeChat of the cancellation (best-effort).
+			s.notifyTerminal(persistCtx, task, model.TaskStatusCancelled, errMsg)
+			if task.ProjectID != "" && s.pubsub != nil {
+				s.pubsub.ReleaseSlot(persistCtx, task.ProjectID)
+			}
+			if task.ProjectID != "" {
+				if derr := s.DispatchPendingTasks(persistCtx, task.ProjectID); derr != nil {
+					s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after cancellation")
+				}
+			}
+		}
 		return nil
 	}
 
-	if result == nil && execErr == nil {
-		execErr = errors.New("executor returned nil result without error")
+	if missingResult && execErr == nil {
+		execErr = errors.New(result.Error)
 	}
 	if execErr != nil {
 		s.logger.Error().Err(execErr).Str("task_id", taskID).Msg("task execution failed")
@@ -400,40 +418,6 @@ func (s *TaskService) handleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	return nil
-}
-
-func (s *TaskService) finalizeCancelledExecution(ctx context.Context, task *model.Task, cause error) {
-	if task == nil || cause == nil {
-		return
-	}
-	taskID := task.ID
-	errMsg := "task cancelled: " + cause.Error()
-	s.logger.Info().Str("task_id", taskID).Msg(errMsg)
-	swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndError(
-		ctx, taskID, model.TaskStatusRunning, model.TaskStatusCancelled, errMsg,
-	)
-	if !swapped {
-		return
-	}
-	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on cancelled task")
-	}
-	// Re-read the task so refundTaskByMode sees the final status
-	// (goal-mode tasks skip refund; normal tasks full-refund).
-	if current, err := s.repo.Tasks().FindByID(ctx, taskID); err == nil {
-		s.refundTaskByMode(ctx, current, "取消")
-	} else {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to reload task for refund")
-	}
-	s.notifyTerminal(ctx, task, model.TaskStatusCancelled, errMsg)
-	if task.ProjectID != "" && s.pubsub != nil {
-		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
-	}
-	if task.ProjectID != "" {
-		if err := s.DispatchPendingTasks(ctx, task.ProjectID); err != nil {
-			s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after cancellation")
-		}
-	}
 }
 
 func (s *TaskService) validateVideoCompletionArtifacts(ctx context.Context, task *model.Task) (agent.ArtifactValidation, error) {
@@ -676,34 +660,16 @@ func (s *TaskService) preparePendingExecution(ctx context.Context, task *model.T
 	wrapped := fmt.Errorf("resolve reference asset: %w", err)
 	persistCtx, cancel := context.WithTimeout(context.Background(), s.persistTimeout)
 	defer cancel()
-	swapped := false
-	if txErr := s.repo.WithTx(persistCtx, func(txRepo repository.Repository) error {
-		var failErr error
-		swapped, failErr = txRepo.Tasks().FailPendingTask(persistCtx, task.ID, wrapped.Error())
-		if failErr != nil {
-			return fmt.Errorf("fail pending task after reference resolution: %w", failErr)
-		}
-		if !swapped || s.creditSvc == nil || task.GoalMode {
-			return nil
-		}
-		if refundErr := s.creditSvc.refundForTask(persistCtx, txRepo, task.ID, "execution_failed"); refundErr != nil {
-			return fmt.Errorf("refund pending task after reference resolution: %w", refundErr)
-		}
-		return nil
-	}); txErr != nil {
-		return nil, pendingExecutionSkipped, txErr
+	won, failErr := s.failPendingAdmittedTaskTransition(persistCtx, task, model.TaskBillingTerminalPlatformError, wrapped.Error())
+	if failErr != nil {
+		return nil, pendingExecutionSkipped, failErr
 	}
-	if !swapped {
+	if !won {
 		return nil, pendingExecutionSkipped, nil
 	}
 	s.logger.Error().Err(wrapped).Str("task_id", task.ID).Msg("pending task reference asset resolution failed")
 	s.finalizeFailedExecutionPostCommit(persistCtx, task, wrapped.Error())
 	return nil, pendingExecutionTerminalized, nil
-}
-
-func (s *TaskService) finalizeFailedExecutionSideEffects(ctx context.Context, task *model.Task, reason, errorMsg string) {
-	s.refundTaskByMode(ctx, task, reason)
-	s.finalizeFailedExecutionPostCommit(ctx, task, errorMsg)
 }
 
 func (s *TaskService) finalizeFailedExecutionPostCommit(ctx context.Context, task *model.Task, errorMsg string) {
@@ -714,6 +680,34 @@ func (s *TaskService) finalizeFailedExecutionPostCommit(ctx context.Context, tas
 	if task.ProjectID != "" {
 		if err := s.DispatchPendingTasks(ctx, task.ProjectID); err != nil {
 			s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
+		}
+	}
+}
+
+func (s *TaskService) finalizeCancelledExecution(ctx context.Context, task *model.Task, cause error) {
+	if task == nil || cause == nil {
+		return
+	}
+	taskID := task.ID
+	errMsg := "task cancelled: " + cause.Error()
+	s.logger.Info().Str("task_id", taskID).Msg(errMsg)
+	swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndError(ctx, taskID, model.TaskStatusRunning, model.TaskStatusCancelled, errMsg)
+	if !swapped {
+		return
+	}
+	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on cancelled task")
+	}
+	if err := s.repo.Tasks().UpdateBillingTerminalReason(ctx, taskID, model.TaskBillingTerminalUserCancelled); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to record cancellation billing reason")
+	}
+	s.notifyTerminal(ctx, task, model.TaskStatusCancelled, errMsg)
+	if task.ProjectID != "" && s.pubsub != nil {
+		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
+	}
+	if task.ProjectID != "" {
+		if err := s.DispatchPendingTasks(ctx, task.ProjectID); err != nil {
+			s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after cancellation")
 		}
 	}
 }
@@ -749,23 +743,19 @@ func isPermanentAuthError(err error) bool {
 func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Task, execErr error) error {
 	taskID := task.ID
 
-	reason := "execution_failed"
-	if isPermanentAuthError(execErr) {
-		reason = "auth_error"
-	}
-
 	s.logger.Error().
 		Err(execErr).
 		Str("task_id", taskID).
 		Msg("task failed; waiting for manual resume or clone")
-	swapped, err := s.repo.Tasks().FailRunningTask(ctx, taskID, execErr.Error())
+	won, err := s.failRunningTaskWithBilling(ctx, taskID, model.TaskBillingTerminalProviderError, execErr.Error())
 	if err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to finalize task and billing outcome")
 		return errors.Join(execErr, ErrExecutionTerminalPersistence, fmt.Errorf("fail running task: %w", err))
 	}
-	if !swapped {
+	if !won {
 		return execErr
 	}
-	s.finalizeFailedExecutionSideEffects(ctx, task, reason, execErr.Error())
+	s.finalizeFailedExecutionPostCommit(ctx, task, execErr.Error())
 
 	return execErr
 }

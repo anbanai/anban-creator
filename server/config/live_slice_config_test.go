@@ -71,6 +71,17 @@ ilink:
   enabled: true
   base_url: "${ANBAN_TEST_ILINK_URL:-http://localhost:18070}"
 claude:
+  provider: volcengine_ark
+  base_url: https://ark.cn-beijing.volces.com/api/compatible
+  auth_token: test-auth-token
+  models:
+    default: doubao-seed-evolving
+    opus: doubao-seed-evolving
+    fable: doubao-seed-evolving
+    sonnet: doubao-seed-2-1-pro-260628
+    haiku: doubao-seed-2-1-turbo-260628
+  model_usage_aliases:
+    doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: docker
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
@@ -112,7 +123,7 @@ func TestTingWuConfigDoesNotRequireCredentialsWhenUnused(t *testing.T) {
 	cfg := &Config{
 		Database: DatabaseConfig{DSN: "root:pass@tcp(localhost:3306)/test"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   ClaudeConfig{Executor: "docker"},
+		Claude:   validClaudeConfigForTest(),
 	}
 	cfg.applyDefaults()
 
@@ -125,7 +136,7 @@ func TestFunASRConfigDoesNotRequireCredentialsWhenUnused(t *testing.T) {
 	cfg := &Config{
 		Database: DatabaseConfig{DSN: "root:pass@tcp(localhost:3306)/test"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   ClaudeConfig{Executor: "docker"},
+		Claude:   validClaudeConfigForTest(),
 	}
 	cfg.applyDefaults()
 
@@ -138,7 +149,7 @@ func TestFunASRConfigRejectsPartialConfig(t *testing.T) {
 	cfg := &Config{
 		Database: DatabaseConfig{DSN: "root:pass@tcp(localhost:3306)/test"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   ClaudeConfig{Executor: "docker"},
+		Claude:   validClaudeConfigForTest(),
 		FunASR:   FunASRConfig{APIKey: "not-needed"},
 	}
 	cfg.applyDefaults()
@@ -156,7 +167,7 @@ func TestFunASRConfigComplete(t *testing.T) {
 	cfg := &Config{
 		Database: DatabaseConfig{DSN: "root:pass@tcp(localhost:3306)/test"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   ClaudeConfig{Executor: "docker"},
+		Claude:   validClaudeConfigForTest(),
 		FunASR: FunASRConfig{
 			BaseURL: "https://workspace.cn-beijing.maas.aliyuncs.com",
 			APIKey:  "dashscope-key",

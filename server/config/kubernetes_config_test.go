@@ -12,24 +12,24 @@ import (
 )
 
 func baseKubernetesConfigForTest() Config {
+	claude := validClaudeConfigForTest()
+	claude.Executor = "kubernetes"
+	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	claude.Kubernetes = KubernetesConfig{
+		Namespace:            "anbanai-prod",
+		AgentImage:           "registry.example.com/creator-agent@sha256:" + strings.Repeat("a", 64),
+		ServiceAccount:       "creator-agent-runner",
+		NASStorageClass:      "nas-sc-creator",
+		ProjectMemorySize:    "1Gi",
+		TaskWorkspaceSize:    "10Gi",
+		ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
+	}
 	cfg := Config{
 		Server:   ServerConfig{TLSCertFile: "/tls/tls.crt", TLSKeyFile: "/tls/tls.key"},
 		Database: DatabaseConfig{DSN: "dsn"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
 		Asynq:    AsynqConfig{ContentGenerateTimeout: time.Hour},
-		Claude: ClaudeConfig{
-			Executor: "kubernetes",
-			Kubernetes: KubernetesConfig{
-				Namespace:            "anbanai-prod",
-				AgentImage:           "registry.example.com/creator-agent@sha256:" + strings.Repeat("a", 64),
-				ServiceAccount:       "creator-agent-runner",
-				NASStorageClass:      "nas-sc-creator",
-				ProjectMemorySize:    "1Gi",
-				TaskWorkspaceSize:    "10Gi",
-				ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
-			},
-			AgentServerURL: "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443",
-		},
+		Claude:   claude,
 		Storage: StorageConfig{
 			Provider:        "oss",
 			Endpoint:        "oss-cn-hangzhou.aliyuncs.com",
@@ -238,6 +238,17 @@ storage:
   bucket_name: "bucket"
   sts_role_arn: "acs:ram::123:role/upload"
 claude:
+  provider: volcengine_ark
+  base_url: https://ark.cn-beijing.volces.com/api/compatible
+  auth_token: test-auth-token
+  models:
+    default: doubao-seed-evolving
+    opus: doubao-seed-evolving
+    fable: doubao-seed-evolving
+    sonnet: doubao-seed-2-1-pro-260628
+    haiku: doubao-seed-2-1-turbo-260628
+  model_usage_aliases:
+    doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: "kubernetes"
   agent_server_url: "https://creator-api-svc:8443"
   kubernetes:

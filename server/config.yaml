@@ -191,8 +191,6 @@ montage:
   execution_targets: ["cloud"]
   # 系统默认执行目标。cloud 表示进入云端 Agent 队列；local 仅用于开发/桌面调试。
   default_execution_target: "cloud"
-  # Montage 基础任务服务费，单位 credits；同时保持 credits.task_costs.montage 一致。
-  credit_cost: 2000
   # OpenMontage 运行时环境变量。key 由上游工具定义，Anban 不维护固定白名单。
   # 这里只写环境变量引用，不写明文密钥。
   # 这些值只会注入 montage 任务的 Agent/Claude SDK 进程，不会写入 MCP profile、日志或 task files。
@@ -253,146 +251,9 @@ montage:
       subtitles: "burned_in"
       audio_processing: "auto"
 
-model_prices:
-  currency_rates:
-    USD:
-      to_cny: 7.20
-    CNY:
-      to_cny: 1.0
-
-  token_models:
-    moonshot/kimi-k2.7-code:
-      currency: USD
-      unit: 1000000
-      cached_input: 0.19
-      cache_read_input: 0.19
-      cache_creation_input: 0.95
-      input: 0.95
-      output: 4.00
-    moonshot/kimi-k2.7-code-highspeed:
-      currency: USD
-      unit: 1000000
-      cached_input: 0.38
-      cache_read_input: 0.38
-      cache_creation_input: 1.90
-      input: 1.90
-      output: 8.00
-
-  image_generation:
-    volcengine_ark/doubao-seedream-5-0-pro-260628:
-      pricing_type: per_image
-      currency: CNY
-      unit: image
-      price: 0.22
-    wangcai_openai/gpt-image-2:
-      pricing_type: openai_image_usage
-      currency: USD
-      unit: 1000000
-      require_usage: true
-      text_input: 5.00
-      text_cached_input: 1.25
-      image_input: 8.00
-      image_cached_input: 2.00
-      image_output: 30.00
-      estimate_table:
-        "1024x1024":
-          low: 0.006
-          medium: 0.053
-          high: 0.211
-        "1024x1536":
-          low: 0.005
-          medium: 0.041
-          high: 0.165
-        "1536x1024":
-          low: 0.005
-          medium: 0.041
-          high: 0.165
-
-  video_generation:
-    volcengine_ark/doubao-seedance-2-0-260128:
-      currency: CNY
-      no_input_price_per_second:
-        480p: 0.462
-        720p: 0.994
-        1080p: 2.478
-        4k: 5.054
-      video_input_5s_min_price:
-        480p: 2.53
-        720p: 5.44
-        1080p: 13.56
-        4k: 27.99
-      video_input_5s_max_price:
-        480p: 5.62
-        720p: 12.10
-        1080p: 30.13
-        4k: 62.21
-    volcengine_ark/doubao-seedance-2-0-fast-260128:
-      currency: CNY
-      no_input_price_per_second:
-        480p: 0.372
-        720p: 0.800
-      video_input_5s_min_price:
-        480p: 1.99
-        720p: 4.28
-      video_input_5s_max_price:
-        480p: 4.42
-        720p: 9.50
-    volcengine_ark/doubao-seedance-2-0-mini-260615:
-      currency: CNY
-      no_input_price_per_second:
-        480p: 0.232
-        720p: 0.496
-      video_input_5s_min_price:
-        480p: 1.27
-        720p: 2.72
-      video_input_5s_max_price:
-        480p: 2.81
-        720p: 6.05
-
-billing:
-  credits_per_cny: 1600
-  tier_multipliers:
-    free: 1.35
-    pro: 1.20
-    enterprise: 1.05
-  default_user_multiplier: 1.00
-  minimum_charge_credits: 1
-
-recharge_tiers:
-  - key: "basic"
-    label: "基础包"
-    price_cny: 10
-    credits: 10000
-    bonus_credits: 0
-    enabled: true
-  - key: "standard"
-    label: "标准包"
-    price_cny: 50
-    credits: 52000
-    bonus_credits: 2000
-    enabled: true
-  - key: "pro"
-    label: "进阶包"
-    price_cny: 100
-    credits: 110000
-    bonus_credits: 10000
-    enabled: true
-
-credits:
-  daily_sign_in: 100
-  register_bonus: 1000
-  invite_reward: 1000
-  task_costs:
-    article: 4000
-    seednote: 3600
-    ecommerce: 3000
-    videocreator: 2000
-    videoeditor: 2000
-    # Montage 手动任务/计划触发时扣除的基础服务费。
-    # 如果调整 montage.credit_cost，这里也要同步调整，避免 Studio 展示和服务扣费不一致。
-    montage: 2000
-    viral_analysis: 1200
-  admin_api_key: "${ANBAN_CREDITS_ADMIN_API_KEY}"
+billing_runtime:
+  config_dir: "./billing"
+  admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"
 
 image_presets:
   - key: "volcengine-standard"
@@ -405,6 +266,19 @@ image_presets:
     min_tier: "pro"
 
 claude:
+  # Claude Code 直连火山方舟。provider 身份与五个角色模型是成本归集的唯一 canonical 来源。
+  provider: "volcengine_ark"
+  base_url: "https://ark.cn-beijing.volces.com/api/compatible"
+  auth_token: "${CLAUDE_CODE_AUTH_TOKEN}"
+  models:
+    default: "doubao-seed-evolving"
+    opus: "doubao-seed-evolving"
+    fable: "doubao-seed-evolving"
+    sonnet: "doubao-seed-2-1-pro-260628"
+    haiku: "doubao-seed-2-1-turbo-260628"
+  # 只登记供应商实际返回且已验证的精确别名；未知名称不会被猜测。
+  model_usage_aliases:
+    doubao-seed-evolving-latest-version: "doubao-seed-evolving"
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # Agent 执行器类型：local 用于开发；docker 用于单机容器；kubernetes 用于生产队列。
@@ -496,19 +370,11 @@ claude:
     montage: 90
   # Agent 执行日志目录。生产建议挂载持久卷，便于失败诊断和审计。
   task_log_dir: "./data/logs/tasks"
-  # Claude 运行时环境的唯一配置源。Kubernetes Job 启动后经认证 Bootstrap
-  # 临时获取 allowlist 内的值，仅注入 Claude 子进程，不写入 JobSpec/PVC/OSS。
+  # 仅允许非 provider 的 Claude Code 运行控制。Provider URL、token 和模型不得放在 env。
   env:
-    # Claude Code/兼容模型认证 token。必须通过环境变量注入，禁止写明文密钥。
-    ANTHROPIC_AUTH_TOKEN: "${CLAUDE_CODE_AUTH_TOKEN}"
-    # Claude Code 兼容 API base URL。
-    ANTHROPIC_BASE_URL: "https://ark.cn-beijing.volces.com/api/compatible"
-    # Agent 默认模型。
-    ANTHROPIC_MODEL: "doubao-seed-evolving"
-    # 关闭非必要遥测流量，生产建议保持 1。
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-    # 允许 Claude Code 使用项目记忆；如需完全无状态执行可改为 1。
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1000000"
 
 email:
   smtp_host: "smtp.163.com"

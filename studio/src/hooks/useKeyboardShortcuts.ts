@@ -16,7 +16,7 @@ export function useKeyboardShortcuts(onShowHelp?: () => void) {
     "g p": () => navigate("/plans"),
     "g t": () => navigate("/tasks"),
     "g l": () => navigate("/timeline"),
-    "g $": () => navigate("/credits"),
+    "g $": () => navigate("/billing"),
     "g s": () => navigate("/settings"),
     "?": () => onShowHelp?.(),
   };

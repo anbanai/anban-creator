@@ -1,7 +1,7 @@
 import { apiKeysApi } from './api-keys'
 import { authApi } from './auth'
 import { projectsApi } from './projects'
-import { creditsApi } from './credits'
+import { billingApi } from './billing'
 import { designerApi } from './designer'
 import { imageModelsApi } from './image-models'
 import { modelConfigApi } from './model-config'
@@ -21,7 +21,7 @@ export const api = {
   apiKeys: apiKeysApi,
   auth: authApi,
   projects: projectsApi,
-  credits: creditsApi,
+  billing: billingApi,
   designer: designerApi,
   imageModels: imageModelsApi,
   modelConfig: modelConfigApi,

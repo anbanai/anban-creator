@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,6 +13,93 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
+
+type localCompletionRace struct {
+	initialReads    atomic.Int32
+	finalizeCalls   atomic.Int32
+	readsReady      chan struct{}
+	secondFinalize  chan struct{}
+	winnerCommitted chan struct{}
+	winnerModel     string
+}
+
+type localCompletionRaceRepository struct {
+	repository.Repository
+	tasks *localCompletionRaceTaskRepository
+}
+
+func (r *localCompletionRaceRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		wrapped := &localCompletionRaceRepository{Repository: tx}
+		wrapped.tasks = &localCompletionRaceTaskRepository{TaskRepository: tx.Tasks(), race: r.tasks.race}
+		return fn(wrapped)
+	})
+}
+
+func newLocalCompletionRaceRepository(base repository.Repository) *localCompletionRaceRepository {
+	race := &localCompletionRace{
+		readsReady:      make(chan struct{}),
+		secondFinalize:  make(chan struct{}),
+		winnerCommitted: make(chan struct{}),
+	}
+	wrapped := &localCompletionRaceRepository{Repository: base}
+	wrapped.tasks = &localCompletionRaceTaskRepository{TaskRepository: base.Tasks(), race: race}
+	return wrapped
+}
+
+func (r *localCompletionRaceTaskRepository) FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	return r.finalizeLocalTask(ctx, false, id, executionID, status, errorMsg, result, usage, costStatus)
+}
+
+func (r *localCompletionRaceTaskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	return r.finalizeLocalTask(ctx, true, id, executionID, status, errorMsg, result, usage, costStatus)
+}
+
+func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Context, inTx bool, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	finalize := r.TaskRepository.FinalizeLocalTask
+	if inTx {
+		finalize = r.TaskRepository.FinalizeLocalTaskInTx
+	}
+	switch r.race.finalizeCalls.Add(1) {
+	case 1:
+		if len(usage) > 0 {
+			r.race.winnerModel = usage[0].Model
+		}
+		<-r.race.secondFinalize
+		won, err := finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+		if won {
+			close(r.race.winnerCommitted)
+		}
+		return won, err
+	case 2:
+		close(r.race.secondFinalize)
+		<-r.race.winnerCommitted
+		return false, nil
+	}
+	return finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+}
+
+func (r *localCompletionRaceRepository) Tasks() repository.TaskRepository { return r.tasks }
+
+type localCompletionRaceTaskRepository struct {
+	repository.TaskRepository
+	race *localCompletionRace
+}
+
+func (r *localCompletionRaceTaskRepository) FindByID(ctx context.Context, id string) (*model.Task, error) {
+	task, err := r.TaskRepository.FindByID(ctx, id)
+	if err != nil || task.Status != model.TaskStatusRunning || task.ExecutionTarget != model.ExecutionTargetLocalClaimed {
+		return task, err
+	}
+	n := r.race.initialReads.Add(1)
+	if n == 2 {
+		close(r.race.readsReady)
+	}
+	if n <= 2 {
+		<-r.race.readsReady
+	}
+	return task, nil
+}
 
 // newLocalSeedTask creates and persists a pending local-target task owned by
 // userID with the given claim deadline. Mirrors the shape CreateManual produces
@@ -485,6 +574,39 @@ func TestCompleteLocalTask_Failure(t *testing.T) {
 	}
 }
 
+func TestCompleteLocalTaskNilResultPersistsTerminalCostEvidence(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+
+	if err := svc.CompleteLocalTask(ctx, taskID, nil); err != nil {
+		t.Fatalf("CompleteLocalTask: %v", err)
+	}
+
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.Status != model.TaskStatusFailed || got.Result == nil {
+		t.Fatalf("local nil result = status %q result %v, want failed persisted result", got.Status, got.Result)
+	}
+	var persisted agent.ExecutionResult
+	if err := json.Unmarshal([]byte(*got.Result), &persisted); err != nil {
+		t.Fatalf("decode persisted result: %v", err)
+	}
+	if persisted.Success || persisted.Error != "agent returned no execution result" {
+		t.Fatalf("persisted nil result = %+v, want stable terminal failure", persisted)
+	}
+	if persisted.CostStatus != "" || got.CostStatus != agent.CostStatusUnreconciled {
+		t.Fatalf("cost status = public result %q internal task %q", persisted.CostStatus, got.CostStatus)
+	}
+	if len(persisted.ModelUsage) != 0 || len(got.TerminalModelUsage.Data()) != 0 {
+		t.Fatalf("nil terminal fabricated usage: result=%+v task=%+v", persisted.ModelUsage, got.TerminalModelUsage.Data())
+	}
+}
+
 // TestCompleteLocalTask_GuardedToNonLocal confirms a cloud (or already-terminal)
 // task is a no-op — so the shared agent binary calling /complete in cloud mode
 // cannot double-finalize. This is the safety property that lets one endpoint
@@ -543,5 +665,89 @@ func TestCompleteLocalTask_Idempotent(t *testing.T) {
 	}
 	if got.Status != model.TaskStatusCompleted {
 		t.Fatalf("status = %q, want completed (idempotent)", got.Status)
+	}
+}
+
+func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testing.T) {
+	for _, success := range []bool{true, false} {
+		name := "failure"
+		if success {
+			name = "success"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, baseRepo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, baseRepo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, baseRepo, userID, projectID)
+			if success {
+				addLocalSeednoteDeliverables(t, baseRepo, taskID)
+			}
+
+			raceRepo := newLocalCompletionRaceRepository(baseRepo)
+			svc.repo = raceRepo
+			results := []*agent.ExecutionResult{
+				{
+					Success: success, Error: "first-error", LogText: "first-result",
+					ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "first", InputTokens: 11}},
+					CostStatus: agent.CostStatusReconciled,
+				},
+				{
+					Success: success, Error: "second-error", LogText: "second-result",
+					ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "second", InputTokens: 22}},
+					CostStatus: agent.CostStatusReconciled,
+				},
+			}
+
+			errCh := make(chan error, len(results))
+			for _, result := range results {
+				result := result
+				go func() { errCh <- svc.CompleteLocalTask(ctx, taskID, result) }()
+			}
+			for range results {
+				if err := <-errCh; err != nil {
+					t.Fatalf("concurrent CompleteLocalTask: %v", err)
+				}
+			}
+
+			got, err := baseRepo.Tasks().FindByID(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantStatus := model.TaskStatusFailed
+			if success {
+				wantStatus = model.TaskStatusCompleted
+			}
+			if got.Status != wantStatus || got.CompletedAt == nil || got.Result == nil {
+				t.Fatalf("terminal task = status %q completed_at %v result %v, want %q with atomic evidence", got.Status, got.CompletedAt, got.Result, wantStatus)
+			}
+			var persisted agent.ExecutionResult
+			if err := json.Unmarshal([]byte(*got.Result), &persisted); err != nil {
+				t.Fatal(err)
+			}
+			usage := got.TerminalModelUsage.Data()
+			if len(persisted.ModelUsage) != 0 || len(usage) != 1 || usage[0].Model != raceRepo.tasks.race.winnerModel {
+				t.Fatalf("terminal evidence/public result mismatch: winner=%q result=%+v typed=%+v", raceRepo.tasks.race.winnerModel, persisted.ModelUsage, usage)
+			}
+			if !success && got.ErrorMessage != persisted.Error {
+				t.Fatalf("failure error/result split across requests: task error=%q result error=%q", got.ErrorMessage, persisted.Error)
+			}
+
+			late := &agent.ExecutionResult{
+				Success: !success, Error: "late-overwrite",
+				ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "late", InputTokens: 99}},
+				CostStatus: agent.CostStatusUnreconciled,
+			}
+			if err := svc.CompleteLocalTask(ctx, taskID, late); err != nil {
+				t.Fatalf("idempotent retry: %v", err)
+			}
+			retried, err := baseRepo.Tasks().FindByID(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if retried.Result == nil || *retried.Result != *got.Result || retried.CostStatus != got.CostStatus {
+				t.Fatal("idempotent retry overwrote terminal evidence")
+			}
+		})
 	}
 }

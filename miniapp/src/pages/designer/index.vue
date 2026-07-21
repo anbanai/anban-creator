@@ -199,7 +199,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import type { DesignerProvider, GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types'
 import { getModelCapabilities } from '@/types/designer'
 import { designerApi } from '@/api/designer'
-import { creditsApi } from '@/api/credits'
+import { billingApi } from '@/api/billing'
 import { TOKEN_KEY } from '@/utils/constants'
 import AbBadge from '@/components/common/AbBadge.vue'
 import AbButton from '@/components/common/AbButton.vue'
@@ -545,7 +545,7 @@ async function loadHistory() {
 
 async function loadCredits() {
   try {
-    const res = await creditsApi.balance()
+    const res = await billingApi.wallet()
     creditsBalance.value = res.balance
   } catch {
     creditsBalance.value = 0

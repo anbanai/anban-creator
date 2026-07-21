@@ -17,6 +17,17 @@ type ProgressPayload struct {
 	Percent     int    `json:"percent,omitempty"`
 }
 
+// ModelTokenUsage is terminal per-model token evidence retained for provider
+// cost reconciliation. It never represents a user-wallet charge.
+type ModelTokenUsage struct {
+	Provider                 string `json:"provider"`
+	Model                    string `json:"model"`
+	InputTokens              int64  `json:"input_tokens"`
+	OutputTokens             int64  `json:"output_tokens"`
+	CacheReadInputTokens     int64  `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64  `json:"cache_creation_input_tokens"`
+}
+
 // EcommerceConfig carries the per-task inputs for an e-commerce image-generation
 // package (project platform = "ecommerce"): which deliverable modules the buyer
 // selected and in what quantity, the uploaded product photos, target platform,
@@ -119,32 +130,35 @@ type Task struct {
 	// tasks (selected deliverable modules, product photos, target platform, selling
 	// points, language, provider-strategy override). Zero value for non-ecommerce
 	// tasks. Read by the agent via get_project_profile(task_id, scope="ecommerce").
-	Ecommerce               datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
-	InputAttachments        datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
-	VideoInput              datatypes.JSONType[VideoInput]        `gorm:"type:json" json:"video_input"`
-	MontageInput            datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
-	VideoConfig             datatypes.JSONType[VideoTaskConfig]   `gorm:"type:json" json:"video_config"`
-	VideoGenerationID       string                                `gorm:"type:varchar(100);default:''" json:"video_generation_id,omitempty"`
-	VideoEstimatedCredits   int                                   `gorm:"default:0" json:"video_estimated_credits,omitempty"`
-	VideoCreditsCharged     int                                   `gorm:"default:0" json:"video_credits_charged,omitempty"`
-	ProgressLog             string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
-	Progress                int                                   `gorm:"default:0" json:"progress,omitempty"`
-	LatestProgress          datatypes.JSONType[ProgressPayload]   `gorm:"type:json" json:"latest_progress"`
-	Result                  *string                               `gorm:"type:json" json:"result,omitempty"`
-	InputTokens             *int64                                `json:"input_tokens,omitempty"`
-	OutputTokens            *int64                                `json:"output_tokens,omitempty"`
-	CacheReadTokens         *int64                                `json:"cache_read_tokens,omitempty"`
-	CacheCreationTokens     *int64                                `json:"cache_creation_tokens,omitempty"`
-	TotalCostUSD            *float64                              `json:"total_cost_usd,omitempty"`
-	BillingStatus           string                                `gorm:"type:varchar(32);default:settled" json:"billing_status,omitempty"`
-	BillingShortfallCredits int                                   `gorm:"default:0" json:"billing_shortfall_credits,omitempty"`
-	ErrorMessage            string                                `gorm:"type:text" json:"error_message,omitempty"`
-	StartedAt               *time.Time                            `gorm:"index" json:"started_at"`
-	CompletedAt             *time.Time                            `gorm:"index" json:"completed_at"`
-	LastHeartbeatAt         *time.Time                            `gorm:"index" json:"last_heartbeat_at,omitempty"`
-	RetryCount              int                                   `gorm:"default:0" json:"retry_count"`
-	MaxRetries              int                                   `gorm:"default:3" json:"max_retries"`
-	RateLimitRetryCount     int                                   `gorm:"default:0" json:"rate_limit_retry_count"`
+	Ecommerce             datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
+	InputAttachments      datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
+	VideoInput            datatypes.JSONType[VideoInput]        `gorm:"type:json" json:"video_input"`
+	MontageInput          datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
+	VideoConfig           datatypes.JSONType[VideoTaskConfig]   `gorm:"type:json" json:"video_config"`
+	VideoGenerationID     string                                `gorm:"type:varchar(100);default:''" json:"video_generation_id,omitempty"`
+	ProgressLog           string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
+	Progress              int                                   `gorm:"default:0" json:"progress,omitempty"`
+	LatestProgress        datatypes.JSONType[ProgressPayload]   `gorm:"type:json" json:"latest_progress"`
+	Result                *string                               `gorm:"type:json" json:"result,omitempty"`
+	TerminalModelUsage    datatypes.JSONType[[]ModelTokenUsage] `gorm:"type:json" json:"-"`
+	CostStatus            string                                `gorm:"type:varchar(20);default:'';index" json:"-"`
+	BillingQuoteID        string                                `gorm:"type:char(36);index" json:"billing_quote_id,omitempty"`
+	BillingCatalogID      string                                `gorm:"type:varchar(128);index" json:"billing_catalog_id,omitempty"`
+	BillingSKUID          string                                `gorm:"type:varchar(128);index" json:"billing_sku_id,omitempty"`
+	BillingChargeID       *string                               `gorm:"type:char(36);uniqueIndex" json:"billing_charge_id,omitempty"`
+	BillingPriceCredits   int64                                 `gorm:"not null;default:0" json:"billing_price_credits"`
+	BillingTerminalReason string                                `gorm:"type:varchar(64);index" json:"billing_terminal_reason,omitempty"`
+	InputTokens           *int64                                `json:"-"`
+	OutputTokens          *int64                                `json:"-"`
+	CacheReadTokens       *int64                                `json:"-"`
+	CacheCreationTokens   *int64                                `json:"-"`
+	ErrorMessage          string                                `gorm:"type:text" json:"error_message,omitempty"`
+	StartedAt             *time.Time                            `gorm:"index" json:"started_at"`
+	CompletedAt           *time.Time                            `gorm:"index" json:"completed_at"`
+	LastHeartbeatAt       *time.Time                            `gorm:"index" json:"last_heartbeat_at,omitempty"`
+	RetryCount            int                                   `gorm:"default:0" json:"retry_count"`
+	MaxRetries            int                                   `gorm:"default:3" json:"max_retries"`
+	RateLimitRetryCount   int                                   `gorm:"default:0" json:"rate_limit_retry_count"`
 
 	// Goal mode: when GoalMode is true, Goal is prepended to the user prompt as
 	// a /goal slash command so Claude Code's built-in goal loop drives
@@ -187,6 +201,15 @@ type Task struct {
 	UpdatedAt time.Time `gorm:"index" json:"updated_at"`
 	Plan      *Plan     `gorm:"foreignKey:PlanID;references:ID" json:"plan,omitempty"`
 }
+
+const (
+	TaskBillingTerminalCompleted               = "completed"
+	TaskBillingTerminalUserCancelled           = "user_cancelled"
+	TaskBillingTerminalPlatformError           = "platform_error"
+	TaskBillingTerminalProviderError           = "provider_error"
+	TaskBillingTerminalExecutionTimeout        = "execution_timeout"
+	TaskBillingTerminalInfrastructureCancelled = "infrastructure_cancelled"
+)
 
 // ExecutionTarget values selecting where a task runs.
 const (

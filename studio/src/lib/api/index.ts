@@ -3,7 +3,7 @@ import { plansApi } from './plans'
 import { tasksApi } from './tasks'
 import { timelineApi } from './timeline'
 import { projectsApi } from './projects'
-import { creditsApi } from './credits'
+import { billingApi } from './billing'
 import { apiKeysApi } from './api-keys'
 import { usageApi } from './usage'
 import { feedbackApi } from './feedback'
@@ -27,7 +27,7 @@ export const api = {
   tasks: tasksApi,
   timeline: timelineApi,
   projects: projectsApi,
-  credits: creditsApi,
+  billing: billingApi,
   apiKeys: apiKeysApi,
   usage: usageApi,
   feedback: feedbackApi,

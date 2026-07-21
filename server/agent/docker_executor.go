@@ -43,6 +43,7 @@ type DockerExecutor struct {
 	serverURL         string
 	dockerCLI         *client.Client
 	defaultModel      string
+	modelUsageAliases map[string]ModelUsageIdentity
 	keyProvider       UserKeyProvider
 	maxTurnsOverrides map[string]int
 	store             storage.Provider
@@ -57,11 +58,15 @@ func NewDockerExecutor(
 	dockerCfg srvconfig.DockerConfig,
 	serverURL string,
 	defaultModel string,
+	modelUsageAliases map[string]ModelUsageIdentity,
 	keyProvider UserKeyProvider,
 	maxTurnsOverrides map[string]int,
 	store storage.Provider,
 	memoryMgr *projectmemory.ProjectMemoryManager,
 ) (*DockerExecutor, error) {
+	if err := ValidateModelUsageAliases(modelUsageAliases); err != nil {
+		return nil, fmt.Errorf("invalid model usage aliases: %w", err)
+	}
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
 	if os.Getenv("DOCKER_HOST") == "" {
 		if host := detectDockerHost(); host != "" {
@@ -85,6 +90,7 @@ func NewDockerExecutor(
 		serverURL:         serverURL,
 		dockerCLI:         cli,
 		defaultModel:      defaultModel,
+		modelUsageAliases: cloneModelUsageAliases(modelUsageAliases),
 		keyProvider:       keyProvider,
 		maxTurnsOverrides: maxTurnsOverrides,
 		store:             store,
@@ -252,7 +258,10 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	if opts.AutoMemoryDirectory != "" {
 		opts.AutoMemoryDirectory = containerMemoryDir(workDir, workDirInContainer, opts.AutoMemoryDirectory)
 	}
-	cmd = e.buildAgentCommand(opts, agentModel, maxTurns, workDirInContainer, apiKey)
+	cmd, err = e.buildAgentCommand(opts, agentModel, maxTurns, workDirInContainer, apiKey)
+	if err != nil {
+		return nil, err
+	}
 	env := e.buildAgentEnv(opts, dockerRuntimeHome(workDirInContainer))
 
 	var execRes execResult
@@ -282,7 +291,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		}
 		if opts.LogWriter != nil {
 			opts.LogWriter.WriteError(result.Error)
-			opts.LogWriter.WriteResult(false, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
+			opts.LogWriter.WriteResult(false, result.DurationMs, result.NumTurns)
 		}
 		return result, nil
 	}
@@ -296,7 +305,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	result.Model = agentModel
 
 	if opts.LogWriter != nil {
-		opts.LogWriter.WriteResult(result.Success, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
+		opts.LogWriter.WriteResult(result.Success, result.DurationMs, result.NumTurns)
 	}
 
 	return result, nil
@@ -323,7 +332,7 @@ func (e *DockerExecutor) resolveAgentAPIKey(ctx context.Context, opts *Execution
 	return rawKey, nil
 }
 
-func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel string, maxTurns int, workspace, apiKey string) []string {
+func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel string, maxTurns int, workspace, apiKey string) ([]string, error) {
 	cmd := []string{
 		AgentBinaryName,
 		"run",
@@ -363,7 +372,14 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 	if agentModel != "" {
 		cmd = append(cmd, "--model", agentModel)
 	}
-	return cmd
+	aliases, err := FormatModelUsageAliases(e.modelUsageAliases)
+	if err != nil {
+		return nil, fmt.Errorf("build model usage alias arguments: %w", err)
+	}
+	for _, alias := range aliases {
+		cmd = append(cmd, "--model-usage-alias", alias)
+	}
+	return cmd, nil
 }
 
 func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions, runtimeHome string) []string {

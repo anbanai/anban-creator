@@ -12,7 +12,7 @@ import (
 func TestResolveVideoGenerationPlanRequiresProjectProfile(t *testing.T) {
 	_, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
 		Prompt: "生成一条产品种草视频",
-	}, model.VideoDefaults{}, model.VideoModelPolicy{}, DefaultVideoModelCatalog(), 1000)
+	}, model.VideoDefaults{}, model.VideoModelPolicy{}, DefaultVideoModelCatalog())
 	if err == nil {
 		t.Fatal("expected missing project videocreator profile to fail")
 	}
@@ -31,7 +31,7 @@ func TestVideoGenerationConfigErrorPreservesMessageAndSentinel(t *testing.T) {
 	}
 }
 
-func TestResolveVideoGenerationPlanAppliesProjectDefaultsAndDynamicCredits(t *testing.T) {
+func TestResolveVideoGenerationPlanAppliesProjectDefaultsWithoutRetailPricing(t *testing.T) {
 	watermark := false
 	plan, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
 		Prompt: "生成一条咖啡杯种草视频",
@@ -48,18 +48,12 @@ func TestResolveVideoGenerationPlanAppliesProjectDefaultsAndDynamicCredits(t *te
 		DefaultModel:  "seedance-2.0-mini",
 		MaxResolution: "720p",
 		MaxDuration:   15,
-	}, DefaultVideoModelCatalog(), 1000)
+	}, DefaultVideoModelCatalog())
 	if err != nil {
 		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
 	}
 	if plan.Model != "doubao-seedance-2-0-mini-260615" {
 		t.Fatalf("resolved model = %q", plan.Model)
-	}
-	if plan.EstimatedCredits != 2480 {
-		t.Fatalf("credits = %d, want 2480", plan.EstimatedCredits)
-	}
-	if plan.PricingBreakdown == nil || plan.PricingBreakdown.CNY != 2.48 || plan.PricingBreakdown.CreditMultiplier != 1000 {
-		t.Fatalf("pricing = %#v", plan.PricingBreakdown)
 	}
 	if !plan.Preflight {
 		t.Fatal("preflight default should be preserved")
@@ -81,56 +75,12 @@ func TestResolveVideoGenerationPlanAppliesProjectDefaultsAndDynamicCredits(t *te
 		DefaultModel:  "seedance-2.0-mini",
 		MaxResolution: "720p",
 		MaxDuration:   15,
-	}, DefaultVideoModelCatalog(), 1000)
+	}, DefaultVideoModelCatalog())
 	if err != nil {
 		t.Fatalf("ResolveVideoGenerationPlan override: %v", err)
 	}
 	if overridden.Preflight {
 		t.Fatal("preflight override should be preserved")
-	}
-}
-
-func TestResolveVideoGenerationPlanWithBillingAppliesTierAndUserMultipliers(t *testing.T) {
-	watermark := false
-	billing := VideoBillingOptions{
-		CreditsPerCNY:    1600,
-		TierMultiplier:   1.35,
-		UserMultiplier:   0.5,
-		CreditMultiplier: 1000,
-	}
-	plan, err := ResolveVideoGenerationPlanWithBilling(VideoGenerationRequest{
-		Prompt: "生成一条咖啡杯种草视频",
-	}, model.VideoDefaults{
-		Purpose:    VideoPurposePlanting,
-		ModelKey:   "seedance-2.0-mini",
-		Resolution: "720p",
-		Ratio:      "16:9",
-		Duration:   5,
-		Watermark:  &watermark,
-		Preflight:  true,
-	}, model.VideoModelPolicy{
-		AllowedModels: []string{"seedance-2.0-mini"},
-		DefaultModel:  "seedance-2.0-mini",
-		MaxResolution: "720p",
-		MaxDuration:   15,
-	}, DefaultVideoModelCatalog(), billing)
-	if err != nil {
-		t.Fatalf("ResolveVideoGenerationPlanWithBilling: %v", err)
-	}
-	if plan.EstimatedCredits != 2679 {
-		t.Fatalf("credits = %d, want 2679", plan.EstimatedCredits)
-	}
-	if plan.PricingBreakdown == nil {
-		t.Fatal("pricing breakdown missing")
-	}
-	if got := plan.PricingBreakdown.CreditsPerCNY; got != 1600 {
-		t.Fatalf("credits_per_cny = %d, want 1600", got)
-	}
-	if got := plan.PricingBreakdown.TierMultiplier; got != 1.35 {
-		t.Fatalf("tier_multiplier = %v, want 1.35", got)
-	}
-	if got := plan.PricingBreakdown.UserMultiplier; got != 0.5 {
-		t.Fatalf("user_multiplier = %v, want 0.5", got)
 	}
 }
 
@@ -148,7 +98,7 @@ func TestResolveVideoGenerationPlanDefaultsCreativeTypePurposePair(t *testing.T)
 		DefaultModel:  "seedance-2.0-mini",
 		MaxResolution: "720p",
 		MaxDuration:   15,
-	}, DefaultVideoModelCatalog(), 1000)
+	}, DefaultVideoModelCatalog())
 	if err != nil {
 		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
 	}
@@ -176,7 +126,7 @@ func TestResolveVideoGenerationPlanAppliesPlaybookRouting(t *testing.T) {
 		DefaultModel:  "seedance-2.0-mini",
 		MaxResolution: "720p",
 		MaxDuration:   15,
-	}, DefaultVideoModelCatalog(), 1000)
+	}, DefaultVideoModelCatalog())
 	if err != nil {
 		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
 	}
@@ -203,7 +153,7 @@ func TestResolveVideoGenerationPlanValidatesProductionControls(t *testing.T) {
 	_, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
 		Prompt:         "生成一条产品视频",
 		ProductionMode: "magic_mode",
-	}, defaults, policy, DefaultVideoModelCatalog(), 1000)
+	}, defaults, policy, DefaultVideoModelCatalog())
 	if err == nil || !strings.Contains(err.Error(), "production_mode must be one of") {
 		t.Fatalf("invalid production mode error = %v", err)
 	}
@@ -211,7 +161,7 @@ func TestResolveVideoGenerationPlanValidatesProductionControls(t *testing.T) {
 	_, err = ResolveVideoGenerationPlan(VideoGenerationRequest{
 		Prompt:       "生成一条产品视频",
 		RetakeBudget: 21,
-	}, defaults, policy, DefaultVideoModelCatalog(), 1000)
+	}, defaults, policy, DefaultVideoModelCatalog())
 	if err == nil || !strings.Contains(err.Error(), "retake_budget must be between 0 and 20") {
 		t.Fatalf("invalid retake budget error = %v", err)
 	}
@@ -231,7 +181,7 @@ func TestResolveVideoGenerationPlanSplitsTargetDurationByModelLimit(t *testing.T
 		DefaultModel:  "seedance-2.0-mini",
 		MaxResolution: "720p",
 		MaxDuration:   120,
-	}, DefaultVideoModelCatalog(), 1000)
+	}, DefaultVideoModelCatalog())
 	if err != nil {
 		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
 	}
@@ -254,15 +204,6 @@ func TestResolveVideoGenerationPlanSplitsTargetDurationByModelLimit(t *testing.T
 		if seg.Duration > 15 {
 			t.Fatalf("segment %d exceeds model limit: %d", i, seg.Duration)
 		}
-		if seg.EstimatedCredits != 7440 {
-			t.Fatalf("segment %d credits = %d, want 7440", i, seg.EstimatedCredits)
-		}
-	}
-	if plan.EstimatedCredits != 29760 {
-		t.Fatalf("total credits = %d, want 29760", plan.EstimatedCredits)
-	}
-	if plan.PricingBreakdown == nil || plan.PricingBreakdown.OutputSeconds != 60 {
-		t.Fatalf("pricing output seconds = %#v, want 60", plan.PricingBreakdown)
 	}
 }
 
@@ -285,7 +226,7 @@ func TestResolveVideoGenerationPlanUsesReferenceVideoDurationWhenUserDurationMis
 		DefaultModel:  "seedance-2.0-mini",
 		MaxResolution: "720p",
 		MaxDuration:   120,
-	}, DefaultVideoModelCatalog(), 1000)
+	}, DefaultVideoModelCatalog())
 	if err != nil {
 		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
 	}
@@ -314,7 +255,7 @@ func TestResolveVideoGenerationPlanRequiresAIPlannedDurationReason(t *testing.T)
 		DefaultModel:  "seedance-2.0-mini",
 		MaxResolution: "720p",
 		MaxDuration:   120,
-	}, DefaultVideoModelCatalog(), 1000)
+	}, DefaultVideoModelCatalog())
 	if err == nil || !strings.Contains(err.Error(), "target_duration_reason is required") {
 		t.Fatalf("ResolveVideoGenerationPlan error = %v, want reason requirement", err)
 	}
@@ -340,7 +281,7 @@ func TestResolveVideoGenerationPlanRebalancesShortRemainder(t *testing.T) {
 		DefaultModel:  "seedance-2.0-mini",
 		MaxResolution: "720p",
 		MaxDuration:   120,
-	}, catalog, 1000)
+	}, catalog)
 	if err != nil {
 		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
 	}
@@ -385,7 +326,7 @@ func TestResolveVideoGenerationPlanRejectsUnsupportedModelResolution(t *testing.
 		DefaultModel:  "seedance-2.0-mini",
 		MaxResolution: "1080p",
 		MaxDuration:   15,
-	}, DefaultVideoModelCatalog(), 1000)
+	}, DefaultVideoModelCatalog())
 	if err == nil {
 		t.Fatal("expected unsupported resolution to fail")
 	}
@@ -414,20 +355,17 @@ func TestResolveVideoGenerationPlanAutoDowngradesResolutionWhenPolicyAllows(t *t
 		AllowAutoDowngrade: true,
 		MaxResolution:      "1080p",
 		MaxDuration:        15,
-	}, DefaultVideoModelCatalog(), 1000)
+	}, DefaultVideoModelCatalog())
 	if err != nil {
 		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
 	}
-	if plan.Resolution != "720p" || plan.EstimatedCredits != 2480 {
-		t.Fatalf("auto downgraded plan = %#v, want 720p and 2480 credits", plan)
+	if plan.Resolution != "720p" {
+		t.Fatalf("auto downgraded plan = %#v, want 720p", plan)
 	}
 }
 
-func TestVideoAPIConfigUsesCatalogAndMultiplierNotBusinessDefaults(t *testing.T) {
+func TestVideoAPIConfigUsesCatalogNotBusinessDefaults(t *testing.T) {
 	cfg := config.VideoAPIConfig{}
-	if cfg.CreditMultiplierOrDefault() != 1000 {
-		t.Fatalf("default multiplier = %d, want 1000", cfg.CreditMultiplierOrDefault())
-	}
 	if len(VideoModelCatalogFromConfig(cfg.ModelCatalog)) != 0 {
 		t.Fatalf("empty video model config must not expose default models")
 	}
@@ -440,7 +378,7 @@ func TestVideoModelCatalogFromConfigEmptyConfigExposesNoModels(t *testing.T) {
 	}
 }
 
-func TestVideoModelCatalogFromConfigMergesConfiguredModelIDWithDefaultPricing(t *testing.T) {
+func TestVideoModelCatalogFromConfigMergesConfiguredModelIDWithDefaultCapabilities(t *testing.T) {
 	catalog := VideoModelCatalogFromConfig([]config.VideoModelCatalogEntry{{
 		Key:     "seedance-2.0-mini",
 		ModelID: "custom-mini-model",
@@ -449,8 +387,8 @@ func TestVideoModelCatalogFromConfigMergesConfiguredModelIDWithDefaultPricing(t 
 	if spec.ModelID != "custom-mini-model" {
 		t.Fatalf("model id = %q", spec.ModelID)
 	}
-	if !spec.SupportsVideoInput || len(spec.NoInputPricePerSecond) == 0 || spec.NoInputPricePerSecond["720p"] == 0 {
-		t.Fatalf("default capabilities/pricing were not preserved: %#v", spec)
+	if !spec.SupportsVideoInput || len(spec.SupportedResolutions) == 0 {
+		t.Fatalf("default capabilities were not preserved: %#v", spec)
 	}
 }
 
@@ -463,9 +401,6 @@ func TestVideoModelCatalogFromConfigOnlyExposesConfiguredModelsWhenProvided(t *t
 		SupportedRatios:      []string{"9:16"},
 		MinDuration:          1,
 		MaxDuration:          15,
-		NoInputPricePerSecond: map[string]float64{
-			"720p": 1,
-		},
 	}})
 
 	if _, ok := catalog["configured-video"]; !ok {
@@ -498,11 +433,8 @@ func TestResolveVideoGenerationPlanRejectsAllowedModelMissingFromCatalog(t *test
 			SupportedRatios:      []string{"9:16"},
 			MinDuration:          1,
 			MaxDuration:          15,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
 		},
-	}, 1000)
+	})
 	if err == nil || !strings.Contains(err.Error(), "video model missing-model is not configured") {
 		t.Fatalf("ResolveVideoGenerationPlan error = %v, want not configured", err)
 	}

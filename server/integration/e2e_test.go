@@ -70,7 +70,6 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 		&model.Plan{},
 		&model.Task{},
 		&model.TaskFile{},
-		&model.CreditTransaction{},
 	); err != nil {
 		t.Fatalf("failed to auto-migrate: %v", err)
 	}
@@ -91,10 +90,10 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	}
 
 	planSvc := service.NewPlanService(repo, &logger)
-	taskSvc := service.NewTaskService(repo, nil, &noopEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, &noopEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	wsHub := handler.NewWebSocketHub(jwtSvc)
-	authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil, nil, nil)
+	authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil)
 	planHandler := handler.NewPlanHandler(planSvc, &logger)
 	taskHandler := handler.NewTaskHandler(taskSvc, &logger)
 	timelineHandler := handler.NewTimelineHandler(repo, &logger)

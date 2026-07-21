@@ -367,6 +367,12 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 	if err := serveragent.ValidateClaudeRuntimeEnv(response.RuntimeEnv); err != nil {
 		return fmt.Errorf("bootstrap runtime environment is invalid: %w", err)
 	}
+	if len(response.ModelUsageAliases) == 0 {
+		return fmt.Errorf("bootstrap model usage aliases are required")
+	}
+	if err := serveragent.ValidateModelUsageAliases(response.ModelUsageAliases); err != nil {
+		return fmt.Errorf("bootstrap model usage aliases are invalid: %w", err)
+	}
 	if response.TaskType != model.PlatformMontage && len(response.Env) > 0 {
 		return fmt.Errorf("bootstrap environment is only valid for Montage tasks")
 	}

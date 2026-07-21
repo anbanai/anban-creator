@@ -26,7 +26,6 @@ export interface TaskContextSummaryProps {
   files: TaskFile[]
   logs: string[]
   progressDescription: string | null
-  netConsumedCredits: number
   sseError: string | null
   onOpenTab: (tab: TaskDetailsTab) => void
 }
@@ -123,7 +122,6 @@ export function TaskContextSummary({
   files,
   logs,
   progressDescription,
-  netConsumedCredits,
   sseError,
   onOpenTab,
 }: TaskContextSummaryProps) {
@@ -165,7 +163,7 @@ export function TaskContextSummary({
             label="任务概览"
             value={projectName}
             detail={task.plan_id ? '计划任务' : '手动创建'}
-            detailSuffix={`${netConsumedCredits.toLocaleString()} 积分`}
+            detailSuffix={`固定价 ${task.billing_price_credits.toLocaleString()} 积分`}
             onClick={() => onOpenTab('overview')}
           />
           <SummaryItem

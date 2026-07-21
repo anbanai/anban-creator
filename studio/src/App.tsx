@@ -24,7 +24,7 @@ const ProjectsPage = React.lazy(() => import('@/pages/ProjectsPage'))
 const PlansPage = React.lazy(() => import('@/pages/PlansPage'))
 const TasksPage = React.lazy(() => import('@/pages/TasksPage'))
 const TaskDetailPage = React.lazy(() => import('@/pages/TaskDetailPage'))
-const CreditsPage = React.lazy(() => import('@/pages/CreditsPage'))
+const BillingPage = React.lazy(() => import('@/pages/BillingPage'))
 const UsagePage = React.lazy(() => import('@/pages/UsagePage'))
 const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
 const TemplatesPage = React.lazy(() => import('@/pages/TemplatesPage'))
@@ -139,7 +139,7 @@ function AppRoutes() {
           <Route path="templates" element={<LazyPage component={TemplatesPage} />} />
 
           <Route path="designer" element={<LazyPage component={DesignerPage} />} />
-          <Route path="credits" element={<LazyPage component={CreditsPage} />} />
+          <Route path="billing" element={<LazyPage component={BillingPage} />} />
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
           <Route path="connect/claude-code" element={<LazyPage component={ClaudeCodeGuidePage} />} />

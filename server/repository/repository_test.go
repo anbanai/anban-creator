@@ -452,9 +452,10 @@ func TestTaskRepository_CRUD(t *testing.T) {
 		t.Errorf("latest_progress overwrite mismatch: %+v", got)
 	}
 
-	// UpdateResult
-	if err := repo.Tasks().UpdateResult(ctx, "task-abc123def456", `{"url":"https://example.com"}`); err != nil {
-		t.Fatalf("UpdateResult: %v", err)
+	// UpdateExecutionEvidence
+	matched, err := repo.Tasks().UpdateExecutionEvidence(ctx, "task-abc123def456", `{"url":"https://example.com"}`, nil, "unreconciled")
+	if err != nil || !matched {
+		t.Fatalf("UpdateExecutionEvidence: matched=%v err=%v", matched, err)
 	}
 	found, _ = repo.Tasks().FindByID(ctx, "task-abc123def456")
 	if found.Result == nil || *found.Result != `{"url":"https://example.com"}` {

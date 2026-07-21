@@ -312,12 +312,12 @@ func TestMCPHandlerToolsList(t *testing.T) {
 			}
 		}
 	}
-	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "get_credit_balance", "generate_image", "upload_image", "register_rendered_image", "get_media_pipeline_status", "upload_live_audio", "create_live_analysis_task", "build_live_clip_plan", "build_live_subject_clip_plan", "build_live_clip_manifest", "prepare_file_upload", "create_video_asr_task", "query_video_asr_task", "pack_video_transcripts"} {
+	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "generate_image", "upload_image", "register_rendered_image", "get_media_pipeline_status", "upload_live_audio", "create_live_analysis_task", "build_live_clip_plan", "build_live_subject_clip_plan", "build_live_clip_manifest", "prepare_file_upload", "create_video_asr_task", "query_video_asr_task", "pack_video_transcripts"} {
 		if !toolNames[expected] {
 			t.Errorf("expected tool %q not found in tools/list response", expected)
 		}
 	}
-	for _, removed := range []string{"write_article", "research_topics", "optimize_seo", "generate_outline", "archive_workspace"} {
+	for _, removed := range []string{"get_credit_balance", "write_article", "research_topics", "optimize_seo", "generate_outline", "archive_workspace"} {
 		if toolNames[removed] {
 			t.Errorf("unexpected removed tool %q found in tools/list response", removed)
 		}

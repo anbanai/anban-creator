@@ -33,20 +33,21 @@ type BootstrapFile struct {
 }
 
 type AgentBootstrapResponse struct {
-	ExecutionToken      string            `json:"execution_token"`
-	TaskID              string            `json:"task_id"`
-	TaskType            string            `json:"task_type"`
-	ProjectID           string            `json:"project_id"`
-	Prompt              string            `json:"prompt"`
-	Model               string            `json:"model"`
-	MaxTurns            int               `json:"max_turns"`
-	AgentFlag           string            `json:"agent_flag"`
-	AutoMemoryDirectory string            `json:"auto_memory_directory"`
-	ResumeSessionID     string            `json:"resume_session_id,omitempty"`
-	ResumeContextPath   string            `json:"resume_context_path,omitempty"`
-	RuntimeEnv          map[string]string `json:"runtime_env,omitempty"`
-	Env                 map[string]string `json:"env,omitempty"`
-	Files               []BootstrapFile   `json:"files"`
+	ExecutionToken      string                                    `json:"execution_token"`
+	TaskID              string                                    `json:"task_id"`
+	TaskType            string                                    `json:"task_type"`
+	ProjectID           string                                    `json:"project_id"`
+	Prompt              string                                    `json:"prompt"`
+	Model               string                                    `json:"model"`
+	MaxTurns            int                                       `json:"max_turns"`
+	AgentFlag           string                                    `json:"agent_flag"`
+	AutoMemoryDirectory string                                    `json:"auto_memory_directory"`
+	ResumeSessionID     string                                    `json:"resume_session_id,omitempty"`
+	ResumeContextPath   string                                    `json:"resume_context_path,omitempty"`
+	RuntimeEnv          map[string]string                         `json:"runtime_env,omitempty"`
+	ModelUsageAliases   map[string]serveragent.ModelUsageIdentity `json:"model_usage_aliases"`
+	Env                 map[string]string                         `json:"env,omitempty"`
+	Files               []BootstrapFile                           `json:"files"`
 }
 
 type AgentBootstrapConfig struct {
@@ -61,6 +62,7 @@ type AgentBootstrapConfig struct {
 	MontagePipelineDefaults map[string]map[string]any
 	MontageEnv              map[string]string
 	RuntimeEnv              map[string]string
+	ModelUsageAliases       map[string]serveragent.ModelUsageIdentity
 }
 
 type AgentBootstrapService struct {
@@ -267,7 +269,25 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err := serveragent.ValidateClaudeRuntimeEnv(runtimeEnv); err != nil {
 		return nil, fmt.Errorf("build Claude runtime environment: %w", err)
 	}
-	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, Env: s.montageEnv(task), Files: files}, nil
+	aliases := cloneBootstrapModelUsageAliases(s.cfg.ModelUsageAliases)
+	if len(aliases) == 0 {
+		return nil, fmt.Errorf("%w: Claude model usage aliases are required", ErrAgentBootstrapUnavailable)
+	}
+	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil {
+		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
+	}
+	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases, Env: s.montageEnv(task), Files: files}, nil
+}
+
+func cloneBootstrapModelUsageAliases(source map[string]serveragent.ModelUsageIdentity) map[string]serveragent.ModelUsageIdentity {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]serveragent.ModelUsageIdentity, len(source))
+	for raw, identity := range source {
+		result[raw] = identity
+	}
+	return result
 }
 
 func (s *AgentBootstrapService) signedReferenceAssetURL(ctx context.Context, asset *model.Asset, credentialDeadline time.Time) (string, error) {

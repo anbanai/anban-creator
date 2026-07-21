@@ -51,45 +51,6 @@ describe('FilePreviewGallery', () => {
     expect(frame).toHaveClass('h-[70vh]')
   })
 
-  it('renders locked file rows without loading preview or download content', () => {
-    render(
-      <FilePreviewGallery
-        files={[fileWith({})]}
-        taskId="task-1"
-        accessLocked
-        lockedMessage="交付已锁定"
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /预览 article\.html/ }))
-    fireEvent.click(screen.getByRole('button', { name: /下载 article\.html/ }))
-
-    expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /下载 article\.html/ })).toBeDisabled()
-    expect(api.tasks.fetchPreviewHTML).not.toHaveBeenCalled()
-    expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-  })
-
-  it('renders locked image files as placeholders instead of signed image urls', () => {
-    render(
-      <FilePreviewGallery
-        files={[fileWith({
-          file_name: 'seednote.png',
-          mime_type: 'image/png',
-          url: 'https://oss.example.com/signed-image.png',
-        })]}
-        taskId="task-1"
-        accessLocked
-        lockedMessage="交付已锁定"
-      />,
-    )
-
-    expect(screen.getByText('交付已锁定')).toBeInTheDocument()
-    expect(screen.queryByRole('img', { name: 'seednote.png' })).not.toBeInTheDocument()
-    expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
-  })
-
   it('uses montage role labels when task type is montage', () => {
     render(
       <FilePreviewGallery

@@ -1,753 +1,471 @@
-# Fixed SKU Billing And Cost Ledger Design
+# Fixed SKU Billing And Provider Cost Ledger Design
 
 **Date:** 2026-07-17
-**Status:** Draft for written review
-**Compatibility:** Forward-only replacement
 
 ## Summary
 
-Anban will sell versioned, fixed-price products while separately measuring the actual cost of every provider call. Users will never be charged from token counts, provider-reported monetary estimates, tier multipliers, or post-execution overages.
+Anban uses two independent ledgers:
 
-The billing boundary is:
+1. The retail wallet charges users fixed, versioned SKU prices in credits.
+2. The provider cost ledger records measured model, image, and video cost for internal margin reporting.
 
-1. A versioned SKU defines the exact user-visible credit price and included limits.
-2. The server quotes and reserves that fixed amount before execution.
-3. Successful durable delivery captures the hold once; failure releases it in full.
-4. Provider usage is written to a separate immutable cost ledger and never changes the user wallet.
-5. Paid-credit revenue, provider cost, and promotional acquisition cost are combined into margin facts for operating decisions.
+Retail prices never come from provider token usage. Provider cost never mutates the user wallet. An accepted task is allowed to finish even if successful image, video, or other premium MCP operations make the wallet negative. A user with debt cannot create another task; a later paid top-up repays debt before creating spendable credits.
 
-This design supersedes `2026-04-10-credits-system-design.md` and the runtime-billing portion of `2026-07-15-agent-runtime-billing-and-failure-artifact-collection-design.md`. The artifact-collection design remains valid.
+Claude Code continues to call Ark directly. Its `total_cost_usd` is ignored. Normal terminal executions use the final raw `result.modelUsage` map to record exact per-model input, cache-read, cache-creation, and output token usage. Partial message events are not a billing source because child Agent events are not forwarded in the parent stream.
+
+This design replaces the billing portions of `2026-04-10-credits-system-design.md` and `2026-07-15-agent-runtime-billing-and-failure-artifact-collection-design.md`. Artifact collection remains valid.
 
 ## Confirmed Product Policy
 
-- User pricing is fixed and SKU-based.
-- Provider usage remains precisely metered for cost and margin reporting.
-- Funding is manual recharge through an authenticated admin API.
-- There are no subscriptions, online payments, recharge bonuses, daily sign-in rewards, postpaid balances, negative balances, or hidden overages.
-- Paid and promotional credits are separate credit lots.
-- Verified registration receives limited, expiring onboarding credits.
-- An inviter receives expiring promotional credits only after the invitee's first real recharge of at least CNY 10.
-- Promotional credits recognize no revenue. Their attributable provider cost is acquisition cost.
-- Automatic retries remain inside the original hold and cannot create a second user charge.
-- A completed purchase produces one final visible capture transaction.
+- User-facing prices are fixed SKU prices.
+- Agent runtime is included in the task-creation SKU and is never charged from tokens.
+- Expensive image, video, and other premium MCP operations use separate fixed operation SKUs.
+- Task creation is the only balance admission boundary for task execution; standalone premium operations have their own prepaid admission.
+- An accepted task never performs another balance sufficiency check.
+- Successful operation charges may create wallet debt.
+- Debt blocks creation of new tasks, plans that would execute immediately, and standalone premium operations.
+- Paid top-ups repay debt first. Promotional credits cannot repay debt.
+- Failed provider operations are not charged. Replaying a successful operation cannot charge twice.
+- A platform-failed task with no accepted deliverable receives an idempotent reversal of its task-creation charge.
+- Automatic retries and resumed execution under the same task do not create another task charge.
+- There is no daily sign-in reward, registration gift, recharge bonus, membership price multiplier, or generic admin grant.
+- Invitation linkage remains. A fixed referral promotion may be issued once after the invitee's first qualifying paid top-up.
+- Existing balances and legacy billing records are not migrated. Cutover is forward-only.
 
 ## Goals
 
-- Make every user charge predictable before execution.
-- Make every yuan of cash, promotional credit, provider cost, and recognized revenue traceable.
-- Prevent both accidental overcharging and unbounded provider-cost exposure.
-- Calculate profitability by SKU, task, model, user, promotion, and date.
-- Fail startup when an enabled route is missing either a cost profile or an exact SKU mapping.
-- Make all financial state transitions idempotent and recoverable after process or queue failure.
+- Make every user charge knowable before the charged operation begins.
+- Keep accepted tasks stable when later operation charges exceed the wallet balance.
+- Make top-up, charge, debt, reversal, expiry, and referral events exactly auditable.
+- Calculate provider cost from measured usage and immutable price versions.
+- Report revenue, receivables, promotional consumption, provider cost, and margin separately.
+- Remove every legacy dynamic runtime deduction and compatibility fallback.
 
 ## Non-Goals
 
-- Subscription plans, online checkout, invoices, tax documents, or payment-provider integration.
-- Usage-based retail billing or user-visible token prices.
-- Provider-cost passthrough, account-specific price multipliers, or tier multipliers.
-- Automatic migration of ambiguous legacy balances.
-- Deploying OpenMeter, Flexprice, Lago, or another external billing platform in the first implementation.
-- Preserving old credit APIs, transaction types, configuration keys, or database contracts.
+- Subscriptions or online payment checkout.
+- Real-time provider-cost enforcement.
+- User-visible token, USD, cache, provider-model, or multiplier pricing.
+- A Claude proxy or budget gateway.
+- Recovering exact token cost from an execution that terminates without a final `result.modelUsage`.
+- Preserving legacy credit APIs, tables, routes, or response shapes.
 
-## Financial Units And Invariants
+## Financial Units
 
-Financial calculations must not use floating point.
-
-- Credits use signed `int64`, but wallet invariants prevent balances below zero.
-- Cash received is stored in integer CNY fen.
-- Provider cost and recognized revenue are stored in integer micro-CNY.
-- Decimal configuration values are parsed with an exact decimal type and converted to integer micro-CNY.
-- The recharge exchange is exact: CNY 1.00 produces 1,000 paid credits, so one fen produces 10 credits.
-- Credits are not currency and cannot be withdrawn, transferred, or converted back to cash.
-- Wallet balance is a projection of immutable entries; it is not the accounting source of truth.
-- The sum of lot available, reserved, consumed, and expired credits must equal the lot's original credits.
-- Every hold must end in exactly one terminal state: captured or released.
-- Every capture must reference one hold, one quote, one SKU version, and the exact lot allocations reserved by that hold.
+- Credits are signed `int64` values. API JSON uses integers.
+- CNY accounting uses signed integer micro-CNY. `1 CNY = 1,000,000 micro-CNY`.
+- Configuration decimals are parsed from strings with exact decimal arithmetic.
+- Floating-point values are forbidden in wallet, cost, and margin persistence.
+- The fixed top-up exchange is `1 CNY = 1,000 credits`.
+- Provider prices are internal cost facts, not retail formulas.
 
 ## Architecture
 
-### Product Catalog
+### Retail Catalog
 
-The product catalog is the only source of user-visible prices. Each immutable SKU version defines:
+Every billable action resolves exactly one active SKU version. A SKU contains:
 
-- exact credit price;
-- workflow or media operation;
-- allowed request dimensions;
-- included media, attempts, and execution limits;
-- maximum provider cost in CNY;
-- durable-delivery predicate;
-- promotion eligibility.
+- stable SKU ID and immutable catalog version;
+- operation type and eligible workflow/options;
+- fixed credit price;
+- charge policy: `task_admission`, `accepted_task_operation`, or `standalone_operation`;
+- delivery evidence required before an operation charge;
+- operational limits and allowed provider routes where relevant.
 
-Changing price, limits, provider allowance, or delivery semantics creates a new SKU version. Existing quotes and holds continue to reference the old version. Runtime formulas cannot synthesize retail prices.
+Changing a price, workflow mapping, charge policy, or delivery contract publishes a new catalog version. Existing task and charge records keep their original snapshot.
 
-### Wallet Ledger And Credit Lots
+### Wallet Account
 
-The wallet contains immutable lots:
+Each user has one projected account:
 
-- `paid_topup`: purchased credits with actual cash received and external payment reference;
-- `onboarding`: expiring promotional credits issued after verified registration;
-- `referral`: expiring promotional credits issued after a referred user's first qualifying top-up.
+```text
+display_balance = paid_credits + promotional_credits - debt_credits
+```
 
-Eligible promotional lots are reserved first by earliest expiry, followed by paid lots in FIFO order. A hold stores its exact allocation across lots. Capture consumes that allocation; release restores it. The Studio displays paid, promotional, reserved, and available balances separately.
+The three buckets are non-negative integers:
 
-### Provider Cost Ledger
+- `paid_credits`: cash-backed spendable balance;
+- `promotional_credits`: expiring, eligibility-constrained acquisition balance;
+- `debt_credits`: successful accepted-task operation charges not covered by spendable credits.
 
-Every provider call writes an append-only cost event containing:
+The projection is disposable and rebuildable from append-only entries and credit lots. Client requests never supply balance-after values.
 
-- provider request ID, task ID, execution attempt ID, user ID, and SKU version;
-- provider, exact model ID, operation, and cost-catalog version;
-- normalized usage dimensions plus the raw provider usage payload;
-- source currency, source amount, FX snapshot, and exact `cost_cny_micros`;
-- evidence type: `provider_usage`, `accrual_estimate`, `provider_invoice`, or `adjustment`;
-- reference to a prior event when correcting or reconciling cost.
+### Charge Ordering
 
-A correction appends a compensating event; it never updates the original. Provider cost never deducts credits and never changes a captured user price.
+For an eligible charge:
 
-### Margin Facts
+1. consume eligible promotional lots by earliest expiry;
+2. consume paid lots FIFO;
+3. if the policy is `accepted_task_operation`, place any remainder in debt;
+4. otherwise reject before creating a charge.
 
-Margin facts are append-only accounting events derived from wallet captures and provider cost events. A rebuildable reporting projection aggregates:
-
-- recognized paid-credit cash revenue;
-- provider cost;
-- promotional credits consumed;
-- provider cost attributed to promotional credits as acquisition cost;
-- provider cost from released or otherwise uncaptured executions as platform failure cost;
-- paid gross profit and paid gross margin;
-- fully loaded contribution after promotional acquisition cost.
-
-For mixed paid and promotional captures, provider cost is attributed by the captured-credit ratio. Provider cost from a released hold has no captured-credit allocation and is classified as platform failure cost. Reports group by SKU, task, provider, model, user, promotion, terminal outcome, and UTC accounting date.
-
-## Quote, Reserve, Capture, And Release
-
-### Quote
-
-The server resolves exactly one active SKU from the user's chosen workflow and options. A quote snapshots the SKU version, fixed price, included limits, cost budget, promotion eligibility, and a 15-minute expiry. A request that maps to zero or multiple SKUs is rejected before task creation.
-
-### Reserve
-
-Creating the task atomically creates a hold and allocates the fixed price across eligible lots. Insufficient available balance rejects the request without creating a task. Holds cannot overdraw, and concurrent requests serialize on the wallet account.
-
-### Execution
-
-The execution receives the hold ID, SKU version, and remaining provider-cost budget. All automatic retries share that context. Provider calls reserve internal cost budget before dispatch and settle it from measured usage afterward. Crossing the hard cost budget aborts the execution, marks it as a platform-budget failure, and releases the user's hold in full.
-
-Provider and media operations included by a task SKU inherit the parent hold and cost budget. They never create child user holds or separate user charges. A standalone image or video action uses its own media SKU only when it was initiated outside a task package. An Agent attempting to exceed a task's included media count is stopped before the extra provider request; the task then fails delivery and releases the parent hold.
-
-### Capture
-
-Capture occurs only after the SKU's durable-delivery predicate is verified. The task, artifact manifest, and required output files must already be committed. Capture consumes the original lot allocations and creates one visible user transaction. Replaying capture returns the existing result.
-
-### Release
-
-Queue rejection, model failure, timeout, cancellation, invalid provider usage, missing durable output, or internal cost-budget exhaustion releases the full hold. Retries cannot create additional charges. Replaying release returns the existing result. Capture and release are mutually exclusive under a database uniqueness constraint.
-
-### Reconciliation
-
-A five-minute reconciler repairs expired quotes, orphaned holds, missing projections, and interrupted terminal transitions. Holds older than their execution deadline plus 30 minutes are released unless a verified durable delivery is already awaiting capture. Reconciliation uses the same idempotent service methods as live execution.
-
-## Recharge And Promotion Flows
+Task admission requires `debt_credits == 0` and eligible spendable credits greater than or equal to the fixed task price. The task charge is recorded atomically with task creation. After acceptance, the executor and MCP tools never ask the wallet whether work may continue.
 
 ### Paid Top-Up
 
-The only funding endpoint is `POST /api/v1/admin/billing/topups`. It requires the admin API key, user ID, integer `cash_fen`, external reference, and idempotency key. The service derives credits from the fixed exchange and creates a `paid_topup` lot. Callers cannot supply the credit amount independently.
+A top-up API call requires an immutable external reference and is idempotent within its source. Credits are applied in this order:
 
-The same idempotency key and payload returns the original lot. Reusing a key with different cash, user, or external reference returns a conflict. Arbitrary admin grants are removed.
+1. reduce `debt_credits`;
+2. create a non-expiring paid lot for the remainder.
 
-### Onboarding
+The response reports `debt_repaid_credits` and `paid_credits_added`. A top-up smaller than the debt leaves no spendable paid balance.
 
-Successful verified registration issues one 5,000-credit onboarding lot that expires after seven days. It can be combined with paid credits but is restricted to the explicitly configured introductory SKUs. Re-registration, login, and invite-code attachment cannot issue it again.
+### Promotions And Referral
 
-### Referral
+There is no registration gift or sign-in reward. Registration preserves `InvitedBy` when a valid invitation is used. After the invitee's first qualifying paid top-up commits, the inviter and invitee may each receive one fixed promotional lot from the active referral program.
 
-An invite code is optional during registration and records an immutable inviter relationship. No reward is issued at registration. The inviter receives one 5,000-credit referral lot after the invitee's first paid top-up of at least CNY 10. The lot expires after 30 days. Self-invitation is rejected, an invitee can trigger only one reward, and one inviter can receive at most ten rewards.
+Referral issuance is idempotent by invitee and program. Promotional lots expire, can be restricted to SKU families, and cannot repay debt. A debt user may receive a referral lot, but remains blocked from task admission until paid top-up clears the debt.
+
+### Task Settlement
+
+Task creation performs quote validation, wallet admission, task insertion, and task charge insertion in one database transaction. Execution receives the immutable SKU snapshot but no wallet budget.
+
+Terminal behavior:
+
+- success: keep the task charge;
+- user cancellation after execution starts: keep the task charge;
+- invalid user input rejected before acceptance: no charge or task;
+- platform/provider failure with no accepted deliverable: append one exact reversal;
+- retry or resume of the same task: no new task charge;
+- explicit creation of a new task: new admission and charge.
+
+Reversal policy is based on terminal reason codes, not free-form error text.
+
+### Premium MCP Settlement
+
+Image, video, and other premium MCP tools resolve a fixed operation SKU before the provider call. They do not reserve credits and do not stop an accepted task because of balance.
+
+The durable-output transaction also appends one idempotent settlement-outbox row using the task ID, attempt ID, tool call ID, and SKU version. The outbox worker applies the wallet charge immediately when possible and retries transient database failures without changing the successful tool result. A failed or output-less operation records provider cost when available but creates no retail charge. Duplicate tool results return the original output and settlement identity.
+
+Standalone premium operations use `standalone_operation`; they require no debt and sufficient balance before dispatch. They cannot overdraw because no accepted parent task exists.
+
+### Operational Limits
+
+Operational limits protect task stability and platform capacity; they are not monetary settlement:
+
+- maximum Agent turns;
+- task retry count;
+- per-task image generation calls;
+- per-task video generation or segmentation calls;
+- image/video understanding calls;
+- provider timeout and output-size limits.
+
+Crossing a limit returns a structured workflow error. It never converts measured provider cost into a user charge and never performs a running-cost calculation.
+
+## Provider Cost Ledger
+
+Provider cost events are append-only and never update the wallet. Each event stores:
+
+- provider and exact normalized model ID;
+- immutable cost-catalog version;
+- request or execution identity and domain idempotency key;
+- typed usage evidence;
+- exact micro-CNY calculation and currency-rate snapshot;
+- source: `provider_response`, `claude_result_model_usage`, `invoice_adjustment`, or `manual_reconciliation`;
+- reconciliation status and safe metadata.
+
+Prompts, generated content, authorization headers, tokens, and media URLs are never persisted as cost evidence.
+
+### Claude Code Evidence
+
+Controlled Claude Code 2.1.197 tests established:
+
+- final `result.modelUsage` contains separate entries for the parent Evolving model and a child Haiku-mapped Turbo model;
+- each entry contains input, output, cache-read, and cache-creation tokens;
+- top-level `result.usage` contains only the parent model;
+- parent partial events omit child Agent token events;
+- `task_notification.usage.total_tokens` does not exactly reconcile with model usage;
+- `total_cost_usd` applies Claude's internal prices to third-party model IDs and materially overstates Ark cost;
+- `contextWindow` is Claude metadata, not provider capability evidence.
+
+Therefore:
+
+- ignore `total_cost_usd`, top-level aggregate usage, task notification totals, and context window for accounting;
+- do not enable partial messages solely for billing;
+- extend the current Go SDK result type to expose typed `modelUsage`;
+- normalize aliases such as `doubao-seed-evolving-latest-version` to exact configured provider model IDs;
+- write one cost event per model entry when the terminal result arrives;
+- mark an execution `unreconciled` when no valid terminal model-usage map is available;
+- never charge or block the user because cost evidence is missing.
+
+The current latest `github.com/severity1/claude-agent-sdk-go v0.6.22` does not expose `modelUsage`. Anban uses a minimal reviewed fork until the field is accepted upstream. Replacing the SDK with ad hoc CLI process management is out of scope.
+
+### Media Evidence
+
+Image and video providers use provider response usage where supplied. When fixed provider pricing depends on output dimensions or duration, persisted output metadata is the evidence. Missing evidence marks the cost event unreconciled; it does not synthesize a user price.
+
+### Margin Facts
+
+Each retail charge or reversal and each provider cost event creates immutable reporting facts. Reports separate:
+
+- cash received;
+- deferred paid-credit value;
+- paid-credit revenue recognized by charges;
+- promotional-credit consumption;
+- debt/service receivable created and collected;
+- provider cost;
+- platform-failure cost;
+- contribution margin.
+
+Provider cost may arrive after the retail charge. Reports group by task, SKU version, provider, model, user, referral program, terminal outcome, and UTC accounting date without rewriting source events.
 
 ## Configuration Contract
 
-Billing configuration is split from runtime routing:
+Billing configuration lives under a mandatory directory and uses strict YAML decoding. Unknown fields, duplicate IDs, invalid decimals, missing references, and ambiguous route mappings fail startup.
 
-```text
-billing/policy.yaml
-billing/promotions.yaml
-billing/products.yaml
-billing/costs.yaml
-billing/margins.yaml
+### Root Runtime Configuration
+
+```yaml
+billing_runtime:
+  config_dir: "./billing"
+  admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"
+
+claude:
+  provider: "volcengine_ark"
+  base_url: "https://ark.cn-beijing.volces.com/api/compatible"
+  auth_token: "${CLAUDE_CODE_AUTH_TOKEN}"
+  models:
+    default: "doubao-seed-evolving"
+    opus: "doubao-seed-evolving"
+    fable: "doubao-seed-evolving"
+    sonnet: "doubao-seed-2-1-pro-260628"
+    haiku: "doubao-seed-2-1-turbo-260628"
 ```
 
-All files use strict YAML decoding. Unknown keys, duplicate IDs, invalid decimals, missing references, and inconsistent budgets fail startup.
+The runtime builder derives the `ANTHROPIC_*` environment variables. Direct duplicate values in an arbitrary `claude.env` map are rejected. Provider credentials are redacted from config APIs and logs.
 
 ### `billing/policy.yaml`
 
 ```yaml
-schema_version: 1
-currency: CNY
-
-credit:
-  exchange:
-    cash_fen: 100
-    credits: 1000
-  allow_negative: false
-  balances: [paid, promotional]
-  spending_order: [promotional_expiring_first, paid_fifo]
-
-topup:
-  mode: admin_api_only
-  minimum_cash_fen: 1000
-  require_idempotency_key: true
-  require_external_reference: true
-  recharge_bonus: false
-  arbitrary_grant: false
-
-settlement:
-  quote_ttl: 15m
-  hold_grace_after_execution: 30m
-  capture_condition: durable_delivery_verified
-  failure_action: full_release
-  retries_share_same_hold: true
-  hidden_overages: false
-  partial_charge: false
-  cost_budget_exceeded: abort_and_release
-
-reconciliation:
-  interval: 5m
-  duplicate_capture_action: return_existing
-```
-
-### `billing/promotions.yaml`
-
-```yaml
-schema_version: 1
-
-programs:
-  onboarding:
-    trigger: verified_registration
-    lot_type: onboarding
-    credits: 5000
-    expires_after: 7d
-    max_provider_cost_cny_per_recipient: "3.00"
-    once_per_user: true
-    eligible_skus:
-      - task.seednote.standard.v1
-      - task.article.standard.v1
-      - image.seedream.pro.standard.v1
-
-  referral:
-    trigger: invitee_first_paid_topup
-    minimum_topup_cash_fen: 1000
-    recipient: inviter
-    lot_type: referral
-    credits: 5000
-    expires_after: 30d
-    max_provider_cost_cny_per_recipient: "3.00"
-    max_rewards_per_inviter: 10
-    reject_self_invitation: true
-    eligible_skus:
-      - task.seednote.standard.v1
-      - task.article.standard.v1
-      - image.seedream.pro.standard.v1
-
-disabled:
-  - daily_sign_in
-  - recharge_bonus
-  - registration_cash_value
-  - admin_bonus
+version: "2026-07-17"
+credits_per_cny: 1000
+task_admission:
+  require_zero_debt: true
+  require_full_price: true
+accepted_task:
+  continue_when_balance_negative: true
+  operation_charge_may_create_debt: true
+top_up:
+  repay_debt_first: true
+promotions:
+  may_repay_debt: false
+task_failure_reversal:
+  enabled: true
+  reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]
 ```
 
 ### `billing/products.yaml`
 
-The initial catalog deliberately uses conservative task budgets. Prices are operating defaults, not formulas; later changes require new SKU versions.
-
 ```yaml
-schema_version: 1
-catalog_id: retail-cn-2026-07-17
-status: active
-
+catalog_id: "retail-2026-07-17-v1"
+currency: credits
 skus:
-  task.seednote.standard.v1:
-    operation: task.seednote
-    price_credits: 20000
-    max_provider_cost_cny: "8.00"
-    included_images: 6
-    max_attempts: 2
-    delivery: seednote_artifacts_verified
+  - id: "task.seednote.standard.v1"
+    operation: "task.seednote"
+    charge_policy: "task_admission"
+    price_credits: 5000
+    delivery: "seednote_artifacts_verified"
 
-  task.article.standard.v1:
-    operation: task.article
-    price_credits: 25000
-    max_provider_cost_cny: "10.00"
-    included_images: 3
-    max_attempts: 2
-    delivery: article_artifacts_verified
+  - id: "task.wechatarticle.standard.v1"
+    operation: "task.wechatarticle"
+    charge_policy: "task_admission"
+    price_credits: 6000
+    delivery: "article_artifacts_verified"
 
-  task.ecommerce.standard.v1:
-    operation: task.ecommerce
-    price_credits: 30000
-    max_provider_cost_cny: "12.00"
-    included_images: 6
-    max_attempts: 2
-    delivery: ecommerce_artifacts_verified
+  - id: "image.seedream.standard.v1"
+    operation: "mcp.generate_image"
+    charge_policy: "accepted_task_operation"
+    price_credits: 500
+    route: "image_generation.content"
+    delivery: "persisted_image"
 
-  task.videocreator.720p-5s.v1:
-    operation: task.videocreator
-    video_provider_model: volcengine_ark/doubao-seedance-2-0-fast-260128
-    price_credits: 30000
-    max_provider_cost_cny: "12.00"
-    input_mode: no_video
-    output_resolution: 720p
-    output_duration_seconds: 5
-    included_videos: 1
-    max_attempts: 2
-    delivery: video_artifact_verified
-
-  task.videoeditor.standard.v1:
-    operation: task.videoeditor
-    price_credits: 15000
-    max_provider_cost_cny: "6.00"
-    max_attempts: 2
-    delivery: edited_video_artifact_verified
-
-  task.montage.standard.v1:
-    operation: task.montage
-    price_credits: 15000
-    max_provider_cost_cny: "6.00"
-    max_attempts: 2
-    delivery: montage_artifacts_verified
-
-  task.viral_analysis.standard.v1:
-    operation: task.viral_analysis
-    price_credits: 10000
-    max_provider_cost_cny: "4.00"
-    max_attempts: 2
-    delivery: analysis_artifact_verified
-
-  image.seedream.pro.standard.v1:
-    operation: image.generate
-    provider_model: volcengine_ark/doubao-seedream-5-0-pro-260628
-    price_credits: 1000
-    output_size_tier: 2K
-    max_reference_images: 1
-    max_provider_cost_cny: "0.60"
-    delivery: generated_image_persisted
-
-  image.seedream.pro.multi-reference.v1:
-    operation: image.generate
-    provider_model: volcengine_ark/doubao-seedream-5-0-pro-260628
-    price_credits: 1500
-    output_size_tier: 2K
-    min_reference_images: 2
-    max_reference_images: 10
-    max_provider_cost_cny: "0.78"
-    delivery: generated_image_persisted
-
-  image.gpt-image-2.medium.v1:
-    operation: image.generate
-    provider_model: wangcai_openai/gpt-image-2-t
-    quality: medium
-    mode: text_to_image
-    output_size: 1024x1024
-    max_reference_images: 0
-    price_credits: 1000
-    max_provider_cost_cny: "0.40"
-    delivery: generated_image_persisted
-
-  image.gpt-image-2.high.v1:
-    operation: image.generate
-    provider_model: wangcai_openai/gpt-image-2-t
-    quality: high
-    mode: text_to_image
-    output_size: 1024x1024
-    max_reference_images: 0
-    price_credits: 4000
-    max_provider_cost_cny: "1.60"
-    delivery: generated_image_persisted
+  - id: "image.seedream.standalone.v1"
+    operation: "designer.generate_image"
+    charge_policy: "standalone_operation"
+    price_credits: 500
+    route: "image_generation.designer.seedream"
+    delivery: "persisted_image"
 ```
 
-Goal mode is disabled at cutover. It can return only after explicit goal-mode SKUs define fixed prices and hard budgets; `goal_mode_multiplier` is deleted.
+Task and operation prices are business defaults, not calculated markups. Video SKUs enumerate resolution, duration, audio, and model options so one request resolves exactly one SKU.
 
 ### `billing/costs.yaml`
 
-The cost catalog stores provider cost only. It is never exposed as retail pricing. The entries below are the confirmed cutover routes. Any other model must be disabled at cutover unless an equally complete cost profile is added before startup.
-
 ```yaml
-schema_version: 1
-cost_catalog_id: provider-cn-2026-07-17
-status: active
-
-fx_snapshot:
-  USD_CNY:
-    rate: "7.20"
-    effective_at: 2026-07-17T00:00:00+08:00
-
+catalog_id: "provider-cost-2026-07-17-v1"
+currency_rates:
+  USD: "7.20"
+  CNY: "1.00"
 models:
-  moonshot/kimi-k2.7-code:
-    evidence: operator_contract
-    currency: USD
-    unit: 1000000_tokens
-    input: "0.95"
-    cache_read_input: "0.19"
-    cache_creation_input: "0.95"
-    output: "4.00"
-
-  moonshot/kimi-k2.7-code-highspeed:
-    evidence: operator_contract
-    currency: USD
-    unit: 1000000_tokens
-    input: "1.90"
-    cache_read_input: "0.38"
-    cache_creation_input: "1.90"
-    output: "8.00"
-
   volcengine_ark/doubao-seed-evolving:
-    evidence: volcengine_model_price_2026-07-13
-    currency: CNY
-    unit: 1000000_tokens
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
     input: "6.00"
     cache_read_input: "1.20"
     cache_creation_input: "6.00"
-    cache_storage_per_hour: "0.017"
-    cache_storage_accrual_hours: "1.00"
     output: "30.00"
 
   volcengine_ark/doubao-seed-2-1-pro-260628:
-    evidence: volcengine_model_price_2026-07-13
-    currency: CNY
-    unit: 1000000_tokens
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
     input: "6.00"
     cache_read_input: "1.20"
     cache_creation_input: "6.00"
-    cache_storage_per_hour: "0.017"
-    cache_storage_accrual_hours: "1.00"
     output: "30.00"
 
   volcengine_ark/doubao-seed-2-1-turbo-260628:
-    evidence: volcengine_model_price_2026-07-13
-    currency: CNY
-    unit: 1000000_tokens
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
     input: "3.00"
     cache_read_input: "0.60"
     cache_creation_input: "3.00"
-    cache_storage_per_hour: "0.017"
-    cache_storage_accrual_hours: "1.00"
     output: "15.00"
 
   volcengine_ark/doubao-seedream-5-0-pro-260628:
-    evidence: volcengine_model_price_2026-07-13
-    currency: CNY
-    pricing_type: image_pixels
-    input_images:
-      first_image: "0.00"
-      each_additional_image: "0.02"
-    output_images:
-      max_2360000_pixels: "0.30"
-      above_2360000_pixels: "0.60"
-
-  volcengine_ark/doubao-seedance-2-0-fast-260128:
-    evidence: volcengine_model_price_2026-07-13
-    currency: CNY
-    pricing_type: video_seconds
-    no_video_input_per_second:
-      480p: "0.372"
-      720p: "0.800"
-    video_input_5s:
-      480p: {minimum: "1.99", maximum: "4.42"}
-      720p: {minimum: "4.28", maximum: "9.50"}
-
-  wangcai_openai/gpt-image-2-t:
-    evidence: operator_contract
-    currency: USD
-    pricing_type: openai_image_usage
-    unit: 1000000_tokens
-    text_input: "5.00"
-    text_cached_input: "1.25"
-    image_input: "8.00"
-    image_cached_input: "2.00"
-    image_output: "30.00"
-
-cost_events:
-  trust_claude_total_cost_usd: false
-  require_provider_usage: true
-  immutable: true
-  invoice_adjustments: append_only
+    pricing_type: "output_pixel_tier"
+    currency: "CNY"
+    tiers:
+      - max_pixels: 2360000
+        price: "0.30"
+      - price: "0.60"
 ```
 
-Provider evidence identifiers must resolve to operator-controlled evidence metadata containing source URL or contract reference, effective time, and verification time. An expired or absent cost catalog disables the affected route and fails startup when that route is required.
+Every price entry includes operator evidence and effective timestamps in the persisted catalog even when omitted from this abbreviated example.
 
-### `billing/margins.yaml`
+### `billing/promotions.yaml`
 
 ```yaml
-schema_version: 1
-
-catalog_publish:
-  minimum_gross_margin: "0.30"
-  workflow_target_margin: "0.60"
-  reject_missing_cost_profile: true
-  reject_unmapped_route: true
-  reject_unknown_sku: true
-
-attribution:
-  paid_credit_revenue: recognize_on_capture
-  promotional_credit_revenue: zero
-  promotional_provider_cost: acquisition_cost
-  mixed_payment_allocation: captured_credit_ratio
-
-alerts:
-  sku_margin_below: "0.30"
-  provider_cost_p95_over_budget: true
-  unpriced_usage_count_above: 0
-  orphan_hold_count_above: 0
+catalog_id: "promotion-2026-07-17-v1"
+programs:
+  - id: "referral-first-topup-v1"
+    trigger: "invitee_first_paid_topup"
+    minimum_topup_cny: "10.00"
+    inviter_credits: 1000
+    invitee_credits: 1000
+    expires_after: 30d
+    max_inviter_rewards: 10
+    can_repay_debt: false
 ```
-
-## Claude Code Model Mapping And Cost Evidence
-
-Claude Code 2.1.187 supports `ANTHROPIC_DEFAULT_FABLE_MODEL`, including custom Fable mappings for third-party providers. The variable remains configured; only the unnecessary context suffix is removed. The exact provider model IDs are:
-
-```yaml
-ANTHROPIC_MODEL: doubao-seed-evolving
-ANTHROPIC_DEFAULT_OPUS_MODEL: doubao-seed-evolving
-ANTHROPIC_DEFAULT_FABLE_MODEL: doubao-seed-evolving
-ANTHROPIC_DEFAULT_SONNET_MODEL: doubao-seed-2-1-pro-260628
-ANTHROPIC_DEFAULT_HAIKU_MODEL: doubao-seed-2-1-turbo-260628
-```
-
-`doubao-seed-evolving` already has a 1024k context window according to the provider model catalog. Provider model environment values therefore use the exact model ID and do not append `[1M]`.
-
-Claude Code's `total_cost_usd` is ignored for both user billing and provider-cost accounting. A controlled test proved that Claude Code can price an unknown third-party model with Anthropic rates. Internal cost is recomputed from provider/model usage and the immutable cost-catalog version.
-
-Cache-creation tokens incur the model's normal input-token rate. Cache storage is a separate token-hour cost. When the provider response does not expose the charged retention period, the cost ledger records a conservative one-hour `accrual_estimate` from the cost profile. Provider invoices later append the difference as an adjustment; neither event changes the user's fixed charge.
-
-## Seedream Cost Measurement
-
-Seedream 5.0 Pro does not return a monetary amount. Its image-generation response returns actual output dimensions and usage dimensions:
-
-- `data[].size` gives actual `width x height`;
-- `usage.generated_images` gives successful output count;
-- `usage.input_images` gives input image count when available;
-- `usage.output_tokens` and `usage.total_tokens` provide additional audit evidence.
-
-The provider cost is:
-
-```text
-successful outputs at <= 2,360,000 pixels * CNY 0.30
-+ successful outputs above 2,360,000 pixels * CNY 0.60
-+ max(input image count - 1, 0) * CNY 0.02
-```
-
-The current 2K mapping produces more than 2.36 million pixels; for example, 2048 x 2048 is 4,194,304 pixels. Its provider output cost is therefore CNY 0.60, so a CNY 0.50 retail SKU would lose money before overhead.
-
-The Volcengine provider must preserve response `data[].size`, `usage.generated_images`, `usage.output_tokens`, and `usage.total_tokens`. Input image count is also known from the validated request. If the provider omits output size, the server decodes the persisted image dimensions. If neither source yields trustworthy dimensions, the operation is unbillable, the deliverable is not captured, and the user hold is released.
 
 ## Data Model
 
-### `billing_wallet_accounts`
+### Wallet
 
-One row per user containing paid, promotional, reserved, and available projections plus a monotonically increasing version for optimistic concurrency. Projections are rebuilt from ledger entries and cannot be edited independently.
+- `billing_wallet_accounts`: projected paid, promotional, debt, version, and timestamps.
+- `billing_credit_lots`: paid or promotional origin, remaining credits, eligibility, expiry, and immutable source.
+- `billing_wallet_entries`: append-only top-up, promotion, charge, debt, repayment, reversal, and expiry events.
+- `billing_charges`: SKU snapshot, task/tool identity, allocations, debt created, status, and idempotency key.
+- `billing_charge_allocations`: exact promotional and paid lot consumption.
+- `billing_settlement_outbox`: durable operation-charge and task-reversal intents, retry state, and terminal result identity.
+- `billing_catalog_versions` and `billing_skus`: immutable published retail catalog.
+- `billing_quotes`: short-lived immutable SKU resolution used by task and standalone-operation admission.
 
-### `billing_credit_lots`
+There are no hold, reservation, capture, release, payment-required, or billing-shortfall tables.
 
-Stores lot type, original/available/reserved/consumed/expired credits, cash received in fen, external reference, program ID, expiry, and immutable creation metadata. Paid lots do not expire. Promotional lots require an expiry and eligible-program reference.
+### Cost And Margin
 
-### `billing_wallet_entries`
-
-Append-only entries for paid top-up, promotion issue, reserve, capture, release, and expiry. Every entry has an idempotency key, account version, balance projection, and reference to its source entity. There is no generic grant or arbitrary balance-update entry.
-
-### `billing_catalog_versions` And `billing_skus`
-
-Store immutable published catalog snapshots. A SKU ID plus catalog version is unique. Published rows cannot be updated or deleted while referenced by a quote, hold, settlement, task, or report.
-
-### `billing_quotes`
-
-Stores the selected SKU snapshot, fixed price, limits, cost budget, request fingerprint, and expiry. Repeating the same idempotent request returns the existing quote.
-
-### `billing_holds` And `billing_hold_allocations`
-
-The hold stores quote, task, status, amount, deadline, and terminal transition. Allocations record exact credits reserved from each lot. Constraints prevent an allocation from exceeding lot availability and prevent both capture and release.
-
-### `billing_provider_cost_events`
-
-Stores the immutable provider usage and exact cost calculation. Provider request ID plus provider is unique. Adjustment events reference the original event and may be positive or negative.
-
-### `billing_margin_fact_events`
-
-Stores revenue-recognition, provider-cost, and acquisition-cost facts. Reporting projections are disposable and rebuildable from these events.
+- `billing_provider_cost_events`: typed usage, calculation snapshot, source, status, and adjustment link.
+- `billing_execution_cost_status`: expected execution identity and reconciled/unreconciled state.
+- `billing_margin_fact_events`: append-only revenue, receivable, promotion, cost, failure, and reversal facts.
 
 ## API Contract
 
-User APIs:
+Public APIs:
 
-```text
-GET  /api/v1/billing/wallet
-GET  /api/v1/billing/transactions
-POST /api/v1/billing/quotes
-```
+- `GET /api/billing/wallet`
+- `GET /api/billing/transactions`
+- `POST /api/billing/quotes`
+- existing task-create endpoints with required `quote_id`
+- existing standalone media endpoints with required `quote_id`
+- `GET /api/billing/referral`
 
-Task and media creation endpoints accept a quote ID and idempotency key. They never accept a client-calculated credit amount.
+Authenticated admin APIs:
 
-Admin API:
+- `POST /api/admin/billing/topups`
+- `GET /api/admin/billing/costs`
+- `GET /api/admin/billing/margins`
+- `GET /api/admin/billing/reconciliation`
 
-```text
-POST /api/v1/admin/billing/topups
-GET  /api/v1/admin/billing/costs
-GET  /api/v1/admin/billing/margins
-```
-
-Top-up requests contain `user_id`, `cash_fen`, `external_reference`, and `idempotency_key`. Cost and margin APIs are read-only operational reporting surfaces.
+Top-up and charge endpoints require idempotency keys. Admin authentication uses a constant-time comparison and never exposes the configured key.
 
 ## Studio Behavior
 
-- Show paid, promotional, reserved, and available balances separately.
-- Show promotional expiry without presenting promotions as cash.
-- Show the exact fixed SKU price before task or media creation.
-- Show included limits, not token or provider-price formulas.
-- Display one pending hold while execution runs and one final capture or release.
-- Remove daily sign-in, recharge packages with bonuses, membership price multipliers, dynamic runtime charges, and token-cost explanations.
-- Referral UI explains that rewards arrive after the invitee's first qualifying recharge.
-- Insufficient balance blocks creation before execution; running tasks never create negative balances.
+- Show one fixed credit price before task or standalone-operation creation.
+- Show paid credits, promotional credits, debt, and net balance.
+- When debt is positive, show that paid top-up repays it first and disable new-task submission.
+- Do not show token usage, cache prices, provider costs, multipliers, holds, or estimated final charges.
+- Running task UI never changes to `payment_required`.
+- Transaction labels distinguish task charge, operation charge, debt created, top-up debt repayment, referral reward, reversal, and promotion expiry.
+- Remove sign-in, recharge bonus, membership, and legacy `/credits` surfaces.
 
-## Strict Validation
+## Error Contract
 
-Startup fails when any of the following is true:
+- `billing_quote_expired`: refresh quote before admission.
+- `billing_debt_outstanding`: paid top-up is required before a new task.
+- `billing_insufficient_for_task`: insufficient eligible spendable balance for task admission.
+- `billing_insufficient_for_standalone_operation`: standalone operation cannot overdraw.
+- `billing_sku_not_found`: request does not resolve exactly one active SKU.
+- `billing_charge_conflict`: same idempotency identity has different parameters.
+- `billing_config_invalid`: startup validation failed.
+- `provider_cost_unreconciled`: admin-only cost status; never a user execution error.
 
-- An enabled provider/model route has no active cost profile.
-- A billable workflow or user-selectable option maps to zero or multiple active SKUs.
-- A promotion references a missing, inactive, or ineligible SKU.
-- A promotion's worst-case eligible-SKU consumption can exceed its per-recipient provider-cost budget.
-- A SKU's maximum provider cost violates the configured minimum gross margin.
-- An exact provider model ID, currency, unit, FX snapshot, or evidence reference is missing.
-- A decimal cannot be represented exactly in micro-CNY.
-- A SKU permits request dimensions outside the provider capability declaration.
-- A deprecated billing key is present.
+## Concurrency And Idempotency
 
-The removed keys include:
+- Wallet mutations lock the account row and use monotonically increasing versions.
+- External top-up references are unique within a source.
+- Task charges are unique by task ID and charge kind.
+- MCP charges are unique by task, attempt, tool-call, and SKU version.
+- Reversals are unique by original charge.
+- Durable outputs and terminal task states enqueue settlement intents in the same database transaction; transient wallet failures are retried from the outbox and never invalidate successful output.
+- Referral rewards are unique by invitee and program.
+- Provider cost base events are unique by provider/request identity or execution/model identity.
+- Replays return the existing semantic result; parameter drift returns a conflict.
 
-```text
-billing.credits_per_cny
-billing.tier_multipliers
-billing.default_user_multiplier
-user.billing_multiplier
-credits.daily_sign_in
-credits.register_bonus
-credits.invite_reward
-credits.task_costs
-credits.model_costs
-credits.agent_runtime_reserve
-credits.goal_mode_multiplier
-recharge_tiers.*.bonus_credits
-```
+## Forward Cutover
 
-Claude `total_cost_usd`, legacy agent-runtime deductions, sign-in endpoints, bonus/grant endpoints, and overdraft behavior are removed rather than retained as compatibility paths.
+The release performs one maintenance-window cutover:
 
-## Error Handling
+1. deploy code that understands only the new contract;
+2. publish and validate billing catalogs;
+3. create new empty wallet projections;
+4. import only explicitly approved opening paid balances as top-up entries;
+5. delete legacy credits, multipliers, sign-in rewards, runtime charges, holds, payment-required states, and dynamic pricing APIs;
+6. switch Studio to `/billing` and fixed quotes;
+7. verify new task admission, accepted-task debt, debt repayment, task reversal, provider cost, and margin reports.
 
-- Insufficient credits returns `402 insufficient_credits` with fixed required and available amounts.
-- Expired or changed quote returns `409 quote_expired`; the client must request a new quote.
-- Duplicate idempotent operations return the existing result.
-- Reused idempotency keys with a different payload return `409 idempotency_conflict`.
-- Missing provider usage, unresolved output dimensions, or absent cost evidence fails the provider operation and releases the hold.
-- Cost-budget exhaustion cancels remaining provider work, records the cost incurred so far, and releases the user hold.
-- Durable-delivery verification failure releases the hold even when provider cost was incurred.
-- Provider cost attached to a released hold is recorded as platform failure cost, never paid revenue or promotional acquisition cost.
-- Provider invoice differences append adjustment events and never retroactively alter user charges.
-- Reconciliation errors produce operator alerts and retain the nonterminal record for retry.
-
-## Concurrency And Recovery
-
-- Wallet mutation uses one database transaction with account-row locking and deterministic lot order.
-- Quote, hold, capture, release, top-up, promotion, referral, and provider-cost events each require domain-specific idempotency keys.
-- Task creation and hold creation are atomic.
-- Durable task completion and capture use an outbox/finalizer boundary so process death cannot lose the settlement decision.
-- Provider request IDs prevent duplicate cost events when response reporting is retried.
-- Reconciliation is safe to run concurrently on multiple server instances through row leases and idempotent transitions.
-
-## Cutover
-
-This is a forward-only cutover:
-
-1. Stop new task creation and drain or cancel all in-flight tasks.
-2. Reconcile all legacy reserves, refunds, and terminal task states.
-3. Export legacy users with positive balances for operator review.
-4. Recreate only verified real-cash balances through the new top-up API using their actual cash references.
-5. Do not import unidentified bonus, sign-in, multiplier-derived, or runtime-derived balances.
-6. Deploy the new tables, strict configuration, APIs, and Studio together.
-7. Remove legacy columns, transaction types, endpoints, configuration, and UI in the same release.
-
-There is no dual-write period, fallback reader, or legacy balance adapter.
-
-## Security And Audit
-
-- The top-up endpoint requires the existing admin API-key boundary and must never log that key.
-- External references and idempotency keys are indexed and unique within their domain.
-- Admin reports require explicit administrative authorization.
-- Raw provider payloads are sanitized for secrets and personal content before cost-ledger persistence.
-- Every financial event records actor, source service, request ID, timestamp, and immutable correlation IDs.
-- No API accepts balance-after, revenue, provider cost, or margin values supplied by the client.
+No compatibility readers, dual writes, or fallback prices remain.
 
 ## Testing Strategy
 
-### Configuration
+Required tests cover:
 
-- Strict decoding rejects every removed key and unknown key.
-- Every enabled route requires exactly one active cost profile.
-- Every billable option resolves exactly one active SKU.
-- Margin, promotion, currency, decimal, capability, and evidence validation fail closed.
-
-### Wallet And Settlement
-
-- Paid and promotional lots preserve all conservation invariants.
-- FEFO promotional allocation and FIFO paid allocation are deterministic.
-- Concurrent reserves cannot overspend one account or lot.
-- Capture and release are mutually exclusive, idempotent, and crash recoverable.
-- Automatic retries never change the hold amount or create another capture.
-- Orphan reconciliation converges to one valid terminal state.
-
-### Recharge And Promotions
-
-- Cash fen deterministically produces credits and recognized lot value.
-- Top-up idempotency rejects mismatched replay payloads.
-- Onboarding is issued once and expires correctly.
-- Referral is issued only after the first qualifying real top-up.
-- Self-referral, duplicate invitee reward, and inviter-limit abuse are rejected.
-- Promotional consumption recognizes zero revenue and records acquisition cost.
-- Promotion configuration proves its per-recipient worst-case provider cost is bounded.
-
-### Provider Cost
-
-- Claude `total_cost_usd` never affects wallet or cost-ledger calculation.
-- Token categories use the exact provider/model cost profile and FX snapshot.
-- Seedream uses actual output pixels, successful output count, and reference count.
-- A 2048 x 2048 Seedream output costs CNY 0.60 before additional references.
-- Task-included provider and media operations consume only the parent task budget and never create a second user charge.
-- GPT Image usage requires provider usage and records exact token categories.
-- Duplicate provider response reporting creates one cost event.
-- Invoice reconciliation appends adjustment events without modifying captures.
-
-### Product And Delivery
-
-- Quote snapshots remain valid after a newer catalog is published.
-- Cost-budget exhaustion aborts execution and releases the hold.
-- Durable delivery captures once; failed or missing delivery releases fully.
-- Goal mode and unmapped variants are unavailable rather than dynamically multiplied.
-- Studio never displays a provider-derived or token-derived user charge.
-
-### Verification
-
-Run targeted configuration, repository, service, handler, MCP, Agent, and provider tests, then:
-
-```bash
-go test ./...
-go build -o /tmp/anban-creator-server ./server
-go build -o /tmp/anban ./agent
-cd studio && bun run test
-cd studio && bun run build
-```
+- strict configuration decoding and cross-file references;
+- exact decimal and micro-CNY arithmetic;
+- task admission under sufficient, insufficient, promotional, and debt states;
+- accepted-task operation overdraft and uninterrupted execution;
+- top-up smaller than, equal to, and greater than debt;
+- promotion inability to repay debt;
+- concurrent task admission and operation charges;
+- idempotent top-up, task charge, operation charge, referral, reversal, and cost events;
+- platform failure reversal and user-cancel no-reversal policies;
+- Evolving plus Turbo `modelUsage` parsing and exact cost calculation;
+- missing final model usage marked unreconciled without wallet mutation;
+- image/video durable-output charge boundaries;
+- full Go tests, server/agent builds, Studio tests/build, and browser QA.
 
 ## Acceptance Criteria
 
-- A user can know the complete fixed charge before starting any billable action.
-- No execution outcome can create a second or larger user charge.
-- No wallet can become negative.
-- Failed, cancelled, timed-out, unbillable, or budget-exhausted work releases the hold fully.
-- Every enabled provider call has immutable usage, price evidence, exact cost, and reconciliation identity.
-- Paid revenue, provider cost, promotional acquisition cost, profit, and margin are reportable by all required dimensions.
-- Seedream costs use actual output pixels and reference count; the API is not expected to return money.
-- `ANTHROPIC_DEFAULT_FABLE_MODEL` remains supported and maps to the exact Evolving provider ID.
-- Old sign-in, bonus, multiplier, dynamic runtime, overdraft, and compatibility paths no longer exist.
-- Strict startup validation prevents unpriced routes and unmapped billable actions from entering production.
+- A new task cannot be created with debt or insufficient fixed-price balance.
+- Once accepted, a task never stops because its wallet becomes negative.
+- Successful premium MCP operations charge their fixed SKU exactly once and may create debt.
+- A transient wallet-write failure after durable output is repaired by the settlement outbox without failing the accepted task.
+- Paid top-up repays debt first; promotion never repays debt.
+- Claude `total_cost_usd` is absent from every wallet and cost calculation.
+- Final `modelUsage` records Evolving and child Turbo usage separately.
+- Missing terminal usage produces an admin reconciliation state, not a user charge or task failure.
+- No Claude gateway or running provider-cost budget exists.
+- No legacy sign-in, bonus, multiplier, dynamic runtime deduction, hold, or payment-required path remains.
+- Users see fixed prices and wallet debt; administrators see provider cost and contribution margin.

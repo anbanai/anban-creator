@@ -133,8 +133,6 @@ export interface ImageGeneration {
   output_format?: string
   status: 'generating' | 'completed' | 'failed'
   error?: string
-  input_tokens?: number
-  output_tokens?: number
   created_at: string
   updated_at: string
   results?: ImageGenerationResult[]

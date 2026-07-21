@@ -30,8 +30,6 @@ type AuthHandler struct {
 	wechatCfg        *config.WeChatConfig
 	repo             repository.Repository
 	emailSvc         *service.EmailService
-	creditSvc        *service.CreditService
-	creditsCfg       *config.CreditsConfig
 	logger           *zerolog.Logger
 	hub              *WebSocketHub
 	inviteEnabled    bool
@@ -52,8 +50,6 @@ func NewAuthHandler(
 	hub *WebSocketHub,
 	inviteEnabled bool,
 	maxInvitePerUser int,
-	creditSvc *service.CreditService,
-	creditsCfg *config.CreditsConfig,
 	rdb *redis.Client,
 ) *AuthHandler {
 	return &AuthHandler{
@@ -62,8 +58,6 @@ func NewAuthHandler(
 		wechatCfg:        wechatCfg,
 		repo:             repo,
 		emailSvc:         emailSvc,
-		creditSvc:        creditSvc,
-		creditsCfg:       creditsCfg,
 		logger:           logger,
 		hub:              hub,
 		inviteEnabled:    inviteEnabled,
@@ -149,16 +143,15 @@ type tokenResponse struct {
 }
 
 type authUserResponse struct {
-	ID             string     `json:"id"`
-	Email          string     `json:"email"`
-	Nickname       string     `json:"nickname"`
-	Avatar         string     `json:"avatar"`
-	Tier           model.Tier `json:"tier"`
-	InviteCode     string     `json:"invite_code"`
-	InviteCount    int        `json:"invite_count"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	CreditsBalance int        `json:"credits_balance"`
+	ID          string     `json:"id"`
+	Email       string     `json:"email"`
+	Nickname    string     `json:"nickname"`
+	Avatar      string     `json:"avatar"`
+	Tier        model.Tier `json:"tier"`
+	InviteCode  string     `json:"invite_code"`
+	InviteCount int        `json:"invite_count"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // ---------------------------------------------------------------------------
@@ -255,16 +248,15 @@ func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse,
 	if user != nil {
 		resp.HasPassword = user.Password != ""
 		resp.User = &authUserResponse{
-			ID:             user.ID,
-			Email:          user.Email,
-			Nickname:       user.Nickname,
-			Avatar:         user.Avatar,
-			Tier:           model.ResolveTier(user.Tier),
-			InviteCode:     user.InviteCode,
-			InviteCount:    user.InviteCount,
-			CreatedAt:      user.CreatedAt,
-			UpdatedAt:      user.UpdatedAt,
-			CreditsBalance: user.CreditsBalance,
+			ID:          user.ID,
+			Email:       user.Email,
+			Nickname:    user.Nickname,
+			Avatar:      user.Avatar,
+			Tier:        model.ResolveTier(user.Tier),
+			InviteCode:  user.InviteCode,
+			InviteCount: user.InviteCount,
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
 		}
 	}
 	return resp, nil
@@ -440,22 +432,6 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		}
 	}
 
-	// Grant registration bonus (best-effort, don't fail registration if this fails).
-	if h.creditSvc != nil && h.creditsCfg != nil && h.creditsCfg.RegisterBonus > 0 {
-		if err := h.creditSvc.GrantBonus(ctx, user.ID, h.creditsCfg.RegisterBonus,
-			model.CreditTypeRegisterBonus, fmt.Sprintf("注册赠送 +%d", h.creditsCfg.RegisterBonus)); err != nil {
-			h.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to grant registration bonus")
-		}
-	}
-
-	// Grant invite reward to inviter (best-effort).
-	if inviter != nil && h.creditSvc != nil && h.creditsCfg != nil && h.creditsCfg.InviteReward > 0 {
-		if err := h.creditSvc.GrantBonus(ctx, inviter.ID, h.creditsCfg.InviteReward,
-			model.CreditTypeInviteReward, fmt.Sprintf("邀请用户注册奖励 +%d", h.creditsCfg.InviteReward)); err != nil {
-			h.logger.Error().Err(err).Str("inviter_id", inviter.ID).Str("invitee_id", user.ID).Msg("failed to grant invite reward")
-		}
-	}
-
 	resp, err := h.generateTokenPair(c, user.ID)
 	if err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to generate tokens")
@@ -626,21 +602,6 @@ func (h *AuthHandler) CodeLogin(c fiber.Ctx) error {
 			}
 		}
 
-		// Grant registration bonus (best-effort, don't fail registration if this fails).
-		if h.creditSvc != nil && h.creditsCfg != nil && h.creditsCfg.RegisterBonus > 0 {
-			if err := h.creditSvc.GrantBonus(ctx, user.ID, h.creditsCfg.RegisterBonus,
-				model.CreditTypeRegisterBonus, fmt.Sprintf("注册赠送 +%d", h.creditsCfg.RegisterBonus)); err != nil {
-				h.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to grant registration bonus")
-			}
-		}
-
-		// Grant invite reward to inviter (best-effort).
-		if inviter != nil && h.creditSvc != nil && h.creditsCfg != nil && h.creditsCfg.InviteReward > 0 {
-			if err := h.creditSvc.GrantBonus(ctx, inviter.ID, h.creditsCfg.InviteReward,
-				model.CreditTypeInviteReward, fmt.Sprintf("邀请用户注册奖励 +%d", h.creditsCfg.InviteReward)); err != nil {
-				h.logger.Error().Err(err).Str("inviter_id", inviter.ID).Str("invitee_id", user.ID).Msg("failed to grant invite reward")
-			}
-		}
 	}
 
 	// generateTokenPair handles single-device login (deletes old sessions first).
@@ -813,7 +774,6 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 		"email":                user.Email,
 		"nickname":             user.Nickname,
 		"avatar":               user.Avatar,
-		"credits_balance":      user.CreditsBalance,
 		"tier":                 tier,
 		"max_concurrent_limit": model.GetTierMaxConcurrentTasks(tier),
 		"invite_code":          user.InviteCode,
@@ -1153,13 +1113,6 @@ func (h *AuthHandler) QRLoginCallback(c fiber.Ctx) error {
 		if err := h.repo.Users().Create(ctx, user); err != nil {
 			h.logger.Error().Err(err).Msg("failed to create user from QR login")
 			return Error(c, fiber.StatusInternalServerError, "failed to create user")
-		}
-		// Grant registration bonus.
-		if h.creditSvc != nil && h.creditsCfg != nil && h.creditsCfg.RegisterBonus > 0 {
-			if err := h.creditSvc.GrantBonus(ctx, user.ID, h.creditsCfg.RegisterBonus,
-				model.CreditTypeRegisterBonus, fmt.Sprintf("注册赠送 +%d", h.creditsCfg.RegisterBonus)); err != nil {
-				h.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to grant registration bonus")
-			}
 		}
 	} else {
 		updated := false

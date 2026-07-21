@@ -63,14 +63,17 @@ type Provider interface {
 
 // GenerateResult 图片生成结果
 type GenerateResult struct {
-	URL             string           // 生成的图片 URL（单张时使用）
-	RevisedPrompt   string           // 优化后的提示词（某些提供者会返回）
-	Model           string           // 实际使用的模型
-	Size            string           // 实际尺寸
-	ResponseType    string           // 返回类型：b64_json / url / file / empty
-	ResponsePreview string           // 原始返回预览：URL 原样输出，base64 截断输出
-	Images          []GeneratedImage // 批量生成的多张图片
-	Usage           *ImageGenerationUsage
+	ProviderRequestID string
+	OutputWidth       int
+	OutputHeight      int
+	URL               string           // 生成的图片 URL（单张时使用）
+	RevisedPrompt     string           // 优化后的提示词（某些提供者会返回）
+	Model             string           // 实际使用的模型
+	Size              string           // 实际尺寸
+	ResponseType      string           // 返回类型：b64_json / url / file / empty
+	ResponsePreview   string           // 原始返回预览：URL 原样输出，base64 截断输出
+	Images            []GeneratedImage // 批量生成的多张图片
+	Usage             *ImageGenerationUsage
 }
 
 type ImageGenerationUsage struct {

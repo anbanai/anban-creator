@@ -57,8 +57,24 @@ func (h *DesignerHandler) SetDirectUploadDependencies(repo repository.Repository
 
 // GetProviders handles GET /api/v1/designer/providers
 func (h *DesignerHandler) GetProviders(c fiber.Ctx) error {
-	providers := h.svc.GetProviders()
+	providers := h.svc.GetProviders(c.Context())
 	return Success(c, providers)
+}
+
+func (h *DesignerHandler) Quote(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req service.DesignerGenerateRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	quote, err := h.svc.CreateGenerationQuote(c.Context(), userID, req)
+	if err != nil {
+		return writeBillingServiceError(c, err)
+	}
+	return Success(c, quote)
 }
 
 // Generate handles POST /api/v1/designer/generate
@@ -85,16 +101,13 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrProjectOwnedByUser) {
 			return Forbidden(c, "project not owned by user")
 		}
-		if errors.Is(err, service.ErrInsufficientCredits) {
-			return Error(c, fiber.StatusPaymentRequired, "积分不足，请充值后重试")
-		}
 		if errors.Is(err, service.ErrDesignerReferenceInvalid) {
 			return Error(c, fiber.StatusBadRequest, "designer reference is invalid or unavailable")
 		}
 		if h.logger != nil {
 			h.logger.Error().Err(err).Str("user_id", userID).Msg("designer create generation record failed")
 		}
-		return Error(c, fiber.StatusInternalServerError, "failed to create generation")
+		return writeBillingServiceError(c, err)
 	}
 
 	go h.svc.ExecuteGeneration(context.Background(), created.GenerationID)

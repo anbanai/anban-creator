@@ -35,9 +35,6 @@ func newJobCommand(bootstrap bootstrapJobFunc, run runAgentFunc) *cli.Command {
 					result := serverExecutionFailure(jobCfg.Workspace, err)
 					reporter := NewReporter(cfg)
 					window := newFinalizationWindow(cfg)
-					workCtx, cancelWork := window.workContext()
-					_ = reporter.ReportResult(workCtx, result)
-					cancelWork()
 					completeCtx, cancelComplete := window.completionContext()
 					_ = reporter.ReportComplete(completeCtx, result)
 					cancelComplete()
@@ -63,6 +60,7 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		Topic:               response.Prompt,
 		BootstrapPrompt:     response.Prompt,
 		RuntimeEnv:          serveragent.ClaudeRuntimeEnv(response.RuntimeEnv),
+		ModelUsageAliases:   cloneRuntimeModelUsageAliases(response.ModelUsageAliases),
 		Workspace:           jobCfg.Workspace,
 		Model:               response.Model,
 		AgentFlag:           response.AgentFlag,
@@ -76,4 +74,15 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		cfg.Env = response.Env
 	}
 	return cfg
+}
+
+func cloneRuntimeModelUsageAliases(source map[string]serveragent.ModelUsageIdentity) map[string]serveragent.ModelUsageIdentity {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]serveragent.ModelUsageIdentity, len(source))
+	for raw, identity := range source {
+		result[raw] = identity
+	}
+	return result
 }

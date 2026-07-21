@@ -30,6 +30,24 @@ type bootstrapSecurityStore struct {
 	signedExpiries []time.Time
 }
 
+func bootstrapTestRuntimeEnv() map[string]string {
+	return map[string]string{
+		"ANTHROPIC_AUTH_TOKEN":           "test-token",
+		"ANTHROPIC_BASE_URL":             "https://anthropic.example.com",
+		"ANTHROPIC_MODEL":                "claude-test",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "claude-test",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "claude-test",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-test",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "claude-test",
+	}
+}
+
+func bootstrapTestModelUsageAliases() map[string]serveragent.ModelUsageIdentity {
+	return map[string]serveragent.ModelUsageIdentity{
+		"claude-test": {Provider: "anthropic", Model: "claude-test"},
+	}
+}
+
 func (s *bootstrapSecurityStore) DownloadURL(_ context.Context, key string, ttl int) (string, error) {
 	s.signedKeys = append(s.signedKeys, key)
 	s.signedTTLs = append(s.signedTTLs, ttl)
@@ -89,7 +107,7 @@ func TestBootstrapSignsOwnedReferenceAsset(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformSeednote, ReferenceImageAssetID: asset.ID}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", Store: store, TokenTTL: time.Hour, SignedURLTTL: 60, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
 
 	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
 	if err != nil {
@@ -158,7 +176,7 @@ func TestBootstrapSignsInheritedProjectReferenceAsset(t *testing.T) {
 	}
 	task := &model.Task{ID: "task-1", UserID: asset.UserID, ProjectID: "project-1", Type: model.PlatformSeednote}
 	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: task.Type, ReferenceImageAssetID: asset.ID})
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", Store: store, TokenTTL: time.Hour, SignedURLTTL: 60, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
 
 	response, err := svc.buildResponse(t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
 	if err != nil {
@@ -205,7 +223,7 @@ func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
 	}
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: 10 * time.Minute, SignedURLTTL: 600, Store: store}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", TokenTTL: 10 * time.Minute, SignedURLTTL: 600, Store: store, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
 	svc.now = func() time.Time { return now }
 	prefix := "uploads/users/user-1/projects/project-1/tasks/task-1"
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformEcommerce, Prompt: "topic", ReferenceImageAssetID: "asset-bootstrap"}
@@ -311,11 +329,10 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	store := &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, RuntimeEnv: map[string]string{
-		"ANTHROPIC_AUTH_TOKEN": "bootstrap-secret",
-		"ANTHROPIC_BASE_URL":   "https://anthropic.example.com",
-		"PATH":                 "/untrusted/bin",
-	}}, zerolog.Nop())
+	runtimeEnv := bootstrapTestRuntimeEnv()
+	runtimeEnv["ANTHROPIC_AUTH_TOKEN"] = "bootstrap-secret"
+	runtimeEnv["PATH"] = "/untrusted/bin"
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, RuntimeEnv: runtimeEnv, ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
 	identity := &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-1", PodUID: "pod-uid-1", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, JobDeadline: time.Now().Add(4 * time.Minute)}
 	first, err := svc.Bootstrap(ctx, identity)
 	if err != nil {
@@ -325,7 +342,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
-	if first.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "bootstrap-secret" || first.RuntimeEnv["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || len(first.RuntimeEnv) != 2 {
+	if first.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "bootstrap-secret" || first.RuntimeEnv["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || first.RuntimeEnv["ANTHROPIC_MODEL"] != "claude-test" || len(first.RuntimeEnv) != 7 {
 		t.Fatalf("runtime environment = %#v, want only allowlisted Claude values", first.RuntimeEnv)
 	}
 	if len(first.Files) < 2 {
@@ -386,7 +403,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	if _, err := svc.Bootstrap(ctx, &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-2", PodUID: "pod-uid-2", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID}); err == nil {
 		t.Fatal("different Pod stole running execution")
 	}
-	taskSvc := NewTaskService(repo, nil, nil, nil, nil, nil, "", nil, "", nil, nil)
+	taskSvc := NewTaskService(repo, nil, nil, nil, nil, "", nil, "", nil, nil)
 	if err := taskSvc.ValidateAgentExecutionAccess(ctx, userID, projectID, taskID, executionID); err != nil {
 		t.Fatalf("current execution rejected: %v", err)
 	}
@@ -490,7 +507,7 @@ func TestBuildResponseSignsKeyFirstReferenceImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: 10 * time.Minute, SignedURLTTL: 60}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", Store: store, TokenTTL: 10 * time.Minute, SignedURLTTL: 60, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
 	svc.now = func() time.Time { return now }
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "write", Status: model.TaskStatusRunning}
 	key := "assets/users/user-1/reference-upload/reference.png"

@@ -3,9 +3,16 @@ package main
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -73,44 +80,98 @@ func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 	}
 }
 
-func TestMainWiresReferenceAssetServiceEvenWithoutStorage(t *testing.T) {
-	raw, err := os.ReadFile("main.go")
+func TestBuildBillingRuntime(t *testing.T) {
+	catalogDir, err := filepath.Abs("billing")
 	if err != nil {
-		t.Fatalf("read main.go: %v", err)
+		t.Fatal(err)
 	}
-	src := string(raw)
-	serviceStart := strings.Index(src, "taskSvc = service.NewTaskService")
-	serviceEnd := strings.Index(src[serviceStart:], "taskSvc.SetProjectMemoryManager")
-	if serviceStart < 0 || serviceEnd < 0 {
-		t.Fatal("task service wiring section is missing")
+	newRepo := func(t *testing.T) (*gorm.DB, repository.Repository) {
+		t.Helper()
+		db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := model.AutoMigrate(db); err != nil {
+			t.Fatal(err)
+		}
+		repo := repository.New(db)
+		t.Cleanup(func() { _ = repo.Close() })
+		return db, repo
 	}
-	serviceSection := src[serviceStart : serviceStart+serviceEnd]
-	constructAt := strings.Index(serviceSection, "referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)")
-	storeGuardAt := strings.Index(serviceSection, "if store != nil")
-	if constructAt < 0 || (storeGuardAt >= 0 && constructAt > storeGuardAt) {
-		t.Fatalf("reference asset service construction must be unconditional after repository setup:\n%s", serviceSection)
+	logger := zerolog.New(os.Stderr)
+
+	t.Run("required config", func(t *testing.T) {
+		for _, cfg := range []*config.Config{
+			{BillingRuntime: config.BillingRuntimeConfig{AdminAPIKey: "key"}},
+			{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir}},
+		} {
+			db, repo := newRepo(t)
+			if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err == nil {
+				t.Fatalf("buildBillingRuntime(%+v) error = nil", cfg.BillingRuntime)
+			}
+		}
+	})
+
+	t.Run("load failure", func(t *testing.T) {
+		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: t.TempDir(), AdminAPIKey: "key"}}
+		db, repo := newRepo(t)
+		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err == nil || !strings.Contains(err.Error(), "load billing bundle") {
+			t.Fatalf("load failure = %v", err)
+		}
+	})
+
+	t.Run("publish failure", func(t *testing.T) {
+		db, repo := newRepo(t)
+		if err := repo.Close(); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
+		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err == nil || !strings.Contains(err.Error(), "publish billing catalog") {
+			t.Fatalf("publish failure = %v", err)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		db, repo := newRepo(t)
+		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
+		runtime, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger)
+		if err != nil || runtime == nil || runtime.Handler == nil || runtime.AdminHandler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil || runtime.Cost == nil || runtime.Margin == nil {
+			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
+		}
+		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-20-v2"); err != nil {
+			t.Fatalf("published production catalog: %v", err)
+		}
+	})
+}
+
+func TestMainWiresRequiredBillingRuntime(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{
-		"planSvc.SetReferenceAssetService(referenceAssetSvc)",
-		"taskSvc.SetReferenceAssetService(referenceAssetSvc)",
-		"aiEntrySvc.SetReferenceAssetService(referenceAssetSvc)",
-		"planHandler.SetReferenceAssetService(referenceAssetSvc)",
-		"taskHandler.SetReferenceAssetService(referenceAssetSvc)",
-		"projectHandler.SetReferenceAssetService(referenceAssetSvc)",
+	text := string(source)
+	for _, required := range []string{
+		"buildBillingRuntime(context.Background(), mysqlDB, repo, cfg, log)",
+		"service.NewBillingMaintenanceWorker(wallet",
+		"BillingHandler:",
+		"go func() {",
+		"fixedBilling.Worker.Run(ctx)",
+		"billingWorkerWG.Wait()",
+		"signalCtx, stop := signal.NotifyContext",
+		"ctx, cancel := context.WithCancel(signalCtx)",
 	} {
-		if !strings.Contains(src, want) {
-			t.Fatalf("main.go missing reference asset wiring %q", want)
+		if !strings.Contains(text, required) {
+			t.Fatalf("main billing wiring missing %q", required)
 		}
 	}
-	projectStart := strings.Index(src, "projectHandler = handler.NewProjectHandler")
-	projectEnd := strings.Index(src[projectStart:], "projectHandler.SetSeednoteClient")
-	if projectStart < 0 || projectEnd < 0 {
-		t.Fatal("project handler wiring section is missing")
+	workerStart := strings.Index(text, "fixedBilling.Worker.Run(ctx)")
+	workerWait := strings.Index(text, "billingWorkerWG.Wait()")
+	repoClose := strings.Index(text, "repo.Close()")
+	if workerStart < 0 || workerWait <= workerStart || repoClose <= workerWait {
+		t.Fatalf("billing worker lifecycle order invalid: start=%d wait=%d repoClose=%d", workerStart, workerWait, repoClose)
 	}
-	projectSection := src[projectStart : projectStart+projectEnd]
-	presentAt := strings.Index(projectSection, "projectHandler.SetReferenceAssetService(referenceAssetSvc)")
-	storeGuardAt = strings.Index(projectSection, "if store != nil")
-	if presentAt < 0 || (storeGuardAt >= 0 && presentAt > storeGuardAt) {
-		t.Fatalf("project handler reference service wiring must not depend on storage:\n%s", projectSection)
+	listen := strings.Index(text, "app.Listen(addr, listenConfig)")
+	if listen < 0 || !strings.Contains(text[listen:], "cancel()") {
+		t.Fatal("main must cancel the shared lifecycle context when Listen returns")
 	}
 }

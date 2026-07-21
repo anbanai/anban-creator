@@ -18,7 +18,7 @@ describe('navigation IA', () => {
     expect(creationItems.map((item) => item.label)).toEqual(['项目', '任务', '设计师'])
     expect(automationItems.map((item) => item.label)).toEqual(['计划', '时间轴'])
     expect(assetItems.map((item) => item.label)).toEqual(['模板库'])
-    expect(businessItems.map((item) => item.label)).toEqual(['积分', '用量'])
+    expect(businessItems.map((item) => item.label)).toEqual(['钱包', '用量'])
     expect(connectSettingItems.map((item) => item.label)).toEqual(['Claude Code', 'OpenClaw', 'Codex', '设置'])
   })
 

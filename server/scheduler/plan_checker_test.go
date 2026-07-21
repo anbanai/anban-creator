@@ -86,7 +86,7 @@ func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskSer
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &recordingEnqueuer{}
-	taskSvc := service.NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, enqueuer, nil, &logger, "", nil, "", nil, nil)
 	taskSvc.SetReferenceAssetService(service.NewReferenceAssetService(repo, nil, time.Now))
 	return repo, taskSvc, enqueuer, &logger
 }

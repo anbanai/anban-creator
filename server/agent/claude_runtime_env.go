@@ -12,11 +12,25 @@ const (
 
 var claudeRuntimeEnvKeys = [...]string{
 	"ANTHROPIC_AUTH_TOKEN",
-	"ANTHROPIC_API_KEY",
 	"ANTHROPIC_BASE_URL",
 	"ANTHROPIC_MODEL",
+	"ANTHROPIC_DEFAULT_OPUS_MODEL",
+	"ANTHROPIC_DEFAULT_FABLE_MODEL",
+	"ANTHROPIC_DEFAULT_SONNET_MODEL",
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
 	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
 	"CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+	"CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+}
+
+var claudeProviderRuntimeEnvKeys = [...]string{
+	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_BASE_URL",
+	"ANTHROPIC_MODEL",
+	"ANTHROPIC_DEFAULT_OPUS_MODEL",
+	"ANTHROPIC_DEFAULT_FABLE_MODEL",
+	"ANTHROPIC_DEFAULT_SONNET_MODEL",
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
 }
 
 // ClaudeRuntimeEnv returns an allowlisted copy of the Server-owned Claude
@@ -59,6 +73,11 @@ func ValidateClaudeRuntimeEnv(runtimeEnv map[string]string) error {
 		total += len(key) + len(value)
 		if total > maxClaudeRuntimeEnvTotalBytes {
 			return fmt.Errorf("Claude runtime environment exceeds total size limit")
+		}
+	}
+	for _, key := range claudeProviderRuntimeEnvKeys {
+		if strings.TrimSpace(runtimeEnv[key]) == "" {
+			return fmt.Errorf("Claude runtime environment key %q is required", key)
 		}
 	}
 	return nil

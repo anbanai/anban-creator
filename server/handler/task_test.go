@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -107,7 +107,7 @@ func mustMarshalTaskJSON(t *testing.T, value any) []byte {
 	return raw
 }
 
-func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
+func TestDownloadAndPreviewRemainAvailableForCompletedTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -131,23 +131,10 @@ func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ProjectID: uuid.New().String(),
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusCompleted,
+		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
+		Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
-	}
-	if err := repo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusPaymentRequired, 3200); err != nil {
-		t.Fatalf("set billing status: %v", err)
-	}
-	locked, err := repo.Tasks().FindByID(ctx, taskID)
-	if err != nil {
-		t.Fatalf("reload task: %v", err)
-	}
-	if locked.BillingStatus != model.TaskBillingStatusPaymentRequired || locked.BillingShortfallCredits != 3200 {
-		t.Fatalf("reloaded billing = %q/%d", locked.BillingStatus, locked.BillingShortfallCredits)
 	}
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
 		ID:              fileID,
@@ -165,12 +152,16 @@ func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files/zip", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return h.DownloadZip(c)
+	})
+	app.Get("/tasks/:id/preview", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.PreviewHTML(c)
 	})
 
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files/zip", nil))
@@ -178,13 +169,23 @@ func TestDownloadZipBlocksPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("request: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusPaymentRequired {
+	if resp.StatusCode != fiber.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 402 body=%s", resp.StatusCode, data)
+		t.Fatalf("zip status = %d, want 200 body=%s", resp.StatusCode, data)
+	}
+
+	preview, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/preview", nil))
+	if err != nil {
+		t.Fatalf("preview request: %v", err)
+	}
+	defer preview.Body.Close()
+	previewBody, _ := io.ReadAll(preview.Body)
+	if preview.StatusCode != fiber.StatusOK || !strings.Contains(string(previewBody), "<main>ok</main>") {
+		t.Fatalf("preview = status %d body=%s, want accessible HTML", preview.StatusCode, previewBody)
 	}
 }
 
-func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
+func TestGetFilesPreservesDeliveryURLs(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -208,11 +209,8 @@ func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ProjectID: uuid.New().String(),
-		Type:      model.PlatformSeednote,
-		Status:    model.TaskStatusCompleted,
+		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
+		Type: model.PlatformSeednote, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -231,12 +229,8 @@ func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create task file: %v", err)
 	}
-	if err := repo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusPaymentRequired, 3200); err != nil {
-		t.Fatalf("set billing status: %v", err)
-	}
-
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
@@ -268,8 +262,8 @@ func TestGetFilesRedactsDeliveryURLsForPaymentRequiredTask(t *testing.T) {
 	if got.ID != fileID || got.FileName != "image_01.png" || got.MimeType != "image/png" || got.FileSize != upload.Size {
 		t.Fatalf("metadata = %+v, want file metadata preserved", got)
 	}
-	if got.URL != "" || got.MediaID != "" || got.WechatURL != "" {
-		t.Fatalf("delivery fields = url %q media_id %q wechat_url %q, want redacted", got.URL, got.MediaID, got.WechatURL)
+	if got.URL == "" || got.MediaID != "wechat-media-1" || got.WechatURL != "https://mmbiz.qpic.cn/wechat-media-1" {
+		t.Fatalf("delivery fields = url %q media_id %q wechat_url %q, want preserved", got.URL, got.MediaID, got.WechatURL)
 	}
 }
 
@@ -291,7 +285,7 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
+	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -314,7 +308,7 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	}
 }
 
-func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
+func TestVideoProductionRemainsAvailableForCompletedTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -329,20 +323,13 @@ func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ProjectID: uuid.New().String(),
-		Type:      model.PlatformVideoCreator,
-		Status:    model.TaskStatusCompleted,
+		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
+		Type: model.PlatformVideoCreator, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := repo.Tasks().UpdateBillingStatus(ctx, taskID, model.TaskBillingStatusPaymentRequired, 800); err != nil {
-		t.Fatalf("set billing status: %v", err)
-	}
-
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/video-production", func(c fiber.Ctx) error {
@@ -355,9 +342,61 @@ func TestVideoProductionBlocksPaymentRequiredTask(t *testing.T) {
 		t.Fatalf("request: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusPaymentRequired {
+	if resp.StatusCode != fiber.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 402 body=%s", resp.StatusCode, data)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, data)
+	}
+}
+
+func TestMarkPublishedWorksForCompletedTask(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, taskID := uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "publishlegacy"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
+	app := fiber.New()
+	app.Patch("/tasks/:id/published", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.MarkPublished(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPatch, "/tasks/"+taskID+"/published", strings.NewReader(`{"published":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, data)
+	}
+	found, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || !found.Published {
+		t.Fatalf("published task = %+v err=%v", found, err)
+	}
+}
+
+func TestTaskHandlerProductionDoesNotReferenceLegacyPaymentRequiredColumns(t *testing.T) {
+	raw, err := os.ReadFile("task.go")
+	if err != nil {
+		t.Fatalf("read task.go: %v", err)
+	}
+	for _, forbidden := range []string{
+		"TaskBillingStatusPaymentRequired", "BillingShortfallCredits", "taskBillingLocked", "ensureTaskBillingUnlocked",
+	} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Errorf("task.go still contains legacy delivery gate %q", forbidden)
+		}
 	}
 }
 
@@ -386,7 +425,7 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	handler := NewTaskHandler(taskSvc, &logger)
 
 	app := fiber.New()
@@ -457,7 +496,7 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetImagePresets(presets)
 	h.SetRepository(repo)
@@ -549,7 +588,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 
 	app := fiber.New()
@@ -615,7 +654,7 @@ func TestCreateTaskMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error {
@@ -670,7 +709,7 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error {
@@ -697,336 +736,6 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	}
 	if len(env.Data) != 1 {
 		t.Fatalf("response data len = %d, want one clamped ecommerce task", len(env.Data))
-	}
-}
-
-func TestCreateTaskPersistsFinalReferenceAndEcommercePhotoURLs(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "finalecomref"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformEcommerce, Name: "Ecommerce", Status: model.ProjectStatusActive}); err != nil {
-		t.Fatal(err)
-	}
-	refID, photoID := uuid.NewString(), uuid.NewString()
-	seedHandlerUploadSession(t, repo, userID, refID, service.DirectUploadPurposeTaskReference, "reference.png", "image/png")
-	photoURL := seedHandlerUploadSession(t, repo, userID, photoID, service.DirectUploadPurposeEcommercePhoto, "product.png", "image/png")
-	store := &referencePresentationStore{fakeStorageProvider: uploadSessionStatStore(repo.UploadSessions())}
-	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
-	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
-	taskSvc.SetReferenceAssetService(referenceSvc)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	h.SetStore(store)
-	h.SetReferenceAssetService(referenceSvc)
-	app := fiber.New()
-	app.Post("/tasks", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Create(c)
-	})
-
-	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","reference_image":{"upload_session_id":"`+refID+`"},"product_photos":["`+photoURL+`"],"selected_modules":{"main_images":1}}`)
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
-	}
-	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte(refID)) {
-		t.Fatalf("task response contains non-final upload URL: %s", body)
-	}
-	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
-	if err != nil || len(tasks) != 1 {
-		t.Fatalf("persisted tasks = %#v, %v", tasks, err)
-	}
-	wantPhoto := "/api/v1/files/assets/users/" + userID + "/" + photoID + "/product.png"
-	photos := tasks[0].Ecommerce.Data().ProductPhotos
-	if tasks[0].ReferenceImageAssetID != refID || len(photos) != 1 || photos[0] != wantPhoto {
-		t.Fatalf("persisted reference/photos = %q/%#v", tasks[0].ReferenceImageAssetID, photos)
-	}
-	for id, wantKey := range map[string]string{
-		refID:   "assets/users/" + userID + "/" + refID + "/reference.png",
-		photoID: "assets/users/" + userID + "/" + photoID + "/product.png",
-	} {
-		assertFinalizedAsset(t, repo, id, wantKey)
-	}
-}
-
-func TestCreateVideoTaskPersistsFinalReferenceURL(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID, projectID, uploadID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "finalvideoref"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoCreator, Name: "Video", Status: model.ProjectStatusActive}); err != nil {
-		t.Fatal(err)
-	}
-	refURL := seedHandlerUploadSession(t, repo, userID, uploadID, service.DirectUploadPurposeVideoReference, "reference.mp4", "video/mp4")
-	store := uploadSessionStatStore(repo.UploadSessions())
-	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	app := fiber.New()
-	app.Post("/tasks", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Create(c)
-	})
-
-	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","video_creator_input":{"brief":"生成产品视频","references":[{"type":"video_url","url":"`+refURL+`"}]}}`)
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
-	}
-	if bytes.Contains(body, []byte("uploads/pending/")) || !bytes.Contains(body, []byte("assets/users/")) {
-		t.Fatalf("video task response contains non-final reference: %s", body)
-	}
-	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
-	if err != nil || len(tasks) != 1 {
-		t.Fatalf("persisted tasks = %#v, %v", tasks, err)
-	}
-	references := tasks[0].VideoInput.Data().References
-	wantURL := "/api/v1/files/assets/users/" + userID + "/" + uploadID + "/reference.mp4"
-	if len(references) != 1 || references[0].URL != wantURL {
-		t.Fatalf("persisted video references = %#v", references)
-	}
-	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/reference.mp4")
-}
-
-func TestCreateTaskMontageFinalizesSourceAssetUploads(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := uuid.New().String()
-	uploadID := uuid.New().String()
-	stagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
-	if err := repo.Users().Create(ctx, &model.User{
-		ID:         userID,
-		Email:      userID + "@example.com",
-		Password:   "hashed",
-		InviteCode: "omasset",
-	}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{
-		ID:       projectID,
-		UserID:   userID,
-		Platform: model.PlatformMontage,
-		Name:     "Montage",
-		Status:   model.ProjectStatusActive,
-	}); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
-		ID:         uploadID,
-		UserID:     userID,
-		Purpose:    service.DirectUploadPurposeMontageAsset,
-		StagingKey: "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
-
-		FileName:    "clip.mp4",
-		ContentType: "video/mp4",
-		Size:        1234,
-		Status:      model.UploadSessionPending,
-		ExpiresAt:   time.Now().Add(time.Minute),
-	}); err != nil {
-		t.Fatalf("create upload session: %v", err)
-	}
-
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, uploadSessionStatStore(repo.UploadSessions()), nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	app := fiber.New()
-	app.Post("/tasks", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Create(c)
-	})
-
-	resp := postJSON(t, app, "/tasks", `{
-		"project_id": "`+projectID+`",
-		"montage_input": {
-			"brief": "剪成一条发布会短片",
-			"source_assets": [{"type": "video", "url": "`+stagingURL+`"}]
-		}
-	}`)
-	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
-	}
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read response: %v", err)
-	}
-	if bytes.Contains(responseBody, []byte("uploads/pending/")) || !bytes.Contains(responseBody, []byte("assets/users/")) {
-		t.Fatalf("task persisted non-final montage URL: %s", responseBody)
-	}
-	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/clip.mp4")
-}
-
-func TestCreateTaskRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := uuid.New().String()
-	uploadID := uuid.New().String()
-	stagingURL := "https://cdn.example.com/uploads/pending/" + userID + "/" + uploadID + "/clip.mp4"
-	if err := repo.Users().Create(ctx, &model.User{
-		ID:         userID,
-		Email:      userID + "@example.com",
-		Password:   "hashed",
-		InviteCode: "omwrong",
-	}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{
-		ID:       projectID,
-		UserID:   userID,
-		Platform: model.PlatformArticle,
-		Name:     "Article",
-		Status:   model.ProjectStatusActive,
-	}); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
-		ID:         uploadID,
-		UserID:     userID,
-		Purpose:    service.DirectUploadPurposeMontageAsset,
-		StagingKey: "uploads/pending/" + userID + "/" + uploadID + "/clip.mp4",
-
-		FileName:    "clip.mp4",
-		ContentType: "video/mp4",
-		Size:        1234,
-		Status:      model.UploadSessionPending,
-		ExpiresAt:   time.Now().Add(time.Minute),
-	}); err != nil {
-		t.Fatalf("create upload session: %v", err)
-	}
-
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	app := fiber.New()
-	app.Post("/tasks", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Create(c)
-	})
-
-	resp := postJSON(t, app, "/tasks", `{
-		"project_id": "`+projectID+`",
-		"montage_input": {
-			"brief": "错误平台",
-			"source_assets": [{"type": "video", "url": "`+stagingURL+`"}]
-		}
-	}`)
-	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusBadRequest {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
-	}
-	session, err := repo.UploadSessions().FindByID(ctx, uploadID)
-	if err != nil {
-		t.Fatalf("find upload session: %v", err)
-	}
-	if session.Status != model.UploadSessionPending || session.AssetID != "" {
-		t.Fatalf("upload session changed: %#v", session)
-	}
-}
-
-func TestCreateTaskRejectsMalformedUploadSessionReferenceWithoutCreatingTask(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{
-		ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "badpending",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformSeednote,
-		Name: "Seednote", Status: model.ProjectStatusActive,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	app := fiber.New()
-	app.Post("/tasks", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Create(c)
-	})
-	body := fmt.Sprintf(`{
-		"project_id": %q,
-		"prompt": "test",
-		"reference_image_url": %q
-	}`, projectID, "https://cdn.example.com/uploads%2Fpending%2F"+userID)
-	resp := postJSON(t, app, "/tasks", body)
-	defer resp.Body.Close()
-	responseBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != fiber.StatusBadRequest || !bytes.Contains(responseBody, []byte("reference_image_url is no longer supported")) {
-		t.Fatalf("status/body = %d/%s", resp.StatusCode, responseBody)
-	}
-	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
-	if err != nil || len(tasks) != 0 {
-		t.Fatalf("tasks/error = %d/%v, want 0/nil", len(tasks), err)
-	}
-}
-
-func TestCreateTaskRejectsExternalLegacyReferencePath(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{
-		ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "externalpending",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformSeednote,
-		Name: "Seednote", Status: model.ProjectStatusActive,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	h.SetStore(&fakeStorageProvider{})
-	app := fiber.New()
-	app.Post("/tasks", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Create(c)
-	})
-	body := fmt.Sprintf(`{
-		"project_id": %q,
-		"prompt": "test",
-		"reference_image_url": %q
-	}`, projectID, "https://external.example.com/uploads/pending/user-1/external-id/ref.png")
-	resp := postJSON(t, app, "/tasks", body)
-	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusBadRequest {
-		responseBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status/body = %d/%s, want 400", resp.StatusCode, responseBody)
-	}
-	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
-	if err != nil || len(tasks) != 0 {
-		t.Fatalf("tasks/error = %d/%v, want 0/nil", len(tasks), err)
 	}
 }
 
@@ -1067,7 +776,7 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 
@@ -1096,224 +805,6 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	}
 	if env.Data.Status != model.TaskStatusPending {
 		t.Fatalf("new task status = %q, want pending", env.Data.Status)
-	}
-}
-
-func TestCloneTaskAcceptsFinalInputSnapshot(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "clone-snapshot@example.com", Password: "hashed", InviteCode: "clonesnapshot", Tier: model.TierFree}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	taskID := uuid.NewString()
-	source := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, Prompt: "source prompt"}
-	source.SetInputAttachments([]model.EntryAttachment{{Role: "brief", Text: "source attachment"}, {Role: model.EntryAttachmentRoleResumeLatest, Text: "old resume"}})
-	if err := repo.Tasks().Create(ctx, source); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	uploadID := "clone-upload"
-	stagingKey := "uploads/pending/" + userID + "/" + uploadID + "/reference.png"
-	finalKey := "assets/users/" + userID + "/" + uploadID + "/reference.png"
-	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
-		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		StagingKey: stagingKey, FileName: "reference.png", ContentType: "image/png", Size: 123,
-		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("create upload session: %v", err)
-	}
-	store := uploadSessionStatStore(repo.UploadSessions())
-	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	h.SetStore(store)
-	app := fiber.New()
-	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Clone(c)
-	})
-
-	resp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
-		"prompt":"  edited prompt  ",
-		"input_attachments":[{
-			"type":"image","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
-			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999,
-			"url":"https://attacker.example/secret","instruction":"  keep logo  "
-		}]
-	}`)
-	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, body=%s", resp.StatusCode, body)
-	}
-	var envelope struct {
-		Data model.Task `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if envelope.Data.Prompt != "edited prompt" {
-		t.Fatalf("prompt = %q", envelope.Data.Prompt)
-	}
-	got := envelope.Data.InputAttachments.Data()
-	if len(got) != 1 || got[0].UploadID != uploadID || got[0].Key != finalKey || got[0].URL != "" || got[0].FileName != "reference.png" || got[0].ContentType != "image/png" || got[0].Size != 123 || got[0].Instruction != "keep logo" {
-		t.Fatalf("clone attachments = %#v, want exact verified final snapshot", got)
-	}
-	found, err := repo.Tasks().FindByID(ctx, envelope.Data.ID)
-	if err != nil {
-		t.Fatalf("find clone: %v", err)
-	}
-	if stored := found.InputAttachments.Data(); len(stored) != 1 || stored[0].Key != finalKey || stored[0].URL != "" {
-		t.Fatalf("stored clone attachments = %#v", stored)
-	}
-
-	emptyResp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
-		"prompt":"",
-		"input_attachments":[{
-			"type":"image","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
-			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999
-		}]
-	}`)
-	defer emptyResp.Body.Close()
-	if emptyResp.StatusCode != fiber.StatusOK {
-		body, _ := io.ReadAll(emptyResp.Body)
-		t.Fatalf("empty prompt status = %d, body=%s", emptyResp.StatusCode, body)
-	}
-	var emptyEnvelope struct {
-		Data model.Task `json:"data"`
-	}
-	if err := json.NewDecoder(emptyResp.Body).Decode(&emptyEnvelope); err != nil {
-		t.Fatalf("decode empty prompt response: %v", err)
-	}
-	if emptyEnvelope.Data.Prompt != "" {
-		t.Fatalf("empty prompt clone prompt = %q", emptyEnvelope.Data.Prompt)
-	}
-	if got := emptyEnvelope.Data.InputAttachments.Data(); len(got) != 1 || got[0].Key != finalKey || got[0].FileName != "reference.png" {
-		t.Fatalf("empty prompt clone attachments = %#v", got)
-	}
-}
-
-func TestCreateVideoEditorPromotesVerifiedPromptVideoToPersistedInputReference(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "prompt-video@example.com", Password: "hashed", InviteCode: "promptvideo", Tier: model.TierFree}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformVideoEditor, Name: "Video Editor", Status: model.ProjectStatusActive}); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	uploadID := "video-upload"
-	stagingKey := "uploads/pending/" + userID + "/" + uploadID + "/source.mp4"
-	finalKey := "assets/users/" + userID + "/" + uploadID + "/source.mp4"
-	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
-		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		StagingKey: stagingKey, FileName: "source.mp4", ContentType: "video/mp4", Size: 321,
-		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("create upload session: %v", err)
-	}
-	store := uploadSessionStatStore(repo.UploadSessions())
-	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	h.SetStore(store)
-	app := fiber.New()
-	app.Post("/tasks", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Create(c)
-	})
-
-	resp := postJSON(t, app, "/tasks", `{
-		"project_id":"`+projectID+`",
-		"prompt":"给源视频加字幕",
-		"quantity":1,
-		"input_attachments":[{
-			"type":"video","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
-			"file_name":"forged.mov","content_type":"video/quicktime","size":999
-		}]
-	}`)
-	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, body=%s", resp.StatusCode, body)
-	}
-	var envelope struct {
-		Data struct {
-			ID               string           `json:"id"`
-			VideoEditorInput model.VideoInput `json:"video_editor_input"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	refs := envelope.Data.VideoEditorInput.References
-	if len(refs) != 1 || refs[0].Type != service.VideoReferenceVideo || refs[0].URL != finalKey || refs[0].FileName != "source.mp4" || refs[0].MimeType != "video/mp4" || refs[0].FileSize != 321 {
-		t.Fatalf("response video input references = %#v", refs)
-	}
-	found, err := repo.Tasks().FindByID(ctx, envelope.Data.ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	stored := found.VideoInput.Data().References
-	if len(stored) != 1 || stored[0].URL != finalKey || strings.Contains(strings.ToLower(stored[0].URL), "signature=") {
-		t.Fatalf("stored video input references = %#v", stored)
-	}
-}
-
-func TestCloneTaskRejectsEmptyMontageBriefBeforeSideEffects(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "clone-montage@example.com", Password: "hashed", InviteCode: "clonemontage", Tier: model.TierFree}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformMontage, Name: "Montage", Status: model.ProjectStatusActive}); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	taskID := uuid.NewString()
-	source := &model.Task{
-		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformMontage,
-		Status: model.TaskStatusCompleted, Prompt: "source prompt", ExecutionTarget: model.ExecutionTargetCloud,
-	}
-	source.SetMontageInput(model.MontageInput{Brief: "source montage brief", PipelineKey: "default"})
-	if err := repo.Tasks().Create(ctx, source); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	app := fiber.New()
-	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Clone(c)
-	})
-
-	resp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{"prompt":"  \n\t "}`)
-	defer resp.Body.Close()
-	var body Response
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body.Msg, "montage task requires brief") {
-		t.Fatalf("status=%d response=%#v; want montage validation error", resp.StatusCode, body)
-	}
-	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
-	if err != nil || len(tasks) != 1 || tasks[0].ID != taskID {
-		t.Fatalf("invalid montage clone changed tasks: tasks=%#v err=%v", tasks, err)
 	}
 }
 
@@ -1352,21 +843,13 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	uploadID := "resume-upload"
-	stagingKey := "uploads/pending/" + userID + "/" + uploadID + "/notes.md"
-	finalKey := "assets/users/" + userID + "/" + uploadID + "/notes.md"
-	if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
-		ID: uploadID, UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
-		StagingKey: stagingKey, FileName: "notes.md", ContentType: "text/markdown", Size: int64(len("# notes")),
-		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("create upload session: %v", err)
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
 	}
-	store := uploadSessionStatStore(repo.UploadSessions())
-	store.data = map[string][]byte{stagingKey: []byte("# notes")}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -1377,15 +860,31 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 		return h.Resume(c)
 	})
 
-	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{
-		"prompt":"继续写结论",
-		"input_attachments":[{
-			"type":"text","upload_id":"`+uploadID+`","key":"`+stagingKey+`",
-			"file_name":"forged.exe","content_type":"application/x-msdownload","size":999999,
-			"instruction":"修改意见"
-		}]
-	}`)
-	defer resp.Body.Close()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("prompt", "继续写结论"); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := writer.WriteField("file_labels", `["修改意见"]`); err != nil {
+		t.Fatalf("write labels: %v", err)
+	}
+	part, err := writer.CreateFormFile("files", "notes.md")
+	if err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	if _, err := part.Write([]byte("# notes")); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/resume", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -1414,55 +913,6 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	if !latest || !file {
 		t.Fatalf("resume attachments latest=%v file=%v: %#v", latest, file, resumed.InputAttachments.Data())
 	}
-	assertFinalizedAsset(t, repo, uploadID, finalKey)
-	if len(store.read) != 1 || store.read[0] != finalKey || len(store.readMax) != 1 || store.readMax[0] != maxTaskResumeFileBytes {
-		t.Fatalf("bounded reads keys=%v max=%v", store.read, store.readMax)
-	}
-}
-
-func TestResumeTaskRejectsMoreThanFiveDirectAttachments(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "resume-limit@example.com", Password: "hashed", InviteCode: "resumelimit"}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	taskID := uuid.NewString()
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
-	taskSvc.SetNASResumeEnabled(true)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-	app := fiber.New()
-	app.Post("/tasks/:id/resume", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Resume(c)
-	})
-
-	attachments := make([]string, 6)
-	for i := range attachments {
-		attachments[i] = fmt.Sprintf(`{"type":"text","upload_id":"upload-%d","key":"uploads/pending/%s/upload-%d/file.txt"}`, i, userID, i)
-	}
-	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{"input_attachments":[`+strings.Join(attachments, ",")+`]}`)
-	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-	var body Response
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !strings.Contains(body.Msg, "at most 5 attachments") {
-		t.Fatalf("message = %q, want five attachment limit", body.Msg)
-	}
 }
 
 func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
@@ -1482,7 +932,7 @@ func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -1492,13 +942,24 @@ func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
 		return h.Resume(c)
 	})
 
-	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{
-		"input_attachments":[{
-			"type":"text","upload_id":"resume-storage-upload",
-			"key":"uploads/pending/`+userID+`/resume-storage-upload/notes.md"
-		}]
-	}`)
-	defer resp.Body.Close()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("files", "notes.md")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("notes")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/resume", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
 	if resp.StatusCode != fiber.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
@@ -1551,7 +1012,7 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, workspaceRoot, nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -1569,81 +1030,6 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 	}
 	if resp.StatusCode != fiber.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-}
-
-func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          "video-task-balance@example.com",
-		Password:       "hashed",
-		InviteCode:     "videotaskbalance",
-		CreditsBalance: 99_999,
-	}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	project := &model.Project{
-		ID:       projectID,
-		UserID:   userID,
-		Platform: model.PlatformVideoCreator,
-		Name:     "Video",
-		Status:   model.ProjectStatusActive,
-	}
-	watermark := false
-	project.SetVideoDefaults(model.VideoDefaults{
-		Purpose:    service.VideoPurposePlanting,
-		ModelKey:   "seedance-2.0-mini",
-		Resolution: "720p",
-		Ratio:      "9:16",
-		Duration:   5,
-		Watermark:  &watermark,
-		Preflight:  true,
-	})
-	project.SetVideoModelPolicy(model.VideoModelPolicy{
-		AllowedModels: []string{"seedance-2.0-mini"},
-		DefaultModel:  "seedance-2.0-mini",
-		MaxResolution: "720p",
-		MaxDuration:   15,
-	})
-	if err := repo.Projects().Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	creditSvc := service.NewCreditService(repo, &config.CreditsConfig{
-		TaskCosts: map[string]int{model.PlatformVideoCreator: 2000},
-	}, &logger)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
-	taskSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-
-	app := fiber.New()
-	app.Post("/tasks", func(c fiber.Ctx) error {
-		c.Locals("user_id", userID)
-		return h.Create(c)
-	})
-
-	req := httptest.NewRequest("POST", "/tasks", strings.NewReader(`{"project_id":"`+projectID+`","prompt":"生成视频"}`))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	bal, err := creditSvc.GetBalance(ctx, userID)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if bal != 99_999-2000 {
-		t.Fatalf("balance = %d, want base fee %d", bal, 99_999-2000)
 	}
 }
 
@@ -1672,7 +1058,7 @@ func TestCreateTask_VideoSplitInputsAndResponseFields(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 
@@ -1740,84 +1126,42 @@ func TestCreateTask_VideoSplitInputsAndResponseFields(t *testing.T) {
 	})
 }
 
-func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
+func TestGetTaskByIDIncludesFixedBillingIdentity(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := uuid.New().String()
-	taskID := uuid.New().String()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	taskID := uuid.NewString()
+	chargeID := uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:         userID,
-		Email:      "task-credits@example.com",
-		Password:   "hashed",
-		InviteCode: "taskcredits",
+		ID: userID, Email: "task-billing@example.com", Password: "hashed", InviteCode: "taskbilling",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Projects().Create(ctx, &model.Project{
-		ID:       projectID,
-		UserID:   userID,
-		Platform: model.PlatformArticle,
-		Name:     "Article",
-		Status:   model.ProjectStatusActive,
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusCompleted,
-		Prompt:    "详情扣分展示",
+		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusCompleted, Prompt: "详情固定价格展示",
+		BillingQuoteID: "quote-v1", BillingCatalogID: "retail-v1", BillingSKUID: "task.article.standard.v1",
+		BillingChargeID: &chargeID, BillingPriceCredits: 6000,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := repo.Credits().CreateTransaction(ctx, &model.CreditTransaction{
-		UserID:       userID,
-		Type:         model.CreditTypeTaskDeduct,
-		Amount:       -120,
-		BalanceAfter: 880,
-		TaskID:       &taskID,
-		Description:  "任务扣除 -120",
-	}); err != nil {
-		t.Fatalf("create credit transaction: %v", err)
-	}
-	if err := repo.Credits().CreateTransaction(ctx, &model.CreditTransaction{
-		UserID:       userID,
-		Type:         model.CreditTypeImageGen,
-		Amount:       -80,
-		BalanceAfter: 800,
-		TaskID:       &taskID,
-		Description:  "操作扣费 (image_gen) -80",
-	}); err != nil {
-		t.Fatalf("create operation transaction: %v", err)
-	}
-	if err := repo.Credits().CreateTransaction(ctx, &model.CreditTransaction{
-		UserID:       userID,
-		Type:         model.CreditTypeTaskRefund,
-		Amount:       20,
-		BalanceAfter: 820,
-		TaskID:       &taskID,
-		Description:  "任务取消退还 +20",
-	}); err != nil {
-		t.Fatalf("create refund transaction: %v", err)
-	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
-	h := NewTaskHandler(taskSvc, &logger)
-	h.SetRepository(repo)
-
+	h := NewTaskHandler(service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return h.GetByID(c)
 	})
 
-	req := httptest.NewRequest("GET", "/tasks/"+taskID, nil)
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID, nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -1826,37 +1170,22 @@ func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
 	}
 	var body struct {
 		Data struct {
-			ID             string `json:"id"`
-			CreditsCharged int    `json:"credits_charged"`
-			CreditsSummary struct {
-				TaskConsumed      int `json:"task_consumed"`
-				OperationConsumed int `json:"operation_consumed"`
-				Refunded          int `json:"refunded"`
-				NetConsumed       int `json:"net_consumed"`
-			} `json:"credits_summary"`
-			CreditTransactions []model.CreditTransaction `json:"credit_transactions"`
+			ID                  string  `json:"id"`
+			BillingCatalogID    string  `json:"billing_catalog_id"`
+			BillingSKUID        string  `json:"billing_sku_id"`
+			BillingChargeID     *string `json:"billing_charge_id"`
+			BillingPriceCredits int64   `json:"billing_price_credits"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Data.ID != taskID {
-		t.Fatalf("id = %q, want %q", body.Data.ID, taskID)
-	}
-	if body.Data.CreditsCharged != 120 {
-		t.Fatalf("credits_charged = %d, want 120", body.Data.CreditsCharged)
-	}
-	if body.Data.CreditsSummary.TaskConsumed != 120 ||
-		body.Data.CreditsSummary.OperationConsumed != 80 ||
-		body.Data.CreditsSummary.Refunded != 20 ||
-		body.Data.CreditsSummary.NetConsumed != 180 {
-		t.Fatalf("credits_summary = %+v, want task=120 operation=80 refunded=20 net=180", body.Data.CreditsSummary)
-	}
-	if len(body.Data.CreditTransactions) != 3 {
-		t.Fatalf("credit_transactions len = %d, want 3", len(body.Data.CreditTransactions))
+	if body.Data.ID != taskID || body.Data.BillingCatalogID != "retail-v1" ||
+		body.Data.BillingSKUID != "task.article.standard.v1" || body.Data.BillingChargeID == nil ||
+		*body.Data.BillingChargeID != chargeID || body.Data.BillingPriceCredits != 6000 {
+		t.Fatalf("task billing identity = %#v", body.Data)
 	}
 }
-
 func setupSeednoteTaskCreateHandler(t *testing.T) (*fiber.App, repository.Repository, context.Context, string, string) {
 	t.Helper()
 	db := setupTaskHandlerTestDB(t)
@@ -1883,7 +1212,7 @@ func setupSeednoteTaskCreateHandler(t *testing.T) (*fiber.App, repository.Reposi
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	handler := NewTaskHandler(taskSvc, &logger)
 	handler.SetRepository(repo)
 	app := fiber.New()
@@ -1930,57 +1259,7 @@ func TestCreateTaskAcceptsSeednoteInputAttachments(t *testing.T) {
 	}
 }
 
-func TestCreateTaskAcceptsAllAgentAttachmentTypes(t *testing.T) {
-	app, repo, ctx, _, projectID := setupSeednoteTaskCreateHandler(t)
-	body := fmt.Sprintf(`{"project_id":%q,"prompt":"test","input_attachments":%s}`, projectID, fiveTypeHandlerAttachmentsJSON)
-	resp := postJSON(t, app, "/tasks", body)
-	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, raw)
-	}
-	data := decodeEnvelopeRawData(t, resp)
-	var task model.Task
-	if err := json.Unmarshal(data["id"], &task.ID); err != nil || task.ID == "" {
-		t.Fatalf("decode task id: %v", err)
-	}
-	stored, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil || len(stored.InputAttachments.Data()) != 5 {
-		t.Fatalf("stored attachments = %#v, err = %v", stored, err)
-	}
-	attachments := stored.InputAttachments.Data()
-	if attachments[1].ContentType != "application/ogg" || attachments[4].ContentType != "application/csv" {
-		t.Fatalf("stored canonical application MIME attachments = %#v", attachments)
-	}
-}
-
-func TestCreateTaskRejectsInvalidAgentAttachmentsAtHandler(t *testing.T) {
-	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", "uploads/pending/foreign/foreign-upload/product.png") {
-		t.Run(tt.name, func(t *testing.T) {
-			app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
-			if err := repo.UploadSessions().Create(ctx, &model.UploadSession{
-				ID: "foreign-upload", UserID: "foreign-user", Purpose: service.DirectUploadPurposeAIEntryAttachment,
-				StagingKey: "uploads/pending/foreign/foreign-upload/product.png", FileName: "product.png", ContentType: "image/png", Size: 10,
-				Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
-			}); err != nil {
-				t.Fatalf("create foreign upload: %v", err)
-			}
-			body := fmt.Sprintf(`{"project_id":%q,"prompt":"test","input_attachments":%s}`, projectID, tt.attachments)
-			resp := postJSON(t, app, "/tasks", body)
-			defer resp.Body.Close()
-			if resp.StatusCode != fiber.StatusBadRequest {
-				raw, _ := io.ReadAll(resp.Body)
-				t.Fatalf("status = %d, want 400: %s", resp.StatusCode, raw)
-			}
-			tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
-			if err != nil || len(tasks) != 0 {
-				t.Fatalf("rejected request persisted tasks = %#v, err = %v", tasks, err)
-			}
-		})
-	}
-}
-
-func TestCreateTaskAcceptsNonImageSeednoteAttachment(t *testing.T) {
+func TestCreateTaskRejectsNonImageSeednoteAttachment(t *testing.T) {
 	app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
 	resp := postJSON(t, app, "/tasks", `{
 		"project_id":"`+projectID+`",
@@ -1993,15 +1272,15 @@ func TestCreateTaskAcceptsNonImageSeednoteAttachment(t *testing.T) {
 		}]
 	}`)
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
+	if resp.StatusCode != fiber.StatusBadRequest {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
 	if err != nil {
 		t.Fatalf("find tasks: %v", err)
 	}
-	if len(tasks) != 1 || len(tasks[0].InputAttachments.Data()) != 1 || tasks[0].InputAttachments.Data()[0].Type != "video" {
-		t.Fatalf("tasks = %#v, want one video attachment", tasks)
+	if len(tasks) != 0 {
+		t.Fatalf("tasks = %#v, want none", tasks)
 	}
 }

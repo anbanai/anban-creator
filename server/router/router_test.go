@@ -2,10 +2,12 @@ package router
 
 import (
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -62,12 +64,12 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		}
 
 		planSvc := service.NewPlanService(repo, &logger)
-		agentExecutor := agent.NewLocalExecutor(&logger, nil, nil, "", false, "", nil, nil, "", "", nil, nil)
-		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, nil, &logger, "", nil, "", nil, nil)
+		agentExecutor := agent.NewLocalExecutor(&logger, nil, nil, "", false, "", nil, nil, nil, "", "", nil, nil)
+		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, &logger, "", nil, "", nil, nil)
 		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
-		authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil, nil, nil)
+		authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil)
 		planHandler := handler.NewPlanHandler(planSvc, &logger)
 		taskHandler := handler.NewTaskHandler(taskSvc, &logger)
 		seednoteAnalyticsHandler := handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, &logger)
@@ -186,25 +188,62 @@ func TestLegacyFileUploadRouteIsNotRegistered(t *testing.T) {
 	}
 }
 
-func TestResolveAssetRouteIsRegistered(t *testing.T) {
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+func TestBillingRoutes(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	t.Cleanup(func() { _ = repo.Close() })
+	jwtSvc, err := auth.NewJWTService("billing-router-secret", "24h", "168h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
 	app := NewRouter(&Services{
-		Config: &config.Config{Server: config.ServerConfig{Port: 0, Host: "0.0.0.0"}},
-		Logger: &logger,
-		UploadHandler: handler.NewUploadHandler(
-			nil,
-			nil,
-			service.DirectUploadConfig{},
-			&logger,
-		),
+		Config: &config.Config{Server: config.ServerConfig{Host: "0.0.0.0"}}, Logger: &logger,
+		Repo: repo, JWTService: jwtSvc, BillingHandler: &handler.BillingHandler{},
 	})
-
+	want := map[string]string{
+		"GET /api/v1/billing/wallet":       "",
+		"GET /api/v1/billing/transactions": "",
+		"POST /api/v1/billing/quotes":      "",
+		"GET /api/v1/billing/referral":     "",
+		"POST /api/admin/billing/topups":   "",
+	}
 	for _, route := range app.GetRoutes() {
-		if route.Method == "POST" && route.Path == "/api/v1/uploads/resolve-asset-url" {
-			return
+		delete(want, route.Method+" "+route.Path)
+	}
+	if len(want) != 0 {
+		t.Fatalf("billing routes missing: %#v", want)
+	}
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/billing/wallet"},
+		{http.MethodGet, "/api/v1/billing/transactions"},
+		{http.MethodPost, "/api/v1/billing/quotes"},
+		{http.MethodGet, "/api/v1/billing/referral"},
+	} {
+		resp, err := app.Test(httptest.NewRequest(tc.method, tc.path, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != fiber.StatusUnauthorized {
+			t.Fatalf("%s %s status = %d, want 401", tc.method, tc.path, resp.StatusCode)
 		}
 	}
-	t.Fatal("POST /api/v1/uploads/resolve-asset-url is not registered")
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/api/admin/billing/topups", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("admin billing route status = %d, want 401", resp.StatusCode)
+	}
 }
 
 // TestPublicAuthEndpoints tests that public auth endpoints are accessible

@@ -62,7 +62,6 @@ type TaskService struct {
 	logger                   *zerolog.Logger
 	enqueuer                 TaskEnqueuer
 	store                    storage.Provider
-	creditSvc                *CreditService
 	publishingSvc            *PublishingService
 	cloudPublisher           cloudDraftPublisher
 	taskLogDir               string
@@ -73,14 +72,11 @@ type TaskService struct {
 	cancelFuncs              sync.Map           // taskID → context.CancelFunc
 	seednoteTrackingSvc      PublishedTrackingService
 	videoCatalog             VideoModelCatalog
-	videoCreditMultiplier    int
-	videoBilling             srvconfig.BillingConfig
 	montageCfg               srvconfig.MontageConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
-	ilinkNotifier  *IlinkNotifier
-	topicPoolSvc   *TopicPoolService
-	goalMultiplier int
+	ilinkNotifier *IlinkNotifier
+	topicPoolSvc  *TopicPoolService
 	// executionTimeout bounds the fallback (Redis-down) in-process execution.
 	// The asynq path is bounded by the asynq task Timeout (see scheduler).
 	// Default 60m; override via SetExecutionTimeouts.
@@ -98,6 +94,9 @@ type TaskService struct {
 	nasResumeEnabled  bool
 	taskWorkspace     TaskWorkspaceLifecycle
 	referenceAssets   *ReferenceAssetService
+	providerCostSvc   *ProviderCostService
+	billingWalletSvc  *BillingWalletService
+	billingCatalogSvc *BillingCatalogService
 }
 
 type TaskWorkspaceLifecycle interface {
@@ -111,7 +110,6 @@ func NewTaskService(
 	executor agent.TaskExecutor,
 	enqueuer TaskEnqueuer,
 	store storage.Provider,
-	creditSvc *CreditService,
 	logger *zerolog.Logger,
 	taskLogDir string,
 	workspaceSvc *WorkspaceService,
@@ -125,7 +123,6 @@ func NewTaskService(
 		logger:                 logger,
 		enqueuer:               enqueuer,
 		store:                  store,
-		creditSvc:              creditSvc,
 		publishingSvc:          publishingSvc,
 		cloudPublisher:         publishingSvc,
 		taskLogDir:             taskLogDir,
@@ -181,19 +178,29 @@ func (s *TaskService) SetReferenceAssetService(referenceAssets *ReferenceAssetSe
 	}
 }
 
-func (s *TaskService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
+func (s *TaskService) SetProviderCostService(providerCostSvc *ProviderCostService) {
+	if s != nil {
+		s.providerCostSvc = providerCostSvc
+	}
+}
+
+func (s *TaskService) SetBillingWalletService(wallet *BillingWalletService) {
+	if s != nil {
+		s.billingWalletSvc = wallet
+	}
+}
+
+func (s *TaskService) SetBillingCatalogService(catalog *BillingCatalogService) {
+	if s != nil {
+		s.billingCatalogSvc = catalog
+	}
+}
+
+func (s *TaskService) SetVideoCatalog(catalog VideoModelCatalog) {
 	if s == nil {
 		return
 	}
 	s.videoCatalog = catalog
-	s.videoCreditMultiplier = creditMultiplier
-}
-
-func (s *TaskService) SetVideoBillingConfig(billing srvconfig.BillingConfig) {
-	if s == nil {
-		return
-	}
-	s.videoBilling = billing
 }
 
 func (s *TaskService) SetMontageConfig(cfg srvconfig.MontageConfig) {
@@ -218,40 +225,6 @@ func (s *TaskService) resolvedVideoCatalog() VideoModelCatalog {
 		return s.videoCatalog
 	}
 	return VideoModelCatalog{}
-}
-
-func (s *TaskService) resolvedVideoCreditMultiplier() int {
-	if s != nil && s.videoCreditMultiplier > 0 {
-		return s.videoCreditMultiplier
-	}
-	return 1000
-}
-
-func (s *TaskService) videoBillingOptions(ctx context.Context, userID string) VideoBillingOptions {
-	fallback := s.resolvedVideoCreditMultiplier()
-	tier := model.TierFree
-	userMultiplier := 1.0
-	var billing srvconfig.BillingConfig
-	if s != nil {
-		billing = s.videoBilling
-	}
-	if s == nil || s.creditSvc == nil || userID == "" {
-		return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
-	}
-	if foundTier, err := s.creditSvc.GetUserTier(ctx, userID); err == nil {
-		tier = foundTier
-	} else if s.logger != nil {
-		s.logger.Warn().Err(err).Str("user_id", userID).Msg("video tier lookup failed")
-	}
-	foundMultiplier, err := s.creditSvc.GetUserBillingMultiplier(ctx, userID)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn().Err(err).Str("user_id", userID).Msg("video billing multiplier lookup failed")
-		}
-	} else if foundMultiplier > 0 {
-		userMultiplier = foundMultiplier
-	}
-	return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
 }
 
 // Close stops the Redis pub/sub subscriber goroutine.
@@ -359,17 +332,6 @@ func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int 
 	return maxConcurrent
 }
 
-// GoalMultiplier returns the configured goal-mode credit multiplier (default 3).
-// Goal mode is charged upfront at this rate and never refunded — the goal
-// evaluation loop runs inside Claude Code's built-in /goal mechanism, so the
-// server cannot tell how many turns were consumed.
-func (s *TaskService) GoalMultiplier() int {
-	if s.goalMultiplier <= 0 {
-		return 3
-	}
-	return s.goalMultiplier
-}
-
 // listenCancelEvents subscribes to Redis cancel events and triggers local
 // context cancellation for tasks executing on this replica.
 func (s *TaskService) listenCancelEvents(ctx context.Context) {
@@ -419,8 +381,7 @@ type CreateManualParams struct {
 	UserID    string
 	ProjectID string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
-	// keep billing and runtime configuration anchored to the source task instead
-	// of re-deriving them from a project or server policy that changed later.
+	// keep a clone on the source task contract even when the project changes.
 	FrozenTaskType        string
 	PreserveFrozenConfig  bool
 	Prompt                string
@@ -435,9 +396,9 @@ type CreateManualParams struct {
 	// Overrides is deprecated. New Studio/API flows do not set task-level style
 	// overrides; runtime style/account config comes from ProjectSnapshot.
 	Overrides *model.StyleOverrides
-	// ProjectSnapshot, when set, is copied verbatim. Clone preserves its original
-	// frozen config; HTTP/AI orchestration freezes the project used for reference
-	// preflight. Other callers leave it nil and snapshot the current project.
+	// ProjectSnapshot, when set, is copied verbatim. Clone uses this to preserve
+	// the original task's frozen config. New manual tasks leave it nil and snapshot
+	// the current project at creation time.
 	ProjectSnapshot *model.ProjectSnapshot
 	// InputAttachments stores the original AI-entry attachments on the task so
 	// executors can materialize them into the agent workspace.
@@ -556,10 +517,7 @@ func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID
 // Style/author/theme dimensions are snapshotted from the project at creation.
 // Editing the project later does not change existing pending/running tasks.
 //
-// When GoalMode is true, each task charges GoalMultiplier() × base cost upfront
-// and never refunds. The goal condition is propagated to the agent process and
-// prepended to the user prompt as a /goal slash command, letting Claude Code's
-// built-in goal loop drive turn-by-turn evaluation inside a single session.
+// GoalMode is execution behavior only. It does not alter the fixed task SKU.
 func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([]*model.Task, error) {
 	if p.ProjectID == "" {
 		return nil, fmt.Errorf("project_id is required")
@@ -656,59 +614,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 	}
 
-	// Pre-calculate total credit cost and deduct upfront to avoid race conditions.
-	var deductedTaskIDs []string
 	tasks := make([]*model.Task, 0, quantity)
 
-	multiplier := 1
-	if p.GoalMode {
-		multiplier = s.GoalMultiplier()
-	}
-
-	if s.creditSvc != nil {
-		{
-			cost, ok := s.creditSvc.TaskCost(taskType)
-			if !ok {
-				return nil, fmt.Errorf("unknown task type: %s", taskType)
-			}
-			totalCost := cost * quantity * multiplier
-
-			// Generate all task IDs upfront so we can create individual transactions.
-			taskIDs := make([]string, quantity)
-			for i := range taskIDs {
-				taskIDs[i] = generateTaskID()
-			}
-
-			// Deduct total base service fees in a single atomic transaction.
-			// Claude Code runtime cost is platform-paid and is not reserved or
-			// settled against the user's balance.
-			var deductErr error
-			if p.ExecutionTarget == model.ExecutionTargetLocal {
-				if multiplier > 1 {
-					deductErr = s.creditSvc.DeductBatchWithMultiplier(ctx, p.UserID, taskType, totalCost, taskIDs, multiplier)
-				} else {
-					deductErr = s.creditSvc.DeductBatch(ctx, p.UserID, taskType, totalCost, taskIDs)
-				}
-			} else {
-				deductErr = s.creditSvc.DeductBatchForTaskCreation(ctx, p.UserID, taskType, totalCost, taskIDs, multiplier)
-			}
-			if deductErr != nil {
-				if errors.Is(deductErr, ErrInsufficientCredits) {
-					return nil, fmt.Errorf("积分不足: %w", deductErr)
-				}
-				return nil, fmt.Errorf("deduct credits: %w", deductErr)
-			}
-			deductedTaskIDs = taskIDs
-		}
-	}
-
 	for i := 0; i < quantity; i++ {
-		var taskID string
-		if s.creditSvc != nil && len(deductedTaskIDs) > i {
-			taskID = deductedTaskIDs[i]
-		} else {
-			taskID = generateTaskID()
-		}
+		taskID := generateTaskID()
 
 		// Topic pool: when the caller supplied no prompt and the project is a
 		// topic-driven platform (article/seednote/moments), claim the next unused topic
@@ -804,44 +713,105 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			task.SetMontageInput(*p.MontageInput)
 		}
 
-		if err := s.repo.Tasks().Create(ctx, task); err != nil {
-			// Refund only the tasks that were NOT successfully created.
-			// deductedTaskIDs[0..i) were created successfully; [i..) were not.
-			if s.creditSvc != nil {
-				for j := i; j < len(deductedTaskIDs); j++ {
-					if refundErr := s.creditSvc.RefundForTask(ctx, deductedTaskIDs[j]); refundErr != nil {
-						s.logger.Error().Err(refundErr).Str("task_id", deductedTaskIDs[j]).Msg("failed to refund credits during rollback")
-					}
-					if refundErr := s.creditSvc.RefundAgentRuntimeReserve(ctx, deductedTaskIDs[j], "任务创建失败退还 Claude Code 运行预留"); refundErr != nil {
-						s.logger.Error().Err(refundErr).Str("task_id", deductedTaskIDs[j]).Msg("failed to refund runtime reserve during rollback")
-					}
-				}
-			}
-			// Release this iteration's pre-claimed topic back to the pool so it
-			// isn't orphaned (a no-op when no topic was claimed for this task).
-			if s.topicPoolSvc != nil {
-				if relErr := s.topicPoolSvc.ReleaseForTask(ctx, taskID); relErr != nil {
-					s.logger.Error().Err(relErr).Str("task_id", taskID).Msg("failed to release topic during rollback")
-				}
-			}
-			return nil, fmt.Errorf("create task: %w", err)
-		}
-
-		// Enqueue for async execution. Local-target tasks wait for a desktop
-		// local executor to claim them (ClaimLocalTask); do NOT enqueue to cloud
-		// Asynq. The fallback worker re-routes them to cloud if unclaimed past
-		// the deadline, so they can never get stuck.
-		if task.ExecutionTarget == model.ExecutionTargetLocal {
-			s.logger.Info().Str("task_id", taskID).Msg("task routed to local executor, awaiting desktop claim")
-		} else if err := s.EnqueueExecution(ctx, task, nil); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue task, marking as failed")
-			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to enqueue: "+err.Error())
-		}
-
 		tasks = append(tasks, task)
+	}
+	if err := s.persistTasksWithFixedAdmission(ctx, tasks); err != nil {
+		if s.topicPoolSvc != nil {
+			for _, task := range tasks {
+				if relErr := s.topicPoolSvc.ReleaseForTask(ctx, task.ID); relErr != nil {
+					s.logger.Error().Err(relErr).Str("task_id", task.ID).Msg("failed to release topic during batch rollback")
+				}
+			}
+		}
+		return nil, fmt.Errorf("create tasks: %w", err)
+	}
+
+	// Batch admission is fully committed before any task is dispatched.
+	for _, task := range tasks {
+		if task.ExecutionTarget == model.ExecutionTargetLocal {
+			s.logger.Info().Str("task_id", task.ID).Msg("task routed to local executor, awaiting desktop claim")
+			continue
+		}
+		if err := s.EnqueueExecution(ctx, task, nil); err != nil {
+			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("failed to enqueue task, marking as failed")
+			if failErr := s.failPendingAdmittedTask(ctx, task, model.TaskBillingTerminalPlatformError, "failed to enqueue: "+err.Error()); failErr != nil {
+				return nil, fmt.Errorf("finalize failed task enqueue: %w", failErr)
+			}
+		}
 	}
 
 	return tasks, nil
+}
+
+func (s *TaskService) persistTaskWithFixedAdmission(ctx context.Context, task *model.Task) error {
+	if task == nil {
+		return fmt.Errorf("task is required")
+	}
+	return s.persistTasksWithFixedAdmission(ctx, []*model.Task{task})
+}
+
+func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks []*model.Task) error {
+	if len(tasks) == 0 {
+		return fmt.Errorf("at least one task is required")
+	}
+	for _, task := range tasks {
+		if task == nil {
+			return fmt.Errorf("task is required")
+		}
+	}
+	if s.billingCatalogSvc == nil && s.billingWalletSvc == nil {
+		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+			for _, task := range tasks {
+				if err := tx.Tasks().Create(ctx, task); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	if s.billingCatalogSvc == nil || s.billingWalletSvc == nil {
+		return fmt.Errorf("fixed task billing is not fully configured")
+	}
+	type admission struct {
+		task        *model.Task
+		quote       *model.BillingQuote
+		fingerprint string
+	}
+	admissions := make([]admission, 0, len(tasks))
+	for _, task := range tasks {
+		payload, err := json.Marshal(task)
+		if err != nil {
+			return fmt.Errorf("marshal task billing fingerprint: %w", err)
+		}
+		fingerprint := billingFingerprint("task-admission", string(payload))
+		quote, err := s.billingCatalogSvc.CreateQuote(ctx, QuoteRequest{
+			UserID: task.UserID, Operation: "task." + task.Type, RequestFingerprint: fingerprint,
+			IdempotencyScope: "task-admission-quote", IdempotencyKey: task.ID,
+		})
+		if err != nil {
+			return err
+		}
+		admissions = append(admissions, admission{task: task, quote: quote, fingerprint: fingerprint})
+	}
+	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		for _, item := range admissions {
+			charge, err := s.billingWalletSvc.ChargeTaskAdmissionInTx(ctx, tx, TaskChargeRequest{
+				UserID: item.task.UserID, TaskID: item.task.ID, QuoteID: item.quote.ID,
+				CatalogID: item.quote.CatalogID, SKUID: item.quote.SKUID, RequestFingerprint: item.fingerprint,
+				IdempotencyScope: "task-admission", IdempotencyKey: item.task.ID,
+				ActorType: "user", ActorID: item.task.UserID, SourceService: "task-service",
+			})
+			if err != nil {
+				return err
+			}
+			item.task.BillingQuoteID, item.task.BillingCatalogID, item.task.BillingSKUID = item.quote.ID, item.quote.CatalogID, item.quote.SKUID
+			item.task.BillingChargeID, item.task.BillingPriceCredits = stringPtr(charge.ID), charge.PriceCredits
+			if err := tx.Tasks().Create(ctx, item.task); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (p CreateManualParams) videoPayloadForTask(taskType string) (*model.VideoTaskConfig, *model.VideoInput, error) {
@@ -878,7 +848,7 @@ func hasVideoEditorSourceVideo(input *model.VideoInput, attachments []model.Entr
 		}
 	}
 	for _, attachment := range attachments {
-		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && entryAttachmentStorageSource(attachment) != "" {
+		if normalizeEntryAttachmentType(attachment.Type, attachment.ContentType) == "video" && strings.TrimSpace(attachment.URL) != "" {
 			return true
 		}
 	}
@@ -936,12 +906,7 @@ func videoReferenceAssetIdentity(ref model.VideoReferenceAsset) string {
 	case "text":
 		typ = VideoReferenceText
 	}
-	return strings.Join([]string{
-		typ,
-		strings.TrimSpace(ref.URL),
-		strings.TrimSpace(ref.TaskFileID),
-		strings.TrimSpace(ref.Text),
-	}, "\x00")
+	return strings.Join([]string{typ, strings.TrimSpace(ref.URL), strings.TrimSpace(ref.TaskFileID), strings.TrimSpace(ref.Text)}, "\x00")
 }
 
 func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) VideoGenerationRequest {
@@ -1048,8 +1013,6 @@ func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
 		References:                videoAssetsFromReferences(plan.References),
 		RetakeBudget:              plan.RetakeBudget,
 		DeliveryTargets:           plan.DeliveryTargets,
-		EstimatedCredits:          plan.EstimatedCredits,
-		PricingBreakdown:          plan.PricingBreakdown,
 	}
 }
 
@@ -1060,16 +1023,15 @@ func videoTaskSegmentsFromPlan(segments []VideoGenerationSegmentPlan) []model.Vi
 	out := make([]model.VideoTaskSegmentConfig, 0, len(segments))
 	for _, seg := range segments {
 		out = append(out, model.VideoTaskSegmentConfig{
-			Index:            seg.Index,
-			StartSecond:      seg.StartSecond,
-			EndSecond:        seg.EndSecond,
-			Duration:         seg.Duration,
-			Prompt:           seg.Prompt,
-			ModelKey:         seg.ModelKey,
-			Model:            seg.Model,
-			Resolution:       seg.Resolution,
-			Ratio:            seg.Ratio,
-			EstimatedCredits: seg.EstimatedCredits,
+			Index:       seg.Index,
+			StartSecond: seg.StartSecond,
+			EndSecond:   seg.EndSecond,
+			Duration:    seg.Duration,
+			Prompt:      seg.Prompt,
+			ModelKey:    seg.ModelKey,
+			Model:       seg.Model,
+			Resolution:  seg.Resolution,
+			Ratio:       seg.Ratio,
 		})
 	}
 	return out
@@ -1081,14 +1043,21 @@ func videoTaskSegmentsFromPlan(segments []VideoGenerationSegmentPlan) []model.Vi
 // reference image, watermark, goal, seednote image composition) flow to the task.
 // Project/account style config is frozen from the project into ProjectSnapshot.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
-	if plan == nil {
-		return nil, fmt.Errorf("plan is required")
-	}
 	taskID := generateTaskID()
 
 	prompt := plan.Prompt
 	if prompt == "" {
 		prompt = plan.Title
+	}
+
+	// Try to claim a topic from the topic pool if no prompt is set.
+	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {
+		claimed, err := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ProjectID, taskID)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
+		} else if claimed != "" {
+			prompt = claimed
+		}
 	}
 
 	// Derive task type from the project if ProjectID is set.
@@ -1097,24 +1066,13 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if plan.ProjectID != "" {
 		found, err := s.ResolveTaskCreationProject(ctx, plan.UserID, plan.ProjectID)
 		if err != nil {
-			return nil, fmt.Errorf("resolve plan project: %w", err)
+			return nil, err
 		}
 		project = found
 		taskType = found.Platform
 	}
 	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil); err != nil {
 		return nil, err
-	}
-
-	// Claim topics only after every persisted reference identity has been
-	// validated, so an invalid plan cannot consume a topic early.
-	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {
-		claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ProjectID, taskID)
-		if claimErr != nil {
-			s.logger.Warn().Err(claimErr).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
-		} else if claimed != "" {
-			prompt = claimed
-		}
 	}
 	var planVideoInput *model.VideoInput
 	if model.IsVideoCreatorPlatform(taskType) {
@@ -1143,28 +1101,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		montageExecutionTarget = target
 	}
 
-	// Deduct credits for the plan task.
-	// Plan-level goal mode (plan.GoalMode) propagates to the task and scales
-	// the upfront charge by GoalMultiplier() to cover all retry attempts.
 	planGoalMode := plan.GoalMode && strings.TrimSpace(plan.Goal) != ""
-	planMultiplier := 1
-	if planGoalMode {
-		planMultiplier = s.GoalMultiplier()
-	}
-
-	if s.creditSvc != nil {
-		if _, costOK := s.creditSvc.TaskCost(taskType); !costOK {
-			s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task with unknown task type")
-			return nil, nil
-		} else if _, err := s.creditSvc.DeductForTaskCreation(ctx, plan.UserID, taskType, taskID, planMultiplier); err != nil {
-			if errors.Is(err, ErrInsufficientCredits) {
-				s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task due to insufficient credits")
-				return nil, nil
-			}
-			s.logger.Error().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("failed to deduct credits for plan task")
-			return nil, nil
-		}
-	}
 
 	task := &model.Task{
 		ID:                       taskID,
@@ -1199,15 +1136,10 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		task.SetMontageInput(*planMontageInput)
 	}
 
-	if err := s.repo.Tasks().Create(ctx, task); err != nil {
-		// Refund the deducted credits if task creation fails.
-		if s.creditSvc != nil {
-			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
-				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits during plan task rollback")
-			}
-			if refundErr := s.creditSvc.RefundAgentRuntimeReserve(ctx, taskID, "计划任务创建失败退还 Claude Code 运行预留"); refundErr != nil {
-				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund runtime reserve during plan task rollback")
-			}
+	if err := s.persistTaskWithFixedAdmission(ctx, task); err != nil {
+		if errors.Is(err, ErrBillingDebtOutstanding) || errors.Is(err, ErrBillingInsufficientForTask) {
+			s.logger.Warn().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task at fixed-SKU admission")
+			return nil, nil
 		}
 		// Release the pre-claimed topic back to the pool so it isn't orphaned
 		// (a no-op when no topic was claimed for this task).
@@ -1221,7 +1153,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 
 	if err := s.EnqueueExecution(ctx, task, nil); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Str("plan_id", plan.ID).Msg("failed to enqueue plan task")
-		_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to enqueue: "+err.Error())
+		if failErr := s.failPendingAdmittedTask(ctx, task, model.TaskBillingTerminalPlatformError, "failed to enqueue: "+err.Error()); failErr != nil {
+			return nil, fmt.Errorf("finalize failed plan task enqueue: %w", failErr)
+		}
 		return task, nil
 	}
 
@@ -1335,13 +1269,10 @@ func normalizeTitleForDedup(title string) string {
 }
 
 // Cancel atomically transitions a task from pending/running to cancelled and signals
-// the running execution to stop. Credits are refunded if the transition succeeds.
+// the running execution to stop. Accepted task charges remain posted on user cancellation.
 // Uses CompareAndSwapStatus to prevent cancelling already-completed or already-failed tasks.
 // If Redis pub/sub is available, it also publishes a cancel event so other replicas
 // can propagate the cancellation to their in-process execution contexts.
-//
-// Goal-mode tasks receive a proportional refund based on remaining attempts;
-// normal tasks receive a full refund.
 func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	return s.cancel(ctx, id, "")
 }
@@ -1357,7 +1288,7 @@ func (s *TaskService) CancelForUser(ctx context.Context, userID, id string) erro
 }
 
 func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
-	// Fetch task before CAS so we can decide refund strategy.
+	// Fetch task before CAS so ownership and cloud execution identity are stable.
 	task, taskErr := s.repo.Tasks().FindByID(ctx, id)
 	if userID != "" && taskErr == nil && task != nil && task.UserID != userID {
 		return fmt.Errorf("task not found")
@@ -1381,16 +1312,10 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 			return fmt.Errorf("task is not in a cancellable state (current status is not pending or running)")
 		}
 	}
-	// Refund credits for the cancelled task (idempotent — double-refund protected).
-	if s.creditSvc != nil && task != nil {
-		s.refundTaskByMode(ctx, task, "取消")
-		if task.Status == model.TaskStatusPending {
-			if refundErr := s.creditSvc.RefundAgentRuntimeReserve(ctx, task.ID, "任务取消退还 Claude Code 运行预留"); refundErr != nil {
-				s.logger.Error().Err(refundErr).Str("task_id", task.ID).Msg("failed to refund runtime reserve for cancelled pending task")
-			}
-		}
-	}
 	if task != nil {
+		if err := s.repo.Tasks().UpdateBillingTerminalReason(ctx, id, model.TaskBillingTerminalUserCancelled); err != nil {
+			return fmt.Errorf("record cancellation billing reason: %w", err)
+		}
 		if err := s.repo.Tasks().SetCompletedAt(ctx, id); err != nil {
 			s.logger.Error().Err(err).Str("task_id", id).Msg("failed to set completed_at on cancellation")
 		}
@@ -1553,9 +1478,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 		}
 		fallbackClaimOwned = false
 	}
-	defer func() {
-		releaseFallbackClaim(context.Background())
-	}()
+	defer func() { releaseFallbackClaim(context.Background()) }()
 	if s.enqueuer == nil && s.pubsub != nil && s.pubsub.Available() {
 		fallbackClaimToken = uuid.NewString()
 		claimTTL := s.executionTimeout + s.persistTimeout + time.Minute
@@ -1670,18 +1593,18 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 			}()
 		}
 		ownsSlot := slotReserved && s.pubsub != nil && s.pubsub.Available() && project != nil
-		releaseOwnedSlot := func(ctx context.Context) {
+		releaseOwnedSlot := func(releaseCtx context.Context) {
 			if !ownsSlot {
 				return
 			}
-			s.pubsub.ReleaseSlot(ctx, project.ID)
+			s.pubsub.ReleaseSlot(releaseCtx, project.ID)
 			ownsSlot = false
 		}
-		releaseOwnedSlotIfNonTerminal := func(ctx context.Context) {
+		releaseOwnedSlotIfNonTerminal := func(releaseCtx context.Context) {
 			if !ownsSlot {
 				return
 			}
-			current, err := s.repo.Tasks().FindByID(ctx, task.ID)
+			current, err := s.repo.Tasks().FindByID(releaseCtx, task.ID)
 			if err != nil {
 				s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("could not resolve fallback slot ownership; leaving count for periodic reconciliation")
 				ownsSlot = false
@@ -1691,7 +1614,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 				ownsSlot = false
 				return
 			}
-			releaseOwnedSlot(ctx)
+			releaseOwnedSlot(releaseCtx)
 		}
 		defer func() {
 			if r := recover(); r != nil {
@@ -1707,9 +1630,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 		referenceAsset, preparation, err := s.preparePendingExecution(fallbackCtx, task)
 		if err != nil {
 			releaseOwnedSlot(fallbackCtx)
-			s.logger.Error().Err(err).
-				Str("task_id", task.ID).
-				Msg("fallback task preparation failed; task remains pending for periodic dispatch retry")
+			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task preparation failed; task remains pending for periodic dispatch retry")
 			return
 		}
 		if preparation == pendingExecutionTerminalized {
@@ -1789,74 +1710,29 @@ func (s *TaskService) DispatchPendingTasks(ctx context.Context, projectID string
 	return dispatchErr
 }
 
-// RefundForTask refunds credits for a failed task. This is a public wrapper
-// around CreditService.RefundForTask for use by external callers (e.g., scheduler).
-func (s *TaskService) RefundForTask(ctx context.Context, taskID string) error {
-	if s.creditSvc == nil {
-		return nil
-	}
-	return s.creditSvc.RefundForTask(ctx, taskID)
-}
-
-// refundTaskByMode issues the correct refund for a task based on whether goal
-// mode is active.
-//
-// Goal-mode tasks never refund — the goal loop runs entirely inside Claude
-// Code's /goal mechanism, so the server cannot tell how many turns were
-// consumed. The upfront ×GoalMultiplier charge stands regardless of outcome.
-//
-// The refund path is idempotent (protected by FindRefundByTaskID), so it is
-// safe for multiple callers (Cancel, HandleExecution cancel-detection,
-// HandleExecutionFailure) to invoke this for the same task.
-func (s *TaskService) refundTaskByMode(ctx context.Context, task *model.Task, reason string) {
-	if s.creditSvc == nil || task == nil {
-		return
-	}
-	if task.GoalMode {
-		return
-	}
-	if refundErr := s.creditSvc.RefundForTask(ctx, task.ID, reason); refundErr != nil {
-		s.logger.Error().Err(refundErr).Str("task_id", task.ID).Msg("failed to refund credits for task")
-	}
-}
-
-// UsageStats holds aggregated LLM usage statistics.
+// UsageStats holds user-visible task activity. Provider usage and cost stay in
+// the internal cost ledger and are never returned by this API.
 type UsageStats struct {
-	TotalTasks               int                       `json:"total_tasks"`
-	TotalInputTokens         int64                     `json:"total_input_tokens"`
-	TotalOutputTokens        int64                     `json:"total_output_tokens"`
-	TotalCacheReadTokens     int64                     `json:"total_cache_read_tokens"`
-	TotalCacheCreationTokens int64                     `json:"total_cache_creation_tokens"`
-	TotalCostUSD             float64                   `json:"total_cost_usd"`
-	ByType                   map[string]*TypeStatEntry `json:"by_type,omitempty"`
+	TotalTasks int                       `json:"total_tasks"`
+	ByType     map[string]*TypeStatEntry `json:"by_type,omitempty"`
 }
 
 // TypeStatEntry holds per-type aggregated stats.
 type TypeStatEntry struct {
-	Count               int     `json:"count"`
-	InputTokens         int64   `json:"input_tokens"`
-	OutputTokens        int64   `json:"output_tokens"`
-	CacheReadTokens     int64   `json:"cache_read_tokens"`
-	CacheCreationTokens int64   `json:"cache_creation_tokens"`
-	CostUSD             float64 `json:"cost_usd"`
+	Count int `json:"count"`
 }
 
-// GetUsageStats returns aggregated token usage and cost stats for a user.
+// GetUsageStats returns user-visible task activity for a date range.
 func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to time.Time, projectID string) (*UsageStats, error) {
 	stats := &UsageStats{ByType: make(map[string]*TypeStatEntry)}
 
 	// SQL-level aggregation for totals.
-	totalTasks, totalInput, totalOutput, totalCacheRead, totalCacheCreation, totalCost, err :=
+	totalTasks, _, _, _, _, err :=
 		s.repo.Tasks().AggregateUsageByUser(ctx, userID, from, to, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate usage: %w", err)
 	}
 	stats.TotalTasks = int(totalTasks)
-	stats.TotalInputTokens = totalInput
-	stats.TotalOutputTokens = totalOutput
-	stats.TotalCacheReadTokens = totalCacheRead
-	stats.TotalCacheCreationTokens = totalCacheCreation
-	stats.TotalCostUSD = totalCost
 
 	// SQL GROUP BY for per-type breakdown.
 	typeRows, err := s.repo.Tasks().AggregateUsageByType(ctx, userID, from, to, projectID)
@@ -1864,14 +1740,7 @@ func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to
 		return nil, fmt.Errorf("aggregate usage by type: %w", err)
 	}
 	for _, row := range typeRows {
-		stats.ByType[row.Type] = &TypeStatEntry{
-			Count:               int(row.Count),
-			InputTokens:         row.InputTokens,
-			OutputTokens:        row.OutputTokens,
-			CacheReadTokens:     row.CacheReadTokens,
-			CacheCreationTokens: row.CacheCreationTokens,
-			CostUSD:             row.CostUSD,
-		}
+		stats.ByType[row.Type] = &TypeStatEntry{Count: int(row.Count)}
 	}
 
 	return stats, nil
@@ -1903,7 +1772,8 @@ func (s *TaskService) setPublishedAndMaybeTrack(ctx context.Context, userID stri
 }
 
 // Delete permanently removes a task and its associated files.
-// Running/pending tasks are cancelled first (with credit refund).
+// Running/pending tasks are cancelled first. User cancellation does not reverse
+// the fixed task charge.
 func (s *TaskService) Delete(ctx context.Context, id string) error {
 	task, err := s.repo.Tasks().FindByID(ctx, id)
 	if err != nil {
