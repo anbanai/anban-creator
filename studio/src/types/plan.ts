@@ -33,7 +33,6 @@ export interface Plan {
   video_creator_input?: VideoInput
   video_creator_config?: VideoTaskConfig
   montage_input?: MontageInput
-  video_estimated_credits?: number
   created_at: string
   updated_at: string
 }

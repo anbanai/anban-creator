@@ -3,6 +3,8 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +26,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -297,7 +300,7 @@ func setupMCPVideoProject(t *testing.T) (context.Context, repository.Repository,
 	projectSvc := service.NewProjectService(repo, &logger)
 	projectSvc.SetVideoCatalog(service.DefaultVideoModelCatalog())
 	svcs = &Services{ProjectSvc: projectSvc}
-	SetBillingServices(nil, nil, &config.Config{VideoAPI: config.VideoAPIConfig{
+	SetBillingServices(nil, &config.Config{VideoAPI: config.VideoAPIConfig{
 		ModelCatalog: defaultMCPVideoModelCatalogEntries(),
 	}})
 	ctx := context.Background()
@@ -315,11 +318,34 @@ func setupMCPVideoProjectWithServices(t *testing.T, store storage.Provider) (con
 	t.Helper()
 	ctx, repo, userID, projectID := setupMCPVideoProject(t)
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
-	taskSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)
+	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
+	taskSvc.SetVideoCatalog(service.DefaultVideoModelCatalog())
 	svcs.TaskSvc = taskSvc
 	svcs.Store = store
 	return ctx, repo, userID, projectID
+}
+
+func installVideoFixedBilling(t *testing.T, repo repository.Repository, taskSvc *service.TaskService, taskID string) (*service.BillingCatalogService, string) {
+	t.Helper()
+	bundle, err := serverbilling.LoadBundle(filepath.Join("..", "billing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := service.NewBillingCatalogService(repo, bundle, service.BillingCatalogOptions{})
+	if _, err := catalog.Publish(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	taskSvc.SetBillingWalletService(service.NewBillingWalletService(repo, bundle, service.BillingWalletOptions{}))
+	executionID := uuid.NewString()
+	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{
+		ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if won, err := repo.Tasks().SetCurrentExecution(context.Background(), taskID, executionID); err != nil || !won {
+		t.Fatalf("set current execution: won=%v err=%v", won, err)
+	}
+	return catalog, executionID
 }
 
 func createMCPVideoTask(t *testing.T, repo repository.Repository, userID, projectID string) string {
@@ -697,17 +723,16 @@ func TestPrepareVideoGenerationInputsAnalyzesMultipleVideoReferences(t *testing.
 	}
 }
 
-func TestAnalyzeVideoReferenceChargesTokenUsageAndStoresMetadata(t *testing.T) {
+func TestAnalyzeVideoReferenceReportsUsageWithoutChargingWallet(t *testing.T) {
 	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/video-understanding.json"}
 	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
 	userID := uuid.NewString()
 	if err := repo.Users().Create(context.Background(), &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		Tier:           model.TierFree,
-		InviteCode:     strings.ToUpper(userID[:8]),
-		CreditsBalance: 10_000,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		Tier:       model.TierFree,
+		InviteCode: strings.ToUpper(userID[:8]),
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -726,31 +751,12 @@ func TestAnalyzeVideoReferenceChargesTokenUsageAndStoresMetadata(t *testing.T) {
 	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
 	writingSvc.SetVideoUnderstandingClient(vision)
 	svcs.WritingSvc = writingSvc
-	creditSvc := service.NewCreditService(repo, &config.CreditsConfig{}, &logger)
-	SetBillingServices(creditSvc, nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoUnderstanding: config.VideoUnderstandingRuntimeConfig{
 			UnderstandingRuntimeConfig: config.UnderstandingRuntimeConfig{
 				ProviderKey: "moonshot",
 				Model:       "kimi-k2.7-code-highspeed",
 			},
-		},
-		ModelPrices: config.ModelPricesConfig{
-			CurrencyRates: map[string]config.CurrencyRate{"USD": {ToCNY: 7.2}},
-			TokenModels: map[string]config.TokenModelPrice{
-				"moonshot/kimi-k2.7-code-highspeed": {
-					Currency:    "USD",
-					Unit:        1_000_000,
-					CachedInput: 0.38,
-					Input:       1.90,
-					Output:      8.00,
-				},
-			},
-		},
-		Billing: config.BillingConfig{
-			CreditsPerCNY:         1000,
-			TierMultipliers:       map[string]float64{"free": 1.30},
-			DefaultUserMultiplier: 1.0,
-			MinimumChargeCredits:  1,
 		},
 	})
 
@@ -766,22 +772,11 @@ func TestAnalyzeVideoReferenceChargesTokenUsageAndStoresMetadata(t *testing.T) {
 		t.Fatalf("analyzeVideoReferenceHandler returned error: %v", err)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, `"credits_charged":225`) || !strings.Contains(text, `"total_tokens":11000`) {
-		t.Fatalf("response missing token billing details: %s", text)
+	if strings.Contains(text, `"credits_charged"`) || !strings.Contains(text, `"total_tokens":11000`) {
+		t.Fatalf("response leaked retail usage billing or omitted provider usage: %s", text)
 	}
-	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
-	if err != nil {
-		t.Fatalf("find task transactions: %v", err)
-	}
-	if len(txs) != 1 || txs[0].Type != model.CreditTypeVideoUnderstanding || txs[0].Amount != -225 {
-		t.Fatalf("transactions = %#v, want one video understanding deduction", txs)
-	}
-	var metadata model.CreditTransactionMetadata
-	if err := json.Unmarshal(txs[0].Metadata, &metadata); err != nil {
-		t.Fatalf("unmarshal metadata: %v", err)
-	}
-	if metadata.TotalTokens != 11_000 || metadata.BaseCredits != 173 || metadata.FinalCredits != 225 {
-		t.Fatalf("metadata = %#v, want token cost snapshot", metadata)
+	if _, err := repo.Billing().FindAccount(ctx, userID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("video understanding created user wallet: %v", err)
 	}
 }
 
@@ -792,20 +787,18 @@ func TestAnalyzeVideoReferencePreflightsForeignTaskBeforeCallingVision(t *testin
 	otherUserID := uuid.NewString()
 	for _, user := range []*model.User{
 		{
-			ID:             userID,
-			Email:          userID + "@example.com",
-			Password:       "hashed",
-			Tier:           model.TierFree,
-			InviteCode:     strings.ToUpper(userID[:8]),
-			CreditsBalance: 10_000,
+			ID:         userID,
+			Email:      userID + "@example.com",
+			Password:   "hashed",
+			Tier:       model.TierFree,
+			InviteCode: strings.ToUpper(userID[:8]),
 		},
 		{
-			ID:             otherUserID,
-			Email:          otherUserID + "@example.com",
-			Password:       "hashed",
-			Tier:           model.TierFree,
-			InviteCode:     strings.ToUpper(otherUserID[:8]),
-			CreditsBalance: 10_000,
+			ID:         otherUserID,
+			Email:      otherUserID + "@example.com",
+			Password:   "hashed",
+			Tier:       model.TierFree,
+			InviteCode: strings.ToUpper(otherUserID[:8]),
 		},
 	} {
 		if err := repo.Users().Create(ctx, user); err != nil {
@@ -826,28 +819,12 @@ func TestAnalyzeVideoReferencePreflightsForeignTaskBeforeCallingVision(t *testin
 	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
 	writingSvc.SetVideoUnderstandingClient(vision)
 	svcs.WritingSvc = writingSvc
-	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoUnderstanding: config.VideoUnderstandingRuntimeConfig{
 			UnderstandingRuntimeConfig: config.UnderstandingRuntimeConfig{
 				ProviderKey: "moonshot",
 				Model:       "kimi-k2.7-code-highspeed",
 			},
-		},
-		ModelPrices: config.ModelPricesConfig{
-			TokenModels: map[string]config.TokenModelPrice{
-				"moonshot/kimi-k2.7-code-highspeed": {
-					Currency: "CNY",
-					Unit:     1_000,
-					Input:    config.FlexibleFloat(1),
-					Output:   config.FlexibleFloat(1),
-				},
-			},
-		},
-		Billing: config.BillingConfig{
-			CreditsPerCNY:         1000,
-			TierMultipliers:       map[string]float64{"free": 1},
-			DefaultUserMultiplier: 1.0,
-			MinimumChargeCredits:  1,
 		},
 	})
 
@@ -990,9 +967,9 @@ func TestDownloadFileRejectsOversizedResponse(t *testing.T) {
 		_, _ = w.Write([]byte("123456"))
 	}))
 	defer srv.Close()
-	oldTransport := http.DefaultTransport
-	http.DefaultTransport = srv.Client().Transport
-	t.Cleanup(func() { http.DefaultTransport = oldTransport })
+	oldClient := videoDownloadHTTPClient
+	videoDownloadHTTPClient = srv.Client()
+	t.Cleanup(func() { videoDownloadHTTPClient = oldClient })
 
 	out := filepath.Join(t.TempDir(), "video.mp4")
 	err := downloadFile(context.Background(), srv.URL, out, 5)
@@ -1189,7 +1166,7 @@ func TestGetProjectVideoProfileFiltersUnconfiguredPolicyModels(t *testing.T) {
 	if err := repo.Projects().Update(ctx, project); err != nil {
 		t.Fatalf("update project: %v", err)
 	}
-	SetBillingServices(nil, nil, &config.Config{VideoAPI: config.VideoAPIConfig{ModelCatalog: []config.VideoModelCatalogEntry{{
+	SetBillingServices(nil, &config.Config{VideoAPI: config.VideoAPIConfig{ModelCatalog: []config.VideoModelCatalogEntry{{
 		Key:                  "seedance-2.0",
 		DisplayName:          "Configured Seedance",
 		ModelID:              "doubao-seedance-2-0-260128",
@@ -1337,14 +1314,14 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 		}
 	}
 	pricing := video["pricing"].(map[string]any)
-	if got, _ := pricing["operation_billing_rule"].(string); !strings.Contains(got, "video_gen") {
-		t.Fatalf("videocreator.pricing.operation_billing_rule = %v, want video_gen rule", pricing["operation_billing_rule"])
+	if got, _ := pricing["operation_billing_rule"].(string); !strings.Contains(got, "fixed SKU") || !strings.Contains(got, "durably persisted") {
+		t.Fatalf("videocreator.pricing.operation_billing_rule = %v, want fixed-SKU durable-output rule", pricing["operation_billing_rule"])
 	}
 	if _, ok := pricing["insufficient_credit_rule"]; ok {
 		t.Fatalf("videocreator.pricing must not expose an execution-time balance gate: %#v", pricing)
 	}
 	brief, ok := info["agent_brief"].(string)
-	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "面向露营人群的咖啡杯项目") || !strings.Contains(brief, "CLAUDE.md") || !strings.Contains(brief, "video_creator_input") || !strings.Contains(brief, "seedance-20") || !strings.Contains(brief, "video_gen") {
+	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "面向露营人群的咖啡杯项目") || !strings.Contains(brief, "CLAUDE.md") || !strings.Contains(brief, "video_creator_input") || !strings.Contains(brief, "seedance-20") || !strings.Contains(brief, "固定任务 SKU") {
 		t.Fatalf("agent_brief missing video project context: %#v", info["agent_brief"])
 	}
 	if strings.Contains(strings.ToLower(brief), "recharge") || strings.Contains(brief, "余额不足") || strings.Contains(brief, "充值") {
@@ -1380,10 +1357,13 @@ func TestBuildVideoGenerationPlanHandlerReturnsPayloadPreview(t *testing.T) {
 		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	for _, want := range []string{"generation_plan", "sdk_payload_preview", "estimated_credits", "reference-anchors.md", "shot-plan.md"} {
+	for _, want := range []string{"generation_plan", "sdk_payload_preview", "reference-anchors.md", "shot-plan.md", `"duration":15`, `"resolution":"1080p"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("payload missing %q: %s", want, text)
 		}
+	}
+	if strings.Contains(text, "estimated_credits") || strings.Contains(text, "pricing_breakdown") {
+		t.Fatalf("plan leaked removed dynamic retail pricing: %s", text)
 	}
 }
 
@@ -1429,8 +1409,8 @@ func TestBuildVideoPlanAllowsTaskSavedVideoReferenceDuration(t *testing.T) {
 		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, `"input_video":true`) || !strings.Contains(text, `"input_seconds":7.25`) {
-		t.Fatalf("pricing did not include saved video input duration: %s", text)
+	if !strings.Contains(text, `"target_duration_source":"reference_video"`) || !strings.Contains(text, `"target_duration_seconds":7`) || !strings.Contains(text, `"input_duration_seconds":7.25`) {
+		t.Fatalf("plan did not preserve saved video reference duration: %s", text)
 	}
 }
 
@@ -2193,8 +2173,8 @@ func TestBuildVideoPlanUsesPreparedMaterializedReferences(t *testing.T) {
 		t.Fatalf("unexpected build error with prepared materialized refs: %s", callToolText(result))
 	}
 	text := callToolText(result)
-	if !strings.Contains(text, `"input_video":true`) || !strings.Contains(text, `"segment_count":3`) {
-		t.Fatalf("build response missing input_video/multi-segment plan: %s", text)
+	if !strings.Contains(text, `"input_duration_seconds":45`) || !strings.Contains(text, `"index":3`) {
+		t.Fatalf("build response missing materialized media input/multi-segment plan: %s", text)
 	}
 }
 
@@ -2255,10 +2235,9 @@ func TestBuildVideoPlanUsesTaskVideoInputReferenceDurationForStrictRemake(t *tes
 	}
 	text := callToolText(result)
 	for _, want := range []string{
-		`"input_video":true`,
+		`"input_duration_seconds":45`,
 		`"target_duration_source":"reference_video"`,
 		`"target_duration_seconds":45`,
-		`"segment_count":3`,
 		`"index":3`,
 	} {
 		if !strings.Contains(text, want) {
@@ -2267,72 +2246,7 @@ func TestBuildVideoPlanUsesTaskVideoInputReferenceDurationForStrictRemake(t *tes
 	}
 }
 
-func TestCreateVideoGenerationTaskHandlerRequiresService(t *testing.T) {
-	old := svcs
-	t.Cleanup(func() { svcs = old })
-	svcs = &Services{}
-	req := &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":"p1","prompt":"生成视频"}`)},
-	}
-	result, err := createVideoGenerationTaskHandler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("createVideoGenerationTaskHandler returned error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error")
-	}
-	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "video service not available") {
-		t.Fatalf("unexpected error text: %q", text)
-	}
-}
-
-func TestCreateVideoGenerationTaskHandlerRejectsInvalidReference(t *testing.T) {
-	old := svcs
-	t.Cleanup(func() { svcs = old })
-	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
-	taskID := createMCPVideoTask(t, repo, userID, projectID)
-	svcs.VideoSvc = service.NewVideoService(&config.VideoAPIConfig{
-		Key:     "test-key",
-		BaseURL: "https://example.com",
-	})
-
-	req := &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
-			"project_id":` + strconv.Quote(projectID) + `,
-			"task_id":` + strconv.Quote(taskID) + `,
-			"prompt":"生成视频",
-			"references":[{"type":"image_url","url":"http://localhost/a.png"}]
-		}`)},
-	}
-	result, err := createVideoGenerationTaskHandler(ctx, req)
-	if err != nil {
-		t.Fatalf("createVideoGenerationTaskHandler returned error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error")
-	}
-	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "publicly accessible HTTPS") {
-		t.Fatalf("unexpected error text: %q", text)
-	}
-}
-
-func TestDownloadVideoGenerationResultDoesNotRequireAgentOutputPath(t *testing.T) {
-	req := &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":"p1","task_id":"task-1","video_url":"https://example.com/out.mp4"}`)},
-	}
-	result, err := downloadVideoGenerationResultHandler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("downloadVideoGenerationResultHandler returned error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error because services/storage are not configured, not because output_path is required")
-	}
-	if text := result.Content[0].(*mcp.TextContent).Text; strings.Contains(text, "output_path is required") {
-		t.Fatalf("must not require agent output_path, got %q", text)
-	}
-}
-
-func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *testing.T) {
+func TestCreateVideoGenerationJobPinsSegmentRetailSKUBeforeProviderDispatch(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
 	oldBill := billSvc
@@ -2341,11 +2255,10 @@ func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *tes
 	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
 	userID := uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		InviteCode:     strings.ToUpper(userID[:8]),
-		CreditsBalance: 100_000,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: strings.ToUpper(userID[:8]),
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -2358,8 +2271,7 @@ func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *tes
 		t.Fatalf("update project owner: %v", err)
 	}
 	ctx = withMCPUserID(ctx, userID)
-	logger := zerolog.New(io.Discard)
-	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoAPI: config.VideoAPIConfig{ModelCatalog: defaultMCPVideoModelCatalogEntries()},
 		ModelRoutes: config.ModelRoutesConfig{
 			VideoGeneration: config.VideoGenerationRouteConfig{Provider: "volcengine_ark"},
@@ -2368,6 +2280,9 @@ func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *tes
 	taskID := createMCPVideoTaskWithConfig(t, repo, userID, projectID, model.VideoTaskConfig{
 		ModelKey: "seedance-2.0-mini",
 	})
+	catalog, executionID := installVideoFixedBilling(t, repo, svcs.TaskSvc, taskID)
+	svcs.BillingCatalogSvc = catalog
+	ctx = withMCPExecutionID(ctx, executionID)
 	arkSrv := newArkTaskServer(t)
 	defer arkSrv.Close()
 	svcs.VideoSvc = service.NewVideoService(&config.VideoAPIConfig{Key: "test-key", BaseURL: arkSrv.URL, Timeout: time.Second})
@@ -2384,22 +2299,19 @@ func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *tes
 			"references":[{"type":"image_url","url":"https://example.com/product.png","reference_role":"product_appearance"}]
 		}`)},
 	}
-	result, err := createVideoGenerationTaskHandler(ctx, req)
+	result, err := createVideoGenerationJobHandler(ctx, req)
 	if err != nil {
-		t.Fatalf("createVideoGenerationTaskHandler returned error: %v", err)
+		t.Fatalf("createVideoGenerationJobHandler returned error: %v", err)
 	}
 	if result.IsError {
 		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
 	}
-	gen, err := repo.VideoGenerations().FindByArkTaskID(ctx, "cgt-video-1")
+	gen, err := repo.VideoGenerations().FindLatestByTaskID(ctx, taskID)
 	if err != nil {
 		t.Fatalf("find video generation: %v", err)
 	}
 	if gen.TaskID != taskID || gen.ProjectID != projectID || gen.Status != "submitted" {
 		t.Fatalf("generation linkage/status = %#v", gen)
-	}
-	if gen.CreditsCharged <= 0 || gen.PricingBreakdown.Data().CNY <= 0 {
-		t.Fatalf("pricing not persisted: %#v", gen)
 	}
 	resolved := gen.ResolvedParams.Data()
 	if resolved.ModelKey != "seedance-2.0-mini" || resolved.Model != modelIDForVideoKey(t, "seedance-2.0-mini") {
@@ -2412,35 +2324,27 @@ func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *tes
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if task.VideoGenerationID != gen.ID || task.VideoEstimatedCredits != gen.CreditsCharged || task.VideoCreditsCharged != gen.CreditsCharged {
+	if task.VideoGenerationID != gen.ID {
 		t.Fatalf("task video snapshot not linked: %#v generation=%#v", task, gen)
 	}
-	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	segments, err := repo.VideoGenerations().ListSegments(ctx, gen.ID)
+	if err != nil || len(segments) != 1 {
+		t.Fatalf("segments = %+v, %v", segments, err)
+	}
+	pinned := segments[0].RetailSKU.Data()
+	if pinned.CatalogID != "retail-2026-07-20-v2" || pinned.SKUID != "video.seedance-2-0-mini.720p.1-5.no-input.v1" || pinned.PriceCredits != 4000 || pinned.InputMode != "no_input" {
+		t.Fatalf("pinned segment retail SKU = %+v", pinned)
+	}
+	entries, err := repo.Billing().ListEntriesByUser(ctx, userID, 0, 10)
 	if err != nil {
-		t.Fatalf("find task transactions: %v", err)
+		t.Fatalf("list wallet entries: %v", err)
 	}
-	var tx *model.CreditTransaction
-	for _, candidate := range txs {
-		if candidate.Type == model.CreditTypeVideoGen && candidate.Amount < 0 {
-			tx = candidate
-			break
-		}
-	}
-	if tx == nil {
-		t.Fatalf("transactions = %+v, want video_gen deduction", txs)
-	}
-	if tx.Type != model.CreditTypeVideoGen || tx.Amount != -gen.CreditsCharged {
-		t.Fatalf("video operation deduction = type %s amount %d, want video_gen -%d", tx.Type, tx.Amount, gen.CreditsCharged)
-	}
-	if tx.TaskID == nil || *tx.TaskID != taskID {
-		t.Fatalf("video operation task_id = %v, want %q", tx.TaskID, taskID)
-	}
-	if tx.OperationID == nil || !strings.HasPrefix(*tx.OperationID, "video_gen:"+taskID+":") {
-		t.Fatalf("video operation_id = %v, want unique task-scoped video_gen id", tx.OperationID)
+	if len(entries) != 0 {
+		t.Fatalf("provider submission charged before durable output: %+v", entries)
 	}
 }
 
-func TestCreateVideoGenerationJobKeepsChargeAfterPartialProviderSubmission(t *testing.T) {
+func TestCreateVideoGenerationJobPinsSegmentsButDoesNotChargeAfterPartialProviderSubmission(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
 	oldBill := billSvc
@@ -2448,11 +2352,10 @@ func TestCreateVideoGenerationJobKeepsChargeAfterPartialProviderSubmission(t *te
 	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, nil)
 	userID := uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		InviteCode:     strings.ToUpper(userID[:8]),
-		CreditsBalance: 100_000,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: strings.ToUpper(userID[:8]),
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -2480,8 +2383,7 @@ func TestCreateVideoGenerationJobKeepsChargeAfterPartialProviderSubmission(t *te
 		t.Fatalf("update project: %v", err)
 	}
 	ctx = withMCPUserID(ctx, userID)
-	logger := zerolog.New(io.Discard)
-	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoAPI: config.VideoAPIConfig{ModelCatalog: defaultMCPVideoModelCatalogEntries()},
 		ModelRoutes: config.ModelRoutesConfig{
 			VideoGeneration: config.VideoGenerationRouteConfig{Provider: "volcengine_ark"},
@@ -2490,6 +2392,8 @@ func TestCreateVideoGenerationJobKeepsChargeAfterPartialProviderSubmission(t *te
 	taskID := createMCPVideoTaskWithConfig(t, repo, userID, projectID, model.VideoTaskConfig{
 		ModelKey: "seedance-2.0-mini",
 	})
+	catalog, _ := installVideoFixedBilling(t, repo, svcs.TaskSvc, taskID)
+	svcs.BillingCatalogSvc = catalog
 	postCount := 0
 	arkSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2527,16 +2431,24 @@ func TestCreateVideoGenerationJobKeepsChargeAfterPartialProviderSubmission(t *te
 	if postCount < 2 {
 		t.Fatalf("provider POST calls = %d, want first success then later failure", postCount)
 	}
-	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	entries, err := repo.Billing().ListEntriesByUser(ctx, userID, 0, 10)
 	if err != nil {
-		t.Fatalf("find task transactions: %v", err)
+		t.Fatalf("list wallet entries: %v", err)
 	}
-	if len(txs) != 1 || txs[0].Type != model.CreditTypeVideoGen || txs[0].Amount >= 0 {
-		t.Fatalf("transactions = %+v, want only retained video_gen deduction", txs)
+	if len(entries) != 0 {
+		t.Fatalf("provider submission created wallet entries: %+v", entries)
+	}
+	gen, err := repo.VideoGenerations().FindLatestByTaskID(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segments, err := repo.VideoGenerations().ListSegments(ctx, gen.ID)
+	if err != nil || len(segments) != 2 || segments[0].RetailSKU.Data().SKUID == "" || segments[1].RetailSKU.Data().SKUID == "" || segments[1].Status != "failed" {
+		t.Fatalf("pinned partial segments = %+v, %v", segments, err)
 	}
 }
 
-func TestCreateVideoGenerationJobRefundsAndClearsChargeBeforeProviderSubmission(t *testing.T) {
+func TestCreateVideoGenerationJobPinsFailedFirstSegmentWithoutChargeOrRefund(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
 	oldBill := billSvc
@@ -2544,11 +2456,10 @@ func TestCreateVideoGenerationJobRefundsAndClearsChargeBeforeProviderSubmission(
 	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, nil)
 	userID := uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Password:       "hashed",
-		InviteCode:     strings.ToUpper(userID[:8]),
-		CreditsBalance: 100_000,
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: strings.ToUpper(userID[:8]),
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -2576,8 +2487,7 @@ func TestCreateVideoGenerationJobRefundsAndClearsChargeBeforeProviderSubmission(
 		t.Fatalf("update project: %v", err)
 	}
 	ctx = withMCPUserID(ctx, userID)
-	logger := zerolog.New(io.Discard)
-	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+	SetBillingServices(nil, &config.Config{
 		VideoAPI: config.VideoAPIConfig{ModelCatalog: defaultMCPVideoModelCatalogEntries()},
 		ModelRoutes: config.ModelRoutesConfig{
 			VideoGeneration: config.VideoGenerationRouteConfig{Provider: "volcengine_ark"},
@@ -2586,6 +2496,8 @@ func TestCreateVideoGenerationJobRefundsAndClearsChargeBeforeProviderSubmission(
 	taskID := createMCPVideoTaskWithConfig(t, repo, userID, projectID, model.VideoTaskConfig{
 		ModelKey: "seedance-2.0-mini",
 	})
+	catalog, _ := installVideoFixedBilling(t, repo, svcs.TaskSvc, taskID)
+	svcs.BillingCatalogSvc = catalog
 	arkSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost || r.URL.Path != "/contents/generations/tasks" {
@@ -2614,110 +2526,212 @@ func TestCreateVideoGenerationJobRefundsAndClearsChargeBeforeProviderSubmission(
 	if !result.IsError {
 		t.Fatal("expected provider error before first submission")
 	}
-	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	entries, err := repo.Billing().ListEntriesByUser(ctx, userID, 0, 10)
 	if err != nil {
-		t.Fatalf("find task transactions: %v", err)
+		t.Fatalf("list wallet entries: %v", err)
 	}
-	if len(txs) != 2 || txs[0].Type != model.CreditTypeVideoGen || txs[0].Amount >= 0 || txs[1].Amount != -txs[0].Amount {
-		t.Fatalf("transactions = %+v, want video_gen deduction followed by equal refund", txs)
-	}
-	if txs[0].OperationID == nil || txs[1].OperationID == nil || *txs[0].OperationID != *txs[1].OperationID {
-		t.Fatalf("operation ids = %v / %v, want matching refund id", txs[0].OperationID, txs[1].OperationID)
-	}
-	user, err := repo.Users().FindByID(ctx, userID)
-	if err != nil {
-		t.Fatalf("find user: %v", err)
-	}
-	if user.CreditsBalance != 100_000 {
-		t.Fatalf("balance = %d, want refunded original 100000", user.CreditsBalance)
+	if len(entries) != 0 {
+		t.Fatalf("provider rejection created wallet entries: %+v", entries)
 	}
 	task, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if task.VideoCreditsCharged != 0 {
-		t.Fatalf("task video credits charged = %d, want cleared after refunded submission failure", task.VideoCreditsCharged)
-	}
 	gen, err := repo.VideoGenerations().FindByID(ctx, task.VideoGenerationID)
 	if err != nil {
 		t.Fatalf("find generation: %v", err)
 	}
-	if gen.CreditsCharged != 0 || gen.Status != "failed" {
-		t.Fatalf("generation charge/status = %d/%s, want cleared failed generation", gen.CreditsCharged, gen.Status)
+	if gen.Status != "failed" {
+		t.Fatalf("generation status = %s, want failed", gen.Status)
+	}
+	segments, err := repo.VideoGenerations().ListSegments(ctx, gen.ID)
+	if err != nil || len(segments) != 1 || segments[0].Status != "failed" || segments[0].RetailSKU.Data().SKUID == "" {
+		t.Fatalf("failed pinned segment = %+v, %v", segments, err)
 	}
 }
 
-func TestQueryAndDownloadVideoGenerationUpdatePersistentRecordAndOSSFile(t *testing.T) {
+func TestDownloadVideoSegmentPersistsFileAndFixedSKUSettlementAtomically(t *testing.T) {
+	f := newVideoSettlementFixture(t, "ark-segment-fixed-1")
+	if err := f.repo.Billing().CreateAccount(f.ctx, &model.BillingWalletAccount{UserID: f.userID}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := downloadVideoGenerationResultsHandler(f.ctx, f.request)
+	if err != nil || result.IsError {
+		t.Fatalf("download result = %#v, %v text=%q", result, err, callToolText(result))
+	}
+	replay, err := downloadVideoGenerationResultsHandler(f.ctx, f.request)
+	if err != nil || replay.IsError || *f.downloadCalls != 1 {
+		t.Fatalf("replay = %#v, %v download_calls=%d text=%q", replay, err, *f.downloadCalls, callToolText(replay))
+	}
+	drift := videoDownloadRequestWithURL(t, f.request, "https://example.com/not-the-provider-output.mp4")
+	driftResult, err := downloadVideoGenerationResultsHandler(f.ctx, drift)
+	if err != nil || !driftResult.IsError || !strings.Contains(callToolText(driftResult), "does not match the persisted provider output") || *f.downloadCalls != 1 {
+		t.Fatalf("provider URL drift = %#v, %v download_calls=%d text=%q", driftResult, err, *f.downloadCalls, callToolText(driftResult))
+	}
+	updatedSegment, err := f.repo.VideoGenerations().FindSegmentByArkTaskID(f.ctx, f.segment.ArkTaskID)
+	if err != nil || updatedSegment.TaskFileID == "" || updatedSegment.Status != "archived" {
+		t.Fatalf("updated segment = %+v, %v", updatedSegment, err)
+	}
+	files, err := f.repo.TaskFiles().FindByExecutionID(f.ctx, f.executionID)
+	if err != nil || len(files) != 1 || files[0].ID != updatedSegment.TaskFileID {
+		t.Fatalf("execution files = %+v, %v", files, err)
+	}
+	settlement, err := f.repo.Billing().FindSettlementByKey(f.ctx, "mcp-video-settlement", testBillingSettlementKey(f.taskID, f.executionID, f.segment.ArkTaskID))
+	if err != nil || settlement.ResourceID != updatedSegment.TaskFileID || settlement.SKUID != f.pinned.SKUID || settlement.Status != "pending" {
+		t.Fatalf("settlement = %+v, %v", settlement, err)
+	}
+	wallet := service.NewBillingWalletService(f.repo, mustLoadProductionBillingBundle(t), service.BillingWalletOptions{})
+	if processed, err := wallet.ProcessSettlementOutbox(f.ctx, 10); err != nil || processed != 1 {
+		t.Fatalf("process outbox = %d, %v", processed, err)
+	}
+	account, err := f.repo.Billing().FindAccount(f.ctx, f.userID)
+	if err != nil || account.DebtCredits != 4000 {
+		t.Fatalf("wallet account = %+v, %v", account, err)
+	}
+}
+
+func TestFailedVideoSettlementDoesNotInvalidateDurableResult(t *testing.T) {
+	f := newVideoSettlementFixture(t, "ark-segment-missing-wallet")
+	result, err := downloadVideoGenerationResultsHandler(f.ctx, f.request)
+	if err != nil || result.IsError {
+		t.Fatalf("download result = %#v, %v text=%q", result, err, callToolText(result))
+	}
+	segmentBefore, err := f.repo.VideoGenerations().FindSegmentByArkTaskID(f.ctx, f.segment.ArkTaskID)
+	if err != nil || segmentBefore.Status != "archived" || segmentBefore.TaskFileID == "" {
+		t.Fatalf("durable segment before settlement = %+v, %v", segmentBefore, err)
+	}
+	wallet := service.NewBillingWalletService(f.repo, mustLoadProductionBillingBundle(t), service.BillingWalletOptions{})
+	if processed, err := wallet.ProcessSettlementOutbox(f.ctx, 10); err != nil || processed != 1 {
+		t.Fatalf("missing-wallet outbox processing = %d, %v", processed, err)
+	}
+	failed, err := f.repo.Billing().FindSettlementByKey(f.ctx, "mcp-video-settlement", testBillingSettlementKey(f.taskID, f.executionID, f.segment.ArkTaskID))
+	if err != nil || failed.Status != "failed" {
+		t.Fatalf("missing-wallet settlement state = %+v, %v", failed, err)
+	}
+	if account, err := f.repo.Billing().FindAccount(f.ctx, f.userID); !errors.Is(err, gorm.ErrRecordNotFound) || account != nil {
+		t.Fatalf("failed settlement mutated wallet account: %+v, %v", account, err)
+	}
+	segmentAfter, err := f.repo.VideoGenerations().FindSegmentByArkTaskID(f.ctx, f.segment.ArkTaskID)
+	if err != nil || segmentAfter.Status != "archived" || segmentAfter.TaskFileID != segmentBefore.TaskFileID {
+		t.Fatalf("failed settlement changed durable video result: %+v, %v", segmentAfter, err)
+	}
+	if files, err := f.repo.TaskFiles().FindByExecutionID(f.ctx, f.executionID); err != nil || len(files) != 1 || files[0].ID != segmentBefore.TaskFileID {
+		t.Fatalf("failed settlement changed durable task file: %+v, %v", files, err)
+	}
+}
+
+type videoSettlementFixture struct {
+	ctx           context.Context
+	repo          repository.Repository
+	userID        string
+	taskID        string
+	executionID   string
+	pinned        model.VideoSegmentRetailSKU
+	segment       *model.VideoGenerationSegment
+	request       *mcp.CallToolRequest
+	downloadCalls *int
+}
+
+func newVideoSettlementFixture(t *testing.T, arkTaskID string) videoSettlementFixture {
+	t.Helper()
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/generated.mp4"}
-	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/segment.mp4"}
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: strings.ToUpper(userID[:8])}); err != nil {
+		t.Fatal(err)
+	}
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.UserID = userID
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
 	taskID := createMCPVideoTask(t, repo, userID, projectID)
-	gen := &model.VideoGeneration{
-		UserID:    userID,
-		ProjectID: projectID,
-		TaskID:    taskID,
-		ArkTaskID: "cgt-video-1",
-		Status:    "submitted",
-	}
+	catalog, executionID := installVideoFixedBilling(t, repo, svcs.TaskSvc, taskID)
+	svcs.BillingCatalogSvc = catalog
+	ctx = withMCPExecutionID(withMCPUserID(ctx, userID), executionID)
+	gen := &model.VideoGeneration{UserID: userID, ProjectID: projectID, TaskID: taskID, Status: "succeeded"}
 	if err := repo.VideoGenerations().Create(ctx, gen); err != nil {
-		t.Fatalf("create generation: %v", err)
+		t.Fatal(err)
 	}
-	arkSrv := newArkTaskServer(t)
-	defer arkSrv.Close()
-	svcs.VideoSvc = service.NewVideoService(&config.VideoAPIConfig{Key: "test-key", BaseURL: arkSrv.URL, Timeout: time.Second})
-
-	queryReq := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":` + strconv.Quote(projectID) + `,"video_task_id":"cgt-video-1"}`)}}
-	queryResult, err := queryVideoGenerationTaskHandler(ctx, queryReq)
-	if err != nil {
-		t.Fatalf("queryVideoGenerationTaskHandler returned error: %v", err)
+	pinned := model.VideoSegmentRetailSKU{
+		CatalogID: "retail-2026-07-20-v2", SKUID: "video.seedance-2-0-mini.720p.1-5.no-input.v1", PriceCredits: 4000,
+		ModelKey: "seedance-2.0-mini", Resolution: "720p", DurationTier: "1-5", InputMode: "no_input",
 	}
-	if queryResult.IsError {
-		t.Fatalf("unexpected query error: %s", queryResult.Content[0].(*mcp.TextContent).Text)
+	segment := &model.VideoGenerationSegment{
+		VideoGenerationID: gen.ID, UserID: userID, ProjectID: projectID, TaskID: taskID, Index: 1,
+		ArkTaskID: "ark-segment-fixed-1", Status: "succeeded", Duration: 5, RetailSKU: datatypes.NewJSONType(pinned),
 	}
-	updated, err := repo.VideoGenerations().FindByArkTaskID(ctx, "cgt-video-1")
-	if err != nil {
-		t.Fatalf("find updated generation: %v", err)
+	if err := repo.VideoGenerations().CreateSegment(ctx, segment); err != nil {
+		t.Fatal(err)
 	}
-	if updated.Status != "succeeded" || !strings.Contains(string(updated.ProviderURLs), "provider/out.mp4") {
-		t.Fatalf("query did not persist provider metadata: %#v urls=%s", updated, string(updated.ProviderURLs))
-	}
-
-	videoSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	downloadCalls := 0
+	videoSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		downloadCalls++
 		w.Header().Set("Content-Type", "video/mp4")
-		_, _ = w.Write([]byte("fake-video"))
+		_, _ = w.Write([]byte("durable-video-segment"))
 	}))
-	defer videoSrv.Close()
-	oldClient := http.DefaultClient
-	http.DefaultClient = videoSrv.Client()
-	t.Cleanup(func() { http.DefaultClient = oldClient })
+	t.Cleanup(videoSrv.Close)
+	oldClient := videoDownloadHTTPClient
+	videoDownloadHTTPClient = videoSrv.Client()
+	t.Cleanup(func() { videoDownloadHTTPClient = oldClient })
+
 	downloadReq := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 		"project_id":` + strconv.Quote(projectID) + `,
 		"task_id":` + strconv.Quote(taskID) + `,
-		"video_url":` + strconv.Quote(videoSrv.URL+"/out.mp4") + `,
-		"file_name":"final.mp4"
+		"video_generation_id":` + strconv.Quote(gen.ID) + `,
+		"segments":[{"index":1,"video_url":` + strconv.Quote(videoSrv.URL+"/segment.mp4") + `}]
 	}`)}}
-	downloadResult, err := downloadVideoGenerationResultHandler(ctx, downloadReq)
+	segment.ArkTaskID = arkTaskID
+	segment.ProviderURLs = datatypes.JSON([]byte(`{"video_url":` + strconv.Quote(videoSrv.URL+"/segment.mp4") + `}`))
+	if err := repo.VideoGenerations().UpdateSegment(ctx, segment); err != nil {
+		t.Fatal(err)
+	}
+	return videoSettlementFixture{
+		ctx: ctx, repo: repo, userID: userID, taskID: taskID, executionID: executionID,
+		pinned: pinned, segment: segment, request: downloadReq, downloadCalls: &downloadCalls,
+	}
+}
+
+func mustLoadProductionBillingBundle(t *testing.T) *serverbilling.Bundle {
+	t.Helper()
+	bundle, err := serverbilling.LoadBundle(filepath.Join("..", "billing"))
 	if err != nil {
-		t.Fatalf("downloadVideoGenerationResultHandler returned error: %v", err)
+		t.Fatal(err)
 	}
-	if downloadResult.IsError {
-		t.Fatalf("unexpected download error: %s", downloadResult.Content[0].(*mcp.TextContent).Text)
+	return bundle
+}
+
+func testBillingSettlementKey(parts ...string) string {
+	hash := sha256.New()
+	for _, part := range parts {
+		_, _ = hash.Write([]byte(part))
+		_, _ = hash.Write([]byte{0})
 	}
-	updated, err = repo.VideoGenerations().FindByArkTaskID(ctx, "cgt-video-1")
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func videoDownloadRequestWithURL(t *testing.T, original *mcp.CallToolRequest, rawURL string) *mcp.CallToolRequest {
+	t.Helper()
+	args := parseArgs(original.Params.Arguments)
+	segments, ok := args["segments"].([]any)
+	if !ok || len(segments) != 1 {
+		t.Fatalf("unexpected video download request: %#v", args)
+	}
+	item, ok := segments[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected video download segment: %#v", segments[0])
+	}
+	item["video_url"] = rawURL
+	encoded, err := json.Marshal(args)
 	if err != nil {
-		t.Fatalf("find downloaded generation: %v", err)
+		t.Fatal(err)
 	}
-	if !strings.Contains(string(updated.TaskFileIDs), "final_video") {
-		t.Fatalf("download did not persist task file IDs: %s", string(updated.TaskFileIDs))
-	}
-	files, err := repo.TaskFiles().FindByTaskID(ctx, taskID)
-	if err != nil {
-		t.Fatalf("find task files: %v", err)
-	}
-	if len(files) != 1 || files[0].StorageProvider == "" || files[0].OSSKey == "" {
-		t.Fatalf("generated video was not registered as OSS task file: %#v", files)
-	}
+	return &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(encoded)}}
 }
 
 func TestValidateVideoDeliveryRequiresExistingFinalVideoTaskFile(t *testing.T) {
@@ -2802,8 +2816,23 @@ func TestDownloadVideoGenerationResultsDoesNotMarkPartialMultiSegmentAsFinal(t *
 	old := svcs
 	t.Cleanup(func() { svcs = old })
 	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/segment.mp4"}
-	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: strings.ToUpper(userID[:8])}); err != nil {
+		t.Fatal(err)
+	}
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.UserID = userID
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
 	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	catalog, executionID := installVideoFixedBilling(t, repo, svcs.TaskSvc, taskID)
+	svcs.BillingCatalogSvc = catalog
+	ctx = withMCPExecutionID(withMCPUserID(ctx, userID), executionID)
 	gen := &model.VideoGeneration{
 		UserID:    userID,
 		ProjectID: projectID,
@@ -2820,8 +2849,13 @@ func TestDownloadVideoGenerationResultsDoesNotMarkPartialMultiSegmentAsFinal(t *
 			ProjectID:         projectID,
 			TaskID:            taskID,
 			Index:             i,
+			ArkTaskID:         "ark-partial-segment-" + strconv.Itoa(i),
 			Status:            "succeeded",
 			Duration:          15,
+			RetailSKU: datatypes.NewJSONType(model.VideoSegmentRetailSKU{
+				CatalogID: "retail-2026-07-20-v2", SKUID: "video.seedance-2-0.1080p.11-15.no-input.v1", PriceCredits: 57500,
+				ModelKey: "seedance-2.0", Resolution: "1080p", DurationTier: "11-15", InputMode: "no_input",
+			}),
 		}); err != nil {
 			t.Fatalf("create segment %d: %v", i, err)
 		}
@@ -2831,9 +2865,17 @@ func TestDownloadVideoGenerationResultsDoesNotMarkPartialMultiSegmentAsFinal(t *
 		_, _ = w.Write([]byte("fake-segment-video"))
 	}))
 	defer videoSrv.Close()
-	oldClient := http.DefaultClient
-	http.DefaultClient = videoSrv.Client()
-	t.Cleanup(func() { http.DefaultClient = oldClient })
+	segments, err := repo.VideoGenerations().ListSegments(ctx, gen.ID)
+	if err != nil || len(segments) != 2 {
+		t.Fatalf("list segments = %+v, %v", segments, err)
+	}
+	segments[0].ProviderURLs = datatypes.JSON([]byte(`{"video_url":` + strconv.Quote(videoSrv.URL+"/segment-01.mp4") + `}`))
+	if err := repo.VideoGenerations().UpdateSegment(ctx, segments[0]); err != nil {
+		t.Fatal(err)
+	}
+	oldClient := videoDownloadHTTPClient
+	videoDownloadHTTPClient = videoSrv.Client()
+	t.Cleanup(func() { videoDownloadHTTPClient = oldClient })
 
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 		"project_id":` + strconv.Quote(projectID) + `,

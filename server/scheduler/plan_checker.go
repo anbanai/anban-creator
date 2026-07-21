@@ -119,7 +119,7 @@ func reapStuckTasks(ctx context.Context, repo repository.Repository, taskSvc *se
 			Str("stale_duration", staleDuration.Round(time.Second).String()).
 			Msg(errMsg)
 
-		swapped, err := repo.Tasks().CompareAndSwapStatusAndError(ctx, t.ID, model.TaskStatusRunning, model.TaskStatusFailed, errMsg)
+		swapped, err := taskSvc.FailRunningTaskForInfrastructure(ctx, t.ID, errMsg)
 		if err != nil {
 			logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to mark stuck task as failed")
 			continue
@@ -128,14 +128,6 @@ func reapStuckTasks(ctx context.Context, repo repository.Repository, taskSvc *se
 			logger.Warn().Str("task_id", t.ID).Msg("stuck task already resolved, skipping")
 			continue
 		}
-		if err := repo.Tasks().SetCompletedAt(ctx, t.ID); err != nil {
-			logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to set completed_at on reaped task")
-		}
-
-		if err := taskSvc.RefundForTask(ctx, t.ID); err != nil {
-			logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to refund credits for reaped task")
-		}
-
 		// Release concurrency slot for the reaped task.
 		if t.ProjectID != "" && taskSvc.PubSub() != nil {
 			taskSvc.PubSub().ReleaseSlot(ctx, t.ProjectID)

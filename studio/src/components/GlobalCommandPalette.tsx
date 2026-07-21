@@ -25,7 +25,7 @@ const shortcutMap: Record<string, string> = {
   '计划': 'g p',
   '任务': 'g t',
   '时间轴': 'g l',
-  '积分': 'g $',
+  '钱包': 'g $',
   '设置': 'g s',
 }
 
@@ -60,14 +60,9 @@ export default function GlobalCommandPalette() {
     queryFn: () => api.plans.list({ limit: 20 }),
     enabled: open,
   })
-  const { data: creditsBalance } = useQuery({
-    queryKey: ['command-palette', 'credits', 'balance'],
-    queryFn: () => api.credits.balance(),
-    enabled: open,
-  })
-  const { data: signInStatus } = useQuery({
-    queryKey: ['command-palette', 'credits', 'signInStatus'],
-    queryFn: () => api.credits.signInStatus(),
+  const { data: billingWallet } = useQuery({
+    queryKey: ['command-palette', 'billing', 'wallet'],
+    queryFn: () => api.billing.wallet(),
     enabled: open,
   })
   const { data: apiKeys = [] } = useQuery({
@@ -90,12 +85,11 @@ export default function GlobalCommandPalette() {
     tasks,
     plans,
     projects,
-    creditsBalance,
-    signInStatus,
+    billingWallet,
     apiKeysReady: apiKeys.length > 0,
     modelConfigReady: hasUsableModelConfig(modelConfig),
     localExecutorReady: true,
-  }), [tasks, plans, projects, creditsBalance, signInStatus, apiKeys.length, modelConfig])
+  }), [tasks, plans, projects, billingWallet, apiKeys.length, modelConfig])
   const nextActions = useMemo(() => buildNextBestActions(signals), [signals])
   const failedTasks = signals.failedTasks.slice(0, 5)
   const defaultProject = signals.projects[0]

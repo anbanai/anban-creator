@@ -104,12 +104,13 @@ type ViralNoteFetcher interface {
 
 // ViralAnalysisService handles viral content analysis business logic.
 type ViralAnalysisService struct {
-	repo      repository.Repository
-	fetcher   ViralNoteFetcher
-	llm       LLMClient
-	enqueuer  TaskEnqueuer
-	creditSvc *CreditService
-	logger    *zerolog.Logger
+	repo           repository.Repository
+	fetcher        ViralNoteFetcher
+	llm            LLMClient
+	enqueuer       TaskEnqueuer
+	billingCatalog *BillingCatalogService
+	billingWallet  *BillingWalletService
+	logger         *zerolog.Logger
 }
 
 // NewViralAnalysisService creates a new ViralAnalysisService.
@@ -123,9 +124,9 @@ func NewViralAnalysisService(repo repository.Repository, fetcher ViralNoteFetche
 	}
 }
 
-// SetCreditService enables credit deduction/refund for analysis jobs.
-func (s *ViralAnalysisService) SetCreditService(creditSvc *CreditService) {
-	s.creditSvc = creditSvc
+func (s *ViralAnalysisService) SetBillingServices(catalog *BillingCatalogService, wallet *BillingWalletService) {
+	s.billingCatalog = catalog
+	s.billingWallet = wallet
 }
 
 // Create creates a new viral analysis record and enqueues it for execution.
@@ -138,18 +139,31 @@ func (s *ViralAnalysisService) Create(ctx context.Context, userID, sourceType, s
 		Status:     "pending",
 	}
 
-	if s.creditSvc != nil {
-		if _, err := s.creditSvc.DeductForTask(ctx, userID, model.CreditTypeViralAnalysis, analysis.ID); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
+	if s.billingCatalog == nil || s.billingWallet == nil {
+		return nil, fmt.Errorf("fixed-SKU viral analysis billing is not configured")
 	}
-
-	if err := s.repo.ViralAnalyses().Create(ctx, analysis); err != nil {
-		if s.creditSvc != nil {
-			if refundErr := s.creditSvc.RefundForTask(ctx, analysis.ID); refundErr != nil {
-				s.logger.Error().Err(refundErr).Str("analysis_id", analysis.ID).Msg("failed to refund credits during viral analysis rollback")
-			}
+	fingerprint := billingFingerprint("viral-analysis", analysis.ID, userID, sourceType, sourceURL)
+	quote, err := s.billingCatalog.CreateQuote(ctx, QuoteRequest{
+		UserID: userID, Operation: "task.viral_analysis", RequestFingerprint: fingerprint,
+		IdempotencyScope: "viral-analysis-quote", IdempotencyKey: analysis.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("quote viral analysis: %w", err)
+	}
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		charge, chargeErr := s.billingWallet.ChargeTaskAdmissionInTx(ctx, tx, TaskChargeRequest{
+			UserID: userID, TaskID: analysis.ID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
+			RequestFingerprint: fingerprint, IdempotencyScope: "viral-analysis-admission", IdempotencyKey: analysis.ID,
+			ActorType: "user", ActorID: userID, SourceService: "viral-analysis-service",
+		})
+		if chargeErr != nil {
+			return chargeErr
 		}
+		analysis.BillingQuoteID, analysis.BillingCatalogID, analysis.BillingSKUID = quote.ID, quote.CatalogID, quote.SKUID
+		analysis.BillingChargeID, analysis.BillingPriceCredits = stringPtr(charge.ID), charge.PriceCredits
+		return tx.ViralAnalyses().Create(ctx, analysis)
+	})
+	if err != nil {
 		return nil, fmt.Errorf("create viral analysis: %w", err)
 	}
 
@@ -167,7 +181,7 @@ func (s *ViralAnalysisService) Create(ctx context.Context, userID, sourceType, s
 		if err := s.enqueuer.Enqueue(ViralAnalysisTaskType, payload); err != nil {
 			s.logger.Warn().Err(err).Str("analysis_id", analysis.ID).Msg("failed to enqueue viral analysis")
 			errMsg := "failed to enqueue viral analysis: " + err.Error()
-			if failErr := s.FailAnalysis(ctx, analysis.ID, errMsg); failErr != nil {
+			if failErr := s.FailAnalysis(ctx, analysis.ID, model.TaskBillingTerminalPlatformError, errMsg); failErr != nil {
 				s.logger.Error().Err(failErr).Str("analysis_id", analysis.ID).Msg("failed to mark viral analysis as failed after enqueue error")
 			}
 			analysis.Status = "failed"
@@ -240,15 +254,15 @@ func (s *ViralAnalysisService) ExecuteAnalysis(ctx context.Context, analysisID s
 	}
 
 	if s.fetcher == nil {
-		return s.FailAnalysis(ctx, analysisID, "note fetcher unavailable")
+		return s.FailAnalysis(ctx, analysisID, model.TaskBillingTerminalPlatformError, "note fetcher unavailable")
 	}
 
 	content, err := s.fetcher.FetchNoteContent(ctx, analysis.SourceURL)
 	if err != nil {
-		return s.FailAnalysis(ctx, analysisID, fmt.Sprintf("fetch note content: %v", err))
+		return s.FailAnalysis(ctx, analysisID, model.TaskBillingTerminalProviderError, fmt.Sprintf("fetch note content: %v", err))
 	}
 	if content == nil {
-		return s.FailAnalysis(ctx, analysisID, "fetch note content: empty response")
+		return s.FailAnalysis(ctx, analysisID, model.TaskBillingTerminalProviderError, "fetch note content: empty response")
 	}
 
 	// Store fetched source data.
@@ -262,17 +276,17 @@ func (s *ViralAnalysisService) ExecuteAnalysis(ctx context.Context, analysisID s
 	}
 
 	if s.llm == nil {
-		return s.FailAnalysis(ctx, analysisID, "AI analysis service unavailable")
+		return s.FailAnalysis(ctx, analysisID, model.TaskBillingTerminalPlatformError, "AI analysis service unavailable")
 	}
 
 	result, err := s.analyzeWithLLM(ctx, content, analysis.SourceURL)
 	if err != nil {
-		return s.FailAnalysis(ctx, analysisID, fmt.Sprintf("AI analysis failed: %v", err))
+		return s.FailAnalysis(ctx, analysisID, model.TaskBillingTerminalProviderError, fmt.Sprintf("AI analysis failed: %v", err))
 	}
 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		return s.FailAnalysis(ctx, analysisID, fmt.Sprintf("marshal result: %v", err))
+		return s.FailAnalysis(ctx, analysisID, model.TaskBillingTerminalPlatformError, fmt.Sprintf("marshal result: %v", err))
 	}
 
 	return s.CompleteAnalysis(ctx, analysisID, resultJSON)
@@ -748,15 +762,39 @@ func (s *ViralAnalysisService) CompleteAnalysis(ctx context.Context, id string, 
 }
 
 // FailAnalysis sets the viral analysis status to "failed" with an error message.
-func (s *ViralAnalysisService) FailAnalysis(ctx context.Context, id, errMsg string) error {
-	if err := s.repo.ViralAnalyses().UpdateStatusAndError(ctx, id, "failed", errMsg); err != nil {
+func (s *ViralAnalysisService) FailAnalysis(ctx context.Context, id, reason, errMsg string) error {
+	if !approvedTaskBillingTerminalReason(reason) {
+		return fmt.Errorf("fail analysis: unsupported terminal reason %q", reason)
+	}
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		analysis, findErr := tx.ViralAnalyses().FindByID(ctx, id)
+		if findErr != nil {
+			return findErr
+		}
+		analysis.Status = "failed"
+		analysis.ErrorMessage = errMsg
+		analysis.BillingTerminalReason = reason
+		if updateErr := tx.ViralAnalyses().Update(ctx, analysis); updateErr != nil {
+			return updateErr
+		}
+		if analysis.BillingChargeID == nil || strings.TrimSpace(*analysis.BillingChargeID) == "" {
+			return fmt.Errorf("viral analysis billing charge is missing")
+		}
+		chargeID := strings.TrimSpace(*analysis.BillingChargeID)
+		_, enqueueErr := s.billingWallet.EnqueueSettlementInTx(ctx, tx, SettlementIntent{
+			Action: model.BillingSettlementActionReverseTask,
+			UserID: analysis.UserID, ResourceType: "viral_analysis", ResourceID: analysis.ID,
+			TaskID: analysis.ID, ChargeID: chargeID, CatalogID: analysis.BillingCatalogID, SKUID: analysis.BillingSKUID,
+			Reason: reason, RequestFingerprint: billingFingerprint("viral-analysis-reversal", analysis.ID, chargeID, reason),
+			IdempotencyScope: "viral-analysis-reversal", IdempotencyKey: chargeID,
+		})
+		return enqueueErr
+	})
+	if err != nil {
 		return fmt.Errorf("fail analysis: %w", err)
 	}
-
-	if s.creditSvc != nil {
-		if refundErr := s.creditSvc.RefundForTask(ctx, id); refundErr != nil {
-			s.logger.Error().Err(refundErr).Str("analysis_id", id).Msg("failed to refund credits for failed viral analysis")
-		}
+	if _, err := s.billingWallet.ProcessSettlementOutbox(ctx, 10); err != nil {
+		s.logger.Error().Err(err).Str("analysis_id", id).Msg("viral analysis reversal remains queued")
 	}
 
 	s.logger.Warn().Str("analysis_id", id).Str("error", errMsg).Msg("viral analysis failed")

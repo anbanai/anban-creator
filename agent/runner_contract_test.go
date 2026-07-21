@@ -21,6 +21,20 @@ func TestRunnerUsesManagedAgentRuntimePolicy(t *testing.T) {
 	}
 }
 
+func TestRunnerReconcilesOnlyTransportedExactModelAliases(t *testing.T) {
+	runner := NewRunner(&Config{ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
+		"doubao-seed-evolving-latest-version": {Provider: "volcengine_ark", Model: "doubao-seed-evolving"},
+	}}, nil, nil)
+	result := &serveragent.ExecutionResult{}
+	runner.populateTerminalModelUsage(result, &claudecode.ResultMessage{ModelUsage: map[string]claudecode.ModelUsage{
+		"doubao-seed-evolving-latest-version": {InputTokens: 7},
+		"unknown-model":                       {OutputTokens: 3},
+	}})
+	if len(result.ModelUsage) != 2 || result.ModelUsage[1].Provider != "volcengine_ark" || result.CostStatus != serveragent.CostStatusUnreconciled {
+		t.Fatalf("terminal usage = %+v status=%q diagnostics=%+v", result.ModelUsage, result.CostStatus, result.CostDiagnostics)
+	}
+}
+
 func TestRuntimeCwd(t *testing.T) {
 	workspace := "/workspace"
 	if got := runtimeCwd(workspace, "montage"); got != "/workspace/openmontage" {

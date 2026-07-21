@@ -1,9 +1,9 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { DesignerProvider, GenerateRequest, HistoryResponse, ImageGeneration, RawDesignerProvider } from '@/types/designer'
+import type { DesignerProvider, GenerateQuote, GenerateRequest, HistoryResponse, ImageGeneration, RawDesignerProvider } from '@/types/designer'
 
 export function normalizeProvider(raw: RawDesignerProvider): DesignerProvider {
   const caps = raw.capabilities ?? {}
-  const pricing = raw.pricing ?? {}
+  const pricing = raw.pricing
   return {
     id: raw.id,
     name: raw.name,
@@ -29,12 +29,9 @@ export function normalizeProvider(raw: RawDesignerProvider): DesignerProvider {
       watermark: caps.watermark ?? false,
     },
     pricing: {
-      pricingType: pricing.pricing_type,
-      currency: pricing.currency,
-      estimateTable: pricing.estimate_table,
-      creditsPerCny: pricing.credits_per_cny,
-      requiresUsage: pricing.requires_usage,
-      billingNote: pricing.billing_note,
+      pricingType: pricing?.pricing_type ?? 'fixed_sku',
+      currency: pricing?.currency ?? 'credits',
+      billingNote: pricing?.billing_note ?? 'fixed retail SKU',
     },
   }
 }
@@ -43,10 +40,21 @@ export const designerApi = {
   getProviders: () =>
     unwrap<RawDesignerProvider[]>(http.get('/designer/providers')).then((items) => items.map(normalizeProvider)),
 
-  generate: (req: GenerateRequest, signal?: AbortSignal) =>
-    unwrap<{ generation_id: string; status: string; estimated_credits?: number; billing_mode?: string }>(
-      signal ? http.post('/designer/generate', req, { signal }) : http.post('/designer/generate', req),
-    ),
+  generate: async (req: GenerateRequest, signal?: AbortSignal) => {
+    const operation_id = crypto.randomUUID()
+    const quotedRequest = { ...req, n: 1, operation_id }
+    const quote = await unwrap<GenerateQuote>(
+      signal ? http.post('/designer/quote', quotedRequest, { signal }) : http.post('/designer/quote', quotedRequest),
+    )
+    const generateRequest = {
+      ...quotedRequest,
+      quote_id: quote.quote_id,
+      request_fingerprint: quote.request_fingerprint,
+    }
+    return unwrap<{ generation_id: string; status: string; price_credits: number }>(
+      signal ? http.post('/designer/generate', generateRequest, { signal }) : http.post('/designer/generate', generateRequest),
+    )
+  },
 
   registerReference: (data: { upload_id: string; key: string }, signal?: AbortSignal) =>
     unwrap<{ file_id: string; filename: string; size: number }>(

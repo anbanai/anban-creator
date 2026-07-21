@@ -11,7 +11,6 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 
-	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -23,13 +22,10 @@ var (
 
 // PlanService handles plan CRUD and lifecycle operations.
 type PlanService struct {
-	repo                  repository.Repository
-	logger                *zerolog.Logger
-	videoCatalog          VideoModelCatalog
-	videoCreditMultiplier int
-	videoBilling          srvconfig.BillingConfig
-	creditSvc             *CreditService
-	referenceAssets       *ReferenceAssetService
+	repo            repository.Repository
+	logger          *zerolog.Logger
+	videoCatalog    VideoModelCatalog
+	referenceAssets *ReferenceAssetService
 }
 
 // NewPlanService creates a new PlanService.
@@ -37,19 +33,11 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 	return &PlanService{repo: repo, logger: logger}
 }
 
-func (s *PlanService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
+func (s *PlanService) SetVideoCatalog(catalog VideoModelCatalog) {
 	if s == nil {
 		return
 	}
 	s.videoCatalog = catalog
-	s.videoCreditMultiplier = creditMultiplier
-}
-
-func (s *PlanService) SetCreditService(creditSvc *CreditService) {
-	if s == nil {
-		return
-	}
-	s.creditSvc = creditSvc
 }
 
 func (s *PlanService) SetReferenceAssetService(referenceAssets *ReferenceAssetService) {
@@ -58,52 +46,11 @@ func (s *PlanService) SetReferenceAssetService(referenceAssets *ReferenceAssetSe
 	}
 }
 
-func (s *PlanService) SetVideoBillingConfig(billing srvconfig.BillingConfig) {
-	if s == nil {
-		return
-	}
-	s.videoBilling = billing
-}
-
 func (s *PlanService) resolvedVideoCatalog() VideoModelCatalog {
 	if s != nil && s.videoCatalog != nil {
 		return s.videoCatalog
 	}
 	return VideoModelCatalog{}
-}
-
-func (s *PlanService) resolvedVideoCreditMultiplier() int {
-	if s != nil && s.videoCreditMultiplier > 0 {
-		return s.videoCreditMultiplier
-	}
-	return 1000
-}
-
-func (s *PlanService) videoBillingOptions(ctx context.Context, userID string) VideoBillingOptions {
-	fallback := s.resolvedVideoCreditMultiplier()
-	tier := model.TierFree
-	userMultiplier := 1.0
-	var billing srvconfig.BillingConfig
-	if s != nil {
-		billing = s.videoBilling
-	}
-	if s == nil || s.creditSvc == nil || userID == "" {
-		return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
-	}
-	if foundTier, err := s.creditSvc.GetUserTier(ctx, userID); err == nil {
-		tier = foundTier
-	} else if s.logger != nil {
-		s.logger.Warn().Err(err).Str("user_id", userID).Msg("video tier lookup failed")
-	}
-	foundMultiplier, err := s.creditSvc.GetUserBillingMultiplier(ctx, userID)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn().Err(err).Str("user_id", userID).Msg("video billing multiplier lookup failed")
-		}
-	} else if foundMultiplier > 0 {
-		userMultiplier = foundMultiplier
-	}
-	return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
 }
 
 // CreatePlanParams holds the inputs for PlanService.Create. Pointer-typed optional
@@ -420,7 +367,6 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 			return nil, fmt.Errorf("%w: video_creator_input can only be set on videocreator plans", ErrVideoTaskInput)
 		}
 		plan.SetVideoInput(*p.VideoCreatorInput)
-		plan.VideoEstimatedCredits = 0
 	} else if p.VideoCreatorConfig != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
 		if err != nil {
@@ -430,7 +376,6 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 			return nil, fmt.Errorf("%w: video_creator_config can only be set on videocreator plans", ErrVideoTaskInput)
 		}
 		plan.SetVideoInput(videoInputFromTaskConfig(plan.Prompt, p.VideoCreatorConfig))
-		plan.VideoEstimatedCredits = 0
 	}
 	if p.MontageInput != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)

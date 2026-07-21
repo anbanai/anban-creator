@@ -12,6 +12,7 @@ import (
 	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/urfave/cli/v3"
 )
 
@@ -123,9 +124,6 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 		}
 	}
 
-	if reportErr := reporter.ReportResult(workCtx, result); reportErr != nil {
-		fmt.Fprintf(stderr, "failed to report result: %v\n", reportErr)
-	}
 	cancelWork()
 
 	// Signal terminal completion so the server can finalize the task. Safe in
@@ -233,8 +231,9 @@ func serverExecutionFailure(workspace string, err error) *serveragent.ExecutionR
 		msg = err.Error()
 	}
 	return &serveragent.ExecutionResult{
-		Success: false,
-		Error:   msg,
-		WorkDir: workspace,
+		Success:        false,
+		Error:          msg,
+		TerminalReason: model.TaskBillingTerminalPlatformError,
+		WorkDir:        workspace,
 	}
 }

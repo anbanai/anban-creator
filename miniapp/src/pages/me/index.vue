@@ -93,26 +93,6 @@
           <text class="popup-sheet__close" @tap="showRecharge = false">&#10005;</text>
         </view>
 
-        <view class="recharge-tiers">
-          <view
-            v-for="tier in rechargeTiers"
-            :key="tier.key"
-            class="recharge-tier"
-            :class="{ 'recharge-tier--active': selectedTier === tier.key }"
-            @tap="selectedTier = tier.key"
-          >
-            <text class="recharge-tier__price">{{ tier.price }}元</text>
-            <text class="recharge-tier__credits">{{ tier.credits.toLocaleString() }} 积分</text>
-            <text v-if="tier.bonus" class="recharge-tier__bonus">多送{{ tier.bonus.toLocaleString() }}</text>
-          </view>
-        </view>
-
-        <view class="recharge-divider">
-          <view class="recharge-divider__line" />
-          <text class="recharge-divider__text">或联系客服充值</text>
-          <view class="recharge-divider__line" />
-        </view>
-
         <view class="recharge-qr">
           <view class="recharge-qr__placeholder">
             <text class="recharge-qr__icon">码</text>
@@ -121,11 +101,7 @@
           </view>
         </view>
 
-        <view class="recharge-footer">
-          <AbButton type="primary" size="lg" block :disabled="!selectedTier" @click="handleRecharge">
-            确认充值
-          </AbButton>
-        </view>
+        <text class="recharge-note">充值不附赠积分；如有欠费，到账积分会优先补齐。</text>
       </view>
     </view>
 
@@ -188,10 +164,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { onShareAppMessage } from '@dcloudio/uni-app'
 import { useAuthStore } from '@/stores/auth'
-import { creditsApi } from '@/api/credits'
+import { billingApi } from '@/api/billing'
 import { post } from '@/api/request'
 import { tierLabels } from '@/utils/labels'
-import type { CreditPricing } from '@/types'
 import AbBadge from '@/components/common/AbBadge.vue'
 import AbCard from '@/components/common/AbCard.vue'
 import AbButton from '@/components/common/AbButton.vue'
@@ -226,7 +201,7 @@ const displayBalance = computed(() => {
 
 async function loadCredits() {
   try {
-    const res = await creditsApi.balance()
+    const res = await billingApi.wallet()
     creditsBalance.value = res.balance
   } catch {
     // Silent fail on Me page
@@ -252,12 +227,11 @@ const creativeTools: MenuItem[] = [
 const dataItems: MenuItem[] = [
   { icon: '轴', title: '时间轴', path: '/pages/timeline/index' },
   { icon: '量', title: '用量统计', path: '/pages/usage/index' },
-  { icon: '分', title: '积分中心', path: '/pages/credits/index' },
+  { icon: '分', title: '钱包', path: '/pages/billing/index' },
 ]
 
 const showFeedback = ref(false)
 const showRecharge = ref(false)
-const pricing = ref<CreditPricing | null>(null)
 
 const otherItems: MenuItem[] = [
   { icon: '设', title: '设置', path: '/pages/settings/index' },
@@ -279,7 +253,7 @@ function goSettings() {
 }
 
 function goCredits() {
-  uni.navigateTo({ url: '/pages/credits/index' })
+  uni.navigateTo({ url: '/pages/billing/index' })
 }
 
 // --- Share ---
@@ -290,54 +264,6 @@ onShareAppMessage(() => {
     path: `/pages/index/index?invite=${inviteCode}`,
   }
 })
-
-// --- Recharge ---
-interface RechargeTier {
-  key: string
-  label: string
-  price: number
-  credits: number
-  bonus?: number
-}
-
-const fallbackRechargeTiers: RechargeTier[] = [
-  { key: 'basic', label: '基础包', price: 10, credits: 10000 },
-  { key: 'standard', label: '标准包', price: 50, credits: 52000, bonus: 2000 },
-  { key: 'pro', label: '进阶包', price: 100, credits: 110000, bonus: 10000 },
-]
-
-const rechargeTiers = computed<RechargeTier[]>(() => {
-  if (pricing.value?.recharge_tiers == null) {
-    return fallbackRechargeTiers
-  }
-  return pricing.value.recharge_tiers
-    ?.filter((tier) => tier.enabled !== false && tier.price_cny > 0 && tier.credits > 0)
-    .map((tier) => ({
-      key: tier.key,
-      label: tier.label,
-      price: tier.price_cny,
-      credits: tier.credits,
-      bonus: tier.bonus_credits,
-    })) ?? []
-})
-
-const selectedTier = ref<string | null>(null)
-
-function handleRecharge() {
-  if (!selectedTier.value) return
-  const tier = rechargeTiers.value.find(t => t.key === selectedTier.value)
-  if (!tier) return
-  // Recharge is handled via customer service QR code
-  uni.showToast({ title: '请联系客服完成充值', icon: 'none' })
-}
-
-async function loadPricing() {
-  try {
-    pricing.value = await creditsApi.pricing()
-  } catch {
-    // Silent fail; recharge popup falls back to safe local tiers.
-  }
-}
 
 // --- Feedback ---
 const feedbackType = ref<'bug' | 'suggestion'>('bug')
@@ -367,7 +293,6 @@ async function submitFeedback() {
 // --- Lifecycle ---
 onMounted(() => {
   void loadCredits()
-  void loadPricing()
 })
 </script>
 

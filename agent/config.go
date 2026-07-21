@@ -32,6 +32,7 @@ type Config struct {
 	ResumeSessionID          string
 	ResumeContextPath        string
 	RuntimeEnv               map[string]string
+	ModelUsageAliases        map[string]serveragent.ModelUsageIdentity
 	Env                      map[string]string
 }
 
@@ -50,6 +51,7 @@ func runFlags() []cli.Flag {
 		&cli.StringFlag{Name: "goal", Usage: "goal-mode condition (prepended as /goal slash command so Claude Code runs its built-in goal loop)", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "workspace", Usage: "workspace directory", Value: "/workspace", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "model", Usage: "Claude model override", Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringSliceFlag{Name: "model-usage-alias", Usage: "exact raw=provider/model terminal usage identity"},
 		&cli.StringFlag{Name: "agent-flag", Usage: "Claude Code --agent flag", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "auto-memory-directory", Usage: "Claude Code auto memory directory", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.IntFlag{Name: "max-turns", Usage: "maximum Claude turns"},
@@ -83,6 +85,11 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 		ArticleWithContentImages: cmd.Bool("article-with-content-images"),
 		ArtifactUploadMode:       strings.ToLower(cmd.String("artifact-upload-mode")),
 	}
+	aliases, err := serveragent.ParseModelUsageAliases(cmd.StringSlice("model-usage-alias"))
+	if err != nil {
+		return nil, err
+	}
+	cfg.ModelUsageAliases = aliases
 
 	if cfg.ServerURL == "" {
 		return nil, fmt.Errorf("server-url is required")

@@ -345,6 +345,29 @@ func TestAgentAPIKeyProgressBehaviorIsPreserved(t *testing.T) {
 	}
 }
 
+func TestAgentProgressResultPayloadCannotWriteTerminalEvidence(t *testing.T) {
+	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentApp(t)
+	body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","message":"still running","result":{"success":true,"model_usage":[{"provider":"provider","model":"early","input_tokens":17}],"cost_status":"reconciled"}}`
+	req := agentJSONRequest("/agent/progress", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("progress status/body = %d/%s", resp.StatusCode, responseBody)
+	}
+
+	found, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Result != nil || found.CostStatus != "" || len(found.TerminalModelUsage.Data()) != 0 {
+		t.Fatalf("non-terminal progress persisted evidence: result=%v cost_status=%q usage=%+v", found.Result, found.CostStatus, found.TerminalModelUsage.Data())
+	}
+}
+
 func TestAgentAPIKeyCannotUseLegacyArtifactContractForCloudTask(t *testing.T) {
 	app, repo, task, _, _, rawAPIKey, store := setupExecutionScopedAgentApp(t)
 	for _, endpoint := range []struct{ path, body string }{
@@ -410,7 +433,7 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 	}
 	logger := zerolog.New(io.Discard)
 	store := &executionScopeTestStore{fakeAgentArtifactStorage: &fakeAgentArtifactStorage{}}
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	apiKeys := service.NewAPIKeyService(repo, &logger)
 	_, rawAPIKey, err := apiKeys.Create(ctx, userID, "local")
 	if err != nil {
@@ -482,7 +505,7 @@ func TestResolvePublishingRequiresAdminKeyAndResumesFinalization(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	h := NewAgentHandler(taskSvc, nil, nil, "", &logger)
 	h.SetAdminAPIKey("operator-secret")
 	app := fiber.New()
@@ -549,7 +572,7 @@ func setupAgentClaimApp(t *testing.T) (app *fiber.App, repo repository.Repositor
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	taskSvc.SetExecutorDefaults("claude-test", nil)
 	apiKeySvc := service.NewAPIKeyService(repo, &logger)
 	_, rawKey, err := apiKeySvc.Create(ctx, userID, "test")
@@ -688,7 +711,7 @@ func setupAgentArtifactApp(t *testing.T) (*fiber.App, repository.Repository, *mo
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeAgentArtifactStorage{}
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	apiKeySvc := service.NewAPIKeyService(repo, &logger)
 	_, rawKey, err := apiKeySvc.Create(ctx, userID, "artifact")
 	if err != nil {

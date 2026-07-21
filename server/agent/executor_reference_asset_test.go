@@ -16,7 +16,7 @@ func TestLocalExecutorReferenceAssetFailureStopsBeforeAgentStart(t *testing.T) {
 	logger := zerolog.Nop()
 	key := "assets/users/user-1/asset-1/reference.png"
 	store := &fakeStore{readErr: context.Canceled}
-	executor := NewLocalExecutor(&logger, nil, nil, "", false, "", nil, nil, t.TempDir(), "", store, nil)
+	executor := NewLocalExecutor(&logger, nil, nil, "", false, "", nil, nil, nil, t.TempDir(), "", store, nil)
 	opts := referenceAssetExecutionOptions(key)
 
 	result, err := executor.Execute(context.Background(), opts)
@@ -61,7 +61,7 @@ func TestExecutorsRejectReferenceAssetSizeMismatchBeforeStartup(t *testing.T) {
 	}{
 		{name: "local", run: func(store *fakeStore, opts *ExecutionOptions) error {
 			logger := zerolog.Nop()
-			executor := NewLocalExecutor(&logger, nil, nil, "", false, "", nil, nil, t.TempDir(), "", store, nil)
+			executor := NewLocalExecutor(&logger, nil, nil, "", false, "", nil, nil, nil, t.TempDir(), "", store, nil)
 			_, err := executor.Execute(t.Context(), opts)
 			return err
 		}},

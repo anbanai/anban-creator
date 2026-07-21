@@ -23,6 +23,7 @@ vendor/
 go.work
 
 # Configuration files (contain sensitive information)
+.env
 .anban-creator/
 server/config.yaml
 

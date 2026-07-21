@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"sync"
@@ -27,7 +28,7 @@ func setupCloudCompletionTest(t *testing.T, withArtifact bool, startedOverride .
 	}
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	task := &model.Task{ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusRunning}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
@@ -109,6 +110,113 @@ func TestCompleteCloudExecutionCurrentAttemptAndDuplicate(t *testing.T) {
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
 	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 1 {
 		t.Fatalf("task=%s execution=%s files=%d", foundTask.Status, foundExecution.FinalizationStatus, len(files))
+	}
+}
+
+func TestCompleteCloudExecutionFencesEvidenceWhenAttemptBecomesStale(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	ctx := context.Background()
+	next := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 2, Target: "kubernetes",
+		Status: model.TaskExecutionRunning, Started: true,
+	}
+	if err := repo.TaskExecutions().Create(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+
+	var switched bool
+	svc.finalizationAfterAdvance = func(stage string) error {
+		if stage != model.TaskExecutionFinalizationArtifacts || switched {
+			return nil
+		}
+		switched = true
+		won, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, next.ID)
+		if err != nil || !won {
+			t.Fatalf("switch current execution: won=%v err=%v", won, err)
+		}
+		return nil
+	}
+	result := &agent.ExecutionResult{
+		Success: true, RemoteArtifacts: true,
+		ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "stale-attempt", InputTokens: 31}},
+		CostStatus: agent.CostStatusReconciled,
+	}
+	err := svc.CompleteCloudExecution(ctx, execution.ID, result)
+	if !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("stale evidence finalization error = %v, want ErrStaleTaskExecution", err)
+	}
+
+	foundTask, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundTask.Result != nil || foundTask.CostStatus != "" || len(foundTask.TerminalModelUsage.Data()) != 0 {
+		t.Fatalf("stale execution wrote task evidence: result=%v cost_status=%q usage=%+v", foundTask.Result, foundTask.CostStatus, foundTask.TerminalModelUsage.Data())
+	}
+	foundExecution, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundExecution.FinalizationStatus != model.TaskExecutionFinalizationArtifacts {
+		t.Fatalf("stale execution finalization advanced to %q, want %q", foundExecution.FinalizationStatus, model.TaskExecutionFinalizationArtifacts)
+	}
+}
+
+func TestStaleCloudFinalizerStopsBeforeTaskAndSettlementSideEffects(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	ctx := context.Background()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID: task.UserID, Email: task.UserID + "@example.com", Password: "x", InviteCode: uuid.NewString()[:12],
+	}); err != nil {
+		t.Fatal(err)
+	}
+	terminalResult := &agent.ExecutionResult{Success: false, Error: "old attempt failed", RemoteArtifacts: true}
+	encoded, err := json.Marshal(terminalResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	won, err := repo.TaskExecutions().Transition(ctx, execution.ID,
+		[]string{model.TaskExecutionRunning}, model.TaskExecutionFailed,
+		model.ExecutionTransition{
+			TerminalReason:     "old_attempt_failed",
+			Result:             encoded,
+			FinalizationStatus: model.TaskExecutionFinalizationResult,
+		})
+	if err != nil || !won {
+		t.Fatalf("terminalize old execution: won=%v err=%v", won, err)
+	}
+	oldExecution, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 2, Target: "kubernetes",
+		Status: model.TaskExecutionRunning, Started: true,
+	}
+	if err := repo.TaskExecutions().Create(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	if swapped, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, next.ID); err != nil || !swapped {
+		t.Fatalf("switch current execution: swapped=%v err=%v", swapped, err)
+	}
+
+	err = svc.finalizeTaskFromExecution(ctx, task, oldExecution)
+	if !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("stale finalizer error = %v, want ErrStaleTaskExecution", err)
+	}
+	foundTask, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundTask.Status != model.TaskStatusRunning || foundTask.WorkflowStatus != nil || foundTask.CurrentExecutionID == nil || *foundTask.CurrentExecutionID != next.ID {
+		t.Fatalf("stale finalizer mutated current task: status=%q workflow=%v current=%v", foundTask.Status, foundTask.WorkflowStatus, foundTask.CurrentExecutionID)
+	}
+	foundOld, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundOld.FinalizationStatus != model.TaskExecutionFinalizationResult || foundOld.PublishingStatus != "" {
+		t.Fatalf("stale finalizer advanced execution: stage=%q publishing=%q", foundOld.FinalizationStatus, foundOld.PublishingStatus)
 	}
 }
 
@@ -295,7 +403,7 @@ func TestFinalizationDispatchReplayDoesNotDuplicateQueueOrInflateSlot(t *testing
 	t.Cleanup(func() { _ = rdb.Close() })
 	logger := zerolog.New(io.Discard)
 	enqueuer := &replaySafeEnqueuer{}
-	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, nil, enqueuer, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 	injected := false
 	svc.finalizationAfterStage = func(stage string) error {
 		if stage == model.TaskExecutionFinalizationDispatch && !injected {
@@ -432,7 +540,7 @@ func TestCloudPublishingAmbiguityNeverCallsProviderTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	publisher := &ambiguousPublishFake{}
 	svc.cloudPublisher = publisher
 	svc.finalizationAfterEffect = func(stage string) error {

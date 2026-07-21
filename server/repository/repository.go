@@ -20,7 +20,6 @@ type Repository interface {
 	UploadSessions() UploadSessionRepository
 	Assets() AssetRepository
 	Projects() ProjectRepository
-	Credits() CreditRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
 	ModelConfigs() ModelConfigRepository
@@ -31,9 +30,11 @@ type Repository interface {
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
 	VideoGenerations() VideoGenerationRepository
+	ImageGenerations() ImageGenerationRepository
 	AgentFeedbacks() AgentFeedbackRepository
 	IlinkBindings() IlinkBindingRepository
 	IlinkNotifications() IlinkNotificationRepository
+	Billing() BillingRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -48,8 +49,6 @@ type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	Update(ctx context.Context, user *model.User) error
 	IncrementInviteCount(ctx context.Context, userID string, maxCount int) (bool, error)
-	AdjustBalance(ctx context.Context, userID string, delta int) (int, error)
-	DeductCredits(ctx context.Context, userID string, amount int) (int, bool, error)
 }
 
 // SessionRepository provides access to the login_sessions table.
@@ -90,7 +89,6 @@ type TaskRepository interface {
 	FindByUserIDAndCreatedAtRange(ctx context.Context, userID string, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindRunning(ctx context.Context) ([]*model.Task, error)
 	FindRunningByUser(ctx context.Context, userID string, projectID string) ([]*model.Task, error)
-	FindPaymentRequiredByUser(ctx context.Context, userID string) ([]*model.Task, error)
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
 	UpdateProgressLog(ctx context.Context, id, log string) error
@@ -104,7 +102,12 @@ type TaskRepository interface {
 	// Used on hot paths (e.g. UpdateProgress) where loading the full row —
 	// including the longtext progress_log — would be wasteful.
 	GetTypeAndProgress(ctx context.Context, id string) (taskType string, progress int, err error)
-	UpdateResult(ctx context.Context, id, result string) error
+	UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error)
+	UpdateBillingTerminalReason(ctx context.Context, id, reason string) error
 	Update(ctx context.Context, task *model.Task) error
 	UpdateInputAttachments(ctx context.Context, id string, attachments []model.EntryAttachment) error
 	UpdateTitle(ctx context.Context, id string, title string) error
@@ -163,9 +166,7 @@ type TaskRepository interface {
 	CompareAndSwapPublishApproval(ctx context.Context, id, expected, newState string, clearArticles bool) (bool, error)
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	Delete(ctx context.Context, id string) error
-	UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error
-	UpdateBillingStatus(ctx context.Context, id, status string, shortfallCredits int) error
-	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error)
+	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, err error)
 	AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error)
 }
 
@@ -175,6 +176,7 @@ type TaskFileRepository interface {
 	Upsert(ctx context.Context, file *model.TaskFile) (*model.TaskFile, error)
 	FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error)
 	FindByID(ctx context.Context, id string) (*model.TaskFile, error)
+	FindByIDForExecution(ctx context.Context, id, taskID, executionID string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error)
@@ -295,6 +297,12 @@ type VideoGenerationRepository interface {
 	UpdateSegment(ctx context.Context, segment *model.VideoGenerationSegment) error
 }
 
+type ImageGenerationRepository interface {
+	Create(ctx context.Context, generation *model.ImageGeneration) error
+	FindByID(ctx context.Context, id string) (*model.ImageGeneration, error)
+	MarkFailed(ctx context.Context, id, message string, completedAt time.Time) error
+}
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
@@ -310,7 +318,6 @@ type repository struct {
 	uploadSessions          UploadSessionRepository
 	assets                  AssetRepository
 	projects                ProjectRepository
-	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
 	modelConfigs            ModelConfigRepository
@@ -321,9 +328,11 @@ type repository struct {
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
 	videoGenerations        VideoGenerationRepository
+	imageGenerations        ImageGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
+	billing                 BillingRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -337,7 +346,6 @@ func New(db *gorm.DB) Repository {
 	uploadSessions := newUploadSessionRepository(db)
 	assets := newAssetRepository(db)
 	projects := newProjectRepository(db)
-	credits := newCreditRepository(db)
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
 	modelConfigs := newModelConfigRepository(db)
@@ -348,9 +356,11 @@ func New(db *gorm.DB) Repository {
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
 	videoGenerations := newVideoGenerationRepository(db)
+	imageGenerations := newImageGenerationRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
 	ilinkBindings := newIlinkBindingRepository(db)
 	ilinkNotifications := newIlinkNotificationRepository(db)
+	billing := newBillingRepository(db)
 
 	return &repository{
 		db:                      db,
@@ -363,7 +373,6 @@ func New(db *gorm.DB) Repository {
 		uploadSessions:          uploadSessions,
 		assets:                  assets,
 		projects:                projects,
-		credits:                 credits,
 		apiKeys:                 apiKeys,
 		feedbacks:               feedbacks,
 		modelConfigs:            modelConfigs,
@@ -374,9 +383,11 @@ func New(db *gorm.DB) Repository {
 		posterTasks:             posterTasks,
 		topicPools:              topicPools,
 		videoGenerations:        videoGenerations,
+		imageGenerations:        imageGenerations,
 		agentFeedbacks:          agentFeedbacks,
 		ilinkBindings:           ilinkBindings,
 		ilinkNotifications:      ilinkNotifications,
+		billing:                 billing,
 	}
 }
 
@@ -389,7 +400,6 @@ func (r *repository) TaskFiles() TaskFileRepository                 { return r.f
 func (r *repository) UploadSessions() UploadSessionRepository       { return r.uploadSessions }
 func (r *repository) Assets() AssetRepository                       { return r.assets }
 func (r *repository) Projects() ProjectRepository                   { return r.projects }
-func (r *repository) Credits() CreditRepository                     { return r.credits }
 func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *repository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
 func (r *repository) ModelConfigs() ModelConfigRepository           { return r.modelConfigs }
@@ -406,6 +416,7 @@ func (r *repository) TopicPools() TopicPoolRepository { return r.topicPools }
 func (r *repository) VideoGenerations() VideoGenerationRepository {
 	return r.videoGenerations
 }
+func (r *repository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
 
 func (r *repository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings
@@ -413,6 +424,7 @@ func (r *repository) IlinkBindings() IlinkBindingRepository {
 func (r *repository) IlinkNotifications() IlinkNotificationRepository {
 	return r.ilinkNotifications
 }
+func (r *repository) Billing() BillingRepository { return r.billing }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -448,7 +460,6 @@ type txRepository struct {
 	uploadSessions          UploadSessionRepository
 	assets                  AssetRepository
 	projects                ProjectRepository
-	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
 	modelConfigs            ModelConfigRepository
@@ -459,9 +470,11 @@ type txRepository struct {
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
 	videoGenerations        VideoGenerationRepository
+	imageGenerations        ImageGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
+	billing                 BillingRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -476,7 +489,6 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		uploadSessions:          newUploadSessionRepository(tx),
 		assets:                  newAssetRepository(tx),
 		projects:                newProjectRepository(tx),
-		credits:                 newCreditRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
 		feedbacks:               newFeedbackRepository(tx),
 		modelConfigs:            newModelConfigRepository(tx),
@@ -487,9 +499,11 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
 		videoGenerations:        newVideoGenerationRepository(tx),
+		imageGenerations:        newImageGenerationRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
 		ilinkBindings:           newIlinkBindingRepository(tx),
 		ilinkNotifications:      newIlinkNotificationRepository(tx),
+		billing:                 newTxBillingRepository(tx),
 	}
 }
 
@@ -502,7 +516,6 @@ func (r *txRepository) TaskFiles() TaskFileRepository                 { return r
 func (r *txRepository) UploadSessions() UploadSessionRepository       { return r.uploadSessions }
 func (r *txRepository) Assets() AssetRepository                       { return r.assets }
 func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
-func (r *txRepository) Credits() CreditRepository                     { return r.credits }
 func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *txRepository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
 func (r *txRepository) ModelConfigs() ModelConfigRepository           { return r.modelConfigs }
@@ -519,6 +532,7 @@ func (r *txRepository) TopicPools() TopicPoolRepository { return r.topicPools }
 func (r *txRepository) VideoGenerations() VideoGenerationRepository {
 	return r.videoGenerations
 }
+func (r *txRepository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
 
 func (r *txRepository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings
@@ -526,6 +540,7 @@ func (r *txRepository) IlinkBindings() IlinkBindingRepository {
 func (r *txRepository) IlinkNotifications() IlinkNotificationRepository {
 	return r.ilinkNotifications
 }
+func (r *txRepository) Billing() BillingRepository { return r.billing }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

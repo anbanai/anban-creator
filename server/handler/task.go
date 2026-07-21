@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -168,11 +169,6 @@ type cloneTaskRequest struct {
 	InputAttachments *[]model.EntryAttachment `json:"input_attachments"`
 }
 
-type resumeTaskRequest struct {
-	Prompt           string                  `json:"prompt"`
-	InputAttachments []model.EntryAttachment `json:"input_attachments"`
-}
-
 type bulkDownloadTaskFilesRequest struct {
 	TaskIDs []string `json:"task_ids"`
 }
@@ -197,13 +193,6 @@ type bulkTasksResponse struct {
 	Succeeded int              `json:"succeeded"`
 	Skipped   int              `json:"skipped"`
 	Results   []bulkTaskResult `json:"results"`
-}
-
-type taskCreditsSummary struct {
-	TaskConsumed      int `json:"task_consumed"`
-	OperationConsumed int `json:"operation_consumed"`
-	Refunded          int `json:"refunded"`
-	NetConsumed       int `json:"net_consumed"`
 }
 
 type videoProductionResponse struct {
@@ -293,9 +282,13 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	if h.repo != nil {
 		pending = h.repo
 	}
+	allowedAttachmentTypes := allAgentAttachmentTypes
+	if project.Platform == model.PlatformSeednote {
+		allowedAttachmentTypes = map[string]bool{"image": true}
+	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
 		MaxCount:     maxAgentInputAttachments,
-		AllowedTypes: allAgentAttachmentTypes,
+		AllowedTypes: allowedAttachmentTypes,
 	})
 	if err != nil {
 		return respondInputAttachmentError(c, h.logger, err)
@@ -413,10 +406,10 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if errors.Is(err, service.ErrInsufficientCredits) {
+		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
-				"code": 40200,
-				"msg":  "insufficient_credits",
+				"code": 40202,
+				"msg":  "billing_task_admission_rejected",
 			})
 		}
 		return Error(c, fiber.StatusInternalServerError, "failed to create task")
@@ -507,45 +500,8 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 	}
 
 	resp := taskAPIResponse(task, h.store)
-	if h.repo != nil {
-		if tx, err := h.repo.Credits().FindDeductionByTaskID(c.Context(), task.ID); err == nil && tx != nil && tx.Amount < 0 {
-			charged := -tx.Amount
-			resp["credits_charged"] = charged
-		}
-		if transactions, err := h.repo.Credits().FindByTaskIDAndUserID(c.Context(), task.ID, userID); err == nil {
-			resp["credit_transactions"] = transactions
-			summary := summarizeTaskCredits(transactions)
-			resp["credits_summary"] = summary
-		}
-	}
 
 	return Success(c, resp)
-}
-
-func summarizeTaskCredits(transactions []*model.CreditTransaction) taskCreditsSummary {
-	var summary taskCreditsSummary
-	for _, tx := range transactions {
-		if tx == nil {
-			continue
-		}
-		if tx.Amount < 0 {
-			consumed := -tx.Amount
-			if tx.Type == model.CreditTypeTaskDeduct {
-				summary.TaskConsumed += consumed
-			} else {
-				summary.OperationConsumed += consumed
-			}
-			continue
-		}
-		if tx.Amount > 0 {
-			summary.Refunded += tx.Amount
-		}
-	}
-	summary.NetConsumed = summary.TaskConsumed + summary.OperationConsumed - summary.Refunded
-	if summary.NetConsumed < 0 {
-		summary.NetConsumed = 0
-	}
-	return summary
 }
 
 // Cancel handles POST /api/v1/tasks/:id/cancel.
@@ -654,10 +610,10 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrVideoGenerationConfig) || errors.Is(err, service.ErrVideoTaskInput) || errors.Is(err, service.ErrMontageInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if errors.Is(err, service.ErrInsufficientCredits) {
+		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
-				"code": 40200,
-				"msg":  "insufficient_credits",
+				"code": 40202,
+				"msg":  "billing_task_admission_rejected",
 			})
 		}
 		return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
@@ -688,46 +644,52 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	var req resumeTaskRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-	prompt := strings.TrimSpace(req.Prompt)
+	prompt := strings.TrimSpace(c.FormValue("prompt"))
 	if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
 		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充指令不能超过 %d 个字符", maxTaskPromptCharacters))
 	}
-	if len(req.InputAttachments) > maxTaskResumeFiles {
-		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("at most %d attachments are allowed", maxTaskResumeFiles))
+
+	var labels []string
+	if raw := strings.TrimSpace(c.FormValue("file_labels")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &labels); err != nil {
+			return Error(c, fiber.StatusBadRequest, "file_labels must be a JSON string array")
+		}
 	}
 
-	resumeStore := h.service.Storage()
-	if len(req.InputAttachments) > 0 && resumeStore == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "补充文件存储暂不可用，请稍后重试")
+	form, _ := c.MultipartForm()
+	fileHeaders := formFiles(form, "files")
+	if len(fileHeaders) > maxTaskResumeFiles {
+		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充文件最多上传 %d 个", maxTaskResumeFiles))
 	}
-	var pending repository.Repository
-	if h.repo != nil {
-		pending = h.repo
-	}
-	validatedAttachments, err := validateInputAttachments(c.Context(), resumeStore, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
-		MaxCount:     maxTaskResumeFiles,
-		MaxBytes:     maxTaskResumeFileBytes,
-		AllowedTypes: allAgentAttachmentTypes,
-	})
-	if err != nil {
-		return respondInputAttachmentError(c, h.logger, err)
-	}
-	files := make([]service.ResumeTaskFile, 0, len(validatedAttachments))
-	for i, attachment := range validatedAttachments {
-		if attachment.UploadID == "" || attachment.Key == "" {
-			return Error(c, fiber.StatusBadRequest, fmt.Sprintf("attachment %d requires upload_id and key", i+1))
+
+	files := make([]service.ResumeTaskFile, 0, len(fileHeaders))
+	opened := make([]io.Closer, 0, len(fileHeaders))
+	defer func() {
+		for _, file := range opened {
+			_ = file.Close()
+		}
+	}()
+	for i, header := range fileHeaders {
+		if header == nil {
+			continue
+		}
+		if header.Size > maxTaskResumeFileBytes {
+			return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充文件不能超过 %dMB", maxTaskResumeFileBytes/(1024*1024)))
+		}
+		src, err := header.Open()
+		if err != nil {
+			return Error(c, fiber.StatusBadRequest, "读取补充文件失败")
+		}
+		opened = append(opened, src)
+		label := ""
+		if i < len(labels) {
+			label = labels[i]
 		}
 		files = append(files, service.ResumeTaskFile{
-			OriginalName: attachment.FileName,
-			Label:        attachment.Instruction,
-			Key:          attachment.Key,
-			Type:         attachment.Type,
-			ContentType:  attachment.ContentType,
-			Size:         attachment.Size,
+			OriginalName: header.Filename,
+			Label:        label,
+			Reader:       src,
+			Size:         header.Size,
 		})
 	}
 
@@ -761,6 +723,13 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 	return Success(c, taskAPIResponse(task, h.store))
 }
 
+func formFiles(form *multipart.Form, key string) []*multipart.FileHeader {
+	if form == nil || form.File == nil {
+		return nil
+	}
+	return form.File[key]
+}
+
 // PublishApprove handles POST /api/v1/tasks/:id/publish-approve: resumes a held
 // publish-approval gate (Batch 4A) and publishes the frozen draft to the WeChat
 // draft box. The actual publish runs asynchronously; this returns once the task
@@ -783,9 +752,6 @@ func (h *TaskHandler) PublishApprove(c fiber.Ctx) error {
 	}
 	if task.UserID != userID {
 		return Forbidden(c, "you do not have access to this task")
-	}
-	if err := h.ensureTaskBillingUnlocked(c, task); err != nil {
-		return err
 	}
 	if err := h.service.ApprovePublish(c.Context(), id); err != nil {
 		h.logger.Error().Err(err).Str("task_id", id).Msg("approve publish failed")
@@ -977,7 +943,7 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 		}
 		newTask, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{})
 		if err != nil {
-			if errors.Is(err, service.ErrInsufficientCredits) {
+			if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 				results = append(results, bulkTaskResult{ID: id, Reason: "insufficient_credits"})
 				continue
 			}
@@ -1058,9 +1024,6 @@ func (h *TaskHandler) MarkPublished(c fiber.Ctx) error {
 	if task.UserID != userID {
 		return Forbidden(c, "you do not have access to this task")
 	}
-	if err := h.ensureTaskBillingUnlocked(c, task); err != nil {
-		return err
-	}
 	if err := h.service.SetPublished(c.Context(), userID, id, body.Published); err != nil {
 		h.logger.Error().Err(err).Msg("mark published failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update published status")
@@ -1095,13 +1058,6 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Msg("get task files failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to get task files")
 	}
-	if taskBillingLocked(task) {
-		for _, file := range files {
-			file.URL = ""
-			file.MediaID = ""
-			file.WechatURL = ""
-		}
-	}
 	return Success(c, files)
 }
 
@@ -1118,9 +1074,6 @@ func (h *TaskHandler) GetVideoProduction(c fiber.Ctx) error {
 	}
 	if !model.IsVideoCreatorPlatform(task.Type) {
 		return Error(c, fiber.StatusBadRequest, "task is not a video creator task")
-	}
-	if err := h.ensureTaskBillingUnlocked(c, task); err != nil {
-		return err
 	}
 	files, err := h.service.GetFiles(c.Context(), id)
 	if err != nil {
@@ -1409,20 +1362,6 @@ func (h *TaskHandler) verifyTaskOwnership(c fiber.Ctx, taskID string) (*model.Ta
 	return task, nil
 }
 
-func taskBillingLocked(task *model.Task) bool {
-	if task == nil {
-		return false
-	}
-	return task.BillingStatus == model.TaskBillingStatusPaymentRequired || task.BillingShortfallCredits > 0
-}
-
-func (h *TaskHandler) ensureTaskBillingUnlocked(c fiber.Ctx, task *model.Task) error {
-	if !taskBillingLocked(task) {
-		return nil
-	}
-	return Error(c, fiber.StatusPaymentRequired, "任务交付已锁定，请充值后再下载、预览或发布")
-}
-
 // DownloadFile handles GET /api/v1/tasks/:id/files/:fileId/download.
 // It streams the file content as an attachment download.
 func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
@@ -1435,12 +1374,9 @@ func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
 		return err
 	}
 
-	task, err := h.verifyTaskOwnership(c, taskID)
+	_, err = h.verifyTaskOwnership(c, taskID)
 	if err != nil {
 		return nil // error response already written
-	}
-	if err := h.ensureTaskBillingUnlocked(c, task); err != nil {
-		return err
 	}
 	// Verify the file belongs to the task.
 	if err := h.service.VerifyFileBelongsToTask(c.Context(), taskID, fileID); err != nil {
@@ -1478,12 +1414,9 @@ func (h *TaskHandler) PreviewHTML(c fiber.Ctx) error {
 		return err
 	}
 
-	task, err := h.verifyTaskOwnership(c, taskID)
+	_, err = h.verifyTaskOwnership(c, taskID)
 	if err != nil {
 		return nil // error response already written
-	}
-	if err := h.ensureTaskBillingUnlocked(c, task); err != nil {
-		return err
 	}
 	// Find all files for the task and locate the HTML one.
 	files, err := h.service.GetFiles(c.Context(), taskID)
@@ -1549,12 +1482,9 @@ func (h *TaskHandler) DownloadZip(c fiber.Ctx) error {
 		return err
 	}
 
-	task, err := h.verifyTaskOwnership(c, taskID)
+	_, err = h.verifyTaskOwnership(c, taskID)
 	if err != nil {
 		return nil // error response already written
-	}
-	if err := h.ensureTaskBillingUnlocked(c, task); err != nil {
-		return err
 	}
 	buf, zipName, err := h.service.DownloadZip(c.Context(), taskID)
 	if err != nil {
@@ -1598,9 +1528,6 @@ func (h *TaskHandler) DownloadTasksZip(c fiber.Ctx) error {
 		}
 		if task.UserID != userID {
 			return Forbidden(c, "you do not have access to this task")
-		}
-		if err := h.ensureTaskBillingUnlocked(c, task); err != nil {
-			return err
 		}
 	}
 

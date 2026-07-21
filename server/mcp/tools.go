@@ -46,59 +46,38 @@ type ImageGenerator interface {
 	) (*service.ImageResult, error)
 }
 
-type ImageGenerationBillingDecision struct {
-	Provider        string
-	Model           string
-	Source          string
-	Dynamic         bool
-	DynamicProvider string
-	DynamicModel    string
-	DynamicRoute    string
-}
-
-// ImageGenerationBiller performs static pre-generation charging or records the
-// dynamic route that must be charged from the provider's returned usage.
-type ImageGenerationBiller interface {
-	PrepareImageGeneration(
-		ctx context.Context,
-		userID, taskID, imageType string,
-		resolved *service.ResolvedImageModel,
-	) (ImageGenerationBillingDecision, error)
-}
-
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ProjectSvc            *service.ProjectService
-	Store                 storage.Provider
-	TaskSvc               *service.TaskService
-	CreditSvc             *service.CreditService
-	PlanSvc               *service.PlanService
-	ImageSvc              *service.ImageService
-	ImageModelResolver    ImageModelResolver
-	ImageGenerator        ImageGenerator
-	ImageGenerationBiller ImageGenerationBiller
-	GenerateImageTimeout  time.Duration
-	VideoSvc              *service.VideoService
-	AudioASRSvc           *service.AudioASRService
-	VideoASRSvc           *service.VideoASRService
-	WritingSvc            *service.WritingService
-	PublishingSvc         *service.PublishingService
-	WorkspaceSvc          *service.WorkspaceService
-	TemplateSvc           *service.TemplateService
-	LiveSliceSvc          *service.LiveSliceService
-	SeednoteClient        *seednote.Client
-	SeednoteReadiness     service.Readiness
-	TopicPoolSvc          *service.TopicPoolService
-	AgentFeedbackSvc      *service.AgentFeedbackService
-	TingWuConfigured      bool
-	FunASRConfigured      bool
+	ProjectSvc           *service.ProjectService
+	Store                storage.Provider
+	TaskSvc              *service.TaskService
+	PlanSvc              *service.PlanService
+	ImageSvc             *service.ImageService
+	ImageModelResolver   ImageModelResolver
+	ImageGenerator       ImageGenerator
+	ProviderCostSvc      *service.ProviderCostService
+	BillingCatalogSvc    *service.BillingCatalogService
+	GenerateImageTimeout time.Duration
+	VideoSvc             *service.VideoService
+	AudioASRSvc          *service.AudioASRService
+	VideoASRSvc          *service.VideoASRService
+	WritingSvc           *service.WritingService
+	PublishingSvc        *service.PublishingService
+	WorkspaceSvc         *service.WorkspaceService
+	TemplateSvc          *service.TemplateService
+	LiveSliceSvc         *service.LiveSliceService
+	SeednoteClient       *seednote.Client
+	SeednoteReadiness    service.Readiness
+	TopicPoolSvc         *service.TopicPoolService
+	AgentFeedbackSvc     *service.AgentFeedbackService
+	TingWuConfigured     bool
+	FunASRConfigured     bool
 }
 
 // RegisterTools registers all MCP tools on the server.
 func RegisterTools(server *mcp.Server) {
 	registerProjectTools(server)
 	registerTaskTools(server)
-	registerCreditTools(server)
 	registerPlanTools(server)
 	registerImageTools(server)
 	registerVideoTools(server)
@@ -269,17 +248,6 @@ func registerTaskTools(server *mcp.Server) {
 			"required": []any{"task_id"},
 		},
 	}, taskFilesHandler)
-}
-
-func registerCreditTools(server *mcp.Server) {
-	server.AddTool(&mcp.Tool{
-		Name:        "get_credit_balance",
-		Description: "Get the authenticated user's current credit balance.",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, creditsGetHandler)
 }
 
 func registerPlanTools(server *mcp.Server) {
@@ -685,11 +653,12 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 		"references":    input.References,
 		"task_config":   taskConfig,
 		"pricing": map[string]any{
-			"credits_per_cny":        videoCreditMultiplier(),
-			"base_task_fee_rule":     "VideoCreator task/plan creation deducts only credits.task_costs.videocreator as the base service fee.",
-			"operation_billing_rule": "create_video_generation_job/create_video_generation_task deduct video_gen operation credits independently when the provider job is submitted.",
-			"operation_refund_rule":  "If provider submission or persistence fails immediately, the video_gen operation deduction is refunded; task failure/cancel refunds only the base task fee.",
-			"estimate_rule":          "Server estimates video_gen credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",
+			"retail_model":             "fixed_sku",
+			"base_task_fee_rule":       "VideoCreator task admission uses the fixed task SKU.",
+			"operation_billing_rule":   "Each provider segment pins a fixed SKU before dispatch; its accepted-task charge is enqueued only after the matching provider output is durably persisted as a task file.",
+			"operation_debt_rule":      "Accepted task segment charges may create debt and never invalidate a durable successful video result.",
+			"sku_selectors":            []string{"model_key", "resolution", "duration_tier", "input_mode"},
+			"provider_cost_separation": "Provider usage is internal cost evidence and never determines retail credits.",
 		},
 		"persistent_file_rule": "all server-persistent references and generated results must be OSS-backed task files; local agent files are temporary only",
 		"visual_anchor_generation": map[string]any{
@@ -774,7 +743,7 @@ func buildProjectAgentBrief(ch *model.Project, usesProjectSnapshot bool, videoBl
 			defaults["model_key"], defaults["resolution"], defaults["ratio"], defaults["duration"], defaults["watermark"])
 	}
 	if pricing, ok := videoBlock["pricing"].(map[string]any); ok {
-		fmt.Fprintf(&b, "积分规则：创建/触发 AI 视频生成任务只扣基础任务服务费；提交 video_gen 时按服务端估价独立记录操作扣费（%v）。\n", pricing["operation_billing_rule"])
+		fmt.Fprintf(&b, "积分规则：任务准入使用固定任务 SKU；每个视频片段在提交前固定操作 SKU，仅在对应 provider 输出持久化为任务文件后排队扣费；已接受任务允许形成欠款且不影响成功视频结果（%v）。\n", pricing["operation_billing_rule"])
 	}
 	b.WriteString("模型规则：只能使用本 profile 返回的 videocreator.model_catalog 与 videocreator.policy.allowed_models 中的模型 key；未返回的模型不可使用。")
 	return b.String()
@@ -902,15 +871,6 @@ func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult(fmt.Sprintf("get task files: %v", err)), nil
 	}
 	return textResult(map[string]any{"files": files, "count": len(files)})
-}
-
-func creditsGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	userID := getUserID(ctx)
-	balance, err := svcs.CreditSvc.GetBalance(context.Background(), userID)
-	if err != nil {
-		return errorResult(fmt.Sprintf("get credits: %v", err)), nil
-	}
-	return textResult(map[string]any{"balance": balance})
 }
 
 func planListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

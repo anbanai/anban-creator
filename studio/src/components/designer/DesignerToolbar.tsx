@@ -184,10 +184,10 @@ export default function DesignerToolbar({
 }: DesignerToolbarProps) {
   const caps = capabilities
 
-  // Fetch user credit balance
+  // Standalone designer operations are prepaid from the fixed-SKU wallet.
   const { data: balanceData, isLoading: balanceLoading } = useQuery({
-    queryKey: ['credits', 'balance'],
-    queryFn: () => api.credits.balance(),
+    queryKey: ['billing', 'wallet'],
+    queryFn: () => api.billing.wallet(),
   })
   const balance = balanceData?.balance ?? 0
 

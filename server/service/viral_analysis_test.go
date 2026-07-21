@@ -14,7 +14,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/anbanai/anban-creator/server/config"
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -73,25 +73,39 @@ func setupViralAnalysisRepo(t *testing.T) repository.Repository {
 	return repository.New(db)
 }
 
-func createViralAnalysisUser(t *testing.T, repo repository.Repository, balance int) string {
+func newViralAnalysisBillingFixture(t *testing.T, paid, debt int64) (*billingWalletFixture, string) {
 	t.Helper()
+	repo := setupViralAnalysisRepo(t)
 	userID := uuid.New().String()
 	if err := repo.Users().Create(context.Background(), &model.User{
-		ID:             userID,
-		Email:          userID + "@example.com",
-		Nickname:       "Viral User",
-		Password:       "hashed",
-		InviteCode:     strings.ReplaceAll(userID[:8], "-", ""),
-		CreditsBalance: balance,
+		ID: userID, Email: userID + "@example.com", Nickname: "Viral User",
+		Password: "hashed", InviteCode: strings.ReplaceAll(userID[:8], "-", ""),
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	return userID
-}
-
-func viralAnalysisCreditService(repo repository.Repository) *CreditService {
-	logger := zerolog.New(io.Discard)
-	return NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{model.CreditTypeViralAnalysis: 800}}, &logger)
+	bundle, err := serverbilling.LoadBundle("../billing")
+	if err != nil {
+		t.Fatalf("load billing bundle: %v", err)
+	}
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	catalog := NewBillingCatalogService(repo, bundle, BillingCatalogOptions{Now: func() time.Time { return now }})
+	if _, err := catalog.Publish(context.Background()); err != nil {
+		t.Fatalf("publish billing catalog: %v", err)
+	}
+	if err := repo.Billing().CreateAccount(context.Background(), &model.BillingWalletAccount{
+		UserID: userID, PaidCredits: paid, DebtCredits: debt,
+	}); err != nil {
+		t.Fatalf("create billing account: %v", err)
+	}
+	if paid > 0 {
+		createBillingLot(t, repo, model.BillingCreditLot{
+			ID: uuid.NewString(), UserID: userID, Kind: model.BillingCreditLotKindPaid,
+			SourceType: "fixture", SourceID: "viral-paid-" + userID, CatalogID: bundle.Products.CatalogID,
+			OriginalCredits: paid, AvailableCredits: paid, CreatedAt: now.Add(-time.Hour),
+		})
+	}
+	wallet := NewBillingWalletService(repo, bundle, BillingWalletOptions{Now: func() time.Time { return now }})
+	return &billingWalletFixture{repo: repo, catalog: catalog, wallet: wallet, now: now}, userID
 }
 
 func TestValidateEvidenceDrivenResultAcceptsCompleteResult(t *testing.T) {
@@ -293,31 +307,20 @@ func TestAnalyzeWithLLMExtractsJSONFromExtraText(t *testing.T) {
 	}
 }
 
-func TestViralAnalysisExecuteRefundsCreditsWhenFetcherReturnsNilContent(t *testing.T) {
-	repo := setupViralAnalysisRepo(t)
-	userID := createViralAnalysisUser(t, repo, 1000)
-	analysisID := uuid.New().String()
-	if err := repo.ViralAnalyses().Create(context.Background(), &model.ViralAnalysis{
-		ID:         analysisID,
-		UserID:     userID,
-		SourceType: model.ViralAnalysisSourceNote,
-		SourceURL:  "https://example.com/note/1",
-		Status:     model.ViralAnalysisStatusPending,
-	}); err != nil {
-		t.Fatalf("create analysis: %v", err)
-	}
-	creditSvc := viralAnalysisCreditService(repo)
-	if _, err := creditSvc.DeductForTask(context.Background(), userID, model.CreditTypeViralAnalysis, analysisID); err != nil {
-		t.Fatalf("deduct credits: %v", err)
-	}
+func TestViralAnalysisExecuteReversesFixedChargeWhenFetcherReturnsNilContent(t *testing.T) {
+	fixture, userID := newViralAnalysisBillingFixture(t, 2_000, 0)
 	logger := zerolog.New(io.Discard)
-	svc := NewViralAnalysisService(repo, fakeViralNoteFetcher{}, &fakeViralAnalysisLLM{}, nil, &logger)
-	svc.SetCreditService(creditSvc)
+	svc := NewViralAnalysisService(fixture.repo, fakeViralNoteFetcher{}, &fakeViralAnalysisLLM{}, &mockEnqueuer{}, &logger)
+	svc.SetBillingServices(fixture.catalog, fixture.wallet)
+	analysis, err := svc.Create(context.Background(), userID, model.ViralAnalysisSourceNote, "https://example.com/note/1")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
-	if err := svc.ExecuteAnalysis(context.Background(), analysisID); err != nil {
+	if err := svc.ExecuteAnalysis(context.Background(), analysis.ID); err != nil {
 		t.Fatalf("ExecuteAnalysis should persist failure instead of returning error: %v", err)
 	}
-	found, err := repo.ViralAnalyses().FindByID(context.Background(), analysisID)
+	found, err := fixture.repo.ViralAnalyses().FindByID(context.Background(), analysis.ID)
 	if err != nil {
 		t.Fatalf("find analysis: %v", err)
 	}
@@ -327,12 +330,11 @@ func TestViralAnalysisExecuteRefundsCreditsWhenFetcherReturnsNilContent(t *testi
 	if !strings.Contains(found.ErrorMessage, "empty response") {
 		t.Fatalf("error message = %q, want empty response", found.ErrorMessage)
 	}
-	user, err := repo.Users().FindByID(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("find user: %v", err)
+	if found.BillingTerminalReason != model.TaskBillingTerminalProviderError {
+		t.Fatalf("terminal reason = %q, want provider_error", found.BillingTerminalReason)
 	}
-	if user.CreditsBalance != 1000 {
-		t.Fatalf("credits balance = %d, want refunded 1000", user.CreditsBalance)
+	if account := fixture.account(t, userID); account.PaidCredits != 2_000 || account.DebtCredits != 0 {
+		t.Fatalf("wallet after reversal = %#v", account)
 	}
 }
 
@@ -353,12 +355,11 @@ func TestAnalyzeWithLLMRejectsInvalidResponse(t *testing.T) {
 	}
 }
 
-func TestViralAnalysisCreateRefundsCreditsWhenEnqueueFails(t *testing.T) {
-	repo := setupViralAnalysisRepo(t)
-	userID := createViralAnalysisUser(t, repo, 1000)
+func TestViralAnalysisCreateReversesFixedChargeWhenEnqueueFails(t *testing.T) {
+	fixture, userID := newViralAnalysisBillingFixture(t, 2_000, 0)
 	logger := zerolog.New(io.Discard)
-	svc := NewViralAnalysisService(repo, nil, nil, failingViralAnalysisEnqueuer{}, &logger)
-	svc.SetCreditService(viralAnalysisCreditService(repo))
+	svc := NewViralAnalysisService(fixture.repo, nil, nil, failingViralAnalysisEnqueuer{}, &logger)
+	svc.SetBillingServices(fixture.catalog, fixture.wallet)
 
 	analysis, err := svc.Create(context.Background(), userID, model.ViralAnalysisSourceNote, "https://example.com/note/1")
 	if err != nil {
@@ -368,40 +369,23 @@ func TestViralAnalysisCreateRefundsCreditsWhenEnqueueFails(t *testing.T) {
 		t.Fatalf("status = %q, want failed", analysis.Status)
 	}
 
-	user, err := repo.Users().FindByID(context.Background(), userID)
+	failed, err := fixture.repo.ViralAnalyses().FindByID(context.Background(), analysis.ID)
 	if err != nil {
-		t.Fatalf("find user: %v", err)
+		t.Fatalf("reload failed analysis: %v", err)
 	}
-	if user.CreditsBalance != 1000 {
-		t.Fatalf("credits balance = %d, want refunded 1000", user.CreditsBalance)
+	if failed.BillingTerminalReason != model.TaskBillingTerminalPlatformError {
+		t.Fatalf("terminal reason = %q, want platform_error", failed.BillingTerminalReason)
 	}
-	refund, err := repo.Credits().FindRefundByTaskID(context.Background(), analysis.ID)
-	if err != nil {
-		t.Fatalf("expected refund transaction: %v", err)
+	if account := fixture.account(t, userID); account.PaidCredits != 2_000 || account.DebtCredits != 0 {
+		t.Fatalf("wallet after reversal = %#v", account)
 	}
-	if refund.Amount != 800 {
-		t.Fatalf("refund amount = %d, want 800", refund.Amount)
+	if _, err := fixture.repo.Billing().FindReversal(context.Background(), *analysis.BillingChargeID); err != nil {
+		t.Fatalf("find fixed charge reversal: %v", err)
 	}
 }
 
-func TestViralAnalysisExecuteRefundsCreditsWhenLLMValidationFails(t *testing.T) {
-	repo := setupViralAnalysisRepo(t)
-	userID := createViralAnalysisUser(t, repo, 1000)
-	analysisID := uuid.New().String()
-	if err := repo.ViralAnalyses().Create(context.Background(), &model.ViralAnalysis{
-		ID:         analysisID,
-		UserID:     userID,
-		SourceType: model.ViralAnalysisSourceNote,
-		SourceURL:  "https://example.com/note/1",
-		Status:     model.ViralAnalysisStatusPending,
-	}); err != nil {
-		t.Fatalf("create analysis: %v", err)
-	}
-	creditSvc := viralAnalysisCreditService(repo)
-	if _, err := creditSvc.DeductForTask(context.Background(), userID, model.CreditTypeViralAnalysis, analysisID); err != nil {
-		t.Fatalf("deduct credits: %v", err)
-	}
-
+func TestViralAnalysisExecuteReversesFixedChargeWhenLLMValidationFails(t *testing.T) {
+	fixture, userID := newViralAnalysisBillingFixture(t, 2_000, 0)
 	invalid := completeEvidenceDrivenResult()
 	invalid.Dimensions = invalid.Dimensions[:5]
 	response, err := json.Marshal(invalid)
@@ -410,18 +394,22 @@ func TestViralAnalysisExecuteRefundsCreditsWhenLLMValidationFails(t *testing.T) 
 	}
 	logger := zerolog.New(io.Discard)
 	svc := NewViralAnalysisService(
-		repo,
+		fixture.repo,
 		fakeViralNoteFetcher{content: &platform.SeednoteNoteContent{NoteID: "note-1", Title: "测试"}},
 		&fakeViralAnalysisLLM{response: string(response)},
-		nil,
+		&mockEnqueuer{},
 		&logger,
 	)
-	svc.SetCreditService(creditSvc)
+	svc.SetBillingServices(fixture.catalog, fixture.wallet)
+	analysis, err := svc.Create(context.Background(), userID, model.ViralAnalysisSourceNote, "https://example.com/note/1")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
-	if err := svc.ExecuteAnalysis(context.Background(), analysisID); err != nil {
+	if err := svc.ExecuteAnalysis(context.Background(), analysis.ID); err != nil {
 		t.Fatalf("ExecuteAnalysis should persist failure instead of returning error: %v", err)
 	}
-	found, err := repo.ViralAnalyses().FindByID(context.Background(), analysisID)
+	found, err := fixture.repo.ViralAnalyses().FindByID(context.Background(), analysis.ID)
 	if err != nil {
 		t.Fatalf("find analysis: %v", err)
 	}
@@ -431,12 +419,8 @@ func TestViralAnalysisExecuteRefundsCreditsWhenLLMValidationFails(t *testing.T) 
 	if !strings.Contains(found.ErrorMessage, "validate evidence-driven result") {
 		t.Fatalf("error message missing validation reason: %q", found.ErrorMessage)
 	}
-	user, err := repo.Users().FindByID(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("find user: %v", err)
-	}
-	if user.CreditsBalance != 1000 {
-		t.Fatalf("credits balance = %d, want refunded 1000", user.CreditsBalance)
+	if account := fixture.account(t, userID); account.PaidCredits != 2_000 || account.DebtCredits != 0 {
+		t.Fatalf("wallet after reversal = %#v", account)
 	}
 }
 

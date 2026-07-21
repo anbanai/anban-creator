@@ -2,7 +2,12 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -10,6 +15,8 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
+
+var ErrTaskExecutionEvidenceConflict = errors.New("task execution evidence conflict")
 
 type taskRepository struct {
 	db *gorm.DB
@@ -113,20 +120,6 @@ func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string, p
 	return tasks, nil
 }
 
-func (r *taskRepository) FindPaymentRequiredByUser(ctx context.Context, userID string) ([]*model.Task, error) {
-	var tasks []*model.Task
-	err := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
-		Where("billing_status = ?", model.TaskBillingStatusPaymentRequired).
-		Where("billing_shortfall_credits > 0").
-		Order("completed_at ASC, created_at ASC").
-		Find(&tasks).Error
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
 func (r *taskRepository) UpdateStatus(ctx context.Context, id, status string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("status", status).Error
 }
@@ -184,8 +177,153 @@ func (r *taskRepository) GetTypeAndProgress(ctx context.Context, id string) (str
 	return row.Type, row.Progress, nil
 }
 
-func (r *taskRepository) UpdateResult(ctx context.Context, id, result string) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("result", result).Error
+// UpdateExecutionEvidence persists the JSON result and its typed cost evidence
+// with one statement. RowsAffected distinguishes a missing task from success.
+func (r *taskRepository) UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"result":               result,
+			"terminal_model_usage": datatypes.NewJSONType(usage),
+			"cost_status":          costStatus,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if res.RowsAffected == 1 {
+		return true, nil
+	}
+	return r.classifyUnchangedExecutionEvidence(ctx, id, "", result, usage, costStatus)
+}
+
+// UpdateExecutionEvidenceForExecution prevents a stale cloud attempt from
+// replacing the task evidence owned by the current durable execution.
+func (r *taskRepository) UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND current_execution_id = ?", id, executionID).
+		Updates(map[string]any{
+			"result":               result,
+			"terminal_model_usage": datatypes.NewJSONType(usage),
+			"cost_status":          costStatus,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if res.RowsAffected == 1 {
+		return true, nil
+	}
+	return r.classifyUnchangedExecutionEvidence(ctx, id, executionID, result, usage, costStatus)
+}
+
+func (r *taskRepository) classifyUnchangedExecutionEvidence(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	var task model.Task
+	err := r.db.WithContext(ctx).Model(&model.Task{}).
+		Select("id", "current_execution_id", "result", "terminal_model_usage", "cost_status").
+		Where("id = ?", id).
+		Take(&task).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read back unchanged execution evidence: %w", err)
+	}
+	if executionID != "" && (task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID) {
+		return false, nil
+	}
+	if task.Result != nil && jsonValuesEqual(*task.Result, result) &&
+		reflect.DeepEqual(task.TerminalModelUsage.Data(), usage) && task.CostStatus == costStatus {
+		return true, nil
+	}
+	return false, ErrTaskExecutionEvidenceConflict
+}
+
+func jsonValuesEqual(left, right string) bool {
+	decode := func(value string) (any, error) {
+		decoder := json.NewDecoder(strings.NewReader(value))
+		decoder.UseNumber()
+		var decoded any
+		if err := decoder.Decode(&decoded); err != nil {
+			return nil, err
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			if err == nil {
+				return nil, fmt.Errorf("multiple JSON values")
+			}
+			return nil, err
+		}
+		return decoded, nil
+	}
+	leftValue, leftErr := decode(left)
+	rightValue, rightErr := decode(right)
+	return leftErr == nil && rightErr == nil && reflect.DeepEqual(leftValue, rightValue)
+}
+
+// FinalizeLocalTask makes terminal ownership and terminal evidence one CAS.
+// Only the request that still owns a running local claim can write any field.
+func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	var won bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		won, err = (&taskRepository{db: tx}).FinalizeLocalTaskInTx(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+		return err
+	})
+	return won, err
+}
+
+func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	now := time.Now()
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
+		Updates(map[string]any{
+			"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
+			"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return false, nil
+	}
+	executionStatus := model.TaskExecutionFailed
+	if status == model.TaskStatusCompleted {
+		executionStatus = model.TaskExecutionSucceeded
+	} else if status == model.TaskStatusCancelled {
+		executionStatus = model.TaskExecutionCancelled
+	}
+	executionResult := datatypes.JSON([]byte(result))
+	execRes := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
+		Where("id = ? AND task_id = ? AND target = ? AND status = ?", executionID, id, model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning).
+		Updates(map[string]any{
+			"status": executionStatus, "terminal_reason": errorMsg, "result": executionResult,
+			"completed_at": now, "finalization_status": model.TaskExecutionFinalizationDone,
+			"cleanup_status": model.TaskExecutionCleanupDone,
+		})
+	if execRes.Error != nil {
+		return false, execRes.Error
+	}
+	if execRes.RowsAffected != 1 {
+		return false, fmt.Errorf("local task execution %s is missing or not running", executionID)
+	}
+	return true, nil
+}
+
+func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND status = ? AND current_execution_id = ?", id, model.TaskStatusRunning, executionID).
+		Updates(map[string]any{
+			"status":        status,
+			"error_message": errorMsg,
+			"completed_at":  time.Now(),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+func (r *taskRepository) UpdateBillingTerminalReason(ctx context.Context, id, reason string) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("billing_terminal_reason", reason).Error
 }
 
 // Update saves the full task object.
@@ -503,6 +641,7 @@ func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID 
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).
 		Where("id = ? AND status IN ?", taskID, model.TerminalTaskStatuses).
+		Where("current_execution_id IS NULL OR EXISTS (SELECT 1 FROM task_executions WHERE task_executions.id = tasks.current_execution_id AND task_executions.finalization_status = ?)", model.TaskExecutionFinalizationDone).
 		Updates(map[string]interface{}{
 			"status":                 model.TaskStatusPending,
 			"started_at":             nil,
@@ -510,6 +649,8 @@ func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID 
 			"last_heartbeat_at":      nil,
 			"error_message":          "",
 			"result":                 nil,
+			"terminal_model_usage":   datatypes.NewJSONType([]model.ModelTokenUsage{}),
+			"cost_status":            "",
 			"progress":               0,
 			"latest_progress":        datatypes.NewJSONType(model.ProgressPayload{}),
 			"workflow_status":        nil,
@@ -583,26 +724,6 @@ func (r *taskRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Delete(&model.Task{}, "id = ?", id).Error
 }
 
-// UpdateTokenUsage writes denormalized token usage and cost columns for a task.
-func (r *taskRepository) UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"input_tokens":          inputTokens,
-			"output_tokens":         outputTokens,
-			"cache_read_tokens":     cacheReadTokens,
-			"cache_creation_tokens": cacheCreationTokens,
-			"total_cost_usd":        costUSD,
-		}).Error
-}
-
-func (r *taskRepository) UpdateBillingStatus(ctx context.Context, id, status string, shortfallCredits int) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"billing_status":            status,
-			"billing_shortfall_credits": shortfallCredits,
-		}).Error
-}
-
 // usageStatuses is the set of task statuses counted toward usage statistics.
 // Cancelled tasks are excluded because they may not have consumed meaningful
 // resources.
@@ -611,15 +732,14 @@ var usageStatuses = []string{
 	model.TaskStatusFailed,
 }
 
-// AggregateUsageByUser returns SQL-level SUM aggregates for token usage and cost.
-func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error) {
+// AggregateUsageByUser returns SQL-level SUM aggregates for token usage.
+func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, err error) {
 	type row struct {
 		Tasks        int64
 		Input        int64
 		Output       int64
 		CacheRead    int64
 		CacheCreated int64
-		Cost         float64
 	}
 	var r2 row
 	q := r.db.WithContext(ctx).Model(&model.Task{}).
@@ -629,7 +749,6 @@ func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string
 			"COALESCE(SUM(output_tokens), 0) AS output",
 			"COALESCE(SUM(cache_read_tokens), 0) AS cache_read",
 			"COALESCE(SUM(cache_creation_tokens), 0) AS cache_created",
-			"COALESCE(SUM(total_cost_usd), 0) AS cost",
 		).
 		Where("user_id = ?", userID).
 		Where("created_at >= ? AND created_at <= ?", from, to).
@@ -640,7 +759,7 @@ func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string
 	if err = q.Scan(&r2).Error; err != nil {
 		return
 	}
-	return r2.Tasks, r2.Input, r2.Output, r2.CacheRead, r2.CacheCreated, r2.Cost, nil
+	return r2.Tasks, r2.Input, r2.Output, r2.CacheRead, r2.CacheCreated, nil
 }
 
 // TypeUsageRow holds per-type aggregated usage data from a SQL GROUP BY query.
@@ -651,10 +770,9 @@ type TypeUsageRow struct {
 	OutputTokens        int64
 	CacheReadTokens     int64
 	CacheCreationTokens int64
-	CostUSD             float64
 }
 
-// AggregateUsageByType returns per-type token usage and cost via SQL GROUP BY.
+// AggregateUsageByType returns per-type token usage via SQL GROUP BY.
 func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error) {
 	var rows []TypeUsageRow
 	q := r.db.WithContext(ctx).Model(&model.Task{}).
@@ -665,7 +783,6 @@ func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string
 			"COALESCE(SUM(output_tokens), 0) AS output_tokens",
 			"COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens",
 			"COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens",
-			"COALESCE(SUM(total_cost_usd), 0) AS cost_usd",
 		).
 		Where("user_id = ?", userID).
 		Where("created_at >= ? AND created_at <= ?", from, to).

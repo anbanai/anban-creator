@@ -7,25 +7,17 @@
           <text class="workbench-hero__title">{{ greeting }}{{ nicknameSuffix }}</text>
           <text class="workbench-hero__sub">把账号、计划、任务和工坊产出收拢到一个移动控制台。</text>
         </view>
-        <view class="balance-chip" @tap="goCredits">
-          <text class="balance-chip__value" :class="{ 'animate-bounce': creditsAnimating }">{{ displayBalance }}</text>
+        <view class="balance-chip" @tap="goBilling">
+          <text class="balance-chip__value">{{ displayBalance }}</text>
           <text class="balance-chip__label">积分</text>
         </view>
       </view>
 
       <view class="production-strip">
         <view class="production-strip__cell">
-          <text class="production-strip__label">签到</text>
-          <AbButton
-            v-if="!signedInToday"
-            type="primary"
-            size="sm"
-            :loading="signInLoading"
-            @click="handleSignIn"
-          >
-            +{{ dailySignInCredits }}
-          </AbButton>
-          <text v-else class="production-strip__value production-strip__value--quiet">已完成</text>
+          <text class="production-strip__label">待补欠费</text>
+          <text class="production-strip__value" :class="{ 'production-strip__value--quiet': debtBalance === 0 }">{{ debtBalance.toLocaleString() }}</text>
+          <text class="production-strip__hint">{{ debtBalance > 0 ? '充值优先补齐' : '账户正常' }}</text>
         </view>
         <view class="production-strip__cell">
           <text class="production-strip__label">今日生产</text>
@@ -206,7 +198,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { onPullDownRefresh } from '@dcloudio/uni-app'
 import { useAuthStore } from '@/stores/auth'
-import { creditsApi } from '@/api/credits'
+import { billingApi } from '@/api/billing'
 import { tasksApi } from '@/api/tasks'
 import { plansApi } from '@/api/plans'
 import { getGreeting, relativeTime, formatDateTimeCN } from '@/utils/format'
@@ -226,53 +218,17 @@ const nicknameSuffix = computed(() => {
 })
 
 const creditsBalance = ref(0)
-const signedInToday = ref(false)
-const signInLoading = ref(false)
-const creditsAnimating = ref(false)
-const dailySignInCredits = ref(100)
+const debtBalance = ref(0)
 
 const displayBalance = computed(() => creditsBalance.value.toLocaleString())
 
 async function loadCredits() {
   try {
-    const [balanceRes, statusRes] = await Promise.all([
-      creditsApi.balance(),
-      creditsApi.signInStatus(),
-    ])
-    creditsBalance.value = balanceRes.balance
-    signedInToday.value = statusRes.signed_in_today
+    const wallet = await billingApi.wallet()
+    creditsBalance.value = wallet.balance
+    debtBalance.value = wallet.debt
   } catch (err) {
     console.error('Failed to load credits:', err)
-  }
-}
-
-async function loadPricing() {
-  try {
-    const pricing = await creditsApi.pricing()
-    if (pricing?.income?.daily_sign_in) {
-      dailySignInCredits.value = pricing.income.daily_sign_in
-    }
-  } catch (err) {
-    console.error('Failed to load pricing:', err)
-  }
-}
-
-async function handleSignIn() {
-  if (signInLoading.value || signedInToday.value) return
-  signInLoading.value = true
-  try {
-    const res = await creditsApi.signIn()
-    signedInToday.value = true
-    creditsBalance.value += res.reward || dailySignInCredits.value
-    creditsAnimating.value = true
-    setTimeout(() => {
-      creditsAnimating.value = false
-    }, 600)
-    uni.showToast({ title: `签到成功 +${res.reward || dailySignInCredits.value}积分`, icon: 'none' })
-  } catch (err: any) {
-    uni.showToast({ title: err?.message || '签到失败', icon: 'none' })
-  } finally {
-    signInLoading.value = false
   }
 }
 
@@ -422,7 +378,6 @@ async function loadAll() {
   try {
     await Promise.all([
       loadCredits(),
-      loadPricing(),
       loadStats(),
     ])
   } finally {
@@ -474,8 +429,8 @@ function runSuggestion() {
   }
 }
 
-function goCredits() {
-  uni.navigateTo({ url: '/pages/credits/index' })
+function goBilling() {
+  uni.navigateTo({ url: '/pages/billing/index' })
 }
 
 function goTasks() {

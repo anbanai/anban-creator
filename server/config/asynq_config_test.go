@@ -27,7 +27,7 @@ func TestValidate_DockerTimeoutMustExceedContentGenerateTimeout(t *testing.T) {
 	cfg := &Config{
 		Database: DatabaseConfig{DSN: "dsn"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   ClaudeConfig{Executor: "docker"},
+		Claude:   validClaudeConfigForTest(),
 	}
 	cfg.applyDefaults()
 	// Force docker timeout below content_generate_timeout (60m) to trip the check.
@@ -46,8 +46,10 @@ func TestValidate_DockerTimeoutOKForLocalExecutor(t *testing.T) {
 	cfg := &Config{
 		Database: DatabaseConfig{DSN: "dsn"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   ClaudeConfig{Executor: "local", PluginDir: "."}, // local needs plugin_dir
+		Claude:   validClaudeConfigForTest(),
 	}
+	cfg.Claude.Executor = "local"
+	cfg.Claude.PluginDir = "." // local needs plugin_dir
 	cfg.applyDefaults()
 	cfg.Claude.Docker.TimeoutSec = 1800 // would fail the docker check, but executor is local
 

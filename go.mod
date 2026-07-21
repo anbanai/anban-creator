@@ -181,3 +181,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace github.com/severity1/claude-agent-sdk-go => ./third_party/claude-agent-sdk-go

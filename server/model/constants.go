@@ -126,25 +126,6 @@ func DefaultImageRatio(platform string) string {
 	return "3:4"
 }
 
-// Credit transaction type constants.
-const (
-	CreditTypeSignIn              = "sign_in"
-	CreditTypeTaskDeduct          = "task_deduct"
-	CreditTypeTaskRefund          = "task_refund"
-	CreditTypeAdminGrant          = "admin_grant"
-	CreditTypeRegisterBonus       = "register_bonus"
-	CreditTypeInviteReward        = "invite_reward"
-	CreditTypeAgentRuntimeReserve = "agent_runtime_reserve"
-	CreditTypeAgentRuntime        = "agent_runtime"
-	CreditTypeAgentRuntimeRefund  = "agent_runtime_refund"
-)
-
-// Task billing status values.
-const (
-	TaskBillingStatusSettled         = "settled"
-	TaskBillingStatusPaymentRequired = "payment_required"
-)
-
 // User tier type.
 type Tier string
 
@@ -226,20 +207,10 @@ func NormalizeTier(s string) Tier {
 	return t
 }
 
-// Per-operation credit type constants (for MCP tool billing).
+// Provider-cost operation identities for understanding tools.
 const (
-	CreditTypeImageGen           = "image_gen"
-	CreditTypeArticleWrite       = "article_write"
-	CreditTypeConvert            = "convert"
-	CreditTypeHumanize           = "humanize"
-	CreditTypeTopicResearch      = "topic_research"
-	CreditTypeSEO                = "seo"
-	CreditTypeOutline            = "outline"
-	CreditTypeVideoGen           = "video_gen"
-	CreditTypeImageUnderstanding = "image_understanding"
-	CreditTypeVideoUnderstanding = "video_understanding"
-	CreditTypePosterGeneration   = "poster_generation"
-	CreditTypeViralAnalysis      = "viral_analysis"
+	OperationImageUnderstanding = "image_understanding"
+	OperationVideoUnderstanding = "video_understanding"
 )
 
 // Viral analysis status constants.

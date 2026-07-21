@@ -84,10 +84,12 @@ func (s *TaskService) currentExecution(ctx context.Context, executionID string) 
 func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) (string, string, *agent.ExecutionResult, error) {
 	failureReason := "execution_failed"
 	if result == nil {
-		result = &agent.ExecutionResult{Success: false, Error: "agent returned no execution result", RemoteArtifacts: true}
+		result = normalizeTerminalExecutionResult(nil)
+		result.RemoteArtifacts = true
 	}
 	if result.Success && agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
 		result.Success, result.Error = false, agent.NestedAgentDelegationError
+		result.TerminalReason = model.TaskBillingTerminalPlatformError
 		failureReason = "nested_agent_delegation"
 	}
 	if result.Success {
@@ -111,6 +113,7 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 		}
 		if !validation.Valid {
 			result.Success, result.Error = false, validation.Error()
+			result.TerminalReason = model.TaskBillingTerminalPlatformError
 			failureReason = "deliverable_validation_failed"
 		}
 	}
@@ -120,12 +123,18 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 	if strings.TrimSpace(result.Error) == "" {
 		result.Error = "execution returned unsuccessful result"
 	}
+	if !approvedTaskBillingTerminalReason(result.TerminalReason) {
+		result.TerminalReason = model.TaskBillingTerminalProviderError
+	}
 	return model.TaskExecutionFailed, failureReason, result, nil
 }
 
 func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) (err error) {
 	if execution.FinalizationStatus == model.TaskExecutionFinalizationDone {
 		return nil
+	}
+	if err := s.ensureExecutionAuthority(ctx, task.ID, execution.ID); err != nil {
+		return err
 	}
 	token := uuid.NewString()
 	won, err := s.repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, token, s.cloudFinalizationLease())
@@ -159,6 +168,9 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 		}
 	}
 	for stage != model.TaskExecutionFinalizationDone {
+		if err := s.ensureFinalizationAuthority(leaseCtx, task.ID, execution.ID, leaseLost); err != nil {
+			return err
+		}
 		next, step, err := s.cloudFinalizationStep(task, execution, result, stage)
 		if err != nil {
 			return err
@@ -174,6 +186,9 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 			if err := s.finalizationAfterStage(next); err != nil {
 				return err
 			}
+		}
+		if err := s.ensureFinalizationAuthority(leaseCtx, task.ID, execution.ID, leaseLost); err != nil {
+			return err
 		}
 		if err := finalizationLeaseError(leaseLost); err != nil {
 			return err
@@ -201,6 +216,30 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 	return nil
 }
 
+func (s *TaskService) ensureFinalizationAuthority(ctx context.Context, taskID, executionID string, leaseLost <-chan error) error {
+	if err := finalizationLeaseError(leaseLost); err != nil {
+		return err
+	}
+	if err := s.ensureExecutionAuthority(ctx, taskID, executionID); err != nil {
+		if leaseErr := finalizationLeaseError(leaseLost); leaseErr != nil {
+			return leaseErr
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *TaskService) ensureExecutionAuthority(ctx context.Context, taskID, executionID string) error {
+	latest, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("verify current task execution: %w", err)
+	}
+	if latest.CurrentExecutionID == nil || *latest.CurrentExecutionID != executionID {
+		return ErrStaleTaskExecution
+	}
+	return nil
+}
+
 type cloudFinalizationStep func(context.Context) error
 
 func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult, stage string) (string, cloudFinalizationStep, error) {
@@ -214,7 +253,11 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 		}, nil
 	case model.TaskExecutionFinalizationArtifacts:
 		return model.TaskExecutionFinalizationResult, func(ctx context.Context) error {
-			return s.UpdateExecutionResult(ctx, task.ID, result)
+			if err := s.updateExecutionResultForExecution(ctx, task.ID, execution.ID, result); err != nil {
+				return err
+			}
+			s.recordTerminalProviderCost(ctx, task, result)
+			return nil
 		}, nil
 	case model.TaskExecutionFinalizationResult:
 		return model.TaskExecutionFinalizationWorkflow, func(ctx context.Context) error {
@@ -233,7 +276,7 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 		}, nil
 	case model.TaskExecutionFinalizationTask:
 		return model.TaskExecutionFinalizationSettlement, func(ctx context.Context) error {
-			return s.settleCloudExecution(ctx, task, execution, result)
+			return s.settleCloudExecution(ctx, task, execution)
 		}, nil
 	case model.TaskExecutionFinalizationSettlement:
 		return model.TaskExecutionFinalizationSlot, func(ctx context.Context) error {
@@ -272,18 +315,7 @@ func (s *TaskService) syncCloudSlot(ctx context.Context, task *model.Task) error
 	return nil
 }
 
-func (s *TaskService) settleCloudExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
-	if s.creditSvc == nil {
-		return nil
-	}
-	if err := s.creditSvc.SettleAgentRuntime(ctx, task, result); err != nil {
-		return fmt.Errorf("settle agent runtime: %w", err)
-	}
-	if execution.Status != model.TaskExecutionSucceeded && !task.GoalMode {
-		if err := s.creditSvc.RefundForTask(ctx, task.ID, execution.TerminalReason); err != nil {
-			return fmt.Errorf("refund terminal cloud task: %w", err)
-		}
-	}
+func (s *TaskService) settleCloudExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) error {
 	return nil
 }
 
@@ -538,28 +570,28 @@ func (s *TaskService) advanceExecutionFinalization(ctx context.Context, id, toke
 
 func (s *TaskService) finalizeExecutionTaskStatus(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
 	target, errMsg := taskTerminalFromExecution(execution, result)
-	var won bool
-	var err error
-	if target == model.TaskStatusCompleted {
-		won, err = s.repo.Tasks().CompareAndSwapStatus(ctx, task.ID, model.TaskStatusRunning, target)
-	} else {
-		won, err = s.repo.Tasks().CompareAndSwapStatusAndError(ctx, task.ID, model.TaskStatusRunning, target, errMsg)
-	}
+	reason := terminalBillingReason(execution, result)
+	durableDelivery, err := s.taskHasDurableDelivery(ctx, task.ID)
 	if err != nil {
-		return fmt.Errorf("finalize task status: %w", err)
+		return fmt.Errorf("inspect durable task delivery: %w", err)
 	}
-	if !won {
-		latest, findErr := s.repo.Tasks().FindByID(ctx, task.ID)
-		if findErr != nil || latest.Status != target {
-			return ErrStaleTaskExecution
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		won, finalizeErr := tx.Tasks().FinalizeTaskForExecution(ctx, task.ID, execution.ID, target, errMsg)
+		if finalizeErr != nil {
+			return fmt.Errorf("finalize task status: %w", finalizeErr)
 		}
+		if !won {
+			latest, findErr := tx.Tasks().FindByID(ctx, task.ID)
+			if findErr != nil || latest.CurrentExecutionID == nil || *latest.CurrentExecutionID != execution.ID || latest.Status != target {
+				return ErrStaleTaskExecution
+			}
+		}
+		return s.persistTerminalBillingInTx(ctx, tx, task, execution, reason, durableDelivery)
+	})
+	if err != nil {
+		return err
 	}
-	if err := s.repo.Tasks().SetCompletedAt(ctx, task.ID); err != nil {
-		return fmt.Errorf("set task completed_at: %w", err)
-	}
-	if target != model.TaskStatusCompleted {
-		task.Status = target
-	}
+	task.Status = target
 	return nil
 }
 

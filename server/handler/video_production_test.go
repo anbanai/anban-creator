@@ -96,7 +96,7 @@ func TestTaskVideoProductionAggregatesProductionArtifacts(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/video-production", func(c fiber.Ctx) error {

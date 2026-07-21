@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/auth"
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/handler"
 	"github.com/anbanai/anban-creator/server/mcp"
@@ -126,6 +128,10 @@ func main() {
 	var repo repository.Repository
 	if mysqlDB != nil {
 		repo = repository.New(mysqlDB)
+	}
+	fixedBilling, err := buildBillingRuntime(context.Background(), mysqlDB, repo, cfg, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to initialize fixed-SKU billing runtime")
 	}
 
 	// 7.1 Create storage provider.
@@ -234,7 +240,7 @@ func main() {
 	var kubeReconciler *agent.KubernetesReconciler
 	switch cfg.Claude.Executor {
 	case "docker":
-		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
+		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker executor")
 		}
@@ -261,7 +267,7 @@ func main() {
 			Str("image", cfg.Claude.Kubernetes.AgentImage).
 			Msg("Kubernetes Job runtime client created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)
+		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)
 		log.Info().
 			Str("plugin_dir", cfg.Claude.PluginDir).
 			Bool("sandbox", cfg.Claude.Sandbox).
@@ -273,7 +279,6 @@ func main() {
 	var planSvc *service.PlanService
 	var taskSvc *service.TaskService
 	var projectSvc *service.ProjectService
-	var creditSvc *service.CreditService
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
 	var seednoteTrackingSvc *service.SeednoteTrackingService
@@ -284,20 +289,12 @@ func main() {
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService()
 	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalog)
-	videoCreditMultiplier := cfg.Billing.CreditsPerCNY
-	if videoCreditMultiplier <= 0 {
-		videoCreditMultiplier = cfg.VideoAPI.CreditMultiplierOrDefault()
-	}
 
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
-		planSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
-		planSvc.SetVideoBillingConfig(cfg.Billing)
+		planSvc.SetVideoCatalog(videoCatalog)
 		projectSvc = service.NewProjectService(repo, log)
 		projectSvc.SetVideoCatalog(videoCatalog)
-		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
-		creditSvc.SetFullConfig(cfg)
-		planSvc.SetCreditService(creditSvc)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
 		templateSvc = service.NewTemplateService(repo, log)
@@ -314,18 +311,20 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
 		planSvc.SetReferenceAssetService(referenceAssetSvc)
 		taskSvc.SetReferenceAssetService(referenceAssetSvc)
+		taskSvc.SetProviderCostService(fixedBilling.Cost)
+		taskSvc.SetBillingWalletService(fixedBilling.Wallet)
+		taskSvc.SetBillingCatalogService(fixedBilling.Catalog)
 		taskSvc.SetProjectMemoryManager(memoryMgr)
-		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
-		taskSvc.SetVideoBillingConfig(cfg.Billing)
+		taskSvc.SetVideoCatalog(videoCatalog)
 		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		// Wire executor defaults so local-executor claim responses carry the same
 		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
-		taskSvc.SetExecutorDefaults(cfg.Claude.Model, cfg.Claude.MaxTurns)
+		taskSvc.SetExecutorDefaults(cfg.Claude.Models.Default, cfg.Claude.MaxTurns)
 		if cfg.Claude.Executor == "kubernetes" {
 			var err error
 			executionTokens, err = auth.NewExecutionTokenService(cfg.Claude.Kubernetes.ExecutionTokenSecret)
@@ -342,7 +341,7 @@ func main() {
 			}
 			activeDeadline := time.Duration(cfg.Claude.Kubernetes.ActiveDeadlineSeconds) * time.Second
 			bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{
-				Model:                   cfg.Claude.Model,
+				Model:                   cfg.Claude.Models.Default,
 				MaxTurns:                cfg.Claude.MaxTurns,
 				TokenTTL:                activeDeadline,
 				ActiveDeadline:          activeDeadline,
@@ -352,7 +351,8 @@ func main() {
 				MontageToolPolicy:       cfg.Montage.ToolPolicy,
 				MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
 				MontageEnv:              cfg.Montage.Env,
-				RuntimeEnv:              cfg.Claude.Env,
+				RuntimeEnv:              cfg.Claude.RuntimeEnv(),
+				ModelUsageAliases:       cfg.Claude.RuntimeModelUsageAliases(),
 			}, *log)
 			taskSvc.SetKubernetesDispatcher(kubeDispatcher)
 			workspaceLifecycle, ok := kubeDispatcher.(service.TaskWorkspaceLifecycle)
@@ -393,7 +393,7 @@ func main() {
 		llmAPIKey := cfg.Writing.Key
 		llmModel := cfg.Writing.Model
 		if llmModel == "" {
-			llmModel = cfg.Claude.Model
+			llmModel = cfg.Claude.Models.Default
 		}
 		if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
 			writingLLMClient = service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel, cfg.Writing.Timeout)
@@ -432,7 +432,7 @@ func main() {
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("SeedNote tracking service initialized")
 		if taskSvc != nil {
 			viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
-			viralAnalysisSvc.SetCreditService(creditSvc)
+			viralAnalysisSvc.SetBillingServices(fixedBilling.Catalog, fixedBilling.Wallet)
 			taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
 			log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("Viral analysis service initialized")
 		}
@@ -466,15 +466,7 @@ func main() {
 		}
 	}
 
-	// Goal-mode configuration is purely a credit multiplier now — the actual
-	// evaluation loop runs inside Claude Code's built-in /goal mechanism.
-	if taskSvc != nil {
-		log.Info().
-			Int("multiplier", cfg.Credits.EffectiveGoalModeMultiplier()).
-			Msg("goal mode configured (uses Claude Code native /goal)")
-	}
-	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
-	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits, rdb)
+	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, rdb)
 
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
@@ -483,7 +475,6 @@ func main() {
 	var agentHandler *handler.AgentHandler
 	var projectHandler *handler.ProjectHandler
 	var timelineHandler *handler.TimelineHandler
-	var creditHandler *handler.CreditHandler
 	var videoHandler *handler.VideoHandler
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
@@ -535,21 +526,16 @@ func main() {
 		}
 		if store != nil {
 			projectHandler.SetStore(store)
-			projectHandler.SetUploadRepository(repo)
 		}
 		projectHandler.SetSeednoteClient(seednoteClient)
 		projectHandler.SetSeednoteReadiness(seednoteMonitor)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
-		if creditSvc != nil {
-			creditHandler = handler.NewCreditHandler(creditSvc, cfg, cfg.Credits.AdminAPIKey, log)
-		}
-		videoHandler = handler.NewVideoHandler(repo, creditSvc, videoCatalog, videoCreditMultiplier, log)
-		videoHandler.SetBillingConfig(cfg.Billing)
+		videoHandler = handler.NewVideoHandler(repo, videoCatalog, log)
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
-		agentHandler.SetAdminAPIKey(cfg.Credits.AdminAPIKey)
+		agentHandler.SetAdminAPIKey(cfg.BillingRuntime.AdminAPIKey)
 		if executionTokens != nil {
 			agentHandler.SetExecutionTokenService(executionTokens)
 			agentHandler.SetBootstrap(kubeVerifier, bootstrapSvc)
@@ -572,9 +558,6 @@ func main() {
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
 		if store != nil {
 			templateHandler.SetStore(store)
-		}
-		if repo != nil {
-			templateHandler.SetUploadRepository(repo)
 		}
 		if viralAnalysisSvc != nil {
 			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
@@ -610,7 +593,7 @@ func main() {
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
 	var mcpHandler http.Handler
-	if projectSvc != nil && taskSvc != nil && creditSvc != nil && planSvc != nil {
+	if projectSvc != nil && taskSvc != nil && planSvc != nil {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
 		var videoSvc *service.VideoService
@@ -642,9 +625,15 @@ func main() {
 			}
 		}
 		if mysqlDB != nil && imageSvc != nil {
-			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, cfg, store, log)
+			designerSvc = service.NewDesignerService(mysqlDB, cfg, store, log)
+			designerSvc.SetProviderCostService(fixedBilling.Cost)
+			designerSvc.SetBillingCatalogService(fixedBilling.Catalog)
+			designerSvc.SetBillingWalletService(fixedBilling.Wallet)
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
 			designerHandler.SetDirectUploadDependencies(repo, store)
+		}
+		if imageSvc != nil {
+			imageSvc.SetProviderCostService(fixedBilling.Cost)
 		}
 		if repo != nil {
 			if writingLLMClient != nil || imageUnderstandingClient != nil || videoUnderstandingClient != nil {
@@ -684,31 +673,31 @@ func main() {
 		}
 
 		mcp.SetServices(&mcp.Services{
-			ProjectSvc:            projectSvc,
-			Store:                 store,
-			TaskSvc:               taskSvc,
-			CreditSvc:             creditSvc,
-			PlanSvc:               planSvc,
-			ImageSvc:              imageSvc,
-			ImageModelResolver:    modelConfigSvc,
-			ImageGenerator:        imageSvc,
-			ImageGenerationBiller: mcp.NewImageGenerationBiller(),
-			GenerateImageTimeout:  cfg.MCP.ToolTimeouts.GenerateImage,
-			VideoSvc:              videoSvc,
-			AudioASRSvc:           audioASRSvc,
-			WritingSvc:            writingSvc,
-			PublishingSvc:         publishingSvc,
-			WorkspaceSvc:          workspaceSvc,
-			TemplateSvc:           templateSvc,
-			LiveSliceSvc:          liveSliceSvc,
-			SeednoteClient:        seednoteClient,
-			SeednoteReadiness:     seednoteMonitor,
-			TopicPoolSvc:          topicPoolSvc,
-			AgentFeedbackSvc:      agentFeedbackSvc,
-			TingWuConfigured:      cfg.TingWu.Complete(),
-			FunASRConfigured:      cfg.FunASR.Complete(),
+			ProjectSvc:           projectSvc,
+			Store:                store,
+			TaskSvc:              taskSvc,
+			PlanSvc:              planSvc,
+			ImageSvc:             imageSvc,
+			ImageModelResolver:   modelConfigSvc,
+			ImageGenerator:       imageSvc,
+			ProviderCostSvc:      fixedBilling.Cost,
+			BillingCatalogSvc:    fixedBilling.Catalog,
+			GenerateImageTimeout: cfg.MCP.ToolTimeouts.GenerateImage,
+			VideoSvc:             videoSvc,
+			AudioASRSvc:          audioASRSvc,
+			WritingSvc:           writingSvc,
+			PublishingSvc:        publishingSvc,
+			WorkspaceSvc:         workspaceSvc,
+			TemplateSvc:          templateSvc,
+			LiveSliceSvc:         liveSliceSvc,
+			SeednoteClient:       seednoteClient,
+			SeednoteReadiness:    seednoteMonitor,
+			TopicPoolSvc:         topicPoolSvc,
+			AgentFeedbackSvc:     agentFeedbackSvc,
+			TingWuConfigured:     cfg.TingWu.Complete(),
+			FunASRConfigured:     cfg.FunASR.Complete(),
 		})
-		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
+		mcp.SetBillingServices(modelConfigSvc, cfg)
 		mcp.SetLogger(log)
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc))
 		log.Info().
@@ -791,13 +780,13 @@ func main() {
 		Executor:                 agentExecutor,
 		PlanService:              planSvc,
 		TaskService:              taskSvc,
-		CreditService:            creditSvc,
 		ProjectHandler:           projectHandler,
 		PlanHandler:              planHandler,
 		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		AgentHandler:             agentHandler,
-		CreditHandler:            creditHandler,
+		BillingHandler:           fixedBilling.Handler,
+		BillingAdminHandler:      fixedBilling.AdminHandler,
 		VideoHandler:             videoHandler,
 		TimelineHandler:          timelineHandler,
 		APIKeyHandler:            apiKeyHandler,
@@ -834,8 +823,19 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
 	// Use signal.NotifyContext for graceful shutdown.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
+
+	var billingWorkerWG sync.WaitGroup
+	if fixedBilling != nil && fixedBilling.Worker != nil {
+		billingWorkerWG.Add(1)
+		go func() {
+			defer billingWorkerWG.Done()
+			fixedBilling.Worker.Run(ctx)
+		}()
+	}
 
 	go seednoteMonitor.Run(ctx)
 	if ilinkMonitor != nil {
@@ -896,6 +896,7 @@ func main() {
 			taskSvc.Close()
 		}
 
+		billingWorkerWG.Wait()
 		if repo != nil {
 			if err := repo.Close(); err != nil {
 				log.Error().Err(err).Msg("failed to close repository")
@@ -922,6 +923,7 @@ func main() {
 	if err := app.Listen(addr, listenConfig); err != nil {
 		log.Error().Err(err).Msg("server listen error")
 	}
+	cancel()
 
 	// Wait for graceful shutdown to complete, with a timeout guard.
 	select {
@@ -1009,6 +1011,51 @@ func buildSeednoteAnalyticsHandler(repo repository.Repository, log *zerolog.Logg
 	}
 	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, log)
 	return handler.NewSeednoteAnalyticsHandler(trackingSvc, log)
+}
+
+type billingRuntimeServices struct {
+	Catalog      *service.BillingCatalogService
+	Wallet       *service.BillingWalletService
+	Referrals    *service.BillingReferralService
+	Handler      *handler.BillingHandler
+	Worker       *service.BillingMaintenanceWorker
+	Cost         *service.ProviderCostService
+	Margin       *service.MarginService
+	AdminHandler *handler.BillingAdminHandler
+}
+
+func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repository, cfg *config.Config, log *zerolog.Logger) (*billingRuntimeServices, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("billing repository is required")
+	}
+	if db == nil {
+		return nil, fmt.Errorf("provider cost database is required")
+	}
+	if cfg == nil || strings.TrimSpace(cfg.BillingRuntime.ConfigDir) == "" {
+		return nil, fmt.Errorf("billing_runtime.config_dir is required")
+	}
+	if strings.TrimSpace(cfg.BillingRuntime.AdminAPIKey) == "" {
+		return nil, fmt.Errorf("billing_runtime.admin_api_key is required")
+	}
+	bundle, err := serverbilling.LoadBundle(cfg.BillingRuntime.ConfigDir)
+	if err != nil {
+		return nil, fmt.Errorf("load billing bundle: %w", err)
+	}
+	catalog := service.NewBillingCatalogService(repo, bundle, service.BillingCatalogOptions{})
+	if _, err := catalog.Publish(ctx); err != nil {
+		return nil, fmt.Errorf("publish billing catalog: %w", err)
+	}
+	wallet := service.NewBillingWalletService(repo, bundle, service.BillingWalletOptions{})
+	referrals := service.NewBillingReferralService(repo, wallet, bundle, service.BillingReferralOptions{})
+	worker := service.NewBillingMaintenanceWorker(wallet, service.BillingMaintenanceWorkerOptions{}, log)
+	cost := service.NewProviderCostService(repository.NewBillingCostRepository(db), bundle)
+	margin := service.NewMarginService(repository.NewBillingMarginRepository(db), repo, bundle, service.MarginServiceOptions{})
+	billingHandler := handler.NewBillingHandler(repo, catalog, referrals, bundle, handler.BillingHandlerOptions{
+		AdminAPIKey:   cfg.BillingRuntime.AdminAPIKey,
+		InviteBaseURL: "https://creator.anbanai.com/register?invite=",
+	}, log)
+	adminHandler := handler.NewBillingAdminHandler(margin)
+	return &billingRuntimeServices{Catalog: catalog, Wallet: wallet, Referrals: referrals, Handler: billingHandler, Worker: worker, Cost: cost, Margin: margin, AdminHandler: adminHandler}, nil
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.

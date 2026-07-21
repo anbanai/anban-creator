@@ -77,9 +77,10 @@ describe('designer API normalization', () => {
     await designerApi.uploadReferenceFromUrl('https://example.com/source.png', controller.signal)
     await designerApi.getGeneration('generation-1', controller.signal)
 
-    expect(post).toHaveBeenNthCalledWith(1, '/designer/generate', expect.any(Object), { signal: controller.signal })
-    expect(post).toHaveBeenNthCalledWith(2, '/designer/register-reference', expect.any(Object), { signal: controller.signal })
-    expect(post).toHaveBeenNthCalledWith(3, '/designer/upload-reference-from-url', expect.any(Object), { signal: controller.signal })
+    expect(post).toHaveBeenNthCalledWith(1, '/designer/quote', expect.any(Object), { signal: controller.signal })
+    expect(post).toHaveBeenNthCalledWith(2, '/designer/generate', expect.any(Object), { signal: controller.signal })
+    expect(post).toHaveBeenNthCalledWith(3, '/designer/register-reference', expect.any(Object), { signal: controller.signal })
+    expect(post).toHaveBeenNthCalledWith(4, '/designer/upload-reference-from-url', expect.any(Object), { signal: controller.signal })
     expect(get).toHaveBeenCalledWith('/designer/generations/generation-1', { signal: controller.signal })
   })
 })

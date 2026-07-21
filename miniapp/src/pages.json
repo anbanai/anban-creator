@@ -90,16 +90,9 @@
 			}
 		},
 		{
-			"path": "pages/credits/index",
+			"path": "pages/billing/index",
 			"style": {
-				"navigationBarTitleText": "积分中心",
-				"enablePullDownRefresh": true
-			}
-		},
-		{
-			"path": "pages/credits/transactions",
-			"style": {
-				"navigationBarTitleText": "积分记录",
+				"navigationBarTitleText": "钱包",
 				"enablePullDownRefresh": true
 			}
 		},

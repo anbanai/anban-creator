@@ -76,7 +76,7 @@ function provider(overrides: Partial<DesignerProvider['capabilities']> = {}): De
       outputFormats: ['png'], hasBackground: false, hasCompression: false, watermark: false,
       ...overrides,
     },
-    pricing: {},
+    pricing: { pricingType: 'fixed_sku', currency: 'credits', billingNote: 'fixed retail SKU' },
   }
 }
 
@@ -141,13 +141,12 @@ describe('Designer shared prompt composer', () => {
     vi.mocked(api.projects.list).mockResolvedValue([
       { id: 'project-1', name: '品牌项目', platform: 'article' } as never,
     ])
-    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 1000 } as never)
     vi.mocked(api.designer.getHistory).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 })
     vi.mocked(uploadToOSS).mockImplementation(async ({ file }) => uploadResult(file))
     vi.mocked(designerApi.registerReference).mockImplementation(async ({ upload_id }) => ({
       file_id: `registered:${upload_id}`, filename: upload_id, size: 5,
     }))
-    vi.mocked(designerApi.generate).mockResolvedValue({ generation_id: 'generation-1', status: 'generating' })
+    vi.mocked(designerApi.generate).mockResolvedValue({ generation_id: 'generation-1', status: 'generating', price_credits: 500 })
   })
 
   afterEach(() => {
@@ -367,7 +366,7 @@ describe('Designer shared prompt composer', () => {
   })
 
   it('keeps a newer prompt and does not begin polling when canceled generate resolves late', async () => {
-    const generation = deferred<{ generation_id: string; status: string }>()
+	const generation = deferred<{ generation_id: string; status: string; price_credits: number }>()
     vi.mocked(designerApi.generate).mockReturnValueOnce(generation.promise)
     render(<DesignerPage />)
     await screen.findByLabelText('Designer prompt')
@@ -377,7 +376,7 @@ describe('Designer shared prompt composer', () => {
 
     fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '用户继续输入 B' } })
     fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
-    generation.resolve({ generation_id: 'late-generation', status: 'generating' })
+	generation.resolve({ generation_id: 'late-generation', status: 'generating', price_credits: 500 })
     await act(async () => {})
 
     expect(screen.getByLabelText('Designer prompt')).toHaveValue('用户继续输入 B')

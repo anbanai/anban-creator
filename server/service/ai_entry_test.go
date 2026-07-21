@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -272,7 +271,7 @@ func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T
 			ctx := context.Background()
 			userID := uuid.NewString()
 			logger := zerolog.New(io.Discard)
-			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "ai-entry-project-reference-" + platform, CreditsBalance: 10_000}); err != nil {
+			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "ai-entry-project-reference-" + platform}); err != nil {
 				t.Fatal(err)
 			}
 			topics := &countingTopicPoolRepository{TopicPoolRepository: base.TopicPools()}
@@ -289,8 +288,7 @@ func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T
 				t.Fatal(err)
 			}
 			store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}, downloadErr: errors.New("signer unavailable")}
-			creditSvc := NewCreditService(repo, &config.CreditsConfig{TaskCosts: map[string]int{platform: 4_000}}, &logger)
-			taskSvc := NewTaskService(repo, nil, &mockEnqueuer{}, store, creditSvc, &logger, "", nil, "", nil, nil)
+			taskSvc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 			taskSvc.SetTopicPoolService(NewTopicPoolService(repo, &logger))
 			referenceSvc := NewReferenceAssetService(repo, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
@@ -307,14 +305,6 @@ func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T
 			_, total, listErr := taskSvc.List(ctx, userID, 0, 10, "", "", "")
 			if listErr != nil || total != 0 {
 				t.Fatalf("tasks = %d, %v", total, listErr)
-			}
-			txCount, _ := repo.Credits().CountByUserID(ctx, userID)
-			if txCount != 0 {
-				t.Fatalf("credit transactions = %d", txCount)
-			}
-			user, _ := repo.Users().FindByID(ctx, userID)
-			if user.CreditsBalance != 10_000 {
-				t.Fatalf("balance = %d", user.CreditsBalance)
 			}
 		})
 	}
@@ -341,7 +331,7 @@ func TestAIEntryPreservesSecondReferenceValidationErrorsBeforeCreationOrBilling(
 			ctx := context.Background()
 			userID := uuid.NewString()
 			logger := zerolog.New(io.Discard)
-			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "ai-entry-second-reference-" + tt.name, CreditsBalance: 10_000}); err != nil {
+			if err := base.Users().Create(ctx, &model.User{ID: userID, OpenID: "ai-entry-second-reference-" + tt.name}); err != nil {
 				t.Fatal(err)
 			}
 			topics := &countingTopicPoolRepository{TopicPoolRepository: base.TopicPools()}
@@ -366,8 +356,7 @@ func TestAIEntryPreservesSecondReferenceValidationErrorsBeforeCreationOrBilling(
 			}
 			repoWithTopics := &taskCreationRepositoryOverride{Repository: repo, topicPools: topics}
 			store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}}
-			creditSvc := NewCreditService(repoWithTopics, &config.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 4_000}}, &logger)
-			taskSvc := NewTaskService(repoWithTopics, nil, &mockEnqueuer{}, store, creditSvc, &logger, "", nil, "", nil, nil)
+			taskSvc := NewTaskService(repoWithTopics, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 			taskSvc.SetTopicPoolService(NewTopicPoolService(repoWithTopics, &logger))
 			referenceSvc := NewReferenceAssetService(repoWithTopics, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
@@ -390,14 +379,6 @@ func TestAIEntryPreservesSecondReferenceValidationErrorsBeforeCreationOrBilling(
 			_, total, listErr := taskSvc.List(ctx, userID, 0, 10, "", "", "")
 			if listErr != nil || total != 0 {
 				t.Fatalf("tasks = %d, %v", total, listErr)
-			}
-			txCount, _ := repo.Credits().CountByUserID(ctx, userID)
-			if txCount != 0 {
-				t.Fatalf("credit transactions = %d", txCount)
-			}
-			user, _ := repo.Users().FindByID(ctx, userID)
-			if user.CreditsBalance != 10_000 {
-				t.Fatalf("balance = %d", user.CreditsBalance)
 			}
 		})
 	}

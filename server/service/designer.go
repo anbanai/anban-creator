@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,7 +26,6 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -41,20 +42,38 @@ const maxDesignerReferenceBytes int64 = 10 * 1024 * 1024
 
 type DesignerService struct {
 	db              *gorm.DB
-	imageSvc        *ImageService
-	creditSvc       *CreditService
+	repo            repository.Repository
 	fullCfg         *srvconfig.Config
 	imageCfg        *srvconfig.ImageAPIConfig
 	storage         storage.Provider
 	referenceRepo   repository.DesignerReferenceRepository
 	logger          *zerolog.Logger
 	providerFactory func(*config.ImageAPI, *zerolog.Logger) (image.Provider, error)
+	providerCostSvc *ProviderCostService
+	billingCatalog  *BillingCatalogService
+	billingWallet   *BillingWalletService
+}
+
+func (s *DesignerService) SetProviderCostService(providerCostSvc *ProviderCostService) {
+	if s != nil {
+		s.providerCostSvc = providerCostSvc
+	}
+}
+
+func (s *DesignerService) SetBillingCatalogService(catalog *BillingCatalogService) {
+	if s != nil {
+		s.billingCatalog = catalog
+	}
+}
+
+func (s *DesignerService) SetBillingWalletService(wallet *BillingWalletService) {
+	if s != nil {
+		s.billingWallet = wallet
+	}
 }
 
 func NewDesignerService(
 	db *gorm.DB,
-	imageSvc *ImageService,
-	creditSvc *CreditService,
 	fullCfg *srvconfig.Config,
 	store storage.Provider,
 	logger *zerolog.Logger,
@@ -63,45 +82,99 @@ func NewDesignerService(
 	if fullCfg != nil {
 		imageCfg = &fullCfg.ImageAPI
 	}
+	var repo repository.Repository
 	var referenceRepo repository.DesignerReferenceRepository
 	if db != nil {
+		repo = repository.New(db)
 		referenceRepo = repository.NewDesignerReferenceRepository(db)
 	}
 	return &DesignerService{
 		db:              db,
-		imageSvc:        imageSvc,
-		creditSvc:       creditSvc,
+		repo:            repo,
+		referenceRepo:   referenceRepo,
 		fullCfg:         fullCfg,
 		imageCfg:        imageCfg,
 		storage:         store,
-		referenceRepo:   referenceRepo,
 		logger:          logger,
 		providerFactory: image.NewProvider,
 	}
 }
 
 type DesignerGenerateRequest struct {
-	ProjectID         string   `json:"project_id"`
-	Prompt            string   `json:"prompt"`
-	Provider          string   `json:"provider"`
-	ProviderID        string   `json:"provider_id,omitempty"`
-	Model             string   `json:"model"`
-	Quality           string   `json:"quality,omitempty"`
-	Size              string   `json:"size,omitempty"`
-	N                 int      `json:"n,omitempty"`
-	OutputFormat      string   `json:"output_format,omitempty"`
-	OutputCompression int      `json:"output_compression,omitempty"`
-	Background        string   `json:"background,omitempty"`
-	ReferenceFileIDs  []string `json:"reference_file_ids,omitempty"`
-	MaskFileID        string   `json:"mask_file_id,omitempty"`
-	Watermark         *bool    `json:"watermark,omitempty"`
+	QuoteID            string   `json:"quote_id"`
+	OperationID        string   `json:"operation_id"`
+	RequestFingerprint string   `json:"request_fingerprint"`
+	ProjectID          string   `json:"project_id"`
+	Prompt             string   `json:"prompt"`
+	Provider           string   `json:"provider"`
+	ProviderID         string   `json:"provider_id,omitempty"`
+	Model              string   `json:"model"`
+	Quality            string   `json:"quality,omitempty"`
+	Size               string   `json:"size,omitempty"`
+	N                  int      `json:"n,omitempty"`
+	OutputFormat       string   `json:"output_format,omitempty"`
+	OutputCompression  int      `json:"output_compression,omitempty"`
+	Background         string   `json:"background,omitempty"`
+	ReferenceFileIDs   []string `json:"reference_file_ids,omitempty"`
+	MaskFileID         string   `json:"mask_file_id,omitempty"`
+	Watermark          *bool    `json:"watermark,omitempty"`
 }
 
 type DesignerGenerationCreated struct {
-	GenerationID     string `json:"generation_id"`
-	Status           string `json:"status"`
-	EstimatedCredits int    `json:"estimated_credits"`
-	BillingMode      string `json:"billing_mode"`
+	GenerationID string `json:"generation_id"`
+	Status       string `json:"status"`
+	PriceCredits int    `json:"price_credits"`
+}
+
+type DesignerGenerationQuote struct {
+	QuoteID            string    `json:"quote_id"`
+	OperationID        string    `json:"operation_id"`
+	RequestFingerprint string    `json:"request_fingerprint"`
+	CatalogID          string    `json:"catalog_id"`
+	SKUID              string    `json:"sku_id"`
+	PriceCredits       int64     `json:"price_credits"`
+	ExpiresAt          time.Time `json:"expires_at"`
+}
+
+func (s *DesignerService) CreateGenerationQuote(ctx context.Context, userID string, req DesignerGenerateRequest) (*DesignerGenerationQuote, error) {
+	if s == nil || s.billingCatalog == nil {
+		return nil, fmt.Errorf("fixed-SKU designer billing is not configured")
+	}
+	if strings.TrimSpace(req.Prompt) == "" || strings.TrimSpace(req.ProviderID) == "" {
+		return nil, fmt.Errorf("prompt and provider_id are required")
+	}
+	if _, err := uuid.Parse(req.OperationID); err != nil {
+		return nil, fmt.Errorf("operation_id must be a UUID")
+	}
+	if req.ProjectID == "" {
+		req.ProjectID = "default"
+	}
+	if req.N < 1 {
+		req.N = 1
+	}
+	if req.N != 1 {
+		return nil, fmt.Errorf("n must equal 1; batch designer SKUs are not configured")
+	}
+	cfg := s.findDesignerConfigByID(req.ProviderID)
+	route, ok := s.designerRoute(req.ProviderID)
+	if cfg == nil || !ok || !cfg.IsEnabled() {
+		return nil, fmt.Errorf("designer provider %s is not available", req.ProviderID)
+	}
+	if err := validateDesignerGenerateRequest(req, route.Capabilities); err != nil {
+		return nil, err
+	}
+	fingerprint := DesignerGenerationFingerprint(userID, req)
+	quote, err := s.billingCatalog.CreateQuote(ctx, QuoteRequest{
+		UserID: userID, Operation: "designer.generate_image", Route: "image_generation.designer." + req.ProviderID,
+		RequestFingerprint: fingerprint, IdempotencyScope: "designer-quote", IdempotencyKey: req.OperationID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &DesignerGenerationQuote{
+		QuoteID: quote.ID, OperationID: req.OperationID, RequestFingerprint: fingerprint,
+		CatalogID: quote.CatalogID, SKUID: quote.SKUID, PriceCredits: quote.PriceCredits, ExpiresAt: quote.ExpiresAt,
+	}, nil
 }
 
 // CreateGenerationRecord validates the request, resolves config, and creates
@@ -113,14 +186,27 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	if req.ProjectID == "" {
 		req.ProjectID = "default"
 	}
-	if err := s.validateDesignerProjectOwnership(ctx, userID, req.ProjectID); err != nil {
-		return nil, err
-	}
 	if strings.TrimSpace(req.ProviderID) == "" {
 		return nil, fmt.Errorf("provider_id is required")
 	}
+	if strings.TrimSpace(req.QuoteID) == "" {
+		return nil, fmt.Errorf("quote_id is required")
+	}
+	if _, err := uuid.Parse(req.OperationID); err != nil {
+		return nil, fmt.Errorf("operation_id must be a UUID")
+	}
 	if req.N < 1 {
 		req.N = 1
+	}
+	if req.N != 1 {
+		return nil, fmt.Errorf("n must equal 1; batch designer SKUs are not configured")
+	}
+	wantFingerprint := DesignerGenerationFingerprint(userID, req)
+	if req.RequestFingerprint != wantFingerprint {
+		return nil, fmt.Errorf("%w: designer request fingerprint mismatch", ErrBillingQuoteMismatch)
+	}
+	if s.billingCatalog == nil || s.billingWallet == nil {
+		return nil, fmt.Errorf("fixed-SKU designer billing is not configured")
 	}
 
 	provider := req.Provider
@@ -149,14 +235,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		}
 	}
 
-	// Billing: look up per-image cost from model config.
-	// Prefer designer entry ID for accurate cost lookup when multiple entries
-	// share the same provider type (e.g., two "openai" entries).
-	var totalCost int
-	var billingMode string
-	var providerKey string
 	var routeName string
-	var estimateCost srvconfig.ImageGenerationCreditCost
 	if req.ProviderID != "" {
 		if cfg := s.findDesignerConfigByID(req.ProviderID); cfg != nil {
 			if !cfg.IsEnabled() {
@@ -168,26 +247,9 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 				if err := validateDesignerGenerateRequest(req, route.Capabilities); err != nil {
 					return nil, err
 				}
-				providerKey = route.Provider
 				routeName = "image_generation.designer." + req.ProviderID
 			} else {
 				return nil, fmt.Errorf("designer provider %s route is not configured", req.ProviderID)
-			}
-			if providerKey != "" && s.fullCfg != nil {
-				var err error
-				estimateCost, err = s.fullCfg.CalculateImageGenerationEstimateCredits(providerKey, cfg.Model, srvconfig.ImageGenerationUsage{
-					Size:                resolvedDesignerSize(req.Size, cfg.Model),
-					Quality:             req.Quality,
-					Count:               req.N,
-					ReferenceImageCount: len(req.ReferenceFileIDs),
-				}, string(s.userTier(ctx, userID)), s.userBillingMultiplier(ctx, userID))
-				if err != nil {
-					return nil, err
-				}
-				totalCost = estimateCost.FinalCredits
-				billingMode = estimateCost.PriceSnapshot.PricingType
-			} else {
-				totalCost = cfg.Credits * req.N
 			}
 		} else {
 			return nil, fmt.Errorf("designer provider %s is not configured", req.ProviderID)
@@ -196,25 +258,22 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	if err := s.validateDesignerReferenceOwnership(ctx, userID, req.ReferenceFileIDs, req.MaskFileID); err != nil {
 		return nil, err
 	}
-	if totalCost == 0 {
-		if unitCost := s.resolveCredits(provider, modelName); unitCost > 0 {
-			totalCost = unitCost * req.N
-		}
+	sku, err := s.billingCatalog.ResolveSKU(ctx, "", "designer.generate_image", routeName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve fixed designer SKU: %w", err)
 	}
-
-	genID := uuid.New().String()
-
-	if totalCost > 0 {
-		if s.creditSvc == nil {
-			return nil, fmt.Errorf("credit service is required for priced image generation")
+	genID := req.OperationID
+	if s.repo == nil {
+		return nil, fmt.Errorf("designer repository is not configured")
+	}
+	existing, findErr := s.repo.ImageGenerations().FindByID(ctx, genID)
+	if findErr == nil {
+		if existing.UserID != userID || existing.RequestFingerprint != wantFingerprint {
+			return nil, ErrBillingConflict
 		}
-		metadata := model.CreditTransactionMetadata{}
-		if estimateCost.FinalCredits > 0 {
-			metadata = imageCreditMetadata(providerKey, modelName, routeName, estimateCost)
-		}
-		if _, err := s.creditSvc.DeductForOperationWithMetadata(ctx, userID, model.CreditTypeImageGen, totalCost, metadata, genID); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
+		return &DesignerGenerationCreated{GenerationID: genID, Status: existing.Status, PriceCredits: existing.Cost}, nil
+	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return nil, findErr
 	}
 
 	refFilesJSON, _ := json.Marshal(req.ReferenceFileIDs)
@@ -223,65 +282,70 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		watermark = *req.Watermark
 	}
 	gen := &model.ImageGeneration{
-		ID:                genID,
-		UserID:            userID,
-		ProjectID:         req.ProjectID,
-		Prompt:            req.Prompt,
-		Provider:          provider,
-		ProviderID:        req.ProviderID,
-		Model:             modelName,
-		Quality:           req.Quality,
-		Size:              req.Size,
-		N:                 req.N,
-		OutputFormat:      req.OutputFormat,
-		OutputCompression: req.OutputCompression,
-		Background:        req.Background,
-		Watermark:         watermark,
-		Status:            model.ImageGenerationStatusGenerating,
-		ReferenceFiles:    string(refFilesJSON),
-		MaskFileID:        req.MaskFileID,
-		Cost:              totalCost,
-		EstimatedCost:     totalCost,
-		BillingMode:       billingMode,
-		BillingStatus:     billingStatus(totalCost, "estimated"),
+		ID:                 genID,
+		UserID:             userID,
+		ProjectID:          req.ProjectID,
+		Prompt:             req.Prompt,
+		Provider:           provider,
+		ProviderID:         req.ProviderID,
+		Model:              modelName,
+		Quality:            req.Quality,
+		Size:               req.Size,
+		N:                  req.N,
+		OutputFormat:       req.OutputFormat,
+		OutputCompression:  req.OutputCompression,
+		Background:         req.Background,
+		Watermark:          watermark,
+		Status:             model.ImageGenerationStatusGenerating,
+		ReferenceFiles:     string(refFilesJSON),
+		MaskFileID:         req.MaskFileID,
+		Cost:               int(sku.PriceCredits),
+		EstimatedCost:      int(sku.PriceCredits),
+		BillingMode:        "fixed_sku",
+		BillingStatus:      "charged",
+		BillingQuoteID:     req.QuoteID,
+		RequestFingerprint: wantFingerprint,
+		PriceSnapshot:      append([]byte(nil), sku.Snapshot...),
 	}
-	if estimateCost.FinalCredits > 0 {
-		if data, err := json.Marshal(estimateCost.PriceSnapshot); err == nil {
-			gen.PriceSnapshot = data
+	chargeReq := OperationChargeRequest{
+		UserID: userID, QuoteID: req.QuoteID, CatalogID: sku.CatalogID, SKUID: sku.SKUID,
+		ResourceType: "image_generation", ResourceID: genID, RequestFingerprint: wantFingerprint,
+		IdempotencyScope: "designer-generation", IdempotencyKey: genID,
+	}
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		charge, chargeErr := s.billingWallet.ChargeStandaloneOperationInTx(ctx, tx, chargeReq)
+		if chargeErr != nil {
+			return chargeErr
 		}
+		gen.BillingChargeID = stringPtr(charge.ID)
+		return tx.ImageGenerations().Create(ctx, gen)
+	})
+	if err != nil {
+		if replay, replayErr := s.repo.ImageGenerations().FindByID(ctx, genID); replayErr == nil && replay.UserID == userID && replay.RequestFingerprint == wantFingerprint {
+			return &DesignerGenerationCreated{GenerationID: genID, Status: replay.Status, PriceCredits: replay.Cost}, nil
+		}
+		return nil, fmt.Errorf("create fixed-SKU generation: %w", err)
 	}
 
-	if err := s.db.Create(gen).Error; err != nil {
-		// Refund on DB create failure to avoid losing credits.
-		if totalCost > 0 && s.creditSvc != nil {
-			if refundErr := s.creditSvc.RefundForOperation(ctx, userID, model.CreditTypeImageGen, totalCost, "生成记录创建失败退还", genID); refundErr != nil {
-				s.logger.Error().Err(refundErr).Int("cost", totalCost).Msg("failed to refund after DB create failure")
-			}
-		}
-		return nil, fmt.Errorf("create generation record: %w", err)
-	}
-
-	return &DesignerGenerationCreated{GenerationID: genID, Status: model.ImageGenerationStatusGenerating, EstimatedCredits: totalCost, BillingMode: billingMode}, nil
+	return &DesignerGenerationCreated{GenerationID: genID, Status: model.ImageGenerationStatusGenerating, PriceCredits: int(sku.PriceCredits)}, nil
 }
 
-func (s *DesignerService) validateDesignerProjectOwnership(ctx context.Context, userID, projectID string) error {
-	if projectID == "default" {
-		return nil
-	}
-	if s.db == nil {
-		return fmt.Errorf("validate designer project ownership: database is required")
-	}
-	var project model.Project
-	if err := s.db.WithContext(ctx).Select("id", "user_id").First(&project, "id = ?", projectID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("%w: %s", ErrProjectNotFound, projectID)
-		}
-		return fmt.Errorf("validate designer project ownership: %w", err)
-	}
-	if project.UserID != userID {
-		return ErrProjectOwnedByUser
-	}
-	return nil
+func DesignerGenerationFingerprint(userID string, req DesignerGenerateRequest) string {
+	payload, _ := json.Marshal(struct {
+		Operation, UserID, OperationID, ProjectID, Prompt, ProviderID, Provider, Model string
+		Quality, Size, OutputFormat, Background, MaskFileID                            string
+		N, OutputCompression                                                           int
+		ReferenceFileIDs                                                               []string
+		Watermark                                                                      *bool
+	}{
+		Operation: "designer.generate_image", UserID: strings.TrimSpace(userID), OperationID: strings.TrimSpace(req.OperationID),
+		ProjectID: strings.TrimSpace(req.ProjectID), Prompt: strings.TrimSpace(req.Prompt), ProviderID: strings.TrimSpace(req.ProviderID),
+		Provider: strings.TrimSpace(req.Provider), Model: strings.TrimSpace(req.Model), Quality: strings.TrimSpace(req.Quality),
+		Size: strings.TrimSpace(req.Size), N: req.N, OutputFormat: strings.TrimSpace(req.OutputFormat), OutputCompression: req.OutputCompression,
+		Background: strings.TrimSpace(req.Background), ReferenceFileIDs: req.ReferenceFileIDs, MaskFileID: strings.TrimSpace(req.MaskFileID), Watermark: req.Watermark,
+	})
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:])
 }
 
 func validateDesignerGenerateRequest(req DesignerGenerateRequest, caps DesignerProviderCapabilities) error {
@@ -345,77 +409,6 @@ func (s *DesignerService) designerRoute(id string) (srvconfig.ImageGenerationRou
 	return route, ok
 }
 
-func (s *DesignerService) userTier(ctx context.Context, userID string) model.Tier {
-	if s.db == nil || userID == "" {
-		return model.TierFree
-	}
-	var user model.User
-	if err := s.db.Select("tier").First(&user, "id = ?", userID).Error; err != nil {
-		return model.TierFree
-	}
-	return model.ResolveTier(model.Tier(user.Tier))
-}
-
-func (s *DesignerService) userBillingMultiplier(ctx context.Context, userID string) float64 {
-	if s.db == nil || userID == "" {
-		return 1
-	}
-	var user model.User
-	if err := s.db.Select("billing_multiplier").First(&user, "id = ?", userID).Error; err != nil {
-		if s.logger != nil {
-			s.logger.Warn().Err(err).Str("user_id", userID).Msg("designer billing multiplier lookup failed")
-		}
-		return 1
-	}
-	if user.BillingMultiplier == nil || *user.BillingMultiplier <= 0 {
-		return 1
-	}
-	return *user.BillingMultiplier
-}
-
-func imageCreditMetadata(providerKey, modelName, routeName string, cost srvconfig.ImageGenerationCreditCost) model.CreditTransactionMetadata {
-	snapshot := map[string]any{}
-	if data, err := json.Marshal(cost.PriceSnapshot); err == nil {
-		_ = json.Unmarshal(data, &snapshot)
-	}
-	return model.CreditTransactionMetadata{
-		Provider:               providerKey,
-		Model:                  modelName,
-		Route:                  routeName,
-		TextInputTokens:        cost.Usage.TextInputTokens,
-		TextCachedInputTokens:  cost.Usage.TextCachedInputTokens,
-		ImageInputTokens:       cost.Usage.ImageInputTokens,
-		ImageCachedInputTokens: cost.Usage.ImageCachedInputTokens,
-		ImageOutputTokens:      cost.Usage.ImageOutputTokens,
-		TotalTokens:            cost.Usage.TotalTokens,
-		BaseCredits:            cost.BaseCredits,
-		TierMultiplier:         cost.TierMultiplier,
-		UserMultiplier:         cost.UserMultiplier,
-		FinalCredits:           cost.FinalCredits,
-		PriceSnapshot:          snapshot,
-	}
-}
-
-func resolvedDesignerSize(size, modelName string) string {
-	size = designerCapabilitySize(size)
-	if size == "" || strings.EqualFold(size, "auto") {
-		return "1024x1024"
-	}
-	if strings.Contains(size, "x") {
-		return size
-	}
-	if strings.HasPrefix(strings.ToLower(modelName), "gpt-image-") {
-		switch size {
-		case "16:9", "4:3":
-			return "1536x1024"
-		case "9:16", "3:4":
-			return "1024x1536"
-		}
-		return "1024x1024"
-	}
-	return size
-}
-
 func designerCapabilitySize(size string) string {
 	size = strings.TrimSpace(size)
 	if size == "" {
@@ -439,13 +432,6 @@ func designerCapabilitySize(size string) string {
 	return size
 }
 
-func billingStatus(cost int, defaultStatus string) string {
-	if cost <= 0 {
-		return ""
-	}
-	return defaultStatus
-}
-
 // ExecuteGeneration runs the actual image generation for the given ID.
 // Reads the generation record from the database, runs generation, processes
 // results, and updates the status. Designed to be called from a goroutine.
@@ -459,26 +445,17 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	var gen model.ImageGeneration
 	if err := s.db.Where("id = ?", genID).First(&gen).Error; err != nil {
 		s.logger.Error().Err(err).Str("gen_id", genID).Msg("generation record not found")
-		// Attempt refund via the deduction's OperationID trace.
-		if s.creditSvc != nil {
-			if refundErr := s.creditSvc.RefundForOperationByID(ctx, genID,
-				fmt.Sprintf("生成记录丢失退还 (genID=%s)", genID)); refundErr != nil {
-				s.logger.Error().Err(refundErr).Str("gen_id", genID).Msg("failed to refund for missing record")
-			}
-		}
 		return
 	}
 
 	now := time.Now()
 	s.db.Model(&model.ImageGeneration{}).Where("id = ?", genID).Update("started_at", &now)
 
-	var refundOnce sync.Once
-	refund := func() {
-		refundOnce.Do(func() {
-			if gen.Cost > 0 && s.creditSvc != nil {
-				if err := s.creditSvc.RefundForOperation(ctx, gen.UserID, model.CreditTypeImageGen, gen.Cost, fmt.Sprintf("设计师生成失败退还 +%d", gen.Cost), genID); err != nil {
-					s.logger.Error().Err(err).Str("gen_id", genID).Int("cost", gen.Cost).Msg("failed to refund designer generation")
-				}
+	var failOnce sync.Once
+	fail := func(reason, message string) {
+		failOnce.Do(func() {
+			if err := s.failGenerationWithReversal(ctx, &gen, reason, message); err != nil {
+				s.logger.Error().Err(err).Str("gen_id", genID).Str("reason", reason).Msg("persist designer failure and reversal intent")
 			}
 		})
 	}
@@ -486,8 +463,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Error().Str("gen_id", genID).Any("panic", r).Msg("generation panicked")
-			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, fmt.Sprintf("internal error: %v", r))
-			refund()
+			fail("platform_error", fmt.Sprintf("internal error: %v", r))
 		}
 	}()
 
@@ -525,12 +501,18 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	var refFileIDs []string
 	if gen.ReferenceFiles != "" {
 		if err := json.Unmarshal([]byte(gen.ReferenceFiles), &refFileIDs); err != nil {
-			s.logger.Error().Err(err).Str("gen_id", genID).Msg("decode designer reference contract failed")
-			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, "designer reference is invalid or unavailable")
-			refund()
+			s.logger.Error().Err(err).Str("gen_id", genID).Msg("decode persisted designer references failed")
+			fail("platform_error", "designer reference is invalid or unavailable")
 			return
 		}
 	}
+	refPaths, maskPath, cleanupReferences, err := s.materializeDesignerReferences(ctx, gen.UserID, refFileIDs, gen.MaskFileID)
+	if err != nil {
+		s.logger.Error().Err(err).Str("gen_id", genID).Str("user_id", gen.UserID).Msg("resolve designer references failed")
+		fail("platform_error", "designer reference is invalid or unavailable")
+		return
+	}
+	defer cleanupReferences()
 
 	s.logger.Info().
 		Str("gen_id", genID).
@@ -562,23 +544,13 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	}
 
 	providerFactory := s.providerFactory
-	refPaths, maskPath, cleanupReferences, err := s.materializeDesignerReferences(ctx, gen.UserID, refFileIDs, gen.MaskFileID)
-	if err != nil {
-		s.logger.Error().Err(err).Str("gen_id", genID).Str("user_id", gen.UserID).Msg("resolve designer references failed")
-		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, "designer reference is invalid or unavailable")
-		refund()
-		return
-	}
-	defer cleanupReferences()
-
 	if providerFactory == nil {
 		providerFactory = image.NewProvider
 	}
 	providerInst, err := providerFactory(apiCfg, s.logger)
 	if err != nil {
 		s.logger.Error().Err(err).Str("gen_id", genID).Str("provider", provider).Msg("designer: failed to create image provider")
-		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, designerGenerationUserError(err))
-		refund()
+		fail("platform_error", designerGenerationUserError(err))
 		return
 	}
 
@@ -596,6 +568,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 
 	result, err := providerInst.Generate(ctx, gen.Prompt, genOpts)
 	if err != nil {
+		s.recordDesignerProviderFailure(ctx, &gen)
 		s.logger.Error().Err(err).
 			Str("gen_id", genID).
 			Str("user_id", gen.UserID).
@@ -604,12 +577,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 			Str("prompt_preview", truncate(gen.Prompt, 100)).
 			Dur("elapsed", time.Since(start)).
 			Msg("designer: image generation failed")
-		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, designerGenerationUserError(err))
-		refund()
-		return
-	}
-
-	if ok := s.settleGenerationBilling(ctx, &gen, result); !ok {
+		fail("provider_error", designerGenerationUserError(err))
 		return
 	}
 
@@ -625,7 +593,16 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		Dur("elapsed", time.Since(start)).
 		Msg("designer: image generation completed")
 
-	s.processResults(ctx, gen.UserID, genID, result)
+	if strings.TrimSpace(result.ProviderRequestID) == "" {
+		result.ProviderRequestID = "internal:designer:" + gen.ID
+	}
+	var durableResults int
+	result.OutputWidth, result.OutputHeight, durableResults = s.processResults(ctx, gen.UserID, genID, result)
+	s.recordDesignerProviderCost(ctx, &gen, result)
+	if durableResults == 0 {
+		fail("platform_error", "generated image could not be persisted")
+		return
+	}
 
 	completedAt := time.Now()
 	s.db.Model(&model.ImageGeneration{}).Where("id = ?", genID).Updates(map[string]any{
@@ -635,132 +612,32 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	})
 }
 
-func (s *DesignerService) settleGenerationBilling(ctx context.Context, gen *model.ImageGeneration, result *image.GenerateResult) bool {
-	if gen == nil || result == nil || gen.BillingMode != srvconfig.ImagePricingTypeOpenAIUsage {
-		return true
+func (s *DesignerService) failGenerationWithReversal(ctx context.Context, gen *model.ImageGeneration, reason, message string) error {
+	if s == nil || s.repo == nil || gen == nil {
+		return fmt.Errorf("designer failure persistence is not configured")
 	}
-	providerKey, routeName, ok := s.generationBillingRoute(gen.ProviderID)
-	if !ok || s.fullCfg == nil {
-		s.failUnbillableGeneration(ctx, gen, "gpt-image-2 usage billing route is not configured", "usage_required_failed")
-		return false
-	}
-	if result.Usage == nil || result.Usage.TotalTokens <= 0 || result.Usage.ImageOutputTokens <= 0 {
-		s.failUnbillableGeneration(ctx, gen, "gpt-image-2 usage is required for billing", "usage_required_failed")
-		return false
-	}
-
-	usage := srvconfig.ImageGenerationUsage{
-		Size:                   resolvedDesignerSize(firstNonEmpty(result.Size, gen.Size), gen.Model),
-		Quality:                gen.Quality,
-		Count:                  gen.N,
-		TextInputTokens:        result.Usage.TextInputTokens,
-		TextCachedInputTokens:  result.Usage.TextCachedInputTokens,
-		ImageInputTokens:       result.Usage.ImageInputTokens,
-		ImageCachedInputTokens: result.Usage.ImageCachedInputTokens,
-		ImageOutputTokens:      result.Usage.ImageOutputTokens,
-		TotalTokens:            result.Usage.TotalTokens,
-	}
-	cost, err := s.fullCfg.CalculateImageGenerationUsageCredits(providerKey, gen.Model, usage, string(s.userTier(ctx, gen.UserID)), s.userBillingMultiplier(ctx, gen.UserID))
-	if err != nil {
-		s.failUnbillableGeneration(ctx, gen, err.Error(), "usage_required_failed")
-		return false
-	}
-
-	delta := cost.FinalCredits - gen.EstimatedCost
-	if delta > 0 {
-		metadata := imageCreditMetadata(providerKey, gen.Model, routeName, cost)
-		if s.creditSvc == nil {
-			s.markSettlementFailed(ctx, gen, "credit service is required for GPT Image 2 settlement")
-			return false
+	completedAt := time.Now().UTC()
+	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.ImageGenerations().MarkFailed(ctx, gen.ID, message, completedAt); err != nil {
+			return err
 		}
-		if _, err := s.creditSvc.DeductForOperationWithMetadata(ctx, gen.UserID, model.CreditTypeImageGen, delta, metadata, gen.ID+":settlement"); err != nil {
-			s.markSettlementFailed(ctx, gen, fmt.Sprintf("settle GPT Image 2 billing: %v", err))
-			return false
+		if s.billingWallet == nil || gen.BillingChargeID == nil || strings.TrimSpace(*gen.BillingChargeID) == "" {
+			return nil
 		}
-	} else if delta < 0 && s.creditSvc != nil {
-		refund := -delta
-		if err := s.creditSvc.RefundForOperation(ctx, gen.UserID, model.CreditTypeImageGen, refund, fmt.Sprintf("GPT Image 2 usage settlement refund +%d", refund), gen.ID+":settlement_refund"); err != nil {
-			s.markSettlementFailed(ctx, gen, fmt.Sprintf("settle GPT Image 2 refund: %v", err))
-			return false
-		}
-	}
-
-	priceSnapshot, _ := json.Marshal(cost.PriceSnapshot)
-	updates := map[string]any{
-		"cost":                      cost.FinalCredits,
-		"final_cost":                cost.FinalCredits,
-		"billing_status":            "settled",
-		"text_input_tokens":         usage.TextInputTokens,
-		"text_cached_input_tokens":  usage.TextCachedInputTokens,
-		"image_input_tokens":        usage.ImageInputTokens,
-		"image_cached_input_tokens": usage.ImageCachedInputTokens,
-		"image_output_tokens":       usage.ImageOutputTokens,
-		"total_tokens":              usage.TotalTokens,
-		"price_snapshot":            datatypes.JSON(priceSnapshot),
-	}
-	if err := s.db.Model(&model.ImageGeneration{}).Where("id = ?", gen.ID).Updates(updates).Error; err != nil {
-		s.markSettlementFailed(ctx, gen, fmt.Sprintf("persist GPT Image 2 billing settlement: %v", err))
-		return false
-	}
-	gen.Cost = cost.FinalCredits
-	gen.FinalCost = cost.FinalCredits
-	gen.BillingStatus = "settled"
-	gen.TextInputTokens = usage.TextInputTokens
-	gen.TextCachedInputTokens = usage.TextCachedInputTokens
-	gen.ImageInputTokens = usage.ImageInputTokens
-	gen.ImageCachedInputTokens = usage.ImageCachedInputTokens
-	gen.ImageOutputTokens = usage.ImageOutputTokens
-	gen.TotalTokens = usage.TotalTokens
-	gen.PriceSnapshot = datatypes.JSON(priceSnapshot)
-	return true
-}
-
-func (s *DesignerService) generationBillingRoute(providerID string) (providerKey string, routeName string, ok bool) {
-	if providerID == "" || s.fullCfg == nil {
-		return "", "", false
-	}
-	route, ok := s.fullCfg.ModelRoutes.ImageGeneration.Designer[providerID]
-	if !ok || route.Provider == "" {
-		return "", "", false
-	}
-	return route.Provider, "image_generation.designer." + providerID, true
-}
-
-func (s *DesignerService) failUnbillableGeneration(ctx context.Context, gen *model.ImageGeneration, errMsg, billingStatus string) {
-	if gen.Cost > 0 && s.creditSvc != nil {
-		if err := s.creditSvc.RefundForOperation(ctx, gen.UserID, model.CreditTypeImageGen, gen.Cost, fmt.Sprintf("GPT Image 2 unbillable generation refund +%d", gen.Cost), gen.ID); err != nil {
-			s.logger.Error().Err(err).Str("gen_id", gen.ID).Msg("failed to refund unbillable GPT Image 2 generation")
-		}
-	}
-	now := time.Now()
-	s.db.Model(&model.ImageGeneration{}).Where("id = ?", gen.ID).Updates(map[string]any{
-		"status":         model.ImageGenerationStatusFailed,
-		"error":          errMsg,
-		"cost":           0,
-		"final_cost":     0,
-		"billing_status": billingStatus,
-		"completed_at":   &now,
+		chargeID := strings.TrimSpace(*gen.BillingChargeID)
+		fingerprint := billingFingerprint("designer-reversal", gen.ID, chargeID, reason)
+		_, err := s.billingWallet.EnqueueSettlementInTx(ctx, tx, SettlementIntent{
+			Action: model.BillingSettlementActionReverseOperation, ResourceType: "image_generation", ResourceID: gen.ID,
+			ChargeID: chargeID, Reason: reason, RequestFingerprint: fingerprint,
+			IdempotencyScope: "designer-reversal", IdempotencyKey: billingFingerprint(gen.ID, reason),
+		})
+		return err
 	})
 }
 
-func (s *DesignerService) markSettlementFailed(ctx context.Context, gen *model.ImageGeneration, errMsg string) {
-	if gen.EstimatedCost > 0 && s.creditSvc != nil {
-		if err := s.creditSvc.RefundForOperation(ctx, gen.UserID, model.CreditTypeImageGen, gen.EstimatedCost, fmt.Sprintf("GPT Image 2 settlement failed refund +%d", gen.EstimatedCost), gen.ID); err != nil {
-			s.logger.Error().Err(err).Str("gen_id", gen.ID).Msg("failed to refund after GPT Image 2 settlement failure")
-		}
-	}
-	now := time.Now()
-	s.db.Model(&model.ImageGeneration{}).Where("id = ?", gen.ID).Updates(map[string]any{
-		"status":         model.ImageGenerationStatusFailed,
-		"error":          errMsg,
-		"cost":           0,
-		"final_cost":     0,
-		"billing_status": "settlement_failed",
-		"completed_at":   &now,
-	})
-}
-
-func (s *DesignerService) processResults(ctx context.Context, userID, genID string, result *image.GenerateResult) {
+func (s *DesignerService) processResults(ctx context.Context, userID, genID string, result *image.GenerateResult) (int, int, int) {
+	var outputWidth, outputHeight int
+	var durableResults int
 	collectURLs := func(rawURL string, idx int) {
 		// Resolve to a local file path — download remote URLs if needed.
 		localPath := rawURL
@@ -769,15 +646,15 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 			tmpPath, err := downloadToTempFile(ctx, rawURL, idx)
 			if err != nil {
 				s.logger.Error().Err(err).Str("url", rawURL).Msg("failed to download remote image")
-				if err := s.db.Create(&model.ImageGenerationResult{
-					GenerationID: genID, ImageURL: rawURL, Index: idx,
-				}).Error; err != nil {
-					s.logger.Error().Err(err).Msg("failed to save fallback generation result")
-				}
 				return
 			}
 			localPath = tmpPath
 			isTemp = true
+		}
+		if outputWidth == 0 && outputHeight == 0 {
+			if width, height, err := image.GetImageDimensions(localPath); err == nil {
+				outputWidth, outputHeight = width, height
+			}
 		}
 
 		serveURL := rawURL // fallback if upload fails
@@ -793,6 +670,12 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 			}
 		}
 
+		if storageKey == "" {
+			if isTemp {
+				_ = os.Remove(localPath)
+			}
+			return
+		}
 		dbResult := model.ImageGenerationResult{
 			GenerationID: genID,
 			ImageURL:     serveURL,
@@ -802,6 +685,8 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 		}
 		if err := s.db.Create(&dbResult).Error; err != nil {
 			s.logger.Error().Err(err).Str("generation_id", genID).Int("index", idx).Msg("failed to save generation result")
+		} else {
+			durableResults++
 		}
 
 		// Cleanup temp file after successful upload.
@@ -816,11 +701,55 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 		for _, img := range result.Images {
 			collectURLs(img.URL, img.Index)
 		}
-		return
+		return outputWidth, outputHeight, durableResults
 	}
 
 	if result.URL != "" {
 		collectURLs(result.URL, 0)
+	}
+	return outputWidth, outputHeight, durableResults
+}
+
+func (s *DesignerService) designerProviderIdentity(gen *model.ImageGeneration) (string, string) {
+	if gen == nil {
+		return "", ""
+	}
+	provider := gen.Provider
+	if s.fullCfg != nil {
+		if route, ok := s.fullCfg.ModelRoutes.ImageGeneration.Designer[gen.ProviderID]; ok && strings.TrimSpace(route.Provider) != "" {
+			provider = route.Provider
+		}
+	}
+	return provider, gen.Model
+}
+
+func (s *DesignerService) recordDesignerProviderFailure(ctx context.Context, gen *model.ImageGeneration) {
+	if s == nil || s.providerCostSvc == nil || gen == nil {
+		return
+	}
+	provider, modelID := s.designerProviderIdentity(gen)
+	if _, err := s.providerCostSvc.RecordMediaUnreconciled(ctx, RecordMediaUnreconciledRequest{
+		Provider: provider, Model: modelID, ProviderRequestID: "internal:designer:" + gen.ID, MediaKind: "image",
+		ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,
+	}); err != nil {
+		s.logger.Error().Err(err).Str("gen_id", gen.ID).Msg("record failed designer provider cost evidence")
+	}
+}
+
+func (s *DesignerService) recordDesignerProviderCost(ctx context.Context, gen *model.ImageGeneration, result *image.GenerateResult) {
+	if s == nil || s.providerCostSvc == nil || gen == nil || result == nil {
+		return
+	}
+	provider, modelID := s.designerProviderIdentity(gen)
+	var usage *OpenAIImageUsage
+	if result.Usage != nil {
+		usage = &OpenAIImageUsage{TextInput: result.Usage.TextInputTokens, TextCachedInput: result.Usage.TextCachedInputTokens, ImageInput: result.Usage.ImageInputTokens, ImageCachedInput: result.Usage.ImageCachedInputTokens, ImageOutput: result.Usage.ImageOutputTokens}
+	}
+	if _, err := s.providerCostSvc.RecordImageGenerationCost(ctx, RecordImageGenerationCostRequest{
+		Provider: provider, Model: modelID, ProviderRequestID: result.ProviderRequestID,
+		Width: int64(result.OutputWidth), Height: int64(result.OutputHeight), Usage: usage,
+	}); err != nil {
+		s.logger.Error().Err(err).Str("gen_id", gen.ID).Msg("record designer provider cost; durable output remains valid")
 	}
 }
 
@@ -864,8 +793,6 @@ func downloadToTempFile(ctx context.Context, url string, index int) (string, err
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 	}
-	// Read one byte past the limit so an oversized response cannot be silently
-	// truncated and accepted as a valid reference image.
 	written, err := io.Copy(f, io.LimitReader(resp.Body, maxDesignerReferenceBytes+1))
 	if err != nil {
 		cleanup()
@@ -915,10 +842,7 @@ func (s *DesignerService) UploadReference(ctx context.Context, userID, filename,
 	if _, err := s.storage.Upload(ctx, key, bytes.NewReader(data), contentType); err != nil {
 		return "", fmt.Errorf("upload designer reference: %w", err)
 	}
-	reference := &model.DesignerReference{
-		ID: fileID, UserID: userID, StorageKey: key, FileName: filename,
-		ContentType: contentType, Size: int64(len(data)),
-	}
+	reference := &model.DesignerReference{ID: fileID, UserID: userID, StorageKey: key, FileName: filename, ContentType: contentType, Size: int64(len(data))}
 	if err := s.referenceRepo.Create(ctx, reference); err != nil {
 		_ = s.storage.Delete(ctx, key)
 		return "", fmt.Errorf("persist designer reference: %w", err)
@@ -926,8 +850,6 @@ func (s *DesignerService) UploadReference(ctx context.Context, userID, filename,
 	return fileID, nil
 }
 
-// RegisterStoredReference creates a user-owned file_id for an existing
-// immutable object without copying it to a second storage key.
 func (s *DesignerService) RegisterStoredReference(ctx context.Context, userID, key, filename, contentType string, size int64) (string, error) {
 	if s.referenceRepo == nil {
 		return "", fmt.Errorf("designer reference repository is unavailable")
@@ -937,10 +859,7 @@ func (s *DesignerService) RegisterStoredReference(ctx context.Context, userID, k
 		return "", err
 	}
 	fileID := uuid.NewString()
-	if err := s.referenceRepo.Create(ctx, &model.DesignerReference{
-		ID: fileID, UserID: userID, StorageKey: strings.TrimSpace(key), FileName: filename,
-		ContentType: contentType, Size: size,
-	}); err != nil {
+	if err := s.referenceRepo.Create(ctx, &model.DesignerReference{ID: fileID, UserID: userID, StorageKey: strings.TrimSpace(key), FileName: filename, ContentType: contentType, Size: size}); err != nil {
 		return "", fmt.Errorf("persist designer reference: %w", err)
 	}
 	return fileID, nil
@@ -1169,15 +1088,12 @@ type DesignerProviderInfo struct {
 type DesignerProviderCapabilities = srvconfig.DesignerProviderCapabilities
 
 type DesignerProviderPricing struct {
-	PricingType   string                        `json:"pricing_type,omitempty"`
-	Currency      string                        `json:"currency,omitempty"`
-	EstimateTable map[string]map[string]float64 `json:"estimate_table,omitempty"`
-	CreditsPerCNY int                           `json:"credits_per_cny,omitempty"`
-	RequiresUsage bool                          `json:"requires_usage,omitempty"`
-	BillingNote   string                        `json:"billing_note,omitempty"`
+	PricingType string `json:"pricing_type"`
+	Currency    string `json:"currency"`
+	BillingNote string `json:"billing_note"`
 }
 
-func (s *DesignerService) GetProviders() []DesignerProviderInfo {
+func (s *DesignerService) GetProviders(ctx context.Context) []DesignerProviderInfo {
 	if s.imageCfg == nil || s.imageCfg.Designer == nil {
 		return nil
 	}
@@ -1211,6 +1127,14 @@ func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 		routeName := "image_generation.designer." + id
 		providerKey := s.designerProviderKey(id)
 		route, _ := s.designerRoute(id)
+		capabilities := route.Capabilities
+		capabilities.MaxBatch = 1
+		credits := 0
+		if s.billingCatalog != nil {
+			if sku, err := s.billingCatalog.ResolveSKU(ctx, "", "designer.generate_image", routeName); err == nil {
+				credits = int(sku.PriceCredits)
+			}
+		}
 		providers = append(providers, DesignerProviderInfo{
 			ID:           id,
 			Name:         name,
@@ -1219,11 +1143,13 @@ func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 			ProviderKey:  providerKey,
 			Route:        routeName,
 			Model:        cfg.Model,
-			Credits:      cfg.Credits,
+			Credits:      credits,
 			Enabled:      cfg.IsEnabled(),
 			Idx:          i,
-			Capabilities: route.Capabilities,
-			Pricing:      s.designerPricing(providerKey, cfg.Model),
+			Capabilities: capabilities,
+			Pricing: DesignerProviderPricing{
+				PricingType: "fixed_sku", Currency: "credits", BillingNote: "fixed retail SKU",
+			},
 		})
 	}
 	return providers
@@ -1237,58 +1163,6 @@ func (s *DesignerService) designerProviderKey(id string) string {
 		return route.Provider
 	}
 	return ""
-}
-
-func (s *DesignerService) designerPricing(providerKey, modelName string) DesignerProviderPricing {
-	if s.fullCfg == nil || providerKey == "" || modelName == "" {
-		return DesignerProviderPricing{}
-	}
-	price, ok := s.fullCfg.ModelPrices.ImageGeneration[providerKey+"/"+modelName]
-	if !ok {
-		return DesignerProviderPricing{}
-	}
-	pricingType := strings.TrimSpace(price.PricingType)
-	if pricingType == "" && strings.EqualFold(price.UnitString(), "image") {
-		pricingType = srvconfig.ImagePricingTypePerImage
-	}
-	out := DesignerProviderPricing{
-		PricingType:   pricingType,
-		Currency:      strings.ToUpper(strings.TrimSpace(price.Currency)),
-		CreditsPerCNY: s.fullCfg.Billing.CreditsPerCNY,
-		RequiresUsage: price.RequireUsage,
-	}
-	if out.CreditsPerCNY <= 0 {
-		out.CreditsPerCNY = 1000
-	}
-	if out.Currency == "" {
-		out.Currency = "CNY"
-	}
-	if pricingType == srvconfig.ImagePricingTypeOpenAIUsage {
-		out.BillingNote = "dynamic usage billing"
-		out.EstimateTable = make(map[string]map[string]float64, len(price.EstimateTable))
-		for size, qualities := range price.EstimateTable {
-			out.EstimateTable[size] = make(map[string]float64, len(qualities))
-			for quality, value := range qualities {
-				out.EstimateTable[size][quality] = value.Float64()
-			}
-		}
-	} else if pricingType == srvconfig.ImagePricingTypePerImage {
-		out.BillingNote = "fixed per-image billing"
-	}
-	return out
-}
-
-// resolveCredits returns the per-image credit cost for the given provider+model combination.
-func (s *DesignerService) resolveCredits(provider, modelName string) int {
-	if s.imageCfg == nil || s.imageCfg.Designer == nil {
-		return 0
-	}
-	for _, cfg := range s.imageCfg.Designer {
-		if cfg != nil && cfg.Provider == provider && cfg.Model == modelName {
-			return cfg.Credits
-		}
-	}
-	return 0
 }
 
 // findDesignerConfig finds the first Designer entry matching the given provider name.

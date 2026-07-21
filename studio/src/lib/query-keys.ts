@@ -25,11 +25,11 @@ export const queryKeys = {
     range: (from: string, to: string, filters?: Record<string, string>) =>
       ['timeline', from, to, filters] as const,
   },
-  credits: {
-    all: ['credits'] as const,
-    balance: ['credits', 'balance'] as const,
-    signInStatus: ['credits', 'signInStatus'] as const,
-    transactions: (page: number) => ['credits', 'transactions', page] as const,
+  billing: {
+    all: ['billing'] as const,
+    wallet: ['billing', 'wallet'] as const,
+    catalog: ['billing', 'catalog'] as const,
+    transactions: (page: number) => ['billing', 'transactions', page] as const,
   },
   apiKeys: {
     all: ['api-keys'] as const,

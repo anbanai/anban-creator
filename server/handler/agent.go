@@ -363,10 +363,14 @@ func isAgentTaskAccessError(err error) bool {
 }
 
 type agentProgressRequest struct {
-	TaskID  string                       `json:"task_id"`
-	Message string                       `json:"message"`
-	Logs    []string                     `json:"logs"`
-	Result  *serveragent.ExecutionResult `json:"result"`
+	TaskID  string   `json:"task_id"`
+	Message string   `json:"message"`
+	Logs    []string `json:"logs"`
+}
+
+type agentCompleteRequest struct {
+	TaskID string                       `json:"task_id"`
+	Result *serveragent.ExecutionResult `json:"result"`
 }
 
 // agentClaimRequest is the optional body for POST /api/v1/agent/claim.
@@ -454,13 +458,6 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		}
 	}
 
-	if req.Result != nil {
-		if err := h.taskSvc.UpdateExecutionResult(c.Context(), req.TaskID, req.Result); err != nil {
-			h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("failed to persist agent result")
-			return Error(c, fiber.StatusInternalServerError, "failed to persist result")
-		}
-	}
-
 	return Success(c, fiber.Map{"ok": true})
 }
 
@@ -478,7 +475,7 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
 	}
 
-	var req agentProgressRequest
+	var req agentCompleteRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}

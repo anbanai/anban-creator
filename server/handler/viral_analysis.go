@@ -60,10 +60,10 @@ func (h *ViralAnalysisHandler) Create(c fiber.Ctx) error {
 	analysis, err := h.service.Create(c.Context(), userID, req.SourceType, req.SourceURL)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create viral analysis failed")
-		if errors.Is(err, service.ErrInsufficientCredits) {
+		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
-				"code": 40200,
-				"msg":  "insufficient_credits",
+				"code": 40202,
+				"msg":  "billing_task_admission_rejected",
 			})
 		}
 		return Error(c, fiber.StatusInternalServerError, "failed to create viral analysis")

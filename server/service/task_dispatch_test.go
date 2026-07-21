@@ -229,7 +229,7 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	dispatcher := &dispatchTestDispatcher{}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	svc.SetKubernetesDispatcher(dispatcher)
 	task := &model.Task{
 		ID:        uuid.NewString(),
@@ -711,7 +711,7 @@ func TestHandleExecutionFromPayloadWithoutDispatcherUsesSynchronousExecutor(t *t
 	}
 	executor := &fakeTaskExecutor{err: errors.New("synchronous executor called")}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
 	}
@@ -732,7 +732,7 @@ func TestHandleExecutionFromPayloadReferenceFailureFinalizesRunningTask(t *testi
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID, CreditsBalance: 1000}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -741,10 +741,6 @@ func TestHandleExecutionFromPayloadReferenceFailureFinalizesRunningTask(t *testi
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	creditSvc := NewCreditService(repo, &serverconfig.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 100}}, &logger)
-	if _, err := creditSvc.DeductForTaskCreation(ctx, userID, task.Type, task.ID); err != nil {
-		t.Fatal(err)
-	}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -752,7 +748,7 @@ func TestHandleExecutionFromPayloadReferenceFailureFinalizesRunningTask(t *testi
 		t.Fatal(err)
 	}
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
@@ -768,8 +764,8 @@ func TestHandleExecutionFromPayloadReferenceFailureFinalizesRunningTask(t *testi
 		t.Fatalf("task after reference failure = %#v", found)
 	}
 	user, err := repo.Users().FindByID(ctx, userID)
-	if err != nil || user.CreditsBalance != 1000 {
-		t.Fatalf("refunded user = %#v, err=%v", user, err)
+	if err != nil {
+		t.Fatalf("load user = %#v, err=%v", user, err)
 	}
 	if count, err := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int(); err != nil || count != 0 {
 		t.Fatalf("running slot count = %d, err=%v", count, err)
@@ -781,7 +777,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 	baseRepo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID, CreditsBalance: 1000}); err != nil {
+	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
@@ -790,10 +786,6 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	creditSvc := NewCreditService(baseRepo, &serverconfig.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 100}}, &logger)
-	if _, err := creditSvc.DeductForTaskCreation(ctx, userID, task.Type, task.ID); err != nil {
-		t.Fatal(err)
-	}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -804,7 +796,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 	state := &failPendingOnceState{err: dbErr}
 	repo, tasks := newFailPendingOnceRepository(baseRepo, state, baseRepo.Assets())
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); !errors.Is(err, dbErr) {
 		t.Fatalf("first error = %v, want %v", err, dbErr)
@@ -815,7 +807,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 	}
 	user, userErr := baseRepo.Users().FindByID(ctx, userID)
 	count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || userErr != nil || user.CreditsBalance != 900 || countErr != nil || count != 1 {
+	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || userErr != nil || countErr != nil || count != 1 {
 		t.Fatalf("state after persistence error: task=%#v user=%#v userErr=%v slot=%d slotErr=%v", found, user, userErr, count, countErr)
 	}
 
@@ -828,7 +820,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 	}
 	user, userErr = baseRepo.Users().FindByID(ctx, userID)
 	count, countErr = rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || user.CreditsBalance != 1000 || countErr != nil || count != 0 {
+	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || countErr != nil || count != 0 {
 		t.Fatalf("state after retry: task=%#v user=%#v userErr=%v slot=%d slotErr=%v", found, user, userErr, count, countErr)
 	}
 	if executor.opts != nil || tasks.callCount() != 2 {
@@ -837,11 +829,12 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 }
 
 func TestHandleExecutionFromPayloadPendingReferenceFailureAtomicallyRetriesRefund(t *testing.T) {
+	t.Skip("dynamic credit refund contract was removed by fixed-SKU billing")
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID, CreditsBalance: 1000}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -850,10 +843,6 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureAtomicallyRetriesRefun
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	creditSvc := NewCreditService(repo, &serverconfig.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 100}}, &logger)
-	if _, err := creditSvc.DeductForTaskCreation(ctx, userID, task.Type, task.ID); err != nil {
-		t.Fatal(err)
-	}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -865,7 +854,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureAtomicallyRetriesRefun
 		t.Fatal(err)
 	}
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err == nil || !strings.Contains(err.Error(), "refund insert unavailable") {
 		t.Fatalf("first HandleExecutionFromPayload error = %v, want refund persistence failure", err)
@@ -898,14 +887,9 @@ func assertPendingReferenceRefundState(t *testing.T, db *gorm.DB, repo repositor
 	if found.Status != wantStatus || (wantStatus == model.TaskStatusPending && found.CompletedAt != nil) || (wantStatus == model.TaskStatusFailed && found.CompletedAt == nil) {
 		t.Fatalf("task state = %#v, want status %s", found, wantStatus)
 	}
-	user, err := repo.Users().FindByID(ctx, userID)
-	if err != nil || user.CreditsBalance != wantBalance {
-		t.Fatalf("user = %#v, err=%v, want balance %d", user, err, wantBalance)
-	}
-	var refunds int64
-	if err := db.Model(&model.CreditTransaction{}).Where("task_id = ? AND type = ?", task.ID, model.CreditTypeTaskRefund).Count(&refunds).Error; err != nil || refunds != wantRefunds {
-		t.Fatalf("refund count = %d, err=%v, want %d", refunds, err, wantRefunds)
-	}
+	_ = db
+	_ = userID
+	_ = wantBalance
 	slots, err := rdb.Get(ctx, projectRunningCountPrefix+task.ProjectID).Int()
 	if err != nil || slots != wantSlots {
 		t.Fatalf("slot count = %d, err=%v, want %d", slots, err, wantSlots)
@@ -937,7 +921,7 @@ func TestHandleExecutionFromPayloadReferenceFailureDoesNotOverwriteConcurrentCan
 	}
 	logger := zerolog.New(io.Discard)
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
@@ -959,7 +943,7 @@ func TestHandleExecutionReferenceFailureDoesNotOverwriteRunningCancellation(t *t
 	baseRepo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID, CreditsBalance: 1000}); err != nil {
+	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
@@ -968,10 +952,6 @@ func TestHandleExecutionReferenceFailureDoesNotOverwriteRunningCancellation(t *t
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	creditSvc := NewCreditService(baseRepo, &serverconfig.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 100}}, &logger)
-	if _, err := creditSvc.DeductForTaskCreation(ctx, userID, task.Type, task.ID); err != nil {
-		t.Fatal(err)
-	}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -992,7 +972,7 @@ func TestHandleExecutionReferenceFailureDoesNotOverwriteRunningCancellation(t *t
 		}},
 	}
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecution(ctx, task, &model.Project{ID: projectID, UserID: userID, Platform: task.Type}); err != nil {
 		t.Fatalf("HandleExecution: %v", err)
@@ -1003,7 +983,7 @@ func TestHandleExecutionReferenceFailureDoesNotOverwriteRunningCancellation(t *t
 	}
 	user, userErr := baseRepo.Users().FindByID(ctx, userID)
 	count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found.Status != model.TaskStatusCancelled || found.ErrorMessage != "cancelled" || userErr != nil || user.CreditsBalance != 900 || countErr != nil || count != 1 {
+	if found.Status != model.TaskStatusCancelled || found.ErrorMessage != "cancelled" || userErr != nil || countErr != nil || count != 1 {
 		t.Fatalf("state after running cancellation: task=%#v user=%#v userErr=%v slot=%d slotErr=%v", found, user, userErr, count, countErr)
 	}
 	if executor.opts != nil {
@@ -1016,7 +996,7 @@ func TestHandleExecutionFailureReturnsRepositoryErrorWithoutSideEffects(t *testi
 	baseRepo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID, CreditsBalance: 1000}); err != nil {
+	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
@@ -1025,10 +1005,6 @@ func TestHandleExecutionFailureReturnsRepositoryErrorWithoutSideEffects(t *testi
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	creditSvc := NewCreditService(baseRepo, &serverconfig.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 100}}, &logger)
-	if _, err := creditSvc.DeductForTaskCreation(ctx, userID, task.Type, task.ID); err != nil {
-		t.Fatal(err)
-	}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -1037,7 +1013,7 @@ func TestHandleExecutionFailureReturnsRepositoryErrorWithoutSideEffects(t *testi
 	}
 	dbErr := errors.New("fail running unavailable")
 	repo := &executionPreparationRepository{Repository: baseRepo, tasks: &failRunningTaskRepository{TaskRepository: baseRepo.Tasks(), err: dbErr}, assets: baseRepo.Assets()}
-	svc := NewTaskService(repo, &fakeTaskExecutor{}, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, &fakeTaskExecutor{}, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 	execErr := errors.New("execution failed")
 
 	err := svc.HandleExecutionFailure(ctx, task, execErr)
@@ -1047,7 +1023,7 @@ func TestHandleExecutionFailureReturnsRepositoryErrorWithoutSideEffects(t *testi
 	found, findErr := baseRepo.Tasks().FindByID(ctx, task.ID)
 	user, userErr := baseRepo.Users().FindByID(ctx, userID)
 	count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if findErr != nil || found.Status != model.TaskStatusRunning || found.CompletedAt != nil || userErr != nil || user.CreditsBalance != 900 || countErr != nil || count != 1 {
+	if findErr != nil || found.Status != model.TaskStatusRunning || found.CompletedAt != nil || userErr != nil || countErr != nil || count != 1 {
 		t.Fatalf("state after repository error: task=%#v findErr=%v user=%#v userErr=%v slot=%d slotErr=%v", found, findErr, user, userErr, count, countErr)
 	}
 }
@@ -1065,7 +1041,7 @@ func TestHandleExecutionReturnsReferenceTerminalPersistenceError(t *testing.T) {
 	dbErr := errors.New("fail running unavailable")
 	repo := &executionPreparationRepository{Repository: baseRepo, tasks: &failRunningTaskRepository{TaskRepository: baseRepo.Tasks(), err: dbErr}, assets: baseRepo.Assets()}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, &fakeTaskExecutor{}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &fakeTaskExecutor{}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
 
 	err := svc.HandleExecution(ctx, task, &model.Project{ID: projectID, UserID: userID, Platform: task.Type})
 	if !errors.Is(err, dbErr) || !errors.Is(err, ErrExecutionTerminalPersistence) {
@@ -1082,7 +1058,7 @@ func TestEnqueueExecutionFallbackUsesPendingReferenceFailureFinalization(t *test
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID, CreditsBalance: 1000}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -1095,15 +1071,11 @@ func TestEnqueueExecutionFallbackUsesPendingReferenceFailureFinalization(t *test
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	creditSvc := NewCreditService(repo, &serverconfig.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 100}}, &logger)
-	if _, err := creditSvc.DeductForTaskCreation(ctx, userID, task.Type, task.ID); err != nil {
-		t.Fatal(err)
-	}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, nil, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, executor, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution: %v", err)
@@ -1122,7 +1094,7 @@ func TestEnqueueExecutionFallbackUsesPendingReferenceFailureFinalization(t *test
 	}
 	user, userErr := repo.Users().FindByID(ctx, userID)
 	count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found == nil || found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || user.CreditsBalance != 1000 || countErr != nil || count != 0 {
+	if found == nil || found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || countErr != nil || count != 0 {
 		t.Fatalf("fallback state: task=%#v user=%#v userErr=%v slot=%d slotErr=%v", found, user, userErr, count, countErr)
 	}
 	if executor.opts != nil {
@@ -1135,7 +1107,7 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 	baseRepo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID, CreditsBalance: 1000}); err != nil {
+	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
@@ -1148,10 +1120,6 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	creditSvc := NewCreditService(baseRepo, &serverconfig.CreditsConfig{TaskCosts: map[string]int{model.PlatformArticle: 100}}, &logger)
-	if _, err := creditSvc.DeductForTaskCreation(ctx, userID, task.Type, task.ID); err != nil {
-		t.Fatal(err)
-	}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -1160,7 +1128,7 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 	state := &failPendingOnceState{err: errors.New("database table is locked"), firstFailure: make(chan struct{})}
 	repo, tasks := newFailPendingOnceRepository(baseRepo, state, assets)
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, nil, nil, creditSvc, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, executor, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("first EnqueueExecution: %v", err)
@@ -1178,7 +1146,7 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 	}
 	user, userErr := baseRepo.Users().FindByID(ctx, userID)
 	slots, slotErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || userErr != nil || user.CreditsBalance != 900 || slotErr != nil || slots != 0 || executor.opts != nil {
+	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || userErr != nil || slotErr != nil || slots != 0 || executor.opts != nil {
 		t.Fatalf("state after preparation persistence error: task=%#v user=%#v userErr=%v slots=%d slotErr=%v executor=%#v", found, user, userErr, slots, slotErr, executor.opts)
 	}
 
@@ -1193,7 +1161,7 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 	}
 	user, userErr = baseRepo.Users().FindByID(ctx, userID)
 	slots, slotErr = rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || user.CreditsBalance != 1000 || slotErr != nil || slots != 0 || executor.opts != nil || tasks.callCount() != 2 {
+	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || slotErr != nil || slots != 0 || executor.opts != nil || tasks.callCount() != 2 {
 		t.Fatalf("state after periodic retry: task=%#v user=%#v userErr=%v slots=%d slotErr=%v executor=%#v calls=%d", found, user, userErr, slots, slotErr, executor.opts, tasks.callCount())
 	}
 }
@@ -1246,7 +1214,7 @@ func TestEnqueueExecutionFallbackReleasesOnlyOwnedSlotWhenPreparationCASLoses(t 
 	}
 	logger := zerolog.New(io.Discard)
 	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, nil, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, executor, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution: %v", err)
@@ -1288,7 +1256,7 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, &fakeTaskExecutor{}, nil, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, &fakeTaskExecutor{}, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution A: %v", err)

@@ -10,7 +10,7 @@ import {
   projectsReturnHref,
   type ModelConfigLike,
 } from './command-center'
-import type { CreditBalance, Plan, Project, SignInStatus, Task } from '@/types'
+import type { BillingWallet, Plan, Project, Task } from '@/types'
 
 function task(overrides: Partial<Task>): Task {
   return {
@@ -25,6 +25,7 @@ function task(overrides: Partial<Task>): Task {
     result: null,
     published: false,
     published_at: null,
+    billing_price_credits: 5000,
     created_at: '2026-07-06T01:00:00.000Z',
     started_at: '',
     completed_at: '',
@@ -87,8 +88,7 @@ describe('command center rules', () => {
         plan({ id: 'later', title: '下周发布', next_run_at: '2026-07-20T08:00:00.000Z' }),
       ],
       projects: [project()],
-      creditsBalance: { balance: 80 } satisfies CreditBalance,
-      signInStatus: { signed_in_today: false } satisfies SignInStatus,
+      billingWallet: { paid: 80, promotional: 0, debt: 0, balance: 80 } satisfies BillingWallet,
       apiKeysReady: true,
       modelConfigReady: true,
       localExecutorReady: true,
@@ -98,7 +98,7 @@ describe('command center rules', () => {
     expect(signals.failedTasks).toHaveLength(1)
     expect(signals.pendingApprovalTasks).toHaveLength(1)
     expect(signals.upcomingPlans.map((item) => item.id)).toEqual(['soon'])
-    expect(signals.creditRisk.level).toBe('low')
+    expect(signals.walletRisk.level).toBe('low')
     expect(signals.readiness.projectsReady).toBe(true)
   })
 
@@ -111,8 +111,7 @@ describe('command center rules', () => {
       ],
       plans: [],
       projects: [project()],
-      creditsBalance: { balance: 80 },
-      signInStatus: { signed_in_today: false },
+      billingWallet: { paid: 80, promotional: 0, debt: 0, balance: 80 },
       apiKeysReady: true,
       modelConfigReady: true,
       localExecutorReady: true,
@@ -121,7 +120,7 @@ describe('command center rules', () => {
     expect(buildNextBestActions(signals).map((action) => action.id)).toEqual([
       'recover-failed-task',
       'review-publish-approval',
-      'claim-daily-credits',
+      'review-wallet',
       'create-task',
     ])
   })
@@ -132,8 +131,7 @@ describe('command center rules', () => {
       tasks: [],
       plans: [],
       projects: [],
-      creditsBalance: { balance: 1000 },
-      signInStatus: { signed_in_today: true },
+      billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: true,
       modelConfigReady: true,
       localExecutorReady: true,
@@ -201,8 +199,7 @@ describe('command center rules', () => {
       tasks: [],
       plans: [],
       projects: [project({ config: { enable_publishing: true, require_publish_approval: true } })],
-      creditsBalance: { balance: 1000 },
-      signInStatus: { signed_in_today: true },
+      billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: null,
       modelConfigReady: false,
       localExecutorReady: true,
@@ -223,8 +220,7 @@ describe('command center rules', () => {
       tasks: [],
       plans: [],
       projects: [project()],
-      creditsBalance: { balance: 1000 },
-      signInStatus: { signed_in_today: true },
+      billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: false,
       modelConfigReady: null,
       localExecutorReady: true,

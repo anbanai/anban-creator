@@ -1,4 +1,4 @@
-import type { CreditBalance, Plan, Project, SignInStatus, Task, TaskType } from '@/types'
+import type { BillingWallet, Plan, Project, Task, TaskType } from '@/types'
 
 export type CommandCenterSignalKind = 'success' | 'risk' | 'running' | 'waiting' | 'publishing' | 'neutral'
 
@@ -26,10 +26,10 @@ export interface CommandCenterReadiness {
   }
 }
 
-export interface CommandCenterCreditRisk {
+export interface CommandCenterWalletRisk {
   level: 'ok' | 'low' | 'critical' | 'unknown'
   balance: number | null
-  signedInToday: boolean | null
+  debt: number | null
 }
 
 export interface CommandCenterSignals {
@@ -42,7 +42,7 @@ export interface CommandCenterSignals {
   pendingApprovalTasks: Task[]
   recentCompletedTasks: Task[]
   upcomingPlans: Plan[]
-  creditRisk: CommandCenterCreditRisk
+  walletRisk: CommandCenterWalletRisk
   readiness: CommandCenterReadiness
 }
 
@@ -51,8 +51,7 @@ export interface BuildCommandCenterSignalsInput {
   tasks?: Task[]
   projects?: Project[]
   plans?: Plan[]
-  creditsBalance?: CreditBalance | null
-  signInStatus?: SignInStatus | null
+  billingWallet?: BillingWallet | null
   localExecutorKnown?: boolean
   modelConfigKnown?: boolean
   apiKeysKnown?: boolean
@@ -80,8 +79,7 @@ export interface NextBestAction {
     | 'recover-failed-task'
     | 'review-publish-approval'
     | 'create-first-project'
-    | 'claim-daily-credits'
-    | 'review-credits'
+    | 'review-wallet'
     | 'review-upcoming-plan'
     | 'create-task'
     | 'connect-settings'
@@ -207,8 +205,8 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
   const tasks = input.tasks ?? []
   const projects = (input.projects ?? []).filter((project) => project.status !== 'archived')
   const plans = input.plans ?? []
-  const balance = input.creditsBalance?.balance ?? null
-  const signedInToday = input.signInStatus?.signed_in_today ?? null
+  const balance = input.billingWallet?.balance ?? null
+  const debt = input.billingWallet?.debt ?? null
 
   const runningTasks = tasks
     .filter((task) => task.status === 'running' || task.status === 'pending')
@@ -231,13 +229,13 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
     })
     .sort(byNextRunAt)
 
-  const creditRisk: CommandCenterCreditRisk = {
+  const walletRisk: CommandCenterWalletRisk = {
     balance,
-    signedInToday,
+    debt,
     level:
-      balance === null
+      balance === null || debt === null
         ? 'unknown'
-        : balance <= CRITICAL_CREDIT_THRESHOLD
+        : debt > 0 || balance <= CRITICAL_CREDIT_THRESHOLD
           ? 'critical'
           : balance < LOW_CREDIT_THRESHOLD
             ? 'low'
@@ -317,7 +315,7 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
     pendingApprovalTasks,
     recentCompletedTasks,
     upcomingPlans,
-    creditRisk,
+    walletRisk,
     readiness: {
       projectsReady: checks.projects.status === 'ready',
       localExecutorKnown: checks.localExecutor.status !== 'unknown',
@@ -379,15 +377,17 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
     })
   }
 
-  if (signals.creditRisk.level === 'critical' || signals.creditRisk.level === 'low') {
+  if (signals.walletRisk.level === 'critical' || signals.walletRisk.level === 'low') {
     actions.push({
-      id: signals.creditRisk.signedInToday === false ? 'claim-daily-credits' : 'review-credits',
-      label: signals.creditRisk.signedInToday === false ? '签到补充积分' : '查看积分风险',
+      id: 'review-wallet',
+      label: signals.walletRisk.debt && signals.walletRisk.debt > 0 ? '补齐钱包欠费' : '查看钱包余额',
       description:
-        signals.creditRisk.balance === null
-          ? '检查积分账户是否可用'
-          : `当前余额 ${signals.creditRisk.balance.toLocaleString()}，建议先确认消耗能力`,
-      href: signals.creditRisk.signedInToday === false ? '/' : '/credits',
+        signals.walletRisk.debt && signals.walletRisk.debt > 0
+          ? `当前欠费 ${signals.walletRisk.debt.toLocaleString()}，新任务暂不可创建`
+          : signals.walletRisk.balance === null
+            ? '检查钱包是否可用'
+            : `当前余额 ${signals.walletRisk.balance.toLocaleString()}，建议充值后再创建任务`,
+      href: '/billing',
       kind: 'risk',
     })
   }

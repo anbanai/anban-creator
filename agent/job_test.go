@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
 
 func TestJobCommandDoesNotRunAfterInvalidBootstrapResponse(t *testing.T) {
@@ -58,11 +60,13 @@ func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 		return &BootstrapResponse{ExecutionToken: "jwt", TaskID: "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write", Model: "sonnet", MaxTurns: 9, AgentFlag: "anban:wechatarticle", AutoMemoryDirectory: ".claude/memory", ResumeSessionID: "bba21f1d-70b8-4157-917b-f9802c2b1740", ResumeContextPath: ".anban-creator/resume/executions/execution-1/latest.md", RuntimeEnv: map[string]string{
 			"ANTHROPIC_AUTH_TOKEN": "runtime-token",
 			"ANBAN_API_KEY":        "must-not-override",
+		}, ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
+			"raw-sonnet": {Provider: "volcengine_ark", Model: "sonnet"},
 		}}, nil
 	}
 	run := func(_ context.Context, cfg *Config) error {
 		order = append(order, "run")
-		if cfg.APIKey != "jwt" || cfg.ExecutionID != "execution-1" || cfg.TaskID != "task-1" || cfg.Topic != "write" || cfg.ResumeSessionID != "bba21f1d-70b8-4157-917b-f9802c2b1740" || cfg.ResumeContextPath != ".anban-creator/resume/executions/execution-1/latest.md" || cfg.ArtifactUploadMode != ArtifactUploadDirect || cfg.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" || len(cfg.RuntimeEnv) != 1 {
+		if cfg.APIKey != "jwt" || cfg.ExecutionID != "execution-1" || cfg.TaskID != "task-1" || cfg.Topic != "write" || cfg.ResumeSessionID != "bba21f1d-70b8-4157-917b-f9802c2b1740" || cfg.ResumeContextPath != ".anban-creator/resume/executions/execution-1/latest.md" || cfg.ArtifactUploadMode != ArtifactUploadDirect || cfg.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" || len(cfg.RuntimeEnv) != 1 || cfg.ModelUsageAliases["raw-sonnet"].Provider != "volcengine_ark" {
 			t.Fatalf("runtime config=%+v", cfg)
 		}
 		return nil

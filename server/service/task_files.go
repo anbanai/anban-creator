@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"gorm.io/gorm"
 )
 
 // mimeTypes maps file extensions to MIME types.
@@ -145,7 +148,7 @@ func buildTaskStorageKey(userID, taskID, relPath string) string {
 // returned. If the path exists with new content, the storage object and DB row
 // are overwritten so resumed tasks can refresh their deliverables.
 func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
-	return s.uploadTaskFileFromReader(ctx, nil, taskID, userID, "", relPath, reader, mimeType, fileSize)
+	return s.uploadTaskFileFromReader(ctx, nil, taskID, userID, "", relPath, reader, mimeType, fileSize, nil)
 }
 
 // UploadExecutionTaskFileFromReader persists an MCP-produced artifact as part
@@ -159,10 +162,147 @@ func (s *TaskService) UploadExecutionTaskFileFromReader(ctx context.Context, tas
 	if err := s.ValidateAgentExecutionAccess(ctx, userID, task.ProjectID, taskID, executionID); err != nil {
 		return nil, err
 	}
-	return s.uploadTaskFileFromReader(ctx, task, taskID, userID, executionID, relPath, reader, mimeType, fileSize)
+	return s.uploadTaskFileFromReader(ctx, task, taskID, userID, executionID, relPath, reader, mimeType, fileSize, nil)
 }
 
-func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.Task, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+type ImageOperationVerificationSnapshot struct {
+	Passed          bool     `json:"passed"`
+	Score           string   `json:"score"`
+	MissingEntities []string `json:"missing_entities,omitempty"`
+}
+
+type ImageOperationBillingSnapshot struct {
+	OperationID  string `json:"operation_id"`
+	CatalogID    string `json:"catalog_id"`
+	SKUID        string `json:"sku_id"`
+	PriceCredits int64  `json:"price_credits"`
+}
+
+// ImageOperationResultSnapshot is the complete, sanitized generate_image
+// response persisted beside the settlement intent for exact retry replay.
+// Provider evidence, prompts, local paths, raw model output, and usage never
+// enter this customer-facing idempotency record.
+type ImageOperationResultSnapshot struct {
+	FilePath           string                              `json:"file_path"`
+	DownloadURL        string                              `json:"download_url"`
+	Size               string                              `json:"size,omitempty"`
+	Width              int                                 `json:"width,omitempty"`
+	Height             int                                 `json:"height,omitempty"`
+	ImageType          string                              `json:"image_type,omitempty"`
+	Provider           string                              `json:"provider"`
+	Model              string                              `json:"model"`
+	SelectionReason    string                              `json:"selection_reason,omitempty"`
+	SupportsReference  bool                                `json:"supports_reference"`
+	MaxReferenceImages int                                 `json:"max_reference_images"`
+	ResponseType       string                              `json:"response_type,omitempty"`
+	OutputMIME         string                              `json:"output_mime,omitempty"`
+	WeChatURL          string                              `json:"wechat_url,omitempty"`
+	MediaID            string                              `json:"media_id,omitempty"`
+	UploadError        string                              `json:"upload_error,omitempty"`
+	Verification       *ImageOperationVerificationSnapshot `json:"verification,omitempty"`
+	Billing            ImageOperationBillingSnapshot       `json:"billing"`
+}
+
+type TaskFileOperationSettlement struct {
+	CatalogID, SKUID, ToolCallID, RequestFingerprint string
+	PriceCredits                                     int64
+	MediaID, WeChatURL                               string
+	ResultSnapshot                                   ImageOperationResultSnapshot
+}
+
+type GenericTaskFileOperationSettlement struct {
+	ResourceType, IdempotencyScope                    string
+	CatalogID, SKUID, OperationID, RequestFingerprint string
+	PriceCredits                                      int64
+	ResultSnapshot                                    []byte
+}
+
+func (s *TaskService) FindTaskFileOperationSettlement(ctx context.Context, taskID, executionID, operationID, requestFingerprint string) (*model.TaskFile, []byte, error) {
+	return s.FindExecutionTaskFileSettlement(ctx, taskID, executionID, operationID, requestFingerprint, "image", "mcp-image-settlement")
+}
+
+func (s *TaskService) FindExecutionTaskFileSettlement(ctx context.Context, taskID, executionID, operationID, requestFingerprint, resourceType, idempotencyScope string) (*model.TaskFile, []byte, error) {
+	if s == nil || s.repo == nil {
+		return nil, nil, fmt.Errorf("task repository is not available")
+	}
+	key := billingFingerprint(taskID, executionID, operationID)
+	settlement, err := s.repo.Billing().FindSettlementByKey(ctx, idempotencyScope, key)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if settlement.TaskID == nil || settlement.AttemptID == nil || settlement.ToolCallID == nil ||
+		*settlement.TaskID != taskID || *settlement.AttemptID != executionID || *settlement.ToolCallID != operationID || settlement.ResourceType != resourceType || settlement.RequestFingerprint != requestFingerprint {
+		return nil, nil, ErrBillingConflict
+	}
+	file, err := s.repo.TaskFiles().FindByIDForExecution(ctx, settlement.ResourceID, taskID, executionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if file == nil || file.TaskID != taskID || file.ExecutionID != executionID {
+		return nil, nil, ErrBillingConflict
+	}
+	if len(settlement.ResultSnapshot) == 0 || !json.Valid(settlement.ResultSnapshot) {
+		return nil, nil, ErrBillingConflict
+	}
+	return file, append([]byte(nil), settlement.ResultSnapshot...), nil
+}
+
+func (s *TaskService) UploadExecutionTaskFileWithSettlementFromReader(ctx context.Context, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64, settlement TaskFileOperationSettlement) (*model.TaskFile, error) {
+	settlement.ResultSnapshot.Billing = ImageOperationBillingSnapshot{
+		OperationID: settlement.ToolCallID, CatalogID: settlement.CatalogID,
+		SKUID: settlement.SKUID, PriceCredits: settlement.PriceCredits,
+	}
+	snapshot, err := json.Marshal(settlement.ResultSnapshot)
+	if err != nil {
+		return nil, fmt.Errorf("marshal image operation result snapshot: %w", err)
+	}
+	return s.UploadExecutionTaskFileWithOperationSettlementFromReader(ctx, taskID, userID, executionID, relPath, reader, mimeType, fileSize, GenericTaskFileOperationSettlement{
+		ResourceType: "image", IdempotencyScope: "mcp-image-settlement",
+		CatalogID: settlement.CatalogID, SKUID: settlement.SKUID, PriceCredits: settlement.PriceCredits,
+		OperationID: settlement.ToolCallID, RequestFingerprint: settlement.RequestFingerprint, ResultSnapshot: snapshot,
+	})
+}
+
+func (s *TaskService) UploadExecutionTaskFileWithOperationSettlementFromReader(ctx context.Context, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64, settlement GenericTaskFileOperationSettlement) (*model.TaskFile, error) {
+	task, err := s.ValidateAgentTaskAccess(ctx, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ValidateAgentExecutionAccess(ctx, userID, task.ProjectID, taskID, executionID); err != nil {
+		return nil, err
+	}
+	intent := &SettlementIntent{
+		Action: model.BillingSettlementActionChargeOperation, UserID: userID, TaskID: taskID, AttemptID: executionID,
+		ToolCallID: settlement.OperationID, CatalogID: settlement.CatalogID, SKUID: settlement.SKUID,
+		ResourceType: settlement.ResourceType, IdempotencyScope: settlement.IdempotencyScope, IdempotencyKey: billingFingerprint(taskID, executionID, settlement.OperationID),
+		RequestFingerprint: settlement.RequestFingerprint,
+	}
+	if strings.TrimSpace(settlement.ResourceType) == "" || strings.TrimSpace(settlement.IdempotencyScope) == "" ||
+		strings.TrimSpace(settlement.OperationID) == "" || len(settlement.ResultSnapshot) == 0 || !json.Valid(settlement.ResultSnapshot) {
+		return nil, fmt.Errorf("invalid fixed-SKU task-file settlement")
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(settlement.ResultSnapshot, &snapshot); err != nil {
+		return nil, fmt.Errorf("decode operation result snapshot: %w", err)
+	}
+	if snapshot == nil {
+		return nil, fmt.Errorf("decode operation result snapshot: object is required")
+	}
+	snapshot["billing"] = ImageOperationBillingSnapshot{
+		OperationID: settlement.OperationID, CatalogID: settlement.CatalogID,
+		SKUID: settlement.SKUID, PriceCredits: settlement.PriceCredits,
+	}
+	intent.ResultSnapshot, err = json.Marshal(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("marshal operation result snapshot: %w", err)
+	}
+	return s.uploadTaskFileFromReader(ctx, task, taskID, userID, executionID, relPath, reader, mimeType, fileSize, intent)
+}
+
+func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.Task, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64, settlement *SettlementIntent) (*model.TaskFile, error) {
 	if s.store == nil {
 		return nil, fmt.Errorf("no storage provider configured: cannot upload files for task %s", taskID)
 	}
@@ -200,7 +340,7 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 		if err != nil {
 			return nil, fmt.Errorf("check existing task file: %w", err)
 		}
-		if existing != nil && existing.ContentHash == contentHash {
+		if existing != nil && existing.ContentHash == contentHash && settlement == nil {
 			return existing, nil
 		}
 	}
@@ -234,11 +374,61 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 		StorageProvider: s.store.Name(),
 		FilePath:        cleanRelPath,
 	}
+	var settlementSnapshot map[string]any
+	if settlement != nil {
+		var snapshot map[string]any
+		if err := json.Unmarshal(settlement.ResultSnapshot, &snapshot); err != nil {
+			return nil, fmt.Errorf("decode operation result snapshot: %w", err)
+		}
+		snapshot["file_path"] = cleanRelPath
+		snapshot["output_mime"] = mimeType
+		// Private OSS URLs expire and therefore are not immutable replay data.
+		// Store only stable public/local identities; the MCP replay path mints a
+		// fresh signed URL from the linked TaskFile when necessary.
+		snapshot["download_url"] = ""
+		if s.store.HasCustomDomain() || s.store.Name() == "local" {
+			snapshot["download_url"] = s.store.GetURL(ossKey)
+		}
+		settlement.ResultSnapshot, err = json.Marshal(snapshot)
+		if err != nil {
+			return nil, fmt.Errorf("marshal durable operation result snapshot: %w", err)
+		}
+		if mediaID, ok := snapshot["media_id"].(string); ok {
+			taskFile.MediaID = mediaID
+		}
+		if wechatURL, ok := snapshot["wechat_url"].(string); ok {
+			taskFile.WechatURL = wechatURL
+		}
+		settlementSnapshot = snapshot
+	}
 	var persisted *model.TaskFile
-	if executionID != "" {
-		persisted, err = s.repo.TaskFiles().UpsertPendingCurrentExecution(ctx, taskID, executionID, taskFile)
+	persist := func(repo repository.Repository) error {
+		if executionID != "" {
+			persisted, err = repo.TaskFiles().UpsertPendingCurrentExecution(ctx, taskID, executionID, taskFile)
+		} else {
+			persisted, err = repo.TaskFiles().Upsert(ctx, taskFile)
+		}
+		if err != nil {
+			return err
+		}
+		if settlement != nil {
+			if s.billingWalletSvc == nil {
+				return fmt.Errorf("fixed-SKU billing wallet is required for operation settlement")
+			}
+			settlement.ResourceID = persisted.ID
+			settlementSnapshot["task_file_id"] = persisted.ID
+			settlement.ResultSnapshot, err = json.Marshal(settlementSnapshot)
+			if err != nil {
+				return fmt.Errorf("marshal linked operation result snapshot: %w", err)
+			}
+			_, err = s.billingWalletSvc.EnqueueSettlementInTx(ctx, repo, *settlement)
+		}
+		return err
+	}
+	if settlement != nil {
+		err = s.repo.WithTx(ctx, persist)
 	} else {
-		persisted, err = s.repo.TaskFiles().Upsert(ctx, taskFile)
+		err = persist(s.repo)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("persist task file %s: %w", cleanRelPath, err)

@@ -12,6 +12,22 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
+const missingExecutionResultDiagnostic = "agent returned no execution result"
+
+func normalizeTerminalExecutionResult(result *serveragent.ExecutionResult) *serveragent.ExecutionResult {
+	if result != nil {
+		return result
+	}
+	return &serveragent.ExecutionResult{
+		Success:    false,
+		Error:      missingExecutionResultDiagnostic,
+		CostStatus: serveragent.CostStatusUnreconciled,
+		CostDiagnostics: []serveragent.CostDiagnostic{{
+			Code: serveragent.CostDiagnosticMissingTerminalModelUsage,
+		}},
+	}
+}
+
 // ValidateAgentTaskAccess loads a task and verifies that the authenticated agent
 // may act on its behalf. Empty authenticatedUserID means system/admin mode.
 func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authenticatedUserID string) (*model.Task, error) {
@@ -160,36 +176,90 @@ func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, 
 	return nil
 }
 
-// UpdateExecutionResult stores the latest execution result JSON for a task.
-func (s *TaskService) UpdateExecutionResult(ctx context.Context, taskID string, result *serveragent.ExecutionResult) error {
+func marshalExecutionEvidence(result *serveragent.ExecutionResult) (string, error) {
 	if result == nil {
-		return nil
+		return "", fmt.Errorf("execution result is required")
 	}
-
-	resultJSON, err := json.Marshal(result)
+	if result.CostStatus == "" {
+		result.CostStatus = serveragent.CostStatusUnreconciled
+		result.CostDiagnostics = []serveragent.CostDiagnostic{{Code: serveragent.CostDiagnosticMissingTerminalModelUsage}}
+	}
+	publicResult := *result
+	publicResult.ModelUsage = nil
+	publicResult.CostStatus = ""
+	publicResult.CostDiagnostics = nil
+	publicResult.Model = ""
+	resultJSON, err := json.Marshal(&publicResult)
 	if err != nil {
-		return fmt.Errorf("marshal execution result: %w", err)
+		return "", fmt.Errorf("marshal execution result: %w", err)
 	}
-	if err := s.repo.Tasks().UpdateResult(ctx, taskID, string(resultJSON)); err != nil {
-		return fmt.Errorf("persist execution result: %w", err)
-	}
+	return string(resultJSON), nil
+}
 
-	// Populate denormalized token/cost columns for efficient aggregation.
-	// Only write when we have usage data — skip to keep columns NULL for tasks without results.
-	if result.TokenUsage != nil {
-		var costUSD float64
-		if result.TotalCostUSD != nil {
-			costUSD = *result.TotalCostUSD
-		}
-		if err := s.repo.Tasks().UpdateTokenUsage(ctx, taskID,
-			int64(result.TokenUsage.InputTokens),
-			int64(result.TokenUsage.OutputTokens),
-			int64(result.TokenUsage.CacheReadTokens),
-			int64(result.TokenUsage.CacheCreationTokens),
-			costUSD); err != nil {
-			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to update denormalized token usage columns")
-		}
+// UpdateExecutionResult atomically stores result JSON and typed cost evidence.
+func (s *TaskService) UpdateExecutionResult(ctx context.Context, taskID string, result *serveragent.ExecutionResult) error {
+	resultJSON, err := marshalExecutionEvidence(result)
+	if err != nil {
+		return err
 	}
-
+	matched, err := s.repo.Tasks().UpdateExecutionEvidence(ctx, taskID, resultJSON, result.ModelUsage, result.CostStatus)
+	if err != nil {
+		return fmt.Errorf("persist execution evidence: %w", err)
+	}
+	if !matched {
+		return fmt.Errorf("persist execution evidence: task %s not found", taskID)
+	}
 	return nil
+}
+
+func (s *TaskService) updateExecutionResultForExecution(ctx context.Context, taskID, executionID string, result *serveragent.ExecutionResult) error {
+	resultJSON, err := marshalExecutionEvidence(result)
+	if err != nil {
+		return err
+	}
+	matched, err := s.repo.Tasks().UpdateExecutionEvidenceForExecution(ctx, taskID, executionID, resultJSON, result.ModelUsage, result.CostStatus)
+	if err != nil {
+		return fmt.Errorf("persist execution evidence for current attempt: %w", err)
+	}
+	if !matched {
+		return ErrStaleTaskExecution
+	}
+	return nil
+}
+
+func (s *TaskService) recordTerminalProviderCost(ctx context.Context, task *model.Task, result *serveragent.ExecutionResult) {
+	if s == nil || s.providerCostSvc == nil || task == nil {
+		return
+	}
+	if task.CurrentExecutionID == nil || strings.TrimSpace(*task.CurrentExecutionID) == "" {
+		s.logger.Error().Str("task_id", task.ID).Msg("terminal provider cost evidence has no durable execution identity")
+		return
+	}
+	executionID := strings.TrimSpace(*task.CurrentExecutionID)
+	if result == nil || len(result.ModelUsage) == 0 {
+		if err := s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonMissingTerminalModelUsage); err != nil {
+			s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("mark terminal provider cost unreconciled")
+		}
+		return
+	}
+	if result.CostStatus != serveragent.CostStatusReconciled {
+		if err := s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonInvalidTerminalModelUsage); err != nil {
+			s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("mark invalid terminal provider cost evidence")
+		}
+		return
+	}
+	entries := make([]ExecutionTokenCostEntry, 0, len(result.ModelUsage))
+	for _, usage := range result.ModelUsage {
+		entries = append(entries, ExecutionTokenCostEntry{
+			Provider: usage.Provider, Model: usage.Model,
+			IdempotencyKey: executionID + "/" + usage.Provider + "/" + usage.Model,
+			Usage:          TokenUsage{Input: usage.InputTokens, CacheRead: usage.CacheReadInputTokens, CacheCreation: usage.CacheCreationInputTokens, Output: usage.OutputTokens},
+			Source:         string(model.BillingProviderCostSourceClaudeResult),
+		})
+	}
+	if _, err := s.providerCostSvc.FinalizeExecutionTokenCosts(ctx, FinalizeExecutionTokenCostsRequest{
+		ExecutionID: executionID, TaskID: task.ID, CatalogID: s.providerCostSvc.catalogID, Entries: entries,
+	}); err != nil {
+		s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("record terminal provider cost; typed evidence remains retryable")
+	}
 }

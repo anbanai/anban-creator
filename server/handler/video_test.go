@@ -12,23 +12,21 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
-func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T) {
+func TestVideoCreatorEstimateReturnsConfiguredAllowedModels(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          "video-estimate@example.com",
-		Password:       "hashed",
-		InviteCode:     "videoestimate",
-		CreditsBalance: 120_000,
+		ID:         userID,
+		Email:      "video-estimate@example.com",
+		Password:   "hashed",
+		InviteCode: "videoestimate",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -61,8 +59,7 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	creditSvc := service.NewCreditService(repo, nil, &logger)
-	h := NewVideoHandler(repo, creditSvc, service.VideoModelCatalog{
+	h := NewVideoHandler(repo, service.VideoModelCatalog{
 		"configured-video": {
 			Key:                  "configured-video",
 			DisplayName:          "Configured Video",
@@ -72,13 +69,8 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 			MinDuration:          1,
 			MaxDuration:          15,
 			SupportsVideoInput:   true,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
-			VideoInput5sMinPrice: map[string]float64{"720p": 5},
-			VideoInput5sMaxPrice: map[string]float64{"720p": 10},
 		},
-	}, 1000, &logger)
+	}, &logger)
 
 	app := fiber.New()
 	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
@@ -100,10 +92,6 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 			AvailableModels []struct {
 				Key string `json:"key"`
 			} `json:"available_models"`
-			EstimatedCredits      int  `json:"estimated_credits"`
-			Balance               int  `json:"balance"`
-			MinBalance            int  `json:"min_balance"`
-			MeetsMinBalance       bool `json:"meets_min_balance"`
 			ResolvedCreatorConfig struct {
 				ModelKey string `json:"model_key"`
 			} `json:"resolved_creator_config"`
@@ -118,11 +106,8 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 	if body.Data.AvailableModels[0].Key != "configured-video" {
 		t.Fatalf("available model = %+v", body.Data.AvailableModels[0])
 	}
-	if body.Data.ResolvedCreatorConfig.ModelKey != "configured-video" || body.Data.EstimatedCredits != 5000 {
+	if body.Data.ResolvedCreatorConfig.ModelKey != "configured-video" {
 		t.Fatalf("estimate = %+v", body.Data)
-	}
-	if body.Data.Balance != 120_000 || body.Data.MinBalance != 0 || !body.Data.MeetsMinBalance {
-		t.Fatalf("balance gate = %+v", body.Data)
 	}
 
 	legacyReq := httptest.NewRequest("POST", "/videocreator/estimate", strings.NewReader(`{"project_id":"`+projectID+`","video_config":{"duration":9}}`))
@@ -148,20 +133,14 @@ func TestVideoCreatorEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *tes
 	}
 }
 
-func TestVideoCreatorEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
+func TestVideoCreatorEstimateDoesNotExposeDynamicRetailPricing(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	multiplier := 0.5
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:                userID,
-		Email:             "video-estimate-billing@example.com",
-		Password:          "hashed",
-		InviteCode:        "videoestimatebilling",
-		Tier:              model.TierFree,
-		CreditsBalance:    120_000,
-		BillingMultiplier: &multiplier,
+		ID: userID, Email: "video-estimate-billing@example.com", Password: "hashed",
+		InviteCode: "videoestimatebilling", Tier: model.TierFree,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -194,8 +173,7 @@ func TestVideoCreatorEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	creditSvc := service.NewCreditService(repo, nil, &logger)
-	h := NewVideoHandler(repo, creditSvc, service.VideoModelCatalog{
+	h := NewVideoHandler(repo, service.VideoModelCatalog{
 		"configured-video": {
 			Key:                  "configured-video",
 			DisplayName:          "Configured Video",
@@ -204,17 +182,8 @@ func TestVideoCreatorEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
 			SupportedRatios:      []string{"9:16"},
 			MinDuration:          1,
 			MaxDuration:          15,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
 		},
-	}, 1000, &logger)
-	h.SetBillingConfig(srvconfig.BillingConfig{
-		CreditsPerCNY:         1600,
-		TierMultipliers:       map[string]float64{"free": 1.35},
-		DefaultUserMultiplier: 1,
-		MinimumChargeCredits:  1,
-	})
+	}, &logger)
 
 	app := fiber.New()
 	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
@@ -231,24 +200,14 @@ func TestVideoCreatorEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	var body struct {
-		Data struct {
-			EstimatedCredits int `json:"estimated_credits"`
-			PricingBreakdown struct {
-				CreditsPerCNY  int     `json:"credits_per_cny"`
-				TierMultiplier float64 `json:"tier_multiplier"`
-				UserMultiplier float64 `json:"user_multiplier"`
-			} `json:"pricing_breakdown"`
-		} `json:"data"`
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.Data.EstimatedCredits != 5400 {
-		t.Fatalf("estimated credits = %d, want ceil(5*1600*1.35*0.5)=5400", body.Data.EstimatedCredits)
-	}
-	if body.Data.PricingBreakdown.CreditsPerCNY != 1600 || body.Data.PricingBreakdown.TierMultiplier != 1.35 || body.Data.PricingBreakdown.UserMultiplier != 0.5 {
-		t.Fatalf("pricing breakdown = %+v, want configured billing multipliers", body.Data.PricingBreakdown)
+	for _, removed := range []string{"estimated_credits", "pricing_breakdown", "tier_multiplier", "user_multiplier", `"balance"`} {
+		if strings.Contains(string(raw), removed) {
+			t.Fatalf("response leaked removed dynamic retail field %q: %s", removed, raw)
+		}
 	}
 }
 
@@ -258,11 +217,10 @@ func TestVideoCreatorEstimateAllowsEmptyPromptForConfigurationPreview(t *testing
 	ctx := context.Background()
 	userID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          "video-empty-estimate@example.com",
-		Password:       "hashed",
-		InviteCode:     "videoemptyestimate",
-		CreditsBalance: 120_000,
+		ID:         userID,
+		Email:      "video-empty-estimate@example.com",
+		Password:   "hashed",
+		InviteCode: "videoemptyestimate",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -293,7 +251,7 @@ func TestVideoCreatorEstimateAllowsEmptyPromptForConfigurationPreview(t *testing
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(repo, service.NewCreditService(repo, nil, &logger), service.VideoModelCatalog{
+	h := NewVideoHandler(repo, service.VideoModelCatalog{
 		"configured-video": {
 			Key:                  "configured-video",
 			DisplayName:          "Configured Video",
@@ -302,11 +260,8 @@ func TestVideoCreatorEstimateAllowsEmptyPromptForConfigurationPreview(t *testing
 			SupportedRatios:      []string{"9:16"},
 			MinDuration:          1,
 			MaxDuration:          15,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
 		},
-	}, 1000, &logger)
+	}, &logger)
 
 	app := fiber.New()
 	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
@@ -327,7 +282,7 @@ func TestVideoCreatorEstimateAllowsEmptyPromptForConfigurationPreview(t *testing
 
 func TestVideoCreatorPlaybooksReturnsSeedanceBusinessScenarios(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(nil, nil, nil, 1000, &logger)
+	h := NewVideoHandler(nil, nil, &logger)
 
 	app := fiber.New()
 	app.Get("/videocreator/playbooks", func(c fiber.Ctx) error {
@@ -394,11 +349,10 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
-		ID:             userID,
-		Email:          "video-production-estimate@example.com",
-		Password:       "hashed",
-		InviteCode:     "videoproductionestimate",
-		CreditsBalance: 120_000,
+		ID:         userID,
+		Email:      "video-production-estimate@example.com",
+		Password:   "hashed",
+		InviteCode: "videoproductionestimate",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -429,7 +383,7 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(repo, service.NewCreditService(repo, nil, &logger), service.VideoModelCatalog{
+	h := NewVideoHandler(repo, service.VideoModelCatalog{
 		"configured-video": {
 			Key:                  "configured-video",
 			DisplayName:          "Configured Video",
@@ -439,13 +393,8 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 			MinDuration:          1,
 			MaxDuration:          15,
 			SupportsVideoInput:   true,
-			NoInputPricePerSecond: map[string]float64{
-				"720p": 1,
-			},
-			VideoInput5sMinPrice: map[string]float64{"720p": 5},
-			VideoInput5sMaxPrice: map[string]float64{"720p": 10},
 		},
-	}, 1000, &logger)
+	}, &logger)
 
 	app := fiber.New()
 	app.Post("/videocreator/estimate", func(c fiber.Ctx) error {
@@ -478,7 +427,6 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 		Data struct {
 			MissingReferenceRoles []string `json:"missing_reference_roles"`
 			ExpectedArtifacts     []string `json:"expected_artifacts"`
-			AffordableTakes       int      `json:"affordable_takes"`
 			SegmentPlan           []struct {
 				Index    int   `json:"index"`
 				Duration int64 `json:"duration"`
@@ -505,20 +453,17 @@ func TestVideoCreatorEstimateReturnsProductionGuidance(t *testing.T) {
 	if !containsString(decoded.Data.ExpectedArtifacts, "quality-review.md") || !containsString(decoded.Data.ExpectedArtifacts, "delivery-manifest.json") {
 		t.Fatalf("expected artifacts = %+v", decoded.Data.ExpectedArtifacts)
 	}
-	if decoded.Data.AffordableTakes != 5 {
-		t.Fatalf("affordable takes = %d, want capped retake budget 5", decoded.Data.AffordableTakes)
-	}
 }
 
 func TestVideoCreatorModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(nil, nil, service.VideoModelCatalog{
+	h := NewVideoHandler(nil, service.VideoModelCatalog{
 		"configured-video": {
 			Key:         "configured-video",
 			DisplayName: "Configured Video",
 			ModelID:     "provider-configured-video",
 		},
-	}, 1000, &logger)
+	}, &logger)
 
 	app := fiber.New()
 	app.Get("/videocreator/models", func(c fiber.Ctx) error {
@@ -550,7 +495,7 @@ func TestVideoCreatorModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
 
 func TestVideoCreatorModelsReturnsEmptyWhenCatalogUnconfigured(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewVideoHandler(nil, nil, nil, 1000, &logger)
+	h := NewVideoHandler(nil, nil, &logger)
 
 	app := fiber.New()
 	app.Get("/videocreator/models", func(c fiber.Ctx) error {

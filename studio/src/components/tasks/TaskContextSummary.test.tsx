@@ -36,6 +36,7 @@ const snapshotTask: Task = {
   result: null,
   published: false,
   published_at: null,
+  billing_price_credits: 5000,
   plan_id: null,
   project_snapshot: {
     project_name: '茶小茶',
@@ -66,7 +67,6 @@ function renderSummary(overrides: Partial<ComponentProps<typeof TaskContextSumma
     files: [],
     logs: [],
     progressDescription: null,
-    netConsumedCredits: 2835,
     sseError: null,
     onOpenTab: vi.fn(),
     ...overrides,
@@ -88,7 +88,7 @@ describe('TaskContextSummary', () => {
     expect(screen.getByText('茶小茶')).toBeInTheDocument()
     expect(screen.getByText('公众号文章')).toBeInTheDocument()
     expect(screen.getByText('清新茶感摄影 · 3:4')).toBeInTheDocument()
-    expect(screen.getByText('2,835 积分')).toBeInTheDocument()
+    expect(screen.getByText('固定价 5,000 积分')).toBeInTheDocument()
     expect(screen.queryByText('后来修改的项目')).not.toBeInTheDocument()
     expect(screen.queryByText('后来修改的视觉 · 1:1')).not.toBeInTheDocument()
   })
@@ -171,7 +171,7 @@ describe('TaskContextSummary', () => {
       screen.getByRole('button', { name: '打开执行日志' }),
     ]
 
-    expect(actions[0]).toHaveAccessibleDescription(/茶小茶.*手动创建.*2,835 积分/)
+    expect(actions[0]).toHaveAccessibleDescription(/茶小茶.*手动创建.*固定价 5,000 积分/)
     expect(actions[3]).toHaveAccessibleDescription(/2 条 · 实时.*最新日志状态/)
 
     const descriptionIds = actions.map((action) => action.getAttribute('aria-describedby'))

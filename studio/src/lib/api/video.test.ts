@@ -29,19 +29,6 @@ describe('videoCreatorApi', () => {
               duration: 5,
               references: [{ type: 'image_url', url: 'https://cdn.example.com/a.png', reference_role: 'product appearance' }],
             },
-            estimated_credits: 5000,
-            pricing_breakdown: {
-              cny: 5,
-              credits_per_cny: 1000,
-              input_video: false,
-              output_seconds: 5,
-              resolution: '720p',
-              ratio: '9:16',
-              model_key: 'configured-video',
-            },
-            balance: 120000,
-            min_balance: 0,
-            meets_min_balance: true,
           },
         })
       }),
@@ -63,8 +50,6 @@ describe('videoCreatorApi', () => {
       },
     })
     expect(estimate.available_models).toHaveLength(1)
-    expect(estimate.estimated_credits).toBe(5000)
-    expect(estimate.meets_min_balance).toBe(true)
   })
 
   it('lists configured video models', async () => {

@@ -143,14 +143,14 @@ export default function TasksPage() {
     return map
   }, [projects])
 
-  const { data: creditsBalance } = useQuery({
-    queryKey: ['credits', 'balance'],
-    queryFn: () => api.credits.balance(),
+  const { data: billingWallet } = useQuery({
+    queryKey: ['billing', 'wallet'],
+    queryFn: () => api.billing.wallet(),
   })
 
-  const { data: pricing } = useQuery({
-    queryKey: ['credits', 'pricing'],
-    queryFn: () => api.credits.pricing(),
+  const { data: billingCatalog } = useQuery({
+    queryKey: ['billing', 'catalog'],
+    queryFn: () => api.billing.catalog(),
   })
 
   const form = useForm<CreateTaskFormValues>({
@@ -538,11 +538,10 @@ export default function TasksPage() {
   }), [tasks])
 
   const costPreview = taskCreationCostPreview({
-    pricing,
+    catalog: billingCatalog,
     type: watchedType,
     quantity,
-    goalMode,
-    balance: creditsBalance?.balance ?? 0,
+    balance: billingWallet?.balance ?? 0,
   })
 
   const videoEditorHasStructuredSource = (watchedVideoEditorReferences ?? []).some((ref) => ref.type === 'video_url' && (ref.url || ref.task_file_id))
@@ -551,8 +550,10 @@ export default function TasksPage() {
     && Boolean((attachment.upload_id && attachment.key) || attachment.url)
   ))
   const videoEditorHasSourceMedia = videoEditorHasStructuredSource || videoEditorHasPromptVideo
-  const creationBlocker = costPreview.insufficient
-    ? { message: '积分不足，补充积分后再创建。', href: '/credits', actionLabel: '查看积分' }
+  const creationBlocker = !costPreview.priceAvailable
+    ? { message: '固定价格目录暂不可用，请稍后重试。', href: '', actionLabel: '' }
+    : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
+      ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing', actionLabel: '查看钱包' }
     : watchedType !== 'ecommerce' && goalMode && !goalText.trim()
       ? { message: '强目标模式需要填写目标条件。', href: '', actionLabel: '' }
       : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
@@ -1204,16 +1205,12 @@ export default function TasksPage() {
                       {ecommerceModuleCatalog.map((mod) => {
                         const qty = watchedSelectedModules?.[mod.key] ?? 0
                         const enabled = qty >= 1
-                        const price = pricing?.ecommerce_module_prices?.[mod.key]
                         return (
                           <div key={mod.key} className="flex items-center justify-between gap-3 py-2">
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2">
                                 <p className="text-sm font-medium text-foreground">{mod.label}</p>
                                 <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{mod.ratio}</span>
-                                {price != null && (
-                                  <span className="text-[10px] text-muted-foreground">{price} 积分/{mod.qtyLabel}</span>
-                                )}
                               </div>
                               <p className="mt-0.5 text-xs text-muted-foreground">{mod.hint}</p>
                             </div>
@@ -1342,27 +1339,27 @@ export default function TasksPage() {
 
               {/* Cost display */}
               <div className="pt-1">
-                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 基础任务费预估</p>
+                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 固定价格</p>
                 <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
-                  <p className="text-muted-foreground">
-                    基础任务费：{costPreview.baseCost} × {costPreview.billableQuantity}
-                    {costPreview.multiplier > 1 && ` × ${costPreview.multiplier}`} = <span className="font-medium text-foreground">{costPreview.totalCost}</span> 积分
-                    {costPreview.multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
-                  </p>
+                  {costPreview.priceAvailable ? (
+                    <p className="text-muted-foreground">
+                      固定任务价：{costPreview.baseCost.toLocaleString()} × {costPreview.billableQuantity} = <span className="font-medium text-foreground">{costPreview.totalCost.toLocaleString()}</span> 积分
+                    </p>
+                  ) : (
+                    <p className="font-medium text-red-500">固定任务价暂不可用</p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {runLocally && !isMontageTask ? '本机运行使用你的 Claude Code 环境。' : '云端 Claude Code 运行成本由平台承担，不额外预留或补扣。'}
                   </p>
-                  {watchedType === 'ecommerce' ? (
-                    <p className="text-xs text-muted-foreground">所选交付模块会影响后续图片生成和理解操作用量，最终以交易明细汇总为准。</p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">模型、图片、视频等 MCP 操作费用按实际用量另计。</p>
+                  <p className="text-xs text-muted-foreground">任务内成功交付的图片、视频等增值操作按开始前确认的固定 SKU 另行记账。</p>
+                  {costPreview.priceAvailable && (
+                    <p className="text-muted-foreground">
+                      余额：{(billingWallet?.balance ?? 0).toLocaleString()} →{' '}
+                      <span className={`font-medium ${costPreview.remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
+                        {costPreview.remaining.toLocaleString()}
+                      </span>
+                    </p>
                   )}
-                  <p className="text-muted-foreground">
-                    余额：{(creditsBalance?.balance ?? 0).toLocaleString()} →{' '}
-                    <span className={`font-medium ${costPreview.remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
-                      {costPreview.remaining.toLocaleString()}
-                    </span>
-                  </p>
                   {creationBlocker && (
                     <p className="text-sm font-medium text-red-500">
                       {creationBlocker.href ? <Link to={creationBlocker.href}>{creationBlocker.message}</Link> : creationBlocker.message}

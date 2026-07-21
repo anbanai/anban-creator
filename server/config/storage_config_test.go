@@ -17,7 +17,7 @@ func validOSSConfig(customDomain string) *Config {
 			BucketName:      "anbancreator",
 			CustomDomain:    customDomain,
 		},
-		Claude: ClaudeConfig{Executor: "docker"},
+		Claude: validClaudeConfigForTest(),
 	}
 	cfg.applyDefaults()
 	return cfg

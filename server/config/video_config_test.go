@@ -42,17 +42,18 @@ model_routes:
         min_duration: 1
         max_duration: 15
         supports_video_input: true
-model_prices:
-  video_generation:
-    volcengine_ark/doubao-seedance-test:
-      currency: CNY
-      no_input_price_per_second:
-        720p: 0.8
-      video_input_5s_min_price:
-        720p: 4.28
-      video_input_5s_max_price:
-        720p: 9.50
 claude:
+  provider: volcengine_ark
+  base_url: https://ark.cn-beijing.volces.com/api/compatible
+  auth_token: test-auth-token
+  models:
+    default: doubao-seed-evolving
+    opus: doubao-seed-evolving
+    fable: doubao-seed-evolving
+    sonnet: doubao-seed-2-1-pro-260628
+    haiku: doubao-seed-2-1-turbo-260628
+  model_usage_aliases:
+    doubao-seed-evolving-latest-version: doubao-seed-evolving
   plugin_dir: "` + pluginDir + `"
 `)
 	if err := os.WriteFile(cfgPath, body, 0644); err != nil {
@@ -73,18 +74,12 @@ claude:
 	if cfg.VideoAPI.Timeout != 7*time.Minute {
 		t.Fatalf("VideoAPI.Timeout = %v", cfg.VideoAPI.Timeout)
 	}
-	if got := cfg.VideoAPI.CreditMultiplierOrDefault(); got != 1000 {
-		t.Fatalf("VideoAPI.CreditMultiplierOrDefault = %d", got)
-	}
 	if len(cfg.VideoAPI.ModelCatalog) != 1 {
 		t.Fatalf("ModelCatalog length = %d", len(cfg.VideoAPI.ModelCatalog))
 	}
 	entry := cfg.VideoAPI.ModelCatalog[0]
 	if entry.ModelID != "doubao-seedance-test" {
 		t.Fatalf("ModelID = %q", entry.ModelID)
-	}
-	if entry.NoInputPricePerSecond["720p"] != 0.8 {
-		t.Fatalf("NoInputPricePerSecond[720p] = %v", entry.NoInputPricePerSecond["720p"])
 	}
 }
 
@@ -97,8 +92,5 @@ func TestVideoAPIConfigAppliesGlobalDefaultsOnly(t *testing.T) {
 	}
 	if cfg.VideoAPI.Timeout != 10*time.Minute {
 		t.Fatalf("default timeout = %v", cfg.VideoAPI.Timeout)
-	}
-	if cfg.VideoAPI.CreditMultiplier != 1000 {
-		t.Fatalf("default credit multiplier = %d", cfg.VideoAPI.CreditMultiplier)
 	}
 }
