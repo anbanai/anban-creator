@@ -13,12 +13,12 @@ The current repository is not a standalone Cobra CLI. It has four main surfaces:
 - `app/`: Shared Go library for content conversion, image generation, humanization, WeChat draft helpers, and writer styles.
 - `studio/`: React 19 + TypeScript + Vite 8 Web Studio.
 
-Plugin assets live in two distributions:
+Plugin assets have one canonical source at `plugins/anban/`:
 
-- `claudecode/`: Claude Code agents, skills, hooks, themes, and writer styles.
-- `codex/`: Codex skills, hooks, and separately installed subagents.
-
-Keep shared `claudecode/skills/*` and `codex/skills/*` contracts synchronized when tests assert distribution parity.
+- `.claude-plugin/` and `.codex-plugin/` are native host manifests.
+- `skills/`, templates, writers, scripts, and binaries are shared once.
+- `agents/*.md` are Claude Code Agents; `agents/*.toml` are Codex subagents.
+- `.mcp.json`/`hooks/hooks.json` are Claude adapters; Codex MCP and subagents are registered through `install/`, with completion checks embedded in TOML instructions.
 
 ## Build And Test Commands
 
@@ -126,7 +126,7 @@ Prefer route-level lazy loading and explicit vendor chunking for heavy dependenc
 
 ## Skills And Agents
 
-The project ships agent-facing workflows in `claudecode/agents` and `claudecode/skills`, with Codex subagents and Skills under `codex/`.
+The project ships all agent-facing workflows from `plugins/anban/agents` and `plugins/anban/skills`.
 
 Current major agents:
 
@@ -141,8 +141,8 @@ Development rules:
 - Local media work in live-slicer uses `ffmpeg` and `ffprobe`.
 - Do not reintroduce legacy Python helper scripts for live slicing.
 - Keep generated task artifacts explicit and file-backed, especially JSON returned by MCP tools.
-- When a skill exists in both `claudecode/skills` and `codex/skills`, update both unless the intended distribution difference is backed by tests.
-- When changing plugin distribution assets under `claudecode/` or `codex/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update the affected plugin manifest `version` in the same change: `claudecode/.claude-plugin/plugin.json` and/or `codex/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
+- Skills must stay host-neutral. Put unavoidable host syntax in the native manifest, MCP, Hook, Agent, or install adapter rather than duplicating a Skill tree.
+- When changing plugin assets under `plugins/anban/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update both native manifest versions in the same change: `plugins/anban/.claude-plugin/plugin.json` and `plugins/anban/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
 
 ## Testing Patterns
 

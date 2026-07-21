@@ -14,7 +14,7 @@ var agentSkillNameRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?
 
 func TestDistributedSkillsFollowAgentSkillsBestPractices(t *testing.T) {
 	root := repoRoot(t)
-	for _, distro := range []string{"claudecode", "codex"} {
+	for _, distro := range []string{"plugins/anban"} {
 		skillsRoot := filepath.Join(root, distro, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -48,7 +48,7 @@ func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
 		"INSTALLATION_GUIDE.md": true,
 		"QUICK_REFERENCE.md":    true,
 	}
-	for _, distro := range []string{"claudecode", "codex"} {
+	for _, distro := range []string{"plugins/anban"} {
 		skillsRoot := filepath.Join(root, distro, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -70,8 +70,8 @@ func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
 
 func TestDistributedWriterSkillReferencesStayMirrored(t *testing.T) {
 	root := repoRoot(t)
-	canonical := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "writers", "references", "writer-style-schema.md"))
-	for _, distro := range []string{"codex"} {
+	canonical := readRepoFile(t, filepath.Join(root, "plugins", "anban", "skills", "writers", "references", "writer-style-schema.md"))
+	for _, distro := range []string{"plugins/anban"} {
 		path := filepath.Join(root, distro, "skills", "writers", "references", "writer-style-schema.md")
 		if got := readRepoFile(t, path); got != canonical {
 			t.Fatalf("%s must match claudecode writer-style-schema.md", path)
@@ -81,7 +81,7 @@ func TestDistributedWriterSkillReferencesStayMirrored(t *testing.T) {
 
 func TestSkillUpstreamIndexDocumentsMirroredSourceBoundaries(t *testing.T) {
 	root := repoRoot(t)
-	claudeReadme := readRepoFile(t, filepath.Join(root, "claudecode", "README.md"))
+	claudeReadme := readRepoFile(t, filepath.Join(root, "plugins", "anban", "README.md"))
 	for _, want := range []string{
 		"docs/claude/",
 		"agent-reach",
@@ -95,24 +95,16 @@ func TestSkillUpstreamIndexDocumentsMirroredSourceBoundaries(t *testing.T) {
 		}
 	}
 
-	for _, distro := range []string{"codex"} {
-		readme := readRepoFile(t, filepath.Join(root, distro, "README.md"))
-		for _, want := range []string{
-			"../claudecode/README.md",
-			"../docs/claude/",
-			"claudecode/skills",
-			"codex/skills",
-		} {
-			if !strings.Contains(readme, want) {
-				t.Fatalf("%s README source-index pointer missing %q", distro, want)
-			}
+	for _, want := range []string{"skills/", "docs/claude/", "宿主差异"} {
+		if !strings.Contains(claudeReadme, want) {
+			t.Fatalf("unified plugin README source-index contract missing %q", want)
 		}
 	}
 }
 
 func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 	root := repoRoot(t)
-	agentsRoot := filepath.Join(root, "claudecode", "agents")
+	agentsRoot := filepath.Join(root, "plugins", "anban", "agents")
 	forbiddenPluginAgentFields := []string{"hooks", "mcpServers", "permissionMode"}
 
 	err := filepath.WalkDir(agentsRoot, func(path string, d os.DirEntry, err error) error {
@@ -152,7 +144,7 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 			}
 		}
 		for _, skill := range frontmatterStringValues(fm["skills"]) {
-			skillPath := filepath.Join(root, "claudecode", "skills", skill, "SKILL.md")
+			skillPath := filepath.Join(root, "plugins", "anban", "skills", skill, "SKILL.md")
 			if _, err := os.Stat(skillPath); err != nil {
 				t.Fatalf("%s preloads missing Skill %q: %v", path, skill, err)
 			}
@@ -177,7 +169,7 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 	}
 
 	for agentName, want := range expected {
-		path := filepath.Join(root, "claudecode", "agents", agentName+".md")
+		path := filepath.Join(root, "plugins", "anban", "agents", agentName+".md")
 		body := readRepoFile(t, path)
 		fm := parseSkillFrontmatter(t, path, body)
 		got := frontmatterStringValues(fm["skills"])
@@ -189,8 +181,8 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 
 func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 	root := repoRoot(t)
-	agentsRoot := filepath.Join(root, "claudecode", "agents")
-	skillsRoot := filepath.Join(root, "claudecode", "skills")
+	agentsRoot := filepath.Join(root, "plugins", "anban", "agents")
+	skillsRoot := filepath.Join(root, "plugins", "anban", "skills")
 	referenced := map[string]bool{}
 	agents, err := os.ReadDir(agentsRoot)
 	if err != nil {
@@ -237,7 +229,7 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 
 func TestCodexAgentSkillConfigsPointToBundledSkills(t *testing.T) {
 	root := repoRoot(t)
-	agentsRoot := filepath.Join(root, "codex", "agents")
+	agentsRoot := filepath.Join(root, "plugins", "anban", "agents")
 	skillPathRE := regexp.MustCompile(`path\s*=\s*"__PLUGIN_ROOT__/skills/([^/]+)/SKILL\.md"`)
 
 	err := filepath.WalkDir(agentsRoot, func(path string, d os.DirEntry, err error) error {
@@ -250,7 +242,7 @@ func TestCodexAgentSkillConfigsPointToBundledSkills(t *testing.T) {
 		body := readRepoFile(t, path)
 		for _, match := range skillPathRE.FindAllStringSubmatch(body, -1) {
 			skillName := match[1]
-			skillPath := filepath.Join(root, "codex", "skills", skillName, "SKILL.md")
+			skillPath := filepath.Join(root, "plugins", "anban", "skills", skillName, "SKILL.md")
 			if _, err := os.Stat(skillPath); err != nil {
 				t.Fatalf("%s references missing bundled skill %q at %s", path, skillName, skillPath)
 			}
@@ -269,7 +261,7 @@ func TestCodexAgentsDoNotPreloadDuplicateUmbrellaSkills(t *testing.T) {
 		"seednote":      "seednote",
 		"wechatarticle": "article",
 	} {
-		path := filepath.Join(root, "codex", "agents", agentName+".toml")
+		path := filepath.Join(root, "plugins", "anban", "agents", agentName+".toml")
 		body := readRepoFile(t, path)
 		config := `path = "__PLUGIN_ROOT__/skills/` + umbrellaSkill + `/SKILL.md"`
 		if strings.Contains(body, config) {
@@ -327,7 +319,7 @@ func assertAgentSkillBestPractice(t *testing.T, path string) {
 
 func TestLongSkillReferencesUseDirectProgressiveDisclosure(t *testing.T) {
 	root := repoRoot(t)
-	for _, distro := range []string{"claudecode", "codex"} {
+	for _, distro := range []string{"plugins/anban"} {
 		skillsRoot := filepath.Join(root, distro, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -362,7 +354,7 @@ func TestLongSkillReferencesUseDirectProgressiveDisclosure(t *testing.T) {
 				}
 				rel = filepath.ToSlash(rel)
 				if filepath.Dir(rel) == "references" && !strings.Contains(skillBody, rel) {
-					t.Fatalf("%s is a long reference and must be linked directly from %s for one-level progressive disclosure", refPath, path)
+					t.Fatalf("%s is a long reference and must be linked directly from %s", refPath, path)
 				}
 				if !hasReferenceContents(refBody) {
 					t.Fatalf("%s has more than 100 lines and must start with a Contents/Table of contents/目录 section", refPath)

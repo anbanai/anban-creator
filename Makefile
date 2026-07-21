@@ -143,7 +143,7 @@ docker-agent-image:
 
 # Build the dedicated Montage Agent image with an immutable OpenMontage template.
 docker-montage-agent-image:
-	@git submodule update --init --recursive third_party/OpenMontage claudecode
+	@git submodule update --init --recursive third_party/OpenMontage
 	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
 	docker build -f Dockerfile.agent-montage \
 	  --build-arg OPENMONTAGE_REVISION=$$(git -C third_party/OpenMontage rev-parse HEAD) \

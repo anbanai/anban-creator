@@ -12,7 +12,7 @@ import { Button } from '@/components/common/button'
 // article tasks — so markdown renders, copy / download / modal navigation all
 // work identically to the rest of the app. No bespoke doc viewer here.
 // Filename prefixes match the agent's file-naming contract in
-// claudecode/agents/ecommerce.md.
+// plugins/anban/agents/ecommerce.md.
 
 const MODULE_GROUPS = [
   { prefix: 'main_', label: '主图套', key: 'main' },

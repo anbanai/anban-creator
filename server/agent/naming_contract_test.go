@@ -13,53 +13,46 @@ import (
 func TestAnbanCreatorNamingContract(t *testing.T) {
 	root := repoRoot(t)
 
-	assertJSONField(t, filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"), "name", "anban")
-	assertClaudePluginUserConfig(t, filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"))
-	assertJSONField(t, filepath.Join(root, "codex", ".codex-plugin", "plugin.json"), "name", "anban")
-	assertClaudeMarketplacePlugin(t, filepath.Join(root, "claudecode", ".claude-plugin", "marketplace.json"))
+	assertJSONField(t, filepath.Join(root, "plugins", "anban", ".claude-plugin", "plugin.json"), "name", "anban")
+	assertClaudePluginUserConfig(t, filepath.Join(root, "plugins", "anban", ".claude-plugin", "plugin.json"))
+	assertJSONField(t, filepath.Join(root, "plugins", "anban", ".codex-plugin", "plugin.json"), "name", "anban")
+	assertClaudeMarketplacePlugin(t, filepath.Join(root, "plugins", "anban", ".claude-plugin", "marketplace.json"))
 
-	for _, path := range []string{
-		filepath.Join(root, "claudecode", ".mcp.json"),
-		filepath.Join(root, "codex", ".mcp.json"),
-	} {
-		assertOnlyMCPServerKey(t, path, "creator")
-	}
+	assertOnlyMCPServerKey(t, filepath.Join(root, "plugins", "anban", ".mcp.json"), "creator")
 
 	for _, path := range []string{
 		filepath.Join(root, "CLAUDE.md"),
-		filepath.Join(root, "claudecode", "README.md"),
+		filepath.Join(root, "plugins", "anban", "README.md"),
 		filepath.Join(root, "Dockerfile.agent"),
 		filepath.Join(root, "Dockerfile.server"),
 		filepath.Join(root, "studio", "src", "components", "connect", "ClaudeGuide.tsx"),
 		filepath.Join(root, "studio", "src", "components", "connect", "CodexGuide.tsx"),
 		filepath.Join(root, "miniapp", "src", "pages", "connect", "claude-code.vue"),
 		filepath.Join(root, "miniapp", "src", "pages", "connect", "codex.vue"),
-		filepath.Join(root, "codex", "README.md"),
-		filepath.Join(root, "codex", "install", "install-subagents.sh"),
+		filepath.Join(root, "plugins", "anban", "README.md"),
+		filepath.Join(root, "plugins", "anban", "install", "install-subagents.sh"),
 	} {
 		assertFileNotContains(t, path, "anbancreator"+"@anbanai")
 		assertFileNotContains(t, path, "creator"+"@anbanai")
 		assertFileNotContains(t, path, "plugin install "+"anban-creator")
 		assertFileNotContains(t, path, "anban-creator"+"@anbanai")
 		assertFileNotContains(t, path, "ab"+"c:")
-		assertFileNotContains(t, path, "anban"+"writer")
-		assertFileNotContains(t, path, "Anban"+"Writer")
 		assertFileNotContains(t, path, "案"+"板")
 	}
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "plugin@marketplace")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban@anbanai")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "The MCP server key is `creator`")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban:<agent>")
-	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "claude plugin install --scope user anban@anbanai")
-	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "/anban:anban-setup")
-	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "/anban:article")
-	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "--agent anban:wechatarticle")
-	assertFileNotContains(t, filepath.Join(root, "claudecode", "README.md"), "--dangerously-skip-permissions")
-	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "插件内的 MCP server key 固定为 `creator`")
-	assertFileNotExists(t, filepath.Join(root, "claudecode", "CLAUDE.md"))
-	assertFileContains(t, filepath.Join(root, "claudecode", "docs", "plugin-development.md"), "Plugin developer notes")
-	assertFileContains(t, filepath.Join(root, "claudecode", ".mcp.json"), "${user_config.api_url}/mcp")
-	assertFileContains(t, filepath.Join(root, "claudecode", ".mcp.json"), "Bearer ${user_config.api_key}")
+	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "claude plugin install --scope user anban@anbanai")
+	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "/anban:anban-setup")
+	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "/anban:article")
+	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "--agent anban:wechatarticle")
+	assertFileNotContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "--dangerously-skip-permissions")
+	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "插件内的 MCP server key 固定为 `creator`")
+	assertFileNotExists(t, filepath.Join(root, "plugins", "anban", "CLAUDE.md"))
+	assertFileContains(t, filepath.Join(root, "plugins", "anban", "docs", "plugin-development.md"), "Plugin developer notes")
+	assertFileContains(t, filepath.Join(root, "plugins", "anban", ".mcp.json"), "${user_config.api_url}/mcp")
+	assertFileContains(t, filepath.Join(root, "plugins", "anban", ".mcp.json"), "Bearer ${user_config.api_key}")
 	assertTrackedFilesDoNotContainLegacyNames(t, root)
 	assertBusinessLayerFilesDoNotContainHostMCPPrefixes(t, root)
 }
@@ -98,8 +91,8 @@ func assertClaudeMarketplacePlugin(t *testing.T, path string) {
 		t.Fatalf("%s author name = %q, want %q", path, plugin.Author.Name, "anbanai")
 	}
 	for _, got := range []string{plugin.Homepage, plugin.Repository} {
-		if !strings.Contains(got, "github.com/anbanai/anban-creator-claudecode") {
-			t.Fatalf("%s plugin URL = %q, want anban-creator-claudecode", path, got)
+		if !strings.Contains(got, "github.com/royalmorty/anbanwriter") {
+			t.Fatalf("%s plugin URL = %q, want unified monorepo", path, got)
 		}
 	}
 }
@@ -128,11 +121,8 @@ func assertTrackedFilesDoNotContainLegacyNames(t *testing.T, root string) {
 			"creator" + "@anbanai",
 			"anban-creator" + "@anbanai",
 			"ab" + "c:",
-			"anban" + "writer",
-			"Anban" + "Writer",
 			"案" + "板",
 			"royal" + "rick",
-			"royal" + "morty/anban" + "writer",
 			"ab" + "writer",
 		} {
 			if strings.Contains(strings.ToLower(body), strings.ToLower(banned)) {
@@ -224,11 +214,11 @@ func businessLayerMCPDocs(t *testing.T, root string) []string {
 	}
 
 	addFile("CLAUDE.md")
-	addFile(filepath.Join("claudecode", "README.md"))
-	addFile(filepath.Join("claudecode", "docs", "plugin-development.md"))
-	addTree(filepath.Join("claudecode", "agents"))
-	addTree(filepath.Join("claudecode", "skills"))
-	addTree(filepath.Join("codex", "skills"))
+	addFile(filepath.Join("plugins", "anban", "README.md"))
+	addFile(filepath.Join("plugins", "anban", "docs", "plugin-development.md"))
+	addTree(filepath.Join("plugins", "anban", "agents"))
+	addTree(filepath.Join("plugins", "anban", "skills"))
+	addTree(filepath.Join("plugins", "anban", "skills"))
 	addTree(filepath.Join("studio", "src", "components", "connect"))
 	addTree(filepath.Join("miniapp", "src", "pages", "connect"))
 	return out

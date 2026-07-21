@@ -1,0 +1,55 @@
+name: tutorial
+category: article
+description: |
+  教程/操作指南模板——按步骤序号展开的可执行教学。
+  封面 + 每个步骤一张操作图，必须能辨识"在做什么"。
+  关键细节可加特写图。结尾用 checklist + CTA 收束。
+article_types: [tutorial, how-to, guide, walkthrough]
+best_for:
+  - '操作步骤类文章（3-8 步）'
+  - '工具使用、技能教学、流程演示'
+  - '"如何 XXX" 类内容'
+rhythm:
+  hero: required
+  section_opener: required
+  inline_detail: optional
+  footer: required
+image_count:
+  min: 5
+  max: 8
+section_image_size: full-width
+modules:
+  preferred: [steps, checklist, callout, summary]
+  forbidden: [quote]
+pairs_well_with: [steps, checklist]
+composition_guidance:
+  - 步骤图必须包含"手/工具/动作"三要素（让读者一眼看懂在做什么）
+  - 推荐构图：前景/背景（展示操作场景）或 特写（展示关键细节）
+  - 顺序感强——可用对角线流动暗示步骤推进
+  - 禁止纯氛围图（教程需要可读性，不需要电影感）
+vision_verification:
+  required: true
+  strictness: very_high
+  must_match_fields: [visual_brief, required_entities]
+  additional_checks:
+    - "图片中的动作是否清晰可辨"
+    - "工具/材料是否与章节描述一致"
+    - "步骤序号或顺序感能否被视觉感知"
+slot_strategy: |
+  1. hero slot：封面图，2.35:1，建议展示最终成果或核心工具
+  2. section_opener slots：每个步骤一张，16:9，紧跟 ### 步骤 N 标题
+  3. inline_detail slots（可选）：关键操作细节加特写图
+  4. footer slot：必选，使用 checklist 总结要点 + cta
+example_layout_plan: |
+  {
+    "article_type": "tutorial",
+    "template_name": "tutorial",
+    "slots": [
+      { "slot_id": "hero", "section_index": 0, "image_url": "<cover_cdn>", "image_size": "full-bleed", "module": "hero" },
+      { "slot_id": "section_opener", "section_index": 1, "image_url": "<img_01_cdn>", "image_size": "full-width", "module": "steps" },
+      { "slot_id": "inline_detail", "section_index": 1, "after_paragraph_index": 2, "image_url": "<img_02_cdn>", "image_size": "inline", "module": null },
+      { "slot_id": "section_opener", "section_index": 2, "image_url": "<img_03_cdn>", "image_size": "full-width", "module": "steps" },
+      { "slot_id": "section_opener", "section_index": 3, "image_url": "<img_04_cdn>", "image_size": "full-width", "module": "steps" },
+      { "slot_id": "footer", "section_index": -1, "image_url": null, "module": "checklist" }
+    ]
+  }

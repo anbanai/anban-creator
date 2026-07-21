@@ -13,30 +13,30 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 	paths := []string{
 		"server/config.yaml",
 		"server/config.example.yaml",
-		"claudecode/agents/seednote.md",
-		"claudecode/agents/ecommerce.md",
-		"claudecode/agents/moments.md",
-		"claudecode/agents/wechatarticle.md",
-		"claudecode/skills/ecommerce/SKILL.md",
-		"claudecode/skills/article/SKILL.md",
-		"claudecode/skills/seednote-visual-design/SKILL.md",
-		"claudecode/skills/ecommerce-visual-design/SKILL.md",
-		"claudecode/skills/ecommerce-platform-specs/SKILL.md",
-		"claudecode/hooks/hooks.json",
-		"claudecode/README.md",
-		"claudecode/docs/plugin-development.md",
-		"codex/agents/seednote.toml",
-		"codex/agents/ecommerce.toml",
-		"codex/agents/moments.toml",
-		"codex/agents/wechatarticle.toml",
-		"codex/skills/ecommerce/SKILL.md",
-		"codex/skills/article/SKILL.md",
-		"codex/skills/seednote-visual-design/SKILL.md",
-		"codex/skills/ecommerce-visual-design/SKILL.md",
-		"codex/skills/ecommerce-platform-specs/SKILL.md",
-		"codex/hooks/hooks.json",
-		"codex/CODEX.md",
-		"codex/install/agents-registration.toml",
+		"plugins/anban/agents/seednote.md",
+		"plugins/anban/agents/ecommerce.md",
+		"plugins/anban/agents/moments.md",
+		"plugins/anban/agents/wechatarticle.md",
+		"plugins/anban/skills/ecommerce/SKILL.md",
+		"plugins/anban/skills/article/SKILL.md",
+		"plugins/anban/skills/seednote-visual-design/SKILL.md",
+		"plugins/anban/skills/ecommerce-visual-design/SKILL.md",
+		"plugins/anban/skills/ecommerce-platform-specs/SKILL.md",
+		"plugins/anban/hooks/hooks.json",
+		"plugins/anban/README.md",
+		"plugins/anban/docs/plugin-development.md",
+		"plugins/anban/agents/seednote.toml",
+		"plugins/anban/agents/ecommerce.toml",
+		"plugins/anban/agents/moments.toml",
+		"plugins/anban/agents/wechatarticle.toml",
+		"plugins/anban/skills/ecommerce/SKILL.md",
+		"plugins/anban/skills/article/SKILL.md",
+		"plugins/anban/skills/seednote-visual-design/SKILL.md",
+		"plugins/anban/skills/ecommerce-visual-design/SKILL.md",
+		"plugins/anban/skills/ecommerce-platform-specs/SKILL.md",
+		"plugins/anban/hooks/hooks.json",
+		"plugins/anban/CODEX.md",
+		"plugins/anban/install/agents-registration.toml",
 	}
 	forbidden := []string{
 		"archive_workspace",
@@ -67,18 +67,18 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 	}
 
 	workflowPaths := []string{
-		"claudecode/agents/seednote.md",
-		"claudecode/agents/ecommerce.md",
-		"claudecode/agents/moments.md",
-		"claudecode/agents/wechatarticle.md",
-		"claudecode/skills/ecommerce/SKILL.md",
-		"claudecode/skills/article/SKILL.md",
-		"codex/agents/seednote.toml",
-		"codex/agents/ecommerce.toml",
-		"codex/agents/moments.toml",
-		"codex/agents/wechatarticle.toml",
-		"codex/skills/ecommerce/SKILL.md",
-		"codex/skills/article/SKILL.md",
+		"plugins/anban/agents/seednote.md",
+		"plugins/anban/agents/ecommerce.md",
+		"plugins/anban/agents/moments.md",
+		"plugins/anban/agents/wechatarticle.md",
+		"plugins/anban/skills/ecommerce/SKILL.md",
+		"plugins/anban/skills/article/SKILL.md",
+		"plugins/anban/agents/seednote.toml",
+		"plugins/anban/agents/ecommerce.toml",
+		"plugins/anban/agents/moments.toml",
+		"plugins/anban/agents/wechatarticle.toml",
+		"plugins/anban/skills/ecommerce/SKILL.md",
+		"plugins/anban/skills/article/SKILL.md",
 	}
 	for _, relativePath := range workflowPaths {
 		t.Run(relativePath+"/canonical-output", func(t *testing.T) {
@@ -100,12 +100,12 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 	}
 
 	for _, relativePath := range []string{
-		"claudecode/agents/seednote.md",
-		"claudecode/agents/ecommerce.md",
-		"claudecode/skills/ecommerce/SKILL.md",
-		"codex/agents/seednote.toml",
-		"codex/agents/ecommerce.toml",
-		"codex/skills/ecommerce/SKILL.md",
+		"plugins/anban/agents/seednote.md",
+		"plugins/anban/agents/ecommerce.md",
+		"plugins/anban/skills/ecommerce/SKILL.md",
+		"plugins/anban/agents/seednote.toml",
+		"plugins/anban/agents/ecommerce.toml",
+		"plugins/anban/skills/ecommerce/SKILL.md",
 	} {
 		t.Run(relativePath+"/mode-aware-progress", func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
@@ -119,10 +119,10 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 	root := repoRoot(t)
 	for _, relativePath := range []string{
-		"claudecode/agents/ecommerce.md",
-		"claudecode/skills/ecommerce/SKILL.md",
-		"codex/agents/ecommerce.toml",
-		"codex/skills/ecommerce/SKILL.md",
+		"plugins/anban/agents/ecommerce.md",
+		"plugins/anban/skills/ecommerce/SKILL.md",
+		"plugins/anban/agents/ecommerce.toml",
+		"plugins/anban/skills/ecommerce/SKILL.md",
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
@@ -147,7 +147,7 @@ func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 
 func TestCodexOverviewDocsUseCanonicalTaskDelivery(t *testing.T) {
 	root := repoRoot(t)
-	for _, relativePath := range []string{"codex/CODEX.md", "codex/README.md"} {
+	for _, relativePath := range []string{"plugins/anban/CODEX.md", "plugins/anban/docs/codex-installation.md"} {
 		t.Run(relativePath, func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
 			seednote := lineContaining(t, body, "| `seednote` |")
@@ -285,8 +285,8 @@ func indexAfterText(body, needle string, after int) int {
 func TestArchiveWorkspaceImplementationIsAbsent(t *testing.T) {
 	root := repoRoot(t)
 	for _, relativePath := range []string{
-		"claudecode/scripts/archive-seednote-workspace.sh",
-		"codex/scripts/archive-seednote-workspace.sh",
+		"plugins/anban/scripts/archive-seednote-workspace.sh",
+		"plugins/anban/scripts/archive-seednote-workspace.sh",
 	} {
 		path := filepath.Join(root, filepath.FromSlash(relativePath))
 		if _, err := os.Stat(path); !os.IsNotExist(err) {

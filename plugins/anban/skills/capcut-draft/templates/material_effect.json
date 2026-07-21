@@ -1,0 +1,20 @@
+{
+  "adjust_params": __ADJUST_PARAMS__,
+  "apply_target_type": 2,
+  "common_keyframes": [],
+  "effect_id": "__EFFECT_PRESET_ID__",
+  "formula_id": "",
+  "id": "__EFFECT_INSTANCE_ID__",
+  "name": "__EFFECT_NAME__",
+  "platform": "all",
+  "render_index": 0,
+  "request_id": "20230813075814C18E8A692D95AF98747C",
+  "resource_id": "__EFFECT_RESOURCE_ID__",
+  "source_platform": 0,
+  "track_render_index": 0,
+  "type": "video_effect",
+  "value": 1.0,
+  "version": "",
+  "category_id": "__EFFECT_CATEGORY_ID__",
+  "category_name": "__EFFECT_CATEGORY_NAME__"
+}

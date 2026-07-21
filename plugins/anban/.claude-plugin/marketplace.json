@@ -1,0 +1,37 @@
+{
+  "name": "anbanai",
+  "description": "Official Anban Creator Claude Code plugins for Chinese social content creation, publishing, Montage, and ecommerce workflows.",
+  "owner": {
+    "name": "anbanai",
+    "email": "hello@anban.ai"
+  },
+  "plugins": [
+    {
+      "name": "anban",
+      "source": "./",
+      "displayName": "Anban Creator",
+      "version": "2.11.0",
+      "description": "Anban Creator plugin for WeChat, Seednote, Montage, ecommerce, and agent-assisted publishing workflows.",
+      "author": {
+        "name": "anbanai"
+      },
+      "homepage": "https://github.com/royalmorty/anbanwriter/tree/main/plugins/anban",
+      "repository": "https://github.com/royalmorty/anbanwriter",
+      "license": "MIT",
+      "keywords": [
+        "wechat",
+        "mcp-server",
+        "claude-code",
+        "ai-writing",
+        "content-generation",
+        "image-generation",
+        "workflow-automation",
+        "image-post",
+        "seednote",
+        "种草笔记",
+        "cover-image",
+        "Montage"
+      ]
+    }
+  ]
+}

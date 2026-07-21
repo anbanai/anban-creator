@@ -9,7 +9,7 @@ import (
 
 func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 	root := repoRoot(t)
-	agentPath := filepath.Join(root, "claudecode", "agents", "designer.md")
+	agentPath := filepath.Join(root, "plugins", "anban", "agents", "designer.md")
 
 	data, err := os.ReadFile(agentPath)
 	if err != nil {
@@ -61,7 +61,7 @@ func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 
 func TestClaudeCodePluginDocsKeepDesignerMCPContract(t *testing.T) {
 	root := repoRoot(t)
-	claudePath := filepath.Join(root, "claudecode", "docs", "plugin-development.md")
+	claudePath := filepath.Join(root, "plugins", "anban", "docs", "plugin-development.md")
 
 	data, err := os.ReadFile(claudePath)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestClaudeCodePluginDocsKeepDesignerMCPContract(t *testing.T) {
 
 func TestLineArtColoringSkillDocumentsRuntimeLimits(t *testing.T) {
 	root := repoRoot(t)
-	skillPath := filepath.Join(root, "claudecode", "skills", "line-art-coloring", "SKILL.md")
+	skillPath := filepath.Join(root, "plugins", "anban", "skills", "line-art-coloring", "SKILL.md")
 
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -144,7 +144,7 @@ func TestLineArtColoringSkillDocumentsRuntimeLimits(t *testing.T) {
 
 func TestLineArtColoringVerificationReferenceDocumentsBestEffortLimits(t *testing.T) {
 	root := repoRoot(t)
-	path := filepath.Join(root, "claudecode", "skills", "line-art-coloring", "references", "verification.md")
+	path := filepath.Join(root, "plugins", "anban", "skills", "line-art-coloring", "references", "verification.md")
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -174,9 +174,9 @@ func TestLineArtColoringVerificationReferenceDocumentsBestEffortLimits(t *testin
 func TestLineArtColoringDocsMatchAnalyzeImageSingleImageSemantics(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "claudecode", "agents", "designer.md"),
-		filepath.Join(root, "claudecode", "skills", "line-art-coloring", "SKILL.md"),
-		filepath.Join(root, "claudecode", "skills", "line-art-coloring", "references", "verification.md"),
+		filepath.Join(root, "plugins", "anban", "agents", "designer.md"),
+		filepath.Join(root, "plugins", "anban", "skills", "line-art-coloring", "SKILL.md"),
+		filepath.Join(root, "plugins", "anban", "skills", "line-art-coloring", "references", "verification.md"),
 	}
 
 	var body strings.Builder

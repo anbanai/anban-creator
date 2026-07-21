@@ -47,9 +47,11 @@ func isManagedContainerEnv(key string) bool {
 func montageSubmoduleRuntimePath(pluginDir string) string {
 	if strings.TrimSpace(pluginDir) != "" {
 		if absPluginDir, err := filepath.Abs(pluginDir); err == nil {
-			candidate := filepath.Join(filepath.Dir(absPluginDir), "third_party", "OpenMontage")
-			if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-				return candidate
+			for _, base := range []string{filepath.Dir(absPluginDir), filepath.Dir(filepath.Dir(absPluginDir))} {
+				candidate := filepath.Join(base, "third_party", "OpenMontage")
+				if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+					return candidate
+				}
 			}
 		}
 	}
@@ -168,7 +170,7 @@ func AppendResumeContextFileToPrompt(prompt, workDir, relativePath string) strin
 }
 
 // describeRuntimeControls emits compact, machine-readable controls for agents.
-// Detailed semantics live in claudecode agents/skills and docs/plugin-development.md so server code
+// Detailed semantics live in plugins/anban agents/skills and docs/plugin-development.md so server code
 // does not duplicate workflow prose.
 func describeRuntimeControls(p UserPromptParams) string {
 	var controls []string

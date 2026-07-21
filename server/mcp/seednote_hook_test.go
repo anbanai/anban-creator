@@ -18,7 +18,7 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 
 	t.Run("agent owns finalization calls", func(t *testing.T) {
-		agentPath := filepath.Join(root, "claudecode", "agents", "seednote.md")
+		agentPath := filepath.Join(root, "plugins", "anban", "agents", "seednote.md")
 		raw, err := os.ReadFile(agentPath)
 		if err != nil {
 			t.Fatalf("read %s: %v", agentPath, err)
@@ -46,7 +46,7 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 	})
 
 	t.Run("hooks contain only mechanical gates", func(t *testing.T) {
-		hooksPath := filepath.Join(root, "claudecode", "hooks", "hooks.json")
+		hooksPath := filepath.Join(root, "plugins", "anban", "hooks", "hooks.json")
 		hooksRaw, err := os.ReadFile(hooksPath)
 		if err != nil {
 			t.Fatalf("read %s: %v", hooksPath, err)
@@ -88,7 +88,7 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 	})
 
 	t.Run("duplicate umbrella skills are absent", func(t *testing.T) {
-		for _, distro := range []string{"claudecode", "codex"} {
+		for _, distro := range []string{"plugins/anban"} {
 			skillPath := filepath.Join(root, distro, "skills", "seednote", "SKILL.md")
 			if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
 				t.Errorf("%s must not ship a duplicate top-level Seednote Skill", skillPath)
@@ -100,8 +100,8 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 func TestRuntimeHooksDoNotSubmitAgentFeedback(t *testing.T) {
 	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
 	for _, relativePath := range []string{
-		"claudecode/hooks/hooks.json",
-		"codex/hooks/hooks.json",
+		"plugins/anban/hooks/hooks.json",
+		"plugins/anban/hooks/hooks.json",
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			path := filepath.Join(root, filepath.FromSlash(relativePath))
@@ -122,20 +122,20 @@ func TestRuntimeHooksDoNotSubmitAgentFeedback(t *testing.T) {
 func TestActiveRuntimeFeedbackScoresAreSerialized(t *testing.T) {
 	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
 	paths := []string{
-		"claudecode/agents/moments.md",
-		"claudecode/agents/seednote.md",
-		"claudecode/agents/live-slicer.md",
-		"claudecode/agents/ecommerce.md",
-		"claudecode/agents/designer.md",
-		"claudecode/agents/wechatarticle.md",
-		"claudecode/agents/montage.md",
-		"codex/agents/moments.toml",
-		"codex/agents/seednote.toml",
-		"codex/agents/live-slicer.toml",
-		"codex/agents/ecommerce.toml",
-		"codex/agents/designer.toml",
-		"codex/agents/wechatarticle.toml",
-		"codex/agents/montage.toml",
+		"plugins/anban/agents/moments.md",
+		"plugins/anban/agents/seednote.md",
+		"plugins/anban/agents/live-slicer.md",
+		"plugins/anban/agents/ecommerce.md",
+		"plugins/anban/agents/designer.md",
+		"plugins/anban/agents/wechatarticle.md",
+		"plugins/anban/agents/montage.md",
+		"plugins/anban/agents/moments.toml",
+		"plugins/anban/agents/seednote.toml",
+		"plugins/anban/agents/live-slicer.toml",
+		"plugins/anban/agents/ecommerce.toml",
+		"plugins/anban/agents/designer.toml",
+		"plugins/anban/agents/wechatarticle.toml",
+		"plugins/anban/agents/montage.toml",
 	}
 	for _, relativePath := range paths {
 		t.Run(relativePath, func(t *testing.T) {
@@ -153,14 +153,14 @@ func TestChangedRuntimeFeedbackOwnership(t *testing.T) {
 		path         string
 		reportMarker string
 	}{
-		{path: "claudecode/agents/seednote.md", reportMarker: "#### 步骤 12：最终报告"},
-		{path: "claudecode/agents/ecommerce.md", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
-		{path: "claudecode/agents/moments.md", reportMarker: "最终摘要包含"},
-		{path: "claudecode/agents/wechatarticle.md", reportMarker: "步骤 9 的最终验收都已写入报告后"},
-		{path: "codex/agents/seednote.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
-		{path: "codex/agents/ecommerce.toml", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
-		{path: "codex/agents/moments.toml", reportMarker: "最终摘要包含"},
-		{path: "codex/agents/wechatarticle.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
+		{path: "plugins/anban/agents/seednote.md", reportMarker: "#### 步骤 12：最终报告"},
+		{path: "plugins/anban/agents/ecommerce.md", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
+		{path: "plugins/anban/agents/moments.md", reportMarker: "最终摘要包含"},
+		{path: "plugins/anban/agents/wechatarticle.md", reportMarker: "步骤 9 的最终验收都已写入报告后"},
+		{path: "plugins/anban/agents/seednote.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
+		{path: "plugins/anban/agents/ecommerce.toml", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
+		{path: "plugins/anban/agents/moments.toml", reportMarker: "最终摘要包含"},
+		{path: "plugins/anban/agents/wechatarticle.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -269,8 +269,8 @@ func TestSeednoteRuntimeDeliveryContracts(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	paths := []string{
-		filepath.Join(root, "claudecode", "agents", "seednote.md"),
-		filepath.Join(root, "codex", "agents", "seednote.toml"),
+		filepath.Join(root, "plugins", "anban", "agents", "seednote.md"),
+		filepath.Join(root, "plugins", "anban", "agents", "seednote.toml"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -303,7 +303,7 @@ func TestSeednoteRuntimeDeliveryContractRejectsMutations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Clean(filepath.Join(wd, "..", "..", "claudecode", "agents", "seednote.md"))
+	path := filepath.Clean(filepath.Join(wd, "..", "..", "plugins", "anban", "agents", "seednote.md"))
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -441,7 +441,7 @@ func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Clean(filepath.Join(wd, "..", "..", "claudecode", "agents", "seednote.md"))
+	path := filepath.Clean(filepath.Join(wd, "..", "..", "plugins", "anban", "agents", "seednote.md"))
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

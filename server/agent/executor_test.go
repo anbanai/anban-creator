@@ -46,7 +46,7 @@ func TestExecutionOptionsDoesNotExposeModelOverride(t *testing.T) {
 
 func TestMontageSubmoduleRuntimePathUsesRepoSiblingWhenAvailable(t *testing.T) {
 	root := t.TempDir()
-	pluginDir := filepath.Join(root, "claudecode")
+	pluginDir := filepath.Join(root, "plugins", "anban")
 	montageDir := filepath.Join(root, "third_party", "OpenMontage")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		t.Fatalf("create plugin dir: %v", err)
@@ -1010,10 +1010,10 @@ func TestLoadAgentDefinition(t *testing.T) {
 	})
 
 	t.Run("real agent files load", func(t *testing.T) {
-		pluginDir := filepath.Join("..", "..", "claudecode")
+		pluginDir := filepath.Join("..", "..", "plugins", "anban")
 		entries, err := os.ReadDir(filepath.Join(pluginDir, "agents"))
 		if err != nil {
-			t.Skip("claudecode submodule not available")
+			t.Skip("unified plugin source not available")
 		}
 		for _, a := range entries {
 			name := a.Name()
@@ -1039,7 +1039,7 @@ func TestLoadAgentDefinition(t *testing.T) {
 				} else if len(def.Tools) != 0 {
 					// All MCP-needing agents omit `tools:` to inherit the full MCP
 					// toolset (Claude Code treats `tools` as an allowlist — see
-					// claudecode/docs/plugin-development.md). designer is asserted above; the others must
+					// plugins/anban/docs/plugin-development.md). designer is asserted above; the others must
 					// also omit. The legacy "must specify tools" policy was dropped when
 					// agents migrated to MCP-tool inheritance.
 					t.Errorf("%s agent should omit tools frontmatter to inherit MCP tools; got %v", agentName, def.Tools)

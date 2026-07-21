@@ -48,9 +48,11 @@ export default function ClaudeGuide() {
 
       <InstallStep
         cliName="Claude Code CLI"
-        oneLiner="帮我安装 Anban Creator Claude Code 插件 https://github.com/anbanai/anban-creator-claudecode"
+        oneLiner="帮我安装 Anban Creator Claude Code 插件 https://github.com/royalmorty/anbanwriter/tree/main/plugins/anban"
         oneLinerHint="AI 会自动添加 marketplace 源并完成插件安装。"
-        advancedCli={`claude plugin marketplace add anbanai/anban-creator-claudecode
+        advancedCli={`git clone https://github.com/royalmorty/anbanwriter.git
+cd anbanwriter
+claude plugin marketplace add ./plugins/anban
 claude plugin install --scope user anban@anbanai`}
         advancedHint="`anban@anbanai` 表示插件 ID `anban` 来自发布方 `anbanai`；MCP server key 固定为 `creator`，具体工具名由 Claude Code 运行时处理。"
       />

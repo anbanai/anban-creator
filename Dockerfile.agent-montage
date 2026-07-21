@@ -38,7 +38,7 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "mcporter@
     gh --version
 
 COPY --from=builder /out/anban /usr/local/bin/anban
-COPY claudecode/ /anbanai/
+COPY plugins/anban/ /anbanai/
 COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/
 COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
 

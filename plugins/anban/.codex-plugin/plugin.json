@@ -1,0 +1,51 @@
+{
+  "name": "anban",
+  "version": "2.11.0",
+  "description": "Anban Creator plugin for OpenAI Codex — WeChat, Seednote, Montage, ecommerce, and agent-assisted publishing workflows",
+  "author": {
+    "name": "anbanai",
+    "url": "https://github.com/anbanai"
+  },
+  "homepage": "https://github.com/royalmorty/anbanwriter/tree/main/plugins/anban",
+  "repository": "https://github.com/royalmorty/anbanwriter",
+  "license": "MIT",
+  "keywords": [
+    "wechat",
+    "weixin",
+    "content-creation",
+    "ai-writing",
+    "visual-design",
+    "seo-optimization",
+    "publishing",
+    "mcp-server",
+    "codex",
+    "chinese-content",
+    "social-media",
+    "official-account",
+    "seednote",
+    "种草笔记",
+    "cover-image",
+    "line-art",
+    "coloring",
+    "color-consistency",
+    "design",
+    "designer",
+    "Montage"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Anban Creator",
+    "shortDescription": "Chinese social content creation workflows",
+    "longDescription": "Create WeChat articles, Seednote posts, ecommerce assets, live clips, and publishing-ready deliverables with shared Anban Skills and native Codex subagents.",
+    "developerName": "anbanai",
+    "category": "Productivity",
+    "capabilities": [
+      "Skills",
+      "Subagents",
+      "MCP workflows"
+    ],
+    "websiteURL": "https://creator.anbanai.com",
+    "brandColor": "#C2413B",
+    "defaultPrompt": "Use Anban Creator Skills to produce a complete, file-backed content deliverable for my request."
+  }
+}

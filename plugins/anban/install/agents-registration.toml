@@ -1,0 +1,52 @@
+# Codex subagent registration — append (or merge) into ~/.codex/config.toml
+#
+# This file is consumed by install-subagents.sh. It registers the seven anban-creator
+# subagents and enables the multi-agent feature flag.
+#
+# WARNING: do NOT paste this verbatim if your ~/.codex/config.toml already declares
+# any of these tables. Run install-subagents.sh instead — it is idempotent.
+
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 7
+
+[mcp_servers.creator]
+url = "https://api.creator.anbanai.com/mcp"
+bearer_token_env_var = "ANBAN_API_KEY"
+
+[agents.wechatarticle]
+description = "微信公众号图文全自动创作引擎（选题 → 草稿）"
+config_file = "~/.codex/agents/wechatarticle.toml"
+nickname_candidates = ["Writer", "ArticleBot", "公众号写手"]
+
+[agents.seednote]
+description = "种草笔记全自动创作引擎（原创 + 复刻）"
+config_file = "~/.codex/agents/seednote.toml"
+nickname_candidates = ["NoteBot", "Seeder", "种草机器"]
+
+[agents.moments]
+description = "朋友圈素材包全自动创作 Agent（素材拆解 → 正文 → 质量复盘 → 交付）"
+config_file = "~/.codex/agents/moments.toml"
+nickname_candidates = ["Moments", "朋友圈写手", "PrivateDomain"]
+
+[agents.designer]
+description = "线稿批量上色与一致性审计引擎"
+config_file = "~/.codex/agents/designer.toml"
+nickname_candidates = ["Colorist", "Designer", "上色师"]
+
+[agents.live-slicer]
+description = "直播视频智能切片引擎（ffmpeg + 听悟 + 剪映草稿）"
+config_file = "~/.codex/agents/live-slicer.toml"
+nickname_candidates = ["Slicer", "Cutter", "切片机"]
+
+[agents.ecommerce]
+description = "电商出图全自动执行引擎（多产品图 → 主图/详情/封面/分享/SKU，保证产品跨图一致）"
+config_file = "~/.codex/agents/ecommerce.toml"
+nickname_candidates = ["ShopBot", "Merchant", "电商出图师"]
+
+[agents.montage]
+description = "Montage 视频生产引擎（业务 brief + 素材 → Montage pipeline → 成片交付）"
+config_file = "~/.codex/agents/montage.toml"
+nickname_candidates = ["Montage", "Montage", "视频生产"]

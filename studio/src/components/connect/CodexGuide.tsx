@@ -48,14 +48,14 @@ export default function CodexGuide() {
 
       <InstallStep
         cliName="Codex CLI"
-        oneLiner="帮我安装 Anban Creator Codex 插件 https://github.com/anbanai/anban-creator-codex"
-        oneLinerHint="AI 会自动完成 marketplace 注册、插件安装、以及 5 个 subagent 的注册。"
-        advancedCli={`git clone https://github.com/anbanai/anban-creator-codex.git
-cd anban-creator-codex
-codex plugin marketplace add .
+        oneLiner="帮我安装 Anban Creator Codex 插件 https://github.com/royalmorty/anbanwriter/tree/main/plugins/anban"
+        oneLinerHint="AI 会自动完成 marketplace 注册、插件安装、以及 7 个 subagent 的注册。"
+        advancedCli={`git clone https://github.com/royalmorty/anbanwriter.git
+cd anbanwriter
+codex plugin marketplace add ./plugins/anban
 codex plugin install anban
-bash install/install-subagents.sh`}
-        advancedHint="最后一行脚本会把 5 个 subagent 注册到 `~/.codex/config.toml`（幂等，可重复执行）。"
+bash plugins/anban/install/install-subagents.sh`}
+        advancedHint="最后一行脚本会把 7 个 subagent 注册到 `~/.codex/config.toml`（幂等，可重复执行）。"
       />
 
       <StepCard step={4} title="配置 API Key">

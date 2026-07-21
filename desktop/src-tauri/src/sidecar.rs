@@ -15,7 +15,7 @@ pub struct SidecarEnv {
     /// Path to the bundled Node executable (its parent dir is prepended to PATH
     /// so claude-agent-sdk-go can spawn the `claude` CLI).
     pub node_bin: PathBuf,
-    /// Bundled claudecode plugin root → CLAUDE_PLUGIN_ROOT.
+    /// Bundled unified Anban plugin root → CLAUDE_PLUGIN_ROOT.
     pub plugin_dir: PathBuf,
     /// ANTHROPIC_API_KEY forwarded to Claude Code; provisioning requires it.
     pub anthropic_api_key: String,

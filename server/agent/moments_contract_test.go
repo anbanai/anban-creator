@@ -10,7 +10,7 @@ import (
 func TestMomentsAgentAndSkillContracts(t *testing.T) {
 	root := repositoryRoot(t)
 
-	claudeAgent := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "moments.md"))
+	claudeAgent := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "moments.md"))
 	for _, want := range []string{
 		"name: moments",
 		"$TASK_ID",
@@ -34,7 +34,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		}
 	}
 
-	codexAgent := readRepoFile(t, filepath.Join(root, "codex", "agents", "moments.toml"))
+	codexAgent := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "moments.toml"))
 	for _, want := range []string{
 		`name = "moments"`,
 		"skills/moments/SKILL.md",
@@ -54,7 +54,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		}
 	}
 
-	reg := readRepoFile(t, filepath.Join(root, "codex", "install", "agents-registration.toml"))
+	reg := readRepoFile(t, filepath.Join(root, "plugins", "anban", "install", "agents-registration.toml"))
 	if !strings.Contains(reg, "[agents.moments]") {
 		t.Fatal("codex agents-registration.toml missing moments registration")
 	}
@@ -62,7 +62,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 
 func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 	root := repositoryRoot(t)
-	claudeAgent := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "moments.md"))
+	claudeAgent := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "moments.md"))
 	if err := validateClaudeAgentFeedbackContract(
 		claudeAgent,
 		"moments",
@@ -83,29 +83,14 @@ func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 		}
 	}
 
-	codexHooks := readRepoFile(t, filepath.Join(root, "codex", "hooks", "hooks.json"))
-	for _, want := range []string{
-		`"matcher": "moments"`,
-		"material-analysis.md",
-		"quality-review.md",
-		"只读质量摘要",
-	} {
-		if !strings.Contains(codexHooks, want) {
-			t.Fatalf("codex hooks missing moments delivery term %q", want)
-		}
-	}
-	if strings.Contains(codexHooks, "submit_agent_feedback") {
-		t.Fatal("codex hooks must not submit agent-owned feedback")
-	}
-
 }
 
 func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 	root := repositoryRoot(t)
-	claudeSkill := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "moments", "SKILL.md"))
-	claudeExamples := readRepoFile(t, filepath.Join(root, "claudecode", "skills", "moments", "references", "examples.md"))
+	claudeSkill := readRepoFile(t, filepath.Join(root, "plugins", "anban", "skills", "moments", "SKILL.md"))
+	claudeExamples := readRepoFile(t, filepath.Join(root, "plugins", "anban", "skills", "moments", "references", "examples.md"))
 
-	for _, plugin := range []string{"claudecode", "codex"} {
+	for _, plugin := range []string{"plugins/anban"} {
 		t.Run(plugin, func(t *testing.T) {
 			skillPath := filepath.Join(root, plugin, "skills", "moments", "SKILL.md")
 			body := readRepoFile(t, skillPath)
@@ -147,9 +132,14 @@ func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 			if plugin != "claudecode" && examples != claudeExamples {
 				t.Fatalf("%s must match claudecode moments examples", examplesPath)
 			}
-			for _, want := range []string{"## Source Patterns", "Anthropic official", "GitHub high-star", "## How To Use These Cases", "### Case "} {
+			for _, want := range []string{"### Case "} {
 				if !strings.Contains(examples, want) {
 					t.Fatalf("%s missing examples contract term %q", examplesPath, want)
+				}
+			}
+			for _, boilerplate := range []string{"## Source Patterns", "Anthropic official", "GitHub high-star", "## How To Use These Cases"} {
+				if strings.Contains(examples, boilerplate) {
+					t.Fatalf("%s contains context-only template prose %q", examplesPath, boilerplate)
 				}
 			}
 		})
@@ -158,7 +148,7 @@ func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 
 func TestMomentsSkillDoesNotVendorReferenceRepository(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, plugin := range []string{"claudecode", "codex"} {
+	for _, plugin := range []string{"plugins/anban"} {
 		dir := filepath.Join(root, plugin, "skills", "moments")
 		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

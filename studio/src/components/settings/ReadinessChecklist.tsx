@@ -40,7 +40,7 @@ export function ReadinessChecklist({
       <Readiness ok={status?.agent_present} label="anban" />
       <Readiness ok={status?.node_present} label="Node 运行时" />
       <Readiness ok={status?.claude_present} label="claude-code" />
-      <Readiness ok={status?.plugin_present} label="claudecode 插件" />
+      <Readiness ok={status?.plugin_present} label="Anban 插件" />
       <Readiness ok={status?.ffmpeg_present} label="ffmpeg（可选）" optional />
     </ul>
   )

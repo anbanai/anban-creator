@@ -13,13 +13,12 @@
 /coverage/
 *.log
 
-# Frontend, desktop, mobile, and plugin distributions that are not needed for
-# building the server/agent Go binaries. claudecode/ is intentionally kept
-# because Dockerfile.agent copies it into the Agent runtime image.
+# Frontend, desktop, and mobile sources that are not needed for
+# building the server/agent Go binaries. plugins/anban/ is intentionally kept
+# because the Agent Dockerfiles copy it into the runtime image.
 /studio/
 /desktop/
 /miniapp/
-/codex/
 /wcflink/
 /seednote-workspace/
 /eval-article-viral-strategy/

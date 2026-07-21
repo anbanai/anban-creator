@@ -194,7 +194,7 @@ func TestAgentDockerfileUsesOpenHandsAgentRuntime(t *testing.T) {
 		"claude --version",
 		"mcporter --version",
 		"gh --version",
-		"COPY claudecode/",
+		"COPY plugins/anban/",
 		"COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/",
 		"ENV AGENT_REACH_VENV=/opt/agent-reach-venv",
 		`python3 -m venv "$AGENT_REACH_VENV"`,
@@ -224,7 +224,7 @@ func TestDockerRuntimeProfiles(t *testing.T) {
 		for _, want := range []string{
 			"ARG CLAUDE_CODE_VERSION=2.1.208",
 			"COPY --from=builder /out/anban",
-			"COPY claudecode/",
+			"COPY plugins/anban/",
 			"ENTRYPOINT",
 		} {
 			if !strings.Contains(body, want) {
@@ -304,7 +304,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"ghcr.io/openhands/agent-server",
 		"./agent",
 		"/usr/local/bin/anban",
-		"COPY claudecode/",
+		"COPY plugins/anban/",
 		"COPY third_party/OpenMontage/",
 		"COPY third_party/Agent-Reach/",
 		"AGENT_REACH_VENV",
@@ -527,7 +527,6 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 	for _, want := range []string{
 		"desktop/",
 		"miniapp/",
-		"codex/",
 		"**/node_modules/",
 		"**/dist/",
 		"**/.cache/",
@@ -535,6 +534,9 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf(".dockerignore missing %q", want)
 		}
+	}
+	if strings.Contains(body, "/plugins/") || strings.Contains(body, "/plugins/anban/") {
+		t.Fatal(".dockerignore must keep the unified plugin available to Agent Docker builds")
 	}
 }
 
@@ -636,7 +638,7 @@ func TestCollectOwnedDockerfilesDetectsUnexpectedEntrypoints(t *testing.T) {
 	got := collectOwnedDockerfilePaths([]string{
 		"Dockerfile.server",
 		"nested/Dockerfile.extra",
-		"claudecode/Dockerfile.plugin",
+		"plugins/anban/Dockerfile.plugin",
 		"third_party/tool/Dockerfile",
 		"web/node_modules/Dockerfile",
 		"web/dist/Dockerfile.generated",
@@ -918,7 +920,7 @@ func dockerignoreRuleIndex(t *testing.T, rules []string, want string) int {
 func ownedDockerContractPath(path string) bool {
 	for _, segment := range strings.Split(filepath.ToSlash(path), "/") {
 		switch segment {
-		case ".git", ".worktrees", "claudecode", "codex", "third_party", "vendor", "node_modules", "dist", "build", "coverage", ".cache", ".vite", ".next", "bin", "data", "release":
+		case ".git", ".worktrees", "plugins", "third_party", "vendor", "node_modules", "dist", "build", "coverage", ".cache", ".vite", ".next", "bin", "data", "release":
 			return false
 		}
 	}

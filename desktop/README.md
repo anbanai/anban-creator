@@ -14,7 +14,7 @@ Studio SPA (webview) ──(JWT + /api + SSE)──►  Cloud server (anbanai)
 Rust local executor ──(user API key)──► POST /api/v1/agent/claim ──► Cloud
       │  (claims the oldest pending local-target task)
       ▼  spawn sidecar
-anban + Node + claude-code + claudecode plugin + ffmpeg
+anban + Node + claude-code + unified Anban plugin + ffmpeg
       │  (real local workspace + shell)
       └──(/agent/progress + /agent/upload)──► Cloud ──(SSE)──► Studio UI
 ```
@@ -66,7 +66,7 @@ bash desktop/populate-resources.sh
 ```
 
 Fills `src-tauri/resources/` with: `anban` (native), `node`,
-`@anthropic-ai/claude-code`, the `claudecode` plugin, and `ffmpeg`.
+`@anthropic-ai/claude-code`, the unified Anban plugin, and `ffmpeg`.
 
 ### 2. Install + run
 

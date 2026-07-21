@@ -9,7 +9,7 @@ import (
 
 func TestGuizangSocialCardSkillIsNotDistributed(t *testing.T) {
 	root := repoRoot(t)
-	for _, plugin := range []string{"claudecode", "codex"} {
+	for _, plugin := range []string{"plugins/anban"} {
 		t.Run(plugin, func(t *testing.T) {
 			dir := filepath.Join(root, plugin, "skills", "guizang-social-card")
 			if _, err := os.Stat(dir); !os.IsNotExist(err) {
@@ -22,13 +22,13 @@ func TestGuizangSocialCardSkillIsNotDistributed(t *testing.T) {
 func TestGuizangSocialCardRoutingIsRemoved(t *testing.T) {
 	root := repoRoot(t)
 	files := []string{
-		filepath.Join(root, "claudecode", "agents", "seednote.md"),
-		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
-		filepath.Join(root, "codex", "agents", "moments.toml"),
-		filepath.Join(root, "codex", "agents", "seednote.toml"),
-		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
+		filepath.Join(root, "plugins", "anban", "agents", "seednote.md"),
+		filepath.Join(root, "plugins", "anban", "agents", "wechatarticle.md"),
+		filepath.Join(root, "plugins", "anban", "agents", "moments.toml"),
+		filepath.Join(root, "plugins", "anban", "agents", "seednote.toml"),
+		filepath.Join(root, "plugins", "anban", "agents", "wechatarticle.toml"),
 	}
-	for _, plugin := range []string{"claudecode", "codex"} {
+	for _, plugin := range []string{"plugins/anban"} {
 		for _, skill := range []string{"moments", "seednote-visual-design", "article-visual-design", "article-cover-design"} {
 			files = append(files, filepath.Join(root, plugin, "skills", skill, "SKILL.md"))
 		}

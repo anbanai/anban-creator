@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestHumanizerSkillMirrorsPinnedUpstream(t *testing.T) {
+func TestHumanizerSkillNormalizesPinnedUpstream(t *testing.T) {
 	root := repoRoot(t)
 	upstreamPath := filepath.Join(root, "third_party", "Humanizer", "SKILL.md")
 	upstream := readRepoFile(t, upstreamPath)
@@ -30,11 +30,13 @@ func TestHumanizerSkillMirrorsPinnedUpstream(t *testing.T) {
 		}
 	}
 
-	for _, distro := range []string{"claudecode", "codex"} {
+	normalized := strings.ReplaceAll(upstream, "version: 2.8.2\n", "")
+	normalized = strings.ReplaceAll(normalized, "compatibility: any-agent\n", "")
+	for _, distro := range []string{"plugins/anban"} {
 		skillDir := filepath.Join(root, distro, "skills", "humanizer")
 		path := filepath.Join(skillDir, "SKILL.md")
-		if got := readRepoFile(t, path); got != upstream {
-			t.Fatalf("%s must be byte-identical to %s", path, upstreamPath)
+		if got := readRepoFile(t, path); got != normalized {
+			t.Fatalf("%s must equal the cross-host normalized form of %s", path, upstreamPath)
 		}
 		referencesDir := filepath.Join(skillDir, "references")
 		entries, err := os.ReadDir(referencesDir)
@@ -66,9 +68,9 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 	for _, want := range []string{
 		"git -C \"$submodule_path\" fetch --prune origin \"$branch\"",
 		"git -C \"$submodule_path\" checkout --detach \"origin/$branch\"",
-		"for distro in claudecode codex; do",
+		"skill_dir=plugins/anban/skills/humanizer",
 		"rm -rf \"$skill_dir/references\"",
-		"cp \"$source_skill\" \"$destination\"",
+		"sed '/^version:[[:space:]]*/d; /^compatibility:[[:space:]]*/d' \"$source_skill\" > \"$destination\"",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("update-humanizer.sh missing %q", want)
@@ -85,9 +87,9 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
-		"claudecode/agents/wechatarticle.md",
-		"claudecode/agents/ecommerce.md",
-		"claudecode/agents/moments.md",
+		"plugins/anban/agents/wechatarticle.md",
+		"plugins/anban/agents/ecommerce.md",
+		"plugins/anban/agents/moments.md",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		frontmatter := frontmatterBlock(t, body)
@@ -96,29 +98,29 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 		}
 	}
 
-	seednoteAgent := readRepoFile(t, filepath.Join(root, "claudecode", "agents", "seednote.md"))
+	seednoteAgent := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "seednote.md"))
 	if strings.Contains(seednoteAgent, "anban:humanizer") || strings.Contains(seednoteAgent, "using the `humanizer` skill") {
 		t.Fatal("Claude Seednote must use its compact built-in de-AI pass instead of loading the general Humanizer Skill")
 	}
 
 	for _, relPath := range []string{
-		"codex/agents/wechatarticle.toml",
-		"codex/agents/ecommerce.toml",
-		"codex/agents/moments.toml",
+		"plugins/anban/agents/wechatarticle.toml",
+		"plugins/anban/agents/ecommerce.toml",
+		"plugins/anban/agents/moments.toml",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		if !strings.Contains(body, `path = "__PLUGIN_ROOT__/skills/humanizer/SKILL.md"`) {
 			t.Fatalf("%s must inject the bundled humanizer skill", relPath)
 		}
 	}
-	codexSeednote := readRepoFile(t, filepath.Join(root, "codex", "agents", "seednote.toml"))
+	codexSeednote := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "seednote.toml"))
 	if strings.Contains(codexSeednote, `skills/humanizer/SKILL.md`) {
 		t.Fatal("Codex Seednote must use seednote-writing's built-in de-AI pass instead of preloading Humanizer")
 	}
 
 	dockerfile := readRepoFile(t, filepath.Join(root, "Dockerfile.agent"))
 	for _, want := range []string{
-		"COPY claudecode/   /anbanai/",
+		"COPY plugins/anban/ /anbanai/",
 		"claude plugin install --scope user anban@anbanai",
 		`cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"`,
 	} {
@@ -138,24 +140,24 @@ func TestHumanizerBusinessConstraintsStayInOwningWorkflows(t *testing.T) {
 		{
 			name: "seednote",
 			relPaths: []string{
-				"claudecode/skills/seednote-writing/SKILL.md",
-				"codex/skills/seednote-writing/SKILL.md",
+				"plugins/anban/skills/seednote-writing/SKILL.md",
+				"plugins/anban/skills/seednote-writing/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "仍 ≤1000 字", "不得在改写中引入新的违禁词"},
 		},
 		{
 			name: "article",
 			relPaths: []string{
-				"claudecode/skills/article/SKILL.md",
-				"codex/skills/article/SKILL.md",
+				"plugins/anban/skills/article/SKILL.md",
+				"plugins/anban/skills/article/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "覆盖原文全部信息点", "不得引入新的违禁词或导流风险"},
 		},
 		{
 			name: "ecommerce",
 			relPaths: []string{
-				"claudecode/skills/ecommerce-copywriting/SKILL.md",
-				"codex/skills/ecommerce-copywriting/SKILL.md",
+				"plugins/anban/skills/ecommerce-copywriting/SKILL.md",
+				"plugins/anban/skills/ecommerce-copywriting/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "FABE 信息点", "先去 AI，后合规"},
 		},

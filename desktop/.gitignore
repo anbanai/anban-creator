@@ -9,6 +9,8 @@ src-tauri/gen/
 # too large and platform-specific)
 src-tauri/resources/bin/
 src-tauri/resources/claude/
+src-tauri/resources/anban/
+# Legacy generated bundle; the next populate-resources.sh run creates anban/.
 src-tauri/resources/claudecode/
 
 # Generated app icons (keep the source if you author them; ignore scratch)

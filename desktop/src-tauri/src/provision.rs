@@ -110,7 +110,7 @@ pub fn status_with_runtime(
     } else if !node_present || !claude_present {
         "缺少内置 Node / claude-code 运行时（请运行 populate-resources.sh）".to_string()
     } else if !plugin_present {
-        "缺少内置 claudecode 插件（请运行 populate-resources.sh）".to_string()
+        "缺少内置 Anban 插件（请运行 populate-resources.sh）".to_string()
     } else {
         "依赖未就绪".to_string()
     };
@@ -268,7 +268,7 @@ mod tests {
             agent_bin: Some(PathBuf::from("/bundle/anban")),
             node_bin: Some(PathBuf::from("/bundle/node")),
             claude_cli: Some(PathBuf::from("/bundle/claude")),
-            plugin_dir: Some(PathBuf::from("/bundle/claudecode")),
+            plugin_dir: Some(PathBuf::from("/bundle/anban")),
             ffmpeg: Some(PathBuf::from("/bundle/ffmpeg")),
         }
     }

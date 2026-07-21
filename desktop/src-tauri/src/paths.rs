@@ -14,7 +14,7 @@ pub struct Resources {
     pub node_bin: Option<PathBuf>,
     /// Bundled `@anthropic-ai/claude-code` package root / CLI entry.
     pub claude_cli: Option<PathBuf>,
-    /// Bundled `claudecode/` plugin root, pointed at via CLAUDE_PLUGIN_ROOT.
+    /// Bundled unified Anban plugin root, pointed at via CLAUDE_PLUGIN_ROOT.
     pub plugin_dir: Option<PathBuf>,
     /// Bundled ffmpeg binary (for live-slicer / video work).
     pub ffmpeg: Option<PathBuf>,
@@ -27,7 +27,7 @@ pub fn resolve(app: &tauri::AppHandle) -> Resources {
         agent_bin: resolve_one(app, "resources/bin/anban"),
         node_bin: resolve_one(app, "resources/bin/node"),
         claude_cli: resolve_one(app, "resources/claude"),
-        plugin_dir: resolve_one(app, "resources/claudecode"),
+        plugin_dir: resolve_one(app, "resources/anban"),
         ffmpeg: resolve_one(app, "resources/bin/ffmpeg"),
     }
 }

@@ -1508,19 +1508,15 @@ func (c *Config) resolvePaths(rootConfigDir string) {
 	}
 }
 
-// detectPluginDir attempts to locate the Anban Creator plugin directory
-// that contains agents/. It checks the claudecode submodule first,
-// then the legacy plugin/ subdirectory, then searches upward from CWD.
+// detectPluginDir attempts to locate the unified Anban Creator plugin directory
+// that contains agents/. It checks the monorepo location first, then searches
+// upward from CWD or the executable directory.
 func detectPluginDir() string {
 	var candidates []string
 	if wd, err := os.Getwd(); err == nil {
-		// Check for claudecode submodule.
-		if info, err := os.Stat(filepath.Join(wd, "claudecode", "agents")); err == nil && info.IsDir() {
-			return filepath.Join(wd, "claudecode")
-		}
-		// Check for legacy plugin/ subdirectory.
-		if info, err := os.Stat(filepath.Join(wd, "plugin", "agents")); err == nil && info.IsDir() {
-			return filepath.Join(wd, "plugin")
+		pluginDir := filepath.Join(wd, "plugins", "anban")
+		if info, err := os.Stat(filepath.Join(pluginDir, "agents")); err == nil && info.IsDir() {
+			return pluginDir
 		}
 		candidates = append(candidates, wd)
 	}
@@ -1532,6 +1528,10 @@ func detectPluginDir() string {
 	}
 	for _, dir := range candidates {
 		for range 5 {
+			pluginDir := filepath.Join(dir, "plugins", "anban")
+			if info, err := os.Stat(filepath.Join(pluginDir, "agents")); err == nil && info.IsDir() {
+				return pluginDir
+			}
 			if info, err := os.Stat(filepath.Join(dir, "agents")); err == nil && info.IsDir() {
 				return dir
 			}

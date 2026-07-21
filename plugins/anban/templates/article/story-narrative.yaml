@@ -1,0 +1,53 @@
+name: story-narrative
+category: article
+description: |
+  故事/叙事模板——场景化、氛围化、情节驱动。
+  封面定调，每个场景一张电影感图。情感高点可加特写。
+  优先氛围与情绪，而非信息密度。
+article_types: [story, narrative, personal-essay, memoir]
+best_for:
+  - '个人故事、回忆录、人物速写'
+  - '场景化叙事、情感共鸣内容'
+  - '"那个 XXX 的下午" 类开头'
+rhythm:
+  hero: required
+  section_opener: required
+  inline_detail: optional
+  footer: optional
+image_count:
+  min: 4
+  max: 6
+section_image_size: full-width
+modules:
+  preferred: [quote, callout]
+  forbidden: [steps, metrics]
+pairs_well_with: [quote]
+composition_guidance:
+  - 电影感、氛围优先于信息
+  - 推荐构图：留白主导 / 前景背景 / 三分法
+  - 颜色和光影承担情绪表达（暖光=温暖回忆，冷调=疏离/紧张）
+  - 避免直白叙事图，让读者通过氛围感受情绪
+vision_verification:
+  required: true
+  strictness: medium
+  must_match_fields: [visual_brief, required_entities, mood]
+  additional_checks:
+    - "图片情绪是否与章节情感基调一致"
+    - "场景是否与章节地点/时间/人物对应"
+slot_strategy: |
+  1. hero slot：封面图，2.35:1，建立全篇情绪基调
+  2. section_opener slots：每个场景一张，16:9，电影感
+  3. inline_detail slots（可选）：情感高点加特写（如物件、表情）
+  4. footer slot（可选）：余韵图或留白
+example_layout_plan: |
+  {
+    "article_type": "story-narrative",
+    "template_name": "story-narrative",
+    "slots": [
+      { "slot_id": "hero", "section_index": 0, "image_url": "<cover_cdn>", "image_size": "full-bleed", "module": "hero" },
+      { "slot_id": "section_opener", "section_index": 1, "image_url": "<img_01_cdn>", "image_size": "full-width", "module": "quote" },
+      { "slot_id": "section_opener", "section_index": 2, "image_url": "<img_02_cdn>", "image_size": "full-width", "module": null },
+      { "slot_id": "inline_detail", "section_index": 2, "after_paragraph_index": 3, "image_url": "<img_03_cdn>", "image_size": "inline", "module": null },
+      { "slot_id": "section_opener", "section_index": 3, "image_url": "<img_04_cdn>", "image_size": "full-width", "module": "quote" }
+    ]
+  }

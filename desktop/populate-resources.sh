@@ -3,7 +3,7 @@
 # Populate desktop/src-tauri/resources/ with the bundled runtime dependencies
 # the Tauri app needs to run Claude Code tasks locally. Run once before
 # `bun tauri build` (and again whenever the agent binary, Node, claude-code,
-# the claudecode plugin, or ffmpeg change).
+# the unified Anban plugin, or ffmpeg change).
 #
 # macOS-only for now (matches the v1 target platform). Requires:
 #   - Go toolchain (for `make agent-build-native`)
@@ -21,7 +21,7 @@ RES_DIR="$REPO_ROOT/desktop/src-tauri/resources"
 BIN_DIR="$RES_DIR/bin"
 
 echo "==> Resource target: $RES_DIR"
-mkdir -p "$BIN_DIR" "$RES_DIR/claude" "$RES_DIR/claudecode"
+mkdir -p "$BIN_DIR" "$RES_DIR/claude" "$RES_DIR/anban"
 
 # ---------------------------------------------------------------------------
 # 1. anban sidecar (native Go build for this host arch).
@@ -69,17 +69,16 @@ cp -R "$STAGE/node_modules/@anthropic-ai/claude-code" "$RES_DIR/claude"
 echo "    -> $RES_DIR/claude"
 
 # ---------------------------------------------------------------------------
-# 4. claudecode plugin (git submodule) → CLAUDE_PLUGIN_ROOT.
+# 4. Unified Anban plugin → CLAUDE_PLUGIN_ROOT.
 # ---------------------------------------------------------------------------
-echo "==> Bundling claudecode plugin…"
-( cd "$REPO_ROOT" && git submodule update --init --recursive >/dev/null 2>&1 || true )
-if [[ ! -d "$REPO_ROOT/claudecode/.claude-plugin" ]]; then
-  echo "ERROR: claudecode submodule missing or not checked out." >&2
+echo "==> Bundling Anban plugin…"
+if [[ ! -d "$REPO_ROOT/plugins/anban/.claude-plugin" ]]; then
+  echo "ERROR: plugins/anban is missing the Claude Code manifest." >&2
   exit 1
 fi
-rm -rf "$RES_DIR/claudecode"
-cp -R "$REPO_ROOT/claudecode" "$RES_DIR/claudecode"
-echo "    -> $RES_DIR/claudecode"
+rm -rf "$RES_DIR/anban"
+cp -R "$REPO_ROOT/plugins/anban" "$RES_DIR/anban"
+echo "    -> $RES_DIR/anban"
 
 # ---------------------------------------------------------------------------
 # 5. ffmpeg (optional; needed only for live-slicer / video work).

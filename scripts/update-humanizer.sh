@@ -36,18 +36,18 @@ test -f "$source_skill" || {
   exit 1
 }
 
-for distro in claudecode codex; do
-  skill_dir=$distro/skills/humanizer
-  destination=$skill_dir/SKILL.md
-  test -d "$skill_dir" || {
-    echo "error: missing bundled Humanizer directory for $distro" >&2
-    exit 1
-  }
-  rm -rf "$skill_dir/references"
-  cp "$source_skill" "$destination"
-done
+skill_dir=plugins/anban/skills/humanizer
+destination=$skill_dir/SKILL.md
+test -d "$skill_dir" || {
+  echo "error: missing bundled Humanizer directory at $skill_dir" >&2
+  exit 1
+}
+rm -rf "$skill_dir/references"
+# Keep the upstream body intact while emitting frontmatter accepted by both
+# Claude Code and Codex. Version provenance remains pinned by the submodule SHA.
+sed '/^version:[[:space:]]*/d; /^compatibility:[[:space:]]*/d' "$source_skill" > "$destination"
 
 revision=$(git -C "$submodule_path" rev-parse HEAD)
 version=$(sed -n 's/^version:[[:space:]]*//p' "$source_skill" | head -n 1)
 printf 'Humanizer %s synchronized from %s\n' "$version" "$revision"
-printf 'Review the upstream diff and bump all affected plugin manifest versions before release.\n'
+printf 'Review the upstream diff and bump both plugin manifest versions before release.\n'
