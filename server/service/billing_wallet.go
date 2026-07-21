@@ -17,7 +17,6 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
-	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 )
 
@@ -1460,11 +1459,6 @@ func isRetryableBillingDBError(err error) bool {
 		return mysqlErr.Number == 1205 || mysqlErr.Number == 1213
 	}
 	return false
-}
-
-func isRetryableSQLiteError(err error) bool {
-	var sqliteErr sqlite3.Error
-	return errors.As(err, &sqliteErr) && (sqliteErr.Code == sqlite3.ErrBusy || sqliteErr.Code == sqlite3.ErrLocked)
 }
 
 func sortChargeAllocationsForLocking(allocations []model.BillingChargeAllocation) {
