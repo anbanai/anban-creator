@@ -324,6 +324,15 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 		if err := requireRunningArtifactExecution(task, execution); err != nil {
 			return err
 		}
+		var pendingFiles []*model.TaskFile
+		if err := tx.Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).
+			Find(&pendingFiles).Error; err != nil {
+			return err
+		}
+		pendingByPath := make(map[string]*model.TaskFile, len(pendingFiles))
+		for _, pendingFile := range pendingFiles {
+			pendingByPath[pendingFile.FilePath] = pendingFile
+		}
 		stale := tx.Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending)
 		if len(incomingPaths) > 0 {
 			stale = stale.Where("file_path NOT IN ?", incomingPaths)
@@ -332,17 +341,28 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 			return err
 		}
 		for _, file := range files {
-			if file.ID == "" {
+			persisted, exists := pendingByPath[file.FilePath]
+			if !exists {
 				file.ID = uuid.NewString()
+				if err := tx.Create(file).Error; err != nil {
+					return err
+				}
+				continue
 			}
-			if err := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "task_id"}, {Name: "execution_id"}, {Name: "file_path"}},
-				DoUpdates: clause.AssignmentColumns([]string{
-					"state", "file_name", "mime_type", "file_size", "oss_key", "oss_url",
-					"storage_provider", "role", "content_hash", "media_id", "wechat_url",
-				}),
-			}).Create(file).Error; err != nil {
-				return err
+			file.ID = persisted.ID
+			result := tx.Model(&model.TaskFile{}).
+				Where("id = ? AND task_id = ? AND execution_id = ? AND state = ?", persisted.ID, taskID, executionID, model.TaskFileStatePending).
+				Updates(map[string]any{
+					"state": file.State, "file_name": file.FileName, "mime_type": file.MimeType,
+					"file_size": file.FileSize, "oss_key": file.OSSKey, "oss_url": file.OSSURL,
+					"storage_provider": file.StorageProvider, "role": file.Role, "content_hash": file.ContentHash,
+					"media_id": file.MediaID, "wechat_url": file.WechatURL,
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("%w: updated %d pending rows for path %q", ErrTaskFileManifestState, result.RowsAffected, file.FilePath)
 			}
 		}
 		statusResult := tx.Model(&model.TaskExecution{}).Where("id = ? AND manifest_status = ?", executionID, execution.ManifestStatus).Update("manifest_status", model.TaskExecutionManifestPending)

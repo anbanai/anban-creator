@@ -11,6 +11,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/google/uuid"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -462,7 +463,7 @@ func TestTaskFileRepositoryReplacePendingExecutionPreservesLogicalPathIdentity(t
 	createdAt := before[0].CreatedAt
 
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
-		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+		ID: "replacement-id", Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
 		ContentHash: strings.Repeat("b", 64), OSSKey: "new-key",
 	}}); err != nil {
 		t.Fatal(err)
@@ -529,5 +530,144 @@ func TestTaskFileRepositoryReplacePendingExecutionIdenticalManifestIsStable(t *t
 	}
 	if rows[0].ID != "file-1" || !rows[0].CreatedAt.Equal(createdAt) || rows[0].ContentHash != strings.Repeat("a", 64) || rows[0].OSSKey != "known-key" {
 		t.Fatalf("stable manifest changed: %#v, createdAt=%v", rows[0], createdAt)
+	}
+}
+
+func TestTaskFileRepositoryReplacePendingExecutionIgnoresCallerIDForNewPath(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
+		ID: "caller-supplied", Role: model.FileRoleOther, FilePath: "output/new.md", FileName: "new.md",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %#v, err=%v", rows, err)
+	}
+	if rows[0].ID == "" || rows[0].ID == "caller-supplied" {
+		t.Fatalf("new path retained caller ID: %#v", rows[0])
+	}
+	if _, err := uuid.Parse(rows[0].ID); err != nil {
+		t.Fatalf("new path ID %q is not a generated UUID: %v", rows[0].ID, err)
+	}
+}
+
+func TestTaskFileRepositoryReplacePendingExecutionCallerIDCollisionCannotMutateForeignRow(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	foreign := &model.TaskFile{
+		ID: "foreign-id", TaskID: "foreign-task", ExecutionID: "foreign-execution", State: model.TaskFileStatePending,
+		Role: model.FileRoleOther, FilePath: "output/foreign.md", FileName: "foreign.md", OSSKey: "foreign-key",
+	}
+	if err := repo.TaskFiles().Create(ctx, foreign); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
+		ID: "foreign-id", Role: model.FileRoleMarkdown, FilePath: "output/new.md", FileName: "new.md", OSSKey: "new-key",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	foreignRows, err := repo.TaskFiles().FindByExecutionID(ctx, "foreign-execution")
+	if err != nil || len(foreignRows) != 1 || foreignRows[0].ID != "foreign-id" || foreignRows[0].OSSKey != "foreign-key" || foreignRows[0].FilePath != "output/foreign.md" {
+		t.Fatalf("foreign row changed: %#v, err=%v", foreignRows, err)
+	}
+	currentRows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(currentRows) != 1 || currentRows[0].ID == "foreign-id" || currentRows[0].OSSKey != "new-key" {
+		t.Fatalf("current rows = %#v, err=%v", currentRows, err)
+	}
+}
+
+func TestTaskFileRepositoryReplacePendingExecutionEmptyManifestRemovesAllPendingRows(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{ID: "first", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/first.md", FileName: "first.md"},
+		{ID: "second", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/second.md", FileName: "second.md"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", nil); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("rows = %#v, err=%v", rows, err)
+	}
+}
+
+func TestTaskFileRepositoryReplacePendingExecutionRejectsNilAndDuplicateEntries(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{nil}); err == nil {
+		t.Fatal("nil task file accepted")
+	}
+	duplicate := []*model.TaskFile{
+		{Role: model.FileRoleOther, FilePath: "output/same.md", FileName: "same.md"},
+		{Role: model.FileRoleOther, FilePath: "output/same.md", FileName: "same.md"},
+	}
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", duplicate); err == nil {
+		t.Fatal("duplicate task file path accepted")
+	}
+}
+
+func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	var logs bytes.Buffer
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{
+		Logger: logger.New(log.New(&logs, "", 0), logger.Config{LogLevel: logger.Info}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
+	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+	mock.ExpectQuery("SELECT .* FROM `task_files` WHERE task_id = \\? AND execution_id = \\? AND state = \\?").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "oss_key"}).
+			AddRow("persisted-id", "t1", "e1", model.TaskFileStatePending, model.FileRoleMarkdown, "output/article.md", "article.md", "old-key"))
+	mock.ExpectExec("DELETE FROM `task_files`").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("UPDATE `task_files` SET").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO `task_files`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE `task_executions` SET").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	repo := New(db)
+	err = repo.TaskFiles().ReplacePendingCurrentExecution(context.Background(), "t1", "e1", []*model.TaskFile{
+		{ID: "ignored-existing-id", Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md", OSSKey: "new-key"},
+		{ID: "ignored-new-id", Role: model.FileRoleOther, FilePath: "output/new.md", FileName: "new.md"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	sql := logs.String()
+	if strings.Contains(sql, "ON DUPLICATE KEY UPDATE") {
+		t.Fatalf("replacement used dialect-sensitive upsert:\n%s", sql)
+	}
+	updateAt, insertAt := strings.Index(sql, "UPDATE `task_files`"), strings.Index(sql, "INSERT INTO `task_files`")
+	if updateAt < 0 || insertAt <= updateAt {
+		t.Fatalf("missing ordered task-file update/insert SQL:\n%s", sql)
+	}
+	updateSQL := sql[updateAt:insertAt]
+	for _, predicate := range []string{"id = 'persisted-id'", "task_id = 't1'", "execution_id = 'e1'", "state = 'pending'"} {
+		if !strings.Contains(updateSQL, predicate) {
+			t.Fatalf("scoped update missing %q:\n%s", predicate, updateSQL)
+		}
 	}
 }
