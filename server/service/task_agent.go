@@ -75,7 +75,7 @@ func (s *TaskService) UpdateHeartbeat(ctx context.Context, taskID string) error 
 }
 
 // UpdateAgentHeartbeat atomically refreshes both the task-level compatibility
-// heartbeat and the durable execution heartbeat used by KubernetesReconciler.
+// heartbeat and the durable execution heartbeat used by RuntimeReconciler.
 func (s *TaskService) UpdateAgentHeartbeat(ctx context.Context, taskID, executionID string) error {
 	if strings.TrimSpace(executionID) == "" {
 		return s.UpdateHeartbeat(ctx, taskID)

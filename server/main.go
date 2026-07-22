@@ -237,7 +237,7 @@ func main() {
 	var kubeVerifier *agent.KubernetesWorkloadVerifier
 	var executionTokens *auth.ExecutionTokenService
 	var bootstrapSvc *service.AgentBootstrapService
-	var kubeReconciler *agent.KubernetesReconciler
+	var runtimeReconciler *agent.RuntimeReconciler
 	var taskWorkspaceRoot string
 	switch cfg.Claude.Executor {
 	case "docker":
@@ -357,10 +357,10 @@ func main() {
 				log.Fatal().Msg("Kubernetes dispatcher does not manage project memory")
 			}
 			projectSvc.SetProjectMemoryLifecycle(projectMemoryLifecycle)
-			kubeReconciler = agent.NewKubernetesReconciler(runtimeDispatcher, taskSvc, agent.KubernetesReconcilerConfig{
+			runtimeReconciler = agent.NewRuntimeReconciler(runtimeDispatcher, taskSvc, agent.RuntimeReconcilerConfig{
 				PreStartRetryLimit: cfg.Claude.Kubernetes.PreStartRetryLimit,
 				HeartbeatTimeout:   time.Duration(cfg.Claude.Kubernetes.HeartbeatTimeoutSeconds) * time.Second,
-			}, log)
+			}, *log)
 			taskSvc.SetNASResumeEnabled(true)
 			taskSvc.SetProjectConcurrencyCap(1)
 			log.Info().Msg("Kubernetes Job runtime enabled: project task concurrency capped at 1 per memory PVC")
@@ -696,10 +696,10 @@ func main() {
 		defer schedulerCancel()
 		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log, rdb)
 	}
-	if kubeReconciler != nil {
+	if runtimeReconciler != nil {
 		reconcilerCtx, reconcilerCancel := context.WithCancel(context.Background())
 		defer reconcilerCancel()
-		go kubeReconciler.Run(reconcilerCtx)
+		go runtimeReconciler.Run(reconcilerCtx)
 	}
 
 	// 15.2 Clean up expirable derived records without touching NAS task workspaces.
