@@ -3,14 +3,14 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Download, Eye, Trash2, RefreshCw, Target, Loader2, MoreHorizontal, ShieldCheck, Send, Ban } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
-import type { InputAttachment, Task, TaskFile } from '@/types'
+import type { InputAttachment, TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
@@ -24,19 +24,17 @@ import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
+import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
-import { ProjectContextControl, type ProjectContextProject } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Checkbox } from '@/components/ui/checkbox'
 import { taskStatusLabel, contentTypeLabel, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { taskFailureMessage } from '@/lib/studio-ux'
-import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 
 const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
 const RESUME_ATTACHMENT_POLICY = {
@@ -50,17 +48,6 @@ const RESUME_ATTACHMENT_POLICY = {
     text: RESUME_FILE_MAX_BYTES,
   },
 } as const
-const CLONE_ATTACHMENT_POLICY = {
-  ...GENERAL_AGENT_ATTACHMENT_POLICY,
-} as const
-
-interface CloneDialogSnapshot {
-  taskId: string
-  prompt: string
-  attachments: InputAttachment[]
-  project: ProjectContextProject | null
-}
-
 function ResumeTaskDialog({
   taskId,
   onClose,
@@ -130,104 +117,6 @@ function ResumeTaskDialog({
         />
         <DialogFooter>
           <Button type="button" variant="outline" disabled={resumeMutation.isPending} onClick={onClose}>取消</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function CloneTaskDialog({
-  snapshot,
-  onClose,
-  onSuccess,
-}: {
-  snapshot: CloneDialogSnapshot
-  onClose: () => void
-  onSuccess: (task: Task) => void
-}) {
-  const [prompt, setPrompt] = useState(snapshot.prompt)
-  const [validationError, setValidationError] = useState<string>()
-  const attachmentController = usePromptAttachments({
-    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
-    policy: CLONE_ATTACHMENT_POLICY,
-    initialAttachments: snapshot.attachments,
-    onAttachmentsChange: () => setValidationError(undefined),
-  })
-  const cloneMutation = useMutation({
-    mutationFn: (inputAttachments: InputAttachment[]) => api.tasks.clone(snapshot.taskId, {
-      prompt,
-      input_attachments: inputAttachments,
-    }),
-    onSuccess: (task) => {
-      toast.success('已克隆为新任务，配置已保留')
-      onSuccess(task)
-    },
-    onError: (err: unknown) => {
-      const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
-      const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
-      if (status === 402 || code === 40200) {
-        toast.error('积分不足，无法克隆任务')
-      } else {
-        toast.error(getApiErrorMessage(err, '克隆任务失败，请稍后再试'))
-      }
-    },
-  })
-
-  async function handleSubmit() {
-    setValidationError(undefined)
-    const prepared = prepareReusableInputAttachments(attachmentController.toInputAttachments())
-    if (prepared.error) {
-      setValidationError(prepared.error)
-      throw new Error(prepared.error)
-    }
-    await cloneMutation.mutateAsync(prepared.attachments ?? [])
-  }
-
-  return (
-    <Dialog
-      open
-      disablePointerDismissal={cloneMutation.isPending}
-      onOpenChange={(open, eventDetails) => {
-        if (open) return
-        if (cloneMutation.isPending) {
-          eventDetails.cancel()
-          return
-        }
-        onClose()
-      }}
-    >
-      <DialogContent className="sm:max-w-2xl" closeButtonDisabled={cloneMutation.isPending}>
-        <DialogHeader>
-          <DialogTitle>克隆任务</DialogTitle>
-          <DialogDescription>
-            已恢复原任务要求和素材。确认或修改后，将按新任务重新计费并执行。
-          </DialogDescription>
-        </DialogHeader>
-        <AgentPromptInput
-          value={{ prompt, attachments: attachmentController.attachments }}
-          onChange={(value) => {
-            setPrompt(value.prompt)
-            setValidationError(undefined)
-          }}
-          onSubmit={handleSubmit}
-          attachmentController={attachmentController}
-          attachmentPolicy={CLONE_ATTACHMENT_POLICY}
-          contextBar={<ProjectContextControl mode="readonly" project={snapshot.project} />}
-          placeholder="确认或修改任务要求..."
-          ariaLabel="克隆任务要求"
-          submitLabel="确认克隆"
-          submitting={cloneMutation.isPending}
-          attachmentPreviewOwner={{ ownerType: 'task', ownerId: snapshot.taskId }}
-          autoFocus
-        />
-        {validationError ? (
-          <Alert variant="destructive">
-            <AlertTriangle />
-            <AlertDescription>{validationError}</AlertDescription>
-          </Alert>
-        ) : null}
-        <DialogFooter>
-          <Button type="button" variant="outline" disabled={cloneMutation.isPending} onClick={onClose}>取消</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -308,7 +197,7 @@ export default function TaskDetailPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showProjectDialog, setShowProjectDialog] = useState(false)
   const [showResumeDialog, setShowResumeDialog] = useState(false)
-  const [cloneDialogSnapshot, setCloneDialogSnapshot] = useState<CloneDialogSnapshot | null>(null)
+  const [showCloneDialog, setShowCloneDialog] = useState(false)
   const [showTaskDetails, setShowTaskDetails] = useState(false)
   const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
@@ -615,8 +504,8 @@ export default function TaskDetailPage() {
 
   useEffect(() => {
     setShowResumeDialog(false)
-    setCloneDialogSnapshot(null)
-  }, [id])
+    setShowCloneDialog(false)
+  }, [id, task?.id])
 
   function openTaskDetails(tab: TaskDetailsTab) {
     setTaskDetailsTab(tab)
@@ -684,21 +573,6 @@ export default function TaskDetailPage() {
   const showPendingResultDestination = (task.status === 'pending' || task.status === 'running')
     && publishedFiles.length === 0
     && collectedFiles.length === 0
-
-  function openCloneDialog() {
-    setCloneDialogSnapshot({
-      taskId: currentTask.id,
-      prompt: currentTask.prompt ?? '',
-      attachments: (currentTask.input_attachments ?? [])
-        .filter((attachment) => attachment.role !== 'resume_latest' && attachment.role !== 'resume_file')
-        .map((attachment) => ({ ...attachment })),
-      project: currentTask.project_id ? {
-        id: currentTask.project_id,
-        name: project?.name || currentTask.project_snapshot?.project_name || '未命名项目',
-        platform: project?.platform || currentTask.project_snapshot?.platform || currentTask.type,
-      } : null,
-    })
-  }
 
   return (
     <div className="space-y-6">
@@ -779,20 +653,19 @@ export default function TaskDetailPage() {
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {task.status === 'completed' && !task.published && (
-            <Button
-              variant="default"
-              size="sm"
-              loading={togglePublished.isPending}
-              onClick={() => {
-                void submit(async () => togglePublished.mutateAsync({ published: !task.published })).catch(() => {})
-              }}
-            >
-              <Eye className="h-4 w-4" />
-              标记已发布
-            </Button>
-          )}
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+          {task.status === 'completed' ? (
+            <label className="flex h-7 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-background px-2.5 text-sm font-medium">
+              <Checkbox
+                checked={task.published}
+                disabled={togglePublished.isPending}
+                onCheckedChange={(published) => {
+                  void submit(async () => togglePublished.mutateAsync({ published })).catch(() => {})
+                }}
+              />
+              <span>已发布</span>
+            </label>
+          ) : null}
           {canCancel && (
             <Button
               variant="destructive"
@@ -800,6 +673,7 @@ export default function TaskDetailPage() {
               loading={cancelMutation.isPending}
               onClick={() => setShowCancelDialog(true)}
             >
+              <Ban className="h-4 w-4" />
               取消任务
             </Button>
           )}
@@ -809,37 +683,23 @@ export default function TaskDetailPage() {
               继续执行
             </Button>
           )}
-          {!canCancel && (
-            <DropdownMenu>
-              <DropdownMenuTrigger aria-label="更多任务操作" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                <MoreHorizontal className="h-4 w-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                {task.status === 'completed' && task.published && (
-                  <DropdownMenuItem
-                    disabled={togglePublished.isPending}
-                    onClick={() => {
-                      void submit(async () => togglePublished.mutateAsync({ published: false })).catch(() => {})
-                    }}
-                  >
-                    <Eye className="h-4 w-4" />
-                    取消发布标记
-                  </DropdownMenuItem>
-                )}
-                {canClone && (
-                  <DropdownMenuItem onClick={openCloneDialog}>
-                    <RefreshCw className="h-4 w-4" />
-                    克隆任务
-                  </DropdownMenuItem>
-                )}
-                {canClone && <DropdownMenuSeparator />}
-                <DropdownMenuItem variant="destructive" onClick={() => setShowDeleteDialog(true)}>
-                  <Trash2 className="h-4 w-4" />
-                  删除任务
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          {canClone ? (
+            <Button variant="outline" size="sm" onClick={() => setShowCloneDialog(true)}>
+              <RefreshCw className="h-4 w-4" />
+              克隆任务
+            </Button>
+          ) : null}
+          {canClone ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:bg-destructive/5 hover:text-destructive"
+              onClick={() => setShowDeleteDialog(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              删除任务
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -1108,17 +968,13 @@ export default function TaskDetailPage() {
         />
       ) : null}
 
-      {cloneDialogSnapshot ? (
-        <CloneTaskDialog
-          snapshot={cloneDialogSnapshot}
-          onClose={() => setCloneDialogSnapshot(null)}
-          onSuccess={(nextTask) => {
-            setCloneDialogSnapshot(null)
-            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-            navigate(`/tasks/${nextTask.id}`)
-          }}
-        />
-      ) : null}
+      <TaskFormDialog
+        open={showCloneDialog}
+        mode="clone"
+        sourceTask={currentTask}
+        onOpenChange={setShowCloneDialog}
+        onCreated={(nextTask) => navigate(`/tasks/${nextTask.id}`)}
+      />
 
       {project && (
         <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>

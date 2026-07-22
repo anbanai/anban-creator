@@ -6,12 +6,6 @@ export interface ResumeTaskRequest {
   input_attachments: InputAttachment[]
 }
 
-// TODO(Task 6): remove after the task detail clone flow submits CloneTaskRequest.
-type ExactCloneTaskRequest = {
-  prompt: string
-  input_attachments: InputAttachment[]
-}
-
 export const tasksApi = {
   create: async (data: CreateTaskRequest): Promise<Task> => {
     const result = await unwrap<Task | Task[]>(http.post('/tasks', data))
@@ -29,7 +23,7 @@ export const tasksApi = {
 
   // Clone a completed/failed/cancelled task into a fresh billed task while
   // preserving the full frozen configuration. Returns the new task.
-  clone: (id: string, data: CloneTaskRequest | ExactCloneTaskRequest) =>
+  clone: (id: string, data: CloneTaskRequest) =>
     unwrap<Task>(http.post(`/tasks/${id}/clone`, data)),
 
   resume: (id: string, data: ResumeTaskRequest) =>
