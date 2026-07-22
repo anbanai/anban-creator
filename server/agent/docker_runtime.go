@@ -219,7 +219,7 @@ func verifyDockerContainer(existing containertypes.InspectResponse, desired dock
 		{name: "binds", equal: slices.Equal(existing.HostConfig.Binds, desired.HostConfig.Binds)},
 		{name: "volumes-from", equal: slices.Equal(existing.HostConfig.VolumesFrom, desired.HostConfig.VolumesFrom)},
 		{name: "network", equal: existing.HostConfig.NetworkMode == desired.HostConfig.NetworkMode},
-		{name: "network attachments", equal: dockerNetworkSettingsEqual(existing.NetworkSettings, desired.NetworkName, desired.ContainerName, existing.ID)},
+		{name: "network attachments", equal: dockerNetworkSettingsEqual(existing.NetworkSettings, desired.NetworkName, desired.ContainerName, existing.ID, existing.Config.Hostname)},
 		{name: "log configuration", equal: dockerLogConfigEqual(existing.HostConfig.LogConfig, desired.HostConfig.LogConfig)},
 		{name: "init process", equal: equalBoolPointer(existing.HostConfig.Init, desired.HostConfig.Init)},
 		{name: "isolation", equal: existing.HostConfig.Isolation == desired.HostConfig.Isolation},
@@ -342,7 +342,7 @@ func dockerSecurityOptionsEqual(existing, desired []string) bool {
 	return slices.Equal(normalize(existing), normalize(desired))
 }
 
-func dockerNetworkSettingsEqual(existing *containertypes.NetworkSettings, networkName, containerName, containerID string) bool {
+func dockerNetworkSettingsEqual(existing *containertypes.NetworkSettings, networkName, containerName, containerID, hostname string) bool {
 	if existing == nil || networkName == "" || len(containerID) < 12 || len(existing.Networks) != 1 {
 		return false
 	}
@@ -350,10 +350,21 @@ func dockerNetworkSettingsEqual(existing *containertypes.NetworkSettings, networ
 	if !ok || endpoint == nil {
 		return false
 	}
-	if endpoint.IPAMConfig != nil || len(endpoint.Links) != 0 || len(endpoint.Aliases) != 0 || len(endpoint.DriverOpts) != 0 || endpoint.GwPriority != 0 {
+	if endpoint.IPAMConfig != nil || len(endpoint.Links) != 0 || !dockerNetworkAliasesEqual(endpoint.Aliases, containerID, hostname) || len(endpoint.DriverOpts) != 0 || endpoint.GwPriority != 0 {
 		return false
 	}
 	return slices.Equal(endpoint.DNSNames, []string{containerName, containerID[:12]})
+}
+
+func dockerNetworkAliasesEqual(existing []string, containerID, hostname string) bool {
+	if len(existing) == 0 {
+		return true
+	}
+	expected := []string{containerID[:12]}
+	if hostname != expected[0] {
+		expected = append(expected, hostname)
+	}
+	return slices.Equal(existing, expected)
 }
 
 func dockerContainsAll(existing, required []string) bool {

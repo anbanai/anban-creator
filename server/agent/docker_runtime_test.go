@@ -250,6 +250,11 @@ func TestVerifyDockerContainerAcceptsExactSpecAndRejectsDrift(t *testing.T) {
 	if err := verifyDockerContainer(legacyNoNewPrivileges, spec); err != nil {
 		t.Fatalf("semantically equivalent no-new-privileges form rejected: %v", err)
 	}
+	legacyNetworkAliases := testDockerInspect(spec)
+	legacyNetworkAliases.NetworkSettings.Networks[spec.NetworkName].Aliases = []string{legacyNetworkAliases.ID[:12]}
+	if err := verifyDockerContainer(legacyNetworkAliases, spec); err != nil {
+		t.Fatalf("Docker API <1.45 generated network aliases rejected: %v", err)
+	}
 
 	tests := []struct {
 		name   string
@@ -306,6 +311,9 @@ func TestVerifyDockerContainerAcceptsExactSpecAndRejectsDrift(t *testing.T) {
 		}},
 		{name: "endpoint alias", mutate: func(got *containertypes.InspectResponse) {
 			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].Aliases = []string{"database"}
+		}},
+		{name: "endpoint alias mixed with legacy generated alias", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].Aliases = []string{got.ID[:12], "database"}
 		}},
 		{name: "endpoint link", mutate: func(got *containertypes.InspectResponse) {
 			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].Links = []string{"database:database"}
