@@ -99,17 +99,24 @@ git submodule sync -- plugins
 
 Expected: `plugins` is a gitlink pinned to `creator_sha`, with `main` configured as its update branch.
 
-- [ ] **Step 3: Prove the cloned child matches the preserved source**
+- [ ] **Step 3: Prove every publishable source file matches the cloned child**
 
 Run:
 
 ```bash
-diff -ru --exclude='.git' "$backup_root/plugins" plugins
+test -z "$(git -C "$snapshot_root/repo" status --porcelain --untracked-files=all)"
+test "$(git -C "$snapshot_root/repo" ls-files | wc -l | tr -d ' ')" = "$(git -C plugins ls-files | wc -l | tr -d ' ')"
+git -C plugins ls-files -z | while IFS= read -r -d '' file; do
+  cmp "$backup_root/plugins/$file" "plugins/$file"
+done
 test "$(git -C plugins rev-parse HEAD)" = "$creator_sha"
 test -z "$(git -C plugins status --porcelain)"
 ```
 
-Expected: no content differences and a clean child working tree at the published SHA.
+Expected: every file accepted by the child repository's `.gitignore` is present
+and byte-identical, with a clean child working tree at the published SHA.
+Ignored local artifacts such as `.DS_Store` and unrepresentable empty directories
+are not part of the Git snapshot.
 
 - [ ] **Step 4: Audit and commit only the submodule boundary**
 
