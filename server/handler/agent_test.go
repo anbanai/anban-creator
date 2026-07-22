@@ -42,11 +42,11 @@ func (s *executionScopeTestStore) Upload(_ context.Context, key string, reader i
 
 type testWorkloadVerifier struct {
 	gotToken, gotExecutionID string
-	identity                 *serveragent.KubernetesWorkloadIdentity
+	identity                 *serveragent.WorkloadIdentity
 	err                      error
 }
 
-func (v *testWorkloadVerifier) Verify(_ context.Context, token, executionID string) (*serveragent.KubernetesWorkloadIdentity, error) {
+func (v *testWorkloadVerifier) Verify(_ context.Context, token, executionID string) (*serveragent.WorkloadIdentity, error) {
 	v.gotToken, v.gotExecutionID = token, executionID
 	return v.identity, v.err
 }
@@ -56,11 +56,11 @@ type testBootstrapper struct {
 	err      error
 }
 
-func (b testBootstrapper) Bootstrap(context.Context, *serveragent.KubernetesWorkloadIdentity) (*service.AgentBootstrapResponse, error) {
+func (b testBootstrapper) Bootstrap(context.Context, *serveragent.WorkloadIdentity) (*service.AgentBootstrapResponse, error) {
 	return b.response, b.err
 }
 
-func TestAgentExecutionTokenAndWorkloadBootstrap(t *testing.T) {
+func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	if err != nil {
@@ -72,7 +72,7 @@ func TestAgentExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	}
 	h := NewAgentHandler(nil, nil, nil, "", &logger)
 	h.SetExecutionTokenService(tokens)
-	verifier := &testWorkloadVerifier{identity: &serveragent.KubernetesWorkloadIdentity{ExecutionID: "execution-1"}}
+	verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: "execution-1"}}
 	h.SetBootstrap(verifier, testBootstrapper{response: &service.AgentBootstrapResponse{TaskID: "task-1", ExecutionToken: "execution-token"}})
 	app := fiber.New()
 	app.Post("/agent/scoped", h.AuthMiddleware, func(c fiber.Ctx) error {
@@ -200,7 +200,7 @@ func TestAgentBootstrapRedactsInternalErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := zerolog.New(io.Discard)
-			verifier := &testWorkloadVerifier{identity: &serveragent.KubernetesWorkloadIdentity{ExecutionID: "execution-1"}}
+			verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}
 			h := NewAgentHandler(nil, nil, nil, "", &logger)
 			h.SetBootstrap(verifier, testBootstrapper{err: tc.err})
 			app := fiber.New()

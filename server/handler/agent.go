@@ -26,12 +26,8 @@ const (
 	agentWorkloadTokenContextKey = "agent_workload_token"
 )
 
-type workloadVerifier interface {
-	Verify(context.Context, string, string) (*serveragent.KubernetesWorkloadIdentity, error)
-}
-
 type agentBootstrapper interface {
-	Bootstrap(context.Context, *serveragent.KubernetesWorkloadIdentity) (*service.AgentBootstrapResponse, error)
+	Bootstrap(context.Context, *serveragent.WorkloadIdentity) (*service.AgentBootstrapResponse, error)
 }
 
 // AgentHandler handles agent-to-server communication endpoints.
@@ -43,7 +39,7 @@ type AgentHandler struct {
 	adminAPIKey      string
 	directUploadCfg  service.DirectUploadConfig
 	executionTokens  *auth.ExecutionTokenService
-	workloadVerifier workloadVerifier
+	workloadVerifier serveragent.WorkloadVerifier
 	bootstrapper     agentBootstrapper
 	logger           *zerolog.Logger
 }
@@ -56,7 +52,7 @@ func (h *AgentHandler) SetAdminAPIKey(key string) {
 	h.adminAPIKey = key
 }
 
-func (h *AgentHandler) SetBootstrap(verifier workloadVerifier, bootstrapper agentBootstrapper) {
+func (h *AgentHandler) SetBootstrap(verifier serveragent.WorkloadVerifier, bootstrapper agentBootstrapper) {
 	h.workloadVerifier, h.bootstrapper = verifier, bootstrapper
 }
 

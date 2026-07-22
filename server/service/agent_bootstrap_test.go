@@ -288,7 +288,7 @@ func TestBootstrapRejectsTextOnlyResponseWhenSafeLifetimeExpiresDuringBuild(t *t
 	}
 }
 
-func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *testing.T) {
+func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -324,7 +324,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 		t.Fatal(err)
 	}
 	resumeSessionID := uuid.NewString()
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, ResumeSessionID: resumeSessionID, Target: "kubernetes", Status: model.TaskExecutionStarting, RuntimeScope: "anban", RuntimeWorkload: "job-1"}); err != nil {
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, ResumeSessionID: resumeSessionID, Target: "docker", Status: model.TaskExecutionStarting, RuntimeScope: "docker", RuntimeWorkload: "exec-1"}); err != nil {
 		t.Fatal(err)
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
@@ -333,7 +333,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	runtimeEnv["ANTHROPIC_AUTH_TOKEN"] = "bootstrap-secret"
 	runtimeEnv["PATH"] = "/untrusted/bin"
 	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, RuntimeEnv: runtimeEnv, ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
-	identity := &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-1", PodUID: "pod-uid-1", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, JobDeadline: time.Now().Add(4 * time.Minute)}
+	identity := &serveragent.WorkloadIdentity{RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, Deadline: time.Now().Add(4 * time.Minute)}
 	first, err := svc.Bootstrap(ctx, identity)
 	if err != nil {
 		t.Fatal(err)
@@ -379,8 +379,8 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.ExpiresAt == nil || claims.ExpiresAt.Time.After(identity.JobDeadline) {
-		t.Fatalf("token expiry = %v, exceeds Job deadline", claims.ExpiresAt)
+	if claims.ExpiresAt == nil || claims.ExpiresAt.Time.After(identity.Deadline) {
+		t.Fatalf("token expiry = %v, exceeds workload deadline", claims.ExpiresAt)
 	}
 	second, err := svc.Bootstrap(ctx, identity)
 	if err != nil || second.TaskID != taskID {
@@ -393,15 +393,15 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retryClaims.ExecutionID != executionID || retryClaims.ExpiresAt == nil || retryClaims.ExpiresAt.Time.After(identity.JobDeadline) {
+	if retryClaims.ExecutionID != executionID || retryClaims.ExpiresAt == nil || retryClaims.ExpiresAt.Time.After(identity.Deadline) {
 		t.Fatalf("retry claims = %#v", retryClaims)
 	}
 	found, _ := repo.TaskExecutions().FindByID(ctx, executionID)
-	if found.Status != model.TaskExecutionRunning || !found.Started || found.RuntimeInstanceID != "pod-uid-1" || found.StartedAt == nil || found.LastHeartbeatAt == nil {
+	if found.Status != model.TaskExecutionRunning || !found.Started || found.RuntimeInstanceID != "container-id" || found.StartedAt == nil || found.LastHeartbeatAt == nil {
 		t.Fatalf("execution = %#v", found)
 	}
-	if _, err := svc.Bootstrap(ctx, &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-2", PodUID: "pod-uid-2", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID}); err == nil {
-		t.Fatal("different Pod stole running execution")
+	if _, err := svc.Bootstrap(ctx, &serveragent.WorkloadIdentity{RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "replacement-id"}, ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, Deadline: time.Now().Add(time.Minute)}); err == nil {
+		t.Fatal("different runtime instance stole running execution")
 	}
 	taskSvc := NewTaskService(repo, nil, nil, nil, nil, "", nil, "", nil, nil)
 	if err := taskSvc.ValidateAgentExecutionAccess(ctx, userID, projectID, taskID, executionID); err != nil {
@@ -412,7 +412,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	}
 }
 
-func TestBootstrapRejectsExpiredJobDeadlineBeforeBuildingResponse(t *testing.T) {
+func TestBootstrapRejectsExpiredWorkloadDeadlineBeforeBuildingResponse(t *testing.T) {
 	svc := &AgentBootstrapService{}
 	if _, err := svc.buildResponse(context.Background(), nil, nil, nil, time.Now().Add(-time.Second)); err == nil {
 		t.Fatal("expired Job deadline accepted")
