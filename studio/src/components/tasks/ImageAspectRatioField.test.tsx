@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/test-utils'
 import { ImageAspectRatioField } from './ImageAspectRatioField'
@@ -22,9 +22,30 @@ describe('ImageAspectRatioField', () => {
     expect(horizontal).not.toBeChecked()
     expect(widescreen).not.toBeChecked()
 
-    fireEvent.click(widescreen)
+    fireEvent.click(screen.getByLabelText('16:9 widescreen', { selector: 'label' }))
 
     expect(onChange).toHaveBeenCalledWith('16:9')
+  })
+
+  it('uses Base UI keyboard navigation and follows the controlled value', async () => {
+    const onChange = vi.fn()
+    const view = render(<ImageAspectRatioField value="3:4" defaultValue="3:4" onChange={onChange} />)
+    const vertical = screen.getByRole('radio', { name: '3:4 vertical default' })
+    const square = screen.getByRole('radio', { name: '1:1 square' })
+
+    vertical.focus()
+    await act(async () => {
+      fireEvent.keyDown(vertical, { key: 'ArrowRight' })
+      await Promise.resolve()
+    })
+
+    expect(onChange).toHaveBeenCalledWith('1:1')
+    expect(square).toHaveFocus()
+
+    view.rerender(<ImageAspectRatioField value="1:1" defaultValue="3:4" onChange={onChange} />)
+
+    expect(vertical).not.toBeChecked()
+    expect(square).toBeChecked()
   })
 
   it('keeps the field unselected while marking the configured default', () => {
