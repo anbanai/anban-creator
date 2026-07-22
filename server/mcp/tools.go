@@ -234,7 +234,7 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_task_files",
-		Description: "List output files for a completed task. Returns file names, roles (cover, html, markdown, image), and sizes.",
+		Description: "List terminal task files owned by the authenticated user. Returns the latest successful published deliverables followed by collected files retained from failed attempts, including names, roles, states, sizes, and download URLs. This is a post-run inspection and recovery query, not a live workspace listing or upload-completion check; pending and superseded files are excluded.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
