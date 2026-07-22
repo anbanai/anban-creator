@@ -12,6 +12,7 @@ func TestConfigRejectsLegacyManagedExecutorFields(t *testing.T) {
 		value string
 		want  string
 	}{
+		{name: "empty executor has no default fallback", field: "executor", value: "", want: "claude.executor must be 'docker' or 'kubernetes'"},
 		{name: "local executor", field: "executor", value: "local", want: "claude.executor must be 'docker' or 'kubernetes'"},
 		{name: "Docker article image", field: "docker", value: "\n    article_image: legacy", want: `unknown claude.docker config field "article_image"`},
 		{name: "Docker image profiles", field: "docker", value: "\n    image_profiles: {}", want: `unknown claude.docker config field "image_profiles"`},

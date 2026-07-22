@@ -66,6 +66,8 @@ func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 		image    string
 	}{
 		{taskType: model.PlatformArticle, profile: "article", image: "creator-agent-article:latest"},
+		{taskType: model.PlatformMoments, profile: "article", image: "creator-agent-article:latest"},
+		{taskType: model.PlatformEcommerce, profile: "article", image: "creator-agent-article:latest"},
 		{taskType: model.PlatformSeednote, profile: "seednote", image: "creator-agent-seednote:latest"},
 		{taskType: model.PlatformMontage, profile: "montage", image: "creator-agent-montage:latest"},
 	} {
