@@ -18,9 +18,31 @@ import (
 type CloneTaskParams struct {
 	Prompt           *string
 	InputAttachments *[]model.EntryAttachment
+	Overrides        *CloneTaskOverrides
 }
 
-func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) (*model.Task, error) {
+type CloneTaskOverrides struct {
+	ProjectID                string
+	Quantity                 int
+	Prompt                   string
+	ImageRatio               string
+	ImageModelKey            string
+	SkipRefImage             *bool
+	ReferenceImageAssetID    string
+	InputAttachments         []model.EntryAttachment
+	Watermark                *bool
+	Goal                     string
+	GoalMode                 bool
+	HasContentImage          *bool
+	HasTailImage             *bool
+	ArticleWithCover         *bool
+	ArticleWithContentImages *bool
+	Ecommerce                *model.EcommerceConfig
+	MontageInput             *model.MontageInput
+	ExecutionTarget          string
+}
+
+func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) ([]*model.Task, error) {
 	src, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("find task: %w", err)
@@ -31,6 +53,55 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	// be cloned because that would duplicate in-flight work and billing.
 	if src.Status != model.TaskStatusCompleted && src.Status != model.TaskStatusFailed && src.Status != model.TaskStatusCancelled {
 		return nil, fmt.Errorf("only completed, failed, or cancelled tasks can be cloned (current status: %s)", src.Status)
+	}
+
+	inputSourceTaskID := src.InputSourceTaskID
+	inputSourceProjectID := src.InputSourceProjectID
+	if inputSourceTaskID == "" {
+		inputSourceTaskID = src.ID
+		inputSourceProjectID = src.ProjectID
+	} else if inputSourceProjectID == "" {
+		inputSourceProjectID = src.ProjectID
+	}
+
+	if cloneParams.Overrides != nil {
+		override := cloneParams.Overrides
+		params := CreateManualParams{
+			UserID:                   src.UserID,
+			ProjectID:                override.ProjectID,
+			Prompt:                   override.Prompt,
+			Quantity:                 override.Quantity,
+			ImageRatio:               override.ImageRatio,
+			ImageModelKey:            override.ImageModelKey,
+			SkipRefImage:             override.SkipRefImage,
+			ReferenceImageAssetID:    override.ReferenceImageAssetID,
+			InputSourceTaskID:        inputSourceTaskID,
+			InputSourceProjectID:     inputSourceProjectID,
+			InputAttachments:         cloneEntryAttachments(override.InputAttachments),
+			Watermark:                override.Watermark,
+			Goal:                     override.Goal,
+			GoalMode:                 override.GoalMode,
+			HasContentImage:          override.HasContentImage,
+			HasTailImage:             override.HasTailImage,
+			ArticleWithCover:         override.ArticleWithCover,
+			ArticleWithContentImages: override.ArticleWithContentImages,
+			Ecommerce:                override.Ecommerce,
+			MontageInput:             override.MontageInput,
+			ExecutionTarget:          override.ExecutionTarget,
+		}
+		tasks, err := s.CreateManual(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+		if len(tasks) == 0 {
+			return nil, fmt.Errorf("clone did not create a task")
+		}
+		s.logger.Info().
+			Str("src_task_id", taskID).
+			Str("new_task_id", tasks[0].ID).
+			Int("quantity", len(tasks)).
+			Msg("task cloned as editable tasks")
+		return tasks, nil
 	}
 
 	// Copy scalar fields to locals before taking their addresses so each *bool
@@ -44,14 +115,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 
 	overrides := src.Overrides.Data()
 	snapshot := src.ProjectSnapshot.Data()
-	inputSourceTaskID := src.InputSourceTaskID
-	inputSourceProjectID := src.InputSourceProjectID
-	if inputSourceTaskID == "" {
-		inputSourceTaskID = src.ID
-		inputSourceProjectID = src.ProjectID
-	} else if inputSourceProjectID == "" {
-		inputSourceProjectID = src.ProjectID
-	}
 	prompt := src.Prompt
 	if cloneParams.Prompt != nil {
 		prompt = strings.TrimSpace(*cloneParams.Prompt)
@@ -116,7 +179,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Str("src_task_id", taskID).
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
-	return tasks[0], nil
+	return tasks, nil
 }
 
 func cloneExecutionTarget(source string) (string, error) {

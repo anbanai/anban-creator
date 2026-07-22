@@ -159,8 +159,29 @@ type createTaskRequest struct {
 }
 
 type cloneTaskRequest struct {
-	Prompt           *string                  `json:"prompt"`
-	InputAttachments *[]model.EntryAttachment `json:"input_attachments"`
+	ProjectID                string                           `json:"project_id"`
+	Prompt                   *string                          `json:"prompt"`
+	Quantity                 int                              `json:"quantity"`
+	ImageRatio               string                           `json:"image_ratio"`
+	ImageModelKey            string                           `json:"image_model_key"`
+	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
+	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
+	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments"`
+	Watermark                *bool                            `json:"watermark"`
+	Goal                     string                           `json:"goal"`
+	GoalMode                 bool                             `json:"goal_mode"`
+	HasContentImage          *bool                            `json:"has_content_image,omitempty"`
+	HasTailImage             *bool                            `json:"has_tail_image,omitempty"`
+	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool                            `json:"article_with_content_images,omitempty"`
+	ProductPhotos            []string                         `json:"product_photos,omitempty"`
+	SelectedModules          map[string]int                   `json:"selected_modules,omitempty"`
+	TargetPlatform           string                           `json:"target_platform,omitempty"`
+	SellingPoints            string                           `json:"selling_points,omitempty"`
+	Language                 string                           `json:"language,omitempty"`
+	ProviderStrategyOverride string                           `json:"provider_strategy_override,omitempty"`
+	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
+	ExecutionTarget          string                           `json:"execution_target,omitempty"`
 }
 
 type resumeTaskRequest struct {
@@ -203,50 +224,76 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	if req.ProjectID == "" {
-		return Error(c, fiber.StatusBadRequest, "project_id is required")
-	}
-	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
-		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
-	}
-
-	prompt := strings.TrimSpace(req.Prompt)
-	if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
-		return Error(c, fiber.StatusBadRequest, "prompt must not exceed 5120 characters")
-	}
-
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
+	prepared, err := h.prepareTaskCreation(c, userID, &req, false)
+	if err != nil || prepared == nil {
+		return err
+	}
+	tasks, err := h.service.CreateManual(c.Context(), prepared.params)
+	if err != nil {
+		return h.respondTaskCreationServiceError(c, userID, err, "create task failed", "failed to create task")
+	}
+	for _, task := range tasks {
+		task.ReferenceImage = prepared.referenceView
+	}
+
+	// Montage is always a single deliverable and Studio expects one task
+	// object even when the request quantity is clamped by the service.
+	if len(tasks) == 1 && (prepared.quantity == 1 || req.MontageInput != nil) {
+		return Success(c, taskAPIResponse(tasks[0], h.store))
+	}
+	return Success(c, taskAPIResponses(tasks, h.store))
+}
+
+type preparedTaskCreation struct {
+	params        service.CreateManualParams
+	quantity      int
+	referenceView *model.AssetView
+}
+
+func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *createTaskRequest, strictQuantity bool) (*preparedTaskCreation, error) {
+	if req.ProjectID == "" {
+		return nil, Error(c, fiber.StatusBadRequest, "project_id is required")
+	}
+	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
+		return nil, Error(c, fiber.StatusBadRequest, "montage task requires brief")
+	}
+	prompt := strings.TrimSpace(req.Prompt)
+	if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
+		return nil, Error(c, fiber.StatusBadRequest, "prompt must not exceed 5120 characters")
+	}
 	project, err := h.service.ResolveTaskCreationProject(c.Context(), userID, req.ProjectID)
 	if err != nil {
-		return respondTaskCreationProjectError(c, h.logger, err)
+		return nil, respondTaskCreationProjectError(c, h.logger, err)
 	}
 	projectSnapshot := model.SnapshotProject(project)
+
 	var referenceAssetID string
 	var referenceView *model.AssetView
 	if req.ReferenceImage != nil {
 		if h.referenceAssets == nil {
-			return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+			return nil, respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
 		}
 		resolved, err := h.referenceAssets.ResolveSelection(c.Context(), userID, *req.ReferenceImage, []string{service.DirectUploadPurposeTaskReference})
 		if err != nil {
-			return respondReferenceAssetError(c, h.logger, err)
+			return nil, respondReferenceAssetError(c, h.logger, err)
 		}
 		referenceAssetID = resolved
 		referenceView, err = h.referenceAssets.Present(c.Context(), userID, resolved, []string{service.DirectUploadPurposeTaskReference})
 		if err != nil {
-			return respondReferenceAssetError(c, h.logger, err)
+			return nil, respondReferenceAssetError(c, h.logger, err)
 		}
 	}
 	if referenceView == nil && (req.SkipReferenceImage == nil || !*req.SkipReferenceImage) && project.ReferenceImageAssetID != "" {
 		if h.referenceAssets == nil {
-			return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+			return nil, respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
 		}
 		presented, presentErr := h.referenceAssets.Present(c.Context(), userID, project.ReferenceImageAssetID, []string{service.DirectUploadPurposeProjectReference})
 		if presentErr != nil {
-			return respondReferenceAssetError(c, h.logger, presentErr)
+			return nil, respondReferenceAssetError(c, h.logger, presentErr)
 		}
 		referenceView = presented
 	}
@@ -264,44 +311,41 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		AllowedTypes: allowedAttachmentTypes,
 	})
 	if err != nil {
-		return respondInputAttachmentError(c, h.logger, err)
+		return nil, respondInputAttachmentError(c, h.logger, err)
 	}
 	req.InputAttachments = validatedAttachments
 
 	quantity := req.Quantity
+	if strictQuantity && (quantity < 1 || quantity > 5) {
+		return nil, Error(c, fiber.StatusBadRequest, "quantity must be between 1 and 5")
+	}
 	if quantity <= 0 {
 		quantity = 1
 	}
 	if quantity > 5 {
-		return Error(c, fiber.StatusBadRequest, "quantity must be between 1 and 5")
+		return nil, Error(c, fiber.StatusBadRequest, "quantity must be between 1 and 5")
 	}
-
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
-		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
+		return nil, Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
-
 	for _, u := range req.ProductPhotos {
 		if !validAttachmentURL(u) {
-			return Error(c, fiber.StatusBadRequest, "product_photos must be internal file paths or http(s) URLs")
+			return nil, Error(c, fiber.StatusBadRequest, "product_photos must be internal file paths or http(s) URLs")
 		}
 	}
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
-
-	// Validate image_model_key against the caller's tier.
 	if err := h.validateImageModelKeyForUser(c, userID, req.ImageModelKey); err != nil {
-		return Error(c, fiber.StatusForbidden, err.Error())
+		return nil, Error(c, fiber.StatusForbidden, err.Error())
 	}
-
-	// Validate goal text length when goal mode is enabled.
 	if req.GoalMode {
 		goalText := strings.TrimSpace(req.Goal)
 		if goalText == "" {
-			return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
+			return nil, Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 		}
 		if utf8.RuneCountInString(goalText) > maxGoalTextCharacters {
-			return Error(c, fiber.StatusBadRequest, "goal must not exceed 4000 characters")
+			return nil, Error(c, fiber.StatusBadRequest, "goal must not exceed 4000 characters")
 		}
 	}
 	if h.repo != nil {
@@ -311,20 +355,18 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		}
 		rewrites, err := finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos)
 		if err != nil {
-			return respondUploadSessionFinalizeError(c, h.logger, err)
+			return nil, respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		rewriteFinalizedUploadURLSlice(req.ProductPhotos, rewrites)
 		if model.IsMontagePlatform(project.Platform) {
 			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
-				return respondUploadSessionFinalizeError(c, h.logger, err)
+				return nil, respondUploadSessionFinalizeError(c, h.logger, err)
 			}
 			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
 	}
 
-	// Build the e-commerce package config when any e-commerce field is present.
-	// The service only consults it when the project platform is "ecommerce".
 	var ecommerceCfg *model.EcommerceConfig
 	if len(req.SelectedModules) > 0 || len(req.ProductPhotos) > 0 || req.TargetPlatform != "" || req.SellingPoints != "" {
 		ecommerceCfg = &model.EcommerceConfig{
@@ -336,58 +378,52 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 			ProviderStrategyOverride: req.ProviderStrategyOverride,
 		}
 	}
+	return &preparedTaskCreation{
+		quantity:      quantity,
+		referenceView: referenceView,
+		params: service.CreateManualParams{
+			UserID:                   userID,
+			ProjectID:                req.ProjectID,
+			Prompt:                   prompt,
+			Quantity:                 quantity,
+			ImageRatio:               req.ImageRatio,
+			ImageModelKey:            req.ImageModelKey,
+			SkipRefImage:             req.SkipReferenceImage,
+			ReferenceImageAssetID:    referenceAssetID,
+			ProjectSnapshot:          &projectSnapshot,
+			InputAttachments:         req.InputAttachments,
+			Watermark:                req.Watermark,
+			Goal:                     req.Goal,
+			GoalMode:                 req.GoalMode,
+			HasContentImage:          req.HasContentImage,
+			HasTailImage:             req.HasTailImage,
+			ArticleWithCover:         req.ArticleWithCover,
+			ArticleWithContentImages: req.ArticleWithContentImages,
+			Ecommerce:                ecommerceCfg,
+			MontageInput:             req.MontageInput,
+			ExecutionTarget:          req.ExecutionTarget,
+		},
+	}, nil
+}
 
-	tasks, err := h.service.CreateManual(c.Context(), service.CreateManualParams{
-		UserID:                   userID,
-		ProjectID:                req.ProjectID,
-		Prompt:                   prompt,
-		Quantity:                 quantity,
-		ImageRatio:               req.ImageRatio,
-		ImageModelKey:            req.ImageModelKey,
-		SkipRefImage:             req.SkipReferenceImage,
-		ReferenceImageAssetID:    referenceAssetID,
-		ProjectSnapshot:          &projectSnapshot,
-		InputAttachments:         req.InputAttachments,
-		Watermark:                req.Watermark,
-		Goal:                     req.Goal,
-		GoalMode:                 req.GoalMode,
-		HasContentImage:          req.HasContentImage,
-		HasTailImage:             req.HasTailImage,
-		ArticleWithCover:         req.ArticleWithCover,
-		ArticleWithContentImages: req.ArticleWithContentImages,
-		Ecommerce:                ecommerceCfg,
-		MontageInput:             req.MontageInput,
-		ExecutionTarget:          req.ExecutionTarget,
-	})
-	if err != nil {
-		if errors.Is(err, service.ErrProjectNotFound) || errors.Is(err, service.ErrProjectOwnedByUser) {
-			return respondTaskCreationProjectError(c, h.logger, err)
-		}
-		if isReferenceAssetError(err) {
-			return respondReferenceAssetError(c, h.logger, err)
-		}
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
-		if errors.Is(err, service.ErrMontageInput) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
-			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
-				"code": 40202,
-				"msg":  "billing_task_admission_rejected",
-			})
-		}
-		return Error(c, fiber.StatusInternalServerError, "failed to create task")
+func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string, err error, logMessage, fallbackMessage string) error {
+	if errors.Is(err, service.ErrProjectNotFound) || errors.Is(err, service.ErrProjectOwnedByUser) || errors.Is(err, service.ErrTaskCreationProjectInactive) {
+		return respondTaskCreationProjectError(c, h.logger, err)
 	}
-	for _, task := range tasks {
-		task.ReferenceImage = referenceView
+	if isReferenceAssetError(err) {
+		return respondReferenceAssetError(c, h.logger, err)
 	}
-
-	// Montage is always a single deliverable and Studio expects one task
-	// object even when the request quantity is clamped by the service.
-	if len(tasks) == 1 && (quantity == 1 || req.MontageInput != nil) {
-		return Success(c, taskAPIResponse(tasks[0], h.store))
+	h.logger.Error().Err(err).Str("user_id", userID).Msg(logMessage)
+	if errors.Is(err, service.ErrMontageInput) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	return Success(c, taskAPIResponses(tasks, h.store))
+	if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
+		return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
+			"code": 40202,
+			"msg":  "billing_task_admission_rejected",
+		})
+	}
+	return Error(c, fiber.StatusInternalServerError, fallbackMessage)
 }
 
 func respondTaskCreationProjectError(c fiber.Ctx, logger *zerolog.Logger, err error) error {
@@ -396,6 +432,8 @@ func respondTaskCreationProjectError(c fiber.Ctx, logger *zerolog.Logger, err er
 		return Error(c, fiber.StatusNotFound, "project not found")
 	case errors.Is(err, service.ErrProjectOwnedByUser):
 		return Forbidden(c, "you do not have access to this project")
+	case errors.Is(err, service.ErrTaskCreationProjectInactive):
+		return Error(c, fiber.StatusBadRequest, "project is not active")
 	default:
 		if logger != nil {
 			logger.Error().Err(err).Msg("resolve task project failed")
@@ -501,6 +539,9 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 // It creates a fresh task from a terminal task's configuration and enqueues it.
 // The original task is preserved and the new task is billed as a new run.
 func (h *TaskHandler) Clone(c fiber.Ctx) error {
+	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	id, err := validateUUIDParam(c, "id")
 	if err != nil {
 		return err
@@ -526,17 +567,85 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "只有已完成、失败或已取消的任务可以克隆")
 	}
 
-	// Re-validate the image model against the caller's current tier (tier may
-	// have changed since the original task was created).
-	if err := h.validateImageModelKeyForUser(c, userID, task.ImageModelKey); err != nil {
-		return Error(c, fiber.StatusForbidden, err.Error())
-	}
-
 	var req cloneTaskRequest
 	if len(c.Body()) > 0 {
 		if err := c.Bind().Body(&req); err != nil {
 			return Error(c, fiber.StatusBadRequest, "invalid request body")
 		}
+	}
+	if req.ProjectID != "" {
+		prompt := ""
+		if req.Prompt != nil {
+			prompt = *req.Prompt
+		}
+		attachments := []model.EntryAttachment(nil)
+		if req.InputAttachments != nil {
+			attachments = *req.InputAttachments
+		}
+		creationReq := createTaskRequest{
+			ProjectID:                req.ProjectID,
+			Prompt:                   prompt,
+			Quantity:                 req.Quantity,
+			ImageRatio:               req.ImageRatio,
+			ImageModelKey:            req.ImageModelKey,
+			SkipReferenceImage:       req.SkipReferenceImage,
+			ReferenceImage:           req.ReferenceImage,
+			InputAttachments:         attachments,
+			Watermark:                req.Watermark,
+			Goal:                     req.Goal,
+			GoalMode:                 req.GoalMode,
+			HasContentImage:          req.HasContentImage,
+			HasTailImage:             req.HasTailImage,
+			ArticleWithCover:         req.ArticleWithCover,
+			ArticleWithContentImages: req.ArticleWithContentImages,
+			ProductPhotos:            req.ProductPhotos,
+			SelectedModules:          req.SelectedModules,
+			TargetPlatform:           req.TargetPlatform,
+			SellingPoints:            req.SellingPoints,
+			Language:                 req.Language,
+			ProviderStrategyOverride: req.ProviderStrategyOverride,
+			MontageInput:             req.MontageInput,
+			ExecutionTarget:          req.ExecutionTarget,
+		}
+		prepared, err := h.prepareTaskCreation(c, userID, &creationReq, true)
+		if err != nil || prepared == nil {
+			return err
+		}
+		tasks, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{Overrides: &service.CloneTaskOverrides{
+			ProjectID:                prepared.params.ProjectID,
+			Quantity:                 prepared.params.Quantity,
+			Prompt:                   prepared.params.Prompt,
+			ImageRatio:               prepared.params.ImageRatio,
+			ImageModelKey:            prepared.params.ImageModelKey,
+			SkipRefImage:             prepared.params.SkipRefImage,
+			ReferenceImageAssetID:    prepared.params.ReferenceImageAssetID,
+			InputAttachments:         prepared.params.InputAttachments,
+			Watermark:                prepared.params.Watermark,
+			Goal:                     prepared.params.Goal,
+			GoalMode:                 prepared.params.GoalMode,
+			HasContentImage:          prepared.params.HasContentImage,
+			HasTailImage:             prepared.params.HasTailImage,
+			ArticleWithCover:         prepared.params.ArticleWithCover,
+			ArticleWithContentImages: prepared.params.ArticleWithContentImages,
+			Ecommerce:                prepared.params.Ecommerce,
+			MontageInput:             prepared.params.MontageInput,
+			ExecutionTarget:          prepared.params.ExecutionTarget,
+		}})
+		if err != nil {
+			return h.respondTaskCreationServiceError(c, userID, err, "editable clone task failed", "克隆任务失败")
+		}
+		if len(tasks) == 0 {
+			h.logger.Error().Str("task_id", id).Msg("editable clone returned no tasks")
+			return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
+		}
+		tasks[0].ReferenceImage = prepared.referenceView
+		return Success(c, taskAPIResponse(tasks[0], h.store))
+	}
+
+	// Exact clones continue to use the source's frozen configuration. Re-check
+	// its image-model entitlement because the user's tier may have changed.
+	if err := h.validateImageModelKeyForUser(c, userID, task.ImageModelKey); err != nil {
+		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 	params := service.CloneTaskParams{}
 	if req.Prompt != nil {
@@ -565,26 +674,17 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 
-	newTask, err := h.service.Clone(c.Context(), id, params)
+	tasks, err := h.service.Clone(c.Context(), id, params)
 	if err != nil {
-		if isReferenceAssetError(err) {
-			return respondReferenceAssetError(c, h.logger, err)
-		}
-		h.logger.Error().Err(err).Str("task_id", id).Msg("clone task failed")
-		if errors.Is(err, service.ErrMontageInput) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
-			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
-				"code": 40202,
-				"msg":  "billing_task_admission_rejected",
-			})
-		}
+		return h.respondTaskCreationServiceError(c, userID, err, "clone task failed", "克隆任务失败")
+	}
+	if len(tasks) == 0 {
+		h.logger.Error().Str("task_id", id).Msg("clone returned no tasks")
 		return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
 	}
-	newTask.ReferenceImage = referenceView
+	tasks[0].ReferenceImage = referenceView
 
-	return Success(c, taskAPIResponse(newTask, h.store))
+	return Success(c, taskAPIResponse(tasks[0], h.store))
 }
 
 // Resume handles POST /api/v1/tasks/:id/resume.
@@ -892,7 +992,7 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "reference_unavailable"})
 			continue
 		}
-		newTask, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{})
+		newTasks, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{})
 		if err != nil {
 			if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 				results = append(results, bulkTaskResult{ID: id, Reason: "insufficient_credits"})
@@ -902,7 +1002,12 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "failed"})
 			continue
 		}
-		results = append(results, bulkTaskResult{ID: id, OK: true, NewTaskID: newTask.ID})
+		if len(newTasks) == 0 {
+			h.logger.Error().Str("task_id", id).Msg("bulk clone returned no tasks")
+			results = append(results, bulkTaskResult{ID: id, Reason: "failed"})
+			continue
+		}
+		results = append(results, bulkTaskResult{ID: id, OK: true, NewTaskID: newTasks[0].ID})
 		succeeded++
 	}
 	return Success(c, bulkTasksResponse{Total: len(ids), Succeeded: succeeded, Skipped: len(ids) - succeeded, Results: results})

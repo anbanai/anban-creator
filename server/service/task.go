@@ -352,7 +352,10 @@ func (s *TaskService) StorageProviderName() string {
 	return s.store.Name()
 }
 
-var ErrMontageInput = errors.New("montage input invalid")
+var (
+	ErrMontageInput                = errors.New("montage input invalid")
+	ErrTaskCreationProjectInactive = errors.New("task creation project is not active")
+)
 
 func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 	return append([]model.EntryAttachment(nil), in...)
@@ -448,7 +451,7 @@ func validateTaskCreationProject(project *model.Project, userID, projectID strin
 		return ErrProjectOwnedByUser
 	}
 	if project.Status != model.ProjectStatusActive {
-		return fmt.Errorf("project is not active")
+		return ErrTaskCreationProjectInactive
 	}
 	return nil
 }
@@ -666,7 +669,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 		tasks = append(tasks, task)
 	}
-	if err := s.persistTasksWithFixedAdmission(ctx, tasks); err != nil {
+	if err := s.persistTasksWithFixedAdmission(ctx, tasks, p.HasContentImage); err != nil {
 		if s.topicPoolSvc != nil {
 			for _, task := range tasks {
 				if relErr := s.topicPoolSvc.ReleaseForTask(ctx, task.ID); relErr != nil {
@@ -701,7 +704,7 @@ func (s *TaskService) persistTaskWithFixedAdmission(ctx context.Context, task *m
 	return s.persistTasksWithFixedAdmission(ctx, []*model.Task{task})
 }
 
-func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks []*model.Task) error {
+func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks []*model.Task, hasContentImageOverride ...*bool) error {
 	if len(tasks) == 0 {
 		return fmt.Errorf("at least one task is required")
 	}
@@ -710,10 +713,24 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			return fmt.Errorf("task is required")
 		}
 	}
+	explicitlyDisableContentImage := len(hasContentImageOverride) > 0 && hasContentImageOverride[0] != nil && !*hasContentImageOverride[0]
+	createTask := func(repo repository.Repository, task *model.Task) error {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			return err
+		}
+		if !explicitlyDisableContentImage {
+			return nil
+		}
+		// GORM applies the model's default:true tag to a false bool during Create.
+		// Save the explicit user choice inside the same admission transaction while
+		// retaining the true default for callers that omit the field.
+		task.HasContentImage = false
+		return repo.Tasks().Update(ctx, task)
+	}
 	if s.billingCatalogSvc == nil && s.billingWalletSvc == nil {
 		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
 			for _, task := range tasks {
-				if err := tx.Tasks().Create(ctx, task); err != nil {
+				if err := createTask(tx, task); err != nil {
 					return err
 				}
 			}
@@ -757,7 +774,7 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			}
 			item.task.BillingQuoteID, item.task.BillingCatalogID, item.task.BillingSKUID = item.quote.ID, item.quote.CatalogID, item.quote.SKUID
 			item.task.BillingChargeID, item.task.BillingPriceCredits = stringPtr(charge.ID), charge.PriceCredits
-			if err := tx.Tasks().Create(ctx, item.task); err != nil {
+			if err := createTask(tx, item.task); err != nil {
 				return err
 			}
 		}

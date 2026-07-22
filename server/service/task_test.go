@@ -1364,10 +1364,14 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatalf("Clone completed task: %v", err)
 	}
+	if len(clones) != 1 {
+		t.Fatalf("clones = %d, want 1", len(clones))
+	}
+	clone := clones[0]
 	if clone.ID == src.ID {
 		t.Fatal("clone reused the original task id")
 	}
@@ -1399,6 +1403,206 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 }
 
+func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	destinationProject := &model.Project{
+		ID:           uuid.NewString(),
+		UserID:       userID,
+		Platform:     model.PlatformSeednote,
+		Name:         "Editable clone destination",
+		Status:       model.ProjectStatusActive,
+		Instructions: "current destination instructions",
+		VisualStyle:  "current destination style",
+	}
+	if err := repo.Projects().Create(ctx, destinationProject); err != nil {
+		t.Fatalf("create destination project: %v", err)
+	}
+	referenceAsset := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      userID,
+		Purpose:     DirectUploadPurposeTaskReference,
+		StorageKey:  "assets/users/" + userID + "/reference/editable-clone.png",
+		FileName:    "editable-clone.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "editable-clone-etag",
+	}
+	if err := repo.Assets().Create(ctx, referenceAsset); err != nil {
+		t.Fatalf("create reference asset: %v", err)
+	}
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+
+	source := &model.Task{
+		ID:                   uuid.NewString(),
+		UserID:               userID,
+		ProjectID:            sourceProjectID,
+		Type:                 model.PlatformArticle,
+		Status:               model.TaskStatusCompleted,
+		Prompt:               "source prompt",
+		InputSourceTaskID:    "root-source-task",
+		InputSourceProjectID: "root-source-project",
+	}
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+
+	skipReference := true
+	watermark := true
+	hasContent := false
+	hasTail := true
+	articleCover := false
+	articleContent := false
+	attachments := []model.EntryAttachment{{Role: "brief", Text: "edited attachment", FileName: "brief.txt"}}
+	tasks, err := svc.Clone(ctx, source.ID, CloneTaskParams{Overrides: &CloneTaskOverrides{
+		ProjectID:                destinationProject.ID,
+		Quantity:                 2,
+		Prompt:                   "edited prompt",
+		ImageRatio:               "1:1",
+		ImageModelKey:            "gemini-pro",
+		SkipRefImage:             &skipReference,
+		ReferenceImageAssetID:    referenceAsset.ID,
+		InputAttachments:         attachments,
+		Watermark:                &watermark,
+		Goal:                     "edited goal",
+		GoalMode:                 true,
+		HasContentImage:          &hasContent,
+		HasTailImage:             &hasTail,
+		ArticleWithCover:         &articleCover,
+		ArticleWithContentImages: &articleContent,
+		ExecutionTarget:          model.ExecutionTargetLocal,
+	}})
+	if err != nil {
+		t.Fatalf("Clone with editable overrides: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("cloned tasks = %d, want 2", len(tasks))
+	}
+	for _, task := range tasks {
+		if task.ProjectID != destinationProject.ID || task.Type != model.PlatformSeednote {
+			t.Fatalf("destination = project %q type %q, want %q/%q", task.ProjectID, task.Type, destinationProject.ID, model.PlatformSeednote)
+		}
+		snapshot := task.ProjectSnapshot.Data()
+		if snapshot.ProjectName != destinationProject.Name || snapshot.Platform != destinationProject.Platform || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
+			t.Fatalf("destination snapshot = %#v", snapshot)
+		}
+		if task.Prompt != "edited prompt" || task.ImageRatio != "1:1" || task.ImageModelKey != "gemini-pro" {
+			t.Fatalf("editable fields = prompt %q ratio %q model %q", task.Prompt, task.ImageRatio, task.ImageModelKey)
+		}
+		if !task.SkipReferenceImage || task.ReferenceImageAssetID != referenceAsset.ID || !task.Watermark {
+			t.Fatalf("reference/watermark fields = skip %v asset %q watermark %v", task.SkipReferenceImage, task.ReferenceImageAssetID, task.Watermark)
+		}
+		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage {
+			t.Fatalf("goal/seednote fields = goal %q mode %v content %v tail %v", task.Goal, task.GoalMode, task.HasContentImage, task.HasTailImage)
+		}
+		if task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
+			t.Fatalf("article fields = cover %v content %v", task.ArticleWithCover, task.ArticleWithContentImages)
+		}
+		if task.ExecutionTarget != model.ExecutionTargetLocal || task.LocalClaimDeadline == nil {
+			t.Fatalf("execution target = %q deadline %v", task.ExecutionTarget, task.LocalClaimDeadline)
+		}
+		if got := task.InputAttachments.Data(); len(got) != 1 || got[0] != attachments[0] {
+			t.Fatalf("attachments = %#v, want %#v", got, attachments)
+		}
+		if task.InputSourceTaskID != "root-source-task" || task.InputSourceProjectID != "root-source-project" {
+			t.Fatalf("root provenance = %q/%q", task.InputSourceTaskID, task.InputSourceProjectID)
+		}
+		persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+		if err != nil {
+			t.Fatalf("reload editable clone: %v", err)
+		}
+		if persisted.HasContentImage {
+			t.Fatal("persisted has_content_image = true, want explicit false")
+		}
+	}
+}
+
+func TestTaskService_CloneAppliesTypeSpecificEditableOverrides(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		override func(projectID string) *CloneTaskOverrides
+		assert   func(t *testing.T, task *model.Task)
+	}{
+		{
+			name:     "ecommerce",
+			platform: model.PlatformEcommerce,
+			override: func(projectID string) *CloneTaskOverrides {
+				return &CloneTaskOverrides{
+					ProjectID: projectID,
+					Quantity:  2,
+					Ecommerce: &model.EcommerceConfig{
+						SelectedModules:          map[string]int{"main_images": 2},
+						ProductPhotos:            []string{"https://example.com/product.png"},
+						TargetPlatform:           "amazon",
+						SellingPoints:            "durable",
+						Language:                 "en",
+						ProviderStrategyOverride: "balanced",
+					},
+				}
+			},
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.Ecommerce.Data()
+				if got.SelectedModules["main_images"] != 2 || got.TargetPlatform != "amazon" || got.SellingPoints != "durable" || got.Language != "en" || got.ProviderStrategyOverride != "balanced" || len(got.ProductPhotos) != 1 {
+					t.Fatalf("ecommerce = %#v", got)
+				}
+			},
+		},
+		{
+			name:     "montage",
+			platform: model.PlatformMontage,
+			override: func(projectID string) *CloneTaskOverrides {
+				return &CloneTaskOverrides{
+					ProjectID: projectID,
+					Quantity:  2,
+					MontageInput: &model.MontageInput{
+						Brief:       "edited montage brief",
+						PipelineKey: "default",
+						Preferences: model.MontagePreferences{AspectRatio: "16:9", DurationSeconds: 30},
+					},
+				}
+			},
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.MontageInput.Data()
+				if got.Brief != "edited montage brief" || got.PipelineKey != "default" || got.Preferences.AspectRatio != "16:9" || got.Preferences.DurationSeconds != 30 {
+					t.Fatalf("montage input = %#v", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			destinationProjectID := createTestProject(t, repo, userID, tt.platform)
+			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+			if err := repo.Tasks().Create(ctx, source); err != nil {
+				t.Fatalf("create source task: %v", err)
+			}
+
+			tasks, err := svc.Clone(ctx, source.ID, CloneTaskParams{Overrides: tt.override(destinationProjectID)})
+			if err != nil {
+				t.Fatalf("Clone: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("type-specific cloned tasks = %d, want platform-clamped 1", len(tasks))
+			}
+			if tasks[0].ProjectID != destinationProjectID || tasks[0].Type != tt.platform || tasks[0].ProjectSnapshot.Data().Platform != tt.platform {
+				t.Fatalf("destination task = %#v", tasks[0])
+			}
+			if tasks[0].InputSourceTaskID != source.ID || tasks[0].InputSourceProjectID != sourceProjectID {
+				t.Fatalf("source provenance = %q/%q", tasks[0].InputSourceTaskID, tasks[0].InputSourceProjectID)
+			}
+			tt.assert(t, tasks[0])
+		})
+	}
+}
+
 func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -1418,10 +1622,14 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(clones) != 1 {
+		t.Fatalf("clones = %d, want 1", len(clones))
+	}
+	clone := clones[0]
 	if clone.InputSourceTaskID != "root-task-id" {
 		t.Fatalf("clone input source = %q, want root-task-id", clone.InputSourceTaskID)
 	}
@@ -1448,10 +1656,14 @@ func TestTaskServiceCloneRepairsPartialInputSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(clones) != 1 {
+		t.Fatalf("clones = %d, want 1", len(clones))
+	}
+	clone := clones[0]
 	if clone.InputSourceTaskID != src.ID {
 		t.Fatalf("clone input source = %q, want %q", clone.InputSourceTaskID, src.ID)
 	}
@@ -1485,10 +1697,14 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatalf("Clone montage task: %v", err)
 	}
+	if len(clones) != 1 {
+		t.Fatalf("clones = %d, want 1", len(clones))
+	}
+	clone := clones[0]
 	got := clone.MontageInput.Data()
 	if got.Brief != "保留克隆输入" || got.PipelineKey != "default" {
 		t.Fatalf("montage input = %#v", got)
