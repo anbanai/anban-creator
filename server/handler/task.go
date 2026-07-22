@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -228,7 +229,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
-	prepared, err := h.prepareTaskCreation(c, userID, &req, false)
+	prepared, err := h.prepareTaskCreation(c, userID, &req, false, nil)
 	if err != nil || prepared == nil {
 		return err
 	}
@@ -254,7 +255,89 @@ type preparedTaskCreation struct {
 	referenceView *model.AssetView
 }
 
-func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *createTaskRequest, strictQuantity bool) (*preparedTaskCreation, error) {
+type taskScopedCreationInput struct {
+	userID    string
+	projectID string
+	taskID    string
+}
+
+func validateTaskCreationSourceReuse(store storage.Provider, source *model.Task, attachments []model.EntryAttachment, productPhotos []string, montageInput *model.MontageInput) error {
+	trusted := taskScopedCreationInput{}
+	if source != nil {
+		trusted.taskID, trusted.projectID = service.ResolveCloneInputSource(source)
+		trusted.userID = source.UserID
+	}
+	validate := func(raw string, keyOnly bool) error {
+		identity, taskScoped, err := parseTaskScopedCreationInput(store, raw, keyOnly)
+		if err != nil {
+			return fmt.Errorf("task input storage URL is invalid")
+		}
+		if !taskScoped {
+			return nil
+		}
+		if source == nil || identity != trusted {
+			return fmt.Errorf("task-scoped input is not authorized for this clone source")
+		}
+		return nil
+	}
+	for _, attachment := range attachments {
+		if err := validate(attachment.URL, false); err != nil {
+			return err
+		}
+		if err := validate(attachment.Key, true); err != nil {
+			return err
+		}
+	}
+	for _, rawURL := range productPhotos {
+		if err := validate(rawURL, false); err != nil {
+			return err
+		}
+	}
+	for _, rawURL := range montageSourceAssetURLs(montageInput) {
+		if err := validate(rawURL, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseTaskScopedCreationInput(store storage.Provider, raw string, keyOnly bool) (taskScopedCreationInput, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return taskScopedCreationInput{}, false, nil
+	}
+	key := raw
+	if !keyOnly {
+		isLocalAPI := strings.HasPrefix(raw, "/api/v1/files/") || strings.HasPrefix(raw, "/files/")
+		if !isLocalAPI && (store == nil || !store.IsOwnedURL(raw)) {
+			return taskScopedCreationInput{}, false, nil
+		}
+		if strings.HasPrefix(raw, "/files/") {
+			parsedURL, err := url.Parse(raw)
+			if err != nil {
+				return taskScopedCreationInput{}, false, err
+			}
+			key = strings.TrimPrefix(parsedURL.Path, "/files/")
+		} else {
+			var ok bool
+			key, ok = storage.StorageKeyFromURL(raw)
+			if !ok {
+				return taskScopedCreationInput{}, false, storage.ErrInvalidRuntimeStorageKey
+			}
+		}
+	}
+	parsed, err := storage.ParseRuntimeStorageKey(strings.TrimPrefix(key, "/"))
+	if err != nil {
+		return taskScopedCreationInput{}, false, err
+	}
+	parts := strings.Split(parsed.Key, "/")
+	if len(parts) < 8 || parts[0] != "uploads" || parts[1] != "users" || parts[2] == "" || parts[3] != "projects" || parts[4] == "" || parts[5] != "tasks" || parts[6] == "" {
+		return taskScopedCreationInput{}, false, nil
+	}
+	return taskScopedCreationInput{userID: parts[2], projectID: parts[4], taskID: parts[6]}, true, nil
+}
+
+func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *createTaskRequest, strictQuantity bool, source *model.Task) (*preparedTaskCreation, error) {
 	if req.ProjectID == "" {
 		return nil, Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
@@ -366,9 +449,12 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
 	}
+	if err := validateTaskCreationSourceReuse(h.service.Storage(), source, req.InputAttachments, req.ProductPhotos, req.MontageInput); err != nil {
+		return nil, Error(c, fiber.StatusBadRequest, err.Error())
+	}
 
 	var ecommerceCfg *model.EcommerceConfig
-	if len(req.SelectedModules) > 0 || len(req.ProductPhotos) > 0 || req.TargetPlatform != "" || req.SellingPoints != "" {
+	if len(req.SelectedModules) > 0 || len(req.ProductPhotos) > 0 || req.TargetPlatform != "" || req.SellingPoints != "" || req.Language != "" || req.ProviderStrategyOverride != "" {
 		ecommerceCfg = &model.EcommerceConfig{
 			ProductPhotos:            req.ProductPhotos,
 			SelectedModules:          req.SelectedModules,
@@ -607,7 +693,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			MontageInput:             req.MontageInput,
 			ExecutionTarget:          req.ExecutionTarget,
 		}
-		prepared, err := h.prepareTaskCreation(c, userID, &creationReq, true)
+		prepared, err := h.prepareTaskCreation(c, userID, &creationReq, true, task)
 		if err != nil || prepared == nil {
 			return err
 		}

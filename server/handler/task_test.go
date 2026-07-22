@@ -911,6 +911,28 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:       "ecommerce language only",
+			platform:   model.PlatformEcommerce,
+			typeFields: `"language":"zh-CN"`,
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.Ecommerce.Data()
+				if got.SelectedModules["main_images"] != 1 || got.Language != "zh-CN" {
+					t.Fatalf("language-only ecommerce config = %#v", got)
+				}
+			},
+		},
+		{
+			name:       "ecommerce provider strategy only",
+			platform:   model.PlatformEcommerce,
+			typeFields: `"provider_strategy_override":"quality"`,
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.Ecommerce.Data()
+				if got.SelectedModules["main_images"] != 1 || got.ProviderStrategyOverride != "quality" {
+					t.Fatalf("provider-only ecommerce config = %#v", got)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -923,6 +945,9 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 			}
 			sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "source", Status: model.ProjectStatusActive}
 			destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: tt.platform, Name: tt.name, Status: model.ProjectStatusActive}
+			if tt.platform == model.PlatformEcommerce {
+				destinationProject.SetEcommerceDefaults(model.EcommerceProjectDefaults{DefaultSelectedModules: map[string]int{"main_images": 1}})
+			}
 			for _, project := range []*model.Project{sourceProject, destinationProject} {
 				if err := repo.Projects().Create(t.Context(), project); err != nil {
 					t.Fatal(err)
@@ -951,6 +976,182 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 			}
 			tt.assert(t, tasks[0])
 		})
+	}
+}
+
+type cloneSourceReuseFixture struct {
+	repo               repository.Repository
+	app                *fiber.App
+	userID             string
+	rootProjectID      string
+	rootTaskID         string
+	source             *model.Task
+	destinationProject *model.Project
+}
+
+func setupCloneSourceReuseFixture(t *testing.T, destinationPlatform string) *cloneSourceReuseFixture {
+	t.Helper()
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: uuid.NewString() + "@source-reuse.test", Password: "hashed", InviteCode: strings.ReplaceAll(uuid.NewString(), "-", "")[:16]}); err != nil {
+		t.Fatal(err)
+	}
+	rootProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "root source", Status: model.ProjectStatusActive}
+	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "intermediate source", Status: model.ProjectStatusActive}
+	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: destinationPlatform, Name: "destination", Status: model.ProjectStatusActive}
+	if destinationPlatform == model.PlatformEcommerce {
+		destinationProject.SetEcommerceDefaults(model.EcommerceProjectDefaults{DefaultSelectedModules: map[string]int{"main_images": 1}})
+	}
+	for _, project := range []*model.Project{rootProject, sourceProject, destinationProject} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rootTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: rootProject.ID, Type: rootProject.Platform, Status: model.TaskStatusCompleted}
+	source := &model.Task{
+		ID:                   uuid.NewString(),
+		UserID:               userID,
+		ProjectID:            sourceProject.ID,
+		Type:                 sourceProject.Platform,
+		Status:               model.TaskStatusCompleted,
+		InputSourceTaskID:    rootTask.ID,
+		InputSourceProjectID: rootProject.ID,
+	}
+	for _, task := range []*model.Task{rootTask, source} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	app := fiber.New()
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+	return &cloneSourceReuseFixture{
+		repo:               repo,
+		app:                app,
+		userID:             userID,
+		rootProjectID:      rootProject.ID,
+		rootTaskID:         rootTask.ID,
+		source:             source,
+		destinationProject: destinationProject,
+	}
+}
+
+func cloneSourceTaskURL(userID, projectID, taskID, fileName string) string {
+	key := strings.Join([]string{"uploads", "users", userID, "projects", projectID, "tasks", taskID, "inputs", fileName}, "/")
+	return "/api/v1/files/" + key
+}
+
+func cloneSourceReuseRequest(platform, projectID, rawURL string) string {
+	switch platform {
+	case model.PlatformEcommerce:
+		return `{"project_id":"` + projectID + `","quantity":1,"product_photos":["` + rawURL + `"]}`
+	case model.PlatformMontage:
+		return `{"project_id":"` + projectID + `","quantity":1,"montage_input":{"brief":"reuse source","source_assets":[{"type":"image","url":"` + rawURL + `","file_name":"source.png","mime_type":"image/png"}]}}`
+	default:
+		return `{"project_id":"` + projectID + `","quantity":1,"input_attachments":[{"type":"image","url":"` + rawURL + `","file_name":"source.png","content_type":"image/png"}]}`
+	}
+}
+
+func TestCloneTask_FullEditableAllowsTrustedRootSourceReuse(t *testing.T) {
+	for _, platform := range []string{model.PlatformArticle, model.PlatformEcommerce, model.PlatformMontage} {
+		t.Run(platform, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixture(t, platform)
+			rawURL := cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "source.png")
+			resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", cloneSourceReuseRequest(platform, fixture.destinationProject.ID, rawURL))
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+			}
+			tasks, err := fixture.repo.Tasks().FindByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "", 0, 10)
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("destination tasks = %d err=%v", len(tasks), err)
+			}
+			got := tasks[0]
+			if got.InputSourceTaskID != fixture.rootTaskID || got.InputSourceProjectID != fixture.rootProjectID {
+				t.Fatalf("root source = %q/%q", got.InputSourceTaskID, got.InputSourceProjectID)
+			}
+			switch platform {
+			case model.PlatformEcommerce:
+				if photos := got.Ecommerce.Data().ProductPhotos; len(photos) != 1 || photos[0] != rawURL {
+					t.Fatalf("product photos = %#v", photos)
+				}
+			case model.PlatformMontage:
+				if assets := got.MontageInput.Data().SourceAssets; len(assets) != 1 || assets[0].URL != rawURL {
+					t.Fatalf("montage assets = %#v", assets)
+				}
+			default:
+				if attachments := got.InputAttachments.Data(); len(attachments) != 1 || attachments[0].URL != rawURL {
+					t.Fatalf("attachments = %#v", attachments)
+				}
+			}
+		})
+	}
+}
+
+func TestCloneTask_FullEditableAllowsPublicExternalSourceURLs(t *testing.T) {
+	for _, platform := range []string{model.PlatformEcommerce, model.PlatformMontage} {
+		t.Run(platform, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixture(t, platform)
+			rawURL := "https://public.example.com/source.png"
+			resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", cloneSourceReuseRequest(platform, fixture.destinationProject.ID, rawURL))
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+			}
+			tasks, err := fixture.repo.Tasks().FindByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "", 0, 10)
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("destination tasks = %d err=%v", len(tasks), err)
+			}
+		})
+	}
+}
+
+func TestCloneTask_FullEditableRejectsUntrustedTaskScopedSourceURLs(t *testing.T) {
+	mismatches := []struct {
+		name string
+		ids  func(*cloneSourceReuseFixture) (string, string, string)
+	}{
+		{name: "wrong user", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return uuid.NewString(), f.rootProjectID, f.rootTaskID
+		}},
+		{name: "wrong project", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return f.userID, uuid.NewString(), f.rootTaskID
+		}},
+		{name: "wrong task", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return f.userID, f.rootProjectID, uuid.NewString()
+		}},
+	}
+	for _, platform := range []string{model.PlatformArticle, model.PlatformEcommerce, model.PlatformMontage} {
+		for _, mismatch := range mismatches {
+			t.Run(platform+"/"+mismatch.name, func(t *testing.T) {
+				fixture := setupCloneSourceReuseFixture(t, platform)
+				userID, projectID, taskID := mismatch.ids(fixture)
+				rawURL := cloneSourceTaskURL(userID, projectID, taskID, "source.png")
+				resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", cloneSourceReuseRequest(platform, fixture.destinationProject.ID, rawURL))
+				defer resp.Body.Close()
+				if resp.StatusCode != fiber.StatusBadRequest {
+					body, _ := io.ReadAll(resp.Body)
+					t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
+				}
+				count, err := fixture.repo.Tasks().CountByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "")
+				if err != nil || count != 0 {
+					t.Fatalf("destination task count = %d err=%v, want 0", count, err)
+				}
+				total, err := fixture.repo.Tasks().CountByUserID(t.Context(), fixture.userID, "", "")
+				if err != nil || total != 2 {
+					t.Fatalf("total task count = %d err=%v, want unchanged root+source tasks", total, err)
+				}
+			})
+		}
 	}
 }
 

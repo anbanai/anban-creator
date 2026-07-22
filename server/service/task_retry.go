@@ -55,14 +55,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		return nil, fmt.Errorf("only completed, failed, or cancelled tasks can be cloned (current status: %s)", src.Status)
 	}
 
-	inputSourceTaskID := src.InputSourceTaskID
-	inputSourceProjectID := src.InputSourceProjectID
-	if inputSourceTaskID == "" {
-		inputSourceTaskID = src.ID
-		inputSourceProjectID = src.ProjectID
-	} else if inputSourceProjectID == "" {
-		inputSourceProjectID = src.ProjectID
-	}
+	inputSourceTaskID, inputSourceProjectID := ResolveCloneInputSource(src)
 
 	if cloneParams.Overrides != nil {
 		override := cloneParams.Overrides
@@ -180,6 +173,24 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
 	return tasks, nil
+}
+
+// ResolveCloneInputSource returns the trusted root task/project pair whose
+// immutable task-scoped inputs a clone may reuse. Legacy rows that predate the
+// project field keep their source task under the source task's own project.
+func ResolveCloneInputSource(src *model.Task) (taskID, projectID string) {
+	if src == nil {
+		return "", ""
+	}
+	taskID = strings.TrimSpace(src.InputSourceTaskID)
+	projectID = strings.TrimSpace(src.InputSourceProjectID)
+	if taskID == "" {
+		return src.ID, src.ProjectID
+	}
+	if projectID == "" {
+		projectID = src.ProjectID
+	}
+	return taskID, projectID
 }
 
 func cloneExecutionTarget(source string) (string, error) {
