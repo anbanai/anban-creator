@@ -1,8 +1,12 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 )
@@ -27,7 +31,13 @@ const (
 	MontageRuntimeDirName              = "montage"
 	ContainerMontageTemplatePath       = "/opt/montage-template"
 	OrphanedContainerNameFilter        = "^/" + EphemeralContainerNamePrefix
+	dockerRuntimeContainerNamePrefix   = "creator-agent-job"
+	dockerProjectMemoryNamePrefix      = "creator-agent-memory"
+	dockerTaskWorkspaceNamePrefix      = "creator-agent-workspace"
+	dockerRuntimeNameMaxLength         = 128
 )
+
+var dockerNameUnsafe = regexp.MustCompile(`[^a-z0-9_.-]+`)
 
 func containerRuntimePath(taskType string) string {
 	switch taskType {
@@ -58,4 +68,32 @@ func EphemeralContainerName(taskID string) string {
 
 func OrphanedContainerNameFilters() []string {
 	return []string{OrphanedContainerNameFilter}
+}
+
+func dockerRuntimeContainerName(executionID string) string {
+	return dockerIdentityName(dockerRuntimeContainerNamePrefix, executionID)
+}
+
+func dockerProjectMemoryVolumeName(projectID string) string {
+	return dockerIdentityName(dockerProjectMemoryNamePrefix, projectID)
+}
+
+func dockerTaskWorkspaceVolumeName(taskID string) string {
+	return dockerIdentityName(dockerTaskWorkspaceNamePrefix, taskID)
+}
+
+func dockerIdentityName(prefix, identity string) string {
+	digest := sha256.Sum256([]byte(identity))
+	hash := hex.EncodeToString(digest[:8])
+	part := strings.ToLower(strings.TrimSpace(identity))
+	part = dockerNameUnsafe.ReplaceAllString(part, "-")
+	part = strings.Trim(part, "-._")
+	maxPartLength := dockerRuntimeNameMaxLength - len(prefix) - len(hash) - 2
+	if len(part) > maxPartLength {
+		part = strings.Trim(part[:maxPartLength], "-._")
+	}
+	if part == "" {
+		part = "unknown"
+	}
+	return prefix + "-" + part + "-" + hash
 }
