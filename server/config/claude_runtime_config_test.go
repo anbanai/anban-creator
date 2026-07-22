@@ -31,6 +31,10 @@ claude:
   model_usage_aliases:
     doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: docker
+  runtime_images:
+    article: creator-agent-article:latest
+    seednote: creator-agent-seednote:latest
+    montage: creator-agent-montage:latest
   env:
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
@@ -51,6 +55,11 @@ func validClaudeConfigForTest() ClaudeConfig {
 		},
 		UsageAliases: map[string]string{"doubao-seed-evolving-latest-version": "doubao-seed-evolving"},
 		Executor:     "docker",
+		RuntimeImages: RuntimeImages{
+			model.PlatformArticle:  "creator-agent-article:latest",
+			model.PlatformSeednote: "creator-agent-seednote:latest",
+			model.PlatformMontage:  "creator-agent-montage:latest",
+		},
 	}
 }
 

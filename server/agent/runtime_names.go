@@ -3,13 +3,14 @@ package agent
 import (
 	"os"
 	"path/filepath"
+
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 )
 
 const (
 	AgentBinaryName              = "anban"
 	DefaultWorkspaceBaseName     = "anban-creator"
 	EphemeralContainerNamePrefix = "creator-agent-task-"
-	DockerArticleImageDefault    = "creator-agent-article:latest"
 	ContainerRuntimeUser         = "1000:1000"
 	ContainerHomePath            = "/home/node"
 	DockerRuntimeHomeDirName     = ".anban-runtime-home"
@@ -34,6 +35,10 @@ func containerRuntimePath(taskType string) string {
 	default:
 		return ContainerContentRuntimePath
 	}
+}
+
+func RuntimeImageForTask(images srvconfig.RuntimeImages, taskType string) srvconfig.RuntimeImageSelection {
+	return images.ForTask(taskType)
 }
 
 func DefaultWorkspaceDir(taskID string) string {

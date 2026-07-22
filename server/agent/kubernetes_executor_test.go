@@ -1238,7 +1238,6 @@ func testJobConfig() kubernetesJobConfig {
 	return kubernetesJobConfig{
 		KubernetesConfig: srvconfig.KubernetesConfig{
 			Namespace:               "anban",
-			ArticleImage:            "registry.example.com/creator-agent:v2",
 			ServiceAccount:          "creator-agent-runner",
 			ImagePullSecret:         "acr-secret",
 			ServerCASecret:          "anban-server-tls",
@@ -1253,6 +1252,11 @@ func testJobConfig() kubernetesJobConfig {
 				Limits:   map[string]string{"cpu": "2", "memory": "2Gi"},
 			},
 		},
+		RuntimeImages: srvconfig.RuntimeImages{
+			model.PlatformArticle:  "registry.example.com/creator-agent:v2",
+			model.PlatformSeednote: "registry.example.com/creator-agent-seednote:v2",
+			model.PlatformMontage:  "registry.example.com/creator-agent-montage:v2",
+		},
 		ServerURL: "https://creator-server:8443",
 	}
 }
@@ -1260,7 +1264,7 @@ func testJobConfig() kubernetesJobConfig {
 func testExecution() *model.TaskExecution {
 	return &model.TaskExecution{
 		ID: "execution-1", TaskID: "task-1", Attempt: 1, Namespace: "anban", JobName: kubernetesJobName("execution-1"),
-		RuntimeProfile: "article", RuntimeImage: testJobConfig().ArticleImage,
+		RuntimeProfile: "article", RuntimeImage: testJobConfig().RuntimeImages.ForTask(model.PlatformArticle).Image,
 	}
 }
 

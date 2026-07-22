@@ -40,7 +40,7 @@ func (d *kubernetesJobDispatcher) ResolveRuntime(taskType string) srvconfig.Runt
 	if d == nil {
 		return srvconfig.RuntimeImageSelection{}
 	}
-	return d.config.ImageForTask(taskType)
+	return RuntimeImageForTask(d.config.RuntimeImages, taskType)
 }
 
 type KubernetesRuntimeIdentity struct {
@@ -64,7 +64,7 @@ type kubernetesJobDispatcher struct {
 
 var _ KubernetesDispatcher = (*kubernetesJobDispatcher)(nil)
 
-func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, serverURL string) (KubernetesDispatcher, error) {
+func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string) (KubernetesDispatcher, error) {
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("kubernetes in-cluster config: %w", err)
@@ -73,14 +73,14 @@ func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, serverURL string) (
 	if err != nil {
 		return nil, fmt.Errorf("kubernetes client: %w", err)
 	}
-	return NewKubernetesDispatcherWithClient(cfg, serverURL, client)
+	return NewKubernetesDispatcherWithClient(cfg, runtimeImages, serverURL, client)
 }
 
-func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, serverURL string, client kubernetes.Interface) (KubernetesDispatcher, error) {
+func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string, client kubernetes.Interface) (KubernetesDispatcher, error) {
 	if client == nil {
 		return nil, fmt.Errorf("kubernetes client is required")
 	}
-	jobCfg := kubernetesJobConfig{KubernetesConfig: cfg, ServerURL: serverURL}
+	jobCfg := kubernetesJobConfig{KubernetesConfig: cfg, RuntimeImages: runtimeImages, ServerURL: serverURL}
 	return &kubernetesJobDispatcher{config: jobCfg, kube: client}, nil
 }
 

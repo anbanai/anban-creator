@@ -82,6 +82,10 @@ claude:
   model_usage_aliases:
     doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: docker
+  runtime_images:
+    article: creator-agent-article:latest
+    seednote: creator-agent-seednote:latest
+    montage: creator-agent-montage:latest
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write temp config: %v", err)

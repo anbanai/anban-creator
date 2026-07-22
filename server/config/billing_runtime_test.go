@@ -36,6 +36,10 @@ claude:
   model_usage_aliases:
     doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: docker
+  runtime_images:
+    article: creator-agent-article:latest
+    seednote: creator-agent-seednote:latest
+    montage: creator-agent-montage:latest
 billing_runtime:
   config_dir: "${ANBAN_TEST_BILLING_DIR}"
   admin_api_key: "${ANBAN_TEST_BILLING_ADMIN_KEY}"
@@ -89,6 +93,10 @@ claude:
   model_usage_aliases:
     doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: docker
+  runtime_images:
+    article: creator-agent-article:latest
+    seednote: creator-agent-seednote:latest
+    montage: creator-agent-montage:latest
 `
 	if err := os.WriteFile(path, []byte(root), 0o600); err != nil {
 		t.Fatal(err)

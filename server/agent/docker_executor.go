@@ -40,6 +40,7 @@ type DockerExecutor struct {
 	imageAPICfg       *srvconfig.ImageAPIConfig
 	claudeEnv         map[string]string
 	dockerCfg         srvconfig.DockerConfig
+	runtimeImages     srvconfig.RuntimeImages
 	serverURL         string
 	dockerCLI         *client.Client
 	defaultModel      string
@@ -56,6 +57,7 @@ func NewDockerExecutor(
 	imageAPICfg *srvconfig.ImageAPIConfig,
 	claudeEnv map[string]string,
 	dockerCfg srvconfig.DockerConfig,
+	runtimeImages srvconfig.RuntimeImages,
 	serverURL string,
 	defaultModel string,
 	modelUsageAliases map[string]ModelUsageIdentity,
@@ -78,8 +80,9 @@ func NewDockerExecutor(
 	if err != nil {
 		return nil, fmt.Errorf("docker client init: %w", err)
 	}
-	if _, err := cli.ImageInspect(context.Background(), dockerCfg.ArticleImage); err != nil {
-		return nil, fmt.Errorf("Docker Article image %q not found locally (run 'make docker-agent-image' to build it): %w", dockerCfg.ArticleImage, err)
+	articleImage := RuntimeImageForTask(runtimeImages, model.PlatformArticle).Image
+	if _, err := cli.ImageInspect(context.Background(), articleImage); err != nil {
+		return nil, fmt.Errorf("Docker Article image %q not found locally (run 'make docker-agent-image' to build it): %w", articleImage, err)
 	}
 
 	return &DockerExecutor{
@@ -87,6 +90,7 @@ func NewDockerExecutor(
 		imageAPICfg:       imageAPICfg,
 		claudeEnv:         filterAgentEnv(claudeEnv),
 		dockerCfg:         dockerCfg,
+		runtimeImages:     runtimeImages,
 		serverURL:         serverURL,
 		dockerCLI:         cli,
 		defaultModel:      defaultModel,
@@ -160,12 +164,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		return nil, err
 	}
 
-	var workDir string
-	if e.dockerCfg.ContainerName != "" && e.dockerCfg.WorkspaceDir != "" {
-		workDir = filepath.Join(e.dockerCfg.WorkspaceDir, opts.Task.ID)
-	} else {
-		workDir = DefaultWorkspaceDir(opts.Task.ID)
-	}
+	workDir := DefaultWorkspaceDir(opts.Task.ID)
 	if err := os.MkdirAll(workDir, 0o777); err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
@@ -249,12 +248,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		Msg("Docker executor: starting agent execution")
 
 	var cmd []string
-	var workDirInContainer string
-	if e.dockerCfg.ContainerName != "" {
-		workDirInContainer = filepath.ToSlash(filepath.Join("/workspace", opts.Task.ID))
-	} else {
-		workDirInContainer = "/workspace"
-	}
+	workDirInContainer := "/workspace"
 	if opts.AutoMemoryDirectory != "" {
 		opts.AutoMemoryDirectory = containerMemoryDir(workDir, workDirInContainer, opts.AutoMemoryDirectory)
 	}
@@ -263,21 +257,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		return nil, err
 	}
 	env := e.buildAgentEnv(opts, dockerRuntimeHome(workDirInContainer))
-	runtime := e.dockerCfg.ImageForTask(opts.Task.Type)
+	runtime := RuntimeImageForTask(e.runtimeImages, opts.Task.Type)
 
-	var execRes execResult
-	if e.dockerCfg.ContainerName != "" && runtime.Profile == model.PlatformArticle {
-		execRes = e.executeViaExec(ctx, opts.Task.ID, workDirInContainer, runtimeUser, cmd, env, opts.HeartbeatFunc)
-	} else {
-		if _, err := e.dockerCLI.ImageInspect(ctx, runtime.Image); err != nil {
-			buildTarget := "docker-agent-image"
-			if runtime.Profile != model.PlatformArticle {
-				buildTarget = "docker-" + runtime.Profile + "-agent-image"
-			}
-			return nil, fmt.Errorf("docker %s image %q not found locally (run 'make %s' to build it): %w", runtime.Profile, runtime.Image, buildTarget, err)
+	if _, err := e.dockerCLI.ImageInspect(ctx, runtime.Image); err != nil {
+		buildTarget := "docker-agent-image"
+		if runtime.Profile != model.PlatformArticle {
+			buildTarget = "docker-" + runtime.Profile + "-agent-image"
 		}
-		execRes = e.executeInNewContainer(ctx, opts.Task.ID, workDir, runtimeUser, cmd, env, runtime.Image, e.dockerCfg.ContainerName)
+		return nil, fmt.Errorf("docker %s image %q not found locally (run 'make %s' to build it): %w", runtime.Profile, runtime.Image, buildTarget, err)
 	}
+	execRes := e.executeInNewContainer(ctx, opts.Task.ID, workDir, runtimeUser, cmd, env, runtime.Image, "")
 
 	if opts.LogWriter != nil {
 		if execRes.stderr.Len() > 0 {
@@ -430,8 +419,7 @@ type execResult struct {
 	err    error
 }
 
-func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInContainer, runtimeUser string, cmd []string, env []string, heartbeatFunc func(string)) execResult {
-	containerName := e.dockerCfg.ContainerName
+func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, containerName, workDirInContainer, runtimeUser string, cmd []string, env []string, heartbeatFunc func(string)) execResult {
 	if containerName == "" {
 		return execResult{err: fmt.Errorf("persistent container name is empty")}
 	}
@@ -571,6 +559,12 @@ func dockerAgentHostConfig(workDir, volumeDonor string, cfg srvconfig.DockerConf
 			Memory:   cfg.MemoryMB * 1024 * 1024,
 		},
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
+	}
+	if cfg.PidsLimit > 0 {
+		hostConfig.PidsLimit = &cfg.PidsLimit
+	}
+	if cfg.Network != "" {
+		hostConfig.NetworkMode = container.NetworkMode(cfg.Network)
 	}
 	if volumeDonor != "" {
 		hostConfig.VolumesFrom = []string{volumeDonor}

@@ -859,14 +859,20 @@ func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
 	for _, configPath := range []string{"server/config.yaml", "server/config.example.yaml"} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
-			"article_image: \"${ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE:-creator-agent-article:latest}\"",
-			"seednote: \"${ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE:-creator-agent-seednote:latest}\"",
-			"montage: \"${ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE:-creator-agent-montage:latest}\"",
-			"container_name: \"${ANBAN_CLAUDE_DOCKER_CONTAINER_NAME}\"",
-			"workspace_dir: \"${ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR}\"",
+			"executor: \"${ANBAN_AGENT_EXECUTOR}\"",
+			"article: \"${ANBAN_AGENT_IMAGE_ARTICLE}\"",
+			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE}\"",
+			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE}\"",
+			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-anban-creator-network}\"",
+			"pids_limit: 512",
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s missing Docker executor config contract %q", configPath, want)
+			}
+		}
+		for _, legacy := range []string{"article_image:", "image_profiles:", "ANBAN_CLAUDE_DOCKER_CONTAINER_NAME", "ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR"} {
+			if strings.Contains(body, legacy) {
+				t.Fatalf("%s retains legacy Docker executor config %q", configPath, legacy)
 			}
 		}
 	}

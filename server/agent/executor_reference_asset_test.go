@@ -38,7 +38,7 @@ func TestDockerExecutorReferenceAssetFailureStopsBeforeContainerStart(t *testing
 	executor := &DockerExecutor{
 		logger:    &logger,
 		store:     store,
-		dockerCfg: srvconfig.DockerConfig{ContainerName: "agent-runtime", WorkspaceDir: t.TempDir()},
+		dockerCfg: srvconfig.DockerConfig{},
 	}
 	opts := referenceAssetExecutionOptions(key)
 
@@ -67,7 +67,7 @@ func TestExecutorsRejectReferenceAssetSizeMismatchBeforeStartup(t *testing.T) {
 		}},
 		{name: "docker", run: func(store *fakeStore, opts *ExecutionOptions) error {
 			logger := zerolog.Nop()
-			executor := &DockerExecutor{logger: &logger, store: store, dockerCfg: srvconfig.DockerConfig{ContainerName: "agent-runtime", WorkspaceDir: t.TempDir()}}
+			executor := &DockerExecutor{logger: &logger, store: store, dockerCfg: srvconfig.DockerConfig{}}
 			_, err := executor.Execute(t.Context(), opts)
 			return err
 		}},

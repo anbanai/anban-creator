@@ -240,14 +240,14 @@ func main() {
 	var kubeReconciler *agent.KubernetesReconciler
 	switch cfg.Claude.Executor {
 	case "docker":
-		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
+		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.Docker, cfg.Claude.RuntimeImages, cfg.AgentServerURL(), cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker executor")
 		}
 		agentExecutor = dockerExec
 		dockerExec.CleanupOrphanedContainers()
 		log.Info().
-			Str("article_image", cfg.Claude.Docker.ArticleImage).
+			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformArticle).Image).
 			Int64("cpu_cores", cfg.Claude.Docker.CPUCores).
 			Int64("memory_mb", cfg.Claude.Docker.MemoryMB).
 			Int("timeout_sec", cfg.Claude.Docker.TimeoutSec).
@@ -264,15 +264,10 @@ func main() {
 		}
 		log.Info().
 			Str("namespace", cfg.Claude.Kubernetes.Namespace).
-			Str("article_image", cfg.Claude.Kubernetes.ArticleImage).
+			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformArticle).Image).
 			Msg("Kubernetes Job runtime client created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)
-		log.Info().
-			Str("plugin_dir", cfg.Claude.PluginDir).
-			Bool("sandbox", cfg.Claude.Sandbox).
-			Bool("per_user_mcp", apiKeySvc != nil).
-			Msg("local agent executor created")
+		log.Fatal().Str("executor", cfg.Claude.Executor).Msg("unsupported Claude executor")
 	}
 
 	// 13. Create services.
@@ -307,7 +302,7 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, log, cfg.Claude.TaskLogDir, workspaceSvc, "", service.NewRedisPubSub(rdb, log), publishingSvc)
 		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
 		planSvc.SetReferenceAssetService(referenceAssetSvc)
 		taskSvc.SetReferenceAssetService(referenceAssetSvc)
@@ -322,11 +317,11 @@ func main() {
 		taskSvc.SetExecutorDefaults(cfg.Claude.Models.Default, cfg.Claude.MaxTurns)
 		if cfg.Claude.Executor == "kubernetes" {
 			var err error
-			executionTokens, err = auth.NewExecutionTokenService(cfg.Claude.Kubernetes.ExecutionTokenSecret)
+			executionTokens, err = auth.NewExecutionTokenService(cfg.Claude.ExecutionTokenSecret)
 			if err != nil {
 				log.Fatal().Err(err).Msg("failed to create Kubernetes execution token service")
 			}
-			kubeDispatcher, err = agent.NewKubernetesDispatcherWithClient(cfg.Claude.Kubernetes, cfg.AgentServerURL(), kubeClient)
+			kubeDispatcher, err = agent.NewKubernetesDispatcherWithClient(cfg.Claude.Kubernetes, cfg.Claude.RuntimeImages, cfg.AgentServerURL(), kubeClient)
 			if err != nil {
 				log.Fatal().Err(err).Msg("failed to create Kubernetes Job dispatcher")
 			}

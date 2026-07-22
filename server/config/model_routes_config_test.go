@@ -221,6 +221,11 @@ claude:
     haiku: doubao-seed-2-1-turbo-260628
   model_usage_aliases:
     doubao-seed-evolving-latest-version: doubao-seed-evolving
+  executor: docker
+  runtime_images:
+    article: creator-agent-article:latest
+    seednote: creator-agent-seednote:latest
+    montage: creator-agent-montage:latest
   plugin_dir: "` + pluginDir + `"
 `)
 	if err := os.WriteFile(cfgPath, body, 0644); err != nil {

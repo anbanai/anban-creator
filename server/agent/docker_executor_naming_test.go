@@ -41,9 +41,6 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	if got, want := EphemeralContainerName(task.ID), "creator-agent-task-task-1"; got != want {
 		t.Fatalf("container name = %q, want %q", got, want)
 	}
-	if got, want := DockerArticleImageDefault, "creator-agent-article:latest"; got != want {
-		t.Fatalf("Docker Agent image default = %q, want %q", got, want)
-	}
 }
 
 func TestDockerResultWorkDirUsesTaskRuntimeRoot(t *testing.T) {
@@ -281,16 +278,21 @@ func TestDockerExecutorDoesNotExposeMontageEnvToOtherTasks(t *testing.T) {
 	}
 }
 
-func TestDockerProfileContainerInheritsPersistentWorkspaceVolume(t *testing.T) {
-	cfg := dockerAgentHostConfig("/host/workspace/task-1", "creator-agent-article", config.DockerConfig{CPUCores: 3, MemoryMB: 5120})
-	if !slices.Equal(cfg.VolumesFrom, []string{"creator-agent-article"}) {
-		t.Fatalf("VolumesFrom = %#v, want persistent content container", cfg.VolumesFrom)
-	}
-	if len(cfg.Mounts) != 0 {
-		t.Fatalf("profile container mounts = %#v, want inherited workspace volume only", cfg.Mounts)
-	}
+func TestDockerAgentHostConfigUsesSchedulerSettings(t *testing.T) {
+	cfg := dockerAgentHostConfig("/host/workspace/task-1", "", config.DockerConfig{
+		Network:   "anban-runtime",
+		CPUCores:  3,
+		MemoryMB:  5120,
+		PidsLimit: 256,
+	})
 	if cfg.NanoCPUs != 3e9 || cfg.Memory != 5120*1024*1024 {
 		t.Fatalf("resources = cpu %d memory %d", cfg.NanoCPUs, cfg.Memory)
+	}
+	if cfg.PidsLimit == nil || *cfg.PidsLimit != 256 {
+		t.Fatalf("pids limit = %v, want 256", cfg.PidsLimit)
+	}
+	if string(cfg.NetworkMode) != "anban-runtime" {
+		t.Fatalf("network mode = %q, want anban-runtime", cfg.NetworkMode)
 	}
 }
 

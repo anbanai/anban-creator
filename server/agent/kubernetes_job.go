@@ -37,7 +37,8 @@ const (
 
 type kubernetesJobConfig struct {
 	srvconfig.KubernetesConfig
-	ServerURL string
+	RuntimeImages srvconfig.RuntimeImages
+	ServerURL     string
 }
 
 func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution, task *model.Task) *batchv1.Job {

@@ -15,18 +15,18 @@ func baseKubernetesConfigForTest() Config {
 	claude := validClaudeConfigForTest()
 	claude.Executor = "kubernetes"
 	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	claude.ExecutionTokenSecret = "0123456789abcdef0123456789abcdef"
+	claude.RuntimeImages = RuntimeImages{
+		model.PlatformArticle:  "registry.example.com/creator-agent-article@sha256:" + strings.Repeat("a", 64),
+		model.PlatformSeednote: "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
+		model.PlatformMontage:  "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
+	}
 	claude.Kubernetes = KubernetesConfig{
-		Namespace:    "anbanai-prod",
-		ArticleImage: "registry.example.com/creator-agent-article@sha256:" + strings.Repeat("a", 64),
-		ImageProfiles: map[string]string{
-			model.PlatformSeednote: "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
-			model.PlatformMontage:  "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
-		},
-		ServiceAccount:       "creator-agent-runner",
-		NASStorageClass:      "nas-sc-creator",
-		ProjectMemorySize:    "1Gi",
-		TaskWorkspaceSize:    "10Gi",
-		ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
+		Namespace:         "anbanai-prod",
+		ServiceAccount:    "creator-agent-runner",
+		NASStorageClass:   "nas-sc-creator",
+		ProjectMemorySize: "1Gi",
+		TaskWorkspaceSize: "10Gi",
 	}
 	cfg := Config{
 		Server:   ServerConfig{TLSCertFile: "/tls/tls.crt", TLSKeyFile: "/tls/tls.key"},
@@ -54,66 +54,11 @@ func TestValidateAcceptsKubernetesExecutor(t *testing.T) {
 	}
 }
 
-func TestKubernetesArticleImageMustBeExplicit(t *testing.T) {
-	cfg := Config{}
-	cfg.applyDefaults()
-	if cfg.Claude.Kubernetes.ArticleImage != "" {
-		t.Fatalf("Kubernetes Article image default = %q, want explicit production image", cfg.Claude.Kubernetes.ArticleImage)
-	}
-	if cfg.Claude.Docker.ArticleImage != "creator-agent-article:latest" {
-		t.Fatalf("Docker Article image default = %q, want creator-agent Docker runtime identity", cfg.Claude.Docker.ArticleImage)
-	}
-}
-
-func TestRejectsGenericAgentImageKeys(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		body string
-		want string
-	}{
-		{
-			name: "Docker image",
-			body: "claude:\n  docker:\n    image: creator-agent-article:latest\n",
-			want: "deprecated config key claude.docker.image; use claude.docker.article_image",
-		},
-		{
-			name: "Kubernetes Agent image",
-			body: "claude:\n  kubernetes:\n    agent_image: registry.example.com/article:v1\n",
-			want: "deprecated config key claude.kubernetes.agent_image; use claude.kubernetes.article_image",
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			err := rejectDeprecatedConfigKeys([]byte(test.body))
-			if err == nil || err.Error() != test.want {
-				t.Fatalf("rejectDeprecatedConfigKeys() error = %v, want %q", err, test.want)
-			}
-		})
-	}
-}
-
-func TestKubernetesImageForTaskUsesProfileThenArticle(t *testing.T) {
-	cfg := KubernetesConfig{
-		ArticleImage: "registry/article@sha256:article",
-		ImageProfiles: map[string]string{
-			model.PlatformSeednote: "registry/seednote@sha256:seednote",
-			model.PlatformMontage:  "registry/montage@sha256:montage",
-		},
-	}
-	if got := cfg.ImageForTask(model.PlatformMontage); got.Profile != "montage" || got.Image != "registry/montage@sha256:montage" {
-		t.Fatalf("montage runtime = %#v", got)
-	}
-	if got := cfg.ImageForTask(model.PlatformSeednote); got.Profile != "seednote" || got.Image != "registry/seednote@sha256:seednote" {
-		t.Fatalf("seednote runtime = %#v", got)
-	}
-}
-
-func TestDockerImageForTaskUsesProfileThenArticle(t *testing.T) {
-	cfg := DockerConfig{
-		ArticleImage: "creator-agent-article:latest",
-		ImageProfiles: map[string]string{
-			model.PlatformSeednote: "creator-agent-seednote:latest",
-			model.PlatformMontage:  "creator-agent-montage:latest",
-		},
+func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
+	images := RuntimeImages{
+		model.PlatformArticle:  "creator-agent-article:latest",
+		model.PlatformSeednote: "creator-agent-seednote:latest",
+		model.PlatformMontage:  "creator-agent-montage:latest",
 	}
 	for _, test := range []struct {
 		taskType string
@@ -124,72 +69,44 @@ func TestDockerImageForTaskUsesProfileThenArticle(t *testing.T) {
 		{taskType: model.PlatformSeednote, profile: "seednote", image: "creator-agent-seednote:latest"},
 		{taskType: model.PlatformMontage, profile: "montage", image: "creator-agent-montage:latest"},
 	} {
-		if got := cfg.ImageForTask(test.taskType); got.Profile != test.profile || got.Image != test.image {
+		if got := images.ForTask(test.taskType); got.Profile != test.profile || got.Image != test.image {
 			t.Fatalf("task %s runtime = %#v, want %s/%s", test.taskType, got, test.profile, test.image)
 		}
 	}
 }
 
-func TestValidateKubernetesImageProfiles(t *testing.T) {
+func TestValidateRuntimeImagesRequiresExactCanonicalProfiles(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		profiles map[string]string
 		want     string
 	}{
 		{
-			name:     "missing seednote image",
+			name:     "missing article image",
 			profiles: map[string]string{model.PlatformMontage: "registry/montage:v1"},
-			want:     "claude.kubernetes.image_profiles.seednote is required",
+			want:     "claude.runtime_images.article is required",
 		},
 		{
 			name:     "missing montage image",
-			profiles: map[string]string{model.PlatformSeednote: "registry/seednote:v1"},
-			want:     "claude.kubernetes.image_profiles.montage is required",
+			profiles: map[string]string{model.PlatformArticle: "registry/article:v1", model.PlatformSeednote: "registry/seednote:v1"},
+			want:     "claude.runtime_images.montage is required",
 		},
 		{
 			name:     "empty mapped image",
-			profiles: map[string]string{model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "  "},
-			want:     "claude.kubernetes.image_profiles.montage must not be empty",
+			profiles: map[string]string{model.PlatformArticle: "registry/article:v1", model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "  "},
+			want:     "claude.runtime_images.montage must not be empty",
 		},
 		{
 			name:     "unsupported task key",
-			profiles: map[string]string{model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "registry/montage:v1", "unknown": "registry/unknown@sha256:test"},
-			want:     `claude.kubernetes.image_profiles contains unsupported task type "unknown"`,
+			profiles: map[string]string{model.PlatformArticle: "registry/article:v1", model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "registry/montage:v1", "unknown": "registry/unknown:v1"},
+			want:     `claude.runtime_images contains unsupported profile "unknown"`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			cfg := baseKubernetesConfigForTest()
-			cfg.Claude.Kubernetes.ImageProfiles = test.profiles
-			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Validate() error = %v, want %q", err, test.want)
-			}
-		})
-	}
-}
-
-func TestValidateKubernetesAcceptsTaggedImages(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		mutate func(*Config)
-	}{
-		{
-			name: "Article image tag",
-			mutate: func(cfg *Config) {
-				cfg.Claude.Kubernetes.ArticleImage = "registry.example.com/article:latest"
-			},
-		},
-		{
-			name: "profile image tag",
-			mutate: func(cfg *Config) {
-				cfg.Claude.Kubernetes.ImageProfiles[model.PlatformMontage] = "registry.example.com/montage:v1"
-			},
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			cfg := baseKubernetesConfigForTest()
-			test.mutate(&cfg)
-			if err := cfg.Validate(); err != nil {
-				t.Fatalf("Validate() error = %v, want tagged image accepted", err)
+			claude := validClaudeConfigForTest()
+			claude.RuntimeImages = RuntimeImages(test.profiles)
+			if err := claude.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ClaudeConfig.Validate() error = %v, want %q", err, test.want)
 			}
 		})
 	}
@@ -311,14 +228,14 @@ claude:
   model_usage_aliases:
     doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: "kubernetes"
+  runtime_images:
+    article: "registry.example.com/creator-agent-article@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    seednote: "registry.example.com/creator-agent-seednote@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    montage: "registry.example.com/creator-agent-montage@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  execution_token_secret: "0123456789abcdef0123456789abcdef"
   agent_server_url: "https://creator-api-svc:8443"
   kubernetes:
-    article_image: "registry.example.com/creator-agent-article@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    image_profiles:
-      seednote: "registry.example.com/creator-agent-seednote@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-      montage: "registry.example.com/creator-agent-montage@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     service_account: "creator-agent-runner"
-    execution_token_secret: "0123456789abcdef0123456789abcdef"
     nas_storage_class: "nas-sc-creator"
     project_memory_size: "1Gi"
     task_workspace_size: "10Gi"
@@ -412,9 +329,9 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 		{
 			name: "execution token secret",
 			mutate: func(cfg *Config) {
-				cfg.Claude.Kubernetes.ExecutionTokenSecret = "too-short"
+				cfg.Claude.ExecutionTokenSecret = "too-short"
 			},
-			wantErr: "claude.kubernetes.execution_token_secret must be at least 32 bytes",
+			wantErr: "claude.execution_token_secret must be at least 32 bytes",
 		},
 		{
 			name: "NAS storage class",
