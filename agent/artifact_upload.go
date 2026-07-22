@@ -59,7 +59,6 @@ type ArtifactManifestFile struct {
 	ContentType  string `json:"content_type"`
 	Size         int64  `json:"size"`
 	SHA256       string `json:"sha256"`
-	ETag         string `json:"etag,omitempty"`
 	Role         string `json:"role,omitempty"`
 }
 
@@ -213,7 +212,6 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 		if contentType == "" {
 			contentType = file.ContentType
 		}
-		etag := prepared.ETag
 		if prepared.UploadRequired {
 			preparedSHA256 := strings.ToLower(strings.TrimSpace(prepared.Headers[artifactSHA256Header]))
 			if preparedSHA256 == "" || preparedSHA256 != snapshot.hash {
@@ -225,7 +223,7 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 				primary := fmt.Errorf("rewind artifact %s: %w", file.RelativePath, err)
 				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 			}
-			etag, err = u.putObject(ctx, prepared, artifactUploadSource{ReadSeeker: snapshot.file}, contentType)
+			_, err = u.putObject(ctx, prepared, artifactUploadSource{ReadSeeker: snapshot.file}, contentType)
 		}
 
 		stable, stabilityErr := snapshot.unchanged()
@@ -252,7 +250,6 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 				ContentType:  contentType,
 				Size:         snapshot.size,
 				SHA256:       snapshot.hash,
-				ETag:         etag,
 			}, nil
 		}
 	}

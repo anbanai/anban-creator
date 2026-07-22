@@ -56,7 +56,6 @@ type TaskArtifactManifestFile struct {
 	ContentType  string `json:"content_type"`
 	Size         int64  `json:"size"`
 	SHA256       string `json:"sha256"`
-	ETag         string `json:"etag"`
 	Role         string `json:"role"`
 }
 
@@ -165,15 +164,30 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	if cred.ExpiresAt.IsZero() {
 		cred.ExpiresAt = expiresAt
 	}
+	session := &model.UploadSession{
+		ID:          uploadID,
+		UserID:      task.UserID,
+		Purpose:     DirectUploadPurposeTaskArtifact,
+		StagingKey:  stagingKey,
+		FileName:    filepath.Base(relPath),
+		ContentType: contentType,
+		Size:        req.Size,
+		Status:      model.UploadSessionPending,
+		ExpiresAt:   expiresAt,
+	}
+	if err := s.repo.UploadSessions().Create(ctx, session); err != nil {
+		return nil, fmt.Errorf("%w: record task artifact upload session: %v", ErrTaskArtifactPersistence, err)
+	}
 
 	return &DirectUploadPrepareResult{
-		UploadRequired: true,
-		UploadID:       uploadID,
-		StagingKey:     stagingKey,
-		Key:            stagingKey,
-		PublicURL:      s.store.GetURL(stagingKey),
-		UploadURL:      uploadURL,
-		Method:         "PUT",
+		UploadRequired:  true,
+		UploadSessionID: uploadID,
+		UploadID:        uploadID,
+		StagingKey:      stagingKey,
+		Key:             stagingKey,
+		PublicURL:       s.store.GetURL(stagingKey),
+		UploadURL:       uploadURL,
+		Method:          "PUT",
 		Headers: map[string]string{
 			"Content-Type":           contentType,
 			taskArtifactSHA256Header: req.SHA256,
@@ -211,12 +225,19 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 	if err != nil {
 		return err
 	}
+	for _, file := range req.Files {
+		if file.Size > maxTaskArtifactUploadBytes {
+			return taskArtifactInvalidf("task artifact %s exceeds the %d MB limit", strings.TrimSpace(file.RelativePath), maxTaskArtifactUploadBytes/(1024*1024))
+		}
+	}
 	artifactStore, ok := s.store.(taskArtifactPromotionStorage)
 	if !ok {
 		return fmt.Errorf("%w: storage provider does not support immutable object promotion", ErrTaskArtifactUnavailable)
 	}
 	prefix := buildTaskArtifactStoragePrefix(task, executionID)
 	files := make([]*model.TaskFile, 0, len(req.Files))
+	stagingKeys := make([]string, 0, len(req.Files))
+	now := time.Now()
 	for _, file := range req.Files {
 		relPath, err := cleanTaskArtifactRelativePath(task, file.RelativePath)
 		if err != nil {
@@ -238,8 +259,12 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		if file.Size <= 0 {
 			return taskArtifactInvalidf("file size is required for %s", relPath)
 		}
+		if file.Size > maxTaskArtifactUploadBytes {
+			return taskArtifactInvalidf("task artifact %s exceeds the %d MB limit", relPath, maxTaskArtifactUploadBytes/(1024*1024))
+		}
 		hash := strings.ToLower(strings.TrimSpace(file.SHA256))
 		finalKey := buildTaskArtifactFinalStorageKey(task, executionID, hash, relPath)
+		stagingUploadID, stagingKeyOK := taskArtifactStagingUploadID(task, executionID, hash, relPath, objectKey)
 		var stat *storage.ObjectInfo
 		switch {
 		case objectKey == finalKey:
@@ -250,31 +275,48 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 			if err := validateTaskArtifactObject(relPath, file.Size, hash, stat); err != nil {
 				return err
 			}
-		case validTaskArtifactStagingStorageKey(task, executionID, hash, relPath, objectKey):
-			stat, err = statTaskArtifactObject(ctx, artifactStore, objectKey)
-			if err != nil {
-				return err
-			}
-			if err := validateTaskArtifactObject(relPath, file.Size, hash, stat); err != nil {
-				return err
-			}
-			sourceETag := strings.TrimSpace(stat.ETag)
-			if sourceETag == "" {
-				return taskArtifactInvalidf("task artifact %s staging ETag is required", relPath)
-			}
-			if _, promoteErr := artifactStore.PromoteObject(ctx, objectKey, finalKey, sourceETag); promoteErr != nil && !errors.Is(promoteErr, storage.ErrObjectAlreadyExists) {
-				if errors.Is(promoteErr, storage.ErrPromotionPreconditionFailed) {
-					return fmt.Errorf("%w: task artifact %s promotion source changed: %v", ErrTaskArtifactUnavailable, relPath, promoteErr)
+		case stagingKeyOK:
+			finalStat, finalErr := artifactStore.StatObject(ctx, finalKey)
+			switch {
+			case finalErr == nil && finalStat == nil:
+				return fmt.Errorf("%w: stat task artifact %s returned no metadata", ErrTaskArtifactUnavailable, finalKey)
+			case finalErr == nil:
+				if err := validateTaskArtifactObject(relPath, file.Size, hash, finalStat); err != nil {
+					return err
 				}
-				return fmt.Errorf("%w: promote task artifact %s: %v", ErrTaskArtifactUnavailable, relPath, promoteErr)
+				stat = finalStat
+			case errors.Is(finalErr, storage.ErrObjectNotFound):
+				if err := s.validateTaskArtifactStagingSession(ctx, task, stagingUploadID, objectKey, relPath, normalizeTaskArtifactContentType(file.ContentType, relPath), file.Size, now); err != nil {
+					return err
+				}
+				stat, err = statTaskArtifactObject(ctx, artifactStore, objectKey)
+				if err != nil {
+					return err
+				}
+				if err := validateTaskArtifactObject(relPath, file.Size, hash, stat); err != nil {
+					return err
+				}
+				sourceETag := strings.TrimSpace(stat.ETag)
+				if sourceETag == "" {
+					return taskArtifactInvalidf("task artifact %s staging ETag is required", relPath)
+				}
+				if _, promoteErr := artifactStore.PromoteObject(ctx, objectKey, finalKey, sourceETag); promoteErr != nil && !errors.Is(promoteErr, storage.ErrObjectAlreadyExists) {
+					if errors.Is(promoteErr, storage.ErrPromotionPreconditionFailed) {
+						return fmt.Errorf("%w: task artifact %s promotion source changed: %v", ErrTaskArtifactUnavailable, relPath, promoteErr)
+					}
+					return fmt.Errorf("%w: promote task artifact %s: %v", ErrTaskArtifactUnavailable, relPath, promoteErr)
+				}
+				stat, err = statTaskArtifactObject(ctx, artifactStore, finalKey)
+				if err != nil {
+					return err
+				}
+				if err := validateTaskArtifactObject(relPath, file.Size, hash, stat); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("%w: stat task artifact %s: %v", ErrTaskArtifactUnavailable, finalKey, finalErr)
 			}
-			stat, err = statTaskArtifactObject(ctx, artifactStore, finalKey)
-			if err != nil {
-				return err
-			}
-			if err := validateTaskArtifactObject(relPath, file.Size, hash, stat); err != nil {
-				return err
-			}
+			stagingKeys = append(stagingKeys, objectKey)
 		default:
 			return taskArtifactInvalidf("object key %q is not the immutable final key or a valid staging key for %q", objectKey, relPath)
 		}
@@ -315,16 +357,20 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 			}
 			return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
 		}
-		return nil
-	}
-	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		for _, file := range files {
-			if _, err := tx.TaskFiles().Upsert(ctx, file); err != nil {
-				return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
+	} else {
+		if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+			for _, file := range files {
+				if _, err := tx.TaskFiles().Upsert(ctx, file); err != nil {
+					return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
+				}
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	deleteTaskArtifactStagingObjects(ctx, s.store, stagingKeys)
+	return nil
 }
 
 func buildTaskMCPArtifactStoragePrefix(task *model.Task, executionID string) string {
@@ -347,18 +393,55 @@ func buildTaskArtifactStagingStorageKey(task *model.Task, executionID, hash, upl
 	return buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + hash + "/" + uploadID + "/" + filepath.ToSlash(relPath)
 }
 
-func validTaskArtifactStagingStorageKey(task *model.Task, executionID, hash, relPath, key string) bool {
+func taskArtifactStagingUploadID(task *model.Task, executionID, hash, relPath, key string) (string, bool) {
 	prefix := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + hash + "/"
 	remainder, ok := strings.CutPrefix(key, prefix)
 	if !ok {
-		return false
+		return "", false
 	}
 	uploadID, suffix, ok := strings.Cut(remainder, "/")
 	if !ok || suffix != filepath.ToSlash(relPath) {
-		return false
+		return "", false
 	}
 	parsed, err := uuid.Parse(uploadID)
-	return err == nil && parsed.String() == uploadID
+	if err != nil || parsed.String() != uploadID {
+		return "", false
+	}
+	return uploadID, true
+}
+
+func (s *TaskService) validateTaskArtifactStagingSession(ctx context.Context, task *model.Task, uploadID, stagingKey, relPath, contentType string, size int64, now time.Time) error {
+	session, err := s.repo.UploadSessions().FindByID(ctx, uploadID)
+	if err != nil {
+		if errors.Is(err, model.ErrUploadSessionNotFound) {
+			return taskArtifactInvalidf("task artifact %s staging upload session is unavailable", relPath)
+		}
+		return fmt.Errorf("%w: find task artifact upload session: %v", ErrTaskArtifactPersistence, err)
+	}
+	if session.UserID != task.UserID || session.Purpose != DirectUploadPurposeTaskArtifact || session.StagingKey != stagingKey ||
+		session.FileName != filepath.Base(relPath) || session.ContentType != contentType || session.Size != size {
+		return taskArtifactInvalidf("task artifact %s staging upload session does not match manifest", relPath)
+	}
+	if session.Status != model.UploadSessionPending || !session.ExpiresAt.After(now) {
+		return taskArtifactInvalidf("task artifact %s staging upload session is not pending and unexpired", relPath)
+	}
+	return nil
+}
+
+func deleteTaskArtifactStagingObjects(ctx context.Context, store storage.Provider, keys []string) {
+	if store == nil || len(keys) == 0 {
+		return
+	}
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), uploadFinalizationCleanupTTL)
+	defer cancel()
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		_ = store.Delete(deleteCtx, key)
+	}
 }
 
 func statTaskArtifactObject(ctx context.Context, statProvider storage.ObjectStatProvider, key string) (*storage.ObjectInfo, error) {

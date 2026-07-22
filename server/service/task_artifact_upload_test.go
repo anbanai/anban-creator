@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,7 @@ type fakeTaskArtifactStorage struct {
 	promoteErrBySource map[string]error
 	afterPromote       func(sourceKey, finalKey string)
 	objects            map[string][]byte
+	deletedKeys        []string
 }
 
 type taskArtifactPromotion struct {
@@ -52,6 +54,24 @@ type taskArtifactPromotion struct {
 type statOnlyTaskArtifactStorage struct {
 	storage.Provider
 	statProvider storage.ObjectStatProvider
+}
+
+type taskArtifactRepositoryOverride struct {
+	repository.Repository
+	uploadSessions repository.UploadSessionRepository
+}
+
+func (r *taskArtifactRepositoryOverride) UploadSessions() repository.UploadSessionRepository {
+	return r.uploadSessions
+}
+
+type failingTaskArtifactUploadSessionRepository struct {
+	repository.UploadSessionRepository
+	err error
+}
+
+func (r *failingTaskArtifactUploadSessionRepository) Create(context.Context, *model.UploadSession) error {
+	return r.err
 }
 
 func (s *statOnlyTaskArtifactStorage) StatObject(ctx context.Context, key string) (*storage.ObjectInfo, error) {
@@ -99,6 +119,7 @@ func (f *fakeTaskArtifactStorage) Read(context.Context, string) ([]byte, error) 
 }
 
 func (f *fakeTaskArtifactStorage) Delete(_ context.Context, key string) error {
+	f.deletedKeys = append(f.deletedKeys, key)
 	delete(f.stats, key)
 	delete(f.objects, key)
 	return nil
@@ -230,7 +251,7 @@ func taskArtifactDirectUploadConfig(t *testing.T) DirectUploadConfig {
 				ExpiresAt:       time.Now().Add(15 * time.Minute),
 			}, nil
 		}),
-		Now: func() time.Time { return time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC) },
+		Now: time.Now,
 	}
 }
 
@@ -263,6 +284,36 @@ func taskArtifactManifestEntry(relPath, objectKey string, size int64, hash strin
 		Size:         size,
 		SHA256:       hash,
 	}
+}
+
+func seedTaskArtifactUploadSession(t *testing.T, repo repository.Repository, task *model.Task, stagingKey, relPath string, size int64, mutate func(*model.UploadSession)) *model.UploadSession {
+	t.Helper()
+	executionID := ""
+	if task.CurrentExecutionID != nil {
+		executionID = *task.CurrentExecutionID
+	}
+	prefix := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/"
+	remainder, ok := strings.CutPrefix(stagingKey, prefix)
+	if !ok {
+		t.Fatalf("staging key %q does not use task artifact prefix", stagingKey)
+	}
+	parts := strings.SplitN(remainder, "/", 3)
+	if len(parts) != 3 {
+		t.Fatalf("staging key %q has no upload session ID", stagingKey)
+	}
+	session := &model.UploadSession{
+		ID: parts[1], UserID: task.UserID, Purpose: DirectUploadPurposeTaskArtifact,
+		StagingKey: stagingKey, FileName: filepath.Base(relPath),
+		ContentType: normalizeTaskArtifactContentType("", relPath), Size: size,
+		Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if mutate != nil {
+		mutate(session)
+	}
+	if err := repo.UploadSessions().Create(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	return session
 }
 
 func taskArtifactDirectUploadConfigWithCredentialCounter(t *testing.T, calls *int) DirectUploadConfig {
@@ -307,6 +358,15 @@ func TestPrepareTaskArtifactUploadTargetsUniqueStagingKey(t *testing.T) {
 	if len(store.statKeys) != 1 || store.statKeys[0] != finalKey {
 		t.Fatalf("stat keys = %#v, want immutable final key %q", store.statKeys, finalKey)
 	}
+	session, err := repo.UploadSessions().FindByID(ctx, result.UploadID)
+	if err != nil {
+		t.Fatalf("find task artifact upload session: %v", err)
+	}
+	if result.UploadSessionID != result.UploadID || session.UserID != task.UserID || session.Purpose != DirectUploadPurposeTaskArtifact ||
+		session.StagingKey != result.Key || session.FileName != "article.md" || session.ContentType != "text/markdown" ||
+		session.Size != request.Size || session.Status != model.UploadSessionPending || !session.ExpiresAt.After(cfg.Now()) {
+		t.Fatalf("task artifact upload session = %#v result=%#v", session, result)
+	}
 	second, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, request)
 	if err != nil {
 		t.Fatal(err)
@@ -315,6 +375,57 @@ func TestPrepareTaskArtifactUploadTargetsUniqueStagingKey(t *testing.T) {
 		t.Fatalf("two missing-final prepares reused staging key %q", result.Key)
 	}
 	assertTaskArtifactStagingKey(t, task, executionID, taskArtifactTestSHA256, request.RelativePath, second.Key)
+}
+
+func TestPrepareTaskArtifactUploadFailsWhenSessionPersistenceFails(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	persistErr := errors.New("upload session unavailable")
+	svc.repo = &taskArtifactRepositoryOverride{
+		Repository: repo,
+		uploadSessions: &failingTaskArtifactUploadSessionRepository{
+			UploadSessionRepository: repo.UploadSessions(), err: persistErr,
+		},
+	}
+
+	result, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if result != nil || !errors.Is(err, ErrTaskArtifactPersistence) || !strings.Contains(err.Error(), persistErr.Error()) {
+		t.Fatalf("PrepareTaskArtifactUpload = %#v, %v; want persistence failure and no response", result, err)
+	}
+	if store.uploadURLCalls != 1 {
+		t.Fatalf("upload URL calls = %d, want credentials prepared before durable session failure", store.uploadURLCalls)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRejectsOversizeBeforeSideEffects(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	firstKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/first.md")
+	oversizeKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	store.stats = map[string]*storage.ObjectInfo{
+		firstKey: {Key: firstKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "final"},
+	}
+	err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{
+			taskArtifactManifestEntry("output/first.md", firstKey, 7, taskArtifactTestSHA256),
+			taskArtifactManifestEntry("output/article.md", oversizeKey, maxTaskArtifactUploadBytes+1, taskArtifactTestSHA256),
+		},
+	})
+	if !errors.Is(err, ErrTaskArtifactInvalid) || !strings.Contains(err.Error(), "512 MB") {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want size limit rejection", err)
+	}
+	if len(store.statKeys) != 0 || len(store.promoteCalls) != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("oversize manifest touched storage: stat=%#v promote=%#v delete=%#v", store.statKeys, store.promoteCalls, store.deletedKeys)
+	}
+	rows, findErr := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if findErr != nil || len(rows) != 0 {
+		t.Fatalf("oversize manifest persisted rows = %#v, err=%v", rows, findErr)
+	}
 }
 
 func TestPrepareTaskArtifactUploadRejectsStorageWithoutConditionalPromotion(t *testing.T) {
@@ -407,11 +518,172 @@ func TestFinalizeTaskArtifactManifestPromotesStagingAndPersistsImmutableFinal(t 
 	}
 }
 
+func TestTaskArtifactStagingCleanupAndFinalExistingRetry(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	now := time.Now().UTC().Truncate(time.Second)
+	cfg := taskArtifactDirectUploadConfig(t)
+	cfg.Now = func() time.Time { return now }
+	cfg.Storage.DirectUploadExpiresSeconds = 60
+	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.stats = map[string]*storage.ObjectInfo{
+		prepared.Key: {Key: prepared.Key, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging-a"},
+	}
+	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{
+		taskArtifactManifestEntry("output/article.md", prepared.Key, 7, taskArtifactTestSHA256),
+	}}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatal(err)
+	}
+	finalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	if store.stats[prepared.Key] != nil || store.stats[finalKey] == nil || len(store.deletedKeys) != 1 || store.deletedKeys[0] != prepared.Key {
+		t.Fatalf("post-commit cleanup: staging=%#v final=%#v deleted=%#v", store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
+	}
+	found, err := repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil || found.Status != model.UploadSessionPending {
+		t.Fatalf("post-commit upload session = %#v, err=%v; want pending for delayed cleanup", found, err)
+	}
+
+	// A delayed PUT can recreate staging, but the still-pending session lets the
+	// existing expiration cleanup delete it again without touching final bytes.
+	store.stats[prepared.Key] = &storage.ObjectInfo{Key: prepared.Key, Size: 9, SHA256: strings.Repeat("b", 64), ETag: "staging-b"}
+	cleaned, err := CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(time.Second), 10)
+	if err != nil || cleaned != 1 {
+		t.Fatalf("CleanupExpiredUploadSessions = %d, %v; want one delayed staging cleanup", cleaned, err)
+	}
+	if store.stats[prepared.Key] != nil || store.stats[finalKey] == nil || len(store.deletedKeys) != 2 || store.deletedKeys[1] != prepared.Key {
+		t.Fatalf("expiration cleanup: staging=%#v final=%#v deleted=%#v", store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
+	}
+	found, err = repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil || found.Status != model.UploadSessionExpired {
+		t.Fatalf("expired task artifact session = %#v, err=%v", found, err)
+	}
+
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatalf("final-existing retry after staging cleanup: %v", err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil || len(rows) != 1 || rows[0].OSSKey != finalKey {
+		t.Fatalf("final-existing retry rows = %#v, err=%v", rows, err)
+	}
+}
+
+func TestCleanupExpiredAbandonedTaskArtifactSessionNeverDeletesFinal(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	now := time.Now().UTC().Truncate(time.Second)
+	cfg := taskArtifactDirectUploadConfig(t)
+	cfg.Now = func() time.Time { return now }
+	cfg.Storage.DirectUploadExpiresSeconds = 60
+	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	store.stats = map[string]*storage.ObjectInfo{
+		prepared.Key: {Key: prepared.Key, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "staging"},
+		finalKey:     {Key: finalKey, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "final"},
+	}
+	cleaned, err := CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(time.Second), 10)
+	if err != nil || cleaned != 1 {
+		t.Fatalf("CleanupExpiredUploadSessions = %d, %v", cleaned, err)
+	}
+	if store.stats[prepared.Key] != nil || store.stats[finalKey] == nil || len(store.deletedKeys) != 1 || store.deletedKeys[0] != prepared.Key {
+		t.Fatalf("abandoned cleanup touched wrong objects: staging=%#v final=%#v deleted=%#v", store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRequiresMatchingPendingStagingSession(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		seed   bool
+		mutate func(*model.UploadSession)
+	}{
+		{name: "missing session"},
+		{name: "foreign owner", seed: true, mutate: func(s *model.UploadSession) { s.UserID = uuid.NewString() }},
+		{name: "wrong purpose", seed: true, mutate: func(s *model.UploadSession) { s.Purpose = DirectUploadPurposeProjectReference }},
+		{name: "wrong key", seed: true, mutate: func(s *model.UploadSession) { s.StagingKey += ".other" }},
+		{name: "wrong size", seed: true, mutate: func(s *model.UploadSession) { s.Size++ }},
+		{name: "expired", seed: true, mutate: func(s *model.UploadSession) { s.ExpiresAt = time.Now().Add(-time.Minute) }},
+		{name: "non-pending", seed: true, mutate: func(s *model.UploadSession) { s.Status = model.UploadSessionExpired }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, store, task := newTaskArtifactTestService(t)
+			ctx := context.Background()
+			executionID := startTaskArtifactExecution(t, repo, task)
+			stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+			if tt.seed {
+				seedTaskArtifactUploadSession(t, repo, task, stagingKey, "output/article.md", 7, tt.mutate)
+			}
+			store.stats = map[string]*storage.ObjectInfo{
+				stagingKey: {Key: stagingKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging"},
+			}
+			err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+				TaskID: task.ID, ExecutionID: executionID,
+				Files: []TaskArtifactManifestFile{taskArtifactManifestEntry("output/article.md", stagingKey, 7, taskArtifactTestSHA256)},
+			})
+			if !errors.Is(err, ErrTaskArtifactInvalid) {
+				t.Fatalf("FinalizeTaskArtifactManifest error = %v, want invalid staging session", err)
+			}
+			if len(store.promoteCalls) != 0 || len(store.deletedKeys) != 0 {
+				t.Fatalf("invalid staging session mutated storage: promote=%#v delete=%#v", store.promoteCalls, store.deletedKeys)
+			}
+			rows, findErr := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+			if findErr != nil || len(rows) != 0 {
+				t.Fatalf("invalid staging session persisted rows = %#v, err=%v", rows, findErr)
+			}
+		})
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRetainsStagingWhenPersistenceFails(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.stats = map[string]*storage.ObjectInfo{
+		prepared.Key: {Key: prepared.Key, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging"},
+	}
+	entry := taskArtifactManifestEntry("output/article.md", prepared.Key, 7, taskArtifactTestSHA256)
+	err = svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{entry, entry},
+	})
+	if !errors.Is(err, ErrTaskArtifactPersistence) {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want persistence failure", err)
+	}
+	if store.stats[prepared.Key] == nil || len(store.deletedKeys) != 0 {
+		t.Fatalf("failed persistence cleaned staging: object=%#v deleted=%#v", store.stats[prepared.Key], store.deletedKeys)
+	}
+}
+
 func TestFinalizeTaskArtifactManifestRejectsChangedPromotionSourceWithoutPersistence(t *testing.T) {
 	svc, repo, store, task := newTaskArtifactTestService(t)
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
 	stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+	seedTaskArtifactUploadSession(t, repo, task, stagingKey, "output/article.md", 7, nil)
 	store.stats = map[string]*storage.ObjectInfo{
 		stagingKey: {Key: stagingKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "observed-etag"},
 	}
@@ -434,6 +706,7 @@ func TestFinalizeTaskArtifactManifestRequiresNonemptyStagingETag(t *testing.T) {
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
 	stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+	seedTaskArtifactUploadSession(t, repo, task, stagingKey, "output/article.md", 7, nil)
 	store.stats = map[string]*storage.ObjectInfo{
 		stagingKey: {Key: stagingKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256},
 	}
@@ -454,6 +727,7 @@ func TestFinalizeTaskArtifactManifestDelayedStagingOverwriteCannotChangeFinal(t 
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
 	stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+	seedTaskArtifactUploadSession(t, repo, task, stagingKey, "output/article.md", 7, nil)
 	store.stats = map[string]*storage.ObjectInfo{
 		stagingKey: {Key: stagingKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "version-a"},
 	}
@@ -600,6 +874,8 @@ func TestFinalizeTaskArtifactManifestRetriesPartialPromotionIdempotently(t *test
 	hashB := strings.Repeat("b", 64)
 	stagingA := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
 	stagingB := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + hashB + "/" + uuid.NewString() + "/output/cover.png"
+	seedTaskArtifactUploadSession(t, repo, task, stagingA, "output/article.md", 7, nil)
+	seedTaskArtifactUploadSession(t, repo, task, stagingB, "output/cover.png", 8, nil)
 	store.stats = map[string]*storage.ObjectInfo{
 		stagingA: {Key: stagingA, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "etag-a"},
 		stagingB: {Key: stagingB, Size: 8, ContentType: "image/png", SHA256: hashB, ETag: "etag-b"},
@@ -1424,7 +1700,6 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 			ContentType:  "text/markdown",
 			Size:         int64(len(body)),
 			SHA256:       hash,
-			ETag:         "etag-1",
 		}},
 	}); err != nil {
 		t.Fatalf("FinalizeTaskArtifactManifest: %v", err)

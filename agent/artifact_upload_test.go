@@ -488,8 +488,8 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 		t.Fatalf("manifest = %#v, want one task file", reporter.manifest)
 	}
 	file := reporter.manifest.Files[0]
-	if file.RelativePath != "output/article.md" || file.ObjectKey == "" || file.SHA256 == "" || file.ETag != "etag-1" {
-		t.Fatalf("manifest file = %#v, want relative path, object key, sha, etag", file)
+	if file.RelativePath != "output/article.md" || file.ObjectKey == "" || file.SHA256 == "" {
+		t.Fatalf("manifest file = %#v, want relative path, object key, and sha", file)
 	}
 	if got := reporter.progress; len(got) != 1 || got[0] != "collected 1 workspace artifact(s)" {
 		t.Fatalf("progress = %#v, want collected artifact progress", got)
@@ -565,9 +565,6 @@ func TestArtifactUploaderSkipsMatchingObjectButStillManifestsIt(t *testing.T) {
 	}
 	if reporter.manifestCalls != 1 || len(reporter.manifest.Files) != 1 {
 		t.Fatalf("manifest calls/files = %d/%d, want 1/1", reporter.manifestCalls, len(reporter.manifest.Files))
-	}
-	if got := reporter.manifest.Files[0].ETag; got != "existing-etag" {
-		t.Fatalf("manifest etag = %q, want existing-etag", got)
 	}
 	if got := reporter.progress; len(got) != 1 || got[0] != "collected 1 workspace artifact(s)" {
 		t.Fatalf("progress = %#v, want collected artifact progress", got)
