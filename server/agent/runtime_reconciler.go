@@ -239,7 +239,7 @@ func runtimeTerminalReason(state *RuntimeExecutionState) (string, string) {
 	}
 	reason := strings.ToLower(strings.TrimSpace(state.Reason))
 	switch {
-	case reason == "deadlineexceeded" || strings.Contains(reason, "deadline"):
+	case reason == "timeout" || reason == "timedout" || reason == "deadlineexceeded" || strings.Contains(reason, "deadline"):
 		return "deadline_exceeded", model.TaskExecutionTimedOut
 	case reason == "oomkilled" || (state.ExitCode != nil && *state.ExitCode == 137):
 		return "oom_killed", model.TaskExecutionFailed

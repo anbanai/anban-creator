@@ -154,9 +154,12 @@ func TestRuntimeTerminalReasonPrecedence(t *testing.T) {
 		{"crash loop", RuntimePhaseFailed, "CrashLoopBackOff", "runtime_failed", model.TaskExecutionFailed, nil},
 		{"run container", RuntimePhaseFailed, "RunContainerError", "runtime_failed", model.TaskExecutionFailed, nil},
 		{"backoff limit", RuntimePhaseFailed, "BackoffLimitExceeded", "runtime_failed", model.TaskExecutionFailed, nil},
-		{"timeout without deadline", RuntimePhaseFailed, "Timeout", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"timeout", RuntimePhaseFailed, "Timeout", "deadline_exceeded", model.TaskExecutionTimedOut, nil},
+		{"timed out", RuntimePhaseFailed, "TimedOut", "deadline_exceeded", model.TaskExecutionTimedOut, nil},
 		{"plain failed", RuntimePhaseFailed, "Failed", "runtime_failed", model.TaskExecutionFailed, nil},
 		{"provider reason cannot terminalize pending state", RuntimePhasePending, "FailedScheduling", "", "", nil},
+		{"timeout cannot terminalize pending state", RuntimePhasePending, "Timeout", "", "", nil},
+		{"timeout cannot terminalize running state", RuntimePhaseRunning, "TimedOut", "", "", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
