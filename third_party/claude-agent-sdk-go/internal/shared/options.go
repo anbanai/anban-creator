@@ -338,6 +338,8 @@ type McpHTTPServerConfig struct {
 	Type    McpServerType     `json:"type"`
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// Timeout is Claude Code's per-request MCP timeout in milliseconds.
+	Timeout int64 `json:"timeout,omitempty"`
 	// AlwaysLoad, when true, opts the server out of tool-search deferral so
 	// all of its tools are always available without a ToolSearch round-trip.
 	// Requires Claude Code CLI 2.1.121 or later.
