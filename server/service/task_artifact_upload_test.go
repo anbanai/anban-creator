@@ -27,14 +27,35 @@ import (
 const taskArtifactTestSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type fakeTaskArtifactStorage struct {
-	name              string
-	uploadKey         string
-	uploadContentType string
-	uploadCalls       int
-	uploadURLCalls    int
-	stats             map[string]*storage.ObjectInfo
-	statErr           error
-	statReturnsNil    bool
+	name               string
+	uploadKey          string
+	uploadContentType  string
+	uploadCalls        int
+	uploadURLCalls     int
+	stats              map[string]*storage.ObjectInfo
+	statErr            error
+	statReturnsNil     bool
+	statKeys           []string
+	promoteCalls       []taskArtifactPromotion
+	promoteErr         error
+	promoteErrBySource map[string]error
+	afterPromote       func(sourceKey, finalKey string)
+	objects            map[string][]byte
+}
+
+type taskArtifactPromotion struct {
+	sourceKey    string
+	finalKey     string
+	expectedETag string
+}
+
+type statOnlyTaskArtifactStorage struct {
+	storage.Provider
+	statProvider storage.ObjectStatProvider
+}
+
+func (s *statOnlyTaskArtifactStorage) StatObject(ctx context.Context, key string) (*storage.ObjectInfo, error) {
+	return s.statProvider.StatObject(ctx, key)
 }
 
 func (f *fakeTaskArtifactStorage) Name() string {
@@ -77,7 +98,11 @@ func (f *fakeTaskArtifactStorage) Read(context.Context, string) ([]byte, error) 
 	return nil, os.ErrNotExist
 }
 
-func (f *fakeTaskArtifactStorage) Delete(context.Context, string) error { return nil }
+func (f *fakeTaskArtifactStorage) Delete(_ context.Context, key string) error {
+	delete(f.stats, key)
+	delete(f.objects, key)
+	return nil
+}
 
 func (f *fakeTaskArtifactStorage) DownloadURL(_ context.Context, key string, _ int) (string, error) {
 	return "https://download.example.com/" + key, nil
@@ -90,6 +115,7 @@ func (f *fakeTaskArtifactStorage) IsOwnedURL(rawURL string) bool {
 }
 
 func (f *fakeTaskArtifactStorage) StatObject(_ context.Context, key string) (*storage.ObjectInfo, error) {
+	f.statKeys = append(f.statKeys, key)
 	if f.statErr != nil {
 		return nil, f.statErr
 	}
@@ -101,6 +127,40 @@ func (f *fakeTaskArtifactStorage) StatObject(_ context.Context, key string) (*st
 	}
 	cp := *f.stats[key]
 	return &cp, nil
+}
+
+func (f *fakeTaskArtifactStorage) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) (*storage.ObjectInfo, error) {
+	f.promoteCalls = append(f.promoteCalls, taskArtifactPromotion{sourceKey: sourceKey, finalKey: finalKey, expectedETag: expectedETag})
+	if err := f.promoteErrBySource[sourceKey]; err != nil {
+		delete(f.promoteErrBySource, sourceKey)
+		return nil, err
+	}
+	if f.promoteErr != nil {
+		return nil, f.promoteErr
+	}
+	source := f.stats[sourceKey]
+	if source == nil {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectNotFound, sourceKey)
+	}
+	if source.ETag != expectedETag {
+		return nil, fmt.Errorf("%w: %s", storage.ErrPromotionPreconditionFailed, sourceKey)
+	}
+	if f.stats[finalKey] != nil {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectAlreadyExists, finalKey)
+	}
+	copy := *source
+	copy.Key = finalKey
+	if f.stats == nil {
+		f.stats = make(map[string]*storage.ObjectInfo)
+	}
+	f.stats[finalKey] = &copy
+	if f.objects != nil {
+		f.objects[finalKey] = append([]byte(nil), f.objects[sourceKey]...)
+	}
+	if f.afterPromote != nil {
+		f.afterPromote(sourceKey, finalKey)
+	}
+	return &copy, nil
 }
 
 func startTaskArtifactExecution(t *testing.T, repo repository.Repository, task *model.Task) string {
@@ -160,8 +220,8 @@ func taskArtifactDirectUploadConfig(t *testing.T) DirectUploadConfig {
 			STSSessionName: "agent-artifact-upload",
 		},
 		CredentialIssuer: StaticUploadCredentialIssuer(func(_ context.Context, req UploadCredentialRequest) (*UploadCredential, error) {
-			if !strings.Contains(req.Policy, "uploads/users/") || !strings.Contains(req.Policy, "/artifacts/output/article.md") {
-				t.Fatalf("policy = %s, want task artifact object key", req.Policy)
+			if !strings.Contains(req.Policy, "uploads/users/") || !strings.Contains(req.Policy, "/artifacts/staging/sha256/") || !strings.Contains(req.Policy, "/output/article.md") {
+				t.Fatalf("policy = %s, want task artifact staging key", req.Policy)
 			}
 			return &UploadCredential{
 				AccessKeyID:     "sts-ak",
@@ -174,6 +234,37 @@ func taskArtifactDirectUploadConfig(t *testing.T) DirectUploadConfig {
 	}
 }
 
+func expectedTaskArtifactFinalKey(task *model.Task, executionID, hash, relPath string) string {
+	return buildTaskArtifactStoragePrefix(task, executionID) + "workspace/sha256/" + hash + "/" + relPath
+}
+
+func assertTaskArtifactStagingKey(t *testing.T, task *model.Task, executionID, hash, relPath, key string) {
+	t.Helper()
+	prefix := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + hash + "/"
+	remainder, ok := strings.CutPrefix(key, prefix)
+	if !ok {
+		t.Fatalf("staging key = %q, want prefix %q", key, prefix)
+	}
+	uploadID, suffix, ok := strings.Cut(remainder, "/")
+	if !ok || suffix != relPath {
+		t.Fatalf("staging key = %q, want UUID and exact suffix %q", key, relPath)
+	}
+	parsed, err := uuid.Parse(uploadID)
+	if err != nil || parsed.String() != uploadID {
+		t.Fatalf("staging key UUID = %q, want canonical UUID", uploadID)
+	}
+}
+
+func taskArtifactManifestEntry(relPath, objectKey string, size int64, hash string) TaskArtifactManifestFile {
+	return TaskArtifactManifestFile{
+		RelativePath: relPath,
+		ObjectKey:    objectKey,
+		ContentType:  normalizeTaskArtifactContentType("", relPath),
+		Size:         size,
+		SHA256:       hash,
+	}
+}
+
 func taskArtifactDirectUploadConfigWithCredentialCounter(t *testing.T, calls *int) DirectUploadConfig {
 	t.Helper()
 	cfg := taskArtifactDirectUploadConfig(t)
@@ -183,6 +274,356 @@ func taskArtifactDirectUploadConfigWithCredentialCounter(t *testing.T, calls *in
 		return issuer.IssueUploadCredential(ctx, req)
 	})
 	return cfg
+}
+
+func TestPrepareTaskArtifactUploadTargetsUniqueStagingKey(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	request := TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md",
+		ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	}
+	var policy string
+	cfg := taskArtifactDirectUploadConfig(t)
+	issuer := cfg.CredentialIssuer
+	cfg.CredentialIssuer = StaticUploadCredentialIssuer(func(ctx context.Context, req UploadCredentialRequest) (*UploadCredential, error) {
+		policy = req.Policy
+		return issuer.IssueUploadCredential(ctx, req)
+	})
+
+	result, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, request.RelativePath)
+	assertTaskArtifactStagingKey(t, task, executionID, taskArtifactTestSHA256, request.RelativePath, result.Key)
+	if result.Key == finalKey || store.uploadKey != result.Key || !strings.Contains(result.UploadURL, result.Key) {
+		t.Fatalf("prepare = %#v upload key=%q, want signed staging key distinct from %q", result, store.uploadKey, finalKey)
+	}
+	if !strings.Contains(policy, result.Key) || strings.Contains(policy, finalKey) {
+		t.Fatalf("policy = %s, want only staging key %q and never final key %q", policy, result.Key, finalKey)
+	}
+	if len(store.statKeys) != 1 || store.statKeys[0] != finalKey {
+		t.Fatalf("stat keys = %#v, want immutable final key %q", store.statKeys, finalKey)
+	}
+	second, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Key == result.Key {
+		t.Fatalf("two missing-final prepares reused staging key %q", result.Key)
+	}
+	assertTaskArtifactStagingKey(t, task, executionID, taskArtifactTestSHA256, request.RelativePath, second.Key)
+}
+
+func TestPrepareTaskArtifactUploadRejectsStorageWithoutConditionalPromotion(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	svc.store = &statOnlyTaskArtifactStorage{Provider: store, statProvider: store}
+	credentialCalls := 0
+
+	_, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfigWithCredentialCounter(t, &credentialCalls), TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if !errors.Is(err, ErrTaskArtifactUnavailable) || !strings.Contains(err.Error(), "immutable object promotion") {
+		t.Fatalf("PrepareTaskArtifactUpload error = %v, want promotion capability rejection", err)
+	}
+	if store.uploadURLCalls != 0 || credentialCalls != 0 {
+		t.Fatalf("unsupported storage issued upload authority: urls=%d credentials=%d", store.uploadURLCalls, credentialCalls)
+	}
+}
+
+func TestPrepareTaskArtifactUploadReusesOnlyExactImmutableFinal(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		info      storage.ObjectInfo
+		wantError string
+	}{
+		{name: "exact match", info: storage.ObjectInfo{Size: 7, SHA256: taskArtifactTestSHA256, ETag: "final-etag"}},
+		{name: "wrong hash", info: storage.ObjectInfo{Size: 7, SHA256: strings.Repeat("b", 64), ETag: "wrong-etag"}, wantError: "immutable final object metadata mismatch"},
+		{name: "wrong size", info: storage.ObjectInfo{Size: 8, SHA256: taskArtifactTestSHA256, ETag: "wrong-etag"}, wantError: "immutable final object metadata mismatch"},
+		{name: "missing hash", info: storage.ObjectInfo{Size: 7, ETag: "wrong-etag"}, wantError: "immutable final object metadata mismatch"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, store, task := newTaskArtifactTestService(t)
+			ctx := context.Background()
+			executionID := startTaskArtifactExecution(t, repo, task)
+			finalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+			tt.info.Key = finalKey
+			store.stats = map[string]*storage.ObjectInfo{finalKey: &tt.info}
+			credentialCalls := 0
+			result, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfigWithCredentialCounter(t, &credentialCalls), TaskArtifactPrepareRequest{
+				TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+			})
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("PrepareTaskArtifactUpload error = %v, want %q", err, tt.wantError)
+				}
+				if store.uploadURLCalls != 0 || credentialCalls != 0 {
+					t.Fatalf("mismatching final issued upload authority: urls=%d credentials=%d", store.uploadURLCalls, credentialCalls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.UploadRequired || result.Key != finalKey || result.ETag != "final-etag" || credentialCalls != 0 || store.uploadURLCalls != 0 {
+				t.Fatalf("matching final prepare = %#v urls=%d credentials=%d", result, store.uploadURLCalls, credentialCalls)
+			}
+		})
+	}
+}
+
+func TestFinalizeTaskArtifactManifestPromotesStagingAndPersistsImmutableFinal(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.stats = make(map[string]*storage.ObjectInfo)
+	store.stats[prepared.Key] = &storage.ObjectInfo{Key: prepared.Key, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging-etag"}
+	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{
+		taskArtifactManifestEntry("output/article.md", prepared.Key, 7, taskArtifactTestSHA256),
+	}}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatal(err)
+	}
+	finalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	if len(store.promoteCalls) != 1 || store.promoteCalls[0] != (taskArtifactPromotion{sourceKey: prepared.Key, finalKey: finalKey, expectedETag: "staging-etag"}) {
+		t.Fatalf("promotions = %#v, want staging to immutable final", store.promoteCalls)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %#v, err=%v", rows, err)
+	}
+	if rows[0].OSSKey != finalKey || rows[0].OSSURL != store.GetURL(finalKey) || rows[0].ContentHash != taskArtifactTestSHA256 {
+		t.Fatalf("persisted row = %#v, want immutable final key", rows[0])
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRejectsChangedPromotionSourceWithoutPersistence(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+	store.stats = map[string]*storage.ObjectInfo{
+		stagingKey: {Key: stagingKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "observed-etag"},
+	}
+	store.promoteErr = storage.ErrPromotionPreconditionFailed
+	err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{taskArtifactManifestEntry("output/article.md", stagingKey, 7, taskArtifactTestSHA256)},
+	})
+	if !errors.Is(err, ErrTaskArtifactUnavailable) || !strings.Contains(err.Error(), "source changed") {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want source-changed unavailable error", err)
+	}
+	rows, findErr := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if findErr != nil || len(rows) != 0 {
+		t.Fatalf("failed promotion persisted rows = %#v, err=%v", rows, findErr)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRequiresNonemptyStagingETag(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+	store.stats = map[string]*storage.ObjectInfo{
+		stagingKey: {Key: stagingKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256},
+	}
+	err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{taskArtifactManifestEntry("output/article.md", stagingKey, 7, taskArtifactTestSHA256)},
+	})
+	if !errors.Is(err, ErrTaskArtifactInvalid) || !strings.Contains(err.Error(), "staging ETag is required") {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want missing ETag rejection", err)
+	}
+	if len(store.promoteCalls) != 0 {
+		t.Fatalf("missing ETag triggered promotions: %#v", store.promoteCalls)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestDelayedStagingOverwriteCannotChangeFinal(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+	store.stats = map[string]*storage.ObjectInfo{
+		stagingKey: {Key: stagingKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "version-a"},
+	}
+	store.objects = map[string][]byte{stagingKey: []byte("version-a")}
+	store.afterPromote = func(sourceKey, _ string) {
+		store.stats[sourceKey] = &storage.ObjectInfo{Key: sourceKey, Size: 9, SHA256: strings.Repeat("b", 64), ETag: "version-b"}
+		store.objects[sourceKey] = []byte("version-b")
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{taskArtifactManifestEntry("output/article.md", stagingKey, 7, taskArtifactTestSHA256)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	finalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	final := store.stats[finalKey]
+	if final == nil || final.Size != 7 || final.SHA256 != taskArtifactTestSHA256 || final.ETag != "version-a" {
+		t.Fatalf("immutable final metadata = %#v, want promoted version A", final)
+	}
+	if got := string(store.objects[finalKey]); got != "version-a" {
+		t.Fatalf("immutable final bytes = %q, want version-a after delayed staging overwrite", got)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil || len(rows) != 1 || rows[0].OSSKey != finalKey || rows[0].OSSURL != store.GetURL(finalKey) {
+		t.Fatalf("persisted rows = %#v, err=%v", rows, err)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRejectsConflictingRaceFinal(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+	finalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	store.stats = map[string]*storage.ObjectInfo{
+		stagingKey: {Key: stagingKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging-etag"},
+		finalKey:   {Key: finalKey, Size: 8, ContentType: "text/markdown", SHA256: strings.Repeat("b", 64), ETag: "conflict-etag"},
+	}
+	err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{taskArtifactManifestEntry("output/article.md", stagingKey, 7, taskArtifactTestSHA256)},
+	})
+	if !errors.Is(err, ErrTaskArtifactInvalid) || !strings.Contains(err.Error(), "size mismatch") {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want conflicting immutable final rejection", err)
+	}
+	rows, findErr := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if findErr != nil || len(rows) != 0 {
+		t.Fatalf("conflicting final persisted rows = %#v, err=%v", rows, findErr)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRejectsMalformedOrCrossScopeStagingKeys(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	prefix := buildTaskArtifactStoragePrefix(task, executionID)
+	otherExecutionID := uuid.NewString()
+	for _, tt := range []struct {
+		name string
+		key  string
+	}{
+		{name: "legacy deterministic", key: prefix + "output/article.md"},
+		{name: "malformed UUID", key: prefix + "staging/sha256/" + taskArtifactTestSHA256 + "/not-a-uuid/output/article.md"},
+		{name: "cross hash", key: prefix + "staging/sha256/" + strings.Repeat("b", 64) + "/" + uuid.NewString() + "/output/article.md"},
+		{name: "cross path", key: prefix + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/other.md"},
+		{name: "cross execution", key: buildTaskArtifactStoragePrefix(task, otherExecutionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store.stats = map[string]*storage.ObjectInfo{tt.key: {Key: tt.key, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "etag"}}
+			err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+				TaskID: task.ID, ExecutionID: executionID,
+				Files: []TaskArtifactManifestFile{taskArtifactManifestEntry("output/article.md", tt.key, 7, taskArtifactTestSHA256)},
+			})
+			if !errors.Is(err, ErrTaskArtifactInvalid) {
+				t.Fatalf("FinalizeTaskArtifactManifest error = %v, want invalid staging key", err)
+			}
+		})
+	}
+}
+
+func TestTaskArtifactImmutableVersionsPreserveRowIdentityAndReuseFinal(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	uploadVersion := func(hash, etag string) string {
+		t.Helper()
+		prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+			TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: hash,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if store.stats == nil {
+			store.stats = make(map[string]*storage.ObjectInfo)
+		}
+		store.stats[prepared.Key] = &storage.ObjectInfo{Key: prepared.Key, Size: 7, ContentType: "text/markdown", SHA256: hash, ETag: etag}
+		if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+			TaskID: task.ID, ExecutionID: executionID,
+			Files: []TaskArtifactManifestFile{taskArtifactManifestEntry("output/article.md", prepared.Key, 7, hash)},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return expectedTaskArtifactFinalKey(task, executionID, hash, "output/article.md")
+	}
+	firstKey := uploadVersion(taskArtifactTestSHA256, "etag-a")
+	firstRows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil || len(firstRows) != 1 {
+		t.Fatalf("first rows = %#v, err=%v", firstRows, err)
+	}
+	firstID := firstRows[0].ID
+	credentialCalls := 0
+	retry, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfigWithCredentialCounter(t, &credentialCalls), TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.UploadRequired || retry.Key != firstKey || credentialCalls != 0 {
+		t.Fatalf("unchanged retry = %#v credentials=%d, want immutable reuse", retry, credentialCalls)
+	}
+	secondHash := strings.Repeat("b", 64)
+	secondKey := uploadVersion(secondHash, "etag-b")
+	secondRows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil || len(secondRows) != 1 {
+		t.Fatalf("second rows = %#v, err=%v", secondRows, err)
+	}
+	if secondKey == firstKey || secondRows[0].ID != firstID || secondRows[0].OSSKey != secondKey || secondRows[0].ContentHash != secondHash {
+		t.Fatalf("versioned row = %#v, want stable ID %s and new key distinct from %s", secondRows[0], firstID, firstKey)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRetriesPartialPromotionIdempotently(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	hashB := strings.Repeat("b", 64)
+	stagingA := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+	stagingB := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + hashB + "/" + uuid.NewString() + "/output/cover.png"
+	store.stats = map[string]*storage.ObjectInfo{
+		stagingA: {Key: stagingA, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "etag-a"},
+		stagingB: {Key: stagingB, Size: 8, ContentType: "image/png", SHA256: hashB, ETag: "etag-b"},
+	}
+	store.promoteErrBySource = map[string]error{stagingB: storage.ErrPromotionPreconditionFailed}
+	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{
+		taskArtifactManifestEntry("output/article.md", stagingA, 7, taskArtifactTestSHA256),
+		taskArtifactManifestEntry("output/cover.png", stagingB, 8, hashB),
+	}}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); !errors.Is(err, ErrTaskArtifactUnavailable) {
+		t.Fatalf("first finalize error = %v, want promotion failure", err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("partial promotion persisted rows = %#v, err=%v", rows, err)
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatalf("retry finalize: %v", err)
+	}
+	rows, err = repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("retry rows = %#v, err=%v", rows, err)
+	}
+	wantKeys := map[string]bool{
+		expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md"): true,
+		expectedTaskArtifactFinalKey(task, executionID, hashB, "output/cover.png"):                   true,
+	}
+	for _, row := range rows {
+		if !wantKeys[row.OSSKey] {
+			t.Fatalf("retry persisted non-final key %q", row.OSSKey)
+		}
+	}
 }
 
 func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
@@ -199,12 +640,9 @@ func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 		t.Fatalf("PrepareTaskArtifactUpload: %v", err)
 	}
 
-	wantKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/output/article.md"
-	if result.Key != wantKey {
-		t.Fatalf("key = %q, want %q", result.Key, wantKey)
-	}
-	if store.uploadKey != wantKey || store.uploadContentType != "text/markdown" {
-		t.Fatalf("signed upload = key %q content-type %q, want %q text/markdown", store.uploadKey, store.uploadContentType, wantKey)
+	assertTaskArtifactStagingKey(t, task, "", taskArtifactTestSHA256, "output/article.md", result.Key)
+	if store.uploadKey != result.Key || store.uploadContentType != "text/markdown" {
+		t.Fatalf("signed upload = key %q content-type %q, want %q text/markdown", store.uploadKey, store.uploadContentType, result.Key)
 	}
 	if result.STSAccessKeyID != "sts-ak" || result.STSSecurityToken != "sts-token" {
 		t.Fatalf("sts fields = %#v", result)
@@ -215,7 +653,7 @@ func TestPrepareTaskArtifactUploadSkipsOnlyMatchingStoredObject(t *testing.T) {
 	svc, repo, store, task := newTaskArtifactTestService(t)
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
-	key := buildTaskArtifactStorageKey(task, executionID, "output/article.md")
+	key := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
 	req := TaskArtifactPrepareRequest{
 		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md",
 		ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
@@ -227,6 +665,7 @@ func TestPrepareTaskArtifactUploadSkipsOnlyMatchingStoredObject(t *testing.T) {
 		uploadRequired  bool
 		wantStoredETag  string
 		wantCredentials bool
+		wantError       bool
 	}{
 		{
 			name:            "matching size and hash",
@@ -236,22 +675,19 @@ func TestPrepareTaskArtifactUploadSkipsOnlyMatchingStoredObject(t *testing.T) {
 			wantCredentials: false,
 		},
 		{
-			name:            "wrong hash",
-			info:            storage.ObjectInfo{Key: key, Size: 7, ContentType: "text/markdown", SHA256: strings.Repeat("b", 64)},
-			uploadRequired:  true,
-			wantCredentials: true,
+			name:      "wrong hash",
+			info:      storage.ObjectInfo{Key: key, Size: 7, ContentType: "text/markdown", SHA256: strings.Repeat("b", 64)},
+			wantError: true,
 		},
 		{
-			name:            "wrong size",
-			info:            storage.ObjectInfo{Key: key, Size: 8, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256},
-			uploadRequired:  true,
-			wantCredentials: true,
+			name:      "wrong size",
+			info:      storage.ObjectInfo{Key: key, Size: 8, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256},
+			wantError: true,
 		},
 		{
-			name:            "missing hash metadata",
-			info:            storage.ObjectInfo{Key: key, Size: 7, ContentType: "text/markdown"},
-			uploadRequired:  true,
-			wantCredentials: true,
+			name:      "missing hash metadata",
+			info:      storage.ObjectInfo{Key: key, Size: 7, ContentType: "text/markdown"},
+			wantError: true,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -262,6 +698,15 @@ func TestPrepareTaskArtifactUploadSkipsOnlyMatchingStoredObject(t *testing.T) {
 			credentialCalls := 0
 
 			result, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfigWithCredentialCounter(t, &credentialCalls), req)
+			if tt.wantError {
+				if !errors.Is(err, ErrTaskArtifactInvalid) {
+					t.Fatalf("PrepareTaskArtifactUpload error = %v, want ErrTaskArtifactInvalid", err)
+				}
+				if store.uploadURLCalls != 0 || credentialCalls != 0 {
+					t.Fatalf("mismatching immutable final issued authority: urls=%d credentials=%d", store.uploadURLCalls, credentialCalls)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -327,7 +772,7 @@ func TestFinalizeTaskArtifactManifestRejectsStoredHashMismatch(t *testing.T) {
 	svc, repo, store, task := newTaskArtifactTestService(t)
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
-	key := buildTaskArtifactStorageKey(task, executionID, "output/article.md")
+	key := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
 	store.stats = map[string]*storage.ObjectInfo{
 		key: {Key: key, Size: 7, ContentType: "text/markdown", SHA256: strings.Repeat("b", 64)},
 	}
@@ -345,7 +790,7 @@ func TestFinalizeTaskArtifactManifestRejectsStoredSizeMismatch(t *testing.T) {
 	svc, repo, store, task := newTaskArtifactTestService(t)
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
-	key := buildTaskArtifactStorageKey(task, executionID, "output/article.md")
+	key := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
 	store.stats = map[string]*storage.ObjectInfo{
 		key: {Key: key, Size: 8, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256},
 	}
@@ -377,8 +822,8 @@ func TestFinalizeTaskArtifactManifestRejectsEntireMultiFileManifestWithoutReplac
 		t.Fatal(err)
 	}
 
-	validKey := buildTaskArtifactStorageKey(task, executionID, "output/article.md")
-	mismatchedKey := buildTaskArtifactStorageKey(task, executionID, "output/cover.png")
+	validKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	mismatchedKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/cover.png")
 	store.stats = map[string]*storage.ObjectInfo{
 		validKey:      {Key: validKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256},
 		mismatchedKey: {Key: mismatchedKey, Size: 7, ContentType: "image/png", SHA256: strings.Repeat("b", 64)},
@@ -460,7 +905,7 @@ func TestFinalizeTaskArtifactManifestPreservesExecutionMCPArtifacts(t *testing.T
 	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID}
 	store.stats = make(map[string]*storage.ObjectInfo, len(paths))
 	for _, relPath := range paths {
-		key := buildTaskArtifactStorageKey(task, executionID, relPath)
+		key := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, relPath)
 		store.stats[key] = &storage.ObjectInfo{Key: key, Size: 3, ContentType: DetectTaskFileMIME(relPath), SHA256: taskArtifactTestSHA256}
 		manifest.Files = append(manifest.Files, TaskArtifactManifestFile{
 			RelativePath: relPath, ObjectKey: key, ContentType: DetectTaskFileMIME(relPath), Size: 3, SHA256: taskArtifactTestSHA256,
@@ -564,7 +1009,7 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 
 	newHashBytes := sha256.Sum256([]byte("new"))
 	newHash := hex.EncodeToString(newHashBytes[:])
-	workspaceKey := buildTaskArtifactStorageKey(task, executionID, "output/cover.png")
+	workspaceKey := expectedTaskArtifactFinalKey(task, executionID, newHash, "output/cover.png")
 	store.stats = map[string]*storage.ObjectInfo{
 		workspaceKey: {Key: workspaceKey, Size: 3, ContentType: "image/png", SHA256: newHash},
 	}
@@ -670,7 +1115,7 @@ func TestFinalizeTaskArtifactEmptyManifestPreservesOnlyMCPArtifacts(t *testing.T
 	mcpPath := "output/cover.png"
 	mcpKey := buildTaskMCPArtifactStoragePrefix(task, executionID) + mcpPath
 	workspacePath := "output/article.md"
-	workspaceKey := buildTaskArtifactStorageKey(task, executionID, workspacePath)
+	workspaceKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, workspacePath)
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
 		{
 			ID: mcpID, TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStatePending,
@@ -717,7 +1162,7 @@ func TestUpdateTaskFileMetadataRejectsLateExecutionMutation(t *testing.T) {
 		}
 		newHashBytes := sha256.Sum256([]byte("new"))
 		newHash := hex.EncodeToString(newHashBytes[:])
-		workspaceKey := buildTaskArtifactStorageKey(task, executionID, original.FilePath)
+		workspaceKey := expectedTaskArtifactFinalKey(task, executionID, newHash, original.FilePath)
 		store.stats = map[string]*storage.ObjectInfo{
 			workspaceKey: {Key: workspaceKey, Size: 3, ContentType: "image/png", SHA256: newHash},
 		}
@@ -952,7 +1397,7 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 	body := []byte("# title\n\nbody")
 	sum := sha256.Sum256(body)
 	hash := hex.EncodeToString(sum[:])
-	objectKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/output/article.md"
+	objectKey := expectedTaskArtifactFinalKey(task, "", hash, "output/article.md")
 	store.stats = map[string]*storage.ObjectInfo{
 		objectKey: {
 			Key:         objectKey,
@@ -1008,7 +1453,7 @@ func TestExecutionArtifactManifestStaysPendingUntilPublication(t *testing.T) {
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now}); err != nil {
 		t.Fatal(err)
 	}
-	objectKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/executions/" + executionID + "/artifacts/output/article.md"
+	objectKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
 	store.stats = map[string]*storage.ObjectInfo{objectKey: {Key: objectKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256}}
 	req := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{{RelativePath: "output/article.md", ObjectKey: objectKey, Size: 7, SHA256: taskArtifactTestSHA256}}}
 	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, req); err != nil {
@@ -1048,7 +1493,7 @@ func TestExecutionArtifactPrepareRejectsMissingOrStaleIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "/executions/" + executionID + "/artifacts/output/article.md"
+	want := "/executions/" + executionID + "/artifacts/staging/sha256/" + taskArtifactTestSHA256 + "/"
 	if !strings.Contains(result.Key, want) {
 		t.Fatalf("key = %q, want segment %q", result.Key, want)
 	}
