@@ -113,6 +113,9 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	if spec.HostConfig.MemorySwap != spec.HostConfig.Memory {
 		t.Fatalf("memory swap = %d, want pinned to memory %d", spec.HostConfig.MemorySwap, spec.HostConfig.Memory)
 	}
+	if spec.HostConfig.OomKillDisable == nil || *spec.HostConfig.OomKillDisable {
+		t.Fatalf("OOM killer setting = %v, want explicit false", spec.HostConfig.OomKillDisable)
+	}
 	wantUlimits := map[string]struct{}{
 		"core": {}, "cpu": {}, "data": {}, "fsize": {}, "locks": {}, "memlock": {}, "msgqueue": {}, "nice": {},
 		"nofile": {}, "nproc": {}, "rss": {}, "rtprio": {}, "rttime": {}, "sigpending": {}, "stack": {},
@@ -209,6 +212,12 @@ func TestVerifyDockerContainerAcceptsExactSpecAndRejectsDrift(t *testing.T) {
 	if err := verifyDockerContainer(normalizedEmptyDefaults, spec); err != nil {
 		t.Fatalf("safe daemon-normalized empty defaults rejected: %v", err)
 	}
+	daemonOomDefault := testDockerInspect(spec)
+	oomKillDisabled := false
+	daemonOomDefault.HostConfig.OomKillDisable = &oomKillDisabled
+	if err := verifyDockerContainer(daemonOomDefault, spec); err != nil {
+		t.Fatalf("daemon-normalized OOM killer default rejected: %v", err)
+	}
 	daemonLogDefaults := testDockerInspect(spec)
 	daemonLogDefaults.HostConfig.LogConfig.Config = maps.Clone(spec.HostConfig.LogConfig.Config)
 	for key, value := range map[string]string{"max-size": "100m", "max-file": "5", "compress": "false"} {
@@ -296,6 +305,8 @@ func TestVerifyDockerContainerAcceptsExactSpecAndRejectsDrift(t *testing.T) {
 		{name: "container ID file", mutate: func(got *containertypes.InspectResponse) { got.HostConfig.ContainerIDFile = "/host/container.id" }},
 		{name: "shared memory", mutate: func(got *containertypes.InspectResponse) { got.HostConfig.ShmSize++ }},
 		{name: "OOM score", mutate: func(got *containertypes.InspectResponse) { got.HostConfig.OomScoreAdj++ }},
+		{name: "OOM killer disabled", mutate: func(got *containertypes.InspectResponse) { value := true; got.HostConfig.OomKillDisable = &value }},
+		{name: "OOM killer setting removed", mutate: func(got *containertypes.InspectResponse) { got.HostConfig.OomKillDisable = nil }},
 		{name: "read-only root", mutate: func(got *containertypes.InspectResponse) {
 			got.HostConfig.ReadonlyRootfs = !got.HostConfig.ReadonlyRootfs
 		}},

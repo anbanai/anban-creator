@@ -53,6 +53,7 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 	pidsLimit := cfg.PidsLimit
 	memoryBytes := cfg.MemoryMB * 1024 * 1024
 	useDockerInit := false
+	oomKillDisable := false
 	containerConfig := dockerContainerConfigFromImage(cfg.ImageConfig)
 	containerConfig.Image = dockerExecutionRuntimeImage(execution)
 	containerConfig.User = ContainerRuntimeUser
@@ -105,11 +106,12 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 			CapDrop:     []string{"ALL"},
 			SecurityOpt: []string{"no-new-privileges=true"},
 			Resources: containertypes.Resources{
-				NanoCPUs:   cfg.CPUCores * 1_000_000_000,
-				Memory:     memoryBytes,
-				MemorySwap: memoryBytes,
-				PidsLimit:  &pidsLimit,
-				Ulimits:    dockerRuntimeUlimits(),
+				NanoCPUs:       cfg.CPUCores * 1_000_000_000,
+				Memory:         memoryBytes,
+				MemorySwap:     memoryBytes,
+				OomKillDisable: &oomKillDisable,
+				PidsLimit:      &pidsLimit,
+				Ulimits:        dockerRuntimeUlimits(),
 			},
 			Mounts: []mount.Mount{
 				{Type: mount.TypeVolume, Source: taskVolume.Name, Target: dockerTaskWorkspaceMountPath},
