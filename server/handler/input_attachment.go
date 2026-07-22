@@ -26,10 +26,10 @@ const (
 )
 
 type InputAttachmentValidationOptions struct {
-	MaxCount            int
-	MaxBytes            int64
-	AllowedTypes        map[string]bool
-	validateExistingKey func(model.EntryAttachment) error
+	MaxCount             int
+	MaxBytes             int64
+	AllowedTypes         map[string]bool
+	normalizeExistingKey func(model.EntryAttachment) (model.EntryAttachment, error)
 }
 
 var allAgentAttachmentTypes = map[string]bool{
@@ -92,12 +92,14 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 			return nil, inputAttachmentValidationErrorf("attachment instruction must not exceed %d characters", inputAttachmentInstructionMaxRunes)
 		}
 		if a.UploadID == "" && a.Key != "" {
-			if options.validateExistingKey == nil {
+			if options.normalizeExistingKey == nil {
 				return nil, inputAttachmentValidationErrorf("attachment %d: storage attachment requires upload_id and key", i+1)
 			}
-			if err := options.validateExistingKey(a); err != nil {
+			normalizedExisting, err := options.normalizeExistingKey(a)
+			if err != nil {
 				return nil, inputAttachmentValidationErrorf("attachment %d: %v", i+1, err)
 			}
+			a = normalizedExisting
 		} else if a.UploadID != "" && a.Key == "" {
 			return nil, inputAttachmentValidationErrorf("attachment %d: storage attachment requires upload_id and key", i+1)
 		}

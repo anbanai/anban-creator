@@ -18,6 +18,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -983,6 +985,7 @@ type cloneSourceReuseFixture struct {
 	repo               repository.Repository
 	app                *fiber.App
 	store              storage.Provider
+	signingStore       *cloneSourceReuseStorage
 	userID             string
 	rootProjectID      string
 	rootTaskID         string
@@ -990,7 +993,31 @@ type cloneSourceReuseFixture struct {
 	destinationProject *model.Project
 }
 
+type cloneSourceReuseStorage struct {
+	*fakeStorageProvider
+	signedKeys []string
+	getURL     func(string) string
+}
+
+func (s *cloneSourceReuseStorage) GetURL(key string) string {
+	if s.getURL != nil {
+		return s.getURL(key)
+	}
+	return s.fakeStorageProvider.GetURL(key)
+}
+
+func (s *cloneSourceReuseStorage) DownloadURL(_ context.Context, key string, _ int) (string, error) {
+	s.signedKeys = append(s.signedKeys, key)
+	return "https://signed.example.com/" + key, nil
+}
+
 func setupCloneSourceReuseFixture(t *testing.T, destinationPlatform string) *cloneSourceReuseFixture {
+	t.Helper()
+	store := &cloneSourceReuseStorage{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	return setupCloneSourceReuseFixtureWithStore(t, destinationPlatform, store)
+}
+
+func setupCloneSourceReuseFixtureWithStore(t *testing.T, destinationPlatform string, store storage.Provider) *cloneSourceReuseFixture {
 	t.Helper()
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -1025,7 +1052,6 @@ func setupCloneSourceReuseFixture(t *testing.T, destinationPlatform string) *clo
 			t.Fatal(err)
 		}
 	}
-	store := &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -1033,16 +1059,74 @@ func setupCloneSourceReuseFixture(t *testing.T, destinationPlatform string) *clo
 	h.SetStore(store)
 	app := fiber.New()
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+	signingStore, _ := store.(*cloneSourceReuseStorage)
 	return &cloneSourceReuseFixture{
 		repo:               repo,
 		app:                app,
 		store:              store,
+		signingStore:       signingStore,
 		userID:             userID,
 		rootProjectID:      rootProject.ID,
 		rootTaskID:         rootTask.ID,
 		source:             source,
 		destinationProject: destinationProject,
 	}
+}
+
+func bootstrapClonedSourceAttachment(t *testing.T, fixture *cloneSourceReuseFixture, task *model.Task) {
+	t.Helper()
+	if fixture.signingStore == nil {
+		t.Fatal("bootstrap fixture requires signing storage")
+	}
+	executionID := uuid.NewString()
+	task.Status = model.TaskStatusRunning
+	task.CurrentExecutionID = &executionID
+	if err := fixture.repo.Tasks().Update(t.Context(), task); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repo.TaskExecutions().Create(t.Context(), &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionStarting,
+		Namespace: "anban", JobName: "job-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeEnv := map[string]string{
+		"ANTHROPIC_AUTH_TOKEN":           "test-token",
+		"ANTHROPIC_BASE_URL":             "https://anthropic.example.com",
+		"ANTHROPIC_MODEL":                "claude-test",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "claude-test",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "claude-test",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-test",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "claude-test",
+	}
+	bootstrap := service.NewAgentBootstrapService(fixture.repo, tokens, service.AgentBootstrapConfig{
+		Model: "claude-test", TokenTTL: time.Hour, SignedURLTTL: 60, Store: fixture.store,
+		RuntimeEnv: runtimeEnv,
+		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
+			"claude-test": {Provider: "anthropic", Model: "claude-test"},
+		},
+	}, zerolog.Nop())
+	response, err := bootstrap.Bootstrap(t.Context(), &serveragent.KubernetesWorkloadIdentity{
+		Namespace: "anban", PodName: "pod-1", PodUID: "pod-uid-1", JobName: "job-1",
+		ExecutionID: executionID, TaskID: task.ID, ProjectID: task.ProjectID, UserID: task.UserID,
+		JobDeadline: time.Now().Add(30 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("bootstrap cloned attachment: %v", err)
+	}
+	for _, file := range response.Files {
+		if strings.HasPrefix(file.Path, ".anban-creator/input-attachments/") && file.DownloadURL != "" {
+			if len(fixture.signingStore.signedKeys) != 1 || fixture.signingStore.signedKeys[0] != task.InputAttachments.Data()[0].Key {
+				t.Fatalf("signed keys = %#v, attachment = %#v", fixture.signingStore.signedKeys, task.InputAttachments.Data()[0])
+			}
+			return
+		}
+	}
+	t.Fatalf("bootstrap files have no signed attachment: %#v", response.Files)
 }
 
 func cloneSourceAttachmentAPIShape(t *testing.T, fixture *cloneSourceReuseFixture, attachment model.EntryAttachment) map[string]any {
@@ -1193,8 +1277,12 @@ func TestCloneTask_FullEditableAllowsTaskAPIAttachmentSourceReuse(t *testing.T) 
 			got := tasks[0].InputAttachments.Data()
 			wantURL, _ := apiAttachment["url"].(string)
 			wantKey, _ := apiAttachment["key"].(string)
-			if len(got) != 1 || got[0].Key != wantKey || got[0].URL != wantURL {
+			if len(got) != 1 || got[0].Key != wantKey || (wantURL != "" && got[0].URL != wantURL) {
 				t.Fatalf("persisted attachment = %#v, API attachment = %#v", got, apiAttachment)
+			}
+			bootstrapClonedSourceAttachment(t, fixture, tasks[0])
+			if got[0].URL == "" || !fixture.store.IsOwnedURL(got[0].URL) {
+				t.Fatalf("persisted attachment URL = %q, want provider-owned URL", got[0].URL)
 			}
 		})
 	}
@@ -1251,6 +1339,41 @@ func TestCloneTask_FullEditableRejectsUntrustedTaskAPIAttachmentSourceReuse(t *t
 		})
 		assertCloneSourceReuseRejectedWithoutPersistence(t, fixture, cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
 	})
+}
+
+func TestCloneTask_FullEditableRejectsKeyOnlyReuseWithoutOwnedProviderURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		store storage.Provider
+	}{
+		{name: "missing storage"},
+		{
+			name: "empty provider URL",
+			store: &cloneSourceReuseStorage{
+				fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}},
+				getURL:              func(string) string { return "" },
+			},
+		},
+		{
+			name: "non-owned provider URL",
+			store: &cloneSourceReuseStorage{
+				fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}},
+				getURL:              func(string) string { return "https://public.example.com/source.png" },
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixtureWithStore(t, model.PlatformArticle, tt.store)
+			apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
+				Type:        "image",
+				Key:         strings.TrimPrefix(cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "source.png"), "/api/v1/files/"),
+				FileName:    "source.png",
+				ContentType: "image/png",
+			})
+			assertCloneSourceReuseRejectedWithoutPersistence(t, fixture, cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+		})
+	}
 }
 
 func TestCloneTask_FullEditableAllowsPublicExternalSourceURLs(t *testing.T) {

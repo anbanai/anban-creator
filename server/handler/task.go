@@ -275,26 +275,39 @@ func trustedTaskCreationSource(source *model.Task) taskScopedCreationInput {
 	return taskScopedCreationInput{userID: source.UserID, projectID: projectID, taskID: taskID}
 }
 
-func validateTrustedTaskAttachmentReuse(store storage.Provider, source *model.Task, attachment model.EntryAttachment) error {
+func normalizeTrustedTaskAttachmentReuse(store storage.Provider, source *model.Task, attachment model.EntryAttachment) (model.EntryAttachment, error) {
 	trusted := trustedTaskCreationSource(source)
 	parsedKey, err := parseTaskScopedCreationInput(store, attachment.Key, true)
 	if err != nil {
-		return fmt.Errorf("task input storage key is invalid")
+		return model.EntryAttachment{}, fmt.Errorf("task input storage key is invalid")
 	}
 	if source == nil || !parsedKey.taskScoped || parsedKey.identity != trusted {
-		return fmt.Errorf("task-scoped input is not authorized for this clone source")
+		return model.EntryAttachment{}, fmt.Errorf("task-scoped input is not authorized for this clone source")
 	}
-	if strings.TrimSpace(attachment.URL) == "" {
-		return nil
+	attachment.Key = parsedKey.key
+	if strings.TrimSpace(attachment.URL) != "" {
+		parsedURL, err := parseTaskScopedCreationInput(store, attachment.URL, false)
+		if err != nil {
+			return model.EntryAttachment{}, fmt.Errorf("task input storage URL is invalid")
+		}
+		if parsedURL.key == "" || parsedURL.key != parsedKey.key {
+			return model.EntryAttachment{}, fmt.Errorf("attachment URL and key must identify the same storage object")
+		}
+		return attachment, nil
 	}
-	parsedURL, err := parseTaskScopedCreationInput(store, attachment.URL, false)
-	if err != nil {
-		return fmt.Errorf("task input storage URL is invalid")
+	if store == nil {
+		return model.EntryAttachment{}, fmt.Errorf("storage provider is required to reuse a task-scoped attachment key")
 	}
-	if parsedURL.key == "" || parsedURL.key != parsedKey.key {
-		return fmt.Errorf("attachment URL and key must identify the same storage object")
+	ownedURL := strings.TrimSpace(store.GetURL(parsedKey.key))
+	if ownedURL == "" || !store.IsOwnedURL(ownedURL) {
+		return model.EntryAttachment{}, fmt.Errorf("storage provider returned an invalid owned URL for task-scoped attachment key")
 	}
-	return nil
+	parsedURL, err := parseTaskScopedCreationInput(store, ownedURL, false)
+	if err != nil || parsedURL.key != parsedKey.key {
+		return model.EntryAttachment{}, fmt.Errorf("storage provider URL does not identify the authorized attachment key")
+	}
+	attachment.URL = ownedURL
+	return attachment, nil
 }
 
 func validateTaskCreationSourceReuse(store storage.Provider, source *model.Task, attachments []model.EntryAttachment, productPhotos []string, montageInput *model.MontageInput) error {
@@ -434,8 +447,8 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		AllowedTypes: allowedAttachmentTypes,
 	}
 	if source != nil {
-		attachmentValidation.validateExistingKey = func(attachment model.EntryAttachment) error {
-			return validateTrustedTaskAttachmentReuse(h.service.Storage(), source, attachment)
+		attachmentValidation.normalizeExistingKey = func(attachment model.EntryAttachment) (model.EntryAttachment, error) {
+			return normalizeTrustedTaskAttachmentReuse(h.service.Storage(), source, attachment)
 		}
 	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, req.InputAttachments, attachmentValidation)
