@@ -30,6 +30,8 @@ type ArtifactPrepareRequest struct {
 }
 
 type ArtifactPrepareResponse struct {
+	UploadRequired     bool              `json:"upload_required"`
+	ETag               string            `json:"etag,omitempty"`
 	UploadID           string            `json:"upload_id"`
 	Key                string            `json:"key"`
 	PublicURL          string            `json:"public_url"`
@@ -110,28 +112,31 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 	if err := artifactContextCause(ctx); err != nil {
 		return err
 	}
+	var (
+		files []WorkspaceArtifact
+		err   error
+	)
 	if u.cfg.ExecutionID != "" {
 		outputDir := filepath.Join(workDir, "output")
-		info, err := os.Lstat(outputDir)
+		info, statErr := os.Lstat(outputDir)
 		if cause := artifactContextCause(ctx); cause != nil {
 			return cause
 		}
-		if os.IsNotExist(err) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("inspect job output directory: %w", err)
-		}
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		switch {
+		case os.IsNotExist(statErr):
+			files = []WorkspaceArtifact{}
+		case statErr != nil:
+			return fmt.Errorf("inspect job output directory: %w", statErr)
+		case !info.IsDir() || info.Mode()&os.ModeSymlink != 0:
 			return fmt.Errorf("job output must be a real directory")
+		default:
+			files, err = scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
 		}
+	} else {
+		files, err = scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
 	}
-	files, err := scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
 	if err != nil {
 		return err
-	}
-	if len(files) == 0 {
-		return nil
 	}
 
 	manifest := ArtifactManifestRequest{
@@ -164,20 +169,23 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 		if prepared.MaxSize > 0 && file.Size > prepared.MaxSize {
 			return fmt.Errorf("artifact %s exceeds prepared upload limit", file.RelativePath)
 		}
+		objectKey := strings.TrimSpace(prepared.Key)
+		if objectKey == "" {
+			return fmt.Errorf("prepare artifact upload %s returned empty object key", file.RelativePath)
+		}
 		contentType := prepared.Headers["Content-Type"]
 		if contentType == "" {
 			contentType = file.ContentType
 		}
-		etag, err := u.putObject(ctx, prepared, file.LocalPath, contentType)
-		if err != nil {
-			return fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
+		etag := prepared.ETag
+		if prepared.UploadRequired {
+			etag, err = u.putObject(ctx, prepared, file.LocalPath, contentType)
+			if err != nil {
+				return fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
+			}
 		}
 		if err := artifactContextCause(ctx); err != nil {
 			return err
-		}
-		objectKey := strings.TrimSpace(prepared.Key)
-		if objectKey == "" {
-			return fmt.Errorf("prepare artifact upload %s returned empty object key", file.RelativePath)
 		}
 		manifest.Files = append(manifest.Files, ArtifactManifestFile{
 			RelativePath: file.RelativePath,
@@ -194,7 +202,9 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 	if err := u.reporter.ReportArtifactManifest(ctx, manifest); err != nil {
 		return fmt.Errorf("report artifact manifest: %w", err)
 	}
-	_ = u.reporter.ReportProgress(ctx, fmt.Sprintf("uploaded %d workspace artifact(s)", len(manifest.Files)))
+	if len(manifest.Files) > 0 {
+		_ = u.reporter.ReportProgress(ctx, fmt.Sprintf("uploaded %d workspace artifact(s)", len(manifest.Files)))
+	}
 	return nil
 }
 
@@ -373,11 +383,18 @@ func putOSSObjectFromFile(ctx context.Context, prepared *ArtifactPrepareResponse
 	if err != nil {
 		return "", fmt.Errorf("open oss bucket: %w", err)
 	}
+	return putOSSObjectFromBucket(ctx, bucket, prepared.Key, localPath, contentType, prepared.Headers["X-Oss-Meta-Sha256"])
+}
+
+func putOSSObjectFromBucket(ctx context.Context, bucket *oss.Bucket, key, localPath, contentType, hash string) (string, error) {
 	options := []oss.Option{oss.WithContext(ctx)}
 	if contentType != "" {
 		options = append(options, oss.ContentType(contentType))
 	}
-	if err := bucket.PutObjectFromFile(prepared.Key, localPath, options...); err != nil {
+	if hash != "" {
+		options = append(options, oss.Meta("sha256", strings.ToLower(hash)))
+	}
+	if err := bucket.PutObjectFromFile(key, localPath, options...); err != nil {
 		return "", fmt.Errorf("put oss object: %w", err)
 	}
 	return "", nil

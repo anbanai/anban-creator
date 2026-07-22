@@ -113,13 +113,7 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 		if uploadErr := uploader.UploadWorkspaceArtifacts(workCtx, result); uploadErr != nil {
 			_ = reporter.ReportProgress(workCtx, "artifact upload failed: "+uploadErr.Error())
 			fmt.Fprintf(stderr, "failed to upload artifacts: %v\n", uploadErr)
-			if result.Success {
-				result.Success = false
-				result.Error = "artifact upload failed: " + uploadErr.Error()
-			}
-			if runErr == nil {
-				runErr = uploadErr
-			}
+			runErr = applyArtifactUploadFailure(result, runErr, uploadErr)
 		}
 	}
 
@@ -149,6 +143,20 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 		return fmt.Errorf("agent execution failed")
 	}
 	return nil
+}
+
+func applyArtifactUploadFailure(result *serveragent.ExecutionResult, runErr, uploadErr error) error {
+	if uploadErr == nil {
+		return runErr
+	}
+	if result != nil && result.Success {
+		result.Success = false
+		result.Error = "artifact upload failed: " + uploadErr.Error()
+	}
+	if runErr == nil {
+		return uploadErr
+	}
+	return runErr
 }
 
 type finalizationWindow struct {

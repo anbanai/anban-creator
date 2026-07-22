@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,29 +16,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
 
 type fakeArtifactReporter struct {
-	prepared []ArtifactPrepareRequest
-	manifest ArtifactManifestRequest
-	progress []string
+	prepared       []ArtifactPrepareRequest
+	prepareResult  *ArtifactPrepareResponse
+	manifest       ArtifactManifestRequest
+	manifestCalls  int
+	manifestErrors []error
+	progress       []string
 }
 
 func (f *fakeArtifactReporter) PrepareArtifactUpload(_ context.Context, req ArtifactPrepareRequest) (*ArtifactPrepareResponse, error) {
 	f.prepared = append(f.prepared, req)
-	return &ArtifactPrepareResponse{
-		Key:       "uploads/users/u/projects/p/tasks/" + req.TaskID + "/artifacts/" + req.RelativePath,
-		Bucket:    "bucket",
-		Endpoint:  "oss-cn-hangzhou.aliyuncs.com",
-		Headers:   map[string]string{"Content-Type": req.ContentType},
-		MaxSize:   512 * 1024 * 1024,
-		ExpiresAt: "2026-07-09T10:15:00Z",
-	}, nil
+	response := ArtifactPrepareResponse{
+		Key:            "uploads/users/u/projects/p/tasks/" + req.TaskID + "/artifacts/" + req.RelativePath,
+		Bucket:         "bucket",
+		Endpoint:       "oss-cn-hangzhou.aliyuncs.com",
+		Headers:        map[string]string{"Content-Type": req.ContentType, "X-Oss-Meta-Sha256": req.SHA256},
+		MaxSize:        512 * 1024 * 1024,
+		ExpiresAt:      "2026-07-09T10:15:00Z",
+		UploadRequired: true,
+	}
+	if f.prepareResult != nil {
+		response = *f.prepareResult
+	}
+	response.Headers = maps.Clone(response.Headers)
+	return &response, nil
 }
 
 func (f *fakeArtifactReporter) ReportArtifactManifest(_ context.Context, req ArtifactManifestRequest) error {
+	f.manifestCalls++
 	f.manifest = req
+	if len(f.manifestErrors) > 0 {
+		err := f.manifestErrors[0]
+		f.manifestErrors = f.manifestErrors[1:]
+		return err
+	}
 	return nil
 }
 
@@ -273,6 +290,33 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	}
 }
 
+func TestArtifactUploaderSkipsMatchingObjectButStillManifestsIt(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
+	reporter := &fakeArtifactReporter{prepareResult: &ArtifactPrepareResponse{
+		Key:            "uploads/existing/article.md",
+		ETag:           "existing-etag",
+		UploadRequired: false,
+		Headers:        map[string]string{"Content-Type": "text/markdown"},
+		MaxSize:        512 * 1024 * 1024,
+	}}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
+		t.Fatal("matching object must not be uploaded")
+		return "", nil
+	}
+
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
+	}
+	if reporter.manifestCalls != 1 || len(reporter.manifest.Files) != 1 {
+		t.Fatalf("manifest calls/files = %d/%d, want 1/1", reporter.manifestCalls, len(reporter.manifest.Files))
+	}
+	if got := reporter.manifest.Files[0].ETag; got != "existing-etag" {
+		t.Fatalf("manifest etag = %q, want existing-etag", got)
+	}
+}
+
 func TestArtifactUploaderUploadsFailureArtifactsForUnsuccessfulResult(t *testing.T) {
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "output/failure-state.json", `{"stage":"quality-gate"}`)
@@ -293,7 +337,7 @@ func TestArtifactUploaderUploadsFailureArtifactsForUnsuccessfulResult(t *testing
 	}
 }
 
-func TestJobArtifactUploaderDoesNotFallbackOutsideOutput(t *testing.T) {
+func TestJobArtifactUploaderSubmitsEmptyManifestWhenOutputIsMissing(t *testing.T) {
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "content.md", "internal draft")
 	writeAgentArtifactTestFile(t, root, ".task-context", "TASK_ID=task-1")
@@ -308,12 +352,15 @@ func TestJobArtifactUploaderDoesNotFallbackOutsideOutput(t *testing.T) {
 	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
 		t.Fatal(err)
 	}
-	if len(reporter.prepared) != 0 || len(reporter.manifest.Files) != 0 || len(reporter.progress) != 0 {
-		t.Fatalf("job uploaded workspace internals: prepared=%v manifest=%v progress=%v", reporter.prepared, reporter.manifest, reporter.progress)
+	if len(reporter.prepared) != 0 || reporter.manifestCalls != 1 || len(reporter.manifest.Files) != 0 || len(reporter.progress) != 0 {
+		t.Fatalf("job uploaded workspace internals: prepared=%v manifest=%v calls=%d progress=%v", reporter.prepared, reporter.manifest, reporter.manifestCalls, reporter.progress)
+	}
+	if reporter.manifest.ExecutionID != "execution-1" {
+		t.Fatalf("manifest execution ID = %q, want execution-1", reporter.manifest.ExecutionID)
 	}
 }
 
-func TestJobArtifactUploaderDoesNotFallbackWhenOutputIsEmpty(t *testing.T) {
+func TestJobArtifactUploaderSubmitsEmptyManifest(t *testing.T) {
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "content.md", "internal draft")
 	if err := os.Mkdir(filepath.Join(root, "output"), 0o755); err != nil {
@@ -324,8 +371,92 @@ func TestJobArtifactUploaderDoesNotFallbackWhenOutputIsEmpty(t *testing.T) {
 	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
 		t.Fatal(err)
 	}
-	if len(reporter.prepared) != 0 || len(reporter.manifest.Files) != 0 {
+	if len(reporter.prepared) != 0 || reporter.manifestCalls != 1 || len(reporter.manifest.Files) != 0 || len(reporter.progress) != 0 {
 		t.Fatalf("empty output fell back to workspace: %+v", reporter)
+	}
+	if reporter.manifest.ExecutionID != "execution-1" {
+		t.Fatalf("manifest execution ID = %q, want execution-1", reporter.manifest.ExecutionID)
+	}
+}
+
+func TestArtifactUploaderRetryAfterManifestFailureReusesUploadedObject(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
+	manifestErr := errors.New("manifest unavailable")
+	reporter := &fakeArtifactReporter{manifestErrors: []error{manifestErr}}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+	putCalls := 0
+	uploader.putObject = func(_ context.Context, prepared *ArtifactPrepareResponse, _ string, contentType string) (string, error) {
+		putCalls++
+		reporter.prepareResult = &ArtifactPrepareResponse{
+			Key:            prepared.Key,
+			ETag:           "reused-etag",
+			UploadRequired: false,
+			Headers:        map[string]string{"Content-Type": contentType},
+			MaxSize:        prepared.MaxSize,
+		}
+		return "reused-etag", nil
+	}
+
+	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	if !errors.Is(err, manifestErr) {
+		t.Fatalf("first collection error = %v, want manifest error", err)
+	}
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+		t.Fatalf("second collection: %v", err)
+	}
+	if putCalls != 1 {
+		t.Fatalf("put calls = %d, want 1", putCalls)
+	}
+	if reporter.manifestCalls != 2 {
+		t.Fatalf("manifest calls = %d, want 2", reporter.manifestCalls)
+	}
+}
+
+func TestApplyArtifactUploadFailureRejectsOtherwiseSuccessfulRun(t *testing.T) {
+	result := &serveragent.ExecutionResult{Success: true}
+	uploadErr := errors.New("manifest unavailable")
+
+	err := applyArtifactUploadFailure(result, nil, uploadErr)
+
+	if !errors.Is(err, uploadErr) {
+		t.Fatalf("error = %v, want upload error", err)
+	}
+	if result.Success {
+		t.Fatal("successful result remained successful after artifact upload failure")
+	}
+	if result.Error != "artifact upload failed: manifest unavailable" {
+		t.Fatalf("result error = %q", result.Error)
+	}
+}
+
+func TestPutOSSObjectFromBucketAddsSHA256Metadata(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "article.md")
+	if err := os.WriteFile(path, []byte("# article"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var sha256Header string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sha256Header = r.Header.Get("X-Oss-Meta-Sha256")
+		w.Header().Set("ETag", "test-etag")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := oss.New(server.URL, "access-key", "secret", oss.UseCname(true))
+	if err != nil {
+		t.Fatalf("create OSS client: %v", err)
+	}
+	bucket, err := client.Bucket("bucket")
+	if err != nil {
+		t.Fatalf("open bucket: %v", err)
+	}
+	if _, err := putOSSObjectFromBucket(context.Background(), bucket, "artifacts/article.md", path, "text/markdown", "ABCDEF"); err != nil {
+		t.Fatalf("put object: %v", err)
+	}
+	if sha256Header != "abcdef" {
+		t.Fatalf("X-Oss-Meta-Sha256 = %q, want abcdef", sha256Header)
 	}
 }
 
