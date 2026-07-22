@@ -169,10 +169,10 @@ func (d *DockerDispatcher) Dispatch(ctx context.Context, execution *model.TaskEx
 		return nil, NewPermanentDispatchError(err)
 	}
 	if err := d.engine.CopyToContainer(dispatchCtx, containerID, path.Dir(dockerWorkloadTokenFile), bytes.NewReader(archive), containertypes.CopyToContainerOptions{CopyUIDGID: true}); err != nil {
-		return nil, fmt.Errorf("copy workload token into Docker container %q: %w", spec.ContainerName, classifyDockerMutationError(err))
+		return nil, fmt.Errorf("copy workload token into Docker container %q: %w", spec.ContainerName, classifyDockerContainerOperationError(err, execution.RuntimeInstanceID != ""))
 	}
-	if err := d.engine.ContainerStart(dispatchCtx, containerID, containertypes.StartOptions{}); err != nil {
-		return nil, fmt.Errorf("start Docker container %q: %w", spec.ContainerName, classifyDockerMutationError(err))
+	if err := d.engine.ContainerStart(dispatchCtx, containerID, containertypes.StartOptions{}); err != nil && !errdefs.IsNotModified(err) {
+		return nil, fmt.Errorf("start Docker container %q: %w", spec.ContainerName, classifyDockerContainerOperationError(err, execution.RuntimeInstanceID != ""))
 	}
 	return identity, nil
 }
@@ -187,13 +187,13 @@ func (d *DockerDispatcher) ensureVolume(ctx context.Context, desired volume.Crea
 		if errdefs.IsConflict(err) {
 			existing, err = d.engine.VolumeInspect(ctx, desired.Name)
 			if err != nil {
-				return fmt.Errorf("inspect %s Docker volume %q after create conflict: %w", kind, desired.Name, classifyDockerMutationError(err))
+				return fmt.Errorf("inspect %s Docker volume %q after create conflict: %w", kind, desired.Name, classifyDockerAccessOrInputError(err))
 			}
 		} else if err != nil {
-			return fmt.Errorf("create %s Docker volume %q: %w", kind, desired.Name, classifyDockerMutationError(err))
+			return fmt.Errorf("create %s Docker volume %q: %w", kind, desired.Name, classifyDockerCreateError(err))
 		}
 	} else if err != nil {
-		return fmt.Errorf("inspect %s Docker volume %q: %w", kind, desired.Name, classifyDockerMutationError(err))
+		return fmt.Errorf("inspect %s Docker volume %q: %w", kind, desired.Name, classifyDockerAccessOrInputError(err))
 	}
 	if err := verifyDockerVolume(existing, desired); err != nil {
 		return NewPermanentDispatchError(fmt.Errorf("%s volume %q: %w", kind, desired.Name, err))
@@ -210,7 +210,7 @@ func (d *DockerDispatcher) ensureContainer(ctx context.Context, desired dockerRu
 		return existing.ID, dockerContainerNeedsStart(existing.State), nil
 	}
 	if !errdefs.IsNotFound(err) {
-		return "", false, fmt.Errorf("inspect Docker container %q: %w", desired.ContainerName, classifyDockerMutationError(err))
+		return "", false, fmt.Errorf("inspect Docker container %q: %w", desired.ContainerName, classifyDockerAccessOrInputError(err))
 	}
 	if persistedInstanceID != "" {
 		return "", false, NewPermanentDispatchError(fmt.Errorf("persisted Docker container %q instance identity mismatch: container %q is missing", desired.ContainerName, persistedInstanceID))
@@ -220,7 +220,7 @@ func (d *DockerDispatcher) ensureContainer(ctx context.Context, desired dockerRu
 	if errdefs.IsConflict(err) {
 		existing, err = d.engine.ContainerInspect(ctx, desired.ContainerName)
 		if err != nil {
-			return "", false, fmt.Errorf("inspect Docker container %q after create conflict: %w", desired.ContainerName, classifyDockerMutationError(err))
+			return "", false, fmt.Errorf("inspect Docker container %q after create conflict: %w", desired.ContainerName, classifyDockerAccessOrInputError(err))
 		}
 		if err := verifyExistingDockerContainer(existing, desired, persistedInstanceID); err != nil {
 			return "", false, err
@@ -228,7 +228,7 @@ func (d *DockerDispatcher) ensureContainer(ctx context.Context, desired dockerRu
 		return existing.ID, dockerContainerNeedsStart(existing.State), nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("create Docker container %q: %w", desired.ContainerName, classifyDockerMutationError(err))
+		return "", false, fmt.Errorf("create Docker container %q: %w", desired.ContainerName, classifyDockerCreateError(err))
 	}
 	if strings.TrimSpace(created.ID) == "" {
 		return "", false, NewPermanentDispatchError(fmt.Errorf("create Docker container %q returned no instance ID", desired.ContainerName))
@@ -242,7 +242,7 @@ func (d *DockerDispatcher) verifyPersistedContainer(ctx context.Context, desired
 		return NewPermanentDispatchError(fmt.Errorf("persisted Docker container %q instance identity mismatch: container %q is missing", desired.ContainerName, persistedInstanceID))
 	}
 	if err != nil {
-		return fmt.Errorf("inspect persisted Docker container %q: %w", desired.ContainerName, classifyDockerMutationError(err))
+		return fmt.Errorf("inspect persisted Docker container %q: %w", desired.ContainerName, classifyDockerAccessOrInputError(err))
 	}
 	return verifyExistingDockerContainer(existing, desired, persistedInstanceID)
 }
@@ -315,14 +315,28 @@ func dockerWorkloadTokenArchive(rawToken string, modifiedAt time.Time) ([]byte, 
 	return archive.Bytes(), nil
 }
 
-func classifyDockerMutationError(err error) error {
+func classifyDockerAccessOrInputError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errdefs.IsNotFound(err) || errdefs.IsInvalidParameter(err) || errdefs.IsForbidden(err) || errdefs.IsUnauthorized(err) {
+	if errdefs.IsInvalidParameter(err) || errdefs.IsForbidden(err) || errdefs.IsUnauthorized(err) {
 		return NewPermanentDispatchError(err)
 	}
 	return err
+}
+
+func classifyDockerCreateError(err error) error {
+	if errdefs.IsNotFound(err) {
+		return NewPermanentDispatchError(err)
+	}
+	return classifyDockerAccessOrInputError(err)
+}
+
+func classifyDockerContainerOperationError(err error, persistedInstance bool) error {
+	if persistedInstance && errdefs.IsNotFound(err) {
+		return NewPermanentDispatchError(err)
+	}
+	return classifyDockerAccessOrInputError(err)
 }
 
 func (d *DockerDispatcher) Inspect(ctx context.Context, execution *model.TaskExecution) (*RuntimeExecutionState, error) {
@@ -411,7 +425,7 @@ func (d *DockerDispatcher) Delete(ctx context.Context, execution *model.TaskExec
 	}
 	if inspected.State != nil && (inspected.State.Running || inspected.State.Paused || inspected.State.Restarting) {
 		timeout := dockerContainerStopTimeout
-		if err := d.engine.ContainerStop(ctx, inspected.ID, containertypes.StopOptions{Timeout: &timeout}); err != nil && !errdefs.IsNotFound(err) {
+		if err := d.engine.ContainerStop(ctx, inspected.ID, containertypes.StopOptions{Timeout: &timeout}); err != nil && !errdefs.IsNotFound(err) && !errdefs.IsNotModified(err) {
 			return fmt.Errorf("stop Docker container %q: %w", name, err)
 		}
 	}

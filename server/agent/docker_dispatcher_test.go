@@ -259,6 +259,51 @@ func TestDockerDispatcherClassifiesPermanentInspectErrors(t *testing.T) {
 	})
 }
 
+func TestDockerDispatcherTreatsAlreadyStartedContainerAsDesiredState(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.startError = errdefs.NotModified(errors.New("container already started"))
+
+	identity, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+	if err != nil {
+		t.Fatalf("Dispatch already-started container: %v", err)
+	}
+	if identity == nil || identity.Scope != dockerRuntimeScope || identity.Workload != dockerRuntimeContainerName(dockerDispatcherTestExecution().ID) || identity.InstanceID != engine.containerID {
+		t.Fatalf("identity = %#v", identity)
+	}
+	assertCallSubsequence(t, engine.calls, "container-create", "archive-copy", "container-start")
+}
+
+func TestDockerDispatcherContainerDisappearanceBeforePersistenceIsRetryable(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*fakeDockerEngine)
+	}{
+		{name: "copy token", configure: func(engine *fakeDockerEngine) {
+			engine.copyError = errdefs.NotFound(errors.New("container disappeared before archive copy"))
+		}},
+		{name: "start", configure: func(engine *fakeDockerEngine) {
+			engine.startError = errdefs.NotFound(errors.New("container disappeared before start"))
+		}},
+		{name: "create conflict inspect", configure: func(engine *fakeDockerEngine) {
+			engine.conflictContainerCreate = true
+			engine.containerMissingOnConflict = true
+		}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			engine := newFakeDockerEngine()
+			testCase.configure(engine)
+			_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+			if err == nil {
+				t.Fatal("Dispatch succeeded after pre-persistence container disappearance")
+			}
+			if IsPermanentDispatchError(err) {
+				t.Fatalf("Dispatch error = %v, want retryable container disappearance", err)
+			}
+		})
+	}
+}
+
 func TestDockerDispatcherValidatesBeforeDockerMutation(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -365,6 +410,23 @@ func TestDockerDeleteStopsAndRemovesOnlyOwnedContainer(t *testing.T) {
 	err := newDockerDispatcherForTest(t, foreign, dockerDispatcherTestTokens(t)).Delete(context.Background(), execution)
 	if err == nil || len(foreign.stoppedContainers) != 0 || len(foreign.removedContainers) != 0 {
 		t.Fatalf("foreign container delete error=%v stopped=%v removed=%v", err, foreign.stoppedContainers, foreign.removedContainers)
+	}
+}
+
+func TestDockerDeleteTreatsAlreadyStoppedContainerAsDesiredState(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.stopError = errdefs.NotModified(errors.New("container already stopped"))
+	execution := dockerDispatcherTestExecution()
+	execution.RuntimeScope = dockerRuntimeScope
+	execution.RuntimeWorkload = dockerRuntimeContainerName(execution.ID)
+	execution.RuntimeInstanceID = engine.containerID
+	engine.containers[execution.RuntimeWorkload] = dockerIdentityInspect(execution, engine.containerID, &containertypes.State{Status: containertypes.StateRunning, Running: true})
+
+	if err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Delete(context.Background(), execution); err != nil {
+		t.Fatalf("Delete already-stopped container: %v", err)
+	}
+	if !slices.Equal(engine.removedContainers, []string{engine.containerID}) {
+		t.Fatalf("removed containers = %v, want inspected instance", engine.removedContainers)
 	}
 }
 
@@ -497,8 +559,12 @@ type fakeDockerEngine struct {
 	conflictTaskCreate          bool
 	conflictContainerCreate     bool
 	foreignContainerOnConflict  bool
+	containerMissingOnConflict  bool
 	volumeInspectError          error
 	containerInspectError       error
+	copyError                   error
+	startError                  error
+	stopError                   error
 	allDispatchCallsHadDeadline bool
 }
 
@@ -594,7 +660,9 @@ func (e *fakeDockerEngine) ContainerCreate(ctx context.Context, config *containe
 	if e.foreignContainerOnConflict {
 		inspected.Config.Labels[dockerExecutionIDLabel] = "foreign"
 	}
-	e.containers[name] = inspected
+	if !e.containerMissingOnConflict {
+		e.containers[name] = inspected
+	}
 	if e.conflictContainerCreate {
 		return containertypes.CreateResponse{}, errdefs.Conflict(errors.New("container already exists"))
 	}
@@ -603,6 +671,9 @@ func (e *fakeDockerEngine) ContainerCreate(ctx context.Context, config *containe
 
 func (e *fakeDockerEngine) CopyToContainer(ctx context.Context, _ string, destination string, content io.Reader, options containertypes.CopyToContainerOptions) error {
 	e.record(ctx, "archive-copy")
+	if e.copyError != nil {
+		return e.copyError
+	}
 	raw, err := io.ReadAll(content)
 	if err != nil {
 		return err
@@ -615,6 +686,9 @@ func (e *fakeDockerEngine) CopyToContainer(ctx context.Context, _ string, destin
 
 func (e *fakeDockerEngine) ContainerStart(ctx context.Context, name string, _ containertypes.StartOptions) error {
 	e.record(ctx, "container-start")
+	if e.startError != nil {
+		return e.startError
+	}
 	got, ok := e.containers[name]
 	if !ok {
 		for key, candidate := range e.containers {
@@ -637,6 +711,9 @@ func (e *fakeDockerEngine) ContainerStart(ctx context.Context, name string, _ co
 func (e *fakeDockerEngine) ContainerStop(_ context.Context, name string, _ containertypes.StopOptions) error {
 	e.calls = append(e.calls, "container-stop")
 	e.stoppedContainers = append(e.stoppedContainers, name)
+	if e.stopError != nil {
+		return e.stopError
+	}
 	return nil
 }
 
