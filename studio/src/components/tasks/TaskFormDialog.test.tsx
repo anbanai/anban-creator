@@ -474,10 +474,12 @@ describe('TaskFormDialog', () => {
     expect(screen.getByText('尾图')).toBeInTheDocument()
     expect(screen.queryByText('仅生成正文配图；发布草稿不设封面')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '预览 keep.pdf' })).toBeInTheDocument()
+    expect(screen.getByText('种草笔记仅支持图片附件，请移除其他附件后继续。')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog', { name: '克隆任务' })).getByRole('button', { name: '克隆' })).toBeDisabled()
     expect(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('复制后的完整创作要求')
   })
 
-  it('serializes an attachment that completes after switching projects', async () => {
+  it('blocks an incompatible attachment that completes after switching projects', async () => {
     const uploadRequest = deferred<{
       uploadId: string
       key: string
@@ -507,17 +509,25 @@ describe('TaskFormDialog', () => {
     }))
     await waitFor(() => expect(screen.getByRole('status', { name: 'pending.pdf 状态' })).toHaveTextContent('已上传'))
 
+    expect(screen.getByText('种草笔记仅支持图片附件，请移除其他附件后继续。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
-    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith('source-task', expect.objectContaining({
-      project_id: 'seednote-project',
-      input_attachments: expect.arrayContaining([
-        expect.objectContaining({
-          upload_id: 'uploaded-after-switch',
-          key: 'uploads/pending/pending.pdf',
-          file_name: 'pending.pdf',
-        }),
-      ]),
-    })))
+    expect(api.tasks.clone).not.toHaveBeenCalled()
+  })
+
+  it('rejects new non-image attachments after switching to a Seednote project', async () => {
+    renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, input_attachments: [] }, initialProjectId: undefined })
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+
+    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+      target: { files: [new File(['brief'], 'brief.pdf', { type: 'application/pdf' })] },
+    })
+
+    expect(screen.queryByRole('button', { name: '预览 brief.pdf' })).not.toBeInTheDocument()
+    expect(uploadToOSSMock).not.toHaveBeenCalled()
+    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeEnabled()
   })
 
   it('keeps a failed attachment visible and blocks submission after switching projects', async () => {

@@ -88,9 +88,13 @@ vi.mock('@/lib/api', async () => {
       tasks: {
         ...actual.api.tasks,
         get: vi.fn(),
+        cancel: vi.fn(),
         clone: vi.fn(),
         resume: vi.fn(),
+        delete: vi.fn(),
         markPublished: vi.fn(),
+        publishApprove: vi.fn(),
+        publishReject: vi.fn(),
         files: vi.fn().mockResolvedValue([]),
         downloadZipBlob: vi.fn(),
       },
@@ -209,7 +213,11 @@ describe('TaskDetailPage', () => {
     vi.mocked(api.tasks.files).mockResolvedValue([])
     vi.mocked(api.tasks.clone).mockResolvedValue(taskWith({ id: 'task-clone', status: 'pending' }))
     vi.mocked(api.tasks.resume).mockResolvedValue(taskWith({ id: 'task-1', status: 'pending' }))
+    vi.mocked(api.tasks.cancel).mockResolvedValue(undefined)
+    vi.mocked(api.tasks.delete).mockResolvedValue(undefined)
     vi.mocked(api.tasks.markPublished).mockResolvedValue(taskWith({ id: 'task-1', status: 'completed', published: false }))
+    vi.mocked(api.tasks.publishApprove).mockResolvedValue({ approved: true })
+    vi.mocked(api.tasks.publishReject).mockResolvedValue({ rejected: true })
     vi.mocked(api.tasks.downloadZipBlob).mockResolvedValue(new Blob(['zip'], { type: 'application/zip' }))
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
     vi.mocked(api.projects.list).mockResolvedValue(mockProjects)
@@ -312,7 +320,7 @@ describe('TaskDetailPage', () => {
     await openTaskDetails()
   })
 
-  it('resets the controlled details tab when the route changes tasks', async () => {
+  it('closes task details on a route change and reopens on Overview', async () => {
     mockTask(taskWith({ id: 'task-1', status: 'running', result: null, completed_at: '' }))
     const view = render(<TaskDetailPage />)
 
@@ -331,9 +339,8 @@ describe('TaskDetailPage', () => {
     view.rerender(<TaskDetailPage />)
 
     await waitFor(() => expect(api.tasks.get).toHaveBeenCalledWith('task-2'))
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
-    })
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '任务详情' })).not.toBeInTheDocument())
+    await openTaskDetails()
   })
 
   it('discards task A resume input before task B can submit it after a route switch', async () => {
@@ -443,6 +450,113 @@ describe('TaskDetailPage', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['tasks'] })
     expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/late-clone')
     expect(toastSuccessMock).not.toHaveBeenCalled()
+  })
+
+  it('ignores a late clone error after navigating away from its source task', async () => {
+    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed', project_id: 'ch-1', result: null })
+    const taskB = taskWith({ id: 'task-2', title: '已完成任务 B', status: 'completed', project_id: 'ch-1', result: null })
+    const request = deferred<Task>()
+    vi.mocked(api.tasks.clone).mockReturnValue(request.promise)
+    const view = renderWithCachedTasks(taskA, taskB)
+
+    const dialog = await openCloneDialog()
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('测试项目'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
+
+    routeState.taskId = 'task-2'
+    view.rerender(<TaskDetailPage />)
+    expect(await screen.findAllByText('已完成任务 B')).not.toHaveLength(0)
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '克隆任务' })).not.toBeInTheDocument())
+
+    await act(async () => {
+      request.reject(new Error('task A clone failed'))
+      await request.promise.catch(() => {})
+    })
+
+    expect(toastErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('ignores a late resume error after navigating away from its source task', async () => {
+    const taskA = taskWith({ id: 'task-1', title: '失败任务 A', status: 'failed', result: null })
+    const taskB = taskWith({ id: 'task-2', title: '失败任务 B', status: 'failed', result: null })
+    const request = deferred<Task>()
+    vi.mocked(api.tasks.resume).mockReturnValue(request.promise)
+    const view = renderWithCachedTasks(taskA, taskB)
+
+    const dialog = await openResumeDialog()
+    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), { target: { value: '继续任务 A' } })
+    fireEvent.click(within(dialog).getByLabelText('提交并继续'))
+    await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledWith('task-1', {
+      prompt: '继续任务 A',
+      input_attachments: [],
+    }))
+
+    routeState.taskId = 'task-2'
+    view.rerender(<TaskDetailPage />)
+    expect(await screen.findAllByText('失败任务 B')).not.toHaveLength(0)
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
+
+    await act(async () => {
+      request.reject(new Error('task A resume failed'))
+      await request.promise.catch(() => {})
+    })
+
+    expect(toastErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('does not navigate or abort the active task when an earlier delete settles late', async () => {
+    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed', result: null })
+    const taskB = taskWith({ id: 'task-2', title: '运行中任务 B', status: 'running', result: null })
+    const deleteRequest = deferred<void>()
+    const streamSignals = new Map<string, AbortSignal>()
+    vi.mocked(api.tasks.delete).mockReturnValue(deleteRequest.promise)
+    mockStreamTaskProgress.mockImplementation(async function* (taskId, _token, signal) {
+      if (!signal) return
+      streamSignals.set(taskId, signal)
+      await waitForAbort(signal)
+    })
+    const view = renderWithCachedTasks(taskA, taskB)
+
+    fireEvent.click(await screen.findByRole('button', { name: '删除任务' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确定删除' }))
+    await waitFor(() => expect(api.tasks.delete).toHaveBeenCalledWith('task-1'))
+
+    routeState.taskId = 'task-2'
+    view.rerender(<TaskDetailPage />)
+    expect(await screen.findByRole('heading', { name: '运行中任务 B' })).toBeInTheDocument()
+    await waitFor(() => expect(streamSignals.get('task-2')).toBeDefined())
+
+    await act(async () => {
+      deleteRequest.resolve()
+      await deleteRequest.promise
+    })
+
+    expect(mockNavigate).not.toHaveBeenCalledWith('/tasks')
+    expect(toastSuccessMock).not.toHaveBeenCalledWith('任务已删除')
+    expect(streamSignals.get('task-2')).toHaveProperty('aborted', false)
+  })
+
+  it('does not show a stale published-state error after switching tasks', async () => {
+    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed', published: false, result: null })
+    const taskB = taskWith({ id: 'task-2', title: '已完成任务 B', status: 'completed', published: false, result: null })
+    const publishRequest = deferred<Task>()
+    vi.mocked(api.tasks.markPublished).mockReturnValue(publishRequest.promise)
+    const view = renderWithCachedTasks(taskA, taskB)
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: '已发布' }))
+    await waitFor(() => expect(api.tasks.markPublished).toHaveBeenCalledWith('task-1', true))
+
+    routeState.taskId = 'task-2'
+    view.rerender(<TaskDetailPage />)
+    expect(await screen.findByRole('heading', { name: '已完成任务 B' })).toBeInTheDocument()
+
+    await act(async () => {
+      publishRequest.reject(new Error('task A publish failed'))
+      await expect(publishRequest.promise).rejects.toThrow('task A publish failed')
+    })
+
+    expect(toastErrorMock).not.toHaveBeenCalled()
   })
 
   it('drops running task SSE state when switching directly to a cached completed task', async () => {
@@ -584,20 +698,18 @@ describe('TaskDetailPage', () => {
       vi.useRealTimers()
       routeState.taskId = 'task-2'
       view.rerender(<TaskDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
-        expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
-      })
+      await waitFor(() => expect(screen.queryByRole('heading', { name: '任务详情' })).not.toBeInTheDocument())
+      await openTaskDetails()
+      expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('tab', { name: '日志' }))
       expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('B 终态日志')
       expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
 
       routeState.taskId = 'task-3'
       view.rerender(<TaskDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
-        expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
-      })
+      await waitFor(() => expect(screen.queryByRole('heading', { name: '任务详情' })).not.toBeInTheDocument())
+      await openTaskDetails()
+      expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('tab', { name: '日志' }))
       expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('C 等待日志')
       expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()

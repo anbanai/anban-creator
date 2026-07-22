@@ -39,6 +39,13 @@ import { getLocalExecutorStatus, setExecutorEnabled, startLocalExecutor, type Lo
 import type { CreateTaskRequest, Project, Task, TaskType } from '@/types'
 import { ImageAspectRatioField } from './ImageAspectRatioField'
 
+const SEEDNOTE_ATTACHMENT_POLICY = {
+  allowedTypes: ['image'],
+  maxCount: GENERAL_AGENT_ATTACHMENT_POLICY.maxCount,
+  maxBytes: GENERAL_AGENT_ATTACHMENT_POLICY.maxBytes,
+} as const
+const SEEDNOTE_ATTACHMENT_BLOCKER = '种草笔记仅支持图片附件，请移除其他附件后继续。'
+
 export interface TaskFormDialogProps {
   open: boolean
   mode: 'create' | 'clone'
@@ -47,7 +54,7 @@ export interface TaskFormDialogProps {
   initialType?: TaskType
   onOpenChange: (open: boolean) => void
   onCreated: (task: Task, quantity: number) => void
-  shouldHandleSuccess?: () => boolean
+  shouldHandleResult?: () => boolean
 }
 
 function createInitialDefaults(project?: Project, initialType?: TaskType): TaskFormDefaults {
@@ -70,7 +77,7 @@ export function TaskFormDialog({
   initialType,
   onOpenChange,
   onCreated,
-  shouldHandleSuccess,
+  shouldHandleResult,
 }: TaskFormDialogProps) {
   const queryClient = useQueryClient()
   const { submit } = useSubmitLock()
@@ -101,9 +108,13 @@ export function TaskFormDialog({
     resolver: zodResolver(createTaskSchema) as Resolver<TaskFormDefaults>,
     defaultValues: createTaskFormDefaults(),
   })
+  const watchedType = useWatch({ control: form.control, name: 'type' })
+  const attachmentPolicy = watchedType === 'seednote'
+    ? SEEDNOTE_ATTACHMENT_POLICY
+    : GENERAL_AGENT_ATTACHMENT_POLICY
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
-    policy: GENERAL_AGENT_ATTACHMENT_POLICY,
+    policy: attachmentPolicy,
     initialAttachments: [],
     onAttachmentsChange: () => {
       form.setValue('input_attachments', attachmentController.toInputAttachments(), {
@@ -114,7 +125,6 @@ export function TaskFormDialog({
   })
   const resetAttachments = attachmentController.reset
 
-  const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   const watchedPrompt = useWatch({ control: form.control, name: 'prompt' }) ?? ''
   const watchedImageModelKey = useWatch({ control: form.control, name: 'image_model_key' }) ?? ''
@@ -130,6 +140,8 @@ export function TaskFormDialog({
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const isMontageTask = watchedType === 'montage'
+  const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
+    && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
   const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const selectedProject = projectMap.get(watchedProjectId ?? '')
   const localExecutorAvailable = localExecutorStatus?.available ?? false
@@ -228,7 +240,7 @@ export function TaskFormDialog({
     },
     onSuccess: (task, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      if (shouldHandleSuccess && !shouldHandleSuccess()) return
+      if (shouldHandleResult && !shouldHandleResult()) return
       toast.success(mode === 'clone'
         ? variables.quantity > 1 ? `已克隆 ${variables.quantity} 个任务` : '任务克隆成功'
         : '任务创建成功')
@@ -239,6 +251,7 @@ export function TaskFormDialog({
       onOpenChange(false)
     },
     onError: (error) => {
+      if (shouldHandleResult && !shouldHandleResult()) return
       toast.error(getApiErrorMessage(error, mode === 'clone' ? '克隆任务失败，请稍后再试' : '创建任务失败，请重试'))
     },
   })
@@ -316,7 +329,7 @@ export function TaskFormDialog({
   }
 
   function handleSubmit(event?: BaseSyntheticEvent) {
-    if (referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
+    if (hasIncompatibleSeednoteAttachments || referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
       event?.preventDefault()
       return
     }
@@ -335,17 +348,19 @@ export function TaskFormDialog({
       ? { message: '正在加载可用项目，请稍候。', href: '' }
       : mode === 'clone' && !selectedProject
         ? { message: '源任务项目不可用，请选择一个有效项目。', href: '' }
-        : watchedType !== 'montage' && localExecutorLoading && (mode === 'create' || runLocally)
-          ? { message: '正在检查本地执行器，请稍候。', href: '' }
-          : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
-            ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
-            : imageModelUnavailable
-              ? { message: '当前图像模型不可用，请重新选择。', href: '' }
-              : watchedType !== 'ecommerce' && goalMode && !goal.trim()
-                ? { message: '强目标模式需要填写目标条件。', href: '' }
-                : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
-                  ? { message: '电商出图需要先上传产品图。', href: '' }
-                  : null
+        : hasIncompatibleSeednoteAttachments
+          ? { message: SEEDNOTE_ATTACHMENT_BLOCKER, href: '' }
+          : watchedType !== 'montage' && localExecutorLoading && (mode === 'create' || runLocally)
+            ? { message: '正在检查本地执行器，请稍候。', href: '' }
+            : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
+              ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
+              : imageModelUnavailable
+                ? { message: '当前图像模型不可用，请重新选择。', href: '' }
+                : watchedType !== 'ecommerce' && goalMode && !goal.trim()
+                  ? { message: '强目标模式需要填写目标条件。', href: '' }
+                  : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
+                    ? { message: '电商出图需要先上传产品图。', href: '' }
+                    : null
 
   const promptComposer = (
     <AgentPromptInput
@@ -358,7 +373,7 @@ export function TaskFormDialog({
       }}
       onSubmit={() => handleSubmit()}
       attachmentController={attachmentController}
-      attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
+      attachmentPolicy={attachmentPolicy}
       submitMode="external"
       placeholder="描述创作目标、内容要求和素材使用方式..."
       submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
@@ -420,6 +435,9 @@ export function TaskFormDialog({
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
                 {!isMontageTask ? promptComposer : null}
+                {hasIncompatibleSeednoteAttachments ? (
+                  <p role="alert" className="mt-2 text-sm font-medium text-red-500">{SEEDNOTE_ATTACHMENT_BLOCKER}</p>
+                ) : null}
               </div>
 
               <div className="space-y-4 pt-1">
@@ -724,7 +742,7 @@ export function TaskFormDialog({
                   {costPreview.priceAvailable ? (
                     <p className="text-muted-foreground">余额：{(billingWallet?.balance ?? 0).toLocaleString()} → <span className={`font-medium ${costPreview.remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>{costPreview.remaining.toLocaleString()}</span></p>
                   ) : null}
-                  {creationBlocker ? (
+                  {creationBlocker && !hasIncompatibleSeednoteAttachments ? (
                     <p className="text-sm font-medium text-red-500">{creationBlocker.href ? <Link to={creationBlocker.href}>{creationBlocker.message}</Link> : creationBlocker.message}</p>
                   ) : null}
                 </div>

@@ -52,27 +52,39 @@ function ResumeTaskDialog({
   taskId,
   onClose,
   onSuccess,
+  shouldHandleResult,
 }: {
   taskId: string
   onClose: () => void
   onSuccess: () => void
+  shouldHandleResult: (taskId: string) => boolean
 }) {
+  const queryClient = useQueryClient()
   const [prompt, setPrompt] = useState('')
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: RESUME_ATTACHMENT_POLICY,
   })
   const resumeMutation = useMutation({
-    mutationFn: (request: { prompt: string; input_attachments: InputAttachment[] }) => (
-      api.tasks.resume(taskId, request)
+    mutationFn: ({ initiatingTaskId, request }: {
+      initiatingTaskId: string
+      request: { prompt: string; input_attachments: InputAttachment[] }
+    }) => (
+      api.tasks.resume(initiatingTaskId, request)
     ),
-    onSuccess: () => {
+    onSuccess: (_data, { initiatingTaskId }) => {
+      if (!shouldHandleResult(initiatingTaskId)) return
       toast.success('已提交，任务将结合已有上下文继续执行')
       onSuccess()
     },
-    onError: (err) => {
+    onError: (err, { initiatingTaskId }) => {
+      if (!shouldHandleResult(initiatingTaskId)) return
       toast.error(getApiErrorMessage(err, '继续执行失败，请稍后再试'))
     },
+    onSettled: (_data, _error, { initiatingTaskId }) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['task', initiatingTaskId] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all }),
+    ]),
   })
   const hasInput = Boolean(prompt.trim() || attachmentController.attachments.length > 0)
 
@@ -101,8 +113,11 @@ function ResumeTaskDialog({
           onChange={(value) => setPrompt(value.prompt)}
           onSubmit={async (value) => {
             await resumeMutation.mutateAsync({
-              prompt: value.prompt,
-              input_attachments: attachmentController.toInputAttachments(),
+              initiatingTaskId: taskId,
+              request: {
+                prompt: value.prompt,
+                input_attachments: attachmentController.toInputAttachments(),
+              },
             })
           }}
           attachmentController={attachmentController}
@@ -226,6 +241,10 @@ export default function TaskDetailPage() {
     taskId: task?.id,
   })
   activeTaskIdentityRef.current = { routeId: id, taskId: task?.id }
+  const isTaskActive = useCallback((taskId: string) => {
+    const active = activeTaskIdentityRef.current
+    return active.routeId === taskId && active.taskId === taskId
+  }, [])
 
   const { data: files } = useQuery({
     queryKey: ['task-files', id],
@@ -274,24 +293,29 @@ export default function TaskDetailPage() {
   const progressStage = currentLiveProgress?.stage ?? persistedProgress?.stage ?? null
   const isRunning = task?.status === 'running'
   const cancelMutation = useMutation({
-    mutationFn: () => api.tasks.cancel(id!),
-    onSuccess: () => {
+    mutationFn: (taskId: string) => api.tasks.cancel(taskId),
+    onSuccess: (_data, taskId) => {
+      if (!isTaskActive(taskId)) return
       toast.success('任务已取消')
       abortRef.current?.abort()
       abortRef.current = null
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
       setShowCancelDialog(false)
     },
-    onError: (err) => {
+    onError: (err, taskId) => {
+      if (!isTaskActive(taskId)) return
       toast.error(getApiErrorMessage(err, '取消任务失败，请稍后重试'))
     },
+    onSettled: (_data, _error, taskId) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all }),
+    ]),
   })
 
   const togglePublished = useMutation({
     mutationFn: ({ taskId, published }: { taskId: string; published: boolean }) =>
       api.tasks.markPublished(taskId, published),
-    onError: (err) => {
+    onError: (err, { taskId }) => {
+      if (!isTaskActive(taskId)) return
       toast.error(getApiErrorMessage(err, '切换发布状态失败，请稍后重试'))
     },
     onSettled: (_data, _error, { taskId }) => Promise.all([
@@ -303,42 +327,55 @@ export default function TaskDetailPage() {
 
   // Publish-approval gate (Batch 4A): resume a held publish or close the gate.
   const approvePublish = useMutation({
-    mutationFn: () => api.tasks.publishApprove(id!),
-    onSuccess: () => {
+    mutationFn: (taskId: string) => api.tasks.publishApprove(taskId),
+    onSuccess: (_data, taskId) => {
+      if (!isTaskActive(taskId)) return
       toast.success('已放行，正在发布到公众号草稿箱')
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
     },
-    onError: (err) => {
+    onError: (err, taskId) => {
+      if (!isTaskActive(taskId)) return
       toast.error(getApiErrorMessage(err, '放行失败，请稍后重试'))
     },
+    onSettled: (_data, _error, taskId) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all }),
+    ]),
   })
 
   const rejectPublish = useMutation({
-    mutationFn: () => api.tasks.publishReject(id!),
-    onSuccess: () => {
+    mutationFn: (taskId: string) => api.tasks.publishReject(taskId),
+    onSuccess: (_data, taskId) => {
+      if (!isTaskActive(taskId)) return
       toast.success('已驳回发布审核')
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
     },
-    onError: (err) => {
+    onError: (err, taskId) => {
+      if (!isTaskActive(taskId)) return
       toast.error(getApiErrorMessage(err, '驳回失败，请稍后重试'))
     },
+    onSettled: (_data, _error, taskId) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all }),
+    ]),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.tasks.delete(id!),
-    onSuccess: () => {
+    mutationFn: (taskId: string) => api.tasks.delete(taskId),
+    onSuccess: (_data, taskId) => {
+      if (!isTaskActive(taskId)) return
       toast.success('任务已删除')
       abortRef.current?.abort()
       abortRef.current = null
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
       setShowDeleteDialog(false)
       navigate('/tasks')
     },
-    onError: (err) => {
+    onError: (err, taskId) => {
+      if (!isTaskActive(taskId)) return
       toast.error(getApiErrorMessage(err, '删除失败，请稍后重试'))
     },
+    onSettled: (_data, _error, taskId) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all }),
+    ]),
   })
 
 	const handleSSEEvent = useCallback((
@@ -508,8 +545,12 @@ export default function TaskDetailPage() {
   }, [task?.id])
 
   useEffect(() => {
+    setShowCancelDialog(false)
+    setShowDeleteDialog(false)
+    setShowProjectDialog(false)
     setShowResumeDialog(false)
     setShowCloneDialog(false)
+    setShowTaskDetails(false)
     setCloneSourceTask(null)
     cloneSourceIdentityRef.current = null
   }, [id, task?.id])
@@ -594,7 +635,7 @@ export default function TaskDetailPage() {
     setCloneSourceTask(null)
   }
 
-  function shouldHandleCloneSuccess() {
+  function shouldHandleCloneResult() {
     const source = cloneSourceIdentityRef.current
     const active = activeTaskIdentityRef.current
     return source !== null
@@ -796,7 +837,7 @@ export default function TaskDetailPage() {
                 size="sm"
                 loading={approvePublish.isPending}
                 onClick={() => {
-                  void submit(async () => approvePublish.mutateAsync()).catch(() => {})
+                  void submit(async () => approvePublish.mutateAsync(task.id)).catch(() => {})
                 }}
               >
                 <Send className="h-4 w-4" />
@@ -806,7 +847,7 @@ export default function TaskDetailPage() {
                 variant="outline"
                 size="sm"
                 loading={rejectPublish.isPending}
-                onClick={() => { void submit(async () => rejectPublish.mutateAsync()).catch(() => {}) }}
+                onClick={() => { void submit(async () => rejectPublish.mutateAsync(task.id)).catch(() => {}) }}
               >
                 <Ban className="h-4 w-4" />
                 驳回
@@ -990,9 +1031,8 @@ export default function TaskDetailPage() {
           onClose={() => setShowResumeDialog(false)}
           onSuccess={() => {
             setShowResumeDialog(false)
-            queryClient.invalidateQueries({ queryKey: ['task', id] })
-            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
           }}
+          shouldHandleResult={isTaskActive}
         />
       ) : null}
 
@@ -1003,7 +1043,7 @@ export default function TaskDetailPage() {
           sourceTask={cloneSourceTask}
           onOpenChange={handleCloneOpenChange}
           onCreated={(nextTask) => navigate(`/tasks/${nextTask.id}`)}
-          shouldHandleSuccess={shouldHandleCloneSuccess}
+          shouldHandleResult={shouldHandleCloneResult}
         />
       ) : null}
 
@@ -1105,7 +1145,7 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={cancelMutation.isPending} onClick={() => { void submit(async () => cancelMutation.mutateAsync()).catch(() => {}) }}>
+            <AlertDialogAction variant="destructive" disabled={cancelMutation.isPending} onClick={() => { void submit(async () => cancelMutation.mutateAsync(task.id)).catch(() => {}) }}>
               {cancelMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
               确定取消
             </AlertDialogAction>
@@ -1124,7 +1164,7 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { void submit(async () => deleteMutation.mutateAsync()).catch(() => {}) }}>
+            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { void submit(async () => deleteMutation.mutateAsync(task.id)).catch(() => {}) }}>
               {deleteMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
               确定删除
             </AlertDialogAction>
