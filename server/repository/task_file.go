@@ -350,6 +350,9 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 				continue
 			}
 			file.ID = persisted.ID
+			if taskFileMutableDeliveryFieldsEqual(persisted, file) {
+				continue
+			}
 			result := tx.Model(&model.TaskFile{}).
 				Where("id = ? AND task_id = ? AND execution_id = ? AND state = ?", persisted.ID, taskID, executionID, model.TaskFileStatePending).
 				Updates(map[string]any{
@@ -365,15 +368,33 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 				return fmt.Errorf("%w: updated %d pending rows for path %q", ErrTaskFileManifestState, result.RowsAffected, file.FilePath)
 			}
 		}
-		statusResult := tx.Model(&model.TaskExecution{}).Where("id = ? AND manifest_status = ?", executionID, execution.ManifestStatus).Update("manifest_status", model.TaskExecutionManifestPending)
-		if statusResult.Error != nil {
-			return statusResult.Error
-		}
-		if statusResult.RowsAffected != 1 {
-			return ErrTaskFileManifestState
+		if execution.ManifestStatus == "" {
+			statusResult := tx.Model(&model.TaskExecution{}).
+				Where("id = ? AND manifest_status = ''", executionID).
+				Update("manifest_status", model.TaskExecutionManifestPending)
+			if statusResult.Error != nil {
+				return statusResult.Error
+			}
+			if statusResult.RowsAffected != 1 {
+				return ErrTaskFileManifestState
+			}
 		}
 		return nil
 	})
+}
+
+func taskFileMutableDeliveryFieldsEqual(persisted, incoming *model.TaskFile) bool {
+	return persisted.State == incoming.State &&
+		persisted.FileName == incoming.FileName &&
+		persisted.MimeType == incoming.MimeType &&
+		persisted.FileSize == incoming.FileSize &&
+		persisted.OSSKey == incoming.OSSKey &&
+		persisted.OSSURL == incoming.OSSURL &&
+		persisted.StorageProvider == incoming.StorageProvider &&
+		persisted.Role == incoming.Role &&
+		persisted.ContentHash == incoming.ContentHash &&
+		persisted.MediaID == incoming.MediaID &&
+		persisted.WechatURL == incoming.WechatURL
 }
 
 func lockCurrentArtifactExecution(tx *gorm.DB, taskID, executionID string) (*model.Task, *model.TaskExecution, error) {

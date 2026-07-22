@@ -451,8 +451,10 @@ func TestTaskFileRepositoryReplacePendingExecutionPreservesLogicalPathIdentity(t
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
 		ID: "file-1", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
-		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
-		ContentHash: strings.Repeat("a", 64), OSSKey: "old-key",
+		Role: model.FileRoleOther, FilePath: "output/article.md", FileName: "old.md",
+		MimeType: "text/plain", FileSize: 10, ContentHash: strings.Repeat("a", 64),
+		OSSKey: "old-key", OSSURL: "https://old.example/file", StorageProvider: "local",
+		MediaID: "old-media", WechatURL: "https://old.example/wechat",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +466,9 @@ func TestTaskFileRepositoryReplacePendingExecutionPreservesLogicalPathIdentity(t
 
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
 		ID: "replacement-id", Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
-		ContentHash: strings.Repeat("b", 64), OSSKey: "new-key",
+		MimeType: "text/markdown", FileSize: 20, ContentHash: strings.Repeat("b", 64),
+		OSSKey: "new-key", OSSURL: "https://new.example/file", StorageProvider: "oss",
+		MediaID: "new-media", WechatURL: "https://new.example/wechat",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +479,10 @@ func TestTaskFileRepositoryReplacePendingExecutionPreservesLogicalPathIdentity(t
 	if rows[0].ID != "file-1" || !rows[0].CreatedAt.Equal(createdAt) {
 		t.Fatalf("identity changed: %#v, createdAt=%v", rows[0], createdAt)
 	}
-	if rows[0].ContentHash != strings.Repeat("b", 64) || rows[0].OSSKey != "new-key" {
+	if rows[0].FileName != "article.md" || rows[0].MimeType != "text/markdown" || rows[0].FileSize != 20 ||
+		rows[0].OSSKey != "new-key" || rows[0].OSSURL != "https://new.example/file" || rows[0].StorageProvider != "oss" ||
+		rows[0].Role != model.FileRoleMarkdown || rows[0].ContentHash != strings.Repeat("b", 64) ||
+		rows[0].MediaID != "new-media" || rows[0].WechatURL != "https://new.example/wechat" {
 		t.Fatalf("manifest values = %#v", rows[0])
 	}
 }
@@ -508,7 +515,9 @@ func TestTaskFileRepositoryReplacePendingExecutionIdenticalManifestIsStable(t *t
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
 		ID: "file-1", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
 		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
-		ContentHash: strings.Repeat("a", 64), OSSKey: "known-key",
+		MimeType: "text/markdown", FileSize: 42, ContentHash: strings.Repeat("a", 64),
+		OSSKey: "known-key", OSSURL: "https://example.com/file", StorageProvider: "oss",
+		MediaID: "known-media", WechatURL: "https://example.com/wechat",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -520,7 +529,9 @@ func TestTaskFileRepositoryReplacePendingExecutionIdenticalManifestIsStable(t *t
 
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
 		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
-		ContentHash: strings.Repeat("a", 64), OSSKey: "known-key",
+		MimeType: "text/markdown", FileSize: 42, ContentHash: strings.Repeat("a", 64),
+		OSSKey: "known-key", OSSURL: "https://example.com/file", StorageProvider: "oss",
+		MediaID: "known-media", WechatURL: "https://example.com/wechat",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +539,11 @@ func TestTaskFileRepositoryReplacePendingExecutionIdenticalManifestIsStable(t *t
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("rows = %#v, err=%v", rows, err)
 	}
-	if rows[0].ID != "file-1" || !rows[0].CreatedAt.Equal(createdAt) || rows[0].ContentHash != strings.Repeat("a", 64) || rows[0].OSSKey != "known-key" {
+	if rows[0].ID != "file-1" || !rows[0].CreatedAt.Equal(createdAt) ||
+		rows[0].FileName != "article.md" || rows[0].MimeType != "text/markdown" || rows[0].FileSize != 42 ||
+		rows[0].OSSKey != "known-key" || rows[0].OSSURL != "https://example.com/file" || rows[0].StorageProvider != "oss" ||
+		rows[0].Role != model.FileRoleMarkdown || rows[0].ContentHash != strings.Repeat("a", 64) ||
+		rows[0].MediaID != "known-media" || rows[0].WechatURL != "https://example.com/wechat" {
 		t.Fatalf("stable manifest changed: %#v, createdAt=%v", rows[0], createdAt)
 	}
 }
@@ -642,7 +657,6 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T)
 	mock.ExpectExec("DELETE FROM `task_files`").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("UPDATE `task_files` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO `task_files`").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("UPDATE `task_executions` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	repo := New(db)
@@ -669,5 +683,54 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T)
 		if !strings.Contains(updateSQL, predicate) {
 			t.Fatalf("scoped update missing %q:\n%s", predicate, updateSQL)
 		}
+	}
+}
+
+func TestTaskFileRepositoryReplacePendingExecutionMySQLIdenticalRetrySkipsNoOpUpdates(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	var logs bytes.Buffer
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{
+		Logger: logger.New(log.New(&logs, "", 0), logger.Config{LogLevel: logger.Info}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
+	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+	mock.ExpectQuery("SELECT .* FROM `task_files` WHERE task_id = \\? AND execution_id = \\? AND state = \\?").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "mime_type", "file_size",
+			"content_hash", "media_id", "wechat_url", "oss_key", "oss_url", "storage_provider",
+		}).AddRow(
+			"persisted-id", "t1", "e1", model.TaskFileStatePending, model.FileRoleMarkdown, "output/article.md", "article.md", "text/markdown", int64(42),
+			strings.Repeat("a", 64), "known-media", "https://example.com/wechat", "known-key", "https://example.com/file", "oss",
+		))
+	mock.ExpectExec("DELETE FROM `task_files`").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	repo := New(db)
+	err = repo.TaskFiles().ReplacePendingCurrentExecution(context.Background(), "t1", "e1", []*model.TaskFile{{
+		ID: "ignored-id", Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+		MimeType: "text/markdown", FileSize: 42, ContentHash: strings.Repeat("a", 64),
+		OSSKey: "known-key", OSSURL: "https://example.com/file", StorageProvider: "oss",
+		MediaID: "known-media", WechatURL: "https://example.com/wechat",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	sql := logs.String()
+	if strings.Contains(sql, "UPDATE `task_files`") || strings.Contains(sql, "UPDATE `task_executions`") {
+		t.Fatalf("identical retry emitted no-op update:\n%s", sql)
 	}
 }
