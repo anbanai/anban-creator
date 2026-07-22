@@ -294,6 +294,8 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
 		return fmt.Errorf("task_id and execution_id are required")
 	}
+	incomingPaths := make([]string, 0, len(files))
+	seenPaths := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		if file == nil {
 			return fmt.Errorf("task file is required")
@@ -305,6 +307,11 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 		if err := validateTaskFileRelativePath(file.FilePath); err != nil {
 			return err
 		}
+		if _, exists := seenPaths[file.FilePath]; exists {
+			return fmt.Errorf("duplicate task file path %q", file.FilePath)
+		}
+		seenPaths[file.FilePath] = struct{}{}
+		incomingPaths = append(incomingPaths, file.FilePath)
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		task, execution, err := lockCurrentArtifactExecution(tx, taskID, executionID)
@@ -317,14 +324,24 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 		if err := requireRunningArtifactExecution(task, execution); err != nil {
 			return err
 		}
-		if err := tx.Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).Delete(&model.TaskFile{}).Error; err != nil {
+		stale := tx.Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending)
+		if len(incomingPaths) > 0 {
+			stale = stale.Where("file_path NOT IN ?", incomingPaths)
+		}
+		if err := stale.Delete(&model.TaskFile{}).Error; err != nil {
 			return err
 		}
 		for _, file := range files {
 			if file.ID == "" {
 				file.ID = uuid.NewString()
 			}
-			if err := tx.Create(file).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "task_id"}, {Name: "execution_id"}, {Name: "file_path"}},
+				DoUpdates: clause.AssignmentColumns([]string{
+					"state", "file_name", "mime_type", "file_size", "oss_key", "oss_url",
+					"storage_provider", "role", "content_hash", "media_id", "wechat_url",
+				}),
+			}).Create(file).Error; err != nil {
 				return err
 			}
 		}

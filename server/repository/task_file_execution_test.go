@@ -443,3 +443,91 @@ func TestTaskFileRepositoryReplacePendingExecutionForcesDeclaredScope(t *testing
 		t.Fatal("unsafe path accepted")
 	}
 }
+
+func TestTaskFileRepositoryReplacePendingExecutionPreservesLogicalPathIdentity(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID: "file-1", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+		ContentHash: strings.Repeat("a", 64), OSSKey: "old-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(before) != 1 {
+		t.Fatalf("before rows = %#v, err=%v", before, err)
+	}
+	createdAt := before[0].CreatedAt
+
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
+		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+		ContentHash: strings.Repeat("b", 64), OSSKey: "new-key",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %#v, err=%v", rows, err)
+	}
+	if rows[0].ID != "file-1" || !rows[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("identity changed: %#v, createdAt=%v", rows[0], createdAt)
+	}
+	if rows[0].ContentHash != strings.Repeat("b", 64) || rows[0].OSSKey != "new-key" {
+		t.Fatalf("manifest values = %#v", rows[0])
+	}
+}
+
+func TestTaskFileRepositoryReplacePendingExecutionRemovesMissingPaths(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{ID: "keep", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/keep.md", FileName: "keep.md"},
+		{ID: "drop", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/drop.md", FileName: "drop.md"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
+		Role: model.FileRoleOther, FilePath: "output/keep.md", FileName: "keep.md",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 || rows[0].ID != "keep" || rows[0].FilePath != "output/keep.md" {
+		t.Fatalf("rows = %#v, err=%v", rows, err)
+	}
+}
+
+func TestTaskFileRepositoryReplacePendingExecutionIdenticalManifestIsStable(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID: "file-1", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+		ContentHash: strings.Repeat("a", 64), OSSKey: "known-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(before) != 1 {
+		t.Fatalf("before rows = %#v, err=%v", before, err)
+	}
+	createdAt := before[0].CreatedAt
+
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
+		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+		ContentHash: strings.Repeat("a", 64), OSSKey: "known-key",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %#v, err=%v", rows, err)
+	}
+	if rows[0].ID != "file-1" || !rows[0].CreatedAt.Equal(createdAt) || rows[0].ContentHash != strings.Repeat("a", 64) || rows[0].OSSKey != "known-key" {
+		t.Fatalf("stable manifest changed: %#v, createdAt=%v", rows[0], createdAt)
+	}
+}
