@@ -153,7 +153,10 @@ function renderWithCachedTasks(...tasks: Task[]) {
     )
   }
 
-  return renderWithoutProviders(<TaskDetailPage />, { wrapper: CachedTaskProviders })
+  return {
+    ...renderWithoutProviders(<TaskDetailPage />, { wrapper: CachedTaskProviders }),
+    queryClient,
+  }
 }
 
 function waitForAbort(signal: AbortSignal) {
@@ -420,6 +423,7 @@ describe('TaskDetailPage', () => {
     const request = deferred<Task>()
     vi.mocked(api.tasks.clone).mockReturnValue(request.promise)
     const view = renderWithCachedTasks(taskA, taskB)
+    const invalidateQueries = vi.spyOn(view.queryClient, 'invalidateQueries')
 
     const dialog = await openCloneDialog()
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('测试项目'))
@@ -436,6 +440,7 @@ describe('TaskDetailPage', () => {
       await request.promise
     })
 
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['tasks'] })
     expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/late-clone')
     expect(toastSuccessMock).not.toHaveBeenCalled()
   })

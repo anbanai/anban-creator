@@ -227,8 +227,8 @@ export function TaskFormDialog({
       return api.tasks.create(request)
     },
     onSuccess: (task, variables) => {
-      if (shouldHandleSuccess && !shouldHandleSuccess()) return
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      if (shouldHandleSuccess && !shouldHandleSuccess()) return
       toast.success(mode === 'clone'
         ? variables.quantity > 1 ? `已克隆 ${variables.quantity} 个任务` : '任务克隆成功'
         : '任务创建成功')
