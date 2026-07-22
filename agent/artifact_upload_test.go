@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -168,12 +172,12 @@ func TestJobArtifactHashCancellationPreservesCompletionReserve(t *testing.T) {
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "output/article.md", strings.Repeat("x", 256*1024))
 	previousOpen := openArtifactFile
-	openArtifactFile = func(path string) (io.ReadCloser, error) {
+	openArtifactFile = func(path string) (artifactFile, error) {
 		file, err := os.Open(path)
 		if err != nil {
 			return nil, err
 		}
-		return &slowArtifactReader{ReadCloser: file, delay: 10 * time.Millisecond}, nil
+		return &slowArtifactReader{file: file, delay: 10 * time.Millisecond}, nil
 	}
 	t.Cleanup(func() { openArtifactFile = previousOpen })
 
@@ -219,8 +223,20 @@ func TestJobArtifactHashCancellationPreservesCompletionReserve(t *testing.T) {
 }
 
 type slowArtifactReader struct {
-	io.ReadCloser
+	file  *os.File
 	delay time.Duration
+}
+
+func (r *slowArtifactReader) Close() error {
+	return r.file.Close()
+}
+
+func (r *slowArtifactReader) Seek(offset int64, whence int) (int64, error) {
+	return r.file.Seek(offset, whence)
+}
+
+func (r *slowArtifactReader) Stat() (fs.FileInfo, error) {
+	return r.file.Stat()
 }
 
 func TestLocalArtifactFinalizationUsesFreshContextAfterRunCancellation(t *testing.T) {
@@ -258,7 +274,7 @@ func (r *slowArtifactReader) Read(p []byte) (int, error) {
 	if len(p) > 1024 {
 		p = p[:1024]
 	}
-	return r.ReadCloser.Read(p)
+	return r.file.Read(p)
 }
 
 func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
@@ -267,8 +283,12 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	reporter := &fakeArtifactReporter{}
 	var uploaded []string
 	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
-	uploader.putObject = func(_ context.Context, prepared *ArtifactPrepareResponse, localPath string, contentType string) (string, error) {
-		uploaded = append(uploaded, prepared.Key+"|"+filepath.Base(localPath)+"|"+contentType)
+	uploader.putObject = func(_ context.Context, prepared *ArtifactPrepareResponse, source io.Reader, contentType string) (string, error) {
+		body, err := io.ReadAll(source)
+		if err != nil {
+			return "", err
+		}
+		uploaded = append(uploaded, prepared.Key+"|"+string(body)+"|"+contentType)
 		return "etag-1", nil
 	}
 
@@ -325,7 +345,7 @@ func TestArtifactUploaderRejectsMissingOrMismatchedPreparedSHA256(t *testing.T) 
 			}}
 			uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
 			putCalls := 0
-			uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
+			uploader.putObject = func(context.Context, *ArtifactPrepareResponse, io.Reader, string) (string, error) {
 				putCalls++
 				return "etag", nil
 			}
@@ -352,7 +372,7 @@ func TestArtifactUploaderSkipsMatchingObjectButStillManifestsIt(t *testing.T) {
 		MaxSize:        512 * 1024 * 1024,
 	}}
 	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
-	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
+	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, io.Reader, string) (string, error) {
 		t.Fatal("matching object must not be uploaded")
 		return "", nil
 	}
@@ -376,7 +396,7 @@ func TestArtifactUploaderUploadsFailureArtifactsForUnsuccessfulResult(t *testing
 	writeAgentArtifactTestFile(t, root, "output/failure-state.json", `{"stage":"quality-gate"}`)
 	reporter := &fakeArtifactReporter{}
 	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
-	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, _ string, _ string) (string, error) {
+	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, _ io.Reader, _ string) (string, error) {
 		return "etag-failure", nil
 	}
 
@@ -399,7 +419,7 @@ func TestJobArtifactUploaderSubmitsEmptyManifestWhenOutputIsMissing(t *testing.T
 	writeAgentArtifactTestFile(t, root, ".claude/memory/MEMORY.md", "memory")
 	reporter := &fakeArtifactReporter{}
 	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
-	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
+	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, io.Reader, string) (string, error) {
 		t.Fatal("job without output must not upload")
 		return "", nil
 	}
@@ -440,7 +460,7 @@ func TestArtifactUploaderRetryAfterManifestFailureReusesUploadedObject(t *testin
 	reporter := &fakeArtifactReporter{manifestErrors: []error{manifestErr}}
 	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
 	putCalls := 0
-	uploader.putObject = func(_ context.Context, prepared *ArtifactPrepareResponse, _ string, contentType string) (string, error) {
+	uploader.putObject = func(_ context.Context, prepared *ArtifactPrepareResponse, _ io.Reader, contentType string) (string, error) {
 		putCalls++
 		reporter.prepareResult = &ArtifactPrepareResponse{
 			Key:            prepared.Key,
@@ -524,12 +544,87 @@ func TestPutOSSObjectFromBucketAddsSHA256Metadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open bucket: %v", err)
 	}
-	if _, err := putOSSObjectFromBucket(context.Background(), bucket, "artifacts/article.md", path, "text/markdown", "ABCDEF"); err != nil {
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := putOSSObjectFromBucket(context.Background(), bucket, "artifacts/article.md", file, "text/markdown", "ABCDEF"); err != nil {
 		t.Fatalf("put object: %v", err)
 	}
 	if sha256Header != "abcdef" {
 		t.Fatalf("X-Oss-Meta-Sha256 = %q, want abcdef", sha256Header)
 	}
+}
+
+func TestArtifactUploaderRetriesFileChangedDuringUpload(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "output", "article.md")
+	writeAgentArtifactTestFile(t, root, "output/article.md", "version-one")
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+	putCalls := 0
+	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, source io.Reader, _ string) (string, error) {
+		putCalls++
+		if _, err := io.Copy(io.Discard, source); err != nil {
+			return "", err
+		}
+		if putCalls == 1 {
+			if err := os.WriteFile(path, []byte("version-two-expanded"), 0o644); err != nil {
+				return "", err
+			}
+		}
+		return fmt.Sprintf("etag-%d", putCalls), nil
+	}
+
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
+	}
+	if putCalls != 2 {
+		t.Fatalf("put calls = %d, want 2", putCalls)
+	}
+	if reporter.manifestCalls != 1 || len(reporter.manifest.Files) != 1 {
+		t.Fatalf("manifest calls/files = %d/%d, want 1/1", reporter.manifestCalls, len(reporter.manifest.Files))
+	}
+	if got := reporter.manifest.Files[0].SHA256; got != sha256Hex("version-two-expanded") {
+		t.Fatalf("manifest SHA-256 = %q, want %q", got, sha256Hex("version-two-expanded"))
+	}
+}
+
+func TestArtifactUploaderFailsWhenFileNeverStabilizes(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "output", "article.md")
+	writeAgentArtifactTestFile(t, root, "output/article.md", "version-0")
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+	putCalls := 0
+	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, source io.Reader, _ string) (string, error) {
+		putCalls++
+		if _, err := io.Copy(io.Discard, source); err != nil {
+			return "", err
+		}
+		body := strings.Repeat("expanded-", putCalls) + fmt.Sprintf("version-%d", putCalls)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("etag-%d", putCalls), nil
+	}
+
+	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	if err == nil || !strings.Contains(err.Error(), "changed during final collection") {
+		t.Fatalf("UploadWorkspaceArtifacts error = %v, want mutation error", err)
+	}
+	if putCalls != maxArtifactSnapshotAttempts {
+		t.Fatalf("put calls = %d, want %d", putCalls, maxArtifactSnapshotAttempts)
+	}
+	if reporter.manifestCalls != 0 {
+		t.Fatalf("manifest calls = %d, want 0", reporter.manifestCalls)
+	}
+}
+
+func sha256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func writeAgentArtifactTestFile(t *testing.T, root, rel, body string) {
