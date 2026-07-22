@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 #
 # Multi-stage build for the Studio frontend with the repository root as its
-# build context. Dockerfile.studio.dockerignore intentionally includes only
+# build context. deploy/docker/Dockerfile.studio.dockerignore intentionally includes only
 # the Studio source tree because the root .dockerignore excludes studio/.
 #
 # dist/ is gitignored, so the production bundle must be built inside the image

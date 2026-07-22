@@ -1,0 +1,114 @@
+FROM golang:alpine AS builder
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+COPY third_party/claude-agent-sdk-go/go.mod ./third_party/claude-agent-sdk-go/go.mod
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/anban ./agent
+
+FROM node:22-bookworm-slim
+
+USER root
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl git jq tini; \
+    getent passwd 1000 >/dev/null || { echo >&2 "Node base must provide UID 1000"; exit 1; }; \
+    getent group 1000 >/dev/null || { echo >&2 "Node base must provide GID 1000"; exit 1; }; \
+    install -d -m 0755 -o 1000 -g 1000 /home/node; \
+    rm -rf /var/lib/apt/lists/*
+
+# Upgrade Claude Code and the Go Agent SDK together after an execution smoke test.
+ARG CLAUDE_CODE_VERSION=2.1.208
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
+    claude --version && \
+    npm cache clean --force && \
+    rm -rf /root/.npm
+
+COPY --from=builder /out/anban /usr/local/bin/anban
+COPY plugins/ /anbanai/
+
+RUN set -eux; \
+    if [ -n "$(find /anbanai -type l -print -quit)" ]; then \
+      echo >&2 "/anbanai must not contain symlinks"; \
+      exit 1; \
+    fi; \
+    chown -R root:root /anbanai; \
+    chmod -R a=rX /anbanai
+
+ENV CLAUDE_PLUGIN_ROOT=/anbanai
+ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template
+ENV HOME=/home/node
+
+USER 1000:1000
+RUN git config --global http.version HTTP/1.1
+RUN claude plugin marketplace add /anbanai && \
+    claude plugin install --scope user anban@anbanai
+
+USER root
+RUN set -eux; \
+    install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache"; \
+    for file in known_marketplaces.json installed_plugins.json; do \
+      test -f "$HOME/.claude/plugins/$file"; \
+      cp -a "$HOME/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"; \
+    done; \
+    test -d "$HOME/.claude/plugins/cache/anbanai"; \
+    cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"; \
+    if [ -n "$(find "$ANBAN_HOME_TEMPLATE" -type l -print -quit)" ]; then \
+      echo >&2 "home template must not contain symlinks"; \
+      exit 1; \
+    fi; \
+    chown -R root:root "$ANBAN_HOME_TEMPLATE"; \
+    chmod -R a=rX "$ANBAN_HOME_TEMPLATE"
+
+# Seednote-only dependencies: external research boundary and quality gate.
+USER root
+
+ARG MCPORTER_VERSION=0.9.0
+ENV AGENT_REACH_VENV=/opt/agent-reach-venv
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3 python3-venv; \
+    rm -rf /var/lib/apt/lists/*; \
+    npm install -g "mcporter@${MCPORTER_VERSION}"; \
+    mcporter --version; \
+    npm cache clean --force; \
+    rm -rf /root/.npm
+
+COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/
+
+RUN set -eux; \
+    python3 -m venv "$AGENT_REACH_VENV"; \
+    "$AGENT_REACH_VENV/bin/pip" install \
+      --no-cache-dir \
+      --constraint /app/third_party/Agent-Reach/constraints.txt \
+      /app/third_party/Agent-Reach; \
+    "$AGENT_REACH_VENV/bin/agent-reach" --version; \
+    "$AGENT_REACH_VENV/bin/agent-reach" doctor --json | \
+      "$AGENT_REACH_VENV/bin/python" -c 'import json, sys; data = json.load(sys.stdin); xhs = data["xiaohongshu"]; assert {"status", "active_backend", "message"} <= set(xhs)'; \
+    chown -R root:root /app/third_party/Agent-Reach "$AGENT_REACH_VENV"; \
+    chmod -R a=rX /app/third_party/Agent-Reach "$AGENT_REACH_VENV"
+
+ENV PATH="${AGENT_REACH_VENV}/bin:${PATH}"
+
+USER 1000:1000
+RUN set -eux; \
+    install -d "$HOME/.config/yt-dlp"; \
+    printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"
+
+USER root
+RUN set -eux; \
+    install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.config/yt-dlp"; \
+    install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"; \
+    chown -R root:root "$ANBAN_HOME_TEMPLATE"; \
+    chmod -R a=rX "$ANBAN_HOME_TEMPLATE"
+
+USER 1000:1000
+WORKDIR /workspace
+
+ENTRYPOINT ["tini", "--", "anban"]
+CMD ["job"]

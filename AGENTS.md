@@ -68,6 +68,12 @@ make docker-montage-agent-image
 make docker-server-image
 ```
 
+All repository-owned Docker build definitions live under `deploy/docker/`; keep
+the repository root as the build context. Agent profiles use independent
+`Dockerfile.agent-article`, `Dockerfile.agent-seednote`, and
+`Dockerfile.agent-montage` files rather than stages inherited from one business
+image.
+
 The managed runtime is split into three images: `creator-agent-article` for the
 minimal Article runtime, `creator-agent-seednote` for Python/Agent-Reach, and
 `creator-agent-montage` for OpenMontage/Remotion/ffmpeg. Keep the canonical

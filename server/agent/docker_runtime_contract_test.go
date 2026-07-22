@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -178,15 +179,14 @@ func makeVariableAssignments(text, variable string) []string {
 	return values
 }
 
-func TestAgentDockerfileSeparatesArticleAndSeednoteDependencies(t *testing.T) {
+func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 	root := repositoryRoot(t)
-	path := filepath.Join(root, "Dockerfile.agent")
-	body := readTextFile(t, path)
+	articlePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-article")
+	seednotePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote")
+	article := readTextFile(t, articlePath)
+	seednote := readTextFile(t, seednotePath)
 	for _, want := range []string{
-		"FROM node:22-bookworm-slim AS runtime-core",
-		"FROM runtime-core AS article",
-		"FROM runtime-core AS seednote",
-		"FROM article AS default",
+		"FROM node:22-bookworm-slim",
 		"apt-get install -y --no-install-recommends ca-certificates curl git jq tini",
 		"ARG CLAUDE_CODE_VERSION=2.1.208",
 		`npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"`,
@@ -195,38 +195,35 @@ func TestAgentDockerfileSeparatesArticleAndSeednoteDependencies(t *testing.T) {
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 		"claude plugin install --scope user anban@anbanai",
 	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("%s missing %q", path, want)
+		for _, runtime := range []struct {
+			path string
+			body string
+		}{{articlePath, article}, {seednotePath, seednote}} {
+			if !strings.Contains(runtime.body, want) {
+				t.Fatalf("%s missing %q", runtime.path, want)
+			}
 		}
 	}
-	runtimeCoreStart := strings.Index(body, "FROM node:22-bookworm-slim AS runtime-core")
-	articleStart := strings.Index(body, "FROM runtime-core AS article")
-	seednoteStart := strings.Index(body, "FROM runtime-core AS seednote")
-	if runtimeCoreStart < 0 || articleStart <= runtimeCoreStart || seednoteStart <= articleStart {
-		t.Fatalf("%s has invalid article/seednote stage order", path)
-	}
-	article := body[runtimeCoreStart:seednoteStart]
 	for _, forbidden := range []string{"Agent-Reach", "python3", "mcporter", "ffmpeg", "fonts-noto-cjk", "OpenMontage"} {
 		if strings.Contains(article, forbidden) {
-			t.Fatalf("%s Article stage must not contain heavyweight dependency %q", path, forbidden)
+			t.Fatalf("%s must not contain specialized dependency %q", articlePath, forbidden)
 		}
 	}
-	seednote := body[seednoteStart:]
 	for _, want := range []string{"python3 python3-venv", "ARG MCPORTER_VERSION=0.9.0", "mcporter --version", "COPY third_party/Agent-Reach/", `python3 -m venv "$AGENT_REACH_VENV"`} {
 		if !strings.Contains(seednote, want) {
-			t.Fatalf("%s seednote stage missing %q", path, want)
+			t.Fatalf("%s missing %q", seednotePath, want)
 		}
 	}
 	for _, forbidden := range []string{"COPY third_party/OpenMontage/", "ANBAN_MONTAGE_SUBMODULE_PATH"} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("%s must not contain Montage dependency %q", path, forbidden)
+		if strings.Contains(article, forbidden) || strings.Contains(seednote, forbidden) {
+			t.Fatalf("Article and Seednote Dockerfiles must not contain Montage dependency %q", forbidden)
 		}
 	}
 }
 
 func TestDockerRuntimeProfiles(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent", "Dockerfile.agent-montage"} {
+	for _, name := range []string{"deploy/docker/Dockerfile.agent-article", "deploy/docker/Dockerfile.agent-seednote", "deploy/docker/Dockerfile.agent-montage"} {
 		path := filepath.Join(root, name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
@@ -247,7 +244,7 @@ func TestGoDockerfilesStageLocalSDKModuleBeforeDependencyDownload(t *testing.T) 
 	const sdkModuleCopy = "COPY third_party/claude-agent-sdk-go/go.mod ./third_party/claude-agent-sdk-go/go.mod"
 	const dependencyDownload = "RUN go mod download"
 
-	for _, name := range []string{"Dockerfile.agent", "Dockerfile.agent-montage", "Dockerfile.server"} {
+	for _, name := range []string{"deploy/docker/Dockerfile.agent-article", "deploy/docker/Dockerfile.agent-seednote", "deploy/docker/Dockerfile.agent-montage", "deploy/docker/Dockerfile.server"} {
 		t.Run(name, func(t *testing.T) {
 			body := readTextFile(t, filepath.Join(root, name))
 			copyIndex := strings.Index(body, sdkModuleCopy)
@@ -266,7 +263,7 @@ func TestGoDockerfilesStageLocalSDKModuleBeforeDependencyDownload(t *testing.T) 
 }
 
 func TestMontageRuntimeImageContract(t *testing.T) {
-	path := filepath.Join(repositoryRoot(t), "Dockerfile.agent-montage")
+	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-montage")
 	body := readTextFile(t, path)
 	for _, want := range []string{
 		"ARG OPENMONTAGE_REVISION",
@@ -292,7 +289,7 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 
 func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	root := repositoryRoot(t)
-	path := filepath.Join(root, "Dockerfile.server")
+	path := filepath.Join(root, "deploy/docker/Dockerfile.server")
 	body := readTextFile(t, path)
 	for _, want := range []string{
 		"FROM alpine:latest",
@@ -357,16 +354,16 @@ func TestServerComposeInjectsBillingAdminKeyAndDocumentsIt(t *testing.T) {
 	}
 }
 
-func TestContentAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
-	path := filepath.Join(repositoryRoot(t), "Dockerfile.agent")
+func TestArticleAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
+	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-article")
 	body := readTextFile(t, path)
-	from := strings.Index(body, "FROM node:22-bookworm-slim AS runtime-core")
+	from := strings.Index(body, "FROM node:22-bookworm-slim")
 	if from < 0 {
-		t.Fatalf("%s missing Article runtime core stage", path)
+		t.Fatalf("%s missing Article runtime", path)
 	}
 	apt := strings.Index(body[from:], "apt-get update")
 	if apt < 0 {
-		t.Fatalf("%s missing apt-get update in Article runtime core stage", path)
+		t.Fatalf("%s missing apt-get update in Article runtime", path)
 	}
 	beforeApt := body[from : from+apt]
 	if !strings.Contains(beforeApt, "USER root") {
@@ -376,7 +373,7 @@ func TestContentAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
 
 func TestAgentReachIsBuildInstalledAndRuntimeReadOnly(t *testing.T) {
 	root := repositoryRoot(t)
-	body := readTextFile(t, filepath.Join(root, "Dockerfile.agent"))
+	body := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote"))
 	for _, want := range []string{
 		`python3 -m venv "$AGENT_REACH_VENV"`,
 		`"$AGENT_REACH_VENV/bin/pip" install`,
@@ -388,7 +385,7 @@ func TestAgentReachIsBuildInstalledAndRuntimeReadOnly(t *testing.T) {
 		`chmod -R a=rX /app/third_party/Agent-Reach "$AGENT_REACH_VENV"`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("Dockerfile.agent missing Agent-Reach build contract %q", want)
+			t.Fatalf("deploy/docker/Dockerfile.agent-seednote missing Agent-Reach build contract %q", want)
 		}
 	}
 	installAt := strings.Index(body, `python3 -m venv "$AGENT_REACH_VENV"`)
@@ -420,28 +417,32 @@ func TestDockerRuntimeAgentImageAndKubernetesJobAgreeOnNumericIdentity(t *testin
 	if kubernetesAgentUID != 1000 || kubernetesAgentGID != 1000 {
 		t.Fatalf("Job identity = %d:%d, want numeric 1000:1000", kubernetesAgentUID, kubernetesAgentGID)
 	}
-	body := readTextFile(t, filepath.Join(repositoryRoot(t), "Dockerfile.agent"))
-	for _, want := range []string{
-		`getent passwd 1000 >/dev/null`,
-		`getent group 1000 >/dev/null`,
-		`install -d -m 0755 -o 1000 -g 1000 /home/node`,
-		"ENV HOME=/home/node",
-		"USER 1000:1000",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("Dockerfile.agent missing numeric identity contract %q", want)
+	root := repositoryRoot(t)
+	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+		path := filepath.Join(root, "deploy", "docker", name)
+		body := readTextFile(t, path)
+		for _, want := range []string{
+			`getent passwd 1000 >/dev/null`,
+			`getent group 1000 >/dev/null`,
+			`install -d -m 0755 -o 1000 -g 1000 /home/node`,
+			"ENV HOME=/home/node",
+			"USER 1000:1000",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing numeric identity contract %q", path, want)
+			}
 		}
-	}
-	for _, forbidden := range []string{"useradd", "groupadd", "USER node", "id -u node", "node:node"} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("Dockerfile.agent must not rely on node account via %q", forbidden)
+		for _, forbidden := range []string{"useradd", "groupadd", "USER node", "id -u node", "node:node"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s must not rely on a named node account via %q", path, forbidden)
+			}
 		}
-	}
-	homeAt := strings.Index(body, "ENV HOME=/home/node")
-	userAt := strings.Index(body, "USER 1000:1000")
-	installAt := strings.Index(body, "claude plugin install --scope user anban@anbanai")
-	if homeAt < 0 || userAt < homeAt || installAt < userAt {
-		t.Fatalf("HOME/numeric USER/install order is invalid: HOME=%d USER=%d install=%d", homeAt, userAt, installAt)
+		homeAt := strings.Index(body, "ENV HOME=/home/node")
+		userAt := strings.Index(body, "USER 1000:1000")
+		installAt := strings.Index(body, "claude plugin install --scope user anban@anbanai")
+		if homeAt < 0 || userAt < homeAt || installAt < userAt {
+			t.Fatalf("%s HOME/numeric USER/install order is invalid: HOME=%d USER=%d install=%d", path, homeAt, userAt, installAt)
+		}
 	}
 }
 
@@ -483,42 +484,55 @@ func TestDockerRuntimeAgentSourceUsesResolvedLocalIdentity(t *testing.T) {
 }
 
 func TestDockerRuntimeAgentImageSnapshotsInstalledHomeState(t *testing.T) {
-	body := readTextFile(t, filepath.Join(repositoryRoot(t), "Dockerfile.agent"))
-	for _, want := range []string{
-		"ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template",
-		`printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"`,
-		`install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"`,
-		`for file in known_marketplaces.json installed_plugins.json; do`,
-		`cp -a "$HOME/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"`,
-		`test -d "$HOME/.claude/plugins/cache/anbanai"`,
-		`cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"`,
-		`find "$ANBAN_HOME_TEMPLATE" -type l -print -quit`,
-		`chown -R root:root "$ANBAN_HOME_TEMPLATE"`,
-		`chmod -R a=rX "$ANBAN_HOME_TEMPLATE"`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("Dockerfile.agent missing immutable home-template contract %q", want)
+	root := repositoryRoot(t)
+	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+		path := filepath.Join(root, "deploy", "docker", name)
+		body := readTextFile(t, path)
+		for _, want := range []string{
+			"ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template",
+			`for file in known_marketplaces.json installed_plugins.json; do`,
+			`cp -a "$HOME/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"`,
+			`test -d "$HOME/.claude/plugins/cache/anbanai"`,
+			`cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"`,
+			`find "$ANBAN_HOME_TEMPLATE" -type l -print -quit`,
+			`chown -R root:root "$ANBAN_HOME_TEMPLATE"`,
+			`chmod -R a=rX "$ANBAN_HOME_TEMPLATE"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing immutable home-template contract %q", path, want)
+			}
+		}
+		installAt := strings.Index(body, "claude plugin install --scope user anban@anbanai")
+		snapshotAt := strings.Index(body, `for file in known_marketplaces.json installed_plugins.json; do`)
+		if installAt < 0 || snapshotAt < installAt {
+			t.Fatalf("%s home snapshot must occur after plugin installation: install=%d snapshot=%d", path, installAt, snapshotAt)
+		}
+		for _, forbidden := range []string{
+			`for entry in .claude .agents .claude.json; do`,
+			`cp -a "/home/node/.claude"`,
+			`cp -a "/home/node/.agents"`,
+			`cp -a "/home/node/.claude.json"`,
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s must not broadly snapshot user home via %q", path, forbidden)
+			}
 		}
 	}
-	installAt := strings.Index(body, "claude plugin install --scope user anban@anbanai")
-	snapshotAt := strings.Index(body, `for file in known_marketplaces.json installed_plugins.json; do`)
-	if installAt < 0 || snapshotAt < installAt {
-		t.Fatalf("home snapshot must occur after all node-user plugin installation: install=%d snapshot=%d", installAt, snapshotAt)
-	}
-	for _, forbidden := range []string{
-		`for entry in .claude .agents .claude.json; do`,
-		`cp -a "/home/node/.claude"`,
-		`cp -a "/home/node/.agents"`,
-		`cp -a "/home/node/.claude.json"`,
+
+	seednotePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote")
+	seednote := readTextFile(t, seednotePath)
+	for _, want := range []string{
+		`printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"`,
+		`install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"`,
 	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("Dockerfile.agent must not broadly snapshot user home via %q", forbidden)
+		if !strings.Contains(seednote, want) {
+			t.Fatalf("%s missing Seednote home-template contract %q", seednotePath, want)
 		}
 	}
 }
 
 func TestDockerRuntimeAgentImageIsImmutableOneShotJobRuntime(t *testing.T) {
-	body := readTextFile(t, filepath.Join(repositoryRoot(t), "Dockerfile.agent"))
+	body := readTextFile(t, filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-article"))
 	for _, want := range []string{
 		`find /anbanai -type l -print -quit`,
 		`chown -R root:root /anbanai`,
@@ -527,12 +541,12 @@ func TestDockerRuntimeAgentImageIsImmutableOneShotJobRuntime(t *testing.T) {
 		`CMD ["job"]`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("Dockerfile.agent missing immutable one-shot contract %q", want)
+			t.Fatalf("deploy/docker/Dockerfile.agent-article missing immutable one-shot contract %q", want)
 		}
 	}
 	for _, forbidden := range []string{`CMD ["sleep", "infinity"]`, `USER root\nWORKDIR /workspace`} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("Dockerfile.agent retains reusable runtime contract %q", forbidden)
+			t.Fatalf("deploy/docker/Dockerfile.agent-article retains reusable runtime contract %q", forbidden)
 		}
 	}
 }
@@ -551,42 +565,44 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 			t.Fatalf(".dockerignore missing %q", want)
 		}
 	}
-	if strings.Contains(body, "/plugins/") || strings.Contains(body, "/plugins/") {
+	if strings.Contains(body, "/plugins/") {
 		t.Fatal(".dockerignore must keep the unified plugin available to Agent Docker builds")
 	}
 }
 
-func TestAgentDockerfileIsRootEntrypoint(t *testing.T) {
+func TestAgentDockerfilesAreCentralized(t *testing.T) {
 	root := repositoryRoot(t)
-	if _, err := os.Stat(filepath.Join(root, "Dockerfile.agent")); err != nil {
-		t.Fatalf("Dockerfile.agent must exist at repository root for CI builds with root context: %v", err)
+	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+		if _, err := os.Stat(filepath.Join(root, "deploy", "docker", name)); err != nil {
+			t.Fatalf("deploy/docker/%s must exist: %v", name, err)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(root, "agent", "Dockerfile")); err == nil {
-		t.Fatalf("agent/Dockerfile must not exist; use root Dockerfile.agent so CI context is unambiguous")
+		t.Fatal("agent/Dockerfile must not exist; use deploy/docker Agent Dockerfiles")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat agent/Dockerfile: %v", err)
 	}
 }
 
-func TestServerDockerfileIsRootEntrypoint(t *testing.T) {
+func TestServerDockerfileIsCentralized(t *testing.T) {
 	root := repositoryRoot(t)
-	if _, err := os.Stat(filepath.Join(root, "Dockerfile.server")); err != nil {
-		t.Fatalf("Dockerfile.server must exist at repository root for CI builds with root context: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "deploy/docker/Dockerfile.server")); err != nil {
+		t.Fatalf("deploy/docker/Dockerfile.server must exist: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "server", "Dockerfile")); err == nil {
-		t.Fatalf("server/Dockerfile must not exist; use root Dockerfile.server so CI context is unambiguous")
+		t.Fatal("server/Dockerfile must not exist; use deploy/docker/Dockerfile.server")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat server/Dockerfile: %v", err)
 	}
 }
 
-func TestStudioDockerfileIsRootEntrypoint(t *testing.T) {
+func TestStudioDockerfileIsCentralized(t *testing.T) {
 	root := repositoryRoot(t)
-	if _, err := os.Stat(filepath.Join(root, "Dockerfile.studio")); err != nil {
-		t.Fatalf("Dockerfile.studio must exist at repository root: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "deploy/docker/Dockerfile.studio")); err != nil {
+		t.Fatalf("deploy/docker/Dockerfile.studio must exist: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "studio", "Dockerfile")); err == nil {
-		t.Fatalf("studio/Dockerfile must not exist; use root Dockerfile.studio so application Dockerfiles share one entrypoint convention")
+		t.Fatal("studio/Dockerfile must not exist; use deploy/docker/Dockerfile.studio")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat studio/Dockerfile: %v", err)
 	}
@@ -599,19 +615,27 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 		want []string
 	}{
 		{
-			path: filepath.Join(root, "Dockerfile.agent"),
-			want: []string{"FROM golang:alpine AS builder", "FROM node:22-bookworm-slim AS runtime-core"},
+			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-article"),
+			want: []string{"FROM golang:alpine AS builder", "FROM node:22-bookworm-slim"},
 		},
 		{
-			path: filepath.Join(root, "Dockerfile.server"),
+			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote"),
+			want: []string{"FROM golang:alpine AS builder", "FROM node:22-bookworm-slim"},
+		},
+		{
+			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-montage"),
+			want: []string{"FROM golang:alpine AS builder", "FROM ghcr.io/openhands/agent-server:latest-python"},
+		},
+		{
+			path: filepath.Join(root, "deploy/docker/Dockerfile.server"),
 			want: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
 		},
 		{
-			path: filepath.Join(root, "Dockerfile.studio"),
+			path: filepath.Join(root, "deploy/docker/Dockerfile.studio"),
 			want: []string{"FROM oven/bun:latest AS build", "FROM nginx:alpine"},
 		},
 		{
-			path: filepath.Join(root, "Dockerfile.wcflink"),
+			path: filepath.Join(root, "deploy/docker/Dockerfile.wcflink"),
 			want: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
 		},
 		{
@@ -620,8 +644,8 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 				"image: mysql:latest",
 				"image: redis:alpine",
 				"image: xpzouying/xiaohongshu-mcp:latest",
-				"dockerfile: Dockerfile.wcflink",
-				"dockerfile: Dockerfile.studio",
+				"dockerfile: deploy/docker/Dockerfile.wcflink",
+				"dockerfile: deploy/docker/Dockerfile.studio",
 				"VITE_API_BASE_URL: /api/v1",
 			},
 		},
@@ -635,15 +659,16 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 	}
 }
 
-func TestDockerfileInventoryIsRootOnly(t *testing.T) {
+func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	root := repositoryRoot(t)
 	got := trackedDockerfiles(t, root)
 	want := []string{
-		"Dockerfile.agent",
-		"Dockerfile.agent-montage",
-		"Dockerfile.server",
-		"Dockerfile.studio",
-		"Dockerfile.wcflink",
+		"deploy/docker/Dockerfile.agent-article",
+		"deploy/docker/Dockerfile.agent-montage",
+		"deploy/docker/Dockerfile.agent-seednote",
+		"deploy/docker/Dockerfile.server",
+		"deploy/docker/Dockerfile.studio",
+		"deploy/docker/Dockerfile.wcflink",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("repository-owned Dockerfile inventory mismatch\nwant: %v\n got: %v", want, got)
@@ -652,7 +677,7 @@ func TestDockerfileInventoryIsRootOnly(t *testing.T) {
 
 func TestCollectOwnedDockerfilesDetectsUnexpectedEntrypoints(t *testing.T) {
 	got := collectOwnedDockerfilePaths([]string{
-		"Dockerfile.server",
+		"deploy/docker/Dockerfile.server",
 		"nested/Dockerfile.extra",
 		"plugins/Dockerfile.plugin",
 		"third_party/tool/Dockerfile",
@@ -660,7 +685,7 @@ func TestCollectOwnedDockerfilesDetectsUnexpectedEntrypoints(t *testing.T) {
 		"web/dist/Dockerfile.generated",
 		".worktrees/other/Dockerfile",
 	})
-	want := []string{"Dockerfile.server", "nested/Dockerfile.extra"}
+	want := []string{"deploy/docker/Dockerfile.server", "nested/Dockerfile.extra"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("fixture Dockerfile inventory mismatch\nwant: %v\n got: %v", want, got)
 	}
@@ -668,7 +693,7 @@ func TestCollectOwnedDockerfilesDetectsUnexpectedEntrypoints(t *testing.T) {
 
 func TestStudioDockerfileUsesRootBuildContext(t *testing.T) {
 	root := repositoryRoot(t)
-	body := readTextFile(t, filepath.Join(root, "Dockerfile.studio"))
+	body := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.studio"))
 	for _, want := range []string{
 		"# syntax=docker/dockerfile:1.7",
 		"FROM oven/bun:latest AS build",
@@ -687,24 +712,24 @@ func TestStudioDockerfileUsesRootBuildContext(t *testing.T) {
 		"CMD [\"nginx\", \"-g\", \"daemon off;\"]",
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("Dockerfile.studio missing root-context Studio contract %q", want)
+			t.Fatalf("deploy/docker/Dockerfile.studio missing root-context Studio contract %q", want)
 		}
 	}
 
 	if _, err := os.Stat(filepath.Join(root, "studio", ".dockerignore")); err == nil {
-		t.Fatal("studio/.dockerignore must not exist; root-context builds use Dockerfile.studio.dockerignore")
+		t.Fatal("studio/.dockerignore must not exist; root-context builds use deploy/docker/Dockerfile.studio.dockerignore")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat studio/.dockerignore: %v", err)
 	}
 
-	rules := dockerignoreRules(readTextFile(t, filepath.Join(root, "Dockerfile.studio.dockerignore")))
+	rules := dockerignoreRules(readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.studio.dockerignore")))
 	if len(rules) == 0 || rules[0] != "**" {
-		t.Fatalf("Dockerfile.studio.dockerignore must begin its non-comment rules with broad exclusion **; got %v", rules)
+		t.Fatalf("deploy/docker/Dockerfile.studio.dockerignore must begin its non-comment rules with broad exclusion **; got %v", rules)
 	}
 	studioDir := dockerignoreRuleIndex(t, rules, "!studio/")
 	studioTree := dockerignoreRuleIndex(t, rules, "!studio/**")
 	if studioDir <= 0 || studioTree <= studioDir {
-		t.Fatalf("Dockerfile.studio.dockerignore must unignore studio/ then studio/** after **; got %v", rules)
+		t.Fatalf("deploy/docker/Dockerfile.studio.dockerignore must unignore studio/ then studio/** after **; got %v", rules)
 	}
 	for _, generated := range []string{
 		"studio/node_modules/",
@@ -737,14 +762,14 @@ func TestStudioDockerfileUsesRootBuildContext(t *testing.T) {
 		"studio/**/pnpm-debug.log*",
 	} {
 		if index := dockerignoreRuleIndex(t, rules, generated); index <= studioTree {
-			t.Fatalf("Dockerfile.studio.dockerignore must exclude %q after unignoring Studio source; got %v", generated, rules)
+			t.Fatalf("deploy/docker/Dockerfile.studio.dockerignore must exclude %q after unignoring Studio source; got %v", generated, rules)
 		}
 	}
 }
 
 func TestWcfLinkDockerfileRetainsPinnedBuildContract(t *testing.T) {
 	root := repositoryRoot(t)
-	body := readTextFile(t, filepath.Join(root, "Dockerfile.wcflink"))
+	body := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.wcflink"))
 	for _, want := range []string{
 		"ARG WCFLINK_REPO=https://github.com/lich0821/wcfLink.git",
 		"ARG WCFLINK_REF=refs/tags/v0.1.0",
@@ -761,23 +786,23 @@ func TestWcfLinkDockerfileRetainsPinnedBuildContract(t *testing.T) {
 	} {
 		want = strings.ReplaceAll(want, "\n+", "\n")
 		if !strings.Contains(body, want) {
-			t.Fatalf("Dockerfile.wcflink missing pinned runtime contract %q", want)
+			t.Fatalf("deploy/docker/Dockerfile.wcflink missing pinned runtime contract %q", want)
 		}
 	}
 }
 
-func TestComposeAndMakefileUseRootDockerfileBuilds(t *testing.T) {
+func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
-		"agent:\n    build:\n      context: .\n      dockerfile: Dockerfile.agent",
-		"wcflink:\n    build:\n      context: .\n      dockerfile: Dockerfile.wcflink",
-		"server:\n    build:\n      context: .\n      dockerfile: Dockerfile.server",
-		"studio:\n    build:\n      context: .\n      dockerfile: Dockerfile.studio",
-		"studio:\n    build:\n      context: .\n      dockerfile: Dockerfile.studio\n      args:\n        VITE_API_BASE_URL: /api/v1",
+		"agent:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.agent-article",
+		"wcflink:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.wcflink",
+		"server:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.server",
+		"studio:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.studio",
+		"studio:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.studio\n      args:\n        VITE_API_BASE_URL: /api/v1",
 	} {
 		if !strings.Contains(compose, want) {
-			t.Fatalf("docker-compose.yml missing root Docker build contract %q", want)
+			t.Fatalf("docker-compose.yml missing centralized Docker build contract %q", want)
 		}
 	}
 
@@ -791,11 +816,11 @@ func TestComposeAndMakefileUseRootDockerfileBuilds(t *testing.T) {
 		"docker-wcflink-image:",
 		"docker-studio-image:",
 		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image",
-		"docker build -f Dockerfile.agent --target article",
-		"docker build -f Dockerfile.agent --target seednote",
-		"docker build -f Dockerfile.agent-montage",
-		"docker build -f Dockerfile.wcflink -t $(WCFLINK_IMAGE) .",
-		"docker build -f Dockerfile.studio -t $(STUDIO_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-montage",
+		"docker build -f deploy/docker/Dockerfile.wcflink -t $(WCFLINK_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
 		"docker-image: docker-agent-image",
 		"make docker-agent-image",
 		"make docker-server-image",
@@ -803,7 +828,7 @@ func TestComposeAndMakefileUseRootDockerfileBuilds(t *testing.T) {
 		"make docker-studio-image",
 	} {
 		if !strings.Contains(makefile, want) {
-			t.Fatalf("Makefile missing root Docker build contract %q", want)
+			t.Fatalf("Makefile missing centralized Docker build contract %q", want)
 		}
 	}
 }
@@ -868,7 +893,24 @@ func TestNoStaleDockerfileReferences(t *testing.T) {
 
 func trackedDockerfiles(t *testing.T, root string) []string {
 	t.Helper()
-	return collectOwnedDockerfilePaths(trackedFiles(t, root))
+	cmd := exec.Command("git", "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	cmd.Dir = root
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("list repository Dockerfiles: %v", err)
+	}
+	var existing []string
+	for _, path := range strings.Split(strings.TrimRight(string(output), "\x00"), "\x00") {
+		if path == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err == nil {
+			existing = append(existing, path)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat repository path %s: %v", path, err)
+		}
+	}
+	return collectOwnedDockerfilePaths(existing)
 }
 
 func collectOwnedDockerfilePaths(paths []string) []string {
@@ -936,7 +978,7 @@ func dockerignoreRuleIndex(t *testing.T, rules []string, want string) int {
 			return index
 		}
 	}
-	t.Fatalf("Dockerfile.studio.dockerignore missing %q; got %v", want, rules)
+	t.Fatalf("deploy/docker/Dockerfile.studio.dockerignore missing %q; got %v", want, rules)
 	return -1
 }
 

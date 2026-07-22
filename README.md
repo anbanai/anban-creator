@@ -13,6 +13,9 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 Managed execution uses separate `creator-agent-article`, `creator-agent-seednote`,
 and `creator-agent-montage` images. They share the same plugin tree while keeping
 Python/Agent-Reach and OpenMontage/Remotion/ffmpeg out of the standard image.
+Their independent build definitions, together with the Server, Studio, and
+wcfLink definitions, live in `deploy/docker/` and use the repository root as the
+Docker build context.
 
 ## Quick Start
 

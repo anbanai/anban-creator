@@ -1,4 +1,4 @@
-# Dockerfile.studio builds from the repository root while keeping its context
+# deploy/docker/Dockerfile.studio builds from the repository root while keeping its context
 # limited to Studio source. Docker always includes the selected Dockerfile and
 # this ignore file, so they remain available to the build engine.
 **

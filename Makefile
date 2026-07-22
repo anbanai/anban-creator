@@ -140,21 +140,21 @@ docker-logs:
 docker-agent-image:
 	@git submodule update --init --recursive third_party/claude-agent-sdk-go
 	@echo "Building $(AGENT_IMAGE)..." && \
-	docker build -f Dockerfile.agent --target article -t $(AGENT_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) . && \
 	echo "Image build complete: $(AGENT_IMAGE)"
 
 # Build the Seednote Agent image with Agent-Reach and its Python runtime.
 docker-seednote-agent-image:
 	@git submodule update --init --recursive third_party/claude-agent-sdk-go third_party/Agent-Reach
 	@echo "Building $(SEEDNOTE_AGENT_IMAGE)..." && \
-	docker build -f Dockerfile.agent --target seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(SEEDNOTE_AGENT_IMAGE)"
 
 # Build the dedicated Montage Agent image with an immutable OpenMontage template.
 docker-montage-agent-image:
 	@git submodule update --init --recursive third_party/claude-agent-sdk-go third_party/OpenMontage
 	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
-	docker build -f Dockerfile.agent-montage \
+	docker build -f deploy/docker/Dockerfile.agent-montage \
 	  --build-arg OPENMONTAGE_REVISION=$$(git -C third_party/OpenMontage rev-parse HEAD) \
 	  -t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
@@ -163,19 +163,19 @@ docker-montage-agent-image:
 docker-server-image:
 	@git submodule update --init --recursive
 	@echo "Building $(SERVER_IMAGE)..." && \
-	docker build -f Dockerfile.server -t $(SERVER_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.server -t $(SERVER_IMAGE) . && \
 	echo "Image build complete: $(SERVER_IMAGE)"
 
 # Build the wcfLink sidecar Docker image from its pinned upstream source.
 docker-wcflink-image:
 	@echo "Building $(WCFLINK_IMAGE)..." && \
-	docker build -f Dockerfile.wcflink -t $(WCFLINK_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.wcflink -t $(WCFLINK_IMAGE) . && \
 	echo "Image build complete: $(WCFLINK_IMAGE)"
 
 # Build the Studio Docker image from the repository-root build context.
 docker-studio-image:
 	@echo "Building $(STUDIO_IMAGE)..." && \
-	docker build -f Dockerfile.studio -t $(STUDIO_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) . && \
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.

@@ -118,14 +118,16 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 		t.Fatal("Codex Seednote must use seednote-writing's built-in de-AI pass instead of preloading Humanizer")
 	}
 
-	dockerfile := readRepoFile(t, filepath.Join(root, "Dockerfile.agent"))
-	for _, want := range []string{
-		"COPY plugins/ /anbanai/",
-		"claude plugin install --scope user anban@anbanai",
-		`cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"`,
-	} {
-		if !strings.Contains(dockerfile, want) {
-			t.Fatalf("Dockerfile.agent missing Humanizer injection boundary %q", want)
+	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+		dockerfile := readRepoFile(t, filepath.Join(root, "deploy", "docker", name))
+		for _, want := range []string{
+			"COPY plugins/ /anbanai/",
+			"claude plugin install --scope user anban@anbanai",
+			`cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"`,
+		} {
+			if !strings.Contains(dockerfile, want) {
+				t.Fatalf("%s missing Humanizer injection boundary %q", name, want)
+			}
 		}
 	}
 }

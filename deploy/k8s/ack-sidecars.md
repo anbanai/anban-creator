@@ -13,7 +13,7 @@ lifecycles, health checks, resource limits, and persistent state, and must not
 share one Pod.
 
 wcfLink has no official published image or Dockerfile upstream. This
-repository's `Dockerfile.wcflink` is the supported build source: it
+repository's `deploy/docker/Dockerfile.wcflink` is the supported build source: it
 fetches `v0.1.0` and verifies commit
 `fb0999b81043c91e8fddb780eb2ecf03f1f8588f`. Seednote pulls a configured,
 immutable `xpzouying/xiaohongshu-mcp` digest directly from Docker Hub. Do not
@@ -49,7 +49,7 @@ shared namespace and pull secret:
 Set `wcflink_image_repo` before the pipeline run to the desired immutable ACR
 reference. In Yunxiao's built-in Docker build/push task, use the ACR service
 connection, set the build context to `.`, Dockerfile to
-`Dockerfile.wcflink`, and set its destination image field to that exact
+`deploy/docker/Dockerfile.wcflink`, and set its destination image field to that exact
 `wcflink_image_repo` pipeline variable. Use a non-`latest` tag, preferably the
 source commit SHA, and never overwrite that tag. Digest and untagged references
 are rejected because the destination must be known before the push. Stage 2

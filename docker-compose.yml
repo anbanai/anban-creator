@@ -71,7 +71,7 @@ services:
   wcflink:
     build:
       context: .
-      dockerfile: Dockerfile.wcflink
+      dockerfile: deploy/docker/Dockerfile.wcflink
       args:
         WCFLINK_REF: refs/tags/v0.1.0
         WCFLINK_COMMIT: fb0999b81043c91e8fddb780eb2ecf03f1f8588f
@@ -112,8 +112,7 @@ services:
   agent:
     build:
       context: .
-      dockerfile: Dockerfile.agent
-      target: article
+      dockerfile: deploy/docker/Dockerfile.agent-article
     image: creator-agent-article:latest
     pull_policy: build
     container_name: creator-agent-article
@@ -130,7 +129,7 @@ services:
   server:
     build:
       context: .
-      dockerfile: Dockerfile.server
+      dockerfile: deploy/docker/Dockerfile.server
     image: anban-creator-server:latest
     container_name: anban-creator-server
     restart: unless-stopped
@@ -181,7 +180,7 @@ services:
   studio:
     build:
       context: .
-      dockerfile: Dockerfile.studio
+      dockerfile: deploy/docker/Dockerfile.studio
       args:
         VITE_API_BASE_URL: /api/v1
     image: anban-creator-studio:latest
