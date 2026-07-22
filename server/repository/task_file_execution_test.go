@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/anbanai/anban-creator/server/model"
@@ -209,7 +210,7 @@ func TestTaskFileRepositoryPublishRacingReplacementHasNoLatePendingRows(t *testi
 	replacement := []*model.TaskFile{{Role: model.FileRoleOther, FilePath: "replacement.md", FileName: "replacement.md"}}
 	publishErr, replaceErr := runArtifactMutationRace(
 		func() error { return repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1") },
-		func() error { return repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", replacement) },
+		func() error { return repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", replacement, "") },
 	)
 	if publishErr != nil {
 		t.Fatalf("publish error = %v", publishErr)
@@ -419,7 +420,7 @@ func TestTaskFileRepositoryReplacePendingExecutionRollsBackOnFailure(t *testing.
 		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "new.md", FileName: "new.md"},
 		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "new.md", FileName: "new.md"},
 	}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", bad); err == nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", bad, ""); err == nil {
 		t.Fatal("invalid replacement unexpectedly succeeded")
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -433,14 +434,14 @@ func TestTaskFileRepositoryReplacePendingExecutionForcesDeclaredScope(t *testing
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
 	files := []*model.TaskFile{{TaskID: "foreign", ExecutionID: "foreign", State: model.TaskFileStatePublished, Role: model.FileRoleOther, FilePath: "output/a.md", FileName: "a.md"}}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", files); err != nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", files, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, _ := repo.TaskFiles().FindByExecutionID(ctx, "e1")
 	if len(rows) != 1 || rows[0].TaskID != "t1" || rows[0].State != model.TaskFileStatePending {
 		t.Fatalf("scoped rows = %#v", rows)
 	}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{Role: model.FileRoleOther, FilePath: "../escape", FileName: "escape"}}); err == nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{Role: model.FileRoleOther, FilePath: "../escape", FileName: "escape"}}, ""); err == nil {
 		t.Fatal("unsafe path accepted")
 	}
 }
@@ -469,7 +470,7 @@ func TestTaskFileRepositoryReplacePendingExecutionPreservesLogicalPathIdentity(t
 		MimeType: "text/markdown", FileSize: 20, ContentHash: strings.Repeat("b", 64),
 		OSSKey: "new-key", OSSURL: "https://new.example/file", StorageProvider: "oss",
 		MediaID: "new-media", WechatURL: "https://new.example/wechat",
-	}}); err != nil {
+	}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -499,7 +500,7 @@ func TestTaskFileRepositoryReplacePendingExecutionRemovesMissingPaths(t *testing
 	}
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
 		Role: model.FileRoleOther, FilePath: "output/keep.md", FileName: "keep.md",
-	}}); err != nil {
+	}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -532,7 +533,7 @@ func TestTaskFileRepositoryReplacePendingExecutionIdenticalManifestIsStable(t *t
 		MimeType: "text/markdown", FileSize: 42, ContentHash: strings.Repeat("a", 64),
 		OSSKey: "known-key", OSSURL: "https://example.com/file", StorageProvider: "oss",
 		MediaID: "known-media", WechatURL: "https://example.com/wechat",
-	}}); err != nil {
+	}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -555,7 +556,7 @@ func TestTaskFileRepositoryReplacePendingExecutionIgnoresCallerIDForNewPath(t *t
 
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
 		ID: "caller-supplied", Role: model.FileRoleOther, FilePath: "output/new.md", FileName: "new.md",
-	}}); err != nil {
+	}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -584,7 +585,7 @@ func TestTaskFileRepositoryReplacePendingExecutionCallerIDCollisionCannotMutateF
 
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
 		ID: "foreign-id", Role: model.FileRoleMarkdown, FilePath: "output/new.md", FileName: "new.md", OSSKey: "new-key",
-	}}); err != nil {
+	}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	foreignRows, err := repo.TaskFiles().FindByExecutionID(ctx, "foreign-execution")
@@ -607,7 +608,7 @@ func TestTaskFileRepositoryReplacePendingExecutionEmptyManifestRemovesAllPending
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", nil); err != nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -616,18 +617,166 @@ func TestTaskFileRepositoryReplacePendingExecutionEmptyManifestRemovesAllPending
 	}
 }
 
+func TestTaskFileRepositoryReplacePendingExecutionEmptyManifestPreservesLockedMCPRows(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	mcpPrefix := "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/"
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{
+			ID: "mcp", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+			Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "cover.png",
+			OSSKey: mcpPrefix + "output/cover.png",
+		},
+		{
+			ID: "workspace", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+			Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+			OSSKey: "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/output/article.md",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", nil, mcpPrefix); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ID != "mcp" || rows[0].OSSKey != mcpPrefix+"output/cover.png" {
+		t.Fatalf("rows = %#v, want only locked MCP row", rows)
+	}
+}
+
+func TestTaskFileRepositoryUpsertAndPrefixReplacementSerializeOnExecutionLocks(t *testing.T) {
+	db := setupTestDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	repo := New(db)
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+
+	type upsertContextKey struct{}
+	upsertReachedCreate := make(chan struct{})
+	releaseUpsert := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseUpsert) }) }
+	t.Cleanup(release)
+	callbackName := "test:pause_mcp_upsert_after_execution_lock"
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Context.Value(upsertContextKey{}) == true && tx.Statement.Table == "task_files" {
+			close(upsertReachedCreate)
+			<-releaseUpsert
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callbackName) })
+
+	mcpPrefix := "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/"
+	upsertDone := make(chan error, 1)
+	go func() {
+		ctx := context.WithValue(context.Background(), upsertContextKey{}, true)
+		_, upsertErr := repo.TaskFiles().UpsertPendingCurrentExecution(ctx, "t1", "e1", &model.TaskFile{
+			Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "cover.png",
+			OSSKey: mcpPrefix + "output/cover.png",
+		})
+		upsertDone <- upsertErr
+	}()
+	select {
+	case <-upsertReachedCreate:
+	case <-time.After(2 * time.Second):
+		t.Fatal("MCP upsert did not reach the locked create boundary")
+	}
+
+	replacementStarted := make(chan struct{})
+	replacementDone := make(chan error, 1)
+	go func() {
+		close(replacementStarted)
+		replacementDone <- repo.TaskFiles().ReplacePendingCurrentExecution(context.Background(), "t1", "e1", nil, mcpPrefix)
+	}()
+	<-replacementStarted
+	select {
+	case err := <-replacementDone:
+		t.Fatalf("replacement bypassed MCP upsert locks: %v", err)
+	default:
+	}
+
+	release()
+	if err := <-upsertDone; err != nil {
+		t.Fatalf("MCP upsert: %v", err)
+	}
+	if err := <-replacementDone; err != nil {
+		t.Fatalf("workspace replacement: %v", err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(context.Background(), "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].FilePath != "output/cover.png" || rows[0].OSSKey != mcpPrefix+"output/cover.png" {
+		t.Fatalf("serialized rows = %#v, want committed MCP artifact preserved", rows)
+	}
+}
+
+func TestTaskFileRepositoryPrefixReplacementScopesPreservationAndKeepsWorkspacePrecedence(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	seedCurrentTaskForArtifacts(t, repo, "t2", "e2")
+	mcpPrefix := "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/"
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{ID: "keep", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleImage, FilePath: "output/keep.png", FileName: "keep.png", OSSKey: mcpPrefix + "output/keep.png"},
+		{ID: "collision", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleImage, FilePath: "output/collision.png", FileName: "collision.png", OSSKey: mcpPrefix + "output/collision.png"},
+		{ID: "workspace-stale", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleMarkdown, FilePath: "output/stale.md", FileName: "stale.md", OSSKey: "workspace/stale.md"},
+		{ID: "wrong-execution-prefix", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleImage, FilePath: "output/wrong.png", FileName: "wrong.png", OSSKey: "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e2/artifacts/mcp/output/wrong.png"},
+		{ID: "prefix-lookalike", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleImage, FilePath: "output/lookalike.png", FileName: "lookalike.png", OSSKey: strings.TrimSuffix(mcpPrefix, "/") + "-other/output/lookalike.png"},
+		{ID: "foreign", TaskID: "t2", ExecutionID: "e2", State: model.TaskFileStatePending, Role: model.FileRoleImage, FilePath: "output/foreign.png", FileName: "foreign.png", OSSKey: mcpPrefix + "output/foreign.png"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	workspaceKey := "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/output/collision.png"
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{
+		{Role: model.FileRoleImage, FilePath: "output/collision.png", FileName: "collision.png", OSSKey: workspaceKey},
+		{Role: model.FileRoleMarkdown, FilePath: "output/new.md", FileName: "new.md", OSSKey: "workspace/new.md"},
+	}, mcpPrefix); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := make(map[string]*model.TaskFile, len(rows))
+	for _, row := range rows {
+		byPath[row.FilePath] = row
+	}
+	if len(byPath) != 3 || byPath["output/keep.png"] == nil || byPath["output/new.md"] == nil {
+		t.Fatalf("current rows = %#v, want preserved MCP plus workspace manifest", rows)
+	}
+	if collision := byPath["output/collision.png"]; collision == nil || collision.ID != "collision" || collision.OSSKey != workspaceKey {
+		t.Fatalf("workspace collision row = %#v, want stable ID collision and workspace key %s", collision, workspaceKey)
+	}
+	foreign, err := repo.TaskFiles().FindByExecutionID(ctx, "e2")
+	if err != nil || len(foreign) != 1 || foreign[0].ID != "foreign" {
+		t.Fatalf("foreign rows changed or imported: %#v, err=%v", foreign, err)
+	}
+}
+
 func TestTaskFileRepositoryReplacePendingExecutionRejectsNilAndDuplicateEntries(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{nil}); err == nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{nil}, ""); err == nil {
 		t.Fatal("nil task file accepted")
 	}
 	duplicate := []*model.TaskFile{
 		{Role: model.FileRoleOther, FilePath: "output/same.md", FileName: "same.md"},
 		{Role: model.FileRoleOther, FilePath: "output/same.md", FileName: "same.md"},
 	}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", duplicate); err == nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", duplicate, ""); err == nil {
 		t.Fatal("duplicate task file path accepted")
 	}
 }
@@ -663,7 +812,7 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T)
 	err = repo.TaskFiles().ReplacePendingCurrentExecution(context.Background(), "t1", "e1", []*model.TaskFile{
 		{ID: "ignored-existing-id", Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md", OSSKey: "new-key"},
 		{ID: "ignored-new-id", Role: model.FileRoleOther, FilePath: "output/new.md", FileName: "new.md"},
-	})
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,7 +871,7 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLIdenticalRetrySkipsNoOpUp
 		MimeType: "text/markdown", FileSize: 42, ContentHash: strings.Repeat("a", 64),
 		OSSKey: "known-key", OSSURL: "https://example.com/file", StorageProvider: "oss",
 		MediaID: "known-media", WechatURL: "https://example.com/wechat",
-	}})
+	}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

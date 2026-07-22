@@ -290,7 +290,9 @@ func (r *taskFileRepository) UpsertPendingCurrentExecution(ctx context.Context, 
 }
 
 // ReplacePendingCurrentExecution atomically replaces only the current running attempt's unpublished manifest.
-func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error {
+// Pending rows under preserveOSSKeyPrefix are retained unless the incoming
+// workspace manifest owns the same logical path.
+func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile, preserveOSSKeyPrefix string) error {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
 		return fmt.Errorf("task_id and execution_id are required")
 	}
@@ -332,6 +334,15 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 		pendingByPath := make(map[string]*model.TaskFile, len(pendingFiles))
 		for _, pendingFile := range pendingFiles {
 			pendingByPath[pendingFile.FilePath] = pendingFile
+			if preserveOSSKeyPrefix == "" || !strings.HasPrefix(pendingFile.OSSKey, preserveOSSKeyPrefix) {
+				continue
+			}
+			if _, collides := seenPaths[pendingFile.FilePath]; collides {
+				continue
+			}
+			seenPaths[pendingFile.FilePath] = struct{}{}
+			incomingPaths = append(incomingPaths, pendingFile.FilePath)
+			files = append(files, pendingFile)
 		}
 		stale := tx.Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending)
 		if len(incomingPaths) > 0 {

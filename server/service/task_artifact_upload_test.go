@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +30,7 @@ type fakeTaskArtifactStorage struct {
 	name              string
 	uploadKey         string
 	uploadContentType string
+	uploadCalls       int
 	uploadURLCalls    int
 	stats             map[string]*storage.ObjectInfo
 	statErr           error
@@ -43,6 +45,7 @@ func (f *fakeTaskArtifactStorage) Name() string {
 }
 
 func (f *fakeTaskArtifactStorage) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
+	f.uploadCalls++
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
@@ -587,6 +590,23 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 	}
 	if got := rows[0]; got.ID != generated.ID || got.OSSKey != workspaceKey || got.ContentHash != newHash {
 		t.Fatalf("workspace replacement = %#v, want ID %s key %s hash %s", got, generated.ID, workspaceKey, newHash)
+	}
+	uploadsBeforeReplay := store.uploadCalls
+	replayFile, replaySnapshot, err := svc.FindTaskFileOperationSettlement(ctx, task.ID, executionID, operationID, billingFingerprint(operationID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replay ImageOperationResultSnapshot
+	if err := json.Unmarshal(replaySnapshot, &replay); err != nil {
+		t.Fatal(err)
+	}
+	svc.EnrichFilesWithURLs(ctx, []*model.TaskFile{replayFile})
+	replay.DownloadURL = replayFile.URL
+	if replayFile.ID != generated.ID || replayFile.OSSKey != workspaceKey || replayFile.ContentHash != newHash || replay.DownloadURL != store.GetURL(workspaceKey) {
+		t.Fatalf("operation replay = file %#v snapshot %#v, want stable ID and latest workspace delivery", replayFile, replay)
+	}
+	if store.uploadCalls != uploadsBeforeReplay {
+		t.Fatalf("operation replay upload calls = %d, want unchanged %d", store.uploadCalls, uploadsBeforeReplay)
 	}
 	settlementAfter, err := fixture.repo.Billing().FindSettlementByKey(ctx, "mcp-image-settlement", settlementKey)
 	if err != nil {
