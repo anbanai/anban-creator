@@ -305,8 +305,12 @@ func trustedTaskCreationProjectReference(source *model.Task, assetID string) boo
 
 func taskCreationReferencePurposes(source *model.Task, selection service.ReferenceImageSelection) []string {
 	allowed := []string{service.DirectUploadPurposeTaskReference}
-	if trustedTaskCreationProjectReference(source, selection.AssetID) {
-		return append(allowed, service.DirectUploadPurposeProjectReference)
+	assetID := strings.TrimSpace(selection.AssetID)
+	if source != nil && assetID != "" && assetID == strings.TrimSpace(source.ReferenceImageAssetID) {
+		allowed = append(allowed, service.DirectUploadPurposeAIEntryAttachment)
+	}
+	if trustedTaskCreationProjectReference(source, assetID) {
+		allowed = append(allowed, service.DirectUploadPurposeProjectReference)
 	}
 	return allowed
 }
