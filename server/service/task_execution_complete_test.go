@@ -699,6 +699,38 @@ func TestReplacePreStartExecutionPreservesRuntimeImage(t *testing.T) {
 	}
 }
 
+func TestReplacePreStartExecutionResetsProviderIdentityAcrossDispatcherScopes(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	ctx := context.Background()
+	oldIdentity := model.RuntimeIdentity{
+		Scope:      "anban",
+		Workload:   "job-" + execution.ID,
+		InstanceID: "pod-old",
+	}
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, oldIdentity); err != nil {
+		t.Fatalf("persist old Kubernetes identity: %v", err)
+	}
+	dispatcher := &dispatchTestDispatcher{}
+	svc.SetRuntimeDispatcher(dispatcher)
+
+	if err := svc.ReconcileExecutionFailure(ctx, execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
+		t.Fatalf("cross-scope replacement dispatch: %v", err)
+	}
+	replacement, err := repo.TaskExecutions().FindCurrentByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement.RuntimeProfile != execution.RuntimeProfile || replacement.RuntimeImage != execution.RuntimeImage {
+		t.Fatalf("replacement runtime = %q %q, want inherited %q %q", replacement.RuntimeProfile, replacement.RuntimeImage, execution.RuntimeProfile, execution.RuntimeImage)
+	}
+	if replacement.Target != "docker" || replacement.RuntimeScope != "daemon-a" || replacement.RuntimeWorkload != "container-"+replacement.ID {
+		t.Fatalf("replacement target/identity = %q %q/%q, want docker daemon/container", replacement.Target, replacement.RuntimeScope, replacement.RuntimeWorkload)
+	}
+	if replacement.RuntimeInstanceID != "" {
+		t.Fatalf("replacement instance = %q, want old provider instance cleared", replacement.RuntimeInstanceID)
+	}
+}
+
 func TestReplacementDispatchResumesSameAttemptAfterTransientFailure(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{err: errors.New("temporary Kubernetes API failure")}

@@ -153,7 +153,6 @@ func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.
 			RuntimeImage:   current.RuntimeImage,
 			Target:         target,
 			Status:         model.TaskExecutionCreated,
-			RuntimeScope:   current.RuntimeScope,
 		}
 		if err := txRepo.TaskExecutions().Create(ctx, replacement); err != nil {
 			return err
