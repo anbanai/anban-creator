@@ -14,6 +14,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/rs/zerolog"
@@ -80,9 +81,9 @@ func NewDockerExecutor(
 	if err != nil {
 		return nil, fmt.Errorf("docker client init: %w", err)
 	}
-	articleImage := RuntimeImageForTask(runtimeImages, model.PlatformArticle).Image
-	if _, err := cli.ImageInspect(context.Background(), articleImage); err != nil {
-		return nil, fmt.Errorf("Docker Article image %q not found locally (run 'make docker-agent-image' to build it): %w", articleImage, err)
+	if err := validatePersistentArticleContainer(context.Background(), cli, RuntimeImageForTask(runtimeImages, model.PlatformArticle).Image); err != nil {
+		_ = cli.Close()
+		return nil, err
 	}
 
 	return &DockerExecutor{
@@ -100,6 +101,48 @@ func NewDockerExecutor(
 		store:             store,
 		memoryMgr:         memoryMgr,
 	}, nil
+}
+
+func validatePersistentArticleContainer(ctx context.Context, cli *client.Client, articleImage string) error {
+	imageInspect, err := cli.ImageInspect(ctx, articleImage)
+	if err != nil {
+		return fmt.Errorf("Docker Article image %q not found locally (run 'make docker-agent-image' to build it): %w", articleImage, err)
+	}
+	if imageInspect.ID == "" {
+		return fmt.Errorf("Docker Article image %q has no immutable image ID", articleImage)
+	}
+
+	containerInspect, err := cli.ContainerInspect(ctx, dockerPersistentAgentContainerName)
+	if err != nil {
+		return fmt.Errorf("persistent Article container %q is unavailable: %w", dockerPersistentAgentContainerName, err)
+	}
+	if containerInspect.State == nil || !containerInspect.State.Running {
+		status := "unknown"
+		if containerInspect.State != nil && containerInspect.State.Status != "" {
+			status = string(containerInspect.State.Status)
+		}
+		return fmt.Errorf("persistent Article container %q is not running (status %q)", dockerPersistentAgentContainerName, status)
+	}
+	if containerInspect.Image != imageInspect.ID {
+		return fmt.Errorf(
+			"persistent Article container %q uses image ID %q, but configured Article image %q resolves to %q",
+			dockerPersistentAgentContainerName,
+			containerInspect.Image,
+			articleImage,
+			imageInspect.ID,
+		)
+	}
+	for _, workspaceMount := range containerInspect.Mounts {
+		sharedMount := workspaceMount.Type == mount.TypeBind || workspaceMount.Type == mount.TypeVolume
+		if workspaceMount.Destination == dockerContainerWorkspaceRoot && workspaceMount.RW && workspaceMount.Source != "" && sharedMount {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"persistent Article container %q must have a writable mount at %q using a bind or volume so specialized runtimes can share task workspaces",
+		dockerPersistentAgentContainerName,
+		dockerContainerWorkspaceRoot,
+	)
 }
 
 // Close releases the Docker client connection.
