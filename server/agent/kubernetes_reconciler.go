@@ -138,6 +138,9 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 		}
 		return err
 	}
+	if state == nil {
+		return r.fail(ctx, execution, model.TaskExecutionFailed, "inspection_empty", "", nil)
+	}
 	if state.InstanceID != "" {
 		if err := r.service.RecordExecutionInstance(ctx, execution.ID, state.InstanceID); err != nil {
 			return err

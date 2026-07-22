@@ -34,6 +34,7 @@ type dispatchTestDispatcher struct {
 	started           chan struct{}
 	release           chan struct{}
 	runtimeSelection  serverconfig.RuntimeImageSelection
+	identity          *model.RuntimeIdentity
 }
 
 type scopedDispatchTestDispatcher struct {
@@ -183,6 +184,11 @@ func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.Ta
 	started := d.started
 	release := d.release
 	err := d.err
+	var identity *model.RuntimeIdentity
+	if d.identity != nil {
+		value := *d.identity
+		identity = &value
+	}
 	d.mu.Unlock()
 	if started != nil {
 		select {
@@ -195,6 +201,9 @@ func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.Ta
 	}
 	if err != nil {
 		return nil, err
+	}
+	if identity != nil {
+		return identity, nil
 	}
 	return &model.RuntimeIdentity{Scope: "daemon-a", Workload: "container-" + execution.ID}, nil
 }
@@ -309,6 +318,149 @@ func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterRuntimeAccepted(t *tes
 	}
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("duplicate dispatch calls = %d", dispatcher.callCount())
+	}
+}
+
+func TestDispatchCurrentExecutionRejectsRuntimeTargetMismatchBeforeClaim(t *testing.T) {
+	svc, repo, db, dispatcher, task := setupDispatchTest(t)
+	ctx := context.Background()
+	execution, created, err := svc.createCurrentExecution(ctx, task)
+	if err != nil || !created {
+		t.Fatalf("create execution: created=%v err=%v", created, err)
+	}
+	if err := db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).Update("target", "kubernetes").Error; err != nil {
+		t.Fatal(err)
+	}
+	task, execution, err = svc.reloadCurrentDispatchState(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.dispatchCurrentExecution(ctx, task, execution)
+	if !errors.Is(err, ErrRuntimeDispatcherTargetMismatch) {
+		t.Fatalf("dispatch error = %v, want ErrRuntimeDispatcherTargetMismatch", err)
+	}
+	current, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dispatcher.callCount() != 0 || current.Status != model.TaskExecutionCreated || current.DispatchClaimToken != "" || current.DispatchClaimedAt != nil {
+		t.Fatalf("mismatched dispatch mutated state: calls=%d execution=%+v", dispatcher.callCount(), current)
+	}
+}
+
+func TestDispatchCurrentExecutionNormalizesTargetForComparison(t *testing.T) {
+	svc, _, db, dispatcher, task := setupDispatchTest(t)
+	ctx := context.Background()
+	execution, created, err := svc.createCurrentExecution(ctx, task)
+	if err != nil || !created {
+		t.Fatalf("create execution: created=%v err=%v", created, err)
+	}
+	if err := db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).Update("target", " docker ").Error; err != nil {
+		t.Fatal(err)
+	}
+	svc.SetRuntimeDispatcher(&scopedDispatchTestDispatcher{dispatchTestDispatcher: dispatcher, scope: " docker "})
+	task, execution, err = svc.reloadCurrentDispatchState(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.dispatchCurrentExecution(ctx, task, execution); err != nil {
+		t.Fatalf("dispatch normalized target: %v", err)
+	}
+	if dispatcher.callCount() != 1 || mustCurrentExecution(t, svc.repo, task.ID).Status != model.TaskExecutionStarting {
+		t.Fatalf("normalized dispatch calls=%d execution=%+v", dispatcher.callCount(), mustCurrentExecution(t, svc.repo, task.ID))
+	}
+}
+
+func TestDispatchReturnedIdentityIsNormalizedBeforePersistence(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.identity = &model.RuntimeIdentity{
+		Scope:      "  daemon-a  ",
+		Workload:   "  container-a  ",
+		InstanceID: "  instance-a  ",
+	}
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	if execution.RuntimeScope != "daemon-a" || execution.RuntimeWorkload != "container-a" || execution.RuntimeInstanceID != "instance-a" {
+		t.Fatalf("persisted identity = %q/%q/%q, want normalized values", execution.RuntimeScope, execution.RuntimeWorkload, execution.RuntimeInstanceID)
+	}
+}
+
+func TestDispatchIncompleteIdentityFailsPermanently(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.identity = &model.RuntimeIdentity{Scope: "  ", Workload: "container-a"}
+	err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
+	if err == nil || !agent.IsPermanentDispatchError(err) {
+		t.Fatalf("dispatch error = %v, want permanent incomplete identity failure", err)
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	if execution.Status != model.TaskExecutionFailed || execution.DispatchClaimToken != "" || execution.DispatchClaimedAt != nil || execution.RuntimeScope != "" || execution.RuntimeWorkload != "" {
+		t.Fatalf("failed incomplete dispatch = %+v", execution)
+	}
+}
+
+func TestDispatchRuntimeIdentityConflictFailsPermanently(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	ctx := context.Background()
+	execution, created, err := svc.createCurrentExecution(ctx, task)
+	if err != nil || !created {
+		t.Fatalf("create execution: created=%v err=%v", created, err)
+	}
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, model.RuntimeIdentity{Scope: "daemon-old"}); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.identity = &model.RuntimeIdentity{Scope: "daemon-new", Workload: "container-a"}
+	task, execution, err = svc.reloadCurrentDispatchState(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.dispatchCurrentExecution(ctx, task, execution)
+	if !errors.Is(err, repository.ErrRuntimeIdentityConflict) || !agent.IsPermanentDispatchError(err) {
+		t.Fatalf("dispatch error = %v, want permanent ErrRuntimeIdentityConflict", err)
+	}
+	execution = mustCurrentExecution(t, repo, task.ID)
+	if execution.Status != model.TaskExecutionFailed || execution.DispatchClaimToken != "" || execution.DispatchClaimedAt != nil {
+		t.Fatalf("conflicted dispatch was not terminalized: %+v", execution)
+	}
+}
+
+func TestDispatchRuntimeIdentitySchemaLengths(t *testing.T) {
+	tests := []struct {
+		name      string
+		identity  model.RuntimeIdentity
+		permanent bool
+	}{
+		{name: "maximum", identity: model.RuntimeIdentity{Scope: strings.Repeat("s", 63), Workload: strings.Repeat("w", 63), InstanceID: strings.Repeat("i", 64)}},
+		{name: "scope over limit", identity: model.RuntimeIdentity{Scope: strings.Repeat("s", 64), Workload: "workload"}, permanent: true},
+		{name: "workload over limit", identity: model.RuntimeIdentity{Scope: "scope", Workload: strings.Repeat("w", 64)}, permanent: true},
+		{name: "instance over limit", identity: model.RuntimeIdentity{Scope: "scope", Workload: "workload", InstanceID: strings.Repeat("i", 65)}, permanent: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, _, dispatcher, task := setupDispatchTest(t)
+			dispatcher.identity = &tc.identity
+			err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
+			execution := mustCurrentExecution(t, repo, task.ID)
+			if tc.permanent {
+				if err == nil || !agent.IsPermanentDispatchError(err) {
+					t.Fatalf("dispatch error = %v, want permanent schema-length failure", err)
+				}
+				if execution.Status != model.TaskExecutionFailed || execution.RuntimeScope != "" || execution.RuntimeWorkload != "" || execution.RuntimeInstanceID != "" {
+					t.Fatalf("over-limit identity persisted: %+v", execution)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if execution.Status != model.TaskExecutionStarting || execution.RuntimeScope != tc.identity.Scope || execution.RuntimeWorkload != tc.identity.Workload || execution.RuntimeInstanceID != tc.identity.InstanceID {
+				t.Fatalf("maximum identity = %+v", execution)
+			}
+		})
 	}
 }
 

@@ -219,6 +219,34 @@ func TestKubernetesReconcilerUsesExecutionHeartbeat(t *testing.T) {
 	}
 }
 
+func TestKubernetesReconcilerFailsAndCleansUpEmptyInspection(t *testing.T) {
+	execution := &model.TaskExecution{ID: "empty-inspection", Status: model.TaskExecutionRunning}
+	dispatcher := &reconcileTestDispatcher{
+		states: map[string]*RuntimeExecutionState{execution.ID: nil},
+		errs:   map[string]error{},
+	}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	reconciler := NewKubernetesReconciler(dispatcher, service, KubernetesReconcilerConfig{}, nil)
+
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if len(service.failures) != 1 || service.failures[0].id != execution.ID || service.failures[0].status != model.TaskExecutionFailed || service.failures[0].reason != "inspection_empty" {
+		t.Fatalf("failures = %#v, want inspection_empty failure", service.failures)
+	}
+	if service.cleanup[execution.ID] != "done" {
+		t.Fatalf("cleanup = %q, want done", service.cleanup[execution.ID])
+	}
+	dispatcher.mu.Lock()
+	deletes := dispatcher.deletes
+	dispatcher.mu.Unlock()
+	if deletes != 1 {
+		t.Fatalf("deletes = %d, want 1", deletes)
+	}
+}
+
 func TestKubernetesReconcilerRunStopsWithContext(t *testing.T) {
 	dispatcher := &reconcileTestDispatcher{states: map[string]*RuntimeExecutionState{}, errs: map[string]error{}}
 	service := &reconcileTestService{}

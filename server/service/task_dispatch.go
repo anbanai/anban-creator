@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
@@ -15,9 +16,18 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrDispatchInProgress = errors.New("runtime dispatch is already in progress")
+var (
+	ErrDispatchInProgress              = errors.New("runtime dispatch is already in progress")
+	ErrRuntimeDispatcherTargetMismatch = errors.New("runtime dispatcher target mismatch")
+)
 
 const defaultRuntimeDispatchLease = time.Minute
+
+const (
+	runtimeScopeMaxLength      = 63
+	runtimeWorkloadMaxLength   = 63
+	runtimeInstanceIDMaxLength = 64
+)
 
 const autocompactThrashingErrorPrefix = "Autocompact is thrashing:"
 
@@ -87,8 +97,13 @@ func (s *TaskService) reloadCurrentDispatchState(ctx context.Context, taskID str
 }
 
 func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) error {
-	if s.runtimeDispatcher == nil {
-		return fmt.Errorf("runtime dispatcher is not configured")
+	dispatcherTarget, err := s.runtimeDispatcherScope()
+	if err != nil {
+		return err
+	}
+	executionTarget := strings.TrimSpace(execution.Target)
+	if executionTarget != dispatcherTarget {
+		return fmt.Errorf("%w: execution target is %q, dispatcher scope is %q", ErrRuntimeDispatcherTargetMismatch, executionTarget, dispatcherTarget)
 	}
 	if task.Status != model.TaskStatusRunning {
 		return fmt.Errorf("task %s has current execution %s but task status is %s", task.ID, execution.ID, task.Status)
@@ -137,10 +152,14 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 		}
 		return fmt.Errorf("ambiguous runtime dispatch: %w", err)
 	}
-	if runtimeIdentity == nil || strings.TrimSpace(runtimeIdentity.Scope) == "" || strings.TrimSpace(runtimeIdentity.Workload) == "" {
-		return fmt.Errorf("runtime dispatcher returned incomplete runtime identity")
+	normalizedIdentity, err := normalizeRuntimeIdentity(runtimeIdentity)
+	if err != nil {
+		return s.failDispatch(ctx, task, execution, token, agent.NewPermanentDispatchError(err))
 	}
-	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token, *runtimeIdentity)
+	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token, normalizedIdentity)
+	if errors.Is(err, repository.ErrRuntimeIdentityConflict) {
+		return s.failDispatch(ctx, task, execution, token, agent.NewPermanentDispatchError(err))
+	}
 	if err != nil {
 		return fmt.Errorf("mark runtime execution starting: %w", err)
 	}
@@ -148,6 +167,34 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 		return fmt.Errorf("mark runtime execution starting: stale execution %s", execution.ID)
 	}
 	return nil
+}
+
+func normalizeRuntimeIdentity(identity *model.RuntimeIdentity) (model.RuntimeIdentity, error) {
+	if identity == nil {
+		return model.RuntimeIdentity{}, fmt.Errorf("runtime dispatcher returned incomplete runtime identity")
+	}
+	normalized := model.RuntimeIdentity{
+		Scope:      strings.TrimSpace(identity.Scope),
+		Workload:   strings.TrimSpace(identity.Workload),
+		InstanceID: strings.TrimSpace(identity.InstanceID),
+	}
+	if normalized.Scope == "" || normalized.Workload == "" {
+		return model.RuntimeIdentity{}, fmt.Errorf("runtime dispatcher returned incomplete runtime identity")
+	}
+	for _, member := range []struct {
+		name  string
+		value string
+		max   int
+	}{
+		{name: "scope", value: normalized.Scope, max: runtimeScopeMaxLength},
+		{name: "workload", value: normalized.Workload, max: runtimeWorkloadMaxLength},
+		{name: "instance", value: normalized.InstanceID, max: runtimeInstanceIDMaxLength},
+	} {
+		if utf8.RuneCountInString(member.value) > member.max {
+			return model.RuntimeIdentity{}, fmt.Errorf("runtime dispatcher returned %s identity longer than %d characters", member.name, member.max)
+		}
+	}
+	return normalized, nil
 }
 
 func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Task) (*model.TaskExecution, bool, error) {
