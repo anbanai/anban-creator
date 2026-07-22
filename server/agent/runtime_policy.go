@@ -15,6 +15,7 @@ const ManagedMCPServerName = "anban"
 const (
 	managedMCPReadyTimeout      = 30 * time.Second
 	managedMCPReadyPollInterval = 250 * time.Millisecond
+	managedMCPRequestTimeout    = 15 * time.Minute
 	managedAgentMaxBufferSize   = 16 * 1024 * 1024
 )
 
@@ -81,8 +82,9 @@ func WithManagedMCPAccess(serverURL, apiKey string) claudecode.Option {
 	return func(opts *claudecode.Options) {
 		claudecode.WithMcpServers(map[string]claudecode.McpServerConfig{
 			ManagedMCPServerName: &claudecode.McpHTTPServerConfig{
-				Type: claudecode.McpServerTypeHTTP,
-				URL:  serverURL + "/mcp",
+				Type:    claudecode.McpServerTypeHTTP,
+				URL:     serverURL + "/mcp",
+				Timeout: managedMCPRequestTimeout.Milliseconds(),
 				Headers: map[string]string{
 					"Authorization": "Bearer " + apiKey,
 				},
