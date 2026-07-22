@@ -104,6 +104,9 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 		return nil, fmt.Errorf("%w: storage provider does not support object metadata", ErrTaskArtifactUnavailable)
 	}
 	stat, statErr := statProvider.StatObject(ctx, key)
+	if statErr == nil && stat == nil {
+		return nil, fmt.Errorf("%w: stat task artifact %s returned no metadata", ErrTaskArtifactUnavailable, key)
+	}
 	switch {
 	case statErr == nil && stat != nil && stat.Size == req.Size && strings.EqualFold(strings.TrimSpace(stat.SHA256), req.SHA256):
 		return &DirectUploadPrepareResult{
