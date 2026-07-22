@@ -595,6 +595,26 @@ func TestBootstrapDownloadSigningAllowsExplicitCloneInputSource(t *testing.T) {
 	}
 }
 
+func TestBootstrapDownloadSigningAllowsLegacyCloneInputSource(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
+	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}}
+	task := &model.Task{ID: "clone-task", UserID: "user-1", ProjectID: "project-1", InputSourceTaskID: "source-task"}
+	deadline := time.Now().Add(time.Hour)
+	allowedKey := "uploads/users/user-1/projects/project-1/tasks/source-task/inputs/reference.png"
+
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: "https://bucket.oss-cn-x.aliyuncs.com/" + allowedKey}, deadline); err != nil {
+		t.Fatalf("legacy clone input source rejected: %v", err)
+	}
+	otherProjectKey := "uploads/users/user-1/projects/project-2/tasks/source-task/inputs/reference.png"
+	if _, err := svc.signedDownloadURL(context.Background(), task, bootstrapDownloadSource{URL: "https://bucket.oss-cn-x.aliyuncs.com/" + otherProjectKey}, deadline); err == nil {
+		t.Fatalf("other project clone source accepted: %s", otherProjectKey)
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != allowedKey {
+		t.Fatalf("signed keys = %v, want only legacy source", store.signedKeys)
+	}
+}
+
 func TestBootstrapDownloadSigningAllowsUserOwnedChannelReference(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}

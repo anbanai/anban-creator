@@ -45,11 +45,11 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	overrides := src.Overrides.Data()
 	snapshot := src.ProjectSnapshot.Data()
 	inputSourceTaskID := src.InputSourceTaskID
+	inputSourceProjectID := src.InputSourceProjectID
 	if inputSourceTaskID == "" {
 		inputSourceTaskID = src.ID
-	}
-	inputSourceProjectID := src.InputSourceProjectID
-	if inputSourceProjectID == "" {
+		inputSourceProjectID = src.ProjectID
+	} else if inputSourceProjectID == "" {
 		inputSourceProjectID = src.ProjectID
 	}
 	prompt := src.Prompt

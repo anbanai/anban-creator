@@ -1430,6 +1430,36 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCloneRepairsPartialInputSource(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	src := &model.Task{
+		ID:                   uuid.NewString(),
+		UserID:               userID,
+		ProjectID:            projectID,
+		Type:                 model.PlatformArticle,
+		Status:               model.TaskStatusCompleted,
+		Prompt:               "partial clone lineage",
+		InputSourceProjectID: "stale-project-id",
+	}
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clone.InputSourceTaskID != src.ID {
+		t.Fatalf("clone input source = %q, want %q", clone.InputSourceTaskID, src.ID)
+	}
+	if clone.InputSourceProjectID != src.ProjectID {
+		t.Fatalf("clone input source project = %q, want %q", clone.InputSourceProjectID, src.ProjectID)
+	}
+}
+
 func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
