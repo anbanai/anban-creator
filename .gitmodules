@@ -12,3 +12,9 @@
 	url = https://github.com/blader/humanizer.git
 	branch = main
 	shallow = true
+[submodule "plugins"]
+	path = plugins
+	url = https://github.com/anbanai/creator-skills.git
+	branch = main
+	syncPush = true
+	syncRemote = origin
