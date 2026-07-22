@@ -138,6 +138,9 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 	if err != nil {
 		return err
 	}
+	if len(files) == 0 && strings.TrimSpace(u.cfg.ExecutionID) == "" {
+		return nil
+	}
 
 	manifest := ArtifactManifestRequest{
 		TaskID:      u.cfg.TaskID,
@@ -179,6 +182,11 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 		}
 		etag := prepared.ETag
 		if prepared.UploadRequired {
+			preparedSHA256 := strings.ToLower(strings.TrimSpace(prepared.Headers["X-Oss-Meta-Sha256"]))
+			if preparedSHA256 == "" || preparedSHA256 != strings.ToLower(file.SHA256) {
+				return fmt.Errorf("prepare artifact upload %s returned missing or mismatched SHA-256 metadata", file.RelativePath)
+			}
+			prepared.Headers["X-Oss-Meta-Sha256"] = preparedSHA256
 			etag, err = u.putObject(ctx, prepared, file.LocalPath, contentType)
 			if err != nil {
 				return fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
@@ -203,7 +211,7 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result 
 		return fmt.Errorf("report artifact manifest: %w", err)
 	}
 	if len(manifest.Files) > 0 {
-		_ = u.reporter.ReportProgress(ctx, fmt.Sprintf("uploaded %d workspace artifact(s)", len(manifest.Files)))
+		_ = u.reporter.ReportProgress(ctx, fmt.Sprintf("collected %d workspace artifact(s)", len(manifest.Files)))
 	}
 	return nil
 }

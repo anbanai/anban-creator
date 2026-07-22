@@ -288,6 +288,57 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	if file.RelativePath != "output/article.md" || file.ObjectKey == "" || file.SHA256 == "" || file.ETag != "etag-1" {
 		t.Fatalf("manifest file = %#v, want relative path, object key, sha, etag", file)
 	}
+	if got := reporter.progress; len(got) != 1 || got[0] != "collected 1 workspace artifact(s)" {
+		t.Fatalf("progress = %#v, want collected artifact progress", got)
+	}
+}
+
+func TestArtifactUploaderSkipsEmptyLegacyManifest(t *testing.T) {
+	root := t.TempDir()
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
+	}
+	if reporter.manifestCalls != 0 {
+		t.Fatalf("manifest calls = %d, want 0 for legacy empty scan", reporter.manifestCalls)
+	}
+}
+
+func TestArtifactUploaderRejectsMissingOrMismatchedPreparedSHA256(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		headers map[string]string
+	}{
+		{name: "missing", headers: map[string]string{"Content-Type": "text/markdown"}},
+		{name: "mismatched", headers: map[string]string{"Content-Type": "text/markdown", "X-Oss-Meta-Sha256": "wrong"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
+			reporter := &fakeArtifactReporter{prepareResult: &ArtifactPrepareResponse{
+				Key:            "uploads/article.md",
+				UploadRequired: true,
+				Headers:        tc.headers,
+				MaxSize:        512 * 1024 * 1024,
+			}}
+			uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+			putCalls := 0
+			uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
+				putCalls++
+				return "etag", nil
+			}
+
+			err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+			if err == nil || !strings.Contains(err.Error(), "SHA-256") {
+				t.Fatalf("UploadWorkspaceArtifacts error = %v, want SHA-256 validation error", err)
+			}
+			if putCalls != 0 {
+				t.Fatalf("put calls = %d, want 0", putCalls)
+			}
+		})
+	}
 }
 
 func TestArtifactUploaderSkipsMatchingObjectButStillManifestsIt(t *testing.T) {
@@ -314,6 +365,9 @@ func TestArtifactUploaderSkipsMatchingObjectButStillManifestsIt(t *testing.T) {
 	}
 	if got := reporter.manifest.Files[0].ETag; got != "existing-etag" {
 		t.Fatalf("manifest etag = %q, want existing-etag", got)
+	}
+	if got := reporter.progress; len(got) != 1 || got[0] != "collected 1 workspace artifact(s)" {
+		t.Fatalf("progress = %#v, want collected artifact progress", got)
 	}
 }
 
@@ -427,6 +481,24 @@ func TestApplyArtifactUploadFailureRejectsOtherwiseSuccessfulRun(t *testing.T) {
 	}
 	if result.Error != "artifact upload failed: manifest unavailable" {
 		t.Fatalf("result error = %q", result.Error)
+	}
+}
+
+func TestApplyArtifactUploadFailurePreservesExistingRunFailure(t *testing.T) {
+	runErr := errors.New("runner failed")
+	uploadErr := errors.New("manifest unavailable")
+	result := &serveragent.ExecutionResult{Success: false, Error: "runner failed"}
+
+	got := applyArtifactUploadFailure(result, runErr, uploadErr)
+
+	if !errors.Is(got, runErr) {
+		t.Fatalf("error = %v, want original run error", got)
+	}
+	if result.Error != "runner failed" || result.Success {
+		t.Fatalf("failed result was overwritten: %#v", result)
+	}
+	if got := applyArtifactUploadFailure(nil, runErr, uploadErr); !errors.Is(got, runErr) {
+		t.Fatalf("nil result error = %v, want original run error", got)
 	}
 }
 
