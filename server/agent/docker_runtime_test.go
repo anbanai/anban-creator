@@ -13,6 +13,7 @@ import (
 
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
+	networktypes "github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/go-connections/nat"
 
@@ -36,9 +37,10 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	}
 	cfg := dockerRuntimeConfig{
 		DockerConfig: srvconfig.DockerConfig{
-			Network: "anban", CPUCores: 2, MemoryMB: 4096, PidsLimit: 256, TimeoutSec: 3600,
+			Network: " anban ", CPUCores: 2, MemoryMB: 4096, PidsLimit: 256, TimeoutSec: 3600,
 		},
 		ServerURL:   "http://server:8080/",
+		ImageID:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ImageConfig: imageConfig,
 	}
 	execution := &model.TaskExecution{
@@ -51,6 +53,9 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	if spec.ContainerName != dockerRuntimeContainerName(execution.ID) {
 		t.Fatalf("container name = %q, want deterministic execution name", spec.ContainerName)
 	}
+	if spec.NetworkName != "anban" {
+		t.Fatalf("network name = %q, want trimmed configured network identity", spec.NetworkName)
+	}
 	if spec.ProjectVolume.Name != dockerProjectMemoryVolumeName(task.ProjectID) {
 		t.Fatalf("project volume name = %q, want deterministic project name", spec.ProjectVolume.Name)
 	}
@@ -59,6 +64,9 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	}
 	if spec.ContainerConfig.Image != execution.RuntimeImage {
 		t.Fatalf("image = %q, want persisted runtime image %q", spec.ContainerConfig.Image, execution.RuntimeImage)
+	}
+	if spec.ImageID != cfg.ImageID {
+		t.Fatalf("image ID = %q, want trusted inspected image ID %q", spec.ImageID, cfg.ImageID)
 	}
 	if spec.ContainerConfig.User != ContainerRuntimeUser {
 		t.Fatalf("user = %q, want %q", spec.ContainerConfig.User, ContainerRuntimeUser)
@@ -194,6 +202,15 @@ func TestVerifyDockerContainerAcceptsExactSpecAndRejectsDrift(t *testing.T) {
 	if spec.ContainerConfig.Labels["org.opencontainers.image.authors"] != "upstream image author" {
 		t.Fatal("trusted image metadata missing from canonical container config")
 	}
+	missingImageID := spec
+	missingImageID.ImageID = ""
+	if err := verifyDockerContainer(testDockerInspect(missingImageID), missingImageID); err == nil {
+		t.Fatal("container spec without a trusted image ID accepted")
+	}
+	missingImageID.ImageID = "   "
+	if err := verifyDockerContainer(testDockerInspect(missingImageID), missingImageID); err == nil {
+		t.Fatal("container spec with a blank trusted image ID accepted")
+	}
 	normalizedEmptyDefaults := testDockerInspect(spec)
 	normalizedEmptyDefaults.HostConfig.Binds = []string{}
 	normalizedEmptyDefaults.HostConfig.VolumesFrom = []string{}
@@ -245,6 +262,9 @@ func TestVerifyDockerContainerAcceptsExactSpecAndRejectsDrift(t *testing.T) {
 			got.Config.Labels["org.opencontainers.image.authors"] = "injected"
 		}},
 		{name: "image", mutate: func(got *containertypes.InspectResponse) { got.Config.Image = "replacement:latest" }},
+		{name: "resolved image ID", mutate: func(got *containertypes.InspectResponse) {
+			got.Image = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		}},
 		{name: "user", mutate: func(got *containertypes.InspectResponse) { got.Config.User = "0:0" }},
 		{name: "hostname", mutate: func(got *containertypes.InspectResponse) { got.Config.Hostname = "attacker" }},
 		{name: "domain name", mutate: func(got *containertypes.InspectResponse) { got.Config.Domainname = "attacker.invalid" }},
@@ -268,6 +288,40 @@ func TestVerifyDockerContainerAcceptsExactSpecAndRejectsDrift(t *testing.T) {
 		{name: "mounts", mutate: func(got *containertypes.InspectResponse) { got.HostConfig.Mounts[0].Target = "/replacement" }},
 		{name: "command", mutate: func(got *containertypes.InspectResponse) { got.Config.Cmd[0] = "run" }},
 		{name: "network", mutate: func(got *containertypes.InspectResponse) { got.HostConfig.NetworkMode = "bridge" }},
+		{name: "missing network settings", mutate: func(got *containertypes.InspectResponse) { got.NetworkSettings = nil }},
+		{name: "missing network attachment", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks = nil
+		}},
+		{name: "wrong network attachment", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks = map[string]*networktypes.EndpointSettings{"other": testDockerEndpoint(got.ID, spec.ContainerName)}
+		}},
+		{name: "extra network attachment", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks["other"] = testDockerEndpoint(got.ID, spec.ContainerName)
+		}},
+		{name: "missing network endpoint", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)] = nil
+		}},
+		{name: "static endpoint IPAM", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].IPAMConfig = &networktypes.EndpointIPAMConfig{IPv4Address: "172.20.0.10"}
+		}},
+		{name: "endpoint alias", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].Aliases = []string{"database"}
+		}},
+		{name: "endpoint link", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].Links = []string{"database:database"}
+		}},
+		{name: "endpoint driver option", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].DriverOpts = map[string]string{"com.docker.network.endpoint.sysctls": "net.ipv4.conf.IFNAME.forwarding=1"}
+		}},
+		{name: "endpoint gateway priority", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].GwPriority = 1
+		}},
+		{name: "endpoint DNS name", mutate: func(got *containertypes.InspectResponse) {
+			got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].DNSNames = append(
+				got.NetworkSettings.Networks[string(spec.HostConfig.NetworkMode)].DNSNames,
+				"database",
+			)
+		}},
 		{name: "log driver", mutate: func(got *containertypes.InspectResponse) { got.HostConfig.LogConfig.Type = "syslog" }},
 		{name: "log option", mutate: func(got *containertypes.InspectResponse) { got.HostConfig.LogConfig.Config["max-size"] = "unlimited" }},
 		{name: "init process", mutate: func(got *containertypes.InspectResponse) { value := true; got.HostConfig.Init = &value }},
@@ -415,6 +469,7 @@ func testDockerRuntimeSpec() dockerRuntimeSpec {
 	return buildDockerRuntimeSpec(dockerRuntimeConfig{
 		DockerConfig: srvconfig.DockerConfig{Network: "anban", CPUCores: 2, MemoryMB: 4096, PidsLimit: 256, TimeoutSec: 3600},
 		ServerURL:    "http://server:8080",
+		ImageID:      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ImageConfig: &containertypes.Config{
 			Env:          []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/home/node"},
 			Labels:       map[string]string{"org.opencontainers.image.authors": "upstream image author"},
@@ -455,8 +510,26 @@ func testDockerInspect(spec dockerRuntimeSpec) containertypes.InspectResponse {
 		hostConfig.PidsLimit = &limit
 	}
 	return containertypes.InspectResponse{
-		ContainerJSONBase: &containertypes.ContainerJSONBase{ID: containerID, Name: "/" + spec.ContainerName, HostConfig: &hostConfig},
+		ContainerJSONBase: &containertypes.ContainerJSONBase{ID: containerID, Image: spec.ImageID, Name: "/" + spec.ContainerName, HostConfig: &hostConfig},
 		Config:            &config,
+		NetworkSettings: &containertypes.NetworkSettings{Networks: map[string]*networktypes.EndpointSettings{
+			string(spec.HostConfig.NetworkMode): testDockerEndpoint(containerID, spec.ContainerName),
+		}},
+	}
+}
+
+func testDockerEndpoint(containerID, containerName string) *networktypes.EndpointSettings {
+	return &networktypes.EndpointSettings{
+		NetworkID:           "network-id",
+		EndpointID:          "endpoint-id",
+		Gateway:             "172.20.0.1",
+		IPAddress:           "172.20.0.2",
+		IPPrefixLen:         16,
+		IPv6Gateway:         "fd00::1",
+		GlobalIPv6Address:   "fd00::2",
+		GlobalIPv6PrefixLen: 64,
+		MacAddress:          "02:42:ac:14:00:02",
+		DNSNames:            []string{containerName, containerID[:12]},
 	}
 }
 

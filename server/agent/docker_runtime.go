@@ -37,11 +37,14 @@ var (
 type dockerRuntimeConfig struct {
 	srvconfig.DockerConfig
 	ServerURL   string
+	ImageID     string
 	ImageConfig *containertypes.Config
 }
 
 type dockerRuntimeSpec struct {
 	ContainerName   string
+	NetworkName     string
+	ImageID         string
 	ProjectVolume   volume.CreateOptions
 	TaskVolume      volume.CreateOptions
 	ContainerConfig *containertypes.Config
@@ -52,6 +55,7 @@ type dockerRuntimeSpec struct {
 func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecution, task *model.Task) dockerRuntimeSpec {
 	pidsLimit := cfg.PidsLimit
 	memoryBytes := cfg.MemoryMB * 1024 * 1024
+	networkName := strings.TrimSpace(cfg.Network)
 	useDockerInit := false
 	oomKillDisable := false
 	containerConfig := dockerContainerConfigFromImage(cfg.ImageConfig)
@@ -89,11 +93,13 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 	}
 	return dockerRuntimeSpec{
 		ContainerName:   dockerRuntimeContainerName(executionID(execution)),
+		NetworkName:     networkName,
+		ImageID:         cfg.ImageID,
 		ProjectVolume:   projectVolume,
 		TaskVolume:      taskVolume,
 		ContainerConfig: containerConfig,
 		HostConfig: &containertypes.HostConfig{
-			NetworkMode:  containertypes.NetworkMode(cfg.Network),
+			NetworkMode:  containertypes.NetworkMode(networkName),
 			LogConfig:    dockerRuntimeLogConfig(),
 			IpcMode:      containertypes.IPCModePrivate,
 			CgroupnsMode: containertypes.CgroupnsModePrivate,
@@ -188,6 +194,7 @@ func verifyDockerContainer(existing containertypes.InspectResponse, desired dock
 		{name: "name", equal: strings.TrimPrefix(existing.Name, "/") == desired.ContainerName},
 		{name: "labels", equal: dockerOwnershipLabelsEqual(existing.Config.Labels, desired.ContainerConfig.Labels)},
 		{name: "image", equal: existing.Config.Image == desired.ContainerConfig.Image},
+		{name: "resolved image ID", equal: strings.TrimSpace(desired.ImageID) != "" && existing.Image == desired.ImageID},
 		{name: "user", equal: existing.Config.User == desired.ContainerConfig.User},
 		{name: "hostname", equal: dockerHostnameEqual(existing.Config.Hostname, existing.ID, desired.ContainerConfig.Hostname)},
 		{name: "domain name", equal: existing.Config.Domainname == desired.ContainerConfig.Domainname},
@@ -212,6 +219,7 @@ func verifyDockerContainer(existing containertypes.InspectResponse, desired dock
 		{name: "binds", equal: slices.Equal(existing.HostConfig.Binds, desired.HostConfig.Binds)},
 		{name: "volumes-from", equal: slices.Equal(existing.HostConfig.VolumesFrom, desired.HostConfig.VolumesFrom)},
 		{name: "network", equal: existing.HostConfig.NetworkMode == desired.HostConfig.NetworkMode},
+		{name: "network attachments", equal: dockerNetworkSettingsEqual(existing.NetworkSettings, desired.NetworkName, desired.ContainerName, existing.ID)},
 		{name: "log configuration", equal: dockerLogConfigEqual(existing.HostConfig.LogConfig, desired.HostConfig.LogConfig)},
 		{name: "init process", equal: equalBoolPointer(existing.HostConfig.Init, desired.HostConfig.Init)},
 		{name: "isolation", equal: existing.HostConfig.Isolation == desired.HostConfig.Isolation},
@@ -332,6 +340,20 @@ func dockerSecurityOptionsEqual(existing, desired []string) bool {
 		return result
 	}
 	return slices.Equal(normalize(existing), normalize(desired))
+}
+
+func dockerNetworkSettingsEqual(existing *containertypes.NetworkSettings, networkName, containerName, containerID string) bool {
+	if existing == nil || networkName == "" || len(containerID) < 12 || len(existing.Networks) != 1 {
+		return false
+	}
+	endpoint, ok := existing.Networks[networkName]
+	if !ok || endpoint == nil {
+		return false
+	}
+	if endpoint.IPAMConfig != nil || len(endpoint.Links) != 0 || len(endpoint.Aliases) != 0 || len(endpoint.DriverOpts) != 0 || endpoint.GwPriority != 0 {
+		return false
+	}
+	return slices.Equal(endpoint.DNSNames, []string{containerName, containerID[:12]})
 }
 
 func dockerContainsAll(existing, required []string) bool {
