@@ -1380,6 +1380,9 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	if clone.InputSourceTaskID != src.ID {
 		t.Fatalf("clone input source = %q, want %q", clone.InputSourceTaskID, src.ID)
 	}
+	if clone.InputSourceProjectID != src.ProjectID {
+		t.Fatalf("clone input source project = %q, want %q", clone.InputSourceProjectID, src.ProjectID)
+	}
 	cloneAttachments := clone.InputAttachments.Data()
 	if len(cloneAttachments) != 1 || cloneAttachments[0].Role != "brief" || cloneAttachments[0].Text != "original input" {
 		t.Fatalf("clone attachments = %#v, want only original task inputs", cloneAttachments)
@@ -1402,13 +1405,14 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	src := &model.Task{
-		ID:                uuid.NewString(),
-		UserID:            userID,
-		ProjectID:         projectID,
-		Type:              model.PlatformArticle,
-		Status:            model.TaskStatusCompleted,
-		Prompt:            "clone lineage",
-		InputSourceTaskID: "root-task-id",
+		ID:                   uuid.NewString(),
+		UserID:               userID,
+		ProjectID:            projectID,
+		Type:                 model.PlatformArticle,
+		Status:               model.TaskStatusCompleted,
+		Prompt:               "clone lineage",
+		InputSourceTaskID:    "root-task-id",
+		InputSourceProjectID: "root-project-id",
 	}
 	if err := repo.Tasks().Create(ctx, src); err != nil {
 		t.Fatal(err)
@@ -1420,6 +1424,9 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	}
 	if clone.InputSourceTaskID != "root-task-id" {
 		t.Fatalf("clone input source = %q, want root-task-id", clone.InputSourceTaskID)
+	}
+	if clone.InputSourceProjectID != "root-project-id" {
+		t.Fatalf("clone input source project = %q, want root-project-id", clone.InputSourceProjectID)
 	}
 }
 

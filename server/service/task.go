@@ -378,6 +378,9 @@ type CreateManualParams struct {
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
+	// InputSourceProjectID is the project that owns InputSourceTaskID. It is
+	// internal clone provenance and must be persisted with the source task ID.
+	InputSourceProjectID string
 	// Overrides is deprecated. New Studio/API flows do not set task-level style
 	// overrides; runtime style/account config comes from ProjectSnapshot.
 	Overrides *model.StyleOverrides
@@ -628,6 +631,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ImageModelKey:            effectiveImageModelKey,
 			ReferenceImageAssetID:    p.ReferenceImageAssetID,
 			InputSourceTaskID:        p.InputSourceTaskID,
+			InputSourceProjectID:     p.InputSourceProjectID,
 			SkipReferenceImage:       p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:                p.Watermark != nil && *p.Watermark,
 			Goal:                     p.Goal,

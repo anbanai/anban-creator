@@ -48,6 +48,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	if inputSourceTaskID == "" {
 		inputSourceTaskID = src.ID
 	}
+	inputSourceProjectID := src.InputSourceProjectID
+	if inputSourceProjectID == "" {
+		inputSourceProjectID = src.ProjectID
+	}
 	prompt := src.Prompt
 	if cloneParams.Prompt != nil {
 		prompt = strings.TrimSpace(*cloneParams.Prompt)
@@ -68,6 +72,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		SkipRefImage:             &skipRef,
 		ReferenceImageAssetID:    src.ReferenceImageAssetID,
 		InputSourceTaskID:        inputSourceTaskID,
+		InputSourceProjectID:     inputSourceProjectID,
 		Overrides:                &overrides,
 		ProjectSnapshot:          &snapshot,
 		Watermark:                &watermark,

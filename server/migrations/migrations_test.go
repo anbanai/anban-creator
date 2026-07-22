@@ -107,3 +107,40 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestCloneInputSourceProjectMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260722_clone_input_source_project.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	required := []string{
+		"ALTER TABLE `tasks`",
+		"ADD COLUMN `input_source_project_id` char(36) NOT NULL DEFAULT ''",
+		"ADD KEY `idx_tasks_input_source_project_id` (`input_source_project_id`)",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("migration SQL missing %q", fragment)
+		}
+	}
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open schema parser: %v", err)
+	}
+	stmt := &gorm.Statement{DB: db}
+	if err := stmt.Parse(&model.Task{}); err != nil {
+		t.Fatalf("parse task schema: %v", err)
+	}
+	field := stmt.Schema.LookUpField("InputSourceProjectID")
+	if field == nil || field.DBName != "input_source_project_id" {
+		t.Fatalf("clone source project field = %#v, want input_source_project_id", field)
+	}
+	for _, index := range stmt.Schema.ParseIndexes() {
+		if index.Name == "idx_tasks_input_source_project_id" {
+			return
+		}
+	}
+	t.Fatal("task schema missing idx_tasks_input_source_project_id")
+}
