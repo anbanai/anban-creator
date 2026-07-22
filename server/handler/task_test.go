@@ -884,6 +884,145 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	}
 }
 
+func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "inherited-reference@example.com", Password: "hashed", InviteCode: "inheritedreference", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	inherited := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeProjectReference, "inherited.png", "image/png")
+	unrelated := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeProjectReference, "unrelated.png", "image/png")
+	foreign := cutoverAsset(uuid.NewString(), uuid.NewString(), service.DirectUploadPurposeProjectReference, "foreign.png", "image/png")
+	for _, asset := range []*model.Asset{inherited, unrelated, foreign} {
+		if err := repo.Assets().Create(ctx, asset); err != nil {
+			t.Fatalf("create asset %q: %v", asset.ID, err)
+		}
+	}
+
+	sourceProject := &model.Project{
+		ID:                    uuid.NewString(),
+		UserID:                userID,
+		Platform:              model.PlatformArticle,
+		Name:                  "source",
+		Status:                model.ProjectStatusActive,
+		ReferenceImageAssetID: inherited.ID,
+	}
+	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "destination", Status: model.ProjectStatusActive}
+	for _, project := range []*model.Project{sourceProject, destinationProject} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+	}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, Status: model.TaskStatusCompleted, Prompt: "source prompt"}
+	source.SetProjectSnapshot(model.SnapshotProject(sourceProject))
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceSvc)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	h.SetReferenceAssetService(referenceSvc)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+
+	view, err := h.presentTaskReference(ctx, userID, source)
+	if err != nil || view == nil || view.AssetID != inherited.ID {
+		t.Fatalf("effective source reference = %#v, %v", view, err)
+	}
+	cloneBody := func(assetID string) string {
+		return `{"project_id":"` + destinationProject.ID + `","quantity":1,"prompt":"editable clone","reference_image":{"asset_id":"` + assetID + `"}}`
+	}
+	taskCount := func() int {
+		tasks, err := repo.Tasks().FindByUserID(ctx, userID, "", "", 0, 20)
+		if err != nil {
+			t.Fatalf("find tasks: %v", err)
+		}
+		return len(tasks)
+	}
+
+	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", cloneBody(inherited.ID))
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("trusted inherited clone status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	var firstEnvelope struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&firstEnvelope); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode first clone: %v", err)
+	}
+	resp.Body.Close()
+	if firstEnvelope.Data.ReferenceImage == nil || firstEnvelope.Data.ReferenceImage.AssetID != inherited.ID {
+		t.Fatalf("first clone reference view = %#v, want %q", firstEnvelope.Data.ReferenceImage, inherited.ID)
+	}
+
+	firstClone, err := repo.Tasks().FindByID(ctx, firstEnvelope.Data.ID)
+	if err != nil {
+		t.Fatalf("find first clone: %v", err)
+	}
+	if firstClone.ReferenceImageAssetID != inherited.ID {
+		t.Fatalf("first persisted clone reference = %q, want %q", firstClone.ReferenceImageAssetID, inherited.ID)
+	}
+	firstClone.Status = model.TaskStatusCompleted
+	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
+		t.Fatalf("complete first clone: %v", err)
+	}
+	resp = postJSON(t, app, "/tasks/"+firstClone.ID+"/clone", cloneBody(inherited.ID))
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("clone-of-clone status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+	if taskCount() != 3 {
+		t.Fatalf("task count after clone-of-clone = %d, want 3", taskCount())
+	}
+
+	for _, test := range []struct {
+		name       string
+		assetID    string
+		wantStatus int
+	}{
+		{name: "unrelated same-user project reference", assetID: unrelated.ID, wantStatus: fiber.StatusBadRequest},
+		{name: "foreign project reference", assetID: foreign.ID, wantStatus: fiber.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := taskCount()
+			resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", cloneBody(test.assetID))
+			defer resp.Body.Close()
+			if resp.StatusCode != test.wantStatus {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want %d body=%s", resp.StatusCode, test.wantStatus, body)
+			}
+			if got := taskCount(); got != before {
+				t.Fatalf("task count after rejected clone = %d, want %d", got, before)
+			}
+		})
+	}
+
+	beforeCreate := taskCount()
+	resp = postJSON(t, app, "/tasks", cloneBody(inherited.ID))
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create project reference status = %d, want 400 body=%s", resp.StatusCode, body)
+	}
+	if got := taskCount(); got != beforeCreate {
+		t.Fatalf("task count after rejected create = %d, want %d", got, beforeCreate)
+	}
+}
+
 func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 	tests := []struct {
 		name       string

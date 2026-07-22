@@ -1519,6 +1519,63 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 	}
 }
 
+func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	destinationProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	inherited := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      userID,
+		Purpose:     DirectUploadPurposeProjectReference,
+		StorageKey:  "assets/users/" + userID + "/reference/inherited.png",
+		FileName:    "inherited.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "inherited-etag",
+	}
+	unrelated := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      userID,
+		Purpose:     DirectUploadPurposeProjectReference,
+		StorageKey:  "assets/users/" + userID + "/reference/unrelated.png",
+		FileName:    "unrelated.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "unrelated-etag",
+	}
+	for _, asset := range []*model.Asset{inherited, unrelated} {
+		seedReferenceAsset(t, repo, asset)
+	}
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	source.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: inherited.ID})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	if _, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID: userID, ProjectID: destinationProjectID, Quantity: 1, ReferenceImageAssetID: inherited.ID,
+	}); !errors.Is(err, ErrReferenceAssetPurposeMismatch) {
+		t.Fatalf("direct CreateManual error = %v, want ErrReferenceAssetPurposeMismatch", err)
+	}
+
+	clone := func(assetID string) ([]*model.Task, error) {
+		return svc.Clone(ctx, source.ID, CloneTaskParams{Overrides: &CloneTaskOverrides{
+			ProjectID: destinationProjectID, Quantity: 1, ReferenceImageAssetID: assetID,
+		}})
+	}
+	clones, err := clone(inherited.ID)
+	if err != nil || len(clones) != 1 || clones[0].ReferenceImageAssetID != inherited.ID {
+		t.Fatalf("trusted inherited clone = %#v, %v", clones, err)
+	}
+	if _, err := clone(unrelated.ID); !errors.Is(err, ErrReferenceAssetPurposeMismatch) {
+		t.Fatalf("unrelated project reference clone error = %v, want ErrReferenceAssetPurposeMismatch", err)
+	}
+}
+
 func TestTaskService_CloneAppliesTypeSpecificEditableOverrides(t *testing.T) {
 	tests := []struct {
 		name     string

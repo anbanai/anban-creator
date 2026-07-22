@@ -275,6 +275,19 @@ func trustedTaskCreationSource(source *model.Task) taskScopedCreationInput {
 	return taskScopedCreationInput{userID: source.UserID, projectID: projectID, taskID: taskID}
 }
 
+func taskCreationReferencePurposes(source *model.Task, selection service.ReferenceImageSelection) []string {
+	allowed := []string{service.DirectUploadPurposeTaskReference}
+	assetID := strings.TrimSpace(selection.AssetID)
+	if source == nil || assetID == "" {
+		return allowed
+	}
+	if assetID == strings.TrimSpace(source.ReferenceImageAssetID) ||
+		assetID == strings.TrimSpace(source.ProjectSnapshot.Data().ReferenceImageAssetID) {
+		return append(allowed, service.DirectUploadPurposeProjectReference)
+	}
+	return allowed
+}
+
 func normalizeTrustedTaskAttachmentReuse(store storage.Provider, source *model.Task, attachment model.EntryAttachment) (model.EntryAttachment, error) {
 	trusted := trustedTaskCreationSource(source)
 	parsedKey, err := parseTaskScopedCreationInput(store, attachment.Key, true)
@@ -413,12 +426,13 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		if h.referenceAssets == nil {
 			return nil, respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
 		}
-		resolved, err := h.referenceAssets.ResolveSelection(c.Context(), userID, *req.ReferenceImage, []string{service.DirectUploadPurposeTaskReference})
+		allowed := taskCreationReferencePurposes(source, *req.ReferenceImage)
+		resolved, err := h.referenceAssets.ResolveSelection(c.Context(), userID, *req.ReferenceImage, allowed)
 		if err != nil {
 			return nil, respondReferenceAssetError(c, h.logger, err)
 		}
 		referenceAssetID = resolved
-		referenceView, err = h.referenceAssets.Present(c.Context(), userID, resolved, []string{service.DirectUploadPurposeTaskReference})
+		referenceView, err = h.referenceAssets.Present(c.Context(), userID, resolved, allowed)
 		if err != nil {
 			return nil, respondReferenceAssetError(c, h.logger, err)
 		}

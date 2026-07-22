@@ -60,27 +60,28 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	if cloneParams.Overrides != nil {
 		override := cloneParams.Overrides
 		params := CreateManualParams{
-			UserID:                   src.UserID,
-			ProjectID:                override.ProjectID,
-			Prompt:                   override.Prompt,
-			Quantity:                 override.Quantity,
-			ImageRatio:               override.ImageRatio,
-			ImageModelKey:            override.ImageModelKey,
-			SkipRefImage:             override.SkipRefImage,
-			ReferenceImageAssetID:    override.ReferenceImageAssetID,
-			InputSourceTaskID:        inputSourceTaskID,
-			InputSourceProjectID:     inputSourceProjectID,
-			InputAttachments:         cloneEntryAttachments(override.InputAttachments),
-			Watermark:                override.Watermark,
-			Goal:                     override.Goal,
-			GoalMode:                 override.GoalMode,
-			HasContentImage:          override.HasContentImage,
-			HasTailImage:             override.HasTailImage,
-			ArticleWithCover:         override.ArticleWithCover,
-			ArticleWithContentImages: override.ArticleWithContentImages,
-			Ecommerce:                override.Ecommerce,
-			MontageInput:             override.MontageInput,
-			ExecutionTarget:          override.ExecutionTarget,
+			UserID:                     src.UserID,
+			ProjectID:                  override.ProjectID,
+			Prompt:                     override.Prompt,
+			Quantity:                   override.Quantity,
+			ImageRatio:                 override.ImageRatio,
+			ImageModelKey:              override.ImageModelKey,
+			SkipRefImage:               override.SkipRefImage,
+			ReferenceImageAssetID:      override.ReferenceImageAssetID,
+			allowProjectReferenceAsset: trustedCloneProjectReferenceAsset(src, override.ReferenceImageAssetID),
+			InputSourceTaskID:          inputSourceTaskID,
+			InputSourceProjectID:       inputSourceProjectID,
+			InputAttachments:           cloneEntryAttachments(override.InputAttachments),
+			Watermark:                  override.Watermark,
+			Goal:                       override.Goal,
+			GoalMode:                   override.GoalMode,
+			HasContentImage:            override.HasContentImage,
+			HasTailImage:               override.HasTailImage,
+			ArticleWithCover:           override.ArticleWithCover,
+			ArticleWithContentImages:   override.ArticleWithContentImages,
+			Ecommerce:                  override.Ecommerce,
+			MontageInput:               override.MontageInput,
+			ExecutionTarget:            override.ExecutionTarget,
 		}
 		tasks, err := s.CreateManual(ctx, params)
 		if err != nil {
@@ -173,6 +174,15 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
 	return tasks, nil
+}
+
+func trustedCloneProjectReferenceAsset(source *model.Task, assetID string) bool {
+	assetID = strings.TrimSpace(assetID)
+	if source == nil || assetID == "" {
+		return false
+	}
+	return assetID == strings.TrimSpace(source.ReferenceImageAssetID) ||
+		assetID == strings.TrimSpace(source.ProjectSnapshot.Data().ReferenceImageAssetID)
 }
 
 // ResolveCloneInputSource returns the trusted root task/project pair whose

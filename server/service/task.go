@@ -378,6 +378,9 @@ type CreateManualParams struct {
 	ImageModelKey         string
 	SkipRefImage          *bool
 	ReferenceImageAssetID string
+	// allowProjectReferenceAsset is set only by Clone after it derives a trusted
+	// match from the persisted source task. Create and plan paths keep it false.
+	allowProjectReferenceAsset bool
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
@@ -456,12 +459,16 @@ func validateTaskCreationProject(project *model.Project, userID, projectID strin
 	return nil
 }
 
-func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot) error {
+func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot, allowProjectReferenceAsset bool) error {
+	taskAssetPurposes := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
+	if allowProjectReferenceAsset {
+		taskAssetPurposes = append(taskAssetPurposes, DirectUploadPurposeProjectReference)
+	}
 	checks := []struct {
 		assetID string
 		allowed []string
 	}{
-		{assetID: taskAssetID, allowed: []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}},
+		{assetID: taskAssetID, allowed: taskAssetPurposes},
 	}
 	if snapshot != nil {
 		checks = append(checks, struct {
@@ -514,7 +521,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
-	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
+	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot, p.allowProjectReferenceAsset); err != nil {
 		return nil, err
 	}
 
@@ -816,7 +823,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		project = found
 		taskType = found.Platform
 	}
-	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil); err != nil {
+	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil, false); err != nil {
 		return nil, err
 	}
 	var planMontageInput *model.MontageInput
