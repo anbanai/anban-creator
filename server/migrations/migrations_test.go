@@ -107,3 +107,28 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeDispatchIdentityMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260722_runtime_dispatch_identity.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	required := []string{
+		"CHANGE COLUMN `namespace` `runtime_scope` varchar(63)",
+		"CHANGE COLUMN `job_name` `runtime_workload` varchar(63)",
+		"CHANGE COLUMN `pod_uid` `runtime_instance_id` varchar(64)",
+		"DROP INDEX `idx_task_executions_job_name`",
+		"ADD INDEX `idx_task_executions_runtime_workload` (`runtime_workload`)",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("migration SQL missing %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{"IF EXISTS", "IF NOT EXISTS", "ADD COLUMN", "UPDATE `task_executions`"} {
+		if strings.Contains(strings.ToUpper(sql), strings.ToUpper(forbidden)) {
+			t.Errorf("migration SQL contains compatibility fragment %q", forbidden)
+		}
+	}
+}

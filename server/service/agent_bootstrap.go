@@ -118,7 +118,7 @@ func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *servera
 			return err
 		}
 		if execution.Status == model.TaskExecutionStarting {
-			won, err := tx.TaskExecutions().Transition(ctx, execution.ID, []string{model.TaskExecutionStarting}, model.TaskExecutionRunning, model.ExecutionTransition{Started: true, PodUID: identity.PodUID})
+			won, err := tx.TaskExecutions().Transition(ctx, execution.ID, []string{model.TaskExecutionStarting}, model.TaskExecutionRunning, model.ExecutionTransition{Started: true, RuntimeInstanceID: identity.PodUID})
 			if err != nil {
 				return err
 			}
@@ -157,7 +157,7 @@ func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo reposi
 	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID || execution.TaskID != identity.TaskID || task.ID != identity.TaskID || task.ProjectID != identity.ProjectID || task.UserID != identity.UserID || project.ID != identity.ProjectID || project.UserID != identity.UserID || user.ID != identity.UserID {
 		return nil, nil, nil, fmt.Errorf("%w: workload identity does not match current task execution ownership", ErrAgentBootstrapConflict)
 	}
-	if execution.Target != "kubernetes" || execution.Namespace != identity.Namespace || execution.JobName != identity.JobName {
+	if execution.Target != "kubernetes" || execution.RuntimeScope != identity.Namespace || execution.RuntimeWorkload != identity.JobName {
 		return nil, nil, nil, fmt.Errorf("%w: workload Kubernetes runtime identity mismatch", ErrAgentBootstrapConflict)
 	}
 	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
@@ -165,11 +165,11 @@ func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo reposi
 	}
 	switch execution.Status {
 	case model.TaskExecutionStarting:
-		if execution.PodUID != "" && execution.PodUID != identity.PodUID {
+		if execution.RuntimeInstanceID != "" && execution.RuntimeInstanceID != identity.PodUID {
 			return nil, nil, nil, fmt.Errorf("%w: execution is bound to another Pod", ErrAgentBootstrapConflict)
 		}
 	case model.TaskExecutionRunning:
-		if !execution.Started || execution.PodUID == "" || execution.PodUID != identity.PodUID {
+		if !execution.Started || execution.RuntimeInstanceID == "" || execution.RuntimeInstanceID != identity.PodUID {
 			return nil, nil, nil, fmt.Errorf("%w: running execution is bound to another Pod", ErrAgentBootstrapConflict)
 		}
 	default:

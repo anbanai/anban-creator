@@ -126,7 +126,10 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 	if runtimeIdentity == nil || strings.TrimSpace(runtimeIdentity.Namespace) == "" || strings.TrimSpace(runtimeIdentity.JobName) == "" {
 		return fmt.Errorf("Kubernetes dispatcher returned incomplete runtime identity")
 	}
-	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token, runtimeIdentity.Namespace, runtimeIdentity.JobName)
+	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token, model.RuntimeIdentity{
+		Scope:    runtimeIdentity.Namespace,
+		Workload: runtimeIdentity.JobName,
+	})
 	if err != nil {
 		return fmt.Errorf("mark Kubernetes execution starting: %w", err)
 	}

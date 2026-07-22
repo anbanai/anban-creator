@@ -428,7 +428,7 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, PodUID: "pod-1"}); err != nil {
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, RuntimeInstanceID: "pod-1"}); err != nil {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)

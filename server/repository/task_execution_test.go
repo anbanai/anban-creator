@@ -48,7 +48,7 @@ func TestTaskExecutionRepositoryTransitionIsCAS(t *testing.T) {
 
 	won, err := repo.TaskExecutions().Transition(context.Background(), execution.ID,
 		[]string{model.TaskExecutionStarting}, model.TaskExecutionRunning,
-		model.ExecutionTransition{Started: true, PodUID: "pod-1"})
+		model.ExecutionTransition{Started: true, RuntimeInstanceID: "pod-1"})
 	if err != nil || !won {
 		t.Fatalf("first transition = %v, %v", won, err)
 	}
@@ -64,7 +64,7 @@ func TestTaskExecutionRepositoryTransitionIsCAS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find transitioned execution: %v", err)
 	}
-	if found.Status != model.TaskExecutionRunning || !found.Started || found.StartedAt == nil || found.PodUID != "pod-1" {
+	if found.Status != model.TaskExecutionRunning || !found.Started || found.StartedAt == nil || found.RuntimeInstanceID != "pod-1" {
 		t.Fatalf("transitioned execution = %+v", found)
 	}
 	if found.CompletedAt != nil || found.TerminalReason != "" {
@@ -149,7 +149,7 @@ func TestTaskExecutionRepositoryRuntimeAndReconciliation(t *testing.T) {
 		t.Fatalf("age executions: %v", err)
 	}
 
-	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, refreshed.ID, "agent-system", "agent-job-1", "pod-1"); err != nil {
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, refreshed.ID, model.RuntimeIdentity{Scope: "agent-system", Workload: "agent-job-1", InstanceID: "pod-1"}); err != nil {
 		t.Fatalf("set runtime identity: %v", err)
 	}
 	heartbeat := time.Now().UTC().Truncate(time.Millisecond)
@@ -160,7 +160,7 @@ func TestTaskExecutionRepositoryRuntimeAndReconciliation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find execution: %v", err)
 	}
-	if found.Namespace != "agent-system" || found.JobName != "agent-job-1" || found.PodUID != "pod-1" {
+	if found.RuntimeScope != "agent-system" || found.RuntimeWorkload != "agent-job-1" || found.RuntimeInstanceID != "pod-1" {
 		t.Fatalf("runtime identity = %+v", found)
 	}
 	if found.LastHeartbeatAt == nil || !found.LastHeartbeatAt.Equal(heartbeat) {
@@ -182,10 +182,10 @@ func TestTaskExecutionRepositoryRuntimeIdentityPreservesExistingValues(t *testin
 	ctx := context.Background()
 	execution := seedTaskExecution(t, repo, model.TaskExecutionStarting)
 
-	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, "agent-system", "agent-job-1", "pod-1"); err != nil {
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, model.RuntimeIdentity{Scope: "agent-system", Workload: "agent-job-1", InstanceID: "pod-1"}); err != nil {
 		t.Fatalf("set full runtime identity: %v", err)
 	}
-	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, "", "agent-job-2", ""); err != nil {
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, model.RuntimeIdentity{Workload: "agent-job-2"}); err != nil {
 		t.Fatalf("set partial runtime identity: %v", err)
 	}
 
@@ -193,9 +193,9 @@ func TestTaskExecutionRepositoryRuntimeIdentityPreservesExistingValues(t *testin
 	if err != nil {
 		t.Fatalf("find execution: %v", err)
 	}
-	if found.Namespace != "agent-system" || found.JobName != "agent-job-2" || found.PodUID != "pod-1" {
+	if found.RuntimeScope != "agent-system" || found.RuntimeWorkload != "agent-job-2" || found.RuntimeInstanceID != "pod-1" {
 		t.Fatalf("runtime identity = (%q, %q, %q), want (%q, %q, %q)",
-			found.Namespace, found.JobName, found.PodUID,
+			found.RuntimeScope, found.RuntimeWorkload, found.RuntimeInstanceID,
 			"agent-system", "agent-job-2", "pod-1")
 	}
 }
@@ -336,11 +336,12 @@ func TestTaskExecutionDispatchClaimLeaseIsTokenGuarded(t *testing.T) {
 	if err != nil || won {
 		t.Fatalf("stale owner abandonment = %v, %v", won, err)
 	}
-	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-1", "stale-namespace", "stale-job")
+	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-1", model.RuntimeIdentity{Scope: "stale-namespace", Workload: "stale-job"})
 	if err != nil || won {
 		t.Fatalf("stale owner completion = %v, %v", won, err)
 	}
-	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-2", "anban", "agent-job-1")
+	identity := model.RuntimeIdentity{Scope: "docker", Workload: "creator-agent-exec-1"}
+	won, err = repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-2", identity)
 	if err != nil || !won {
 		t.Fatalf("current owner completion = %v, %v", won, err)
 	}
@@ -348,7 +349,7 @@ func TestTaskExecutionDispatchClaimLeaseIsTokenGuarded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find completed dispatch: %v", err)
 	}
-	if found.Status != model.TaskExecutionStarting || found.DispatchClaimToken != "" || found.DispatchClaimedAt != nil || found.Namespace != "anban" || found.JobName != "agent-job-1" {
+	if found.Status != model.TaskExecutionStarting || found.DispatchClaimToken != "" || found.DispatchClaimedAt != nil || found.RuntimeScope != identity.Scope || found.RuntimeWorkload != identity.Workload {
 		t.Fatalf("completed dispatch = %+v", found)
 	}
 }

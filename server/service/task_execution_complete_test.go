@@ -762,7 +762,7 @@ func TestBootstrapStartedBoundaryPreventsPreStartReplacement(t *testing.T) {
 	svc.SetKubernetesDispatcher(dispatcher)
 	if won, err := repo.TaskExecutions().Transition(context.Background(), execution.ID,
 		[]string{model.TaskExecutionStarting}, model.TaskExecutionRunning,
-		model.ExecutionTransition{Started: true, PodUID: "pod-1"}); err != nil || !won {
+		model.ExecutionTransition{Started: true, RuntimeInstanceID: "pod-1"}); err != nil || !won {
 		t.Fatalf("mark bootstrap started: won=%v err=%v", won, err)
 	}
 	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "job_failed", nil, 1); err != nil {

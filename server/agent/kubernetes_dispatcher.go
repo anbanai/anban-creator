@@ -315,11 +315,11 @@ func (d *kubernetesJobDispatcher) validate(execution *model.TaskExecution) error
 		return fmt.Errorf("execution is required")
 	}
 	deterministicName := kubernetesJobName(execution.ID)
-	if execution.JobName != "" && execution.JobName != deterministicName {
-		return fmt.Errorf("execution Job identity mismatch: name is %q, want %q", execution.JobName, deterministicName)
+	if execution.RuntimeWorkload != "" && execution.RuntimeWorkload != deterministicName {
+		return fmt.Errorf("execution workload identity mismatch: name is %q, want %q", execution.RuntimeWorkload, deterministicName)
 	}
-	if execution.Namespace != "" && execution.Namespace != d.config.Namespace {
-		return fmt.Errorf("execution namespace identity mismatch: namespace is %q, want %q", execution.Namespace, d.config.Namespace)
+	if execution.RuntimeScope != "" && execution.RuntimeScope != d.config.Namespace {
+		return fmt.Errorf("execution runtime scope identity mismatch: scope is %q, want %q", execution.RuntimeScope, d.config.Namespace)
 	}
 	return nil
 }

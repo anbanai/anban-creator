@@ -17,7 +17,7 @@ import (
 
 type KubernetesReconcileService interface {
 	FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error)
-	RecordExecutionPod(context.Context, string, string) error
+	RecordExecutionInstance(context.Context, string, string) error
 	ResumeExecutionDispatch(context.Context, string) error
 	ResumeExecutionFinalization(context.Context, string) error
 	ReconcileExecutionFailure(context.Context, string, string, string, []byte, int) error
@@ -141,7 +141,7 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 		return err
 	}
 	if state.PodUID != "" {
-		if err := r.service.RecordExecutionPod(ctx, execution.ID, state.PodUID); err != nil {
+		if err := r.service.RecordExecutionInstance(ctx, execution.ID, state.PodUID); err != nil {
 			return err
 		}
 	}

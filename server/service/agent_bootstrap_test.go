@@ -324,7 +324,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 		t.Fatal(err)
 	}
 	resumeSessionID := uuid.NewString()
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, ResumeSessionID: resumeSessionID, Target: "kubernetes", Status: model.TaskExecutionStarting, Namespace: "anban", JobName: "job-1"}); err != nil {
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, ResumeSessionID: resumeSessionID, Target: "kubernetes", Status: model.TaskExecutionStarting, RuntimeScope: "anban", RuntimeWorkload: "job-1"}); err != nil {
 		t.Fatal(err)
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
@@ -397,7 +397,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 		t.Fatalf("retry claims = %#v", retryClaims)
 	}
 	found, _ := repo.TaskExecutions().FindByID(ctx, executionID)
-	if found.Status != model.TaskExecutionRunning || !found.Started || found.PodUID != "pod-uid-1" || found.StartedAt == nil || found.LastHeartbeatAt == nil {
+	if found.Status != model.TaskExecutionRunning || !found.Started || found.RuntimeInstanceID != "pod-uid-1" || found.StartedAt == nil || found.LastHeartbeatAt == nil {
 		t.Fatalf("execution = %#v", found)
 	}
 	if _, err := svc.Bootstrap(ctx, &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-2", PodUID: "pod-uid-2", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID}); err == nil {

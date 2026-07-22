@@ -20,7 +20,7 @@ func (s *TaskService) FindReconcilableExecutions(ctx context.Context, before tim
 	return s.repo.TaskExecutions().FindReconcilable(ctx, before, limit)
 }
 
-func (s *TaskService) RecordExecutionPod(ctx context.Context, executionID, podUID string) error {
+func (s *TaskService) RecordExecutionInstance(ctx context.Context, executionID, instanceID string) error {
 	execution, _, err := s.currentExecution(ctx, executionID)
 	if err != nil {
 		return err
@@ -28,13 +28,13 @@ func (s *TaskService) RecordExecutionPod(ctx context.Context, executionID, podUI
 	if isTerminalExecution(execution.Status) {
 		return nil
 	}
-	if podUID != "" && execution.PodUID != "" && execution.PodUID != podUID {
-		return fmt.Errorf("execution pod identity changed from %s to %s", execution.PodUID, podUID)
+	if instanceID != "" && execution.RuntimeInstanceID != "" && execution.RuntimeInstanceID != instanceID {
+		return fmt.Errorf("execution runtime instance identity changed from %s to %s", execution.RuntimeInstanceID, instanceID)
 	}
-	if podUID == "" || execution.PodUID == podUID {
+	if instanceID == "" || execution.RuntimeInstanceID == instanceID {
 		return nil
 	}
-	return s.repo.TaskExecutions().SetRuntimeIdentity(ctx, executionID, "", "", podUID)
+	return s.repo.TaskExecutions().SetRuntimeIdentity(ctx, executionID, model.RuntimeIdentity{InstanceID: instanceID})
 }
 
 func (s *TaskService) ResumeExecutionDispatch(ctx context.Context, executionID string) error {
@@ -149,7 +149,7 @@ func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.
 			RuntimeImage:   current.RuntimeImage,
 			Target:         current.Target,
 			Status:         model.TaskExecutionCreated,
-			Namespace:      current.Namespace,
+			RuntimeScope:   current.RuntimeScope,
 		}
 		if err := txRepo.TaskExecutions().Create(ctx, replacement); err != nil {
 			return err

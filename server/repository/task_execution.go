@@ -97,7 +97,7 @@ func (r *taskExecutionRepository) AbandonDispatch(ctx context.Context, id, token
 	return result.RowsAffected > 0, nil
 }
 
-func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token, namespace, jobName string) (bool, error) {
+func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error) {
 	result := r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
 		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token).
@@ -105,8 +105,9 @@ func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, toke
 			"status":               model.TaskExecutionStarting,
 			"dispatch_claim_token": "",
 			"dispatch_claimed_at":  nil,
-			"namespace":            namespace,
-			"job_name":             jobName,
+			"runtime_scope":        identity.Scope,
+			"runtime_workload":     identity.Workload,
+			"runtime_instance_id":  identity.InstanceID,
 		})
 	if result.Error != nil {
 		return false, result.Error
@@ -175,16 +176,16 @@ func (r *taskExecutionRepository) FindReconcilable(ctx context.Context, before t
 	return executions, err
 }
 
-func (r *taskExecutionRepository) SetRuntimeIdentity(ctx context.Context, id, namespace, jobName, podUID string) error {
+func (r *taskExecutionRepository) SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error {
 	updates := make(map[string]any, 3)
-	if namespace != "" {
-		updates["namespace"] = namespace
+	if identity.Scope != "" {
+		updates["runtime_scope"] = identity.Scope
 	}
-	if jobName != "" {
-		updates["job_name"] = jobName
+	if identity.Workload != "" {
+		updates["runtime_workload"] = identity.Workload
 	}
-	if podUID != "" {
-		updates["pod_uid"] = podUID
+	if identity.InstanceID != "" {
+		updates["runtime_instance_id"] = identity.InstanceID
 	}
 	if len(updates) == 0 {
 		return nil
@@ -216,8 +217,8 @@ func (r *taskExecutionRepository) Transition(
 		updates["started"] = true
 		updates["started_at"] = now
 	}
-	if change.PodUID != "" {
-		updates["pod_uid"] = change.PodUID
+	if change.RuntimeInstanceID != "" {
+		updates["runtime_instance_id"] = change.RuntimeInstanceID
 	}
 	if change.ManifestStatus != "" {
 		updates["manifest_status"] = change.ManifestStatus

@@ -292,8 +292,8 @@ func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterJobAccepted(t *testing
 	if current.Attempt != 1 || current.Target != "kubernetes" || current.Status != model.TaskExecutionStarting {
 		t.Fatalf("current execution = %+v", current)
 	}
-	if current.Namespace != "anban" || current.JobName != "job-"+current.ID {
-		t.Fatalf("runtime identity = %q/%q, want persisted namespace and Job name", current.Namespace, current.JobName)
+	if current.RuntimeScope != "anban" || current.RuntimeWorkload != "job-"+current.ID {
+		t.Fatalf("runtime identity = %q/%q, want persisted scope and workload", current.RuntimeScope, current.RuntimeWorkload)
 	}
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
 		t.Fatal(err)

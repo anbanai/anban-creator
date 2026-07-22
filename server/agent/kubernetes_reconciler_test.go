@@ -52,7 +52,7 @@ type reconcileTestService struct {
 	failures   []reconcileFailure
 	resumed    []string
 	dispatched []string
-	pods       map[string]string
+	instances  map[string]string
 	cleanup    map[string]string
 	failID     string
 }
@@ -60,13 +60,13 @@ type reconcileTestService struct {
 func (s *reconcileTestService) FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error) {
 	return s.executions, nil
 }
-func (s *reconcileTestService) RecordExecutionPod(_ context.Context, id, uid string) error {
+func (s *reconcileTestService) RecordExecutionInstance(_ context.Context, id, uid string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pods == nil {
-		s.pods = map[string]string{}
+	if s.instances == nil {
+		s.instances = map[string]string{}
 	}
-	s.pods[id] = uid
+	s.instances[id] = uid
 	return nil
 }
 func (s *reconcileTestService) ResumeExecutionDispatch(_ context.Context, id string) error {
@@ -194,8 +194,8 @@ func TestKubernetesReconcilerGracesAndItemIsolation(t *testing.T) {
 	if _, ok := got["missing-grace"]; ok {
 		t.Fatal("missing-resource grace was ignored")
 	}
-	if len(service.resumed) != 1 || service.resumed[0] != "terminal" || service.pods["success-expired"] != "pod-1" {
-		t.Fatalf("resumed=%v pods=%v", service.resumed, service.pods)
+	if len(service.resumed) != 1 || service.resumed[0] != "terminal" || service.instances["success-expired"] != "pod-1" {
+		t.Fatalf("resumed=%v instances=%v", service.resumed, service.instances)
 	}
 }
 
@@ -262,8 +262,8 @@ func TestKubernetesReconcilerDoesNotInferBootstrapFromContainerState(t *testing.
 	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
-	if service.pods[execution.ID] != "pod-1" || len(service.failures) != 1 {
-		t.Fatalf("pods=%v failures=%v", service.pods, service.failures)
+	if service.instances[execution.ID] != "pod-1" || len(service.failures) != 1 {
+		t.Fatalf("instances=%v failures=%v", service.instances, service.failures)
 	}
 }
 

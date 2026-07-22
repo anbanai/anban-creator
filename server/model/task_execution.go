@@ -6,6 +6,13 @@ import (
 	"gorm.io/datatypes"
 )
 
+// RuntimeIdentity identifies a provider-owned execution workload and instance.
+type RuntimeIdentity struct {
+	Scope      string
+	Workload   string
+	InstanceID string
+}
+
 // TaskExecution is one durable cloud execution attempt for a task.
 type TaskExecution struct {
 	ID                 string         `gorm:"type:char(36);primaryKey" json:"id"`
@@ -19,9 +26,9 @@ type TaskExecution struct {
 	Status             string         `gorm:"type:varchar(20);index;not null" json:"status"`
 	DispatchClaimToken string         `gorm:"type:char(36);index" json:"-"`
 	DispatchClaimedAt  *time.Time     `gorm:"index" json:"-"`
-	Namespace          string         `gorm:"type:varchar(63)" json:"namespace,omitempty"`
-	JobName            string         `gorm:"type:varchar(63);index" json:"job_name,omitempty"`
-	PodUID             string         `gorm:"type:varchar(64)" json:"pod_uid,omitempty"`
+	RuntimeScope       string         `gorm:"column:runtime_scope;type:varchar(63)" json:"runtime_scope,omitempty"`
+	RuntimeWorkload    string         `gorm:"column:runtime_workload;type:varchar(63);index" json:"runtime_workload,omitempty"`
+	RuntimeInstanceID  string         `gorm:"column:runtime_instance_id;type:varchar(64)" json:"runtime_instance_id,omitempty"`
 	Started            bool           `gorm:"default:false;not null" json:"started"`
 	ManifestStatus     string         `gorm:"type:varchar(20);default:'';check:chk_task_execution_manifest_status,manifest_status IN ('','pending','published','collected','discarded','rejected')" json:"manifest_status,omitempty"`
 	FinalizationStatus string         `gorm:"type:varchar(20);default:'';index" json:"finalization_status,omitempty"`
@@ -92,7 +99,7 @@ const (
 // ExecutionTransition contains optional fields persisted with a status CAS.
 type ExecutionTransition struct {
 	Started            bool
-	PodUID             string
+	RuntimeInstanceID  string
 	ManifestStatus     string
 	TerminalReason     string
 	Diagnostics        datatypes.JSON

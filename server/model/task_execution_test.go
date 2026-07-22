@@ -38,4 +38,21 @@ func TestTaskExecutionMigrationAndCurrentAttempt(t *testing.T) {
 			t.Fatalf("task execution durability column %s missing", column)
 		}
 	}
+	for _, column := range []string{"RuntimeScope", "RuntimeWorkload", "RuntimeInstanceID"} {
+		if !db.Migrator().HasColumn(&TaskExecution{}, column) {
+			t.Fatalf("task execution runtime identity column %s missing", column)
+		}
+	}
+	for _, column := range []string{"Namespace", "JobName", "PodUID"} {
+		if db.Migrator().HasColumn(&TaskExecution{}, column) {
+			t.Fatalf("legacy task execution runtime identity column %s remains", column)
+		}
+	}
+}
+
+func TestRuntimeIdentityCarriesProviderNeutralValues(t *testing.T) {
+	identity := RuntimeIdentity{Scope: "docker", Workload: "creator-agent-exec-1", InstanceID: "container-1"}
+	if identity.Scope != "docker" || identity.Workload != "creator-agent-exec-1" || identity.InstanceID != "container-1" {
+		t.Fatalf("runtime identity = %+v", identity)
+	}
 }

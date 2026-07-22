@@ -197,12 +197,12 @@ type TaskExecutionRepository interface {
 	NextAttempt(ctx context.Context, taskID string) (int, error)
 	ClaimDispatch(ctx context.Context, id, token string, leaseDuration time.Duration) (bool, error)
 	AbandonDispatch(ctx context.Context, id, token string) (bool, error)
-	CompleteDispatch(ctx context.Context, id, token, namespace, jobName string) (bool, error)
+	CompleteDispatch(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error)
 	FailDispatch(ctx context.Context, id, token, reason string, diagnostics, result []byte) (bool, error)
 	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)
 	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
 	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)
-	SetRuntimeIdentity(ctx context.Context, id, namespace, jobName, podUID string) error
+	SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error
 	UpdateHeartbeat(ctx context.Context, id string, now time.Time) error
 	Transition(ctx context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error)
 	ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error)
