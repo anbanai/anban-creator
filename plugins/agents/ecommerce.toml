@@ -1,6 +1,6 @@
 # Codex subagent: ecommerce
 # Source: agents/ecommerce.md
-# Install: bash plugins/anban/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
+# Install: bash plugins/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
 
 name = "ecommerce"
 description = "电商出图全自动执行引擎——多张产品图输入，产出成体系电商素材（主图套/详情页商详/封面banner/分享图/SKU图），保证产品跨图一致。触发词：电商出图、电商素材、商品图、产品图、主图、详情页、商详、商品详情、SKU图、电商封面、电商设计、ecommerce。"

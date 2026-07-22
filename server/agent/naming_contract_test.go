@@ -13,24 +13,24 @@ import (
 func TestAnbanCreatorNamingContract(t *testing.T) {
 	root := repoRoot(t)
 
-	assertJSONField(t, filepath.Join(root, "plugins", "anban", ".claude-plugin", "plugin.json"), "name", "anban")
-	assertClaudePluginUserConfig(t, filepath.Join(root, "plugins", "anban", ".claude-plugin", "plugin.json"))
-	assertJSONField(t, filepath.Join(root, "plugins", "anban", ".codex-plugin", "plugin.json"), "name", "anban")
-	assertClaudeMarketplacePlugin(t, filepath.Join(root, "plugins", "anban", ".claude-plugin", "marketplace.json"))
+	assertJSONField(t, filepath.Join(root, "plugins", ".claude-plugin", "plugin.json"), "name", "anban")
+	assertClaudePluginUserConfig(t, filepath.Join(root, "plugins", ".claude-plugin", "plugin.json"))
+	assertJSONField(t, filepath.Join(root, "plugins", ".codex-plugin", "plugin.json"), "name", "anban")
+	assertClaudeMarketplacePlugin(t, filepath.Join(root, "plugins", ".claude-plugin", "marketplace.json"))
 
-	assertOnlyMCPServerKey(t, filepath.Join(root, "plugins", "anban", ".mcp.json"), "creator")
+	assertOnlyMCPServerKey(t, filepath.Join(root, "plugins", ".mcp.json"), "creator")
 
 	for _, path := range []string{
 		filepath.Join(root, "CLAUDE.md"),
-		filepath.Join(root, "plugins", "anban", "README.md"),
+		filepath.Join(root, "plugins", "README.md"),
 		filepath.Join(root, "Dockerfile.agent"),
 		filepath.Join(root, "Dockerfile.server"),
 		filepath.Join(root, "studio", "src", "components", "connect", "ClaudeGuide.tsx"),
 		filepath.Join(root, "studio", "src", "components", "connect", "CodexGuide.tsx"),
 		filepath.Join(root, "miniapp", "src", "pages", "connect", "claude-code.vue"),
 		filepath.Join(root, "miniapp", "src", "pages", "connect", "codex.vue"),
-		filepath.Join(root, "plugins", "anban", "README.md"),
-		filepath.Join(root, "plugins", "anban", "install", "install-subagents.sh"),
+		filepath.Join(root, "plugins", "README.md"),
+		filepath.Join(root, "plugins", "install", "install-subagents.sh"),
 	} {
 		assertFileNotContains(t, path, "anbancreator"+"@anbanai")
 		assertFileNotContains(t, path, "creator"+"@anbanai")
@@ -43,16 +43,16 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban@anbanai")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "The MCP server key is `creator`")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban:<agent>")
-	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "claude plugin install --scope user anban@anbanai")
-	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "/anban:anban-setup")
-	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "/anban:article")
-	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "--agent anban:wechatarticle")
-	assertFileNotContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "--dangerously-skip-permissions")
-	assertFileContains(t, filepath.Join(root, "plugins", "anban", "README.md"), "插件内的 MCP server key 固定为 `creator`")
-	assertFileNotExists(t, filepath.Join(root, "plugins", "anban", "CLAUDE.md"))
-	assertFileContains(t, filepath.Join(root, "plugins", "anban", "docs", "plugin-development.md"), "Plugin developer notes")
-	assertFileContains(t, filepath.Join(root, "plugins", "anban", ".mcp.json"), "${user_config.api_url}/mcp")
-	assertFileContains(t, filepath.Join(root, "plugins", "anban", ".mcp.json"), "Bearer ${user_config.api_key}")
+	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "claude plugin install --scope user anban@anbanai")
+	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "/anban:anban-setup")
+	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "/anban:article")
+	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "--agent anban:wechatarticle")
+	assertFileNotContains(t, filepath.Join(root, "plugins", "README.md"), "--dangerously-skip-permissions")
+	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "插件内的 MCP server key 固定为 `creator`")
+	assertFileNotExists(t, filepath.Join(root, "plugins", "CLAUDE.md"))
+	assertFileContains(t, filepath.Join(root, "plugins", "docs", "plugin-development.md"), "Plugin developer notes")
+	assertFileContains(t, filepath.Join(root, "plugins", ".mcp.json"), "${user_config.api_url}/mcp")
+	assertFileContains(t, filepath.Join(root, "plugins", ".mcp.json"), "Bearer ${user_config.api_key}")
 	assertTrackedFilesDoNotContainLegacyNames(t, root)
 	assertBusinessLayerFilesDoNotContainHostMCPPrefixes(t, root)
 }
@@ -214,11 +214,11 @@ func businessLayerMCPDocs(t *testing.T, root string) []string {
 	}
 
 	addFile("CLAUDE.md")
-	addFile(filepath.Join("plugins", "anban", "README.md"))
-	addFile(filepath.Join("plugins", "anban", "docs", "plugin-development.md"))
-	addTree(filepath.Join("plugins", "anban", "agents"))
-	addTree(filepath.Join("plugins", "anban", "skills"))
-	addTree(filepath.Join("plugins", "anban", "skills"))
+	addFile(filepath.Join("plugins", "README.md"))
+	addFile(filepath.Join("plugins", "docs", "plugin-development.md"))
+	addTree(filepath.Join("plugins", "agents"))
+	addTree(filepath.Join("plugins", "skills"))
+	addTree(filepath.Join("plugins", "skills"))
 	addTree(filepath.Join("studio", "src", "components", "connect"))
 	addTree(filepath.Join("miniapp", "src", "pages", "connect"))
 	return out

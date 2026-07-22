@@ -170,7 +170,7 @@ func AppendResumeContextFileToPrompt(prompt, workDir, relativePath string) strin
 }
 
 // describeRuntimeControls emits compact, machine-readable controls for agents.
-// Detailed semantics live in plugins/anban agents/skills and docs/plugin-development.md so server code
+// Detailed semantics live in plugins agents/skills and docs/plugin-development.md so server code
 // does not duplicate workflow prose.
 func describeRuntimeControls(p UserPromptParams) string {
 	var controls []string

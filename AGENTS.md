@@ -13,7 +13,7 @@ The current repository is not a standalone Cobra CLI. It has four main surfaces:
 - `app/`: Shared Go library for content conversion, image generation, humanization, WeChat draft helpers, and writer styles.
 - `studio/`: React 19 + TypeScript + Vite 8 Web Studio.
 
-Plugin assets have one canonical source at `plugins/anban/`:
+Plugin assets have one canonical source at `plugins/`:
 
 - `.claude-plugin/` and `.codex-plugin/` are native host manifests.
 - `skills/`, templates, writers, scripts, and binaries are shared once.
@@ -68,8 +68,8 @@ make docker-montage-agent-image
 make docker-server-image
 ```
 
-The managed runtime is split into three images: `creator-agent-content` for the
-minimal shared runtime, `creator-agent-seednote` for Python/Agent-Reach, and
+The managed runtime is split into three images: `creator-agent-article` for the
+minimal Article runtime, `creator-agent-seednote` for Python/Agent-Reach, and
 `creator-agent-montage` for OpenMontage/Remotion/ffmpeg. Keep the canonical
 plugin tree intact in every image; image selection controls system dependencies,
 not which Skills are distributed.
@@ -134,7 +134,7 @@ Prefer route-level lazy loading and explicit vendor chunking for heavy dependenc
 
 ## Skills And Agents
 
-The project ships all agent-facing workflows from `plugins/anban/agents` and `plugins/anban/skills`.
+The project ships all agent-facing workflows from `plugins/agents` and `plugins/skills`.
 
 Current major agents:
 
@@ -150,7 +150,7 @@ Development rules:
 - Do not reintroduce legacy Python helper scripts for live slicing.
 - Keep generated task artifacts explicit and file-backed, especially JSON returned by MCP tools.
 - Skills must stay host-neutral. Put unavoidable host syntax in the native manifest, MCP, Hook, Agent, or install adapter rather than duplicating a Skill tree.
-- When changing plugin assets under `plugins/anban/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update both native manifest versions in the same change: `plugins/anban/.claude-plugin/plugin.json` and `plugins/anban/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
+- When changing plugin assets under `plugins/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update both native manifest versions in the same change: `plugins/.claude-plugin/plugin.json` and `plugins/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
 
 ## Testing Patterns
 

@@ -40,7 +40,7 @@ func (d *dispatchTestDispatcher) ResolveRuntime(string) serverconfig.RuntimeImag
 	if d.runtimeSelection.Profile != "" || d.runtimeSelection.Image != "" {
 		return d.runtimeSelection
 	}
-	return serverconfig.RuntimeImageSelection{Profile: "content", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
 }
 
 type cancelingReferenceAssetRepository struct {
@@ -357,7 +357,7 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 func TestDispatchAutocompactThrashingStartsFreshClaudeSessionAndRuntime(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{
-		Profile: "content", Image: "registry/content@sha256:current",
+		Profile: "article", Image: "registry/content@sha256:current",
 	}
 	ctx := context.Background()
 	result, err := json.Marshal(&agent.ExecutionResult{
@@ -391,14 +391,14 @@ func TestDispatchAutocompactThrashingStartsFreshClaudeSessionAndRuntime(t *testi
 	if current.ResumeSessionID != "" {
 		t.Fatalf("resume session = %q, want a fresh Claude session after autocompact thrashing", current.ResumeSessionID)
 	}
-	if current.RuntimeProfile != "content" || current.RuntimeImage != "registry/content@sha256:current" {
+	if current.RuntimeProfile != model.PlatformArticle || current.RuntimeImage != "registry/content@sha256:current" {
 		t.Fatalf("resumed runtime = %q %q, want current deployed runtime", current.RuntimeProfile, current.RuntimeImage)
 	}
 }
 
 func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "content", Image: "registry/content@sha256:new"}
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:new"}
 	parent := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
 		RuntimeProfile: model.PlatformMontage, RuntimeImage: "registry/montage@sha256:original",

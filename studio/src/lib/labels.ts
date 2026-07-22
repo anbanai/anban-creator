@@ -77,7 +77,7 @@ export const progressStageLabel: Record<string, string> = {
   quality_review: '质量复核',
   compliance: '合规检查',
   archive: '资源归档',
-  // ecommerce-only (slugs from plugins/anban/agents/ecommerce.md)
+  // ecommerce-only (slugs from plugins/agents/ecommerce.md)
   analysis: '产品档案',
   copywriting: '卖点与文案',
   finalize: '完成',

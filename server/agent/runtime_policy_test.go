@@ -236,7 +236,7 @@ func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
 			message := &claudecode.SystemMessage{
 				Subtype: "init",
 				Data: map[string]any{
-					"plugins": []any{map[string]any{"name": "anban", "path": "/plugins/anban"}},
+					"plugins": []any{map[string]any{"name": "anban", "path": "/plugins"}},
 					"skills":  tc.skills,
 				},
 			}

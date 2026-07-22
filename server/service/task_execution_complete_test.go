@@ -43,7 +43,7 @@ func setupCloudCompletionTest(t *testing.T, withArtifact bool, startedOverride .
 	}
 	execution := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: executionStatus, Started: started,
-		RuntimeProfile: "content", RuntimeImage: "registry/content@sha256:test",
+		RuntimeProfile: "article", RuntimeImage: "registry/content@sha256:test",
 	}
 	if withArtifact {
 		execution.ManifestStatus = model.TaskExecutionManifestPending
@@ -583,7 +583,7 @@ type cancelOrderingDispatcher struct {
 }
 
 func (*cancelOrderingDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSelection {
-	return srvconfig.RuntimeImageSelection{Profile: "content", Image: "registry/content@sha256:test"}
+	return srvconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
 }
 
 func (*cancelOrderingDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*agent.KubernetesRuntimeIdentity, error) {

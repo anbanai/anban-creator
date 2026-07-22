@@ -26,7 +26,7 @@ func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
 
 	for _, name := range agents {
 		t.Run(name, func(t *testing.T) {
-			body := readRepoFile(t, filepath.Join("../../plugins/anban/agents", name+".md"))
+			body := readRepoFile(t, filepath.Join("../../plugins/agents", name+".md"))
 			calls, ownedCalls := claudeAgentFeedbackCallCounts(body, name)
 			if calls != 1 {
 				t.Errorf("%s agent has %d submit_agent_feedback call expressions, want exactly one", name, calls)
@@ -50,7 +50,7 @@ func TestClaudeAgentFeedbackCallsMatchMCPSchema(t *testing.T) {
 
 	for _, name := range agents {
 		t.Run(name, func(t *testing.T) {
-			body := readRepoFile(t, filepath.Join("../../plugins/anban/agents", name+".md"))
+			body := readRepoFile(t, filepath.Join("../../plugins/agents", name+".md"))
 			calls, err := documentedToolCalls(body, "submit_agent_feedback")
 			if err != nil {
 				t.Fatal(err)
@@ -360,7 +360,7 @@ func TestClaudeAgentFeedbackFollowsDeliveryReport(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body := readRepoFile(t, filepath.Join("../../plugins/anban/agents", tt.name+".md"))
+			body := readRepoFile(t, filepath.Join("../../plugins/agents", tt.name+".md"))
 			if err := validateClaudeAgentFeedbackContract(body, tt.name, tt.anchor, tt.summaryTerms); err != nil {
 				t.Fatal(err)
 			}
@@ -454,7 +454,7 @@ func TestClaudeCodePluginManifestMatchesOfficialBestPracticeFields(t *testing.T)
 			Default     string `json:"default"`
 		} `json:"userConfig"`
 	}
-	raw := readRepoFile(t, "../../plugins/anban/.claude-plugin/plugin.json")
+	raw := readRepoFile(t, "../../plugins/.claude-plugin/plugin.json")
 	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
 		t.Fatalf("plugin.json must be valid JSON: %v", err)
 	}
@@ -496,7 +496,7 @@ func TestClaudeCodePluginManifestMatchesOfficialBestPracticeFields(t *testing.T)
 			Version     string `json:"version"`
 		} `json:"plugins"`
 	}
-	raw = readRepoFile(t, "../../plugins/anban/.claude-plugin/marketplace.json")
+	raw = readRepoFile(t, "../../plugins/.claude-plugin/marketplace.json")
 	if err := json.Unmarshal([]byte(raw), &marketplace); err != nil {
 		t.Fatalf("marketplace.json must be valid JSON: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestClaudeCodePluginManifestMatchesOfficialBestPracticeFields(t *testing.T)
 }
 
 func TestClaudeCodePluginComponentsUseRootDefaultLocations(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins", "anban")
+	root := filepath.Join(repoRoot(t), "plugins")
 	for _, rel := range []string{
 		"skills",
 		"agents",
@@ -563,7 +563,7 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 		"hooks": true, "mcpServers": true, "permissionMode": true,
 	}
 
-	root := filepath.Join(repoRoot(t), "plugins", "anban", "agents")
+	root := filepath.Join(repoRoot(t), "plugins", "agents")
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatalf("read claudecode agents: %v", err)
@@ -593,7 +593,7 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 			t.Fatalf("%s must set description so Claude Code can delegate appropriately", path)
 		}
 		for _, skill := range frontmatterStringList(fm["skills"]) {
-			skillPath := filepath.Join(repoRoot(t), "plugins", "anban", "skills", skill, "SKILL.md")
+			skillPath := filepath.Join(repoRoot(t), "plugins", "skills", skill, "SKILL.md")
 			if _, err := os.Stat(skillPath); err != nil {
 				t.Fatalf("%s preloads missing Skill %q: %v", path, skill, err)
 			}
@@ -611,7 +611,7 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 }
 
 func TestClaudeCodePluginAgentsDeclareAutonomousExecution(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins", "anban", "agents")
+	root := filepath.Join(repoRoot(t), "plugins", "agents")
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatalf("read claudecode agents: %v", err)
@@ -638,9 +638,9 @@ func TestClaudeCodePluginAgentsDeclareAutonomousExecution(t *testing.T) {
 
 func TestClaudeCodePluginHasGitHubHealthFilesAndChangelog(t *testing.T) {
 	for _, rel := range []string{
-		"plugins/anban/CHANGELOG.md",
-		"plugins/anban/SECURITY.md",
-		"plugins/anban/CONTRIBUTING.md",
+		"plugins/CHANGELOG.md",
+		"plugins/SECURITY.md",
+		"plugins/CONTRIBUTING.md",
 	} {
 		path := filepath.Join(repoRoot(t), rel)
 		if info, err := os.Stat(path); err != nil || info.IsDir() {
@@ -653,14 +653,14 @@ func TestClaudeCodePluginChangelogMentionsManifestVersion(t *testing.T) {
 	var manifest struct {
 		Version string `json:"version"`
 	}
-	raw := readRepoFile(t, "../../plugins/anban/.claude-plugin/plugin.json")
+	raw := readRepoFile(t, "../../plugins/.claude-plugin/plugin.json")
 	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
 		t.Fatalf("plugin.json must be valid JSON: %v", err)
 	}
 	if manifest.Version == "" {
 		t.Fatal("plugin.json must set version")
 	}
-	changelog := readRepoFile(t, "../../plugins/anban/CHANGELOG.md")
+	changelog := readRepoFile(t, "../../plugins/CHANGELOG.md")
 	if !strings.Contains(changelog, "## ["+manifest.Version+"]") {
 		t.Fatalf("CHANGELOG.md must include an entry for plugin version %s", manifest.Version)
 	}
@@ -678,7 +678,7 @@ func TestClaudeCodeHooksUseExecFormForPluginPathCommands(t *testing.T) {
 			} `json:"hooks"`
 		} `json:"hooks"`
 	}
-	raw := readRepoFile(t, "../../plugins/anban/hooks/hooks.json")
+	raw := readRepoFile(t, "../../plugins/hooks/hooks.json")
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		t.Fatalf("hooks.json must be valid JSON: %v", err)
 	}
@@ -706,7 +706,7 @@ func TestClaudeCodeSubagentHooksUsePluginScopedMatchers(t *testing.T) {
 			Matcher string `json:"matcher"`
 		} `json:"hooks"`
 	}
-	raw := readRepoFile(t, "../../plugins/anban/hooks/hooks.json")
+	raw := readRepoFile(t, "../../plugins/hooks/hooks.json")
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		t.Fatalf("hooks.json must be valid JSON: %v", err)
 	}
@@ -728,7 +728,7 @@ func TestClaudeCodeCompletionHooksUseSupportedRoles(t *testing.T) {
 			} `json:"hooks"`
 		} `json:"hooks"`
 	}
-	raw := readRepoFile(t, "../../plugins/anban/hooks/hooks.json")
+	raw := readRepoFile(t, "../../plugins/hooks/hooks.json")
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		t.Fatalf("hooks.json must be valid JSON: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestClaudeCodeCompletionHooksUseSupportedRoles(t *testing.T) {
 }
 
 func TestClaudeCodeDocsDoNotTellAgentsToPrintSecrets(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins", "anban")
+	root := filepath.Join(repoRoot(t), "plugins")
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -793,7 +793,7 @@ func TestClaudeCodeDocsDoNotTellAgentsToPrintSecrets(t *testing.T) {
 }
 
 func TestClaudeCodeSkillsStayWithinOfficialSizeGuideline(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins", "anban", "skills")
+	root := filepath.Join(repoRoot(t), "plugins", "skills")
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -816,7 +816,7 @@ func TestClaudeCodeSkillsStayWithinOfficialSizeGuideline(t *testing.T) {
 }
 
 func TestClaudeCodeSkillsUseOfficialInvocationContract(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins", "anban", "skills")
+	root := filepath.Join(repoRoot(t), "plugins", "skills")
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -865,7 +865,7 @@ func TestClaudeCodeSkillsUseOfficialInvocationContract(t *testing.T) {
 
 func TestUnifiedSkillsLinkConcreteExamples(t *testing.T) {
 	root := repoRoot(t)
-	claudeSkillsRoot := filepath.Join(root, "plugins", "anban", "skills")
+	claudeSkillsRoot := filepath.Join(root, "plugins", "skills")
 	entries, err := os.ReadDir(claudeSkillsRoot)
 	if err != nil {
 		t.Fatalf("read claudecode skills: %v", err)
@@ -879,7 +879,7 @@ func TestUnifiedSkillsLinkConcreteExamples(t *testing.T) {
 		if skill == "humanizer" {
 			continue
 		}
-		skillPath := filepath.Join(root, "plugins", "anban", "skills", skill, "SKILL.md")
+		skillPath := filepath.Join(root, "plugins", "skills", skill, "SKILL.md")
 		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 			continue
 		} else if err != nil {
@@ -890,7 +890,7 @@ func TestUnifiedSkillsLinkConcreteExamples(t *testing.T) {
 			t.Fatalf("%s must link to its concrete examples", skillPath)
 		}
 
-		examplesPath := filepath.Join(root, "plugins", "anban", "skills", skill, "references", "examples.md")
+		examplesPath := filepath.Join(root, "plugins", "skills", skill, "references", "examples.md")
 		examplesBody := readRepoFile(t, examplesPath)
 		if count := strings.Count(examplesBody, "\n### Case "); count < 3 {
 			t.Fatalf("%s must include at least 3 concrete cases, got %d", examplesPath, count)
@@ -906,7 +906,7 @@ func TestUnifiedSkillsLinkConcreteExamples(t *testing.T) {
 			}
 		}
 
-		for _, mirror := range []string{"plugins/anban"} {
+		for _, mirror := range []string{"plugins"} {
 			mirrorPath := filepath.Join(root, mirror, "skills", skill, "SKILL.md")
 			if _, err := os.Stat(mirrorPath); err == nil {
 				mirrorSkillBody := readRepoFile(t, mirrorPath)

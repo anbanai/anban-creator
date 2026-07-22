@@ -60,7 +60,7 @@ func TestKubernetesAgentImageMustBeExplicit(t *testing.T) {
 	if cfg.Claude.Kubernetes.AgentImage != "" {
 		t.Fatalf("kubernetes agent image default = %q, want explicit production image", cfg.Claude.Kubernetes.AgentImage)
 	}
-	if cfg.Claude.Docker.Image != "creator-agent-content:latest" {
+	if cfg.Claude.Docker.Image != "creator-agent-article:latest" {
 		t.Fatalf("docker image default = %q, want creator-agent Docker runtime identity", cfg.Claude.Docker.Image)
 	}
 }
@@ -83,7 +83,7 @@ func TestKubernetesImageForTaskUsesProfileThenDefault(t *testing.T) {
 
 func TestDockerImageForTaskUsesProfileThenDefault(t *testing.T) {
 	cfg := DockerConfig{
-		Image: "creator-agent-content:latest",
+		Image: "creator-agent-article:latest",
 		ImageProfiles: map[string]string{
 			model.PlatformSeednote: "creator-agent-seednote:latest",
 			model.PlatformMontage:  "creator-agent-montage:latest",
@@ -94,7 +94,7 @@ func TestDockerImageForTaskUsesProfileThenDefault(t *testing.T) {
 		profile  string
 		image    string
 	}{
-		{taskType: model.PlatformArticle, profile: "content", image: "creator-agent-content:latest"},
+		{taskType: model.PlatformArticle, profile: "article", image: "creator-agent-article:latest"},
 		{taskType: model.PlatformSeednote, profile: "seednote", image: "creator-agent-seednote:latest"},
 		{taskType: model.PlatformMontage, profile: "montage", image: "creator-agent-montage:latest"},
 	} {

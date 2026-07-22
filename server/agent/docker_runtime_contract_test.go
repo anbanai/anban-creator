@@ -21,11 +21,11 @@ func TestCreatorAgentImageNamingContract(t *testing.T) {
 }
 
 func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.T) {
-	validMakefile := "AGENT_IMAGE := creator-agent-content:latest\n"
+	validMakefile := "AGENT_IMAGE := creator-agent-article:latest\n"
 	validCompose := `services:
   agent:
-    image: creator-agent-content:latest
-    container_name: creator-agent-content
+    image: creator-agent-article:latest
+    container_name: creator-agent-article
 `
 
 	for _, tc := range []struct {
@@ -35,12 +35,12 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 	}{
 		{
 			name:     "Make variable name decoy",
-			makefile: "LEGACY_AGENT_IMAGE := creator-agent-content:latest\n",
+			makefile: "LEGACY_AGENT_IMAGE := creator-agent-article:latest\n",
 			compose:  validCompose,
 		},
 		{
 			name:     "commented Make assignment",
-			makefile: "# AGENT_IMAGE := creator-agent-content:latest\n",
+			makefile: "# AGENT_IMAGE := creator-agent-article:latest\n",
 			compose:  validCompose,
 		},
 		{
@@ -63,8 +63,8 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 			makefile: validMakefile,
 			compose: `services:
   worker:
-    image: creator-agent-content:latest
-    container_name: creator-agent-content
+    image: creator-agent-article:latest
+    container_name: creator-agent-article
 `,
 		},
 		{
@@ -107,8 +107,8 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 		return fmt.Errorf("Makefile must not retain anban-creator-agent or anban-agent identities")
 	}
 	makeValues := makeVariableAssignments(makefile, "AGENT_IMAGE")
-	if len(makeValues) != 1 || makeValues[0] != "creator-agent-content:latest" {
-		return fmt.Errorf("Makefile must define AGENT_IMAGE exactly once with value creator-agent-content:latest")
+	if len(makeValues) != 1 || makeValues[0] != "creator-agent-article:latest" {
+		return fmt.Errorf("Makefile must define AGENT_IMAGE exactly once with value creator-agent-article:latest")
 	}
 
 	if containsRetiredAgentIdentity(compose) {
@@ -144,8 +144,8 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 			}
 		}
 	}
-	if agentBlockCount != 1 || len(imageValues) != 1 || imageValues[0] != "creator-agent-content:latest" || len(containerNameValues) != 1 || containerNameValues[0] != "creator-agent-content" {
-		return fmt.Errorf("docker-compose.yml must define exactly one agent service with one image creator-agent-content:latest and one container_name creator-agent-content")
+	if agentBlockCount != 1 || len(imageValues) != 1 || imageValues[0] != "creator-agent-article:latest" || len(containerNameValues) != 1 || containerNameValues[0] != "creator-agent-article" {
+		return fmt.Errorf("docker-compose.yml must define exactly one agent service with one image creator-agent-article:latest and one container_name creator-agent-article")
 	}
 	return nil
 }
@@ -178,20 +178,20 @@ func makeVariableAssignments(text, variable string) []string {
 	return values
 }
 
-func TestAgentDockerfileSeparatesContentAndSeednoteDependencies(t *testing.T) {
+func TestAgentDockerfileSeparatesArticleAndSeednoteDependencies(t *testing.T) {
 	root := repositoryRoot(t)
 	path := filepath.Join(root, "Dockerfile.agent")
 	body := readTextFile(t, path)
 	for _, want := range []string{
 		"FROM node:22-bookworm-slim AS runtime-core",
-		"FROM runtime-core AS content",
+		"FROM runtime-core AS article",
 		"FROM runtime-core AS seednote",
-		"FROM content AS default",
+		"FROM article AS default",
 		"apt-get install -y --no-install-recommends ca-certificates curl git jq tini",
 		"ARG CLAUDE_CODE_VERSION=2.1.208",
 		`npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"`,
 		"claude --version",
-		"COPY plugins/anban/",
+		"COPY plugins/",
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 		"claude plugin install --scope user anban@anbanai",
 	} {
@@ -200,15 +200,15 @@ func TestAgentDockerfileSeparatesContentAndSeednoteDependencies(t *testing.T) {
 		}
 	}
 	runtimeCoreStart := strings.Index(body, "FROM node:22-bookworm-slim AS runtime-core")
-	contentStart := strings.Index(body, "FROM runtime-core AS content")
+	articleStart := strings.Index(body, "FROM runtime-core AS article")
 	seednoteStart := strings.Index(body, "FROM runtime-core AS seednote")
-	if runtimeCoreStart < 0 || contentStart <= runtimeCoreStart || seednoteStart <= contentStart {
-		t.Fatalf("%s has invalid content/seednote stage order", path)
+	if runtimeCoreStart < 0 || articleStart <= runtimeCoreStart || seednoteStart <= articleStart {
+		t.Fatalf("%s has invalid article/seednote stage order", path)
 	}
-	content := body[runtimeCoreStart:seednoteStart]
+	article := body[runtimeCoreStart:seednoteStart]
 	for _, forbidden := range []string{"Agent-Reach", "python3", "mcporter", "ffmpeg", "fonts-noto-cjk", "OpenMontage"} {
-		if strings.Contains(content, forbidden) {
-			t.Fatalf("%s content stage must not contain heavyweight dependency %q", path, forbidden)
+		if strings.Contains(article, forbidden) {
+			t.Fatalf("%s Article stage must not contain heavyweight dependency %q", path, forbidden)
 		}
 	}
 	seednote := body[seednoteStart:]
@@ -232,7 +232,7 @@ func TestDockerRuntimeProfiles(t *testing.T) {
 		for _, want := range []string{
 			"ARG CLAUDE_CODE_VERSION=2.1.208",
 			"COPY --from=builder /out/anban",
-			"COPY plugins/anban/",
+			"COPY plugins/",
 			"ENTRYPOINT",
 		} {
 			if !strings.Contains(body, want) {
@@ -317,7 +317,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"ghcr.io/openhands/agent-server",
 		"./agent",
 		"/usr/local/bin/anban",
-		"COPY plugins/anban/",
+		"COPY plugins/",
 		"COPY third_party/OpenMontage/",
 		"COPY third_party/Agent-Reach/",
 		"AGENT_REACH_VENV",
@@ -362,11 +362,11 @@ func TestContentAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
 	body := readTextFile(t, path)
 	from := strings.Index(body, "FROM node:22-bookworm-slim AS runtime-core")
 	if from < 0 {
-		t.Fatalf("%s missing content runtime core stage", path)
+		t.Fatalf("%s missing Article runtime core stage", path)
 	}
 	apt := strings.Index(body[from:], "apt-get update")
 	if apt < 0 {
-		t.Fatalf("%s missing apt-get update in content runtime core stage", path)
+		t.Fatalf("%s missing apt-get update in Article runtime core stage", path)
 	}
 	beforeApt := body[from : from+apt]
 	if !strings.Contains(beforeApt, "USER root") {
@@ -551,7 +551,7 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 			t.Fatalf(".dockerignore missing %q", want)
 		}
 	}
-	if strings.Contains(body, "/plugins/") || strings.Contains(body, "/plugins/anban/") {
+	if strings.Contains(body, "/plugins/") || strings.Contains(body, "/plugins/") {
 		t.Fatal(".dockerignore must keep the unified plugin available to Agent Docker builds")
 	}
 }
@@ -654,7 +654,7 @@ func TestCollectOwnedDockerfilesDetectsUnexpectedEntrypoints(t *testing.T) {
 	got := collectOwnedDockerfilePaths([]string{
 		"Dockerfile.server",
 		"nested/Dockerfile.extra",
-		"plugins/anban/Dockerfile.plugin",
+		"plugins/Dockerfile.plugin",
 		"third_party/tool/Dockerfile",
 		"web/node_modules/Dockerfile",
 		"web/dist/Dockerfile.generated",
@@ -791,7 +791,7 @@ func TestComposeAndMakefileUseRootDockerfileBuilds(t *testing.T) {
 		"docker-wcflink-image:",
 		"docker-studio-image:",
 		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image",
-		"docker build -f Dockerfile.agent --target content",
+		"docker build -f Dockerfile.agent --target article",
 		"docker build -f Dockerfile.agent --target seednote",
 		"docker build -f Dockerfile.agent-montage",
 		"docker build -f Dockerfile.wcflink -t $(WCFLINK_IMAGE) .",
@@ -812,16 +812,16 @@ func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
-		"pull_policy: build\n    container_name: creator-agent-content",
+		"pull_policy: build\n    container_name: creator-agent-article",
 		"entrypoint: [\"tini\", \"--\"]\n    command: [\"sleep\", \"infinity\"]",
 		"- ./data/workspace:/workspace",
 		"agent:\n        condition: service_started",
 		"ANBAN_CLAUDE_EXECUTOR: \"docker\"",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL: \"http://server:8080\"",
-		"ANBAN_CLAUDE_DOCKER_IMAGE: \"creator-agent-content:latest\"",
+		"ANBAN_CLAUDE_DOCKER_IMAGE: \"creator-agent-article:latest\"",
 		"ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE: \"creator-agent-seednote:latest\"",
 		"ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE: \"creator-agent-montage:latest\"",
-		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: \"creator-agent-content\"",
+		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: \"creator-agent-article\"",
 		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: \"/app/data/workspace\"",
 		"- ./data/workspace:/app/data/workspace",
 		"- /var/run/docker.sock:/var/run/docker.sock",
@@ -835,7 +835,7 @@ func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
 	for _, configPath := range []string{"server/config.yaml", "server/config.example.yaml"} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
-			"image: \"${ANBAN_CLAUDE_DOCKER_IMAGE:-creator-agent-content:latest}\"",
+			"image: \"${ANBAN_CLAUDE_DOCKER_IMAGE:-creator-agent-article:latest}\"",
 			"seednote: \"${ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE:-creator-agent-seednote:latest}\"",
 			"montage: \"${ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE:-creator-agent-montage:latest}\"",
 			"container_name: \"${ANBAN_CLAUDE_DOCKER_CONTAINER_NAME}\"",

@@ -1,6 +1,6 @@
 # Codex subagent: moments
 # Source: agents/moments.md
-# Install: bash plugins/anban/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
+# Install: bash plugins/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
 
 name = "moments"
 description = "朋友圈素材包全自动创作 Agent——从素材拆解到正文、质量复盘与交付。触发词：朋友圈、私域、朋友圈文案、moments。"

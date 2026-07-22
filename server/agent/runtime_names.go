@@ -9,7 +9,7 @@ const (
 	AgentBinaryName               = "anban"
 	DefaultWorkspaceBaseName      = "anban-creator"
 	EphemeralContainerNamePrefix  = "creator-agent-task-"
-	DockerAgentImageDefault       = "creator-agent-content:latest"
+	DockerAgentImageDefault       = "creator-agent-article:latest"
 	ContainerRuntimeUser          = "1000:1000"
 	ContainerHomePath             = "/home/node"
 	DockerRuntimeHomeDirName      = ".anban-runtime-home"

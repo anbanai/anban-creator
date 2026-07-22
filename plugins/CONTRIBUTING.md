@@ -25,7 +25,7 @@ go build -o /tmp/anban ./agent
 
 ## Plugin Rules
 
-- Keep all plugin runtime content in `plugins/anban/`.
+- Keep all plugin runtime content in `plugins/`.
 - Maintain one shared `skills/` tree; keep host-specific behavior in native manifests, Agents, MCP files, Hooks, and installers.
 - Do not add `tools` or `mcpServers` to plugin agent frontmatter unless a contract test and developer note explain why.
 - Do not print API keys or authorization headers. Check only whether a sensitive value exists.

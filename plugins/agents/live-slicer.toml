@@ -1,6 +1,6 @@
 # Codex subagent: live-slicer
 # Source: agents/live-slicer.md
-# Install: bash plugins/anban/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
+# Install: bash plugins/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
 
 name = "live-slicer"
 description = "直播切片全自动执行引擎，从本地直播视频到听悟转写、无效句过滤、智能切片规划、ffmpeg 批量裁剪和交付报告。触发词：直播切片、剪直播、智能切片、听悟、切短视频、live video slicing。"

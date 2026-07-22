@@ -1,6 +1,6 @@
 # Anban Creator for Codex
 
-Professional **WeChat** and **Seednote (种草笔记)** content creation toolkit for OpenAI Codex. This Codex adapter lives in the same `plugins/anban/` source as the Claude Code plugin and uses the shared Skill tree.
+Professional **WeChat** and **Seednote (种草笔记)** content creation toolkit for OpenAI Codex. This Codex adapter lives in the same `plugins/` source as the Claude Code plugin and uses the shared Skill tree.
 
 ## What you get
 
@@ -23,7 +23,7 @@ Professional **WeChat** and **Seednote (种草笔记)** content creation toolkit
 From a local clone:
 
 ```bash
-codex plugin marketplace add ./plugins/anban
+codex plugin marketplace add ./plugins
 codex plugin install anban
 ```
 
@@ -32,7 +32,7 @@ codex plugin install anban
 Codex plugins cannot bundle subagents (open limitation — see `../CODEX.md`). The seven subagents live in `agents/*.toml` and must be copied to `~/.codex/agents/`:
 
 ```bash
-bash plugins/anban/install/install-subagents.sh
+bash plugins/install/install-subagents.sh
 ```
 
 The script is idempotent and does three things:
@@ -151,7 +151,7 @@ using the article-visual-design skill, generate a 2.35:1 cover for the article a
 The install script substitutes `__PLUGIN_ROOT__` based on `~/.codex/plugins/cache/...`. If you installed the plugin to a non-default location, set `ANBAN_PLUGIN_ROOT` and re-run:
 
 ```bash
-ANBAN_PLUGIN_ROOT=/custom/path bash plugins/anban/install/install-subagents.sh
+ANBAN_PLUGIN_ROOT=/custom/path bash plugins/install/install-subagents.sh
 ```
 
 ### Completion checks

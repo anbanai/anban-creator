@@ -14,8 +14,8 @@
 
     <view class="step-card">
       <text class="step-card__title">2. 安装插件市场源</text>
-      <view class="copy-block" @tap="copyText('claude plugin marketplace add ./plugins/anban')">
-        <text class="copy-block__code">claude plugin marketplace add ./plugins/anban</text>
+      <view class="copy-block" @tap="copyText('claude plugin marketplace add ./plugins')">
+        <text class="copy-block__code">claude plugin marketplace add ./plugins</text>
         <text class="copy-block__hint">点击复制</text>
       </view>
     </view>

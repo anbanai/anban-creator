@@ -1256,7 +1256,7 @@ func testJobConfig() kubernetesJobConfig {
 func testExecution() *model.TaskExecution {
 	return &model.TaskExecution{
 		ID: "execution-1", TaskID: "task-1", Attempt: 1, Namespace: "anban", JobName: kubernetesJobName("execution-1"),
-		RuntimeProfile: "content", RuntimeImage: testJobConfig().AgentImage,
+		RuntimeProfile: "article", RuntimeImage: testJobConfig().AgentImage,
 	}
 }
 

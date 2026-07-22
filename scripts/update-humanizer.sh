@@ -36,7 +36,7 @@ test -f "$source_skill" || {
   exit 1
 }
 
-skill_dir=plugins/anban/skills/humanizer
+skill_dir=plugins/skills/humanizer
 destination=$skill_dir/SKILL.md
 test -d "$skill_dir" || {
   echo "error: missing bundled Humanizer directory at $skill_dir" >&2

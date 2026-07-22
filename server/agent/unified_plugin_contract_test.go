@@ -11,7 +11,7 @@ import (
 
 func TestUnifiedPluginLayout(t *testing.T) {
 	root := repoRoot(t)
-	pluginRoot := filepath.Join(root, "plugins", "anban")
+	pluginRoot := filepath.Join(root, "plugins")
 
 	for _, legacy := range []string{"claudecode", "codex"} {
 		if _, err := os.Stat(filepath.Join(root, legacy)); !os.IsNotExist(err) {
@@ -25,19 +25,23 @@ func TestUnifiedPluginLayout(t *testing.T) {
 		}
 	}
 
-	skillRoots, err := filepath.Glob(filepath.Join(root, "plugins", "*", "skills"))
-	if err != nil {
-		t.Fatalf("glob plugin Skill roots: %v", err)
+	skillRoot := filepath.Join(pluginRoot, "skills")
+	if info, err := os.Stat(skillRoot); err != nil || !info.IsDir() {
+		t.Fatalf("canonical plugin Skill root missing at %s: %v", skillRoot, err)
 	}
-	if len(skillRoots) != 1 || skillRoots[0] != filepath.Join(pluginRoot, "skills") {
-		t.Fatalf("plugin Skill roots = %v, want only %s", skillRoots, filepath.Join(pluginRoot, "skills"))
+	nestedSkillRoots, err := filepath.Glob(filepath.Join(pluginRoot, "*", "skills"))
+	if err != nil {
+		t.Fatalf("glob nested plugin Skill roots: %v", err)
+	}
+	if len(nestedSkillRoots) != 0 {
+		t.Fatalf("nested plugin Skill roots = %v, want none below flattened root %s", nestedSkillRoots, pluginRoot)
 	}
 
 	type manifest struct {
-		Name       string `json:"name"`
-		Version    string `json:"version"`
-		Skills     string `json:"skills"`
-		Interface  any    `json:"interface"`
+		Name      string `json:"name"`
+		Version   string `json:"version"`
+		Skills    string `json:"skills"`
+		Interface any    `json:"interface"`
 	}
 	readManifest := func(path string) manifest {
 		t.Helper()

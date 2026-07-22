@@ -31,7 +31,7 @@ cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.co
 
 Production uses three immutable Agent images:
 
-- `ANBAN_AGENT_IMAGE`: the minimal default content runtime.
+- `ANBAN_AGENT_IMAGE`: the minimal default Article runtime.
 - `ANBAN_SEEDNOTE_AGENT_IMAGE`: the Seednote runtime with Python, Agent-Reach, and mcporter.
 - `ANBAN_MONTAGE_AGENT_IMAGE`: the Montage runtime with an embedded OpenMontage template.
 

@@ -10,7 +10,7 @@ import (
 func TestMomentsAgentAndSkillContracts(t *testing.T) {
 	root := repositoryRoot(t)
 
-	claudeAgent := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "moments.md"))
+	claudeAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "moments.md"))
 	for _, want := range []string{
 		"name: moments",
 		"$TASK_ID",
@@ -34,7 +34,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		}
 	}
 
-	codexAgent := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "moments.toml"))
+	codexAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "moments.toml"))
 	for _, want := range []string{
 		`name = "moments"`,
 		"skills/moments/SKILL.md",
@@ -54,7 +54,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		}
 	}
 
-	reg := readRepoFile(t, filepath.Join(root, "plugins", "anban", "install", "agents-registration.toml"))
+	reg := readRepoFile(t, filepath.Join(root, "plugins", "install", "agents-registration.toml"))
 	if !strings.Contains(reg, "[agents.moments]") {
 		t.Fatal("codex agents-registration.toml missing moments registration")
 	}
@@ -62,7 +62,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 
 func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 	root := repositoryRoot(t)
-	claudeAgent := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "moments.md"))
+	claudeAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "moments.md"))
 	if err := validateClaudeAgentFeedbackContract(
 		claudeAgent,
 		"moments",
@@ -87,10 +87,10 @@ func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 
 func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 	root := repositoryRoot(t)
-	claudeSkill := readRepoFile(t, filepath.Join(root, "plugins", "anban", "skills", "moments", "SKILL.md"))
-	claudeExamples := readRepoFile(t, filepath.Join(root, "plugins", "anban", "skills", "moments", "references", "examples.md"))
+	claudeSkill := readRepoFile(t, filepath.Join(root, "plugins", "skills", "moments", "SKILL.md"))
+	claudeExamples := readRepoFile(t, filepath.Join(root, "plugins", "skills", "moments", "references", "examples.md"))
 
-	for _, plugin := range []string{"plugins/anban"} {
+	for _, plugin := range []string{"plugins"} {
 		t.Run(plugin, func(t *testing.T) {
 			skillPath := filepath.Join(root, plugin, "skills", "moments", "SKILL.md")
 			body := readRepoFile(t, skillPath)
@@ -148,7 +148,7 @@ func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 
 func TestMomentsSkillDoesNotVendorReferenceRepository(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, plugin := range []string{"plugins/anban"} {
+	for _, plugin := range []string{"plugins"} {
 		dir := filepath.Join(root, plugin, "skills", "moments")
 		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

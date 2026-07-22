@@ -1,6 +1,6 @@
 # Codex subagent: seednote
 # Source: agents/seednote.md
-# Install: bash plugins/anban/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
+# Install: bash plugins/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
 
 name = "seednote"
 description = "种草笔记图文全自动创作引擎——从选题到图文生成的端到端流水线。触发词：种草笔记、seednote、种草、复刻、仿写、改写笔记、爆款改写、克隆、clone。支持原创与复刻模式。"

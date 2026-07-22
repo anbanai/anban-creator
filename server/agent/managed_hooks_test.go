@@ -211,7 +211,7 @@ func TestSeednoteQualityGateAcceptsCanonicalManagedOutput(t *testing.T) {
 }
 
 func TestSeednoteArchiveScriptIsRemoved(t *testing.T) {
-	script := filepath.Join(repoRoot(t), "plugins", "anban", "scripts", "archive-seednote-workspace.sh")
+	script := filepath.Join(repoRoot(t), "plugins", "scripts", "archive-seednote-workspace.sh")
 	if _, err := os.Stat(script); !os.IsNotExist(err) {
 		t.Fatalf("archive script still exists or could not be checked: %v", err)
 	}
@@ -219,8 +219,8 @@ func TestSeednoteArchiveScriptIsRemoved(t *testing.T) {
 
 func TestSeednoteQualityGateStaysMirroredForClaudeAndCodex(t *testing.T) {
 	root := repoRoot(t)
-	claudeHook := readRepoFile(t, filepath.Join(root, "plugins", "anban", "hooks", "seednote-quality-gate.sh"))
-	codexHook := readRepoFile(t, filepath.Join(root, "plugins", "anban", "hooks", "seednote-quality-gate.sh"))
+	claudeHook := readRepoFile(t, filepath.Join(root, "plugins", "hooks", "seednote-quality-gate.sh"))
+	codexHook := readRepoFile(t, filepath.Join(root, "plugins", "hooks", "seednote-quality-gate.sh"))
 	if codexHook != claudeHook {
 		t.Fatal("Claude and Codex seednote quality gates must stay byte-identical")
 	}
@@ -267,7 +267,7 @@ func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) strin
 
 func runSeednoteQualityGate(t *testing.T, workspace string) string {
 	t.Helper()
-	script := filepath.Join(repoRoot(t), "plugins", "anban", "hooks", "seednote-quality-gate.sh")
+	script := filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh")
 	cmd := exec.Command("bash", script)
 	cmd.Dir = workspace
 	cmd.Env = append(os.Environ(), "CLAUDE_PROJECT_DIR="+workspace)

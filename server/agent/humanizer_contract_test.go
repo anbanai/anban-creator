@@ -32,7 +32,7 @@ func TestHumanizerSkillNormalizesPinnedUpstream(t *testing.T) {
 
 	normalized := strings.ReplaceAll(upstream, "version: 2.8.2\n", "")
 	normalized = strings.ReplaceAll(normalized, "compatibility: any-agent\n", "")
-	for _, distro := range []string{"plugins/anban"} {
+	for _, distro := range []string{"plugins"} {
 		skillDir := filepath.Join(root, distro, "skills", "humanizer")
 		path := filepath.Join(skillDir, "SKILL.md")
 		if got := readRepoFile(t, path); got != normalized {
@@ -68,7 +68,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 	for _, want := range []string{
 		"git -C \"$submodule_path\" fetch --prune origin \"$branch\"",
 		"git -C \"$submodule_path\" checkout --detach \"origin/$branch\"",
-		"skill_dir=plugins/anban/skills/humanizer",
+		"skill_dir=plugins/skills/humanizer",
 		"rm -rf \"$skill_dir/references\"",
 		"sed '/^version:[[:space:]]*/d; /^compatibility:[[:space:]]*/d' \"$source_skill\" > \"$destination\"",
 	} {
@@ -87,9 +87,9 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
-		"plugins/anban/agents/wechatarticle.md",
-		"plugins/anban/agents/ecommerce.md",
-		"plugins/anban/agents/moments.md",
+		"plugins/agents/wechatarticle.md",
+		"plugins/agents/ecommerce.md",
+		"plugins/agents/moments.md",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		frontmatter := frontmatterBlock(t, body)
@@ -98,29 +98,29 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 		}
 	}
 
-	seednoteAgent := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "seednote.md"))
+	seednoteAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "seednote.md"))
 	if strings.Contains(seednoteAgent, "anban:humanizer") || strings.Contains(seednoteAgent, "using the `humanizer` skill") {
 		t.Fatal("Claude Seednote must use its compact built-in de-AI pass instead of loading the general Humanizer Skill")
 	}
 
 	for _, relPath := range []string{
-		"plugins/anban/agents/wechatarticle.toml",
-		"plugins/anban/agents/ecommerce.toml",
-		"plugins/anban/agents/moments.toml",
+		"plugins/agents/wechatarticle.toml",
+		"plugins/agents/ecommerce.toml",
+		"plugins/agents/moments.toml",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		if !strings.Contains(body, `path = "__PLUGIN_ROOT__/skills/humanizer/SKILL.md"`) {
 			t.Fatalf("%s must inject the bundled humanizer skill", relPath)
 		}
 	}
-	codexSeednote := readRepoFile(t, filepath.Join(root, "plugins", "anban", "agents", "seednote.toml"))
+	codexSeednote := readRepoFile(t, filepath.Join(root, "plugins", "agents", "seednote.toml"))
 	if strings.Contains(codexSeednote, `skills/humanizer/SKILL.md`) {
 		t.Fatal("Codex Seednote must use seednote-writing's built-in de-AI pass instead of preloading Humanizer")
 	}
 
 	dockerfile := readRepoFile(t, filepath.Join(root, "Dockerfile.agent"))
 	for _, want := range []string{
-		"COPY plugins/anban/ /anbanai/",
+		"COPY plugins/ /anbanai/",
 		"claude plugin install --scope user anban@anbanai",
 		`cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"`,
 	} {
@@ -140,24 +140,24 @@ func TestHumanizerBusinessConstraintsStayInOwningWorkflows(t *testing.T) {
 		{
 			name: "seednote",
 			relPaths: []string{
-				"plugins/anban/skills/seednote-writing/SKILL.md",
-				"plugins/anban/skills/seednote-writing/SKILL.md",
+				"plugins/skills/seednote-writing/SKILL.md",
+				"plugins/skills/seednote-writing/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "仍 ≤1000 字", "不得在改写中引入新的违禁词"},
 		},
 		{
 			name: "article",
 			relPaths: []string{
-				"plugins/anban/skills/article/SKILL.md",
-				"plugins/anban/skills/article/SKILL.md",
+				"plugins/skills/article/SKILL.md",
+				"plugins/skills/article/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "覆盖原文全部信息点", "不得引入新的违禁词或导流风险"},
 		},
 		{
 			name: "ecommerce",
 			relPaths: []string{
-				"plugins/anban/skills/ecommerce-copywriting/SKILL.md",
-				"plugins/anban/skills/ecommerce-copywriting/SKILL.md",
+				"plugins/skills/ecommerce-copywriting/SKILL.md",
+				"plugins/skills/ecommerce-copywriting/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "FABE 信息点", "先去 AI，后合规"},
 		},

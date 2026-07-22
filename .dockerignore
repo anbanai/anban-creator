@@ -14,7 +14,7 @@
 *.log
 
 # Frontend, desktop, and mobile sources that are not needed for
-# building the server/agent Go binaries. plugins/anban/ is intentionally kept
+# building the server/agent Go binaries. plugins/ is intentionally kept
 # because the Agent Dockerfiles copy it into the runtime image.
 /studio/
 /desktop/

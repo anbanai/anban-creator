@@ -15,7 +15,7 @@ func TestLiveSliceSkillFiles(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	var firstBody string
-	for _, plugin := range []string{"plugins/anban"} {
+	for _, plugin := range []string{"plugins"} {
 		skillDir := filepath.Join(root, plugin, "skills", "live-slice")
 		skillPath := filepath.Join(skillDir, "SKILL.md")
 		legacyPythonHelper := "live_slice_media" + ".py"
@@ -88,7 +88,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 
-	agentPath := filepath.Join(root, "plugins", "anban", "agents", "live-slicer.md")
+	agentPath := filepath.Join(root, "plugins", "agents", "live-slicer.md")
 	raw, err := os.ReadFile(agentPath)
 	if err != nil {
 		t.Fatalf("live-slicer agent missing: %v", err)
@@ -201,7 +201,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		}
 	}
 
-	claudePath := filepath.Join(root, "plugins", "anban", "docs", "plugin-development.md")
+	claudePath := filepath.Join(root, "plugins", "docs", "plugin-development.md")
 	claudeRaw, err := os.ReadFile(claudePath)
 	if err != nil {
 		t.Fatalf("claudecode plugin development docs missing: %v", err)
@@ -227,7 +227,7 @@ func TestCapCutDraftSkillUsesShellJSONValidation(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 
-	referencePath := filepath.Join(root, "plugins", "anban", "skills", "capcut-draft", "references", "operations.md")
+	referencePath := filepath.Join(root, "plugins", "skills", "capcut-draft", "references", "operations.md")
 	raw, err := os.ReadFile(referencePath)
 	if err != nil {
 		t.Fatalf("capcut-draft operations reference missing: %v", err)

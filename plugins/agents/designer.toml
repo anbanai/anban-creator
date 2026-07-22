@@ -1,6 +1,6 @@
 # Codex subagent: designer
 # Source: agents/designer.md
-# Install: bash plugins/anban/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
+# Install: bash plugins/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
 
 name = "designer"
 description = "创意设计自动执行引擎——史蒂夫·乔布斯风格的极致设计哲学驱动批量视觉处理。触发词：上色、填色、line art coloring、配色、color consistency、批量上色、角色上色、设计、designer、线稿、color、上颜色、给线稿上色、线稿上色。专注于视觉一致性和设计质量。"

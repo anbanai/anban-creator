@@ -1,6 +1,6 @@
 # Codex subagent: wechatarticle
 # Source: agents/wechatarticle.md
-# Install: bash plugins/anban/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
+# Install: bash plugins/install/install-subagents.sh (copies to ~/.codex/agents/ and substitutes __PLUGIN_ROOT__)
 
 name = "wechatarticle"
 description = "微信公众号图文文章全自动创作引擎，从选题研究到草稿发布的端到端流水线。触发词：写文章、写一篇、发文章、公众号文章、WeChat article。流水线：选题研究 → 写作 → 去 AI 味 → SEO → 封面 → 配图 → HTML → 草稿。"

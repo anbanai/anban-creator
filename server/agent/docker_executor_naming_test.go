@@ -41,7 +41,7 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	if got, want := EphemeralContainerName(task.ID), "creator-agent-task-task-1"; got != want {
 		t.Fatalf("container name = %q, want %q", got, want)
 	}
-	if got, want := DockerAgentImageDefault, "creator-agent-content:latest"; got != want {
+	if got, want := DockerAgentImageDefault, "creator-agent-article:latest"; got != want {
 		t.Fatalf("Docker Agent image default = %q, want %q", got, want)
 	}
 }
@@ -257,8 +257,8 @@ func TestDockerExecutorDoesNotExposeMontageEnvToOtherTasks(t *testing.T) {
 }
 
 func TestDockerProfileContainerInheritsPersistentWorkspaceVolume(t *testing.T) {
-	cfg := dockerAgentHostConfig("/host/workspace/task-1", "creator-agent-content", config.DockerConfig{CPUCores: 3, MemoryMB: 5120})
-	if !slices.Equal(cfg.VolumesFrom, []string{"creator-agent-content"}) {
+	cfg := dockerAgentHostConfig("/host/workspace/task-1", "creator-agent-article", config.DockerConfig{CPUCores: 3, MemoryMB: 5120})
+	if !slices.Equal(cfg.VolumesFrom, []string{"creator-agent-article"}) {
 		t.Fatalf("VolumesFrom = %#v, want persistent content container", cfg.VolumesFrom)
 	}
 	if len(cfg.Mounts) != 0 {

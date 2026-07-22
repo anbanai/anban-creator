@@ -4,11 +4,19 @@ All notable changes to the Anban Creator Claude Code plugin are documented here.
 
 This project follows semantic versioning for the plugin package. Patch releases cover documentation, compatibility, hook, and workflow contract fixes that do not change the public agent or MCP behavior.
 
+## [2.12.0] - 2026-07-22
+
+### Changed
+
+- Flattened the canonical plugin distribution from `plugins/anban/` to `plugins/`.
+- Updated Claude Code, Codex, Docker, desktop, and repository installation paths to use the new plugin root.
+- Renamed the minimal managed runtime from `creator-agent-content` to `creator-agent-article`; Seednote and Montage remain dedicated dependency images.
+
 ## [2.11.0] - 2026-07-21
 
 ### Changed
 
-- Consolidated the Claude Code and Codex distributions under `plugins/anban/` with one shared Skill tree.
+- Consolidated the Claude Code and Codex distributions under `plugins/` with one shared Skill tree.
 - Kept native manifests, Agent formats, MCP authentication, Hooks, and Codex subagent installation as thin host adapters.
 - Moved repository, Docker, desktop packaging, runtime discovery, tests, and maintenance scripts to the unified plugin root.
 

@@ -14,7 +14,7 @@ func TestClaudeSeednotePhaseSkillsUseFileBackedContracts(t *testing.T) {
 		"seednote-writing",
 		"seednote-visual-design",
 	} {
-		path := filepath.Join(root, "plugins", "anban", "skills", skill, "SKILL.md")
+		path := filepath.Join(root, "plugins", "skills", skill, "SKILL.md")
 		body := readRepoFile(t, path)
 		frontmatter := parseSkillFrontmatter(t, path, body)
 		if got := frontmatterStringValue(frontmatter["context"]); got != "" {
@@ -29,7 +29,7 @@ func TestClaudeSeednotePhaseSkillsUseFileBackedContracts(t *testing.T) {
 }
 
 func TestClaudeSeednoteAgentDeclaresPhaseSkillsWithoutInvocationBoilerplate(t *testing.T) {
-	path := filepath.Join(repoRoot(t), "plugins", "anban", "agents", "seednote.md")
+	path := filepath.Join(repoRoot(t), "plugins", "agents", "seednote.md")
 	body := readRepoFile(t, path)
 	frontmatter := frontmatterBlock(t, body)
 	for _, want := range []string{

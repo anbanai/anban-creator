@@ -778,12 +778,12 @@ func (c ClaudeConfig) Validate() error {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Image         string            `yaml:"image"`          // Default content image (default: "creator-agent-content:latest")
+	Image         string            `yaml:"image"`          // Default Article image (default: "creator-agent-article:latest")
 	ImageProfiles map[string]string `yaml:"image_profiles"` // Images for task types with additional runtime dependencies
 	CPUCores      int64             `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
 	MemoryMB      int64             `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
 	TimeoutSec    int               `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
-	ContainerName string            `yaml:"container_name"` // Persistent content container; profile tasks use one-shot containers and inherit its volumes
+	ContainerName string            `yaml:"container_name"` // Persistent Article container; profile tasks use one-shot containers and inherit its volumes
 	WorkspaceDir  string            `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
 }
 
@@ -821,7 +821,7 @@ func imageForTask(defaultImage string, profiles map[string]string, taskType stri
 	if image := strings.TrimSpace(profiles[taskType]); image != "" {
 		return RuntimeImageSelection{Profile: taskType, Image: image}
 	}
-	return RuntimeImageSelection{Profile: "content", Image: strings.TrimSpace(defaultImage)}
+	return RuntimeImageSelection{Profile: model.PlatformArticle, Image: strings.TrimSpace(defaultImage)}
 }
 
 func (c DockerConfig) ImageForTask(taskType string) RuntimeImageSelection {
@@ -1209,7 +1209,7 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	if c.Claude.Docker.Image == "" {
-		c.Claude.Docker.Image = "creator-agent-content:latest"
+		c.Claude.Docker.Image = "creator-agent-article:latest"
 	}
 	if c.Claude.Docker.ImageProfiles == nil {
 		c.Claude.Docker.ImageProfiles = map[string]string{}
@@ -1532,7 +1532,7 @@ func (c *Config) resolvePaths(rootConfigDir string) {
 func detectPluginDir() string {
 	var candidates []string
 	if wd, err := os.Getwd(); err == nil {
-		pluginDir := filepath.Join(wd, "plugins", "anban")
+		pluginDir := filepath.Join(wd, "plugins")
 		if info, err := os.Stat(filepath.Join(pluginDir, "agents")); err == nil && info.IsDir() {
 			return pluginDir
 		}
@@ -1546,7 +1546,7 @@ func detectPluginDir() string {
 	}
 	for _, dir := range candidates {
 		for range 5 {
-			pluginDir := filepath.Join(dir, "plugins", "anban")
+			pluginDir := filepath.Join(dir, "plugins")
 			if info, err := os.Stat(filepath.Join(pluginDir, "agents")); err == nil && info.IsDir() {
 				return pluginDir
 			}

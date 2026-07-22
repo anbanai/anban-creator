@@ -37,7 +37,7 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
     rm -rf /root/.npm
 
 COPY --from=builder /out/anban /usr/local/bin/anban
-COPY plugins/anban/ /anbanai/
+COPY plugins/ /anbanai/
 COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
 
 ARG OPENMONTAGE_REVISION

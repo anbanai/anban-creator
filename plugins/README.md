@@ -38,7 +38,7 @@ Codex 安装说明见 [docs/codex-installation.md](docs/codex-installation.md)�
 从本仓库根目录注册并安装：
 
 ```bash
-claude plugin marketplace add ./plugins/anban
+claude plugin marketplace add ./plugins
 claude plugin install --scope user anban@anbanai
 ```
 

@@ -5,7 +5,7 @@
 
 BINARY      := anban-creator-server
 BINDIR      := bin
-AGENT_IMAGE := creator-agent-content:latest
+AGENT_IMAGE := creator-agent-article:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
 SERVER_IMAGE := anban-creator-server:latest
@@ -136,11 +136,11 @@ docker-down:
 docker-logs:
 	@docker compose logs -f
 
-# Build the minimal content Agent image.
+# Build the minimal Article Agent image.
 docker-agent-image:
 	@git submodule update --init --recursive third_party/claude-agent-sdk-go
 	@echo "Building $(AGENT_IMAGE)..." && \
-	docker build -f Dockerfile.agent --target content -t $(AGENT_IMAGE) . && \
+	docker build -f Dockerfile.agent --target article -t $(AGENT_IMAGE) . && \
 	echo "Image build complete: $(AGENT_IMAGE)"
 
 # Build the Seednote Agent image with Agent-Reach and its Python runtime.

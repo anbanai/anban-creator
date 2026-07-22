@@ -23,7 +23,7 @@ type reconcileTestDispatcher struct {
 }
 
 func (*reconcileTestDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSelection {
-	return srvconfig.RuntimeImageSelection{Profile: "content", Image: "registry/content@sha256:test"}
+	return srvconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
 }
 
 func (*reconcileTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*KubernetesRuntimeIdentity, error) {

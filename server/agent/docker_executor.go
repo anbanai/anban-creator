@@ -266,12 +266,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	runtime := e.dockerCfg.ImageForTask(opts.Task.Type)
 
 	var execRes execResult
-	if e.dockerCfg.ContainerName != "" && runtime.Profile == "content" {
+	if e.dockerCfg.ContainerName != "" && runtime.Profile == model.PlatformArticle {
 		execRes = e.executeViaExec(ctx, opts.Task.ID, workDirInContainer, runtimeUser, cmd, env, opts.HeartbeatFunc)
 	} else {
 		if _, err := e.dockerCLI.ImageInspect(ctx, runtime.Image); err != nil {
 			buildTarget := "docker-agent-image"
-			if runtime.Profile != "content" {
+			if runtime.Profile != model.PlatformArticle {
 				buildTarget = "docker-" + runtime.Profile + "-agent-image"
 			}
 			return nil, fmt.Errorf("docker %s image %q not found locally (run 'make %s' to build it): %w", runtime.Profile, runtime.Image, buildTarget, err)

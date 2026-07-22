@@ -9,7 +9,7 @@ import (
 
 func TestAllSkillsDeclareImageRatioRule(t *testing.T) {
 	root := articleContractRepoRoot(t)
-	for _, plugin := range []string{"plugins/anban"} {
+	for _, plugin := range []string{"plugins"} {
 		skillsRoot := filepath.Join(root, plugin, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
