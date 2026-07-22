@@ -479,6 +479,145 @@ func TestFinalizeTaskArtifactManifestPreservesExecutionMCPArtifacts(t *testing.T
 	}
 }
 
+func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(t *testing.T) {
+	repo, db := newBillingServiceRepositoryWithDB(t)
+	fixture := newBillingWalletFixtureWithRepository(t, repo, 500, 0, 0)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	store := &fakeTaskArtifactStorage{name: "oss"}
+	svc := NewTaskService(fixture.repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc.SetBillingWalletService(fixture.wallet)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID,
+		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+	}
+	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	executionID := startTaskArtifactExecution(t, fixture.repo, task)
+	operationID := "internal:image:collision"
+	generated, err := svc.UploadExecutionTaskFileWithSettlementFromReader(
+		ctx, task.ID, task.UserID, executionID, "output/cover.png",
+		strings.NewReader("old"), "image/png", 3,
+		TaskFileOperationSettlement{
+			CatalogID: "retail-test-v1", SKUID: "image.cover.v1", ToolCallID: operationID,
+			RequestFingerprint: billingFingerprint(operationID),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settlementKey := billingFingerprint(task.ID, executionID, operationID)
+	settlementBefore, err := fixture.repo.Billing().FindSettlementByKey(ctx, "mcp-image-settlement", settlementKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outboxBefore, chargesBefore int64
+	if err := db.Model(&model.BillingSettlementOutbox{}).
+		Where("task_id = ? AND attempt_id = ?", task.ID, executionID).
+		Count(&outboxBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.BillingCharge{}).
+		Where("operation_task_id = ? AND attempt_id = ?", task.ID, executionID).
+		Count(&chargesBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	newHashBytes := sha256.Sum256([]byte("new"))
+	newHash := hex.EncodeToString(newHashBytes[:])
+	workspaceKey := buildTaskArtifactStorageKey(task, executionID, "output/cover.png")
+	store.stats = map[string]*storage.ObjectInfo{
+		workspaceKey: {Key: workspaceKey, Size: 3, ContentType: "image/png", SHA256: newHash},
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{{
+			RelativePath: "output/cover.png", ObjectKey: workspaceKey,
+			ContentType: "image/png", Size: 3, SHA256: newHash,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := fixture.repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("execution rows = %d, want 1: %#v", len(rows), rows)
+	}
+	if got := rows[0]; got.ID != generated.ID || got.OSSKey != workspaceKey || got.ContentHash != newHash {
+		t.Fatalf("workspace replacement = %#v, want ID %s key %s hash %s", got, generated.ID, workspaceKey, newHash)
+	}
+	settlementAfter, err := fixture.repo.Billing().FindSettlementByKey(ctx, "mcp-image-settlement", settlementKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settlementAfter.ID != settlementBefore.ID || settlementAfter.ResourceID != generated.ID {
+		t.Fatalf("settlement after replacement = %#v, want stable settlement %s linked to %s", settlementAfter, settlementBefore.ID, generated.ID)
+	}
+	var outboxAfter, chargesAfter int64
+	if err := db.Model(&model.BillingSettlementOutbox{}).
+		Where("task_id = ? AND attempt_id = ?", task.ID, executionID).
+		Count(&outboxAfter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.BillingCharge{}).
+		Where("operation_task_id = ? AND attempt_id = ?", task.ID, executionID).
+		Count(&chargesAfter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if outboxBefore != 1 || outboxAfter != outboxBefore || chargesAfter != chargesBefore {
+		t.Fatalf("billing rows changed: outbox %d -> %d, charges %d -> %d", outboxBefore, outboxAfter, chargesBefore, chargesAfter)
+	}
+}
+
+func TestFinalizeTaskArtifactEmptyManifestPreservesOnlyMCPArtifacts(t *testing.T) {
+	svc, repo, _, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	mcpID := uuid.NewString()
+	mcpPath := "output/cover.png"
+	mcpKey := buildTaskMCPArtifactStoragePrefix(task, executionID) + mcpPath
+	workspacePath := "output/article.md"
+	workspaceKey := buildTaskArtifactStorageKey(task, executionID, workspacePath)
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{
+			ID: mcpID, TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStatePending,
+			Role: model.FileRoleImage, FileName: "cover.png", MimeType: "image/png", FileSize: 3,
+			ContentHash: taskArtifactTestSHA256, OSSKey: mcpKey, OSSURL: "https://cdn.example.com/" + mcpKey,
+			StorageProvider: "oss", FilePath: mcpPath,
+		},
+		{
+			ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStatePending,
+			Role: model.FileRoleMarkdown, FileName: "article.md", MimeType: "text/markdown", FileSize: 7,
+			ContentHash: taskArtifactTestSHA256, OSSKey: workspaceKey, OSSURL: "https://cdn.example.com/" + workspaceKey,
+			StorageProvider: "oss", FilePath: workspacePath,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID, Files: nil,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("execution rows = %d, want 1: %#v", len(rows), rows)
+	}
+	if got := rows[0]; got.ID != mcpID || got.FilePath != mcpPath || got.OSSKey != mcpKey {
+		t.Fatalf("preserved artifact = %#v, want MCP row %s at %s with key %s", got, mcpID, mcpPath, mcpKey)
+	}
+}
+
 func TestUploadExecutionTaskFileWithSettlementPersistsArtifactAndOutboxAtomically(t *testing.T) {
 	fixture := newBillingWalletFixture(t, 500, 0, 0)
 	ctx := context.Background()

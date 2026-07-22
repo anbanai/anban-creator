@@ -317,7 +317,13 @@ func (s *TaskService) mergeExecutionMCPArtifacts(ctx context.Context, task *mode
 	}
 	merged := make([]*model.TaskFile, 0, len(existing)+len(manifestFiles))
 	for _, file := range existing {
-		if file == nil || file.State != model.TaskFileStatePending || !strings.HasPrefix(file.OSSKey, prefix) || manifestPaths[file.FilePath] {
+		if file == nil || file.State != model.TaskFileStatePending || !strings.HasPrefix(file.OSSKey, prefix) {
+			continue
+		}
+		// The post-execution workspace manifest owns a colliding logical path.
+		// ReplacePendingCurrentExecution updates that path using its persisted task-file
+		// ID so operation settlement evidence remains linked without a new charge.
+		if manifestPaths[file.FilePath] {
 			continue
 		}
 		merged = append(merged, file)
