@@ -152,10 +152,26 @@ func composeEnvironmentAssignments(text, service, variable string) []string {
 func TestDockerRuntimeContractRemovesPersistentHostExecutors(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
-	productionGo := readProductionGoFiles(t,
-		filepath.Join(root, "server", "agent"),
-		filepath.Join(root, "server", "service"),
-	)
+	productionGo := readProductionGoFiles(t, filepath.Join(root, "server"))
+	for _, required := range []struct {
+		path   string
+		marker string
+	}{
+		{path: "server/main.go", marker: "func main() {"},
+		{path: "server/config/config.go", marker: "type Config struct {"},
+	} {
+		if !strings.Contains(productionGo, required.marker) {
+			t.Errorf("production runtime scan excludes %s", required.path)
+		}
+	}
+	testOnlyMarker := "func TestConfigRejectsLegacyManagedExecutorFields("
+	configTest := readTextFile(t, filepath.Join(root, "server", "config", "runtime_images_test.go"))
+	if !strings.Contains(configTest, testOnlyMarker) {
+		t.Fatal("runtime scan test marker is missing from server/config/runtime_images_test.go")
+	}
+	if strings.Contains(productionGo, testOnlyMarker) {
+		t.Error("production runtime scan includes _test.go files")
+	}
 	for _, forbidden := range []string{
 		"NewLocalExecutor(",
 		"NewDockerExecutor(",
@@ -191,24 +207,39 @@ func TestDockerRuntimeContractRemovesPersistentHostExecutors(t *testing.T) {
 	}
 }
 
-func readProductionGoFiles(t *testing.T, roots ...string) string {
+func readProductionGoFiles(t *testing.T, root string) string {
 	t.Helper()
 	var contents strings.Builder
-	for _, root := range roots {
-		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if path == root {
 				return nil
 			}
-			contents.WriteString(readTextFile(t, path))
-			contents.WriteByte('\n')
+			switch entry.Name() {
+			case ".git", "generated", "gen", "node_modules", "vendor":
+				return filepath.SkipDir
+			}
+			if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+				return filepath.SkipDir
+			}
 			return nil
-		})
-		if err != nil {
-			t.Fatalf("scan production Go sources under %s: %v", root, err)
 		}
+		if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		source := readTextFile(t, path)
+		if strings.Contains(source, "// Code generated ") && strings.Contains(source, " DO NOT EDIT.") {
+			return nil
+		}
+		contents.WriteString(source)
+		contents.WriteByte('\n')
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan production Go sources under %s: %v", root, err)
 	}
 	return contents.String()
 }
