@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -172,6 +173,9 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 		}
 		snapshot, err := openArtifactSnapshot(ctx, file.LocalPath)
 		if err != nil {
+			if errors.Is(err, errArtifactSnapshotChanged) && !hasArtifactCloseError(err) {
+				continue
+			}
 			return ArtifactManifestFile{}, fmt.Errorf("snapshot artifact %s: %w", file.RelativePath, err)
 		}
 
@@ -185,25 +189,24 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 			SHA256:       snapshot.hash,
 		})
 		if err != nil {
-			_ = snapshot.file.Close()
-			return ArtifactManifestFile{}, fmt.Errorf("prepare artifact upload %s: %w", file.RelativePath, err)
+			primary := fmt.Errorf("prepare artifact upload %s: %w", file.RelativePath, err)
+			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 		}
 		if err := artifactContextCause(ctx); err != nil {
-			_ = snapshot.file.Close()
-			return ArtifactManifestFile{}, err
+			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, err)
 		}
 		if prepared == nil {
-			_ = snapshot.file.Close()
-			return ArtifactManifestFile{}, fmt.Errorf("prepare artifact upload %s: empty response", file.RelativePath)
+			primary := fmt.Errorf("prepare artifact upload %s: empty response", file.RelativePath)
+			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 		}
 		if prepared.MaxSize > 0 && snapshot.size > prepared.MaxSize {
-			_ = snapshot.file.Close()
-			return ArtifactManifestFile{}, fmt.Errorf("artifact %s exceeds prepared upload limit", file.RelativePath)
+			primary := fmt.Errorf("artifact %s exceeds prepared upload limit", file.RelativePath)
+			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 		}
 		objectKey := strings.TrimSpace(prepared.Key)
 		if objectKey == "" {
-			_ = snapshot.file.Close()
-			return ArtifactManifestFile{}, fmt.Errorf("prepare artifact upload %s returned empty object key", file.RelativePath)
+			primary := fmt.Errorf("prepare artifact upload %s returned empty object key", file.RelativePath)
+			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 		}
 
 		contentType := prepared.Headers["Content-Type"]
@@ -214,26 +217,25 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 		if prepared.UploadRequired {
 			preparedSHA256 := strings.ToLower(strings.TrimSpace(prepared.Headers[artifactSHA256Header]))
 			if preparedSHA256 == "" || preparedSHA256 != snapshot.hash {
-				_ = snapshot.file.Close()
-				return ArtifactManifestFile{}, fmt.Errorf("prepare artifact upload %s returned missing or mismatched SHA-256 metadata", file.RelativePath)
+				primary := fmt.Errorf("prepare artifact upload %s returned missing or mismatched SHA-256 metadata", file.RelativePath)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 			}
 			prepared.Headers[artifactSHA256Header] = preparedSHA256
 			if err := snapshot.rewind(); err != nil {
-				_ = snapshot.file.Close()
-				return ArtifactManifestFile{}, fmt.Errorf("rewind artifact %s: %w", file.RelativePath, err)
+				primary := fmt.Errorf("rewind artifact %s: %w", file.RelativePath, err)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 			}
 			etag, err = u.putObject(ctx, prepared, snapshot.file, contentType)
 		}
 
 		stable := snapshot.unchanged()
-		closeErr := snapshot.file.Close()
+		var operationErr error
 		if err != nil {
-			return ArtifactManifestFile{}, fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
+			operationErr = fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
+		} else if err := artifactContextCause(ctx); err != nil {
+			operationErr = err
 		}
-		if closeErr != nil {
-			return ArtifactManifestFile{}, fmt.Errorf("close artifact %s: %w", file.RelativePath, closeErr)
-		}
-		if err := artifactContextCause(ctx); err != nil {
+		if err := closeArtifactFile(file.RelativePath, snapshot.file, operationErr); err != nil {
 			return ArtifactManifestFile{}, err
 		}
 		if stable {

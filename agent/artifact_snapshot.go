@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -11,6 +12,8 @@ import (
 )
 
 const maxArtifactSnapshotAttempts = 3
+
+var errArtifactSnapshotChanged = errors.New("artifact changed while opening")
 
 type artifactFile interface {
 	io.ReadSeeker
@@ -26,6 +29,19 @@ type artifactSnapshot struct {
 	hash   string
 }
 
+type artifactCloseError struct {
+	path string
+	err  error
+}
+
+func (e *artifactCloseError) Error() string {
+	return fmt.Sprintf("close artifact %s: %v", e.path, e.err)
+}
+
+func (e *artifactCloseError) Unwrap() error {
+	return e.err
+}
+
 var openArtifactFile = func(path string) (artifactFile, error) {
 	return os.Open(path)
 }
@@ -33,7 +49,7 @@ var openArtifactFile = func(path string) (artifactFile, error) {
 func openArtifactSnapshot(ctx context.Context, path string) (*artifactSnapshot, error) {
 	pathInfo, err := os.Lstat(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("inspect artifact %s: %w", path, err)
 	}
 	if !pathInfo.Mode().IsRegular() {
 		return nil, fmt.Errorf("artifact is not a regular file: %s", path)
@@ -41,18 +57,24 @@ func openArtifactSnapshot(ctx context.Context, path string) (*artifactSnapshot, 
 
 	file, err := openArtifactFile(path)
 	if err != nil {
-		return nil, err
+		primary := fmt.Errorf("open artifact %s: %w", path, err)
+		if file != nil {
+			return nil, closeArtifactFile(path, file, primary)
+		}
+		return nil, primary
 	}
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || !os.SameFile(pathInfo, info) {
-		_ = file.Close()
-		return nil, fmt.Errorf("artifact changed while opening: %s", path)
+	if err != nil {
+		return nil, closeArtifactFile(path, file, fmt.Errorf("stat artifact %s: %w", path, err))
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(pathInfo, info) {
+		mutationErr := fmt.Errorf("%w: %s", errArtifactSnapshotChanged, path)
+		return nil, closeArtifactFile(path, file, mutationErr)
 	}
 
 	hash := sha256.New()
 	if _, err := copyArtifactWithContext(ctx, hash, file); err != nil {
-		_ = file.Close()
-		return nil, err
+		return nil, closeArtifactFile(path, file, fmt.Errorf("hash artifact %s: %w", path, err))
 	}
 	return &artifactSnapshot{
 		file:   file,
@@ -95,6 +117,9 @@ func copyArtifactWithContext(ctx context.Context, dst io.Writer, src io.Reader) 
 				return total, io.ErrShortWrite
 			}
 		}
+		if err := artifactContextCause(ctx); err != nil {
+			return total, err
+		}
 		if readErr == io.EOF {
 			return total, nil
 		}
@@ -109,6 +134,25 @@ func fileSHA256(ctx context.Context, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer snapshot.file.Close()
+	if err := closeArtifactFile(path, snapshot.file, nil); err != nil {
+		return "", err
+	}
 	return snapshot.hash, nil
+}
+
+func closeArtifactFile(path string, file artifactFile, primary error) error {
+	closeErr := file.Close()
+	if closeErr == nil {
+		return primary
+	}
+	contextualCloseErr := &artifactCloseError{path: path, err: closeErr}
+	if primary == nil {
+		return contextualCloseErr
+	}
+	return errors.Join(primary, contextualCloseErr)
+}
+
+func hasArtifactCloseError(err error) bool {
+	var closeErr *artifactCloseError
+	return errors.As(err, &closeErr)
 }
