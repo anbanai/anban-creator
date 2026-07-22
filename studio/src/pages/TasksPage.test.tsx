@@ -146,6 +146,7 @@ function renderTasksPage(initialPath = '/tasks') {
           <AgentPromptDropProvider>
             <Routes>
               <Route path="/tasks" element={<TasksPage />} />
+              <Route path="/tasks/:id" element={<div>created task detail</div>} />
             </Routes>
           </AgentPromptDropProvider>
         </MemoryRouter>
@@ -184,6 +185,23 @@ describe('TasksPage unified prompt composer', () => {
       montage_input: expect.objectContaining({ brief: '将访谈素材剪成 30 秒竖版短片' }),
       input_attachments: [],
     })))
+  })
+
+  it('navigates to the created task after shared dialog submission', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project])
+    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
+    vi.mocked(api.tasks.create).mockResolvedValue({
+      ...fixtures.failedTask,
+      id: 'created-task',
+      status: 'pending',
+    } as Task)
+    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
+
+    await screen.findByRole('dialog', { name: '新建任务' })
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目'))
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    expect(await screen.findByText('created task detail')).toBeInTheDocument()
   })
 
   it('marks attachment changes dirty so closing asks for confirmation', async () => {
