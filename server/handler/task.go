@@ -261,80 +261,120 @@ type taskScopedCreationInput struct {
 	taskID    string
 }
 
-func validateTaskCreationSourceReuse(store storage.Provider, source *model.Task, attachments []model.EntryAttachment, productPhotos []string, montageInput *model.MontageInput) error {
-	trusted := taskScopedCreationInput{}
-	if source != nil {
-		trusted.taskID, trusted.projectID = service.ResolveCloneInputSource(source)
-		trusted.userID = source.UserID
+type parsedTaskCreationInput struct {
+	identity   taskScopedCreationInput
+	key        string
+	taskScoped bool
+}
+
+func trustedTaskCreationSource(source *model.Task) taskScopedCreationInput {
+	if source == nil {
+		return taskScopedCreationInput{}
 	}
-	validate := func(raw string, keyOnly bool) error {
-		identity, taskScoped, err := parseTaskScopedCreationInput(store, raw, keyOnly)
-		if err != nil {
-			return fmt.Errorf("task input storage URL is invalid")
-		}
-		if !taskScoped {
-			return nil
-		}
-		if source == nil || identity != trusted {
-			return fmt.Errorf("task-scoped input is not authorized for this clone source")
-		}
+	taskID, projectID := service.ResolveCloneInputSource(source)
+	return taskScopedCreationInput{userID: source.UserID, projectID: projectID, taskID: taskID}
+}
+
+func validateTrustedTaskAttachmentReuse(store storage.Provider, source *model.Task, attachment model.EntryAttachment) error {
+	trusted := trustedTaskCreationSource(source)
+	parsedKey, err := parseTaskScopedCreationInput(store, attachment.Key, true)
+	if err != nil {
+		return fmt.Errorf("task input storage key is invalid")
+	}
+	if source == nil || !parsedKey.taskScoped || parsedKey.identity != trusted {
+		return fmt.Errorf("task-scoped input is not authorized for this clone source")
+	}
+	if strings.TrimSpace(attachment.URL) == "" {
 		return nil
 	}
+	parsedURL, err := parseTaskScopedCreationInput(store, attachment.URL, false)
+	if err != nil {
+		return fmt.Errorf("task input storage URL is invalid")
+	}
+	if parsedURL.key == "" || parsedURL.key != parsedKey.key {
+		return fmt.Errorf("attachment URL and key must identify the same storage object")
+	}
+	return nil
+}
+
+func validateTaskCreationSourceReuse(store storage.Provider, source *model.Task, attachments []model.EntryAttachment, productPhotos []string, montageInput *model.MontageInput) error {
+	trusted := trustedTaskCreationSource(source)
+	validate := func(raw string, keyOnly bool) (parsedTaskCreationInput, error) {
+		parsed, err := parseTaskScopedCreationInput(store, raw, keyOnly)
+		if err != nil {
+			return parsedTaskCreationInput{}, fmt.Errorf("task input storage URL is invalid")
+		}
+		if !parsed.taskScoped {
+			return parsed, nil
+		}
+		if source == nil || parsed.identity != trusted {
+			return parsedTaskCreationInput{}, fmt.Errorf("task-scoped input is not authorized for this clone source")
+		}
+		return parsed, nil
+	}
 	for _, attachment := range attachments {
-		if err := validate(attachment.URL, false); err != nil {
+		parsedURL, err := validate(attachment.URL, false)
+		if err != nil {
 			return err
 		}
-		if err := validate(attachment.Key, true); err != nil {
+		parsedKey, err := validate(attachment.Key, true)
+		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(attachment.URL) != "" && strings.TrimSpace(attachment.Key) != "" && (parsedURL.key == "" || parsedKey.key == "" || parsedURL.key != parsedKey.key) {
+			return fmt.Errorf("attachment URL and key must identify the same storage object")
 		}
 	}
 	for _, rawURL := range productPhotos {
-		if err := validate(rawURL, false); err != nil {
+		if _, err := validate(rawURL, false); err != nil {
 			return err
 		}
 	}
 	for _, rawURL := range montageSourceAssetURLs(montageInput) {
-		if err := validate(rawURL, false); err != nil {
+		if _, err := validate(rawURL, false); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func parseTaskScopedCreationInput(store storage.Provider, raw string, keyOnly bool) (taskScopedCreationInput, bool, error) {
+func parseTaskScopedCreationInput(store storage.Provider, raw string, keyOnly bool) (parsedTaskCreationInput, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return taskScopedCreationInput{}, false, nil
+		return parsedTaskCreationInput{}, nil
 	}
 	key := raw
 	if !keyOnly {
 		isLocalAPI := strings.HasPrefix(raw, "/api/v1/files/") || strings.HasPrefix(raw, "/files/")
 		if !isLocalAPI && (store == nil || !store.IsOwnedURL(raw)) {
-			return taskScopedCreationInput{}, false, nil
+			return parsedTaskCreationInput{}, nil
 		}
 		if strings.HasPrefix(raw, "/files/") {
 			parsedURL, err := url.Parse(raw)
 			if err != nil {
-				return taskScopedCreationInput{}, false, err
+				return parsedTaskCreationInput{}, err
 			}
 			key = strings.TrimPrefix(parsedURL.Path, "/files/")
 		} else {
 			var ok bool
 			key, ok = storage.StorageKeyFromURL(raw)
 			if !ok {
-				return taskScopedCreationInput{}, false, storage.ErrInvalidRuntimeStorageKey
+				return parsedTaskCreationInput{}, storage.ErrInvalidRuntimeStorageKey
 			}
 		}
 	}
 	parsed, err := storage.ParseRuntimeStorageKey(strings.TrimPrefix(key, "/"))
 	if err != nil {
-		return taskScopedCreationInput{}, false, err
+		return parsedTaskCreationInput{}, err
 	}
+	result := parsedTaskCreationInput{key: parsed.Key}
 	parts := strings.Split(parsed.Key, "/")
 	if len(parts) < 8 || parts[0] != "uploads" || parts[1] != "users" || parts[2] == "" || parts[3] != "projects" || parts[4] == "" || parts[5] != "tasks" || parts[6] == "" {
-		return taskScopedCreationInput{}, false, nil
+		return result, nil
 	}
-	return taskScopedCreationInput{userID: parts[2], projectID: parts[4], taskID: parts[6]}, true, nil
+	result.identity = taskScopedCreationInput{userID: parts[2], projectID: parts[4], taskID: parts[6]}
+	result.taskScoped = true
+	return result, nil
 }
 
 func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *createTaskRequest, strictQuantity bool, source *model.Task) (*preparedTaskCreation, error) {
@@ -389,10 +429,16 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if project.Platform == model.PlatformSeednote {
 		allowedAttachmentTypes = map[string]bool{"image": true}
 	}
-	validatedAttachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
+	attachmentValidation := InputAttachmentValidationOptions{
 		MaxCount:     maxAgentInputAttachments,
 		AllowedTypes: allowedAttachmentTypes,
-	})
+	}
+	if source != nil {
+		attachmentValidation.validateExistingKey = func(attachment model.EntryAttachment) error {
+			return validateTrustedTaskAttachmentReuse(h.service.Storage(), source, attachment)
+		}
+	}
+	validatedAttachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, req.InputAttachments, attachmentValidation)
 	if err != nil {
 		return nil, respondInputAttachmentError(c, h.logger, err)
 	}

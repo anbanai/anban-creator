@@ -982,6 +982,7 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 type cloneSourceReuseFixture struct {
 	repo               repository.Repository
 	app                *fiber.App
+	store              storage.Provider
 	userID             string
 	rootProjectID      string
 	rootTaskID         string
@@ -1035,11 +1036,58 @@ func setupCloneSourceReuseFixture(t *testing.T, destinationPlatform string) *clo
 	return &cloneSourceReuseFixture{
 		repo:               repo,
 		app:                app,
+		store:              store,
 		userID:             userID,
 		rootProjectID:      rootProject.ID,
 		rootTaskID:         rootTask.ID,
 		source:             source,
 		destinationProject: destinationProject,
+	}
+}
+
+func cloneSourceAttachmentAPIShape(t *testing.T, fixture *cloneSourceReuseFixture, attachment model.EntryAttachment) map[string]any {
+	t.Helper()
+	fixture.source.SetInputAttachments([]model.EntryAttachment{attachment})
+	response := taskAPIResponse(fixture.source, fixture.store)
+	attachments, ok := response["input_attachments"].([]any)
+	if !ok || len(attachments) != 1 {
+		t.Fatalf("task API input_attachments = %#v", response["input_attachments"])
+	}
+	result, ok := attachments[0].(map[string]any)
+	if !ok {
+		t.Fatalf("task API attachment = %#v", attachments[0])
+	}
+	return result
+}
+
+func cloneSourceAttachmentRequest(t *testing.T, projectID string, attachment map[string]any) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"project_id":        projectID,
+		"quantity":          1,
+		"input_attachments": []any{attachment},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+func assertCloneSourceReuseRejectedWithoutPersistence(t *testing.T, fixture *cloneSourceReuseFixture, requestBody string) {
+	t.Helper()
+	resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", requestBody)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
+	}
+	count, err := fixture.repo.Tasks().CountByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "")
+	if err != nil || count != 0 {
+		t.Fatalf("destination task count = %d err=%v, want 0", count, err)
+	}
+	total, err := fixture.repo.Tasks().CountByUserID(t.Context(), fixture.userID, "", "")
+	if err != nil || total != 2 {
+		t.Fatalf("total task count = %d err=%v, want unchanged root+source tasks", total, err)
 	}
 }
 
@@ -1094,6 +1142,115 @@ func TestCloneTask_FullEditableAllowsTrustedRootSourceReuse(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCloneTask_FullEditableAllowsTaskAPIAttachmentSourceReuse(t *testing.T) {
+	tests := []struct {
+		name       string
+		attachment func(*cloneSourceReuseFixture) model.EntryAttachment
+	}{
+		{
+			name: "owned URL and enriched matching key",
+			attachment: func(f *cloneSourceReuseFixture) model.EntryAttachment {
+				return model.EntryAttachment{
+					Type:        "image",
+					URL:         cloneSourceTaskURL(f.userID, f.rootProjectID, f.rootTaskID, "source.png"),
+					FileName:    "source.png",
+					ContentType: "image/png",
+				}
+			},
+		},
+		{
+			name: "trusted persisted key only",
+			attachment: func(f *cloneSourceReuseFixture) model.EntryAttachment {
+				return model.EntryAttachment{
+					Type:        "image",
+					Key:         strings.TrimPrefix(cloneSourceTaskURL(f.userID, f.rootProjectID, f.rootTaskID, "source.png"), "/api/v1/files/"),
+					FileName:    "source.png",
+					ContentType: "image/png",
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+			apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, tt.attachment(fixture))
+			if _, hasUploadID := apiAttachment["upload_id"]; hasUploadID {
+				t.Fatalf("task API attachment unexpectedly has upload_id: %#v", apiAttachment)
+			}
+			resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 200 body=%s attachment=%#v", resp.StatusCode, body, apiAttachment)
+			}
+			tasks, err := fixture.repo.Tasks().FindByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "", 0, 10)
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("destination tasks = %d err=%v", len(tasks), err)
+			}
+			got := tasks[0].InputAttachments.Data()
+			wantURL, _ := apiAttachment["url"].(string)
+			wantKey, _ := apiAttachment["key"].(string)
+			if len(got) != 1 || got[0].Key != wantKey || got[0].URL != wantURL {
+				t.Fatalf("persisted attachment = %#v, API attachment = %#v", got, apiAttachment)
+			}
+		})
+	}
+}
+
+func TestCloneTask_FullEditableRejectsUntrustedTaskAPIAttachmentSourceReuse(t *testing.T) {
+	mismatches := []struct {
+		name string
+		ids  func(*cloneSourceReuseFixture) (string, string, string)
+	}{
+		{name: "wrong user", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return uuid.NewString(), f.rootProjectID, f.rootTaskID
+		}},
+		{name: "wrong project", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return f.userID, uuid.NewString(), f.rootTaskID
+		}},
+		{name: "wrong task", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return f.userID, f.rootProjectID, uuid.NewString()
+		}},
+	}
+	for _, mismatch := range mismatches {
+		t.Run(mismatch.name, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+			userID, projectID, taskID := mismatch.ids(fixture)
+			apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
+				Type:        "image",
+				URL:         cloneSourceTaskURL(userID, projectID, taskID, "source.png"),
+				FileName:    "source.png",
+				ContentType: "image/png",
+			})
+			assertCloneSourceReuseRejectedWithoutPersistence(t, fixture, cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+		})
+	}
+
+	t.Run("URL and key identify different objects", func(t *testing.T) {
+		fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+		apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
+			Type:        "image",
+			URL:         cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "source.png"),
+			FileName:    "source.png",
+			ContentType: "image/png",
+		})
+		apiAttachment["key"] = strings.TrimPrefix(cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "other.png"), "/api/v1/files/")
+		assertCloneSourceReuseRejectedWithoutPersistence(t, fixture, cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+	})
+
+	t.Run("untrusted key only", func(t *testing.T) {
+		fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+		apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
+			Type:        "image",
+			Key:         strings.TrimPrefix(cloneSourceTaskURL(uuid.NewString(), fixture.rootProjectID, fixture.rootTaskID, "source.png"), "/api/v1/files/"),
+			FileName:    "source.png",
+			ContentType: "image/png",
+		})
+		assertCloneSourceReuseRejectedWithoutPersistence(t, fixture, cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+	})
 }
 
 func TestCloneTask_FullEditableAllowsPublicExternalSourceURLs(t *testing.T) {
