@@ -29,7 +29,7 @@ func (s *TaskService) RecordExecutionInstance(ctx context.Context, executionID, 
 		return nil
 	}
 	if instanceID != "" && execution.RuntimeInstanceID != "" && execution.RuntimeInstanceID != instanceID {
-		return fmt.Errorf("execution runtime instance identity changed from %s to %s", execution.RuntimeInstanceID, instanceID)
+		return fmt.Errorf("%w: execution instance changed from %s to %s", repository.ErrRuntimeIdentityConflict, execution.RuntimeInstanceID, instanceID)
 	}
 	if instanceID == "" || execution.RuntimeInstanceID == instanceID {
 		return nil

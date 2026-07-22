@@ -126,7 +126,7 @@ func TestRuntimeDispatchIdentityMigration(t *testing.T) {
 			t.Errorf("migration SQL missing %q", fragment)
 		}
 	}
-	for _, forbidden := range []string{"IF EXISTS", "IF NOT EXISTS", "ADD COLUMN", "UPDATE `task_executions`"} {
+	for _, forbidden := range []string{"IF EXISTS", "IF NOT EXISTS", "ADD COLUMN", "UPDATE `task_executions`", "NOT NULL", "DEFAULT"} {
 		if strings.Contains(strings.ToUpper(sql), strings.ToUpper(forbidden)) {
 			t.Errorf("migration SQL contains compatibility fragment %q", forbidden)
 		}

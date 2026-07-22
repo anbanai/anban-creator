@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -177,26 +178,97 @@ func TestTaskExecutionRepositoryRuntimeAndReconciliation(t *testing.T) {
 	}
 }
 
-func TestTaskExecutionRepositoryRuntimeIdentityPreservesExistingValues(t *testing.T) {
+func TestTaskExecutionRepositoryRuntimeIdentityIsFillOnlyAndIdempotent(t *testing.T) {
 	repo := setupTaskExecutionRepository(t)
 	ctx := context.Background()
 	execution := seedTaskExecution(t, repo, model.TaskExecutionStarting)
+	identity := model.RuntimeIdentity{Scope: "agent-system", Workload: "agent-job-1", InstanceID: "pod-1"}
 
-	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, model.RuntimeIdentity{Scope: "agent-system", Workload: "agent-job-1", InstanceID: "pod-1"}); err != nil {
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, identity); err != nil {
 		t.Fatalf("set full runtime identity: %v", err)
 	}
-	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, model.RuntimeIdentity{Workload: "agent-job-2"}); err != nil {
-		t.Fatalf("set partial runtime identity: %v", err)
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, identity); err != nil {
+		t.Fatalf("replay runtime identity: %v", err)
+	}
+	for name, drift := range map[string]model.RuntimeIdentity{
+		"scope":    {Scope: "other-system"},
+		"workload": {Workload: "agent-job-2"},
+		"instance": {InstanceID: "pod-2"},
+	} {
+		t.Run(name+" drift", func(t *testing.T) {
+			if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, drift); !errors.Is(err, ErrRuntimeIdentityConflict) {
+				t.Fatalf("SetRuntimeIdentity error = %v, want ErrRuntimeIdentityConflict", err)
+			}
+		})
 	}
 
 	found, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
 	if err != nil {
 		t.Fatalf("find execution: %v", err)
 	}
-	if found.RuntimeScope != "agent-system" || found.RuntimeWorkload != "agent-job-2" || found.RuntimeInstanceID != "pod-1" {
+	if found.RuntimeScope != identity.Scope || found.RuntimeWorkload != identity.Workload || found.RuntimeInstanceID != identity.InstanceID {
 		t.Fatalf("runtime identity = (%q, %q, %q), want (%q, %q, %q)",
 			found.RuntimeScope, found.RuntimeWorkload, found.RuntimeInstanceID,
-			"agent-system", "agent-job-2", "pod-1")
+			identity.Scope, identity.Workload, identity.InstanceID)
+	}
+}
+
+func TestTaskExecutionRepositoryRuntimeIdentityRejectsInactiveAndMissingExecutions(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	terminal := seedTaskExecution(t, repo, model.TaskExecutionSucceeded)
+
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, terminal.ID, model.RuntimeIdentity{InstanceID: "pod-1"}); !errors.Is(err, ErrRuntimeIdentityInactive) {
+		t.Fatalf("terminal identity error = %v, want ErrRuntimeIdentityInactive", err)
+	}
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, "missing", model.RuntimeIdentity{InstanceID: "pod-1"}); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("missing identity error = %v, want gorm.ErrRecordNotFound", err)
+	}
+	found, err := repo.TaskExecutions().FindByID(ctx, terminal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.RuntimeInstanceID != "" {
+		t.Fatalf("terminal runtime instance = %q, want empty", found.RuntimeInstanceID)
+	}
+}
+
+func TestTaskExecutionRepositoryConcurrentRuntimeInstanceBindingHasOneWinner(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	sqlDB, err := repo.db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	execution := seedTaskExecution(t, repo, model.TaskExecutionStarting)
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, instanceID := range []string{"pod-1", "pod-2"} {
+		wg.Add(1)
+		go func(instanceID string) {
+			defer wg.Done()
+			<-start
+			errs <- repo.TaskExecutions().SetRuntimeIdentity(context.Background(), execution.ID, model.RuntimeIdentity{InstanceID: instanceID})
+		}(instanceID)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	succeeded, conflicted := 0, 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, ErrRuntimeIdentityConflict):
+			conflicted++
+		default:
+			t.Fatalf("concurrent binding error = %v", err)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("concurrent bindings succeeded=%d conflicted=%d, want 1/1", succeeded, conflicted)
 	}
 }
 
@@ -351,6 +423,50 @@ func TestTaskExecutionDispatchClaimLeaseIsTokenGuarded(t *testing.T) {
 	}
 	if found.Status != model.TaskExecutionStarting || found.DispatchClaimToken != "" || found.DispatchClaimedAt != nil || found.RuntimeScope != identity.Scope || found.RuntimeWorkload != identity.Workload {
 		t.Fatalf("completed dispatch = %+v", found)
+	}
+}
+
+func TestTaskExecutionCompleteDispatchPreservesInstanceAndRejectsIdentityDrift(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionCreated)
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, execution.ID, model.RuntimeIdentity{InstanceID: "container-1"}); err != nil {
+		t.Fatalf("record runtime instance: %v", err)
+	}
+	if won, err := repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "owner-1", time.Minute); err != nil || !won {
+		t.Fatalf("claim dispatch = %v, %v", won, err)
+	}
+	if won, err := repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "stale-owner", model.RuntimeIdentity{Scope: "docker", Workload: "workload-1"}); err != nil || won {
+		t.Fatalf("stale completion = %v, %v", won, err)
+	}
+	if won, err := repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, "owner-1", model.RuntimeIdentity{Scope: "docker", Workload: "workload-1"}); err != nil || !won {
+		t.Fatalf("complete partial identity = %v, %v", won, err)
+	}
+	found, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.RuntimeScope != "docker" || found.RuntimeWorkload != "workload-1" || found.RuntimeInstanceID != "container-1" {
+		t.Fatalf("completed identity = %+v", found)
+	}
+
+	conflicted := seedTaskExecution(t, repo, model.TaskExecutionCreated)
+	if err := repo.TaskExecutions().SetRuntimeIdentity(ctx, conflicted.ID, model.RuntimeIdentity{Workload: "workload-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if won, err := repo.TaskExecutions().ClaimDispatch(ctx, conflicted.ID, "owner-2", time.Minute); err != nil || !won {
+		t.Fatalf("claim conflicting dispatch = %v, %v", won, err)
+	}
+	won, err := repo.TaskExecutions().CompleteDispatch(ctx, conflicted.ID, "owner-2", model.RuntimeIdentity{Scope: "docker", Workload: "workload-2"})
+	if won || !errors.Is(err, ErrRuntimeIdentityConflict) {
+		t.Fatalf("conflicting completion = %v, %v, want false/ErrRuntimeIdentityConflict", won, err)
+	}
+	found, err = repo.TaskExecutions().FindByID(ctx, conflicted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.TaskExecutionDispatching || found.DispatchClaimToken != "owner-2" || found.RuntimeScope != "" || found.RuntimeWorkload != "workload-1" {
+		t.Fatalf("conflicting completion mutated execution = %+v", found)
 	}
 }
 

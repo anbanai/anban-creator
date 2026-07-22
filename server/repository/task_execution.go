@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,20 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+var (
+	// ErrRuntimeIdentityConflict reports attempted drift from a persisted non-empty identity member.
+	ErrRuntimeIdentityConflict = errors.New("runtime identity conflict")
+	// ErrRuntimeIdentityInactive reports identity writes rejected after an execution leaves its active states.
+	ErrRuntimeIdentityInactive = errors.New("runtime identity cannot be updated for inactive execution")
+)
+
+var activeTaskExecutionStatuses = []string{
+	model.TaskExecutionCreated,
+	model.TaskExecutionDispatching,
+	model.TaskExecutionStarting,
+	model.TaskExecutionRunning,
+}
 
 type taskExecutionRepository struct {
 	db *gorm.DB
@@ -98,21 +113,37 @@ func (r *taskExecutionRepository) AbandonDispatch(ctx context.Context, id, token
 }
 
 func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error) {
-	result := r.db.WithContext(ctx).
+	updates := map[string]any{
+		"status":               model.TaskExecutionStarting,
+		"dispatch_claim_token": "",
+		"dispatch_claimed_at":  nil,
+	}
+	query := r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
-		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token).
-		Updates(map[string]any{
-			"status":               model.TaskExecutionStarting,
-			"dispatch_claim_token": "",
-			"dispatch_claimed_at":  nil,
-			"runtime_scope":        identity.Scope,
-			"runtime_workload":     identity.Workload,
-			"runtime_instance_id":  identity.InstanceID,
-		})
+		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token)
+	query = addRuntimeIdentityUpdate(query, updates, identity)
+	result := query.Updates(updates)
 	if result.Error != nil {
 		return false, result.Error
 	}
-	return result.RowsAffected > 0, nil
+	if result.RowsAffected > 0 {
+		return true, nil
+	}
+
+	current, err := r.findRuntimeIdentityState(ctx, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if current.Status != model.TaskExecutionDispatching || current.DispatchClaimToken != token {
+		return false, nil
+	}
+	if err := runtimeIdentityConflict(current, identity); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func (r *taskExecutionRepository) FailDispatch(
@@ -177,24 +208,87 @@ func (r *taskExecutionRepository) FindReconcilable(ctx context.Context, before t
 }
 
 func (r *taskExecutionRepository) SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error {
-	updates := make(map[string]any, 3)
-	if identity.Scope != "" {
-		updates["runtime_scope"] = identity.Scope
-	}
-	if identity.Workload != "" {
-		updates["runtime_workload"] = identity.Workload
-	}
-	if identity.InstanceID != "" {
-		updates["runtime_instance_id"] = identity.InstanceID
-	}
-	if len(updates) == 0 {
+	if identity.Scope == "" && identity.Workload == "" && identity.InstanceID == "" {
 		return nil
 	}
 
-	return r.db.WithContext(ctx).
+	updates := make(map[string]any, 3)
+	query := r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
-		Where("id = ? AND status IN ?", id, []string{model.TaskExecutionCreated, model.TaskExecutionDispatching, model.TaskExecutionStarting, model.TaskExecutionRunning}).
-		Updates(updates).Error
+		Where("id = ? AND status IN ?", id, activeTaskExecutionStatuses)
+	query = addRuntimeIdentityUpdate(query, updates, identity)
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+
+	current, err := r.findRuntimeIdentityState(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !isActiveTaskExecutionStatus(current.Status) {
+		return fmt.Errorf("%w: execution %s has status %s", ErrRuntimeIdentityInactive, id, current.Status)
+	}
+	return runtimeIdentityConflict(current, identity)
+}
+
+func addRuntimeIdentityUpdate(query *gorm.DB, updates map[string]any, identity model.RuntimeIdentity) *gorm.DB {
+	for _, member := range []struct {
+		column string
+		value  string
+	}{
+		{column: "runtime_scope", value: identity.Scope},
+		{column: "runtime_workload", value: identity.Workload},
+		{column: "runtime_instance_id", value: identity.InstanceID},
+	} {
+		if member.value == "" {
+			continue
+		}
+		updates[member.column] = member.value
+		query = query.Where("("+member.column+" IS NULL OR "+member.column+" = '' OR "+member.column+" = ?)", member.value)
+	}
+	return query
+}
+
+func (r *taskExecutionRepository) findRuntimeIdentityState(ctx context.Context, id string) (*model.TaskExecution, error) {
+	var execution model.TaskExecution
+	err := r.db.WithContext(ctx).
+		Select("id", "status", "dispatch_claim_token", "runtime_scope", "runtime_workload", "runtime_instance_id").
+		Where("id = ?", id).
+		First(&execution).Error
+	if err != nil {
+		return nil, err
+	}
+	return &execution, nil
+}
+
+func runtimeIdentityConflict(current *model.TaskExecution, identity model.RuntimeIdentity) error {
+	for _, member := range []struct {
+		name      string
+		persisted string
+		supplied  string
+	}{
+		{name: "scope", persisted: current.RuntimeScope, supplied: identity.Scope},
+		{name: "workload", persisted: current.RuntimeWorkload, supplied: identity.Workload},
+		{name: "instance", persisted: current.RuntimeInstanceID, supplied: identity.InstanceID},
+	} {
+		if member.supplied != "" && member.persisted != "" && member.persisted != member.supplied {
+			return fmt.Errorf("%w: %s is %q, received %q", ErrRuntimeIdentityConflict, member.name, member.persisted, member.supplied)
+		}
+	}
+	return nil
+}
+
+func isActiveTaskExecutionStatus(status string) bool {
+	for _, active := range activeTaskExecutionStatuses {
+		if status == active {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *taskExecutionRepository) UpdateHeartbeat(ctx context.Context, id string, now time.Time) error {

@@ -303,6 +303,24 @@ func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterJobAccepted(t *testing
 	}
 }
 
+func TestRecordExecutionInstanceIsIdempotentAndPropagatesIdentityConflict(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	ctx := context.Background()
+	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	if err := svc.RecordExecutionInstance(ctx, execution.ID, "instance-1"); err != nil {
+		t.Fatalf("record instance: %v", err)
+	}
+	if err := svc.RecordExecutionInstance(ctx, execution.ID, "instance-1"); err != nil {
+		t.Fatalf("replay instance: %v", err)
+	}
+	if err := svc.RecordExecutionInstance(ctx, execution.ID, "instance-2"); !errors.Is(err, repository.ErrRuntimeIdentityConflict) {
+		t.Fatalf("drift error = %v, want ErrRuntimeIdentityConflict", err)
+	}
+}
+
 func TestCreateCurrentExecutionPersistsRuntimeImage(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{
