@@ -47,6 +47,7 @@ export interface TaskFormDialogProps {
   initialType?: TaskType
   onOpenChange: (open: boolean) => void
   onCreated: (task: Task, quantity: number) => void
+  shouldHandleSuccess?: () => boolean
 }
 
 function createInitialDefaults(project?: Project, initialType?: TaskType): TaskFormDefaults {
@@ -69,6 +70,7 @@ export function TaskFormDialog({
   initialType,
   onOpenChange,
   onCreated,
+  shouldHandleSuccess,
 }: TaskFormDialogProps) {
   const queryClient = useQueryClient()
   const { submit } = useSubmitLock()
@@ -225,6 +227,7 @@ export function TaskFormDialog({
       return api.tasks.create(request)
     },
     onSuccess: (task, variables) => {
+      if (shouldHandleSuccess && !shouldHandleSuccess()) return
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       toast.success(mode === 'clone'
         ? variables.quantity > 1 ? `已克隆 ${variables.quantity} 个任务` : '任务克隆成功'

@@ -10,7 +10,7 @@ import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
-import type { InputAttachment, TaskFile } from '@/types'
+import type { InputAttachment, Task, TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
@@ -198,6 +198,7 @@ export default function TaskDetailPage() {
   const [showProjectDialog, setShowProjectDialog] = useState(false)
   const [showResumeDialog, setShowResumeDialog] = useState(false)
   const [showCloneDialog, setShowCloneDialog] = useState(false)
+  const [cloneSourceTask, setCloneSourceTask] = useState<Task | null>(null)
   const [showTaskDetails, setShowTaskDetails] = useState(false)
   const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
@@ -205,6 +206,7 @@ export default function TaskDetailPage() {
   const activeSseTaskRef = useRef<string | null>(null)
   const persistedLogsRef = useRef<string[]>([])
   const logContainerRef = useRef<HTMLDivElement | null>(null)
+  const cloneSourceIdentityRef = useRef<{ routeId: string; taskId: string } | null>(null)
   const { submit } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
@@ -219,6 +221,11 @@ export default function TaskDetailPage() {
     },
     enabled: !!id,
   })
+  const activeTaskIdentityRef = useRef<{ routeId: string | undefined; taskId: string | undefined }>({
+    routeId: id,
+    taskId: task?.id,
+  })
+  activeTaskIdentityRef.current = { routeId: id, taskId: task?.id }
 
   const { data: files } = useQuery({
     queryKey: ['task-files', id],
@@ -282,18 +289,16 @@ export default function TaskDetailPage() {
   })
 
   const togglePublished = useMutation({
-    mutationFn: ({ published }: { published: boolean }) =>
-      api.tasks.markPublished(id!, published),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-      if (id) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(id) })
-      }
-    },
+    mutationFn: ({ taskId, published }: { taskId: string; published: boolean }) =>
+      api.tasks.markPublished(taskId, published),
     onError: (err) => {
       toast.error(getApiErrorMessage(err, '切换发布状态失败，请稍后重试'))
     },
+    onSettled: (_data, _error, { taskId }) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(taskId) }),
+    ]),
   })
 
   // Publish-approval gate (Batch 4A): resume a held publish or close the gate.
@@ -505,6 +510,8 @@ export default function TaskDetailPage() {
   useEffect(() => {
     setShowResumeDialog(false)
     setShowCloneDialog(false)
+    setCloneSourceTask(null)
+    cloneSourceIdentityRef.current = null
   }, [id, task?.id])
 
   function openTaskDetails(tab: TaskDetailsTab) {
@@ -573,6 +580,27 @@ export default function TaskDetailPage() {
   const showPendingResultDestination = (task.status === 'pending' || task.status === 'running')
     && publishedFiles.length === 0
     && collectedFiles.length === 0
+
+  function openCloneDialog() {
+    cloneSourceIdentityRef.current = { routeId: id!, taskId: currentTask.id }
+    setCloneSourceTask(currentTask)
+    setShowCloneDialog(true)
+  }
+
+  function handleCloneOpenChange(open: boolean) {
+    setShowCloneDialog(open)
+    if (open) return
+    cloneSourceIdentityRef.current = null
+    setCloneSourceTask(null)
+  }
+
+  function shouldHandleCloneSuccess() {
+    const source = cloneSourceIdentityRef.current
+    const active = activeTaskIdentityRef.current
+    return source !== null
+      && source.routeId === active.routeId
+      && source.taskId === active.taskId
+  }
 
   return (
     <div className="space-y-6">
@@ -660,7 +688,7 @@ export default function TaskDetailPage() {
                 checked={task.published}
                 disabled={togglePublished.isPending}
                 onCheckedChange={(published) => {
-                  void submit(async () => togglePublished.mutateAsync({ published })).catch(() => {})
+                  void submit(async () => togglePublished.mutateAsync({ taskId: task.id, published })).catch(() => {})
                 }}
               />
               <span>已发布</span>
@@ -684,7 +712,7 @@ export default function TaskDetailPage() {
             </Button>
           )}
           {canClone ? (
-            <Button variant="outline" size="sm" onClick={() => setShowCloneDialog(true)}>
+            <Button variant="outline" size="sm" onClick={openCloneDialog}>
               <RefreshCw className="h-4 w-4" />
               克隆任务
             </Button>
@@ -968,13 +996,16 @@ export default function TaskDetailPage() {
         />
       ) : null}
 
-      <TaskFormDialog
-        open={showCloneDialog}
-        mode="clone"
-        sourceTask={currentTask}
-        onOpenChange={setShowCloneDialog}
-        onCreated={(nextTask) => navigate(`/tasks/${nextTask.id}`)}
-      />
+      {showCloneDialog && canClone && cloneSourceTask ? (
+        <TaskFormDialog
+          open
+          mode="clone"
+          sourceTask={cloneSourceTask}
+          onOpenChange={handleCloneOpenChange}
+          onCreated={(nextTask) => navigate(`/tasks/${nextTask.id}`)}
+          shouldHandleSuccess={shouldHandleCloneSuccess}
+        />
+      ) : null}
 
       {project && (
         <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>

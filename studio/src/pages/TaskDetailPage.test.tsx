@@ -402,6 +402,44 @@ describe('TaskDetailPage', () => {
     expect(api.tasks.clone).not.toHaveBeenCalled()
   })
 
+  it('ignores a late clone success after navigating away from its source task', async () => {
+    const taskA = taskWith({
+      id: 'task-1',
+      title: '已完成任务 A',
+      status: 'completed',
+      project_id: 'ch-1',
+      result: null,
+    })
+    const taskB = taskWith({
+      id: 'task-2',
+      title: '已完成任务 B',
+      status: 'completed',
+      project_id: 'ch-1',
+      result: null,
+    })
+    const request = deferred<Task>()
+    vi.mocked(api.tasks.clone).mockReturnValue(request.promise)
+    const view = renderWithCachedTasks(taskA, taskB)
+
+    const dialog = await openCloneDialog()
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('测试项目'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
+
+    routeState.taskId = 'task-2'
+    view.rerender(<TaskDetailPage />)
+    expect(await screen.findAllByText('已完成任务 B')).not.toHaveLength(0)
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '克隆任务' })).not.toBeInTheDocument())
+
+    await act(async () => {
+      request.resolve(taskWith({ id: 'late-clone', status: 'pending' }))
+      await request.promise
+    })
+
+    expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/late-clone')
+    expect(toastSuccessMock).not.toHaveBeenCalled()
+  })
+
   it('drops running task SSE state when switching directly to a cached completed task', async () => {
     const streamSignals = new Map<string, AbortSignal>()
     mockStreamTaskProgress.mockImplementation(async function* (taskId, _token, signal) {
@@ -934,6 +972,25 @@ describe('TaskDetailPage', () => {
     expect(screen.getByRole('button', { name: /下载 article\.html/ })).toBeEnabled()
   })
 
+  it('does not load shared clone-form data until a terminal task opens the clone dialog', async () => {
+    mockTask(taskWith({ id: 'task-1', status: 'completed', project_id: 'ch-1', result: null }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByRole('button', { name: '克隆任务' })).toBeInTheDocument()
+    expect(api.projects.list).not.toHaveBeenCalled()
+    expect(api.billing.wallet).not.toHaveBeenCalled()
+    expect(api.billing.catalog).not.toHaveBeenCalled()
+    expect(api.imageModels.list).not.toHaveBeenCalled()
+
+    await openCloneDialog()
+
+    await waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(1))
+    expect(api.billing.wallet).toHaveBeenCalledTimes(1)
+    expect(api.billing.catalog).toHaveBeenCalledTimes(1)
+    expect(api.imageModels.list).toHaveBeenCalledTimes(1)
+  })
+
   it('opens the shared full clone form with editable source defaults and navigates to the first created task', async () => {
     mockTask(taskWith({
       id: 'task-1',
@@ -1006,8 +1063,11 @@ describe('TaskDetailPage', () => {
     })
   })
 
-  it('disables the published checkbox while pending and preserves server state after an error', async () => {
-    mockTask(taskWith({ id: 'task-1', status: 'completed', published: true, result: null }))
+  it('disables the published checkbox while pending and refetches unchanged server state after an error', async () => {
+    const serverTask = taskWith({ id: 'task-1', status: 'completed', published: true, result: null })
+    vi.mocked(api.tasks.get)
+      .mockResolvedValueOnce(serverTask)
+      .mockResolvedValue(serverTask)
     const request = deferred<Task>()
     vi.mocked(api.tasks.markPublished).mockReturnValue(request.promise)
 
@@ -1025,8 +1085,29 @@ describe('TaskDetailPage', () => {
     })
 
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
+    await waitFor(() => expect(api.tasks.get).toHaveBeenCalledTimes(2))
     expect(checkbox).not.toHaveAttribute('aria-disabled', 'true')
     expect(checkbox).toBeChecked()
+  })
+
+  it('reconciles an error-after-commit publish response with the persisted server state', async () => {
+    const originalTask = taskWith({ id: 'task-1', status: 'completed', published: false, result: null })
+    const persistedTask = taskWith({ ...originalTask, published: true })
+    vi.mocked(api.tasks.get)
+      .mockResolvedValueOnce(originalTask)
+      .mockResolvedValue(persistedTask)
+    vi.mocked(api.tasks.markPublished).mockRejectedValue(new Error('tracking failed after commit'))
+
+    render(<TaskDetailPage />)
+
+    const checkbox = await screen.findByRole('checkbox', { name: '已发布' })
+    expect(checkbox).not.toBeChecked()
+    fireEvent.click(checkbox)
+
+    await waitFor(() => expect(api.tasks.markPublished).toHaveBeenCalledWith('task-1', true))
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
+    await waitFor(() => expect(api.tasks.get).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(checkbox).toBeChecked())
   })
 
   it.each([
@@ -1282,6 +1363,10 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByRole('button', { name: '克隆任务' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '删除任务' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多任务操作' })).not.toBeInTheDocument()
+    expect(api.projects.list).not.toHaveBeenCalled()
+    expect(api.billing.wallet).not.toHaveBeenCalled()
+    expect(api.billing.catalog).not.toHaveBeenCalled()
+    expect(api.imageModels.list).not.toHaveBeenCalled()
   })
 
   it('shows visible continue, clone, and delete actions for a cancelled task', async () => {
