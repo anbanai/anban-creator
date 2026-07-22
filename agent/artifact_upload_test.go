@@ -285,9 +285,10 @@ func (r *slowArtifactReader) Read(p []byte) (int, error) {
 
 type artifactTestFile struct {
 	*os.File
-	read     func([]byte) (int, error)
-	stat     func() (fs.FileInfo, error)
-	closeErr error
+	read       func([]byte) (int, error)
+	stat       func() (fs.FileInfo, error)
+	closeErr   error
+	closeCalls *int
 }
 
 func (f *artifactTestFile) Read(p []byte) (int, error) {
@@ -305,8 +306,24 @@ func (f *artifactTestFile) Stat() (fs.FileInfo, error) {
 }
 
 func (f *artifactTestFile) Close() error {
+	if f.closeCalls != nil {
+		(*f.closeCalls)++
+	}
 	fileErr := f.File.Close()
 	return errors.Join(fileErr, f.closeErr)
+}
+
+type artifactShortWriter struct{}
+
+func (artifactShortWriter) Write(p []byte) (int, error) {
+	return len(p) - 1, nil
+}
+
+func TestCopyArtifactWithContextRejectsShortWrite(t *testing.T) {
+	_, err := copyArtifactWithContext(context.Background(), artifactShortWriter{}, strings.NewReader("payload"))
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("copyArtifactWithContext error = %v, want io.ErrShortWrite", err)
+	}
 }
 
 func TestFileSHA256ReturnsCloseErrorAfterSuccessfulHash(t *testing.T) {
@@ -723,6 +740,74 @@ func TestPutOSSObjectFromBucketAddsSHA256Metadata(t *testing.T) {
 	}
 }
 
+func TestArtifactUploaderRetainsOwnershipOfOSSUploadFile(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/article.md", "owned by uploader")
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		w.Header().Set("ETag", "test-etag")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	client, err := oss.New(server.URL, "access-key", "secret", oss.UseCname(true))
+	if err != nil {
+		t.Fatalf("create OSS client: %v", err)
+	}
+	bucket, err := client.Bucket("bucket")
+	if err != nil {
+		t.Fatalf("open bucket: %v", err)
+	}
+
+	previousOpen := openArtifactFile
+	openCalls := 0
+	ownerCloseCalls := 0
+	var uploadFile *artifactTestFile
+	openArtifactFile = func(path string) (artifactFile, error) {
+		openCalls++
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		if openCalls == 1 {
+			return file, nil
+		}
+		uploadFile = &artifactTestFile{File: file, closeCalls: &ownerCloseCalls}
+		return uploadFile, nil
+	}
+	t.Cleanup(func() { openArtifactFile = previousOpen })
+
+	uploader.putObject = func(ctx context.Context, prepared *ArtifactPrepareResponse, source io.Reader, contentType string) (string, error) {
+		if _, err := putOSSObjectFromBucket(ctx, bucket, prepared.Key, source, contentType, prepared.Headers[artifactSHA256Header]); err != nil {
+			return "", err
+		}
+		if _, ok := source.(io.Closer); ok {
+			return "", errors.New("OSS upload source exposes Close")
+		}
+		if _, ok := source.(io.Seeker); !ok {
+			return "", errors.New("OSS upload source does not expose Seek")
+		}
+		if _, err := uploadFile.Stat(); err != nil {
+			return "", fmt.Errorf("stat descriptor after OSS upload: %w", err)
+		}
+		if _, err := uploadFile.Seek(0, io.SeekCurrent); err != nil {
+			return "", fmt.Errorf("seek descriptor after OSS upload: %w", err)
+		}
+		return "etag-owned", nil
+	}
+
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
+	}
+	if ownerCloseCalls != 1 {
+		t.Fatalf("owner close calls = %d, want 1", ownerCloseCalls)
+	}
+}
+
 func TestArtifactUploaderRetriesFileChangedDuringUpload(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "output", "article.md")
@@ -827,7 +912,7 @@ func TestArtifactUploaderPreservesPutAndCloseErrors(t *testing.T) {
 	}
 }
 
-func TestArtifactUploaderRetriesFileChangedWhileOpening(t *testing.T) {
+func TestArtifactUploaderRetriesFileChangedDuringSnapshotOpen(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "output", "article.md")
 	writeAgentArtifactTestFile(t, root, "output/article.md", "version-one")
@@ -869,6 +954,89 @@ func TestArtifactUploaderRetriesFileChangedWhileOpening(t *testing.T) {
 	}
 	if body, err := os.ReadFile(path); err != nil || string(body) != "version-two-expanded" {
 		t.Fatalf("latest artifact = %q, %v", body, err)
+	}
+}
+
+func TestArtifactUploaderDoesNotRetryPostUploadDescriptorStatError(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/article.md", "stable")
+	statErr := errors.New("post-upload fstat failed")
+	closeErr := errors.New("close failed")
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+	putCalls := 0
+	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, source io.Reader, _ string) (string, error) {
+		putCalls++
+		_, err := io.Copy(io.Discard, source)
+		return "etag", err
+	}
+	previousOpen := openArtifactFile
+	openCalls := 0
+	openArtifactFile = func(path string) (artifactFile, error) {
+		openCalls++
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		if openCalls == 1 {
+			return file, nil
+		}
+		statCalls := 0
+		return &artifactTestFile{
+			File: file,
+			stat: func() (fs.FileInfo, error) {
+				statCalls++
+				if statCalls == 1 {
+					return file.Stat()
+				}
+				return nil, statErr
+			},
+			closeErr: closeErr,
+		}, nil
+	}
+	t.Cleanup(func() { openArtifactFile = previousOpen })
+
+	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	if !errors.Is(err, statErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("UploadWorkspaceArtifacts error = %v, want stat and close errors", err)
+	}
+	if strings.Contains(err.Error(), "changed during final collection") {
+		t.Fatalf("descriptor stat error mislabeled as mutation: %v", err)
+	}
+	if len(reporter.prepared) != 1 || putCalls != 1 || reporter.manifestCalls != 0 {
+		t.Fatalf("prepare/PUT/manifest calls = %d/%d/%d, want 1/1/0", len(reporter.prepared), putCalls, reporter.manifestCalls)
+	}
+}
+
+func TestArtifactUploaderDoesNotRetryPostUploadPathStatError(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "output", "article.md")
+	writeAgentArtifactTestFile(t, root, "output/article.md", "stable")
+	closeErr := errors.New("close failed")
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+	putCalls := 0
+	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, source io.Reader, _ string) (string, error) {
+		putCalls++
+		if _, err := io.Copy(io.Discard, source); err != nil {
+			return "", err
+		}
+		if err := os.Remove(path); err != nil {
+			return "", err
+		}
+		return "etag", nil
+	}
+	installArtifactCloseFailureAfterScan(t, closeErr)
+
+	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	if !errors.Is(err, fs.ErrNotExist) || !errors.Is(err, closeErr) {
+		t.Fatalf("UploadWorkspaceArtifacts error = %v, want path stat and close errors", err)
+	}
+	if !strings.Contains(err.Error(), "recheck artifact output/article.md") || !strings.Contains(err.Error(), "inspect artifact path") || strings.Contains(err.Error(), "changed during final collection") {
+		t.Fatalf("path stat error has wrong classification: %v", err)
+	}
+	if len(reporter.prepared) != 1 || putCalls != 1 || reporter.manifestCalls != 0 {
+		t.Fatalf("prepare/PUT/manifest calls = %d/%d/%d, want 1/1/0", len(reporter.prepared), putCalls, reporter.manifestCalls)
 	}
 }
 

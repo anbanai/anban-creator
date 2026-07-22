@@ -29,6 +29,10 @@ type artifactSnapshot struct {
 	hash   string
 }
 
+type artifactUploadSource struct {
+	io.ReadSeeker
+}
+
 type artifactCloseError struct {
 	path string
 	err  error
@@ -90,13 +94,22 @@ func (s *artifactSnapshot) rewind() error {
 	return err
 }
 
-func (s *artifactSnapshot) unchanged() bool {
+func (s *artifactSnapshot) unchanged() (bool, error) {
 	after, err := s.file.Stat()
-	if err != nil || after.Size() != s.before.Size() || !after.ModTime().Equal(s.before.ModTime()) {
-		return false
+	if err != nil {
+		return false, fmt.Errorf("stat opened artifact %s: %w", s.path, err)
+	}
+	if after.Size() != s.before.Size() || !after.ModTime().Equal(s.before.ModTime()) {
+		return false, nil
 	}
 	pathInfo, err := os.Lstat(s.path)
-	return err == nil && pathInfo.Mode().IsRegular() && os.SameFile(pathInfo, after)
+	if err != nil {
+		return false, fmt.Errorf("inspect artifact path %s: %w", s.path, err)
+	}
+	if !pathInfo.Mode().IsRegular() || !os.SameFile(pathInfo, after) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func copyArtifactWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {

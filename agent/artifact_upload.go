@@ -225,15 +225,22 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 				primary := fmt.Errorf("rewind artifact %s: %w", file.RelativePath, err)
 				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 			}
-			etag, err = u.putObject(ctx, prepared, snapshot.file, contentType)
+			etag, err = u.putObject(ctx, prepared, artifactUploadSource{ReadSeeker: snapshot.file}, contentType)
 		}
 
-		stable := snapshot.unchanged()
+		stable, stabilityErr := snapshot.unchanged()
 		var operationErr error
 		if err != nil {
 			operationErr = fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
-		} else if err := artifactContextCause(ctx); err != nil {
-			operationErr = err
+		}
+		if stabilityErr != nil {
+			stabilityErr = fmt.Errorf("recheck artifact %s: %w", file.RelativePath, stabilityErr)
+			operationErr = errors.Join(operationErr, stabilityErr)
+		}
+		if operationErr == nil {
+			if err := artifactContextCause(ctx); err != nil {
+				operationErr = err
+			}
 		}
 		if err := closeArtifactFile(file.RelativePath, snapshot.file, operationErr); err != nil {
 			return ArtifactManifestFile{}, err
