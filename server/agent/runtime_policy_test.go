@@ -75,6 +75,10 @@ func TestWithManagedMCPAccessUsesProgrammaticHTTPServer(t *testing.T) {
 	if server.URL != "https://server.example.com/mcp" || server.Headers["Authorization"] != "Bearer execution-jwt" {
 		t.Fatalf("server = %#v", server)
 	}
+	wantTimeout := (15 * time.Minute).Milliseconds()
+	if server.Timeout != wantTimeout {
+		t.Fatalf("server timeout = %dms, want %dms", server.Timeout, wantTimeout)
+	}
 	if _, ok := opts.ExtraArgs["strict-mcp-config"]; !ok {
 		t.Fatalf("ExtraArgs = %#v, want strict-mcp-config for application-owned MCP", opts.ExtraArgs)
 	}
