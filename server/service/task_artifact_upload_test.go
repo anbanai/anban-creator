@@ -511,24 +511,32 @@ func TestFinalizeTaskArtifactManifestRejectsMalformedOrCrossScopeStagingKeys(t *
 	executionID := startTaskArtifactExecution(t, repo, task)
 	prefix := buildTaskArtifactStoragePrefix(task, executionID)
 	otherExecutionID := uuid.NewString()
+	validFinalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	validStagingKey := prefix + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
 	for _, tt := range []struct {
-		name string
-		key  string
+		name       string
+		key        string
+		storageKey string
 	}{
 		{name: "legacy deterministic", key: prefix + "output/article.md"},
 		{name: "malformed UUID", key: prefix + "staging/sha256/" + taskArtifactTestSHA256 + "/not-a-uuid/output/article.md"},
 		{name: "cross hash", key: prefix + "staging/sha256/" + strings.Repeat("b", 64) + "/" + uuid.NewString() + "/output/article.md"},
 		{name: "cross path", key: prefix + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/other.md"},
 		{name: "cross execution", key: buildTaskArtifactStoragePrefix(task, otherExecutionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"},
+		{name: "final leading whitespace", key: " " + validFinalKey, storageKey: validFinalKey},
+		{name: "final leading slash", key: "/" + validFinalKey, storageKey: validFinalKey},
+		{name: "staging leading whitespace", key: " " + validStagingKey, storageKey: validStagingKey},
+		{name: "staging leading slash", key: "/" + validStagingKey, storageKey: validStagingKey},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			store.stats = map[string]*storage.ObjectInfo{tt.key: {Key: tt.key, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "etag"}}
+			storageKey := firstNonEmptyString(tt.storageKey, tt.key)
+			store.stats = map[string]*storage.ObjectInfo{storageKey: {Key: storageKey, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "etag"}}
 			err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
 				TaskID: task.ID, ExecutionID: executionID,
 				Files: []TaskArtifactManifestFile{taskArtifactManifestEntry("output/article.md", tt.key, 7, taskArtifactTestSHA256)},
 			})
 			if !errors.Is(err, ErrTaskArtifactInvalid) {
-				t.Fatalf("FinalizeTaskArtifactManifest error = %v, want invalid staging key", err)
+				t.Fatalf("FinalizeTaskArtifactManifest error = %v, want invalid object key", err)
 			}
 		})
 	}

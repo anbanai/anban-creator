@@ -222,9 +222,12 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		if err != nil {
 			return taskArtifactInvalidf("%v", err)
 		}
-		objectKey := strings.TrimPrefix(strings.TrimSpace(file.ObjectKey), "/")
-		if objectKey == "" {
+		objectKey := file.ObjectKey
+		if strings.TrimSpace(objectKey) == "" {
 			return taskArtifactInvalidf("object_key is required for %s", relPath)
+		}
+		if objectKey != strings.TrimSpace(objectKey) {
+			return taskArtifactInvalidf("object key %q must not contain surrounding whitespace", objectKey)
 		}
 		if !strings.HasPrefix(objectKey, prefix) {
 			return taskArtifactInvalidf("object key %q is outside task artifact prefix %q", objectKey, prefix)
