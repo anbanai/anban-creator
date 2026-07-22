@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os/user"
 	"strings"
 	"testing"
@@ -38,10 +39,52 @@ func TestWorkloadDockerVerifierValidatesTokenAndLiveContainer(t *testing.T) {
 	if inspector.got != "exec-1" {
 		t.Fatalf("inspected container = %q, want claimed workload", inspector.got)
 	}
-	if identity.Scope != "docker" || identity.Workload != "exec-1" || identity.InstanceID != "container-id" ||
+	if identity.Target != "docker" || identity.Scope != "docker" || identity.Workload != "exec-1" || identity.InstanceID != "container-id" ||
 		identity.ExecutionID != "execution-1" || identity.TaskID != "task-1" || identity.ProjectID != "project-1" || identity.UserID != "user-1" ||
 		!identity.Deadline.Equal(now.Add(5*time.Minute)) {
 		t.Fatalf("identity = %#v", identity)
+	}
+}
+
+func TestWorkloadDockerVerifierRejectsInvalidTokenInspectionAndRestartingState(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	tokens, raw := dockerWorkloadToken(t, now)
+	expired, err := tokens.IssueAt(auth.WorkloadClaims{
+		RuntimeScope: "docker", RuntimeWorkload: "exec-1", RuntimeInstanceID: "container-id",
+		UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1",
+	}, now.Add(-10*time.Minute), now.Add(-5*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspectErr := errors.New("Docker unavailable")
+	for _, tc := range []struct {
+		name      string
+		token     string
+		inspector *workloadContainerInspector
+	}{
+		{name: "malformed token", token: "not-a-jwt", inspector: &workloadContainerInspector{inspect: dockerWorkloadContainer("container-id")}},
+		{name: "expired token", token: expired, inspector: &workloadContainerInspector{inspect: dockerWorkloadContainer("container-id")}},
+		{name: "inspect error", token: raw, inspector: &workloadContainerInspector{err: inspectErr}},
+		{name: "nil inspection base", token: raw, inspector: &workloadContainerInspector{inspect: container.InspectResponse{}}},
+		{name: "nil state", token: raw, inspector: &workloadContainerInspector{inspect: container.InspectResponse{ContainerJSONBase: &container.ContainerJSONBase{ID: "container-id"}}}},
+		{name: "nil config", token: raw, inspector: &workloadContainerInspector{inspect: container.InspectResponse{ContainerJSONBase: &container.ContainerJSONBase{ID: "container-id", State: &container.State{Status: container.StateRunning, Running: true}}}}},
+		{name: "restarting", token: raw, inspector: &workloadContainerInspector{inspect: func() container.InspectResponse {
+			inspected := dockerWorkloadContainer("container-id")
+			inspected.State.Status = container.StateRestarting
+			inspected.State.Running = false
+			inspected.State.Restarting = true
+			return inspected
+		}()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			verifier, err := NewDockerWorkloadVerifier(tc.inspector, tokens)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := verifier.Verify(context.Background(), tc.token, "execution-1"); err == nil {
+				t.Fatal("invalid Docker workload accepted")
+			}
+		})
 	}
 }
 

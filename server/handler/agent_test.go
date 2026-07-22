@@ -72,7 +72,7 @@ func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	}
 	h := NewAgentHandler(nil, nil, nil, "", &logger)
 	h.SetExecutionTokenService(tokens)
-	verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: "execution-1"}}
+	verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: "execution-1"}}
 	h.SetBootstrap(verifier, testBootstrapper{response: &service.AgentBootstrapResponse{TaskID: "task-1", ExecutionToken: "execution-token"}})
 	app := fiber.New()
 	app.Post("/agent/scoped", h.AuthMiddleware, func(c fiber.Ctx) error {

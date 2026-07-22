@@ -24,9 +24,11 @@ const (
 )
 
 // WorkloadIdentity is the provider-neutral, verified identity of one runtime
-// instance and the execution ownership it is allowed to bootstrap.
+// instance and the execution ownership it is allowed to bootstrap. Target is
+// the provider kind; RuntimeIdentity fields remain provider-owned coordinates.
 type WorkloadIdentity struct {
 	model.RuntimeIdentity
+	Target      string
 	ExecutionID string
 	TaskID      string
 	ProjectID   string
@@ -133,6 +135,7 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 	}
 	return &WorkloadIdentity{
 		RuntimeIdentity: model.RuntimeIdentity{Scope: v.namespace, Workload: job.Name, InstanceID: podUID},
+		Target:          "kubernetes",
 		ExecutionID:     requestedExecutionID,
 		TaskID:          labels[kubernetesTaskIDLabel],
 		ProjectID:       labels[kubernetesProjectIDLabel],

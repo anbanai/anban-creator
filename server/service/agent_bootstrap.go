@@ -104,6 +104,9 @@ func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *servera
 	if s == nil || s.repo == nil || s.tokens == nil || identity == nil {
 		return nil, errors.New("agent bootstrap is not configured")
 	}
+	if err := validateBootstrapWorkloadIdentity(identity, s.currentTime()); err != nil {
+		return nil, err
+	}
 	execution, task, project, err := s.loadAndValidate(ctx, s.repo, identity)
 	if err != nil {
 		return nil, err
@@ -113,6 +116,12 @@ func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *servera
 		return nil, err
 	}
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.TaskExecutions().SetRuntimeIdentity(ctx, identity.ExecutionID, identity.RuntimeIdentity); err != nil {
+			if errors.Is(err, repository.ErrRuntimeIdentityConflict) || errors.Is(err, repository.ErrRuntimeIdentityInactive) {
+				return fmt.Errorf("%w: workload runtime identity changed", ErrAgentBootstrapConflict)
+			}
+			return err
+		}
 		execution, _, _, err := s.loadAndValidate(ctx, tx, identity)
 		if err != nil {
 			return err
@@ -123,7 +132,13 @@ func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *servera
 				return err
 			}
 			if !won {
-				return fmt.Errorf("%w: execution bootstrap state changed concurrently", ErrAgentBootstrapConflict)
+				refreshed, _, _, err := s.loadAndValidate(ctx, tx, identity)
+				if err != nil {
+					return err
+				}
+				if refreshed.Status != model.TaskExecutionRunning {
+					return fmt.Errorf("%w: execution bootstrap state changed concurrently", ErrAgentBootstrapConflict)
+				}
 			}
 		}
 		now := time.Now()
@@ -135,6 +150,31 @@ func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *servera
 		return nil, err
 	}
 	return response, nil
+}
+
+func validateBootstrapWorkloadIdentity(identity *serveragent.WorkloadIdentity, now time.Time) error {
+	for _, member := range []struct {
+		name  string
+		value string
+	}{
+		{name: "target", value: identity.Target},
+		{name: "scope", value: identity.Scope},
+		{name: "workload", value: identity.Workload},
+		{name: "instance", value: identity.InstanceID},
+		{name: "execution", value: identity.ExecutionID},
+		{name: "task", value: identity.TaskID},
+		{name: "project", value: identity.ProjectID},
+		{name: "user", value: identity.UserID},
+	} {
+		trimmed := strings.TrimSpace(member.value)
+		if trimmed == "" || trimmed != member.value {
+			return fmt.Errorf("%w: verified workload %s identity is incomplete or non-canonical", ErrAgentBootstrapConflict, member.name)
+		}
+	}
+	if identity.Deadline.IsZero() || !identity.Deadline.After(now) {
+		return fmt.Errorf("%w: verified workload deadline is not in the future", ErrAgentBootstrapConflict)
+	}
+	return nil
 }
 
 func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo repository.Repository, identity *serveragent.WorkloadIdentity) (*model.TaskExecution, *model.Task, *model.Project, error) {
@@ -157,7 +197,7 @@ func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo reposi
 	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID || execution.TaskID != identity.TaskID || task.ID != identity.TaskID || task.ProjectID != identity.ProjectID || task.UserID != identity.UserID || project.ID != identity.ProjectID || project.UserID != identity.UserID || user.ID != identity.UserID {
 		return nil, nil, nil, fmt.Errorf("%w: workload identity does not match current task execution ownership", ErrAgentBootstrapConflict)
 	}
-	if execution.RuntimeScope != identity.Scope || execution.RuntimeWorkload != identity.Workload {
+	if execution.Target != identity.Target || execution.RuntimeScope != identity.Scope || execution.RuntimeWorkload != identity.Workload {
 		return nil, nil, nil, fmt.Errorf("%w: workload runtime identity mismatch", ErrAgentBootstrapConflict)
 	}
 	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {

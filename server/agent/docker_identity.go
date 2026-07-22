@@ -82,6 +82,7 @@ func (v *DockerWorkloadVerifier) Verify(ctx context.Context, rawToken, requested
 	}
 	return &WorkloadIdentity{
 		RuntimeIdentity: model.RuntimeIdentity{Scope: claims.RuntimeScope, Workload: claims.RuntimeWorkload, InstanceID: claims.RuntimeInstanceID},
+		Target:          "docker",
 		ExecutionID:     claims.ExecutionID,
 		TaskID:          claims.TaskID,
 		ProjectID:       claims.ProjectID,
