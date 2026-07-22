@@ -446,10 +446,19 @@ func (s *TaskService) UpdateTaskFileMetadata(ctx context.Context, file *model.Ta
 	if file == nil {
 		return nil, fmt.Errorf("task file is required")
 	}
-	updated := *file
+	updatedRole := file.Role
 	if role != "" {
-		updated.Role = role
+		updatedRole = role
 	}
+	if file.ExecutionID != "" {
+		persisted, err := s.repo.TaskFiles().UpdatePendingCurrentExecutionMetadata(ctx, file, updatedRole, mediaID, wechatURL)
+		if err != nil {
+			return nil, fmt.Errorf("update task file metadata: %w", err)
+		}
+		return persisted, nil
+	}
+	updated := *file
+	updated.Role = updatedRole
 	updated.MediaID = mediaID
 	updated.WechatURL = wechatURL
 	persisted, err := s.repo.TaskFiles().Upsert(ctx, &updated)

@@ -34,10 +34,19 @@ func TestTaskFileMutationMySQLLockOrderContract(t *testing.T) {
 	_ = db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", "t1").First(&task).Error
 	var execution model.TaskExecution
 	_ = db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND task_id = ?", "e1", "t1").First(&execution).Error
-	sql := logs.String()
+	assertTaskFileMutationLockOrder(t, logs.String())
+}
+
+func assertTaskFileMutationLockOrder(t *testing.T, sql string) {
+	t.Helper()
 	taskAt, executionAt := strings.Index(sql, "FROM `tasks`"), strings.Index(sql, "FROM `task_executions`")
-	if taskAt < 0 || executionAt <= taskAt || strings.Count(sql, "FOR UPDATE") != 2 {
-		t.Fatalf("lock order SQL contract invalid:\n%s", sql)
+	if taskAt < 0 || executionAt <= taskAt {
+		t.Fatalf("task-file mutation lock order SQL contract invalid:\n%s", sql)
+	}
+	taskLockOffset := strings.Index(sql[taskAt:], "FOR UPDATE")
+	executionLockOffset := strings.Index(sql[executionAt:], "FOR UPDATE")
+	if taskLockOffset < 0 || executionLockOffset < 0 || taskAt+taskLockOffset >= executionAt {
+		t.Fatalf("task-file mutation lock order SQL contract invalid:\n%s", sql)
 	}
 }
 
@@ -210,7 +219,7 @@ func TestTaskFileRepositoryPublishRacingReplacementHasNoLatePendingRows(t *testi
 	replacement := []*model.TaskFile{{Role: model.FileRoleOther, FilePath: "replacement.md", FileName: "replacement.md"}}
 	publishErr, replaceErr := runArtifactMutationRace(
 		func() error { return repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1") },
-		func() error { return repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", replacement, "") },
+		func() error { return repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", replacement) },
 	)
 	if publishErr != nil {
 		t.Fatalf("publish error = %v", publishErr)
@@ -420,7 +429,7 @@ func TestTaskFileRepositoryReplacePendingExecutionRollsBackOnFailure(t *testing.
 		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "new.md", FileName: "new.md"},
 		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "new.md", FileName: "new.md"},
 	}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", bad, ""); err == nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", bad); err == nil {
 		t.Fatal("invalid replacement unexpectedly succeeded")
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -434,14 +443,14 @@ func TestTaskFileRepositoryReplacePendingExecutionForcesDeclaredScope(t *testing
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
 	files := []*model.TaskFile{{TaskID: "foreign", ExecutionID: "foreign", State: model.TaskFileStatePublished, Role: model.FileRoleOther, FilePath: "output/a.md", FileName: "a.md"}}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", files, ""); err != nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", files); err != nil {
 		t.Fatal(err)
 	}
 	rows, _ := repo.TaskFiles().FindByExecutionID(ctx, "e1")
 	if len(rows) != 1 || rows[0].TaskID != "t1" || rows[0].State != model.TaskFileStatePending {
 		t.Fatalf("scoped rows = %#v", rows)
 	}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{Role: model.FileRoleOther, FilePath: "../escape", FileName: "escape"}}, ""); err == nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{Role: model.FileRoleOther, FilePath: "../escape", FileName: "escape"}}); err == nil {
 		t.Fatal("unsafe path accepted")
 	}
 }
@@ -470,7 +479,7 @@ func TestTaskFileRepositoryReplacePendingExecutionPreservesLogicalPathIdentity(t
 		MimeType: "text/markdown", FileSize: 20, ContentHash: strings.Repeat("b", 64),
 		OSSKey: "new-key", OSSURL: "https://new.example/file", StorageProvider: "oss",
 		MediaID: "new-media", WechatURL: "https://new.example/wechat",
-	}}, ""); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -500,7 +509,7 @@ func TestTaskFileRepositoryReplacePendingExecutionRemovesMissingPaths(t *testing
 	}
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
 		Role: model.FileRoleOther, FilePath: "output/keep.md", FileName: "keep.md",
-	}}, ""); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -533,7 +542,7 @@ func TestTaskFileRepositoryReplacePendingExecutionIdenticalManifestIsStable(t *t
 		MimeType: "text/markdown", FileSize: 42, ContentHash: strings.Repeat("a", 64),
 		OSSKey: "known-key", OSSURL: "https://example.com/file", StorageProvider: "oss",
 		MediaID: "known-media", WechatURL: "https://example.com/wechat",
-	}}, ""); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -556,7 +565,7 @@ func TestTaskFileRepositoryReplacePendingExecutionIgnoresCallerIDForNewPath(t *t
 
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
 		ID: "caller-supplied", Role: model.FileRoleOther, FilePath: "output/new.md", FileName: "new.md",
-	}}, ""); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -585,7 +594,7 @@ func TestTaskFileRepositoryReplacePendingExecutionCallerIDCollisionCannotMutateF
 
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
 		ID: "foreign-id", Role: model.FileRoleMarkdown, FilePath: "output/new.md", FileName: "new.md", OSSKey: "new-key",
-	}}, ""); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	foreignRows, err := repo.TaskFiles().FindByExecutionID(ctx, "foreign-execution")
@@ -608,7 +617,7 @@ func TestTaskFileRepositoryReplacePendingExecutionEmptyManifestRemovesAllPending
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", nil, ""); err != nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -637,7 +646,7 @@ func TestTaskFileRepositoryReplacePendingExecutionEmptyManifestPreservesLockedMC
 		t.Fatal(err)
 	}
 
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", nil, mcpPrefix); err != nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -649,7 +658,10 @@ func TestTaskFileRepositoryReplacePendingExecutionEmptyManifestPreservesLockedMC
 	}
 }
 
-func TestTaskFileRepositoryUpsertAndPrefixReplacementSerializeOnExecutionLocks(t *testing.T) {
+// This behavioral test fixes the operation order with one SQLite connection.
+// The MySQL contract tests below separately prove both methods take the same
+// task-then-execution row locks used for production serialization.
+func TestTaskFileRepositorySerializedConnectionPreservesMCPUpsertBeforeReplacement(t *testing.T) {
 	db := setupTestDB(t)
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -674,7 +686,6 @@ func TestTaskFileRepositoryUpsertAndPrefixReplacementSerializeOnExecutionLocks(t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Callback().Create().Remove(callbackName) })
 
 	mcpPrefix := "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/"
 	upsertDone := make(chan error, 1)
@@ -696,7 +707,7 @@ func TestTaskFileRepositoryUpsertAndPrefixReplacementSerializeOnExecutionLocks(t
 	replacementDone := make(chan error, 1)
 	go func() {
 		close(replacementStarted)
-		replacementDone <- repo.TaskFiles().ReplacePendingCurrentExecution(context.Background(), "t1", "e1", nil, mcpPrefix)
+		replacementDone <- repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(context.Background(), "t1", "e1", nil)
 	}()
 	<-replacementStarted
 	select {
@@ -721,6 +732,108 @@ func TestTaskFileRepositoryUpsertAndPrefixReplacementSerializeOnExecutionLocks(t
 	}
 }
 
+func TestTaskFileRepositorySerializedConnectionRejectsMetadataAfterWorkspaceReplacement(t *testing.T) {
+	db := setupTestDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	repo := New(db)
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	original, err := repo.TaskFiles().UpsertPendingCurrentExecution(context.Background(), "t1", "e1", &model.TaskFile{
+		Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "cover.png",
+		OSSKey: "mcp/old.png", ContentHash: strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type replacementContextKey struct{}
+	replacementReachedPendingRead := make(chan struct{})
+	releaseReplacement := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseReplacement) }) }
+	t.Cleanup(release)
+	callbackName := "test:pause_replacement_after_execution_lock"
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Context.Value(replacementContextKey{}) == true && tx.Statement.Table == "task_files" {
+			close(replacementReachedPendingRead)
+			<-releaseReplacement
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	replacementDone := make(chan error, 1)
+	go func() {
+		ctx := context.WithValue(context.Background(), replacementContextKey{}, true)
+		replacementDone <- repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
+			Role: model.FileRoleImage, FilePath: original.FilePath, FileName: original.FileName,
+			OSSKey: "workspace/new.png", ContentHash: strings.Repeat("b", 64),
+		}})
+	}()
+	select {
+	case <-replacementReachedPendingRead:
+	case <-time.After(2 * time.Second):
+		t.Fatal("replacement did not reach the post-lock pending read")
+	}
+
+	metadataStarted := make(chan struct{})
+	metadataDone := make(chan error, 1)
+	go func() {
+		close(metadataStarted)
+		_, updateErr := repo.TaskFiles().UpdatePendingCurrentExecutionMetadata(context.Background(), original, model.FileRoleCover, "late-media", "https://late.example/image")
+		metadataDone <- updateErr
+	}()
+	<-metadataStarted
+	select {
+	case err := <-metadataDone:
+		t.Fatalf("metadata update bypassed replacement transaction: %v", err)
+	default:
+	}
+
+	release()
+	if err := <-replacementDone; err != nil {
+		t.Fatalf("workspace replacement: %v", err)
+	}
+	if err := <-metadataDone; !errors.Is(err, ErrTaskFileDeliveryIdentityChanged) {
+		t.Fatalf("late metadata error = %v, want ErrTaskFileDeliveryIdentityChanged", err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(context.Background(), "e1")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("execution rows = %#v, err=%v", rows, err)
+	}
+	if got := rows[0]; got.ID != original.ID || got.OSSKey != "workspace/new.png" || got.ContentHash != strings.Repeat("b", 64) || got.MediaID != "" || got.WechatURL != "" {
+		t.Fatalf("workspace row mutated by late metadata: %#v", got)
+	}
+}
+
+func TestTaskFileRepositoryUpdatePendingExecutionMetadataChangesOnlyMetadata(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	original, err := repo.TaskFiles().UpsertPendingCurrentExecution(ctx, "t1", "e1", &model.TaskFile{
+		Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "cover.png",
+		MimeType: "image/png", FileSize: 42, OSSKey: "mcp/cover.png", OSSURL: "https://files.example/cover.png",
+		StorageProvider: "oss", ContentHash: strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repo.TaskFiles().UpdatePendingCurrentExecutionMetadata(ctx, original, model.FileRoleCover, "media-1", "https://wechat.example/cover.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != original.ID || updated.FilePath != original.FilePath || updated.OSSKey != original.OSSKey || updated.ContentHash != original.ContentHash ||
+		updated.Role != model.FileRoleCover || updated.MediaID != "media-1" || updated.WechatURL != "https://wechat.example/cover.png" {
+		t.Fatalf("updated row = %#v", updated)
+	}
+	if _, err := repo.TaskFiles().UpdatePendingCurrentExecutionMetadata(ctx, original, model.FileRoleCover, "media-1", "https://wechat.example/cover.png"); err != nil {
+		t.Fatalf("identical metadata retry: %v", err)
+	}
+}
+
 func TestTaskFileRepositoryPrefixReplacementScopesPreservationAndKeepsWorkspacePrecedence(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
@@ -733,15 +846,16 @@ func TestTaskFileRepositoryPrefixReplacementScopesPreservationAndKeepsWorkspaceP
 		{ID: "workspace-stale", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleMarkdown, FilePath: "output/stale.md", FileName: "stale.md", OSSKey: "workspace/stale.md"},
 		{ID: "wrong-execution-prefix", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleImage, FilePath: "output/wrong.png", FileName: "wrong.png", OSSKey: "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e2/artifacts/mcp/output/wrong.png"},
 		{ID: "prefix-lookalike", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleImage, FilePath: "output/lookalike.png", FileName: "lookalike.png", OSSKey: strings.TrimSuffix(mcpPrefix, "/") + "-other/output/lookalike.png"},
+		{ID: "unsafe-path", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleImage, FilePath: "../unsafe.png", FileName: "unsafe.png", OSSKey: mcpPrefix + "../unsafe.png"},
 		{ID: "foreign", TaskID: "t2", ExecutionID: "e2", State: model.TaskFileStatePending, Role: model.FileRoleImage, FilePath: "output/foreign.png", FileName: "foreign.png", OSSKey: mcpPrefix + "output/foreign.png"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	workspaceKey := "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/output/collision.png"
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", []*model.TaskFile{
 		{Role: model.FileRoleImage, FilePath: "output/collision.png", FileName: "collision.png", OSSKey: workspaceKey},
 		{Role: model.FileRoleMarkdown, FilePath: "output/new.md", FileName: "new.md", OSSKey: "workspace/new.md"},
-	}, mcpPrefix); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -765,20 +879,127 @@ func TestTaskFileRepositoryPrefixReplacementScopesPreservationAndKeepsWorkspaceP
 	}
 }
 
+func TestTaskFileRepositoryMCPPreservationDoesNotMutateCallerSliceBackingArray(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	mcpPrefix := "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/"
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID: "mcp", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+		Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "cover.png", OSSKey: mcpPrefix + "output/cover.png",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := &model.TaskFile{ID: "caller-sentinel"}
+	backing := []*model.TaskFile{
+		{Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md", OSSKey: "workspace/article.md"},
+		sentinel,
+	}
+	manifest := backing[:1]
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", manifest); err != nil {
+		t.Fatal(err)
+	}
+	if backing[1] != sentinel {
+		t.Fatalf("caller backing array mutated: got %#v, want sentinel %#v", backing[1], sentinel)
+	}
+}
+
 func TestTaskFileRepositoryReplacePendingExecutionRejectsNilAndDuplicateEntries(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{nil}, ""); err == nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{nil}); err == nil {
 		t.Fatal("nil task file accepted")
 	}
 	duplicate := []*model.TaskFile{
 		{Role: model.FileRoleOther, FilePath: "output/same.md", FileName: "same.md"},
 		{Role: model.FileRoleOther, FilePath: "output/same.md", FileName: "same.md"},
 	}
-	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", duplicate, ""); err == nil {
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", duplicate); err == nil {
 		t.Fatal("duplicate task file path accepted")
 	}
+}
+
+func TestTaskFileRepositoryUpsertPendingExecutionMySQLLockOrderContract(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	var logs bytes.Buffer
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{
+		Logger: logger.New(log.New(&logs, "", 0), logger.Config{LogLevel: logger.Info}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
+	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+	mock.ExpectExec("INSERT INTO `task_files`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery("SELECT .* FROM `task_files`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "oss_key", "content_hash"}).
+			AddRow("mcp-id", "t1", "e1", model.TaskFileStatePending, model.FileRoleImage, "output/cover.png", "cover.png", "mcp/cover.png", strings.Repeat("a", 64)))
+	mock.ExpectCommit()
+
+	repo := New(db)
+	_, err = repo.TaskFiles().UpsertPendingCurrentExecution(context.Background(), "t1", "e1", &model.TaskFile{
+		ID: "mcp-id", Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "cover.png",
+		OSSKey: "mcp/cover.png", ContentHash: strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	assertTaskFileMutationLockOrder(t, logs.String())
+}
+
+func TestTaskFileRepositoryUpdatePendingExecutionMetadataMySQLLockOrderContract(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	var logs bytes.Buffer
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{
+		Logger: logger.New(log.New(&logs, "", 0), logger.Config{LogLevel: logger.Info}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
+	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+	mock.ExpectQuery("SELECT .* FROM `task_files`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "oss_key", "content_hash"}).
+			AddRow("file-1", "t1", "e1", model.TaskFileStatePending, model.FileRoleImage, "output/cover.png", "cover.png", "mcp/cover.png", strings.Repeat("a", 64)))
+	mock.ExpectExec("UPDATE `task_files` SET").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	repo := New(db)
+	updated, err := repo.TaskFiles().UpdatePendingCurrentExecutionMetadata(context.Background(), &model.TaskFile{
+		ID: "file-1", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+		Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "cover.png",
+		OSSKey: "mcp/cover.png", ContentHash: strings.Repeat("a", 64),
+	}, model.FileRoleCover, "media-1", "https://wechat.example/cover.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Role != model.FileRoleCover || updated.MediaID != "media-1" || updated.WechatURL != "https://wechat.example/cover.png" {
+		t.Fatalf("updated metadata = %#v", updated)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	assertTaskFileMutationLockOrder(t, logs.String())
 }
 
 func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T) {
@@ -812,7 +1033,7 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T)
 	err = repo.TaskFiles().ReplacePendingCurrentExecution(context.Background(), "t1", "e1", []*model.TaskFile{
 		{ID: "ignored-existing-id", Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md", OSSKey: "new-key"},
 		{ID: "ignored-new-id", Role: model.FileRoleOther, FilePath: "output/new.md", FileName: "new.md"},
-	}, "")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -833,6 +1054,7 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T)
 			t.Fatalf("scoped update missing %q:\n%s", predicate, updateSQL)
 		}
 	}
+	assertTaskFileMutationLockOrder(t, sql)
 }
 
 func TestTaskFileRepositoryReplacePendingExecutionMySQLIdenticalRetrySkipsNoOpUpdates(t *testing.T) {
@@ -871,7 +1093,7 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLIdenticalRetrySkipsNoOpUp
 		MimeType: "text/markdown", FileSize: 42, ContentHash: strings.Repeat("a", 64),
 		OSSKey: "known-key", OSSURL: "https://example.com/file", StorageProvider: "oss",
 		MediaID: "known-media", WechatURL: "https://example.com/wechat",
-	}}, "")
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

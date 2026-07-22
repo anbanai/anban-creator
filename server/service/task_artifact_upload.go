@@ -276,8 +276,7 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		files = append(files, taskFile)
 	}
 	if executionID != "" {
-		mcpPrefix := buildTaskMCPArtifactStoragePrefix(task, executionID)
-		if err := s.repo.TaskFiles().ReplacePendingCurrentExecution(ctx, task.ID, executionID, files, mcpPrefix); err != nil {
+		if err := s.repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, task.ID, executionID, files); err != nil {
 			if errors.Is(err, repository.ErrTaskFileExecutionNotCurrent) || errors.Is(err, repository.ErrTaskFileTaskNotRunning) || errors.Is(err, repository.ErrTaskFileManifestState) {
 				return fmt.Errorf("%w: %v", ErrTaskArtifactExecutionConflict, err)
 			}

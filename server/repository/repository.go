@@ -188,7 +188,9 @@ type TaskFileRepository interface {
 	CollectCurrentExecution(ctx context.Context, taskID, executionID string) error
 	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
 	UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error)
-	ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile, preserveOSSKeyPrefix string) error
+	UpdatePendingCurrentExecutionMetadata(ctx context.Context, original *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error)
+	ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
+	ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
 }
 
 // TaskExecutionRepository provides durable execution-attempt persistence.

@@ -705,6 +705,115 @@ func TestFinalizeTaskArtifactEmptyManifestPreservesOnlyMCPArtifacts(t *testing.T
 	}
 }
 
+func TestUpdateTaskFileMetadataRejectsLateExecutionMutation(t *testing.T) {
+	t.Run("workspace collision changed delivery identity", func(t *testing.T) {
+		svc, repo, store, task := newTaskArtifactTestService(t)
+		ctx := context.Background()
+		executionID := startTaskArtifactExecution(t, repo, task)
+		original, err := svc.UploadExecutionTaskFileFromReader(ctx, task.ID, task.UserID, executionID,
+			"output/cover.png", strings.NewReader("old"), "image/png", 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		newHashBytes := sha256.Sum256([]byte("new"))
+		newHash := hex.EncodeToString(newHashBytes[:])
+		workspaceKey := buildTaskArtifactStorageKey(task, executionID, original.FilePath)
+		store.stats = map[string]*storage.ObjectInfo{
+			workspaceKey: {Key: workspaceKey, Size: 3, ContentType: "image/png", SHA256: newHash},
+		}
+		if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+			TaskID: task.ID, ExecutionID: executionID,
+			Files: []TaskArtifactManifestFile{{
+				RelativePath: original.FilePath, ObjectKey: workspaceKey,
+				ContentType: "image/png", Size: 3, SHA256: newHash,
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := svc.UpdateTaskFileMetadata(ctx, original, model.FileRoleCover, "late-media", "https://late.example/image"); !errors.Is(err, repository.ErrTaskFileDeliveryIdentityChanged) {
+			t.Fatalf("late metadata error = %v, want ErrTaskFileDeliveryIdentityChanged", err)
+		}
+		rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("execution rows = %#v, err=%v", rows, err)
+		}
+		if got := rows[0]; got.ID != original.ID || got.OSSKey != workspaceKey || got.ContentHash != newHash || got.MediaID != "" || got.WechatURL != "" {
+			t.Fatalf("workspace delivery mutated by late metadata: %#v", got)
+		}
+	})
+
+	t.Run("empty manifest removed delivery row", func(t *testing.T) {
+		svc, repo, _, task := newTaskArtifactTestService(t)
+		ctx := context.Background()
+		executionID := startTaskArtifactExecution(t, repo, task)
+		original, err := repo.TaskFiles().UpsertPendingCurrentExecution(ctx, task.ID, executionID, &model.TaskFile{
+			Role: model.FileRoleImage, FilePath: "output/stale.png", FileName: "stale.png",
+			OSSKey: "workspace/stale.png", ContentHash: taskArtifactTestSHA256,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+			TaskID: task.ID, ExecutionID: executionID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := svc.UpdateTaskFileMetadata(ctx, original, model.FileRoleCover, "late-media", "https://late.example/image"); !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatalf("late metadata error = %v, want gorm.ErrRecordNotFound", err)
+		}
+		rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+		if err != nil || len(rows) != 0 {
+			t.Fatalf("removed execution rows = %#v, err=%v", rows, err)
+		}
+	})
+
+	t.Run("terminal execution", func(t *testing.T) {
+		svc, repo, _, task := newTaskArtifactTestService(t)
+		ctx := context.Background()
+		executionID := startTaskArtifactExecution(t, repo, task)
+		original, err := svc.UploadExecutionTaskFileFromReader(ctx, task.ID, task.UserID, executionID,
+			"output/cover.png", strings.NewReader("old"), "image/png", 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changed, err := repo.TaskExecutions().Transition(ctx, executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionSucceeded, model.ExecutionTransition{}); err != nil || !changed {
+			t.Fatalf("terminal transition changed=%v err=%v", changed, err)
+		}
+
+		if _, err := svc.UpdateTaskFileMetadata(ctx, original, model.FileRoleCover, "late-media", "https://late.example/image"); !errors.Is(err, repository.ErrTaskFileTaskNotRunning) {
+			t.Fatalf("late metadata error = %v, want ErrTaskFileTaskNotRunning", err)
+		}
+		rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+		if err != nil || len(rows) != 1 || rows[0].MediaID != "" || rows[0].WechatURL != "" {
+			t.Fatalf("terminal execution rows mutated: %#v, err=%v", rows, err)
+		}
+	})
+
+	t.Run("published manifest", func(t *testing.T) {
+		svc, repo, _, task := newTaskArtifactTestService(t)
+		ctx := context.Background()
+		executionID := startTaskArtifactExecution(t, repo, task)
+		original, err := svc.UploadExecutionTaskFileFromReader(ctx, task.ID, task.UserID, executionID,
+			"output/cover.png", strings.NewReader("old"), "image/png", 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, executionID); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := svc.UpdateTaskFileMetadata(ctx, original, model.FileRoleCover, "late-media", "https://late.example/image"); !errors.Is(err, repository.ErrTaskFileManifestState) {
+			t.Fatalf("late metadata error = %v, want ErrTaskFileManifestState", err)
+		}
+		rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+		if err != nil || len(rows) != 1 || rows[0].State != model.TaskFileStatePublished || rows[0].MediaID != "" || rows[0].WechatURL != "" {
+			t.Fatalf("published execution rows mutated: %#v, err=%v", rows, err)
+		}
+	})
+}
+
 func TestUploadExecutionTaskFileWithSettlementPersistsArtifactAndOutboxAtomically(t *testing.T) {
 	fixture := newBillingWalletFixture(t, 500, 0, 0)
 	ctx := context.Background()

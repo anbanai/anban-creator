@@ -15,10 +15,11 @@ import (
 )
 
 var (
-	ErrNoPendingExecutionArtifacts = errors.New("no pending execution artifacts")
-	ErrTaskFileExecutionNotCurrent = errors.New("task file execution is not current")
-	ErrTaskFileTaskNotRunning      = errors.New("task is not running for artifact publication")
-	ErrTaskFileManifestState       = errors.New("task file manifest state conflict")
+	ErrNoPendingExecutionArtifacts     = errors.New("no pending execution artifacts")
+	ErrTaskFileExecutionNotCurrent     = errors.New("task file execution is not current")
+	ErrTaskFileTaskNotRunning          = errors.New("task is not running for artifact publication")
+	ErrTaskFileManifestState           = errors.New("task file manifest state conflict")
+	ErrTaskFileDeliveryIdentityChanged = errors.New("task file delivery identity changed")
 )
 
 type taskFileRepository struct {
@@ -289,13 +290,79 @@ func (r *taskFileRepository) UpsertPendingCurrentExecution(ctx context.Context, 
 	return &persisted, nil
 }
 
+// UpdatePendingCurrentExecutionMetadata updates publication metadata without
+// permitting a late downstream side effect to restore stale delivery fields.
+func (r *taskFileRepository) UpdatePendingCurrentExecutionMetadata(ctx context.Context, original *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error) {
+	if original == nil || strings.TrimSpace(original.ID) == "" || strings.TrimSpace(original.TaskID) == "" ||
+		strings.TrimSpace(original.ExecutionID) == "" || strings.TrimSpace(original.FilePath) == "" ||
+		strings.TrimSpace(original.OSSKey) == "" || strings.TrimSpace(original.ContentHash) == "" {
+		return nil, fmt.Errorf("complete original task file delivery identity is required")
+	}
+	if err := validateTaskFileRelativePath(original.FilePath); err != nil {
+		return nil, err
+	}
+
+	var persisted model.TaskFile
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, execution, err := lockCurrentArtifactExecution(tx, original.TaskID, original.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending {
+			return ErrTaskFileManifestState
+		}
+		if err := requireRunningArtifactExecution(task, execution); err != nil {
+			return err
+		}
+		find := tx.Where("id = ? AND task_id = ? AND execution_id = ? AND state = ?", original.ID, original.TaskID, original.ExecutionID, model.TaskFileStatePending).
+			Limit(1).Find(&persisted)
+		if find.Error != nil {
+			return find.Error
+		}
+		if find.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		if persisted.FilePath != original.FilePath || persisted.OSSKey != original.OSSKey || persisted.ContentHash != original.ContentHash {
+			return ErrTaskFileDeliveryIdentityChanged
+		}
+		if persisted.Role == role && persisted.MediaID == mediaID && persisted.WechatURL == wechatURL {
+			return nil
+		}
+		result := tx.Model(&model.TaskFile{}).
+			Where("id = ? AND task_id = ? AND execution_id = ? AND state = ? AND file_path = ? AND oss_key = ? AND content_hash = ?",
+				original.ID, original.TaskID, original.ExecutionID, model.TaskFileStatePending, original.FilePath, original.OSSKey, original.ContentHash).
+			Updates(map[string]any{"role": role, "media_id": mediaID, "wechat_url": wechatURL})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrTaskFileDeliveryIdentityChanged
+		}
+		persisted.Role, persisted.MediaID, persisted.WechatURL = role, mediaID, wechatURL
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &persisted, nil
+}
+
 // ReplacePendingCurrentExecution atomically replaces only the current running attempt's unpublished manifest.
-// Pending rows under preserveOSSKeyPrefix are retained unless the incoming
-// workspace manifest owns the same logical path.
-func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile, preserveOSSKeyPrefix string) error {
+func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error {
+	return r.replacePendingCurrentExecution(ctx, taskID, executionID, files, false)
+}
+
+// ReplacePendingCurrentExecutionPreservingMCPArtifacts also retains pending
+// same-execution MCP rows unless the workspace manifest owns the same path.
+func (r *taskFileRepository) ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error {
+	return r.replacePendingCurrentExecution(ctx, taskID, executionID, files, true)
+}
+
+func (r *taskFileRepository) replacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile, preserveMCPArtifacts bool) error {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
 		return fmt.Errorf("task_id and execution_id are required")
 	}
+	effectiveFiles := append(make([]*model.TaskFile, 0, len(files)), files...)
 	incomingPaths := make([]string, 0, len(files))
 	seenPaths := make(map[string]struct{}, len(files))
 	for _, file := range files {
@@ -326,6 +393,10 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 		if err := requireRunningArtifactExecution(task, execution); err != nil {
 			return err
 		}
+		preserveOSSKeyPrefix := ""
+		if preserveMCPArtifacts {
+			preserveOSSKeyPrefix = taskExecutionMCPArtifactPrefix(task, executionID)
+		}
 		var pendingFiles []*model.TaskFile
 		if err := tx.Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending).
 			Find(&pendingFiles).Error; err != nil {
@@ -337,12 +408,15 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 			if preserveOSSKeyPrefix == "" || !strings.HasPrefix(pendingFile.OSSKey, preserveOSSKeyPrefix) {
 				continue
 			}
+			if err := validateTaskFileRelativePath(pendingFile.FilePath); err != nil {
+				continue
+			}
 			if _, collides := seenPaths[pendingFile.FilePath]; collides {
 				continue
 			}
 			seenPaths[pendingFile.FilePath] = struct{}{}
 			incomingPaths = append(incomingPaths, pendingFile.FilePath)
-			files = append(files, pendingFile)
+			effectiveFiles = append(effectiveFiles, pendingFile)
 		}
 		stale := tx.Where("task_id = ? AND execution_id = ? AND state = ?", taskID, executionID, model.TaskFileStatePending)
 		if len(incomingPaths) > 0 {
@@ -351,7 +425,7 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 		if err := stale.Delete(&model.TaskFile{}).Error; err != nil {
 			return err
 		}
-		for _, file := range files {
+		for _, file := range effectiveFiles {
 			persisted, exists := pendingByPath[file.FilePath]
 			if !exists {
 				file.ID = uuid.NewString()
@@ -392,6 +466,10 @@ func (r *taskFileRepository) ReplacePendingCurrentExecution(ctx context.Context,
 		}
 		return nil
 	})
+}
+
+func taskExecutionMCPArtifactPrefix(task *model.Task, executionID string) string {
+	return path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID, "executions", executionID, "artifacts", "mcp") + "/"
 }
 
 func taskFileMutableDeliveryFieldsEqual(persisted, incoming *model.TaskFile) bool {
