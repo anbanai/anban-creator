@@ -20,6 +20,18 @@ func TestInputAttachmentServiceErrorClassifiesObjectMetadataMismatch(t *testing.
 	}
 }
 
+func TestValidateInputAttachmentsRequiresUploadIDForGenericExistingKey(t *testing.T) {
+	_, err := validateInputAttachments(context.Background(), nil, nil, "user-1", []model.EntryAttachment{{
+		Type:        "image",
+		Key:         "uploads/users/user-1/projects/project-1/tasks/task-1/inputs/source.png",
+		FileName:    "source.png",
+		ContentType: "image/png",
+	}}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: allAgentAttachmentTypes})
+	if err == nil || err.Error() != "attachment 1: storage attachment requires upload_id and key" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	const key = "uploads/pending/user-1/upload-1/product.png"
 	session := &model.UploadSession{

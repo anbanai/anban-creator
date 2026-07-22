@@ -483,7 +483,11 @@ func (s *AgentBootstrapService) authorizeBootstrapObject(ctx context.Context, ta
 			return nil
 		}
 		if inputSourceTaskID := strings.TrimSpace(task.InputSourceTaskID); inputSourceTaskID != "" {
-			sourcePrefix := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", inputSourceTaskID) + "/"
+			inputSourceProjectID := strings.TrimSpace(task.InputSourceProjectID)
+			if inputSourceProjectID == "" {
+				inputSourceProjectID = task.ProjectID
+			}
+			sourcePrefix := path.Join("uploads/users", task.UserID, "projects", inputSourceProjectID, "tasks", inputSourceTaskID) + "/"
 			if strings.HasPrefix(key, sourcePrefix) {
 				return nil
 			}

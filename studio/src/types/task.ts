@@ -63,6 +63,13 @@ export interface Task {
   skip_reference_image?: boolean
   reference_image?: ReferenceAssetView | null
   input_attachments?: InputAttachment[]
+  watermark?: boolean
+  // Seednote image composition persisted with the task.
+  has_content_image?: boolean
+  has_tail_image?: boolean
+  // Article image composition persisted with the task.
+  article_with_cover?: boolean
+  article_with_content_images?: boolean
   // Failure detail persisted by server model.Task.ErrorMessage; omitted when empty.
   error_message?: string
   plan_id?: string | null
@@ -204,6 +211,9 @@ export interface CreateTaskRequest {
   // The desktop sets this when a local executor is available; web always omits.
   execution_target?: ExecutionTarget
 }
+
+// Cloning creates another task through the same complete creation contract.
+export type CloneTaskRequest = CreateTaskRequest
 
 // Where a task executes (mirrors server model.ExecutionTarget* constants).
 export type ExecutionTarget = '' | 'cloud' | 'local' | 'local_claimed'

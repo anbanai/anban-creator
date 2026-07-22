@@ -352,7 +352,10 @@ func (s *TaskService) StorageProviderName() string {
 	return s.store.Name()
 }
 
-var ErrMontageInput = errors.New("montage input invalid")
+var (
+	ErrMontageInput                = errors.New("montage input invalid")
+	ErrTaskCreationProjectInactive = errors.New("task creation project is not active")
+)
 
 func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 	return append([]model.EntryAttachment(nil), in...)
@@ -375,9 +378,15 @@ type CreateManualParams struct {
 	ImageModelKey         string
 	SkipRefImage          *bool
 	ReferenceImageAssetID string
+	// allowProjectReferenceAsset is set only by Clone after it derives a trusted
+	// match from the persisted source task. Create and plan paths keep it false.
+	allowProjectReferenceAsset bool
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
+	// InputSourceProjectID is the project that owns InputSourceTaskID. It is
+	// internal clone provenance and must be persisted with the source task ID.
+	InputSourceProjectID string
 	// Overrides is deprecated. New Studio/API flows do not set task-level style
 	// overrides; runtime style/account config comes from ProjectSnapshot.
 	Overrides *model.StyleOverrides
@@ -445,17 +454,21 @@ func validateTaskCreationProject(project *model.Project, userID, projectID strin
 		return ErrProjectOwnedByUser
 	}
 	if project.Status != model.ProjectStatusActive {
-		return fmt.Errorf("project is not active")
+		return ErrTaskCreationProjectInactive
 	}
 	return nil
 }
 
-func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot) error {
+func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot, allowProjectReferenceAsset bool) error {
+	taskAssetPurposes := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
+	if allowProjectReferenceAsset {
+		taskAssetPurposes = append(taskAssetPurposes, DirectUploadPurposeProjectReference)
+	}
 	checks := []struct {
 		assetID string
 		allowed []string
 	}{
-		{assetID: taskAssetID, allowed: []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}},
+		{assetID: taskAssetID, allowed: taskAssetPurposes},
 	}
 	if snapshot != nil {
 		checks = append(checks, struct {
@@ -508,7 +521,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
-	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
+	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot, p.allowProjectReferenceAsset); err != nil {
 		return nil, err
 	}
 
@@ -628,6 +641,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ImageModelKey:            effectiveImageModelKey,
 			ReferenceImageAssetID:    p.ReferenceImageAssetID,
 			InputSourceTaskID:        p.InputSourceTaskID,
+			InputSourceProjectID:     p.InputSourceProjectID,
 			SkipReferenceImage:       p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:                p.Watermark != nil && *p.Watermark,
 			Goal:                     p.Goal,
@@ -662,7 +676,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 		tasks = append(tasks, task)
 	}
-	if err := s.persistTasksWithFixedAdmission(ctx, tasks); err != nil {
+	if err := s.persistTasksWithFixedAdmission(ctx, tasks, p.HasContentImage); err != nil {
 		if s.topicPoolSvc != nil {
 			for _, task := range tasks {
 				if relErr := s.topicPoolSvc.ReleaseForTask(ctx, task.ID); relErr != nil {
@@ -697,7 +711,7 @@ func (s *TaskService) persistTaskWithFixedAdmission(ctx context.Context, task *m
 	return s.persistTasksWithFixedAdmission(ctx, []*model.Task{task})
 }
 
-func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks []*model.Task) error {
+func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks []*model.Task, hasContentImageOverride ...*bool) error {
 	if len(tasks) == 0 {
 		return fmt.Errorf("at least one task is required")
 	}
@@ -706,10 +720,24 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			return fmt.Errorf("task is required")
 		}
 	}
+	explicitlyDisableContentImage := len(hasContentImageOverride) > 0 && hasContentImageOverride[0] != nil && !*hasContentImageOverride[0]
+	createTask := func(repo repository.Repository, task *model.Task) error {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			return err
+		}
+		if !explicitlyDisableContentImage {
+			return nil
+		}
+		// GORM applies the model's default:true tag to a false bool during Create.
+		// Save the explicit user choice inside the same admission transaction while
+		// retaining the true default for callers that omit the field.
+		task.HasContentImage = false
+		return repo.Tasks().Update(ctx, task)
+	}
 	if s.billingCatalogSvc == nil && s.billingWalletSvc == nil {
 		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
 			for _, task := range tasks {
-				if err := tx.Tasks().Create(ctx, task); err != nil {
+				if err := createTask(tx, task); err != nil {
 					return err
 				}
 			}
@@ -753,7 +781,7 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			}
 			item.task.BillingQuoteID, item.task.BillingCatalogID, item.task.BillingSKUID = item.quote.ID, item.quote.CatalogID, item.quote.SKUID
 			item.task.BillingChargeID, item.task.BillingPriceCredits = stringPtr(charge.ID), charge.PriceCredits
-			if err := tx.Tasks().Create(ctx, item.task); err != nil {
+			if err := createTask(tx, item.task); err != nil {
 				return err
 			}
 		}
@@ -795,7 +823,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		project = found
 		taskType = found.Platform
 	}
-	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil); err != nil {
+	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil, false); err != nil {
 		return nil, err
 	}
 	var planMontageInput *model.MontageInput
