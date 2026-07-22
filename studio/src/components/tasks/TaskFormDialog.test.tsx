@@ -435,6 +435,32 @@ describe('TaskFormDialog', () => {
     expect(onCreated).toHaveBeenCalledWith(fixtures.createdTask, 3)
   })
 
+  it('waits for executor status before creating and uses the resolved default target', async () => {
+    const executorRequest = deferred<LocalExecutorStatus | null>()
+    vi.mocked(getLocalExecutorStatus).mockReturnValueOnce(executorRequest.promise)
+    renderDialog()
+
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目'))
+    expect(await within(dialog).findByText('正在检查本地执行器，请稍候。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    expect(api.tasks.create).not.toHaveBeenCalled()
+
+    await act(async () => executorRequest.resolve(executorStatus({
+      state: 'running_idle',
+      available: true,
+      running: true,
+    })))
+
+    const localExecutionLabel = await within(dialog).findByText('在本机运行')
+    expect(within(localExecutionLabel.closest('label')!).getByRole('switch')).toBeChecked()
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      execution_target: 'local',
+    })))
+  })
+
   it('applies destination project defaults when a clone changes project', async () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     await screen.findByRole('dialog', { name: '克隆任务' })
@@ -451,19 +477,66 @@ describe('TaskFormDialog', () => {
     expect(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('复制后的完整创作要求')
   })
 
-  it('preserves an in-flight attachment when switching projects', async () => {
-    uploadToOSSMock.mockImplementationOnce(() => new Promise(() => {}))
+  it('serializes an attachment that completes after switching projects', async () => {
+    const uploadRequest = deferred<{
+      uploadId: string
+      key: string
+      publicUrl: string
+      contentType: string
+      size: number
+    }>()
+    uploadToOSSMock.mockReturnValueOnce(uploadRequest.promise)
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
-    await screen.findByRole('dialog', { name: '克隆任务' })
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
 
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['pending'], 'pending.pdf', { type: 'application/pdf' })] },
     })
     expect(await screen.findByRole('button', { name: '预览 pending.pdf' })).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: 'pending.pdf 状态' })).toHaveTextContent('上传中')
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
     fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
 
     expect(screen.getByRole('button', { name: '预览 pending.pdf' })).toBeInTheDocument()
+    await act(async () => uploadRequest.resolve({
+      uploadId: 'uploaded-after-switch',
+      key: 'uploads/pending/pending.pdf',
+      publicUrl: '',
+      contentType: 'application/pdf',
+      size: 7,
+    }))
+    await waitFor(() => expect(screen.getByRole('status', { name: 'pending.pdf 状态' })).toHaveTextContent('已上传'))
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith('source-task', expect.objectContaining({
+      project_id: 'seednote-project',
+      input_attachments: expect.arrayContaining([
+        expect.objectContaining({
+          upload_id: 'uploaded-after-switch',
+          key: 'uploads/pending/pending.pdf',
+          file_name: 'pending.pdf',
+        }),
+      ]),
+    })))
+  })
+
+  it('keeps a failed attachment visible and blocks submission after switching projects', async () => {
+    uploadToOSSMock.mockRejectedValueOnce(new Error('upload failed'))
+    renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+      target: { files: [new File(['failed'], 'failed.pdf', { type: 'application/pdf' })] },
+    })
+    expect(await screen.findByRole('alert', { name: 'failed.pdf 状态' })).toHaveTextContent('失败')
+    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
+
+    expect(screen.getByRole('button', { name: '预览 failed.pdf' })).toBeInTheDocument()
+    expect(screen.getByRole('alert', { name: 'failed.pdf 状态' })).toHaveTextContent('失败')
+    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
+    expect(api.tasks.clone).not.toHaveBeenCalled()
   })
 
   it('preserves edited values and remains open after a rejected clone', async () => {

@@ -63,17 +63,38 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
   }
 }
 
-// Project changes replace task-type-specific state with the selected project's
-// defaults while keeping the shared composition input intact.
+// Project changes replace project-owned defaults while keeping user-authored input.
 export function switchTaskFormDefaults(
   current: TaskFormDefaults,
   project?: Project | null,
 ): TaskFormDefaults {
   if (project && current.type === project.platform) {
-    return {
+    const defaults = createTaskFormDefaults(project)
+    const switched = {
       ...cloneValue(current),
       project_id: project.id,
+      image_ratio: defaults.image_ratio,
+      image_model_key: defaults.image_model_key,
     }
+
+    if (current.type === 'ecommerce') {
+      switched.selected_modules = cloneValue(defaults.selected_modules)
+      switched.target_platform = defaults.target_platform
+    }
+
+    if (current.type === 'montage') {
+      const montageDefaults = projectMontageInput(project, current.prompt)
+      if (montageDefaults) {
+        switched.montage_input = {
+          ...montageDefaults,
+          brief: current.montage_input?.brief ?? current.prompt,
+          source_assets: cloneValue(current.montage_input?.source_assets ?? []),
+          advanced: cloneValue(current.montage_input?.advanced),
+        }
+      }
+    }
+
+    return switched
   }
 
   const defaults = createTaskFormDefaults(project)

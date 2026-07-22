@@ -198,7 +198,9 @@ export function TaskFormDialog({
           const cloned = cloneTaskFormDefaults(sourceTask)
           const sourceProject = projectMap.get(sourceTask.project_id ?? '')
           return sourceProject
-            ? switchTaskFormDefaults(cloned, sourceProject)
+            ? cloned.type === sourceProject.platform
+              ? { ...cloned, project_id: sourceProject.id }
+              : switchTaskFormDefaults(cloned, sourceProject)
             : { ...cloned, project_id: '' }
         })()
       : createInitialDefaults(project, initialType)
@@ -285,7 +287,7 @@ export function TaskFormDialog({
   async function onSubmit(values: TaskFormDefaults) {
     let statusForSubmit = localExecutorStatus
     const wantsLocalExecution = values.type !== 'montage' && runLocally
-    if (wantsLocalExecution && localExecutorLoading) return
+    if (values.type !== 'montage' && localExecutorLoading && (mode === 'create' || wantsLocalExecution)) return
     if (wantsLocalExecution && statusForSubmit?.state === 'ready_stopped') {
       const started = await startLocalExecutor()
       if (started) {
@@ -330,7 +332,7 @@ export function TaskFormDialog({
       ? { message: '正在加载可用项目，请稍候。', href: '' }
       : mode === 'clone' && !selectedProject
         ? { message: '源任务项目不可用，请选择一个有效项目。', href: '' }
-        : runLocally && localExecutorLoading
+        : watchedType !== 'montage' && localExecutorLoading && (mode === 'create' || runLocally)
           ? { message: '正在检查本地执行器，请稍候。', href: '' }
           : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
             ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }

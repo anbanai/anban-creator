@@ -147,14 +147,22 @@ describe('task form mapping', () => {
     })
   })
 
-  it('preserves ecommerce edits when switching between ecommerce projects', () => {
+  it('preserves ecommerce inputs but applies destination defaults between ecommerce projects', () => {
     const current = {
       ...createTaskFormDefaults(project({
         id: 'source-ecommerce',
         platform: 'ecommerce',
-        ecommerce_defaults: { default_selected_modules: { hero: 1 } },
+        image_ratio: '1:1',
+        ecommerce_defaults: {
+          image_model_key: 'source-model',
+          default_selected_modules: { hero: 1 },
+          target_platform: 'tmall',
+        },
       })),
       prompt: 'Keep ecommerce prompt',
+      quantity: 3,
+      input_attachments: [{ type: 'document' as const, key: 'brief' }],
+      watermark: true,
       product_photos: ['oss://product.png'],
       selected_modules: { hero: 3, detail: 2 },
       target_platform: 'tmall',
@@ -164,9 +172,10 @@ describe('task form mapping', () => {
     const destination = project({
       id: 'destination-ecommerce',
       platform: 'ecommerce',
+      image_ratio: '4:3',
       ecommerce_defaults: {
         image_model_key: 'destination-model',
-        default_selected_modules: { stale_default: 1 },
+        default_selected_modules: { destination_hero: 1 },
         target_platform: 'douyin',
       },
     })
@@ -177,17 +186,83 @@ describe('task form mapping', () => {
       project_id: 'destination-ecommerce',
       type: 'ecommerce',
       prompt: 'Keep ecommerce prompt',
+      quantity: 3,
+      input_attachments: [{ type: 'document', key: 'brief' }],
+      watermark: true,
+      image_ratio: '4:3',
+      image_model_key: 'destination-model',
       product_photos: ['oss://product.png'],
-      selected_modules: { hero: 3, detail: 2 },
-      target_platform: 'tmall',
+      selected_modules: { destination_hero: 1 },
+      target_platform: 'douyin',
       selling_points: 'Lightweight and durable',
       language: 'zh-CN',
     })
   })
 
-  it('preserves Montage input when switching between Montage projects', () => {
+  it('preserves article image toggles but applies destination image defaults', () => {
     const current = {
-      ...createTaskFormDefaults(project({ id: 'source-montage', platform: 'montage' })),
+      ...createTaskFormDefaults(project({
+        id: 'source-article',
+        platform: 'article',
+        image_ratio: '1:1',
+        ecommerce_defaults: { image_model_key: 'source-model' },
+      })),
+      article_with_cover: false,
+      article_with_content_images: false,
+    }
+    const destination = project({
+      id: 'destination-article',
+      platform: 'article',
+      image_ratio: '16:9',
+      ecommerce_defaults: { image_model_key: 'destination-model' },
+    })
+
+    expect(switchTaskFormDefaults(current, destination)).toMatchObject({
+      project_id: 'destination-article',
+      type: 'article',
+      image_ratio: '16:9',
+      image_model_key: 'destination-model',
+      article_with_cover: false,
+      article_with_content_images: false,
+    })
+  })
+
+  it('preserves seednote image toggles but applies destination image defaults', () => {
+    const current = {
+      ...createTaskFormDefaults(project({
+        id: 'source-seednote',
+        platform: 'seednote',
+        image_ratio: '1:1',
+        ecommerce_defaults: { image_model_key: 'source-model' },
+      })),
+      has_content_image: false,
+      has_tail_image: true,
+    }
+    const destination = project({
+      id: 'destination-seednote',
+      platform: 'seednote',
+      image_ratio: '3:4',
+      ecommerce_defaults: { image_model_key: 'destination-model' },
+    })
+
+    expect(switchTaskFormDefaults(current, destination)).toMatchObject({
+      project_id: 'destination-seednote',
+      type: 'seednote',
+      image_ratio: '3:4',
+      image_model_key: 'destination-model',
+      has_content_image: false,
+      has_tail_image: true,
+    })
+  })
+
+  it('preserves Montage inputs but applies destination pipeline defaults', () => {
+    const current = {
+      ...createTaskFormDefaults(project({
+        id: 'source-montage',
+        platform: 'montage',
+        image_ratio: '1:1',
+        ecommerce_defaults: { image_model_key: 'source-model' },
+      })),
       prompt: 'Keep montage brief',
       montage_input: {
         brief: 'Keep montage brief',
@@ -201,9 +276,11 @@ describe('task form mapping', () => {
     const destination = project({
       id: 'destination-montage',
       platform: 'montage',
+      image_ratio: '16:9',
+      ecommerce_defaults: { image_model_key: 'destination-model' },
       montage_defaults: {
         default_pipeline: 'destination-default',
-        preferences: { duration_seconds: 15 },
+        preferences: { aspect_ratio: '16:9', duration_seconds: 15, style: 'documentary' },
         delivery_targets: ['wechat'],
       },
     })
@@ -214,12 +291,14 @@ describe('task form mapping', () => {
       project_id: 'destination-montage',
       type: 'montage',
       prompt: 'Keep montage brief',
+      image_ratio: '16:9',
+      image_model_key: 'destination-model',
       montage_input: {
         brief: 'Keep montage brief',
-        pipeline_key: 'custom-pipeline',
+        pipeline_key: 'destination-default',
         source_assets: [{ type: 'video_url', url: 'oss://source.mp4' }],
-        preferences: { aspect_ratio: '9:16', duration_seconds: 37, style: 'kinetic' },
-        delivery_targets: ['douyin'],
+        preferences: { aspect_ratio: '16:9', duration_seconds: 15, style: 'documentary' },
+        delivery_targets: ['wechat'],
         advanced: { render: { fps: 60 } },
       },
     })
