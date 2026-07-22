@@ -131,18 +131,13 @@ func TestMontageRuntimeManifestFilesUseEmptyObjectsWhenUnset(t *testing.T) {
 	}
 }
 
-func TestMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
+func TestMontageTaskFilesRequireFinalVideoAndManifest(t *testing.T) {
 	task := &model.Task{Type: model.PlatformMontage}
 
 	t.Run("missing manifest", func(t *testing.T) {
-		workDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(workDir, "final.mp4"), []byte("video"), 0o644); err != nil {
-			t.Fatalf("write final video: %v", err)
-		}
-
-		got := ValidateTaskArtifactsFromWorkDir(task, workDir)
+		got := ValidateTaskArtifactsFromTaskFiles(task, []*model.TaskFile{{FileName: "final.mp4"}})
 		if got.Valid {
-			t.Fatal("ValidateTaskArtifactsFromWorkDir valid = true, want false")
+			t.Fatal("ValidateTaskArtifactsFromTaskFiles valid = true, want false")
 		}
 		if got.Reason != "montage missing required deliverables: delivery-manifest.json" {
 			t.Fatalf("Reason = %q, want missing delivery manifest", got.Reason)
@@ -152,17 +147,12 @@ func TestMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
 	t.Run("accepts final video aliases with manifest", func(t *testing.T) {
 		for _, name := range []string{"final.mp4", "final_video.mp4", "final-video.mp4"} {
 			t.Run(name, func(t *testing.T) {
-				workDir := t.TempDir()
-				if err := os.WriteFile(filepath.Join(workDir, name), []byte("video"), 0o644); err != nil {
-					t.Fatalf("write final video: %v", err)
-				}
-				if err := os.WriteFile(filepath.Join(workDir, "delivery-manifest.json"), []byte("{}"), 0o644); err != nil {
-					t.Fatalf("write delivery manifest: %v", err)
-				}
-
-				got := ValidateTaskArtifactsFromWorkDir(task, workDir)
+				got := ValidateTaskArtifactsFromTaskFiles(task, []*model.TaskFile{
+					{FileName: name},
+					{FileName: "delivery-manifest.json"},
+				})
 				if !got.Valid {
-					t.Fatalf("ValidateTaskArtifactsFromWorkDir valid = false, reason=%q missing=%v", got.Reason, got.Missing)
+					t.Fatalf("ValidateTaskArtifactsFromTaskFiles valid = false, reason=%q missing=%v", got.Reason, got.Missing)
 				}
 			})
 		}

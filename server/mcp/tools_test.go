@@ -33,7 +33,7 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	repo := repository.New(db)
 	logger := zerolog.Nop()
 	projectSvc := service.NewProjectService(repo, &logger)
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 	planSvc := service.NewPlanService(repo, &logger)
 	templateSvc := service.NewTemplateService(repo, &logger)
 

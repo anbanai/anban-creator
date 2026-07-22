@@ -3,8 +3,6 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -12,29 +10,23 @@ import (
 )
 
 const (
-	AgentBinaryName                    = "anban"
-	DefaultWorkspaceBaseName           = "anban-creator"
-	EphemeralContainerNamePrefix       = "creator-agent-task-"
-	dockerPersistentAgentContainerName = "creator-agent-article"
-	DockerServerWorkspaceRoot          = "/app/data/workspace"
-	dockerContainerWorkspaceRoot       = "/workspace"
-	ContainerRuntimeUser               = "1000:1000"
-	ContainerHomePath                  = "/home/node"
-	DockerRuntimeHomeDirName           = ".anban-runtime-home"
-	ContainerAgentReachVenvPath        = "/opt/agent-reach-venv"
-	ContainerOpenMontageVenvPath       = "/opt/openmontage-venv"
-	ContainerContentRuntimePath        = "/usr/local/bin:/usr/bin:/bin"
-	ContainerSeednoteRuntimePath       = ContainerAgentReachVenvPath + "/bin:" + ContainerContentRuntimePath
-	ContainerMontageRuntimePath        = ContainerOpenMontageVenvPath + "/bin:" + ContainerContentRuntimePath
-	MontageSubmoduleEnvName            = "ANBAN_MONTAGE_SUBMODULE_PATH"
-	MontageTemplateEnvName             = "ANBAN_MONTAGE_TEMPLATE_PATH"
-	MontageRuntimeDirName              = "montage"
-	ContainerMontageTemplatePath       = "/opt/montage-template"
-	OrphanedContainerNameFilter        = "^/" + EphemeralContainerNamePrefix
-	dockerRuntimeContainerNamePrefix   = "creator-agent-job"
-	dockerProjectMemoryNamePrefix      = "creator-agent-memory"
-	dockerTaskWorkspaceNamePrefix      = "creator-agent-workspace"
-	dockerRuntimeNameMaxLength         = 128
+	AgentBinaryName                  = "anban"
+	ContainerRuntimeUser             = "1000:1000"
+	ContainerHomePath                = "/home/node"
+	RuntimeHomeDirName               = ".anban-runtime-home"
+	ContainerAgentReachVenvPath      = "/opt/agent-reach-venv"
+	ContainerOpenMontageVenvPath     = "/opt/openmontage-venv"
+	ContainerContentRuntimePath      = "/usr/local/bin:/usr/bin:/bin"
+	ContainerSeednoteRuntimePath     = ContainerAgentReachVenvPath + "/bin:" + ContainerContentRuntimePath
+	ContainerMontageRuntimePath      = ContainerOpenMontageVenvPath + "/bin:" + ContainerContentRuntimePath
+	MontageSubmoduleEnvName          = "ANBAN_MONTAGE_SUBMODULE_PATH"
+	MontageTemplateEnvName           = "ANBAN_MONTAGE_TEMPLATE_PATH"
+	MontageRuntimeDirName            = "montage"
+	ContainerMontageTemplatePath     = "/opt/montage-template"
+	dockerRuntimeContainerNamePrefix = "creator-agent-job"
+	dockerProjectMemoryNamePrefix    = "creator-agent-memory"
+	dockerTaskWorkspaceNamePrefix    = "creator-agent-workspace"
+	dockerRuntimeNameMaxLength       = 128
 )
 
 var dockerNameUnsafe = regexp.MustCompile(`[^a-z0-9_.-]+`)
@@ -52,22 +44,6 @@ func containerRuntimePath(taskType string) string {
 
 func RuntimeImageForTask(images srvconfig.RuntimeImages, taskType string) srvconfig.RuntimeImageSelection {
 	return images.ForTask(taskType)
-}
-
-func dockerContainerWorkspaceDir(taskID string) string {
-	return filepath.Join(dockerContainerWorkspaceRoot, taskID)
-}
-
-func DefaultWorkspaceDir(taskID string) string {
-	return filepath.Join(os.TempDir(), DefaultWorkspaceBaseName, taskID)
-}
-
-func EphemeralContainerName(taskID string) string {
-	return EphemeralContainerNamePrefix + taskID
-}
-
-func OrphanedContainerNameFilters() []string {
-	return []string{OrphanedContainerNameFilter}
 }
 
 func dockerRuntimeContainerName(executionID string) string {

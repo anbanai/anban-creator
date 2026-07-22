@@ -410,7 +410,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	if _, err := svc.Bootstrap(ctx, &crossProvider); err == nil {
 		t.Fatal("cross-provider workload with identical runtime identity accepted")
 	}
-	taskSvc := NewTaskService(repo, nil, nil, nil, nil, "", nil, "", nil, nil)
+	taskSvc := NewTaskService(repo, nil, nil, nil, "", nil, nil)
 	if err := taskSvc.ValidateAgentExecutionAccess(ctx, userID, projectID, taskID, executionID); err != nil {
 		t.Fatalf("current execution rejected: %v", err)
 	}

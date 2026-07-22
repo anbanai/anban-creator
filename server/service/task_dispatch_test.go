@@ -107,18 +107,6 @@ func (r *losingFailPendingTaskRepository) FailPendingTask(context.Context, strin
 	return false, nil
 }
 
-type blockingRunningClaimTaskRepository struct {
-	repository.TaskRepository
-	entered chan context.Context
-	release <-chan struct{}
-}
-
-func (r *blockingRunningClaimTaskRepository) CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error) {
-	r.entered <- ctx
-	<-r.release
-	return r.TaskRepository.CompareAndSwapStatusAndStartedAt(ctx, taskID, expected, newStatus)
-}
-
 func (r *failRunningTaskRepository) FailRunningTask(context.Context, string, string) (bool, error) {
 	return false, r.err
 }
@@ -247,7 +235,7 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	dispatcher := &dispatchTestDispatcher{}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	svc.SetRuntimeDispatcher(dispatcher)
 	task := &model.Task{
 		ID:        uuid.NewString(),
@@ -944,7 +932,7 @@ func TestDispatchCloudTaskRollsBackWhenCurrentPointerUpdateFails(t *testing.T) {
 	}
 }
 
-func TestHandleExecutionFromPayloadWithoutDispatcherUsesSynchronousExecutor(t *testing.T) {
+func TestHandleExecutionFromPayloadWithoutDispatcherReturnsConfigurationError(t *testing.T) {
 	db := setupTaskTestDB(t)
 	if err := db.AutoMigrate(&model.TaskExecution{}); err != nil {
 		t.Fatalf("migrate task executions: %v", err)
@@ -957,21 +945,21 @@ func TestHandleExecutionFromPayloadWithoutDispatcherUsesSynchronousExecutor(t *t
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	executor := &fakeTaskExecutor{err: errors.New("synchronous executor called")}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
-		t.Fatalf("HandleExecutionFromPayload: %v", err)
-	}
-	if executor.opts == nil {
-		t.Fatal("synchronous executor was not called")
+	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
+	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err == nil || !strings.Contains(err.Error(), "runtime dispatcher is not configured") {
+		t.Fatalf("HandleExecutionFromPayload error = %v, want dispatcher configuration error", err)
 	}
 	var count int64
 	if err := db.Model(&model.TaskExecution{}).Where("task_id = ?", task.ID).Count(&count).Error; err != nil {
 		t.Fatalf("count executions: %v", err)
 	}
-	if count != 0 {
-		t.Fatalf("TaskExecution rows = %d, want 0", count)
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 || found.Status != model.TaskStatusPending {
+		t.Fatalf("TaskExecution rows = %d, task status = %s; want no execution and pending task", count, found.Status)
 	}
 }
 
@@ -995,14 +983,10 @@ func TestHandleExecutionFromPayloadReferenceFailureFinalizesRunningTask(t *testi
 	if err := rdb.Set(ctx, projectRunningCountPrefix+projectID, 1, time.Hour).Err(); err != nil {
 		t.Fatal(err)
 	}
-	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
-	}
-	if executor.opts != nil {
-		t.Fatalf("executor called after reference failure: %#v", executor.opts)
 	}
 	found, err := repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
@@ -1043,8 +1027,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 	dbErr := errors.New("fail pending unavailable")
 	state := &failPendingOnceState{err: dbErr}
 	repo, tasks := newFailPendingOnceRepository(baseRepo, state, baseRepo.Assets())
-	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); !errors.Is(err, dbErr) {
 		t.Fatalf("first error = %v, want %v", err, dbErr)
@@ -1071,8 +1054,8 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || countErr != nil || count != 0 {
 		t.Fatalf("state after retry: task=%#v user=%#v userErr=%v slot=%d slotErr=%v", found, user, userErr, count, countErr)
 	}
-	if executor.opts != nil || tasks.callCount() != 2 {
-		t.Fatalf("executor=%#v fail pending calls=%d", executor.opts, tasks.callCount())
+	if tasks.callCount() != 2 {
+		t.Fatalf("fail pending calls=%d", tasks.callCount())
 	}
 }
 
@@ -1101,8 +1084,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureAtomicallyRetriesRefun
 		WHEN NEW.type = 'task_refund' BEGIN SELECT RAISE(ABORT, 'refund insert unavailable'); END`).Error; err != nil {
 		t.Fatal(err)
 	}
-	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err == nil || !strings.Contains(err.Error(), "refund insert unavailable") {
 		t.Fatalf("first HandleExecutionFromPayload error = %v, want refund persistence failure", err)
@@ -1116,9 +1098,6 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureAtomicallyRetriesRefun
 		t.Fatalf("retry HandleExecutionFromPayload: %v", err)
 	}
 	assertPendingReferenceRefundState(t, db, repo, rdb, task, userID, 1000, 1, 0)
-	if executor.opts != nil {
-		t.Fatalf("executor called after reference failure: %#v", executor.opts)
-	}
 }
 
 func assertPendingReferenceRefundState(t *testing.T, db *gorm.DB, repo repository.Repository, rdb *redis.Client, task *model.Task, userID string, wantBalance int, wantRefunds int64, wantSlots int) {
@@ -1168,14 +1147,10 @@ func TestHandleExecutionFromPayloadReferenceFailureDoesNotOverwriteConcurrentCan
 		}},
 	}
 	logger := zerolog.New(io.Discard)
-	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
-	}
-	if executor.opts != nil {
-		t.Fatalf("executor called after cancellation: %#v", executor.opts)
 	}
 	found, err := baseRepo.Tasks().FindByID(context.Background(), task.ID)
 	if err != nil {
@@ -1183,121 +1158,6 @@ func TestHandleExecutionFromPayloadReferenceFailureDoesNotOverwriteConcurrentCan
 	}
 	if found.Status != model.TaskStatusCancelled || found.CompletedAt == nil || found.ErrorMessage != "cancelled" {
 		t.Fatalf("task after cancellation = %#v", found)
-	}
-}
-
-func TestHandleExecutionReferenceFailureDoesNotOverwriteRunningCancellation(t *testing.T) {
-	db := setupTaskTestDB(t)
-	baseRepo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
-		t.Fatal(err)
-	}
-	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, ReferenceImageAssetID: "missing"}
-	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	logger := zerolog.New(io.Discard)
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	if err := rdb.Set(ctx, projectRunningCountPrefix+projectID, 1, time.Hour).Err(); err != nil {
-		t.Fatal(err)
-	}
-	repo := &referenceAssetRepositoryOverride{
-		Repository: baseRepo,
-		assets: &cancelingReferenceAssetRepository{AssetRepository: baseRepo.Assets(), cancel: func() {
-			swapped, err := baseRepo.Tasks().CompareAndSwapStatusAndError(context.Background(), task.ID, model.TaskStatusRunning, model.TaskStatusCancelled, "cancelled")
-			if err != nil || !swapped {
-				t.Errorf("cancel running task: swapped=%v err=%v", swapped, err)
-				return
-			}
-			if err := baseRepo.Tasks().SetCompletedAt(context.Background(), task.ID); err != nil {
-				t.Errorf("complete cancelled task: %v", err)
-			}
-		}},
-	}
-	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
-
-	if err := svc.HandleExecution(ctx, task, &model.Project{ID: projectID, UserID: userID, Platform: task.Type}); err != nil {
-		t.Fatalf("HandleExecution: %v", err)
-	}
-	found, err := baseRepo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	user, userErr := baseRepo.Users().FindByID(ctx, userID)
-	count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found.Status != model.TaskStatusCancelled || found.ErrorMessage != "cancelled" || userErr != nil || countErr != nil || count != 1 {
-		t.Fatalf("state after running cancellation: task=%#v user=%#v userErr=%v slot=%d slotErr=%v", found, user, userErr, count, countErr)
-	}
-	if executor.opts != nil {
-		t.Fatalf("executor called after reference failure: %#v", executor.opts)
-	}
-}
-
-func TestHandleExecutionFailureReturnsRepositoryErrorWithoutSideEffects(t *testing.T) {
-	db := setupTaskTestDB(t)
-	baseRepo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
-		t.Fatal(err)
-	}
-	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
-	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	logger := zerolog.New(io.Discard)
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	if err := rdb.Set(ctx, projectRunningCountPrefix+projectID, 1, time.Hour).Err(); err != nil {
-		t.Fatal(err)
-	}
-	dbErr := errors.New("fail running unavailable")
-	repo := &executionPreparationRepository{Repository: baseRepo, tasks: &failRunningTaskRepository{TaskRepository: baseRepo.Tasks(), err: dbErr}, assets: baseRepo.Assets()}
-	svc := NewTaskService(repo, &fakeTaskExecutor{}, &mockEnqueuer{}, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
-	execErr := errors.New("execution failed")
-
-	err := svc.HandleExecutionFailure(ctx, task, execErr)
-	if !errors.Is(err, dbErr) || !errors.Is(err, execErr) {
-		t.Fatalf("HandleExecutionFailure error = %v, want repository and execution errors", err)
-	}
-	found, findErr := baseRepo.Tasks().FindByID(ctx, task.ID)
-	user, userErr := baseRepo.Users().FindByID(ctx, userID)
-	count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if findErr != nil || found.Status != model.TaskStatusRunning || found.CompletedAt != nil || userErr != nil || countErr != nil || count != 1 {
-		t.Fatalf("state after repository error: task=%#v findErr=%v user=%#v userErr=%v slot=%d slotErr=%v", found, findErr, user, userErr, count, countErr)
-	}
-}
-
-func TestHandleExecutionReturnsReferenceTerminalPersistenceError(t *testing.T) {
-	db := setupTaskTestDB(t)
-	baseRepo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, ReferenceImageAssetID: "missing"}
-	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	dbErr := errors.New("fail running unavailable")
-	repo := &executionPreparationRepository{Repository: baseRepo, tasks: &failRunningTaskRepository{TaskRepository: baseRepo.Tasks(), err: dbErr}, assets: baseRepo.Assets()}
-	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, &fakeTaskExecutor{}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-
-	err := svc.HandleExecution(ctx, task, &model.Project{ID: projectID, UserID: userID, Platform: task.Type})
-	if !errors.Is(err, dbErr) || !errors.Is(err, ErrExecutionTerminalPersistence) {
-		t.Fatalf("HandleExecution error = %v, want terminal persistence error", err)
-	}
-	found, findErr := baseRepo.Tasks().FindByID(ctx, task.ID)
-	if findErr != nil || found.Status != model.TaskStatusRunning || found.CompletedAt != nil {
-		t.Fatalf("task after persistence error = %#v, err=%v", found, findErr)
 	}
 }
 
@@ -1322,8 +1182,7 @@ func TestEnqueueExecutionFallbackUsesPendingReferenceFailureFinalization(t *test
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution: %v", err)
@@ -1344,9 +1203,6 @@ func TestEnqueueExecutionFallbackUsesPendingReferenceFailureFinalization(t *test
 	count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
 	if found == nil || found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || countErr != nil || count != 0 {
 		t.Fatalf("fallback state: task=%#v user=%#v userErr=%v slot=%d slotErr=%v", found, user, userErr, count, countErr)
-	}
-	if executor.opts != nil {
-		t.Fatalf("fallback executor called after reference failure: %#v", executor.opts)
 	}
 }
 
@@ -1375,8 +1231,7 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 	assets := &contextCapturingAssetRepository{AssetRepository: baseRepo.Assets(), contexts: assetContexts}
 	state := &failPendingOnceState{err: errors.New("database table is locked"), firstFailure: make(chan struct{})}
 	repo, tasks := newFailPendingOnceRepository(baseRepo, state, assets)
-	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("first EnqueueExecution: %v", err)
@@ -1394,8 +1249,8 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 	}
 	user, userErr := baseRepo.Users().FindByID(ctx, userID)
 	slots, slotErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || userErr != nil || slotErr != nil || slots != 0 || executor.opts != nil {
-		t.Fatalf("state after preparation persistence error: task=%#v user=%#v userErr=%v slots=%d slotErr=%v executor=%#v", found, user, userErr, slots, slotErr, executor.opts)
+	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || userErr != nil || slotErr != nil || slots != 0 {
+		t.Fatalf("state after preparation persistence error: task=%#v user=%#v userErr=%v slots=%d slotErr=%v", found, user, userErr, slots, slotErr)
 	}
 
 	if err := svc.DispatchPendingTasks(ctx, projectID); err != nil {
@@ -1409,8 +1264,8 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 	}
 	user, userErr = baseRepo.Users().FindByID(ctx, userID)
 	slots, slotErr = rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || slotErr != nil || slots != 0 || executor.opts != nil || tasks.callCount() != 2 {
-		t.Fatalf("state after periodic retry: task=%#v user=%#v userErr=%v slots=%d slotErr=%v executor=%#v calls=%d", found, user, userErr, slots, slotErr, executor.opts, tasks.callCount())
+	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || userErr != nil || slotErr != nil || slots != 0 || tasks.callCount() != 2 {
+		t.Fatalf("state after periodic retry: task=%#v user=%#v userErr=%v slots=%d slotErr=%v calls=%d", found, user, userErr, slots, slotErr, tasks.callCount())
 	}
 }
 
@@ -1461,8 +1316,7 @@ func TestEnqueueExecutionFallbackReleasesOnlyOwnedSlotWhenPreparationCASLoses(t 
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	executor := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: true}}
-	svc := NewTaskService(repo, executor, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution: %v", err)
@@ -1474,8 +1328,8 @@ func TestEnqueueExecutionFallbackReleasesOnlyOwnedSlotWhenPreparationCASLoses(t 
 		t.Fatal(err)
 	}
 	count, countErr := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
-	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || countErr != nil || count != 1 || executor.opts != nil {
-		t.Fatalf("preparation CAS loser state: task=%#v count=%d countErr=%v executor=%#v", found, count, countErr, executor.opts)
+	if found.Status != model.TaskStatusPending || found.CompletedAt != nil || countErr != nil || count != 1 {
+		t.Fatalf("preparation CAS loser state: task=%#v count=%d countErr=%v", found, count, countErr)
 	}
 }
 
@@ -1493,27 +1347,25 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	entered := make(chan context.Context, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	releaseFallbacks := func() { releaseOnce.Do(func() { close(release) }) }
 	t.Cleanup(releaseFallbacks)
-	tasks := &blockingRunningClaimTaskRepository{TaskRepository: baseRepo.Tasks(), entered: entered, release: release}
-	repo := &executionPreparationRepository{Repository: baseRepo, tasks: tasks, assets: baseRepo.Assets()}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, &fakeTaskExecutor{}, nil, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	dispatcher := &dispatchTestDispatcher{started: make(chan struct{}, 1), release: release}
+	svc := NewTaskService(baseRepo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
+	svc.SetRuntimeDispatcher(dispatcher)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution A: %v", err)
 	}
-	var fallbackCtx context.Context
 	select {
-	case fallbackCtx = <-entered:
+	case <-dispatcher.started:
 	case <-time.After(2 * time.Second):
-		t.Fatal("fallback A did not reach running CAS")
+		t.Fatal("fallback A did not reach runtime dispatch")
 	}
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution duplicate: %v", err)
@@ -1529,10 +1381,19 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 		t.Fatalf("reserve replacement slot B: ok=%v err=%v", ok, err)
 	}
 	releaseFallbacks()
-	select {
-	case <-fallbackCtx.Done():
-	case <-time.After(2 * time.Second):
-		t.Fatal("fallback A did not exit after losing CAS")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		exists, existsErr := rdb.Exists(ctx, fallbackDispatchClaimPrefix+task.ID).Result()
+		if existsErr != nil {
+			t.Fatal(existsErr)
+		}
+		if exists == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if exists, existsErr := rdb.Exists(ctx, fallbackDispatchClaimPrefix+task.ID).Result(); existsErr != nil || exists != 0 {
+		t.Fatalf("fallback A claim was not released: exists=%d err=%v", exists, existsErr)
 	}
 	count, err = rdb.Get(ctx, projectRunningCountPrefix+projectID).Int()
 	if err != nil || count != 1 {

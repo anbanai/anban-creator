@@ -38,7 +38,7 @@ func TestUpdateExecutionResultPersistsAllEvidenceWithOneUpdate(t *testing.T) {
 	t.Cleanup(func() { _ = db.Callback().Update().Remove(callbackName) })
 
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 	result := &agent.ExecutionResult{
 		Success:    true,
 		ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "winner", InputTokens: 7}},
@@ -55,7 +55,7 @@ func TestUpdateExecutionResultPersistsAllEvidenceWithOneUpdate(t *testing.T) {
 func TestUpdateExecutionResultReturnsErrorForMissingTask(t *testing.T) {
 	repo := repository.New(setupTaskTestDB(t))
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 
 	err := svc.UpdateExecutionResult(context.Background(), uuid.NewString(), &agent.ExecutionResult{Success: true})
 	if err == nil {
@@ -76,7 +76,7 @@ func TestUpdateExecutionResultPersistsTerminalModelUsageForEveryOutcome(t *testi
 				t.Fatalf("create task: %v", err)
 			}
 			logger := zerolog.New(io.Discard)
-			svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+			svc := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 			usage := []agent.ModelTokenUsage{
 				{
 					Provider: "volcengine_ark", Model: "doubao-seed-2-1-turbo-260628",
@@ -133,7 +133,7 @@ func TestUpdateExecutionResultPersistsUnreconciledTerminalStatus(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 	result := &agent.ExecutionResult{
 		Success: false, CostStatus: agent.CostStatusUnreconciled,
 		CostDiagnostics: []agent.CostDiagnostic{{Code: agent.CostDiagnosticMissingTerminalModelUsage}},
@@ -154,7 +154,7 @@ func TestUpdateExecutionResultPersistsUnreconciledTerminalStatus(t *testing.T) {
 func TestUpdateExecutionResultRejectsNilInsteadOfSilentlySkippingPersistence(t *testing.T) {
 	repo := repository.New(setupTaskTestDB(t))
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 
 	if err := svc.UpdateExecutionResult(context.Background(), uuid.NewString(), nil); err == nil {
 		t.Fatal("UpdateExecutionResult(nil) = nil, want explicit error")

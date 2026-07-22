@@ -275,44 +275,23 @@ func TestValidateManagedPluginResultPreservesProtocolErrorsAndFailsClosed(t *tes
 	}
 }
 
-func TestManagedAgentExecutorsUseRuntimePolicy(t *testing.T) {
-	for _, path := range []string{
-		"executor.go",
-		"../../agent/runner.go",
-	} {
-		t.Run(path, func(t *testing.T) {
-			text := readRepoFile(t, path)
-			if !strings.Contains(text, "WithManagedAgentRuntimePolicy()") {
-				t.Fatalf("%s must apply WithManagedAgentRuntimePolicy()", path)
-			}
-		})
-	}
-
-	localExecutor := readRepoFile(t, "executor.go")
+func TestStandaloneAgentRunnerUsesRuntimePolicy(t *testing.T) {
+	body := readRepoFile(t, "../../agent/runner.go")
 	for _, want := range []string{
-		`agentFlag := "anban:" + agentName`,
-		`claudecode.WithExtraArgs(map[string]*string{"agent": &agentFlag})`,
+		"WithManagedAgentRuntimePolicy()",
+		"claudecode.WithPermissionMode(claudecode.PermissionModeDefault)",
+		"client.ReceiveResponse(ctx)",
 	} {
-		if !strings.Contains(localExecutor, want) {
-			t.Fatalf("local executor must start the plugin agent as the main session via %q", want)
+		if !strings.Contains(body, want) {
+			t.Fatalf("standalone Agent runner must retain managed runtime contract %q", want)
 		}
 	}
-	if strings.Contains(localExecutor, "claudecode.WithAgent(agentName") {
-		t.Fatal("local executor must not register the workflow agent as a delegatable subagent")
-	}
-	for _, path := range []string{"executor.go", "../../agent/runner.go"} {
-		body := readRepoFile(t, path)
-		if !strings.Contains(body, "claudecode.WithPermissionMode(claudecode.PermissionModeDefault)") {
-			t.Fatalf("%s must use default permission evaluation with the managed fail-closed callback", path)
-		}
-		if strings.Contains(body, "claudecode.PermissionModeBypassPermissions") {
-			t.Fatalf("%s must not bypass the managed allowlist", path)
-		}
-		if !strings.Contains(body, "client.ReceiveResponse(ctx)") {
-			t.Fatalf("%s must consume the SDK response iterator so asynchronous stream errors are preserved", path)
-		}
-		if strings.Contains(body, "client.ReceiveMessages(ctx)") {
-			t.Fatalf("%s must not discard SDK stream errors through the message-only channel", path)
+	for _, forbidden := range []string{
+		"claudecode.PermissionModeBypassPermissions",
+		"client.ReceiveMessages(ctx)",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("standalone Agent runner retains forbidden runtime behavior %q", forbidden)
 		}
 	}
 }

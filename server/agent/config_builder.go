@@ -204,17 +204,6 @@ func buildAutoMemorySettingsJSON(autoMemoryDir string) (string, error) {
 	return string(data), nil
 }
 
-func containerMemoryDir(hostWorkDir, containerWorkDir, hostMemoryDir string) string {
-	hostWorkDir = filepath.Clean(hostWorkDir)
-	containerWorkDir = filepath.ToSlash(filepath.Clean(containerWorkDir))
-	hostMemoryDir = filepath.Clean(hostMemoryDir)
-	rel, err := filepath.Rel(hostWorkDir, hostMemoryDir)
-	if err != nil || filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(hostMemoryDir)
-	}
-	return filepath.ToSlash(filepath.Join(containerWorkDir, rel))
-}
-
 // writeProjectCLAUDEMD writes a project's positioning into a fixed CLAUDE.md
 // template in the workspace root. Claude Code loads CLAUDE.md from the cwd as
 // project memory, so all skills/sub-agents in the session receive the same

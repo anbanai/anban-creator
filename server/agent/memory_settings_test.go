@@ -18,10 +18,3 @@ func TestBuildAutoMemorySettingsJSON(t *testing.T) {
 		t.Fatalf("autoMemoryDirectory = %#v", decoded["autoMemoryDirectory"])
 	}
 }
-
-func TestContainerMemoryDirUsesContainerWorkspace(t *testing.T) {
-	got := containerMemoryDir("/host/work/task-1", "/workspace/task-1", "/host/work/task-1/.claude/memory")
-	if got != "/workspace/task-1/.claude/memory" {
-		t.Fatalf("container memory dir = %q, want /workspace/task-1/.claude/memory", got)
-	}
-}

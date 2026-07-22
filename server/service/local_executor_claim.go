@@ -46,7 +46,7 @@ const LocalClaimWindow = 30 * time.Second
 
 // LocalExecutionConfig is the full task config returned to a desktop local
 // executor on a successful claim. The desktop builds the anban run argv
-// from this (mirroring agent.DockerExecutor.buildAgentCommand) and supplies
+// from this (matching the managed bootstrap defaults) and supplies
 // server_url + the user's own API key from its local settings — those are NOT
 // echoed here (the desktop already holds them and echoing keys is unsafe).
 type LocalExecutionConfig struct {
@@ -127,7 +127,7 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 }
 
 // buildLocalExecutionConfig resolves the agent argv inputs for a task the same
-// way the cloud DockerExecutor does (default model from config, per-type
+// way managed runtime bootstrap does (default model from config, per-type
 // max-turns via agent.DefaultMaxTurns). See agent.buildAgentCommand.
 func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutionConfig {
 	return &LocalExecutionConfig{

@@ -6,10 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,7 +20,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
-	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -86,7 +83,7 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 	})
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	return svc, repo
 }
@@ -95,7 +92,7 @@ func TestTaskService_ResumeRequiresNASCapability(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -680,6 +677,7 @@ func TestTaskService_CreateManualEcommerceTaskForcesSinglePackageWithoutCreditSe
 
 func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
 	userID := "user-om"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
@@ -731,6 +729,7 @@ func TestTaskServiceCreateManualRejectsMontageInputForOtherPlatforms(t *testing.
 
 func TestTaskServiceCreateFromPlanMontageCopiesInput(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
@@ -808,534 +807,6 @@ func TestTaskService_ClearArtifactTitles(t *testing.T) {
 	}
 	if len(titles) != 1 || titles[0] != "真实茶饮标题" {
 		t.Fatalf("titles = %v, want [真实茶饮标题]", titles)
-	}
-}
-
-type fakeTaskExecutor struct {
-	result *agent.ExecutionResult
-	err    error
-	opts   *agent.ExecutionOptions
-}
-
-func (f *fakeTaskExecutor) Execute(ctx context.Context, opts *agent.ExecutionOptions) (*agent.ExecutionResult, error) {
-	f.opts = opts
-	return f.result, f.err
-}
-
-func TestTaskServiceHandleExecutionPassesMontageRuntimeConfig(t *testing.T) {
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	task := &model.Task{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformMontage,
-		Status:    model.TaskStatusRunning,
-	}
-	task.SetMontageInput(model.MontageInput{Brief: "做短片"})
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	exec := &fakeTaskExecutor{result: &agent.ExecutionResult{Success: false, Error: "stop after options"}}
-	svc := NewTaskService(repo, exec, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-	svc.SetMontageConfig(config.MontageConfig{
-		Enabled:                true,
-		SubmodulePath:          "third_party/OpenMontage",
-		DefaultPipeline:        "cinematic",
-		AllowedPipelines:       []string{"cinematic"},
-		MaxDurationSeconds:     600,
-		MaxAssets:              20,
-		TimeoutMinutes:         90,
-		ExecutionTargets:       []string{"cloud"},
-		DefaultExecutionTarget: "cloud",
-		Env:                    map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
-		ToolPolicy: map[string]config.MontageToolCapabilityPolicy{
-			"video_generation": {Preferred: []string{"fal"}},
-		},
-		PipelineDefaults: map[string]map[string]any{
-			"cinematic": {"budget_usd": 2.0},
-		},
-	})
-
-	if err := svc.HandleExecution(ctx, task, nil); err != nil {
-		t.Fatalf("HandleExecution: %v", err)
-	}
-	if exec.opts == nil {
-		t.Fatal("executor options were not captured")
-	}
-	if exec.opts.MontageEnv["NEW_PROVIDER_TOKEN"] != "future-secret" {
-		t.Fatalf("MontageEnv = %#v, want NEW_PROVIDER_TOKEN", exec.opts.MontageEnv)
-	}
-	if exec.opts.MontageToolPolicy["video_generation"].Preferred[0] != "fal" {
-		t.Fatalf("MontageToolPolicy = %#v, want video_generation preference", exec.opts.MontageToolPolicy)
-	}
-	if exec.opts.MontagePipelineDefaults["cinematic"]["budget_usd"] != 2.0 {
-		t.Fatalf("MontagePipelineDefaults = %#v, want cinematic budget", exec.opts.MontagePipelineDefaults)
-	}
-}
-
-func TestTaskService_ExecuteDoesNotExtractTitleFromWorkspace(t *testing.T) {
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	workDir := t.TempDir()
-	outputDir := filepath.Join(workDir, "output")
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		t.Fatalf("mkdir output: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(outputDir, "image-plan.md"), []byte("# 图片内容规划\n\ninternal"), 0644); err != nil {
-		t.Fatalf("write image plan: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(outputDir, "content.md"), []byte("# 真实最终标题\n\ncontent"), 0644); err != nil {
-		t.Fatalf("write content: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(outputDir, "cover.png"), []byte("png"), 0644); err != nil {
-		t.Fatalf("write cover: %v", err)
-	}
-	task := &model.Task{
-		ID:              uuid.New().String(),
-		UserID:          userID,
-		ProjectID:       projectID,
-		Type:            model.PlatformSeednote,
-		Status:          model.TaskStatusRunning,
-		Title:           "AI 已上报标题",
-		HasContentImage: false,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
-		Success: true,
-		WorkDir: workDir,
-	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-
-	if err := svc.HandleExecution(ctx, task, nil); err != nil {
-		t.Fatalf("HandleExecution: %v", err)
-	}
-	found, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.Title != "AI 已上报标题" {
-		t.Fatalf("title = %q, want existing AI-reported title", found.Title)
-	}
-	if _, err := os.Stat(workDir); err != nil {
-		t.Fatalf("workDir should remain for possible resume, stat error: %v", err)
-	}
-}
-
-func TestTaskService_HandleExecutionRejectsNestedAgentOnlyResult(t *testing.T) {
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	workDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte("# project"), 0644); err != nil {
-		t.Fatalf("write CLAUDE.md: %v", err)
-	}
-	task := &model.Task{
-		ID:              uuid.New().String(),
-		UserID:          userID,
-		ProjectID:       projectID,
-		Type:            model.PlatformSeednote,
-		Status:          model.TaskStatusRunning,
-		HasContentImage: true,
-		MaxRetries:      model.DefaultRetries,
-		RetryCount:      model.DefaultRetries,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
-		Success:        true,
-		WorkDir:        workDir,
-		ToolUseSummary: map[string]int{"Agent": 1},
-	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-
-	if err := svc.HandleExecution(ctx, task, nil); err != nil {
-		t.Fatalf("HandleExecution: %v", err)
-	}
-	found, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.Status != model.TaskStatusFailed {
-		t.Fatalf("status = %q, want failed", found.Status)
-	}
-	if found.ErrorMessage != agent.NestedAgentDelegationError {
-		t.Fatalf("error = %q, want %q", found.ErrorMessage, agent.NestedAgentDelegationError)
-	}
-}
-
-func TestTaskService_HandleExecutionRejectsSeednoteWithoutWorkDir(t *testing.T) {
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	task := &model.Task{
-		ID:              uuid.New().String(),
-		UserID:          userID,
-		ProjectID:       projectID,
-		Type:            model.PlatformSeednote,
-		Status:          model.TaskStatusRunning,
-		HasContentImage: true,
-		MaxRetries:      model.DefaultRetries,
-		RetryCount:      model.DefaultRetries,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
-		Success: true,
-	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-
-	if err := svc.HandleExecution(ctx, task, nil); err != nil {
-		t.Fatalf("HandleExecution: %v", err)
-	}
-	found, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.Status != model.TaskStatusFailed {
-		t.Fatalf("status = %q, want failed", found.Status)
-	}
-	if !strings.Contains(found.ErrorMessage, "seednote missing required deliverables") {
-		t.Fatalf("error = %q, want missing deliverables", found.ErrorMessage)
-	}
-}
-
-func TestTaskServiceHandleExecutionRejectsMontageWithoutDeliveryManifest(t *testing.T) {
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	task := &model.Task{
-		ID:         uuid.New().String(),
-		UserID:     userID,
-		ProjectID:  projectID,
-		Type:       model.PlatformMontage,
-		Status:     model.TaskStatusRunning,
-		MaxRetries: model.DefaultRetries,
-		RetryCount: model.DefaultRetries,
-	}
-	task.SetMontageInput(model.MontageInput{Brief: "做短片"})
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
-		ID:       uuid.New().String(),
-		TaskID:   task.ID,
-		Role:     model.FileRoleVideo,
-		FileName: "final.mp4",
-		FilePath: "remote/tasks/" + task.ID + "/output/montage/final.mp4",
-		MimeType: "video/mp4",
-		FileSize: 4096,
-	}); err != nil {
-		t.Fatalf("create task file: %v", err)
-	}
-	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
-		Success:         true,
-		RemoteArtifacts: true,
-	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-
-	if err := svc.HandleExecution(ctx, task, nil); err != nil {
-		t.Fatalf("HandleExecution: %v", err)
-	}
-	found, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.Status != model.TaskStatusFailed {
-		t.Fatalf("status = %q, want failed", found.Status)
-	}
-	if !strings.Contains(found.ErrorMessage, "montage missing required deliverables") {
-		t.Fatalf("error = %q, want montage missing required deliverables", found.ErrorMessage)
-	}
-}
-
-func TestTaskServiceHandleExecutionAcceptsMontageRemoteArtifacts(t *testing.T) {
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	task := &model.Task{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformMontage,
-		Status:    model.TaskStatusRunning,
-	}
-	task.SetMontageInput(model.MontageInput{Brief: "做短片"})
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	for _, file := range []*model.TaskFile{
-		{
-			ID:       uuid.New().String(),
-			TaskID:   task.ID,
-			Role:     "final_video",
-			FileName: "final_video.mp4",
-			FilePath: "remote/tasks/" + task.ID + "/output/montage/final_video.mp4",
-			MimeType: "video/mp4",
-			FileSize: 4096,
-		},
-		{
-			ID:       uuid.New().String(),
-			TaskID:   task.ID,
-			Role:     "delivery_manifest",
-			FileName: "delivery-manifest.json",
-			FilePath: "remote/tasks/" + task.ID + "/output/montage/delivery-manifest.json",
-			MimeType: "application/json",
-			FileSize: 128,
-		},
-	} {
-		if err := repo.TaskFiles().Create(ctx, file); err != nil {
-			t.Fatalf("create task file: %v", err)
-		}
-	}
-	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
-		Success:         true,
-		RemoteArtifacts: true,
-	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-
-	if err := svc.HandleExecution(ctx, task, nil); err != nil {
-		t.Fatalf("HandleExecution: %v", err)
-	}
-	found, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.Status != model.TaskStatusCompleted {
-		t.Fatalf("status = %q error=%q, want completed with montage deliverables", found.Status, found.ErrorMessage)
-	}
-}
-
-func TestTaskService_HandleExecutionCompletesWithSeednoteDeliverables(t *testing.T) {
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	workDir := t.TempDir()
-	outputDir := filepath.Join(workDir, "output")
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		t.Fatalf("mkdir output: %v", err)
-	}
-	artifacts := map[string][]byte{
-		"compliance.md":  []byte("ok"),
-		"topic-note.txt": []byte("ok"),
-	}
-	for _, name := range seednoteCompletionArtifactNamesForTest(true, false) {
-		artifacts[name] = []byte("fixture")
-	}
-	for name, data := range artifacts {
-		if err := os.WriteFile(filepath.Join(outputDir, name), data, 0o644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
-	task := &model.Task{
-		ID:              uuid.New().String(),
-		UserID:          userID,
-		ProjectID:       projectID,
-		Type:            model.PlatformSeednote,
-		Status:          model.TaskStatusRunning,
-		HasContentImage: true,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
-		Success:        true,
-		WorkDir:        workDir,
-		ToolUseSummary: map[string]int{"generate_image": 2, "Bash": 3},
-	}}, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-
-	if err := svc.HandleExecution(ctx, task, nil); err != nil {
-		t.Fatalf("HandleExecution: %v", err)
-	}
-	found, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.Status != model.TaskStatusCompleted {
-		t.Fatalf("status = %q, want completed; err=%q", found.Status, found.ErrorMessage)
-	}
-	if found.CompletedAt == nil {
-		t.Fatal("completed_at not set")
-	}
-}
-
-func TestTaskService_HandleExecutionFailure_PermanentAuthErrorDoesNotRetry(t *testing.T) {
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	enqueuer := &mockEnqueuer{}
-	svc := NewTaskService(repo, nil, enqueuer, nil, &logger, "", nil, "", nil, nil)
-
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{
-		ID:                  uuid.New().String(),
-		UserID:              userID,
-		ProjectID:           projectID,
-		Type:                model.PlatformArticle,
-		Status:              model.TaskStatusRunning,
-		Prompt:              "auth failure",
-		MaxRetries:          model.DefaultRetries,
-		RetryCount:          0,
-		RateLimitRetryCount: 0,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	execErr := fmt.Errorf("agent execution failed: Failed to authenticate. API Error: 403 {\"error\":{\"type\":\"forbidden\",\"message\":\"Request not allowed\"}}")
-	if err := svc.HandleExecutionFailure(ctx, task, execErr); err == nil {
-		t.Fatal("expected permanent auth error to be returned")
-	}
-
-	found, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.Status != model.TaskStatusFailed {
-		t.Fatalf("status = %q, want %q", found.Status, model.TaskStatusFailed)
-	}
-	if found.RetryCount != 0 {
-		t.Fatalf("retry_count = %d, want 0", found.RetryCount)
-	}
-	if found.RateLimitRetryCount != 0 {
-		t.Fatalf("rate_limit_retry_count = %d, want 0", found.RateLimitRetryCount)
-	}
-	if found.CompletedAt == nil {
-		t.Fatal("completed_at was not set")
-	}
-	if !strings.Contains(found.ErrorMessage, "API Error: 403") {
-		t.Fatalf("error_message = %q, want API Error: 403", found.ErrorMessage)
-	}
-	if len(enqueuer.enqueued) != 0 {
-		t.Fatalf("auth error should not enqueue retries, got %d", len(enqueuer.enqueued))
-	}
-}
-
-func TestTaskService_HandleExecutionFailure_DoesNotAutoRetry(t *testing.T) {
-	db := setupTaskTestDB(t)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
-	repo := repository.New(db)
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	enqueuer := &mockEnqueuer{}
-	svc := NewTaskService(repo, nil, enqueuer, nil, &logger, "", nil, "", nil, nil)
-
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{
-		ID:         uuid.New().String(),
-		UserID:     userID,
-		ProjectID:  projectID,
-		Type:       model.PlatformArticle,
-		Status:     model.TaskStatusRunning,
-		Prompt:     "manual recovery only",
-		MaxRetries: model.DefaultRetries,
-		RetryCount: 0,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	execErr := fmt.Errorf("agent execution failed: transient model error")
-	if err := svc.HandleExecutionFailure(ctx, task, execErr); err == nil {
-		t.Fatal("expected execution error to be returned")
-	}
-
-	found, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("find task: %v", err)
-	}
-	if found.Status != model.TaskStatusFailed {
-		t.Fatalf("status = %q, want %q", found.Status, model.TaskStatusFailed)
-	}
-	if found.RetryCount != 0 {
-		t.Fatalf("retry_count = %d, want 0", found.RetryCount)
-	}
-	if found.CompletedAt == nil {
-		t.Fatal("completed_at was not set")
-	}
-	if !strings.Contains(found.ErrorMessage, "transient model error") {
-		t.Fatalf("error_message = %q, want transient model error", found.ErrorMessage)
-	}
-	if len(enqueuer.enqueued) != 0 {
-		t.Fatalf("execution failure should not enqueue retries, got %d", len(enqueuer.enqueued))
 	}
 }
 
@@ -1473,7 +944,7 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
 	store := &resumeTestStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, nil, enqueuer, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, enqueuer, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -1638,7 +1109,7 @@ func TestTaskService_ResumePersistsFilesWithoutResultOrLocalWorkspace(t *testing
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
 	store := &fakeTaskStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, nil, enqueuer, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, enqueuer, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -1713,7 +1184,7 @@ func TestTaskService_ResumeStorageFailureCleansPartialUploads(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &resumeTestStorage{files: map[string][]byte{}, failUploadAt: 2}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1765,7 +1236,7 @@ func TestTaskService_ResumeRejectsNonPortableFilenameAndCleansPartialUploads(t *
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &resumeTestStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1805,7 +1276,7 @@ func TestTaskService_ResumeDeletesSupersededResumeFilesAfterCAS(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &resumeTestStorage{files: map[string][]byte{"resume/old.txt": []byte("old")}}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1841,7 +1312,7 @@ func TestTaskService_ResumeEnqueueFailureReturnsTaskToFailed(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	ctx, cancel := context.WithCancel(context.Background())
-	svc := NewTaskService(repo, nil, cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}, nil, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -1882,7 +1353,7 @@ func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := newConcurrentResumeStorage()
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -2022,35 +1493,13 @@ func TestTaskServiceProjectConcurrencyModes(t *testing.T) {
 	}
 }
 
-func TestTaskServiceResolveWorkspacePath(t *testing.T) {
+func TestTaskServiceResolveWorkspacePathDoesNotInspectServerFilesystem(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
-	root := t.TempDir()
-	svc.workspaceDir = root
-	taskID := "task-1"
-
-	got, ok := svc.ResolveWorkspacePath(taskID, "output/cover.png")
-	if ok {
-		t.Fatalf("resolved missing workspace to %q", got)
-	}
-	if got != "output/cover.png" {
-		t.Fatalf("path = %q, want original relative path", got)
-	}
-
-	if err := os.MkdirAll(filepath.Join(root, taskID), 0o755); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	got, ok = svc.ResolveWorkspacePath(taskID, "output/cover.png")
-	if !ok {
-		t.Fatal("expected task-relative path to resolve when workspace exists")
-	}
-	if want := filepath.Join(root, taskID, "output", "cover.png"); got != want {
-		t.Fatalf("resolved path = %q, want %q", got, want)
-	}
-
-	absolute := filepath.Join(root, taskID, "already.png")
-	got, ok = svc.ResolveWorkspacePath(taskID, absolute)
-	if ok || got != absolute {
-		t.Fatalf("absolute path resolved to %q ok=%v, want unchanged", got, ok)
+	for _, path := range []string{"output/cover.png", "/workspace/task-1/output/cover.png"} {
+		got, ok := svc.ResolveWorkspacePath("task-1", path)
+		if ok || got != path {
+			t.Fatalf("ResolveWorkspacePath(%q) = %q, %v; want unchanged path and false", path, got, ok)
+		}
 	}
 }
 
@@ -2157,44 +1606,6 @@ func TestTaskService_ResumePersistsPromptWithoutResultOrLocalWorkspace(t *testin
 	}
 	if !strings.Contains(attachments[0].Text, "继续完成原任务") {
 		t.Fatalf("resume latest = %q, want prompt", attachments[0].Text)
-	}
-}
-
-func TestBuildNoOutputFilesErrorIncludesLastToolError(t *testing.T) {
-	result := &agent.ExecutionResult{
-		Model:             "claude-test",
-		NumTurns:          10,
-		ToolUseCount:      9,
-		ToolErrorCount:    1,
-		LastToolErrorTool: "generate_image",
-		LastToolError:     "provider rejected model",
-	}
-
-	msg := buildNoOutputFilesError(result)
-	if !strings.Contains(msg, "tool_errors=1") {
-		t.Fatalf("error = %q, want tool error count", msg)
-	}
-	if !strings.Contains(msg, "generate_image failed: provider rejected model") {
-		t.Fatalf("error = %q, want last MCP tool error", msg)
-	}
-	if strings.Contains(msg, "check user model config") {
-		t.Fatalf("error = %q, should not use old generic model-config hint", msg)
-	}
-}
-
-func TestBuildNoOutputFilesErrorWithoutToolErrorKeepsFallback(t *testing.T) {
-	result := &agent.ExecutionResult{
-		Model:        "",
-		NumTurns:     10,
-		ToolUseCount: 9,
-	}
-
-	msg := buildNoOutputFilesError(result)
-	if !strings.Contains(msg, "tool_uses=9") {
-		t.Fatalf("error = %q, want tool use count", msg)
-	}
-	if !strings.Contains(msg, "files may have been written to an unexpected location") {
-		t.Fatalf("error = %q, want fallback location diagnostic", msg)
 	}
 }
 
@@ -2346,57 +1757,6 @@ func TestTaskService_CancelEnqueuesIlinkNotification(t *testing.T) {
 		t.Fatalf("outbox items = %d, want 1", len(items))
 	}
 	if items[0].TaskID != task.ID || items[0].TaskStatus != model.TaskStatusCancelled {
-		t.Fatalf("unexpected notification: %+v", items[0])
-	}
-}
-
-func TestTaskService_HandleExecutionEarlyFailureEnqueuesIlinkNotification(t *testing.T) {
-	svc, repo := setupTaskServiceWithEnqueuer(t)
-	userID := uuid.New().String()
-	if err := repo.Users().Create(context.Background(), &model.User{
-		ID:         userID,
-		Email:      "early-failure@example.com",
-		Password:   "x",
-		InviteCode: "early-failure",
-	}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	if err := repo.IlinkBindings().Create(context.Background(), &model.IlinkBinding{
-		ID:                uuid.NewString(),
-		UserID:            userID,
-		PlatformAccountID: stringPtr("platform-1"),
-		ExternalUserID:    stringPtr("wx-user-1"),
-		Status:            model.IlinkBindingStatusActive,
-	}); err != nil {
-		t.Fatalf("create ilink binding: %v", err)
-	}
-	log := zerolog.Nop()
-	svc.SetIlinkNotifier(NewIlinkNotifier(repo, true, &log))
-	task := &model.Task{
-		ID:        uuid.NewString(),
-		UserID:    userID,
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusRunning,
-		Prompt:    "Missing project",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-	if err := repo.Tasks().Create(context.Background(), task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	if err := svc.HandleExecution(context.Background(), task, nil); err == nil {
-		t.Fatal("HandleExecution error = nil, want missing project error")
-	}
-
-	items, err := repo.IlinkNotifications().ListDue(context.Background(), 10)
-	if err != nil {
-		t.Fatalf("ListDue: %v", err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("outbox items = %d, want 1", len(items))
-	}
-	if items[0].TaskID != task.ID || items[0].TaskStatus != model.TaskStatusFailed {
 		t.Fatalf("unexpected notification: %+v", items[0])
 	}
 }

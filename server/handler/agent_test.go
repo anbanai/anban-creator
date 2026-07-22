@@ -433,7 +433,7 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 	}
 	logger := zerolog.New(io.Discard)
 	store := &executionScopeTestStore{fakeAgentArtifactStorage: &fakeAgentArtifactStorage{}}
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	apiKeys := service.NewAPIKeyService(repo, &logger)
 	_, rawAPIKey, err := apiKeys.Create(ctx, userID, "local")
 	if err != nil {
@@ -505,7 +505,7 @@ func TestResolvePublishingRequiresAdminKeyAndResumesFinalization(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewAgentHandler(taskSvc, nil, nil, "", &logger)
 	h.SetAdminAPIKey("operator-secret")
 	app := fiber.New()
@@ -572,7 +572,7 @@ func setupAgentClaimApp(t *testing.T) (app *fiber.App, repo repository.Repositor
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetExecutorDefaults("claude-test", nil)
 	apiKeySvc := service.NewAPIKeyService(repo, &logger)
 	_, rawKey, err := apiKeySvc.Create(ctx, userID, "test")
@@ -711,7 +711,7 @@ func setupAgentArtifactApp(t *testing.T) (*fiber.App, repository.Repository, *mo
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeAgentArtifactStorage{}
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	apiKeySvc := service.NewAPIKeyService(repo, &logger)
 	_, rawKey, err := apiKeySvc.Create(ctx, userID, "artifact")
 	if err != nil {

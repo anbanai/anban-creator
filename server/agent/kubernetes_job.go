@@ -27,7 +27,7 @@ const (
 	kubernetesServerCAMountPath                = "/var/run/secrets/anban-server-ca"
 	kubernetesServerCAFile                     = kubernetesServerCAMountPath + "/ca.crt"
 	kubernetesMemoryMountPath                  = "/workspace/.claude/memory"
-	kubernetesRuntimeHomePath                  = "/workspace/" + DockerRuntimeHomeDirName
+	kubernetesRuntimeHomePath                  = "/workspace/" + RuntimeHomeDirName
 	kubernetesTokenMountPath                   = "/var/run/secrets/anban"
 	kubernetesTokenFile                        = kubernetesTokenMountPath + "/token"
 	kubernetesTokenAudience                    = "anban-server"

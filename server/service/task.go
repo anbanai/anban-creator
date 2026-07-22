@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +15,6 @@ import (
 
 	"github.com/anbanai/anban-creator/server/agent"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
-	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -47,7 +44,6 @@ const TypeContentGenerate = "content:generate"
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
 	repo                     repository.Repository
-	executor                 agent.TaskExecutor
 	runtimeDispatcher        agent.RuntimeDispatcher
 	dispatchLeaseDuration    time.Duration
 	dispatchBeforeCreate     func()
@@ -65,8 +61,6 @@ type TaskService struct {
 	publishingSvc            *PublishingService
 	cloudPublisher           cloudDraftPublisher
 	taskLogDir               string
-	workspaceSvc             *WorkspaceService
-	workspaceDir             string
 	pubsub                   *RedisPubSub
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
 	cancelFuncs              sync.Map           // taskID → context.CancelFunc
@@ -86,10 +80,9 @@ type TaskService struct {
 	persistTimeout time.Duration
 	// defaultModel / maxTurnsOverrides feed the local-executor claim response
 	// (LocalExecutionConfig) so a desktop-built agent argv mirrors what the cloud
-	// DockerExecutor would pass. Set via SetExecutorDefaults during wiring.
+	// managed bootstrap returns. Set via SetExecutorDefaults during wiring.
 	defaultModel      string
 	maxTurnsOverrides map[string]int
-	memoryMgr         *projectmemory.ProjectMemoryManager
 	nasResumeEnabled  bool
 	taskWorkspace     TaskWorkspaceLifecycle
 	referenceAssets   *ReferenceAssetService
@@ -106,27 +99,21 @@ type TaskWorkspaceLifecycle interface {
 // If pubsub is nil, cross-replica cancel signaling and progress events are disabled.
 func NewTaskService(
 	repo repository.Repository,
-	executor agent.TaskExecutor,
 	enqueuer TaskEnqueuer,
 	store storage.Provider,
 	logger *zerolog.Logger,
 	taskLogDir string,
-	workspaceSvc *WorkspaceService,
-	workspaceDir string,
 	pubsub *RedisPubSub,
 	publishingSvc *PublishingService,
 ) *TaskService {
 	svc := &TaskService{
 		repo:                   repo,
-		executor:               executor,
 		logger:                 logger,
 		enqueuer:               enqueuer,
 		store:                  store,
 		publishingSvc:          publishingSvc,
 		cloudPublisher:         publishingSvc,
 		taskLogDir:             taskLogDir,
-		workspaceSvc:           workspaceSvc,
-		workspaceDir:           workspaceDir,
 		pubsub:                 pubsub,
 		executionTimeout:       60 * time.Minute,
 		persistTimeout:         10 * time.Minute,
@@ -161,10 +148,6 @@ func (s *TaskService) Storage() storage.Provider {
 		return nil
 	}
 	return s.store
-}
-
-func (s *TaskService) SetProjectMemoryManager(memoryMgr *projectmemory.ProjectMemoryManager) {
-	s.memoryMgr = memoryMgr
 }
 
 func (s *TaskService) SetTaskWorkspaceLifecycle(workspace TaskWorkspaceLifecycle) {
@@ -209,7 +192,7 @@ func defaultMontageServiceConfig() srvconfig.MontageConfig {
 }
 
 func (s *TaskService) montageCloudAvailable() bool {
-	return s != nil && (s.enqueuer != nil || s.executor != nil)
+	return s != nil && s.runtimeDispatcher != nil
 }
 
 // Close stops the Redis pub/sub subscriber goroutine.
@@ -259,9 +242,8 @@ func (s *TaskService) SetExecutionTimeouts(execution, persist time.Duration) {
 	}
 }
 
-// SetExecutorDefaults wires the Claude model + per-type max-turns overrides used
-// to build local-executor claim responses. Mirrors the values the cloud
-// DockerExecutor receives, so a desktop-spawned agent argv matches the cloud path.
+// SetExecutorDefaults wires the Claude model and per-type max-turns overrides
+// used to build standalone desktop Agent claim responses.
 func (s *TaskService) SetExecutorDefaults(defaultModel string, maxTurnsOverrides map[string]int) {
 	s.defaultModel = defaultModel
 	s.maxTurnsOverrides = maxTurnsOverrides
@@ -274,36 +256,16 @@ func (s *TaskService) SetProjectConcurrencyCap(cap int) {
 	s.projectConcurrencyCap = cap
 }
 
-// SetNASResumeEnabled enables task continuation against durable Kubernetes NAS
-// workspaces. It must remain disabled for local and Docker executors.
+// SetNASResumeEnabled enables task continuation against durable managed
+// workspaces.
 func (s *TaskService) SetNASResumeEnabled(enabled bool) {
 	s.nasResumeEnabled = enabled
 }
 
-func (s *TaskService) taskWorkspaceDir(taskID string) string {
-	if s.workspaceDir != "" {
-		return filepath.Join(s.workspaceDir, taskID)
-	}
-	return agent.DefaultWorkspaceDir(taskID)
-}
-
-// ResolveWorkspacePath converts a task-relative path into a server-local path
-// when the API server can see that task's workspace. It returns false when the
-// original path should be used as-is, including Kubernetes/remote workspaces.
-func (s *TaskService) ResolveWorkspacePath(taskID, filePath string) (string, bool) {
-	filePath = strings.TrimSpace(filePath)
-	if taskID == "" || filePath == "" || filepath.IsAbs(filePath) {
-		return filePath, false
-	}
-	cleanRelPath, err := CleanTaskFileRelativePath(filePath)
-	if err != nil {
-		return filePath, false
-	}
-	workDir := s.taskWorkspaceDir(taskID)
-	if info, err := os.Stat(workDir); err == nil && info.IsDir() {
-		return filepath.Join(workDir, cleanRelPath), true
-	}
-	return filePath, false
+// ResolveWorkspacePath retains the MCP contract without claiming that the API
+// server can read a managed runtime's isolated workspace.
+func (s *TaskService) ResolveWorkspacePath(_ string, filePath string) (string, bool) {
+	return strings.TrimSpace(filePath), false
 }
 
 func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int {
@@ -1340,7 +1302,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 		}()
 		fallbackCtx, cancel := context.WithTimeout(context.Background(), s.executionTimeout)
 		defer cancel()
-		referenceAsset, preparation, err := s.preparePendingExecution(fallbackCtx, task)
+		_, preparation, err := s.preparePendingExecution(fallbackCtx, task)
 		if err != nil {
 			releaseOwnedSlot(fallbackCtx)
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task preparation failed; task remains pending for periodic dispatch retry")
@@ -1354,19 +1316,9 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 			releaseOwnedSlotIfNonTerminal(fallbackCtx)
 			return
 		}
-		// Set running status before execution to prevent plan checker from re-dispatching.
-		swapped, swapErr := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
-		if swapErr != nil {
-			releaseOwnedSlot(fallbackCtx)
-			s.logger.Error().Err(swapErr).Str("task_id", task.ID).Msg("fallback task running claim failed; task remains pending for periodic dispatch retry")
-			return
-		}
-		if !swapped {
+		if err := s.dispatchRuntime(fallbackCtx, task); err != nil {
 			releaseOwnedSlotIfNonTerminal(fallbackCtx)
-			return
-		}
-		if err := s.handleExecution(fallbackCtx, task, project, referenceAsset, true); err != nil {
-			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task execution failed")
+			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback managed runtime dispatch failed")
 		}
 	}(goroutineOwnsClaim, goroutineClaimToken)
 	return nil

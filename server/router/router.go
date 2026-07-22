@@ -16,7 +16,6 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
-	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/handler"
@@ -37,7 +36,6 @@ type Services struct {
 	WechatSvc                *auth.WeChatService
 	WSHub                    *handler.WebSocketHub
 	AuthHandler              *handler.AuthHandler
-	Executor                 agent.TaskExecutor
 	PlanService              *service.PlanService
 	TaskService              *service.TaskService
 	PlanHandler              *handler.PlanHandler

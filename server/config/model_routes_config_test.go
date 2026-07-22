@@ -222,6 +222,7 @@ claude:
   model_usage_aliases:
     doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: docker
+  execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
     article: creator-agent-article:latest
     seednote: creator-agent-seednote:latest

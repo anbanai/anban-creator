@@ -146,7 +146,7 @@ func setupTimedGenerateImageHandlerTest(t *testing.T) (context.Context, string, 
 		"output_path": "output/cover.png",
 		"image_type": "cover"
 	}`, projectID, taskID))}}
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 	return ctx, userID, request, resolver, taskSvc, installImageFixedBilling(t, repo, taskSvc, taskID)
 }
 
@@ -314,7 +314,7 @@ func TestGenerateImageResolvesModelOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	generator := &fakeImageGenerator{result: &service.ImageResult{FilePath: "output/cover.png", LocalFilePath: generatedPath, OutputMIME: "image/png"}}
-	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, store, &logger, "", nil, nil)
 	svcs = &Services{
 		TaskSvc:            taskSvc,
 		ImageSvc:           &service.ImageService{},
@@ -413,7 +413,7 @@ func TestGenerateImageUsesMultiReferenceArrayAsAuthoritativeInput(t *testing.T) 
 		t.Fatal(err)
 	}
 	generator := &fakeImageGenerator{result: &service.ImageResult{FilePath: "output/generated.png", LocalFilePath: generatedPath, OutputMIME: "image/png"}}
-	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, store, &logger, "", nil, nil)
 	svcs = &Services{
 		TaskSvc:            taskSvc,
 		ImageModelResolver: resolver,
@@ -484,7 +484,7 @@ func TestGenerateImageValidatesVisionPreconditionsBeforeBillingOrGeneration(t *t
 			resolver := &fakeImageModelResolver{resolved: &service.ResolvedImageModel{Provider: "openai", Model: "gpt-image-2"}}
 			generator := &fakeImageGenerator{result: &service.ImageResult{DownloadURL: "https://example.com/generated.png"}}
 			svcs = &Services{
-				TaskSvc:            service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil),
+				TaskSvc:            service.NewTaskService(repo, nil, nil, &logger, "", nil, nil),
 				ImageModelResolver: resolver,
 				ImageGenerator:     generator,
 			}
@@ -572,7 +572,7 @@ func TestGenerateImageReplaysFinalSanitizedSettlementResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &countingImageStorage{Provider: local}
-	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, store, &logger, "", nil, nil)
 	taskSvc.SetBillingWalletService(walletSvc)
 	imageSvc := service.NewImageService(nil, store, repo, &logger)
 	vision := &fakeMCPWritingLLM{response: `{"overall_pass":true,"relevance_score":"high","missing_entities":[],"notes":"secret raw note"}`}
@@ -670,7 +670,7 @@ func TestGenerateImageReturnsActualReferenceLimit(t *testing.T) {
 	resolver := &fakeImageModelResolver{err: &service.ImageReferenceLimitError{Requested: 17, MaxReferenceImages: 16}}
 	generator := &fakeImageGenerator{}
 	svcs = &Services{
-		TaskSvc:            service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil),
+		TaskSvc:            service.NewTaskService(repo, nil, nil, &logger, "", nil, nil),
 		ImageSvc:           &service.ImageService{},
 		ImageModelResolver: resolver,
 		ImageGenerator:     generator,
@@ -1182,7 +1182,7 @@ func TestValidateImageToolTaskAccessRejectsForeignTask(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)}
+	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)}
 
 	res := validateImageToolTaskAccess(ctx, userID, taskID, "")
 	if res == nil || !res.IsError {
@@ -1226,7 +1226,7 @@ func TestValidateImageToolTaskAccessRejectsProjectMismatch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)}
+	svcs = &Services{TaskSvc: service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)}
 
 	res := validateImageToolTaskAccess(ctx, userID, taskID, otherProjectID)
 	if res == nil || !res.IsError {
@@ -1258,7 +1258,7 @@ func TestResolveTaskWorkspaceReadablePathRestoresTaskFileWhenWorkspaceMissing(t 
 		t.Fatalf("create task: %v", err)
 	}
 	store := &fakeObjectStorage{files: map[string][]byte{"user/task/output/cover.png": tinyPNGBytes()}}
-	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, t.TempDir(), nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, store, &logger, "", nil, nil)
 	svcs = &Services{TaskSvc: taskSvc, Store: store}
 	if _, err := repo.TaskFiles().Upsert(ctx, &model.TaskFile{
 		TaskID:          taskID,
@@ -1650,7 +1650,7 @@ func TestRunImageVerificationRecordsProviderCostWithoutUserWallet(t *testing.T) 
 			TotalTokens:  200,
 		},
 	})
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 	bundle, err := serverbilling.LoadBundle("../billing")
 	if err != nil {
 		t.Fatalf("load billing bundle: %v", err)
@@ -1768,7 +1768,7 @@ func TestAnalyzeImagePreflightsForeignTaskBeforeCallingVision(t *testing.T) {
 	writingSvc.SetImageUnderstandingClient(visionClient)
 	svcs = &Services{
 		WritingSvc: writingSvc,
-		TaskSvc:    service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil),
+		TaskSvc:    service.NewTaskService(repo, nil, nil, &logger, "", nil, nil),
 	}
 	billSvc = &billingServices{config: cfg}
 

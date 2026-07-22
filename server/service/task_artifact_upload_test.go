@@ -99,7 +99,7 @@ func newTaskArtifactTestService(t *testing.T) (*TaskService, repository.Reposito
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeTaskArtifactStorage{name: "oss"}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{
@@ -227,7 +227,7 @@ func TestUploadExecutionTaskFileWithSettlementPersistsArtifactAndOutboxAtomicall
 	ctx := context.Background()
 	logger := zerolog.New(io.Discard)
 	store := &fakeTaskArtifactStorage{name: "oss"}
-	svc := NewTaskService(fixture.repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(fixture.repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetBillingWalletService(fixture.wallet)
 	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
@@ -253,7 +253,7 @@ func TestUploadExecutionTaskFileWithSettlementPersistsArtifactAndOutboxAtomicall
 		t.Fatalf("settlement = %#v err=%v", settlement, err)
 	}
 
-	broken := NewTaskService(fixture.repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	broken := NewTaskService(fixture.repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	_, err = broken.UploadExecutionTaskFileWithSettlementFromReader(ctx, task.ID, task.UserID, executionID, "output/content.png", strings.NewReader("other"), "image/png", 5, TaskFileOperationSettlement{
 		CatalogID: "retail-test-v1", SKUID: "image.cover.v1", ToolCallID: "internal:image:call-2", RequestFingerprint: billingFingerprint("call-2"),
 	})

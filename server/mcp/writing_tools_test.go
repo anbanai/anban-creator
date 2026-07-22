@@ -707,7 +707,7 @@ func TestListProjectTitlesHandler_ReturnsTitlesOnly(t *testing.T) {
 	defer cleanup()
 	SetServices(&Services{
 		ProjectSvc: service.NewProjectService(repo, &log),
-		TaskSvc:    service.NewTaskService(repo, nil, nil, nil, &log, "", nil, "", nil, nil),
+		TaskSvc:    service.NewTaskService(repo, nil, nil, &log, "", nil, nil),
 	})
 
 	text := callMCPTool(t, handler, "list_project_titles",
@@ -768,7 +768,7 @@ func TestFinalizeTaskTitleHandler_ViaMCP(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
 	SetServices(&Services{
-		TaskSvc: service.NewTaskService(repo, nil, nil, nil, &log, "", nil, "", nil, nil),
+		TaskSvc: service.NewTaskService(repo, nil, nil, &log, "", nil, nil),
 	})
 
 	text := callMCPTool(t, handler, "finalize_task_title",
@@ -828,7 +828,7 @@ func TestFinalizeTaskTitleHandler_RejectsDuplicateViaMCP(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
 	SetServices(&Services{
-		TaskSvc: service.NewTaskService(repo, nil, nil, nil, &log, "", nil, "", nil, nil),
+		TaskSvc: service.NewTaskService(repo, nil, nil, &log, "", nil, nil),
 	})
 
 	text := callMCPTool(t, handler, "finalize_task_title",

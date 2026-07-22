@@ -123,9 +123,9 @@ web-build:
 # Docker targets
 # ---------------------------------------------------------------------------
 
-# Build task-specific runtimes, then start all Compose services. The content
-# image is built by Compose itself; profile images are launched on demand.
-docker-up: docker-seednote-agent-image docker-montage-agent-image
+# Build all one-shot task runtimes, then start the Compose services. Runtime
+# containers are launched on demand by the server and are not Compose services.
+docker-up: docker-agent-image docker-seednote-agent-image docker-montage-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services

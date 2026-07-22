@@ -381,7 +381,7 @@ type agentClaimRequest struct {
 // A desktop local executor polls this endpoint to atomically claim its oldest
 // pending local-target task. On success it returns the full task config
 // (service.LocalExecutionConfig) which the desktop turns into an anban run
-// argv (mirroring the cloud DockerExecutor), supplying its own server_url +
+// argv (matching managed bootstrap defaults), supplying its own server_url +
 // API key. The claimed task is already status=running, so cloud Asynq never
 // picks it up. Returns 204 No Content when nothing is claimable.
 func (h *AgentHandler) Claim(c fiber.Ctx) error {

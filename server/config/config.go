@@ -1730,6 +1730,9 @@ func (c *Config) Validate() error {
 	default:
 		errs = append(errs, fmt.Sprintf("claude.executor must be 'docker' or 'kubernetes', got %q", c.Claude.Executor))
 	}
+	if len(c.Claude.ExecutionTokenSecret) < 32 {
+		errs = append(errs, "claude.execution_token_secret must be at least 32 bytes")
+	}
 
 	// When using the Docker executor, the container timeout must be at least as
 	// long as content_generate_timeout, otherwise the container is killed before
@@ -1776,9 +1779,6 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.ServerCASecret) == "" {
 			errs = append(errs, "claude.kubernetes.server_ca_secret is required")
-		}
-		if len(c.Claude.ExecutionTokenSecret) < 32 {
-			errs = append(errs, "claude.execution_token_secret must be at least 32 bytes")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.NASStorageClass) == "" {
 			errs = append(errs, "claude.kubernetes.nas_storage_class is required")

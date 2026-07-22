@@ -8,7 +8,7 @@ import (
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 )
 
-func TestClaudeRuntimeEnvAndAliasesAreIdenticalForLocalDockerAndBootstrap(t *testing.T) {
+func TestClaudeRuntimeEnvAndAliasesAreIdenticalForManagedRuntimeAndBootstrap(t *testing.T) {
 	claude := srvconfig.ClaudeConfig{
 		Provider:  srvconfig.ClaudeProviderVolcengineArk,
 		BaseURL:   srvconfig.ClaudeArkCompatibleBaseURL,
@@ -26,14 +26,15 @@ func TestClaudeRuntimeEnvAndAliasesAreIdenticalForLocalDockerAndBootstrap(t *tes
 	}
 	runtimeEnv := claude.RuntimeEnv()
 	aliases := claude.RuntimeModelUsageAliases()
-	local := NewLocalExecutor(nil, nil, runtimeEnv, "", false, claude.Models.Default, aliases, nil, nil, "", "", nil, nil)
-	docker := &DockerExecutor{claudeEnv: filterAgentEnv(runtimeEnv), modelUsageAliases: cloneModelUsageAliases(aliases)}
+	managedEnv := ClaudeRuntimeEnv(runtimeEnv)
 	bootstrapEnv := ClaudeRuntimeEnv(runtimeEnv)
-	if !reflect.DeepEqual(local.claudeEnv, docker.claudeEnv) || !reflect.DeepEqual(local.claudeEnv, bootstrapEnv) {
-		t.Fatalf("runtime env mismatch: local=%#v docker=%#v bootstrap=%#v", local.claudeEnv, docker.claudeEnv, bootstrapEnv)
+	if !reflect.DeepEqual(managedEnv, bootstrapEnv) {
+		t.Fatalf("runtime env mismatch: managed=%#v bootstrap=%#v", managedEnv, bootstrapEnv)
 	}
-	if !reflect.DeepEqual(local.modelUsageAliases, docker.modelUsageAliases) {
-		t.Fatalf("model usage aliases mismatch: local=%#v docker=%#v", local.modelUsageAliases, docker.modelUsageAliases)
+	managedAliases := cloneModelUsageAliases(aliases)
+	bootstrapAliases := cloneModelUsageAliases(aliases)
+	if !reflect.DeepEqual(managedAliases, bootstrapAliases) {
+		t.Fatalf("model usage aliases mismatch: managed=%#v bootstrap=%#v", managedAliases, bootstrapAliases)
 	}
 }
 

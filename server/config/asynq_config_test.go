@@ -75,6 +75,21 @@ func TestValidateDockerSchedulerSettingsMustBePositive(t *testing.T) {
 	}
 }
 
+func TestValidateDockerRequiresExecutionTokenSecret(t *testing.T) {
+	cfg := &Config{
+		Database: DatabaseConfig{DSN: "dsn"},
+		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
+		Claude:   validClaudeConfigForTest(),
+	}
+	cfg.applyDefaults()
+	cfg.Claude.ExecutionTokenSecret = "too-short"
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.execution_token_secret must be at least 32 bytes") {
+		t.Fatalf("Validate() error = %v, want Docker execution token secret requirement", err)
+	}
+}
+
 func TestValidate_DockerTimeoutMustExceedContentGenerateTimeout(t *testing.T) {
 	cfg := &Config{
 		Database: DatabaseConfig{DSN: "dsn"},

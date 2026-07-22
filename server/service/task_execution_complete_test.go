@@ -28,7 +28,7 @@ func setupCloudCompletionTest(t *testing.T, withArtifact bool, startedOverride .
 	}
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	task := &model.Task{ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusRunning}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
@@ -403,7 +403,7 @@ func TestFinalizationDispatchReplayDoesNotDuplicateQueueOrInflateSlot(t *testing
 	t.Cleanup(func() { _ = rdb.Close() })
 	logger := zerolog.New(io.Discard)
 	enqueuer := &replaySafeEnqueuer{}
-	svc := NewTaskService(repo, nil, enqueuer, nil, &logger, "", nil, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := NewTaskService(repo, enqueuer, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 	injected := false
 	svc.finalizationAfterStage = func(stage string) error {
 		if stage == model.TaskExecutionFinalizationDispatch && !injected {
@@ -540,7 +540,7 @@ func TestCloudPublishingAmbiguityNeverCallsProviderTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	publisher := &ambiguousPublishFake{}
 	svc.cloudPublisher = publisher
 	svc.finalizationAfterEffect = func(stage string) error {

@@ -18,7 +18,7 @@ func newFixedTaskBillingFixture(t *testing.T, paid, debt int64) (*TaskService, *
 	f := newBillingWalletFixture(t, paid, 0, debt)
 	enqueuer := &mockEnqueuer{}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(f.repo, nil, enqueuer, nil, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(f.repo, enqueuer, nil, &logger, "", nil, nil)
 	svc.SetBillingCatalogService(f.catalog)
 	svc.SetBillingWalletService(f.wallet)
 	svc.SetNASResumeEnabled(true)

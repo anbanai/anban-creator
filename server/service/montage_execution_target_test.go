@@ -131,7 +131,6 @@ func TestTaskServiceCreateManualMontageRejectsWhenDisabled(t *testing.T) {
 func TestTaskServiceCreateManualMontageRejectsWhenCloudRuntimeMissing(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.enqueuer = nil
-	svc.executor = nil
 	cfg := srvconfig.MontageConfig{Enabled: true}
 	cfg.ApplyDefaults()
 	cfg.DefaultExecutionTarget = "cloud"
