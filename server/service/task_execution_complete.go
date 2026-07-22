@@ -567,7 +567,7 @@ func (s *TaskService) advanceExecutionFinalization(ctx context.Context, id, toke
 func (s *TaskService) finalizeExecutionTaskStatus(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
 	target, errMsg := taskTerminalFromExecution(execution, result)
 	reason := terminalBillingReason(execution, result)
-	durableDelivery, err := s.taskHasDurableDelivery(ctx, task.ID)
+	durableDelivery, err := s.executionHasDurableDelivery(ctx, execution.ID)
 	if err != nil {
 		return fmt.Errorf("inspect durable task delivery: %w", err)
 	}

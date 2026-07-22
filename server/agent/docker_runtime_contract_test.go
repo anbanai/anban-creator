@@ -152,23 +152,26 @@ func composeEnvironmentAssignments(text, service, variable string) []string {
 func TestDockerRuntimeContractRemovesPersistentHostExecutors(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
-	serverMain := readTextFile(t, filepath.Join(root, "server", "main.go"))
-	serviceTask := readTextFile(t, filepath.Join(root, "server", "service", "task.go"))
-	taskExecution := readTextFile(t, filepath.Join(root, "server", "service", "task_execution.go"))
-	serverAgent := readTextFile(t, filepath.Join(root, "server", "agent", "executor.go"))
-	repositoryText := strings.Join([]string{serverMain, serviceTask, taskExecution, serverAgent, compose}, "\n")
+	productionGo := readProductionGoFiles(t,
+		filepath.Join(root, "server", "agent"),
+		filepath.Join(root, "server", "service"),
+	)
 	for _, forbidden := range []string{
 		"NewLocalExecutor(",
 		"NewDockerExecutor(",
 		"ContainerExecCreate(",
 		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME",
 		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR",
-		`"sleep", "infinity"`,
 		"agent.TaskExecutor",
+		"uploadMissingTaskFiles(",
+		"ExtractTitleFromWorkspace(",
 	} {
-		if strings.Contains(repositoryText, forbidden) {
+		if strings.Contains(productionGo, forbidden) {
 			t.Errorf("removed host execution contract remains: %s", forbidden)
 		}
+	}
+	if strings.Contains(compose, `"sleep", "infinity"`) {
+		t.Error("docker-compose.yml retains a persistent agent process")
 	}
 	for _, obsolete := range []string{
 		"server/agent/docker_executor.go",
@@ -186,6 +189,28 @@ func TestDockerRuntimeContractRemovesPersistentHostExecutors(t *testing.T) {
 			t.Errorf("docker-compose.yml retains shared host execution contract %q", forbidden)
 		}
 	}
+}
+
+func readProductionGoFiles(t *testing.T, roots ...string) string {
+	t.Helper()
+	var contents strings.Builder
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			contents.WriteString(readTextFile(t, path))
+			contents.WriteByte('\n')
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("scan production Go sources under %s: %v", root, err)
+		}
+	}
+	return contents.String()
 }
 
 func TestManagedRuntimeWiring(t *testing.T) {

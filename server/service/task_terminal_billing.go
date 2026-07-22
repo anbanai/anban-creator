@@ -70,16 +70,28 @@ func (s *TaskService) taskHasDurableDelivery(ctx context.Context, taskID string)
 	if err != nil {
 		return false, err
 	}
+	return hasDurableDelivery(files), nil
+}
+
+func (s *TaskService) executionHasDurableDelivery(ctx context.Context, executionID string) (bool, error) {
+	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil {
+		return false, err
+	}
+	return hasDurableDelivery(files), nil
+}
+
+func hasDurableDelivery(files []*model.TaskFile) bool {
 	for _, file := range files {
 		if file == nil || (file.State != model.TaskFileStatePublished && file.State != model.TaskFileStateCollected) {
 			continue
 		}
 		if file.FileSize > 0 || strings.TrimSpace(file.OSSKey) != "" || strings.TrimSpace(file.OSSURL) != "" ||
 			strings.TrimSpace(file.MediaID) != "" || strings.TrimSpace(file.WechatURL) != "" {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 func (s *TaskService) persistTerminalBillingInTx(ctx context.Context, tx repository.Repository, task *model.Task, execution *model.TaskExecution, reason string, durableDelivery bool) error {
