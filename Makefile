@@ -66,8 +66,8 @@ git-sync-setup:
 agent-reach-update:
 	@scripts/update-agent-reach.sh
 
-# Fast-forward the pinned upstream Humanizer source and mirror its SKILL.md.
-# Review the upstream diff and bump plugin versions before release.
+# Delegate the pinned Humanizer gitlink update to Creator Skills.
+# The child target validates the upstream checkout and plugin manifests.
 humanizer-update:
 	@scripts/update-humanizer.sh
 

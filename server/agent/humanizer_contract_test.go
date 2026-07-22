@@ -1,15 +1,29 @@
 package agent
 
 import (
-	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestHumanizerSkillNormalizesPinnedUpstream(t *testing.T) {
+const pinnedHumanizerRevision = "1b48564898e999219882660237fde01bf4843a0f"
+
+func TestHumanizerSkillUsesOfficialNestedSubmodule(t *testing.T) {
 	root := repoRoot(t)
-	upstreamPath := filepath.Join(root, "third_party", "Humanizer", "SKILL.md")
+	pluginRoot := filepath.Join(root, "plugins")
+	cmd := exec.Command("git", "ls-tree", "HEAD", "--", "skills/humanizer")
+	cmd.Dir = pluginRoot
+	entry, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("read Humanizer gitlink: %v", err)
+	}
+	wantEntry := "160000 commit " + pinnedHumanizerRevision + "\tskills/humanizer\n"
+	if got := string(entry); got != wantEntry {
+		t.Fatalf("Humanizer gitlink = %q, want %q", got, wantEntry)
+	}
+
+	upstreamPath := filepath.Join(root, "plugins", "skills", "humanizer", "SKILL.md")
 	upstream := readRepoFile(t, upstreamPath)
 	frontmatter := parseSkillFrontmatter(t, upstreamPath, upstream)
 	if got := frontmatterStringValue(frontmatter["name"]); got != "humanizer" {
@@ -29,58 +43,84 @@ func TestHumanizerSkillNormalizesPinnedUpstream(t *testing.T) {
 			t.Fatalf("upstream Humanizer source missing %q", want)
 		}
 	}
-
-	normalized := strings.ReplaceAll(upstream, "version: 2.8.2\n", "")
-	normalized = strings.ReplaceAll(normalized, "compatibility: any-agent\n", "")
-	for _, distro := range []string{"plugins"} {
-		skillDir := filepath.Join(root, distro, "skills", "humanizer")
-		path := filepath.Join(skillDir, "SKILL.md")
-		if got := readRepoFile(t, path); got != normalized {
-			t.Fatalf("%s must equal the cross-host normalized form of %s", path, upstreamPath)
-		}
-		referencesDir := filepath.Join(skillDir, "references")
-		entries, err := os.ReadDir(referencesDir)
-		if err != nil && !os.IsNotExist(err) {
-			t.Fatalf("read %s: %v", referencesDir, err)
-		}
-		if len(entries) != 0 {
-			t.Fatalf("%s must not retain Anban-specific references", skillDir)
-		}
-	}
 }
 
 func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 	root := repoRoot(t)
-	gitmodules := readRepoFile(t, filepath.Join(root, ".gitmodules"))
+	rootModules := readRepoFile(t, filepath.Join(root, ".gitmodules"))
+	if strings.Contains(rootModules, `submodule "third_party/Humanizer"`) {
+		t.Fatal("Anban Writer must not retain the old root Humanizer submodule")
+	}
+
+	pluginModules := readRepoFile(t, filepath.Join(root, "plugins", ".gitmodules"))
 	for _, want := range []string{
-		`[submodule "third_party/Humanizer"]`,
-		"path = third_party/Humanizer",
+		`[submodule "skills/humanizer"]`,
+		"path = skills/humanizer",
 		"url = https://github.com/blader/humanizer.git",
 		"branch = main",
-		"shallow = true",
 	} {
-		if !strings.Contains(gitmodules, want) {
-			t.Fatalf(".gitmodules missing upstream Humanizer contract %q", want)
+		if !strings.Contains(pluginModules, want) {
+			t.Fatalf("Creator Skills .gitmodules missing upstream Humanizer contract %q", want)
 		}
 	}
 
-	script := readRepoFile(t, filepath.Join(root, "scripts", "update-humanizer.sh"))
+	script := readRepoFile(t, filepath.Join(root, "plugins", "scripts", "update-humanizer.sh"))
 	for _, want := range []string{
+		"submodule_name=skills/humanizer",
+		`submodule_root=$(git -C "$submodule_path" rev-parse --show-toplevel 2>/dev/null || true)`,
+		`if [ "$submodule_root" != "$repo_root/$submodule_path" ]; then`,
+		`git submodule update --init -- "$submodule_path"`,
+		`git -C "$submodule_path" fetch --unshallow origin`,
 		"git -C \"$submodule_path\" fetch --prune origin \"$branch\"",
 		"git -C \"$submodule_path\" checkout --detach \"origin/$branch\"",
-		"skill_dir=plugins/skills/humanizer",
-		"rm -rf \"$skill_dir/references\"",
-		"sed '/^version:[[:space:]]*/d; /^compatibility:[[:space:]]*/d' \"$source_skill\" > \"$destination\"",
+		"git diff --submodule=log",
+		"make humanizer-check",
 	} {
 		if !strings.Contains(script, want) {
-			t.Fatalf("update-humanizer.sh missing %q", want)
+			t.Fatalf("Creator Skills updater missing %q", want)
+		}
+	}
+	if strings.Contains(script, `if ! git -C "$submodule_path" rev-parse --git-dir`) {
+		t.Fatal("Creator Skills updater must not mistake the parent repository for an initialized nested submodule")
+	}
+
+	checkScript := readRepoFile(t, filepath.Join(root, "plugins", "scripts", "check-humanizer.sh"))
+	if !strings.Contains(checkScript, `submodule_root=$(git -C "$submodule_path" rev-parse --show-toplevel 2>/dev/null || true)`) ||
+		!strings.Contains(checkScript, `if [ "$submodule_root" != "$repo_root/$submodule_path" ]; then`) {
+		t.Fatal("Creator Skills checker must verify the nested repository boundary")
+	}
+
+	makefile := readRepoFile(t, filepath.Join(root, "plugins", "Makefile"))
+	if !strings.Contains(makefile, "humanizer-update:") ||
+		!strings.Contains(makefile, "scripts/update-humanizer.sh") ||
+		!strings.Contains(makefile, "humanizer-check:") ||
+		!strings.Contains(makefile, "scripts/check-humanizer.sh") {
+		t.Fatal("Creator Skills Makefile must expose the upstream Humanizer update and check commands")
+	}
+
+	rootScript := readRepoFile(t, filepath.Join(root, "scripts", "update-humanizer.sh"))
+	for _, want := range []string{
+		`git -C "$repo_root" submodule update --init --depth 1 -- plugins`,
+		`exec "$plugin_script"`,
+	} {
+		if !strings.Contains(rootScript, want) {
+			t.Fatalf("Anban Writer updater missing Creator Skills delegation boundary %q", want)
 		}
 	}
 
-	makefile := readRepoFile(t, filepath.Join(root, "Makefile"))
-	if !strings.Contains(makefile, "humanizer-update:") ||
-		!strings.Contains(makefile, "scripts/update-humanizer.sh") {
-		t.Fatal("Makefile must expose the upstream Humanizer update command")
+	codexInstall := readRepoFile(t, filepath.Join(root, "plugins", "docs", "codex-installation.md"))
+	for _, want := range []string{
+		"Codex marketplace Git sources do not initialize nested submodules",
+		"git submodule update --init --recursive plugins",
+		"test -f plugins/skills/humanizer/SKILL.md",
+		"codex plugin add anban@anbanai",
+	} {
+		if !strings.Contains(codexInstall, want) {
+			t.Fatalf("Codex installation guide missing nested Humanizer boundary %q", want)
+		}
+	}
+	if strings.Contains(codexInstall, "codex plugin install") {
+		t.Fatal("Codex installation guide must not use the nonexistent plugin install command")
 	}
 }
 
@@ -98,9 +138,19 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 		}
 	}
 
-	seednoteAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "seednote.md"))
-	if strings.Contains(seednoteAgent, "anban:humanizer") || strings.Contains(seednoteAgent, "using the `humanizer` skill") {
-		t.Fatal("Claude Seednote must use its compact built-in de-AI pass instead of loading the general Humanizer Skill")
+	for _, relPath := range []string{"plugins/agents/seednote.md", "plugins/agents/seednote.toml"} {
+		body := strings.ToLower(readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath))))
+		for _, banned := range []string{
+			"anban:humanizer",
+			"skills/humanizer/skill.md",
+			"using the humanizer skill",
+			"using the `humanizer` skill",
+			"重跑 humanizer",
+		} {
+			if strings.Contains(body, banned) {
+				t.Fatalf("%s must use seednote-writing's compact built-in de-AI pass, found %q", relPath, banned)
+			}
+		}
 	}
 
 	for _, relPath := range []string{
@@ -113,11 +163,6 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 			t.Fatalf("%s must inject the bundled humanizer skill", relPath)
 		}
 	}
-	codexSeednote := readRepoFile(t, filepath.Join(root, "plugins", "agents", "seednote.toml"))
-	if strings.Contains(codexSeednote, `skills/humanizer/SKILL.md`) {
-		t.Fatal("Codex Seednote must use seednote-writing's built-in de-AI pass instead of preloading Humanizer")
-	}
-
 	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		dockerfile := readRepoFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, want := range []string{

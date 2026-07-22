@@ -36,8 +36,11 @@ func TestDistributedSkillsFollowAgentSkillsBestPractices(t *testing.T) {
 }
 
 func isUpstreamHumanizerSkillPath(path string) bool {
-	return filepath.Base(filepath.Dir(path)) == "humanizer" &&
-		filepath.Base(filepath.Dir(filepath.Dir(path))) == "skills"
+	return filepath.Base(path) == "SKILL.md" && isUpstreamHumanizerPath(path)
+}
+
+func isUpstreamHumanizerPath(path string) bool {
+	return strings.Contains(filepath.ToSlash(path), "/plugins/skills/humanizer/")
 }
 
 func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
@@ -55,6 +58,9 @@ func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
 				return err
 			}
 			if d.IsDir() {
+				return nil
+			}
+			if isUpstreamHumanizerPath(path) {
 				return nil
 			}
 			if auxiliaryNames[filepath.Base(path)] {
