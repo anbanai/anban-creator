@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -48,14 +49,15 @@ func (d *reconcileTestDispatcher) Inspect(_ context.Context, execution *model.Ta
 
 type reconcileFailure struct{ id, status, reason string }
 type reconcileTestService struct {
-	mu         sync.Mutex
-	executions []*model.TaskExecution
-	failures   []reconcileFailure
-	resumed    []string
-	dispatched []string
-	instances  map[string]string
-	cleanup    map[string]string
-	failID     string
+	mu          sync.Mutex
+	executions  []*model.TaskExecution
+	failures    []reconcileFailure
+	resumed     []string
+	dispatched  []string
+	instances   map[string]string
+	cleanup     map[string]string
+	diagnostics map[string][]byte
+	failID      string
 }
 
 func (s *reconcileTestService) FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error) {
@@ -120,34 +122,47 @@ func (s *reconcileTestService) ResumeExecutionFinalization(_ context.Context, id
 	s.resumed = append(s.resumed, id)
 	return nil
 }
-func (s *reconcileTestService) ReconcileExecutionFailure(_ context.Context, id, status, reason string, _ []byte, _ int) error {
+func (s *reconcileTestService) ReconcileExecutionFailure(_ context.Context, id, status, reason string, diagnostics []byte, _ int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if id == s.failID {
 		return errors.New("injected")
 	}
 	s.failures = append(s.failures, reconcileFailure{id, status, reason})
+	if s.diagnostics == nil {
+		s.diagnostics = map[string][]byte{}
+	}
+	s.diagnostics[id] = append([]byte(nil), diagnostics...)
 	return nil
 }
 
 func TestRuntimeTerminalReasonPrecedence(t *testing.T) {
 	exit137 := int32(137)
 	tests := []struct {
-		name, phase, reason, want string
-		exit                      *int32
+		name, phase, reason, wantReason, wantStatus string
+		exit                                        *int32
 	}{
-		{"deadline before generic failure", RuntimePhaseFailed, "DeadlineExceeded", "deadline_exceeded", nil},
-		{"oom", RuntimePhaseFailed, "", "oom_killed", &exit137},
-		{"scheduling", RuntimePhasePending, "FailedScheduling", "scheduling_failed", nil},
-		{"mount", RuntimePhasePending, "FailedMount", "volume_mount_failed", nil},
-		{"image", RuntimePhasePending, "ImagePullBackOff", "image_pull_failed", nil},
-		{"runtime", RuntimePhaseFailed, "BackoffLimitExceeded", "runtime_failed", nil},
+		{"deadline", RuntimePhaseFailed, "DeadlineExceeded", "deadline_exceeded", model.TaskExecutionTimedOut, nil},
+		{"runtime deadline", RuntimePhaseFailed, "runtime deadline exceeded", "deadline_exceeded", model.TaskExecutionTimedOut, nil},
+		{"oom reason", RuntimePhaseFailed, "OOMKilled", "oom_killed", model.TaskExecutionFailed, nil},
+		{"oom exit code", RuntimePhaseFailed, "Failed", "oom_killed", model.TaskExecutionFailed, &exit137},
+		{"scheduling", RuntimePhaseFailed, "FailedScheduling", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"mount", RuntimePhaseFailed, "FailedMount", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"attach volume", RuntimePhaseFailed, "FailedAttachVolume", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"image pull", RuntimePhaseFailed, "ErrImagePull", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"image pull backoff", RuntimePhaseFailed, "ImagePullBackOff", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"crash loop", RuntimePhaseFailed, "CrashLoopBackOff", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"run container", RuntimePhaseFailed, "RunContainerError", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"backoff limit", RuntimePhaseFailed, "BackoffLimitExceeded", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"timeout without deadline", RuntimePhaseFailed, "Timeout", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"plain failed", RuntimePhaseFailed, "Failed", "runtime_failed", model.TaskExecutionFailed, nil},
+		{"provider reason cannot terminalize pending state", RuntimePhasePending, "FailedScheduling", "", "", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _ := runtimeTerminalReason(&RuntimeExecutionState{Phase: tc.phase, Reason: tc.reason, ExitCode: tc.exit})
-			if got != tc.want {
-				t.Fatalf("reason=%q want=%q", got, tc.want)
+			gotReason, gotStatus := runtimeTerminalReason(&RuntimeExecutionState{Phase: tc.phase, Reason: tc.reason, ExitCode: tc.exit})
+			if gotReason != tc.wantReason || gotStatus != tc.wantStatus {
+				t.Fatalf("reason/status = %q/%q, want %q/%q", gotReason, gotStatus, tc.wantReason, tc.wantStatus)
 			}
 		})
 	}
@@ -215,9 +230,18 @@ func TestRuntimeReconcilerUsesExecutionHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.mu.Lock()
-	defer service.mu.Unlock()
-	if len(service.failures) != 1 || service.failures[0].reason != "deadline_exceeded" || service.failures[0].status != model.TaskExecutionTimedOut {
-		t.Fatalf("failures = %#v", service.failures)
+	failures := append([]reconcileFailure(nil), service.failures...)
+	diagnostics := append([]byte(nil), service.diagnostics[execution.ID]...)
+	service.mu.Unlock()
+	if len(failures) != 1 || failures[0].reason != "deadline_exceeded" || failures[0].status != model.TaskExecutionTimedOut {
+		t.Fatalf("failures = %#v", failures)
+	}
+	var diagnostic map[string]any
+	if err := json.Unmarshal(diagnostics, &diagnostic); err != nil {
+		t.Fatal(err)
+	}
+	if diagnostic["reason"] != "deadline_exceeded" || diagnostic["runtime_reason"] != "" {
+		t.Fatalf("diagnostics = %#v, want synthetic deadline with empty runtime reason", diagnostic)
 	}
 }
 
@@ -354,7 +378,7 @@ func TestRuntimeReconcilerFinalizesExitedContainer(t *testing.T) {
 	execution := &model.TaskExecution{ID: "execution-1", Status: model.TaskExecutionRunning, Started: true}
 	dispatcher := &reconcileTestDispatcher{
 		states: map[string]*RuntimeExecutionState{
-			execution.ID: {Phase: RuntimePhaseFailed, InstanceID: "container-id", Reason: "Exited", ExitCode: &exitCode},
+			execution.ID: {Phase: RuntimePhaseFailed, InstanceID: "container-id", Reason: "BackoffLimitExceeded", Message: "runtime exited", ExitCode: &exitCode},
 		},
 		errs: map[string]error{},
 	}
@@ -366,11 +390,19 @@ func TestRuntimeReconcilerFinalizesExitedContainer(t *testing.T) {
 	}
 
 	service.mu.Lock()
-	if len(service.failures) != 1 || service.failures[0].reason != "runtime_failed" {
-		service.mu.Unlock()
-		t.Fatalf("failures = %#v, want runtime_failed", service.failures)
-	}
+	failures := append([]reconcileFailure(nil), service.failures...)
+	diagnostics := append([]byte(nil), service.diagnostics[execution.ID]...)
 	service.mu.Unlock()
+	if len(failures) != 1 || failures[0].reason != "runtime_failed" {
+		t.Fatalf("failures = %#v, want runtime_failed", failures)
+	}
+	var diagnostic map[string]any
+	if err := json.Unmarshal(diagnostics, &diagnostic); err != nil {
+		t.Fatal(err)
+	}
+	if diagnostic["reason"] != "runtime_failed" || diagnostic["runtime_reason"] != "BackoffLimitExceeded" || diagnostic["message"] != "runtime exited" {
+		t.Fatalf("diagnostics = %#v", diagnostic)
+	}
 	dispatcher.mu.Lock()
 	defer dispatcher.mu.Unlock()
 	if len(dispatcher.deleted) != 1 || dispatcher.deleted[0] != execution.ID {

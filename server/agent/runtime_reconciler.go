@@ -134,12 +134,12 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 			missingSince = execution.CreatedAt
 		}
 		if errors.Is(err, ErrRuntimeWorkloadNotFound) && now.Sub(missingSince) >= r.config.MissingResourceGrace {
-			return r.fail(ctx, execution, model.TaskExecutionFailed, "runtime_missing", "Runtime workload was not found", nil)
+			return r.fail(ctx, execution, model.TaskExecutionFailed, "runtime_missing", "", "Runtime workload was not found", nil)
 		}
 		return err
 	}
 	if state == nil {
-		return r.fail(ctx, execution, model.TaskExecutionFailed, "inspection_empty", "", nil)
+		return r.fail(ctx, execution, model.TaskExecutionFailed, "inspection_empty", "", "", nil)
 	}
 	if state.InstanceID != "" {
 		if err := r.service.RecordExecutionInstance(ctx, execution.ID, state.InstanceID); err != nil {
@@ -149,7 +149,7 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 
 	reason, terminalStatus := runtimeTerminalReason(state)
 	if reason != "" {
-		return r.fail(ctx, execution, terminalStatus, reason, state.Message, state.ExitCode)
+		return r.fail(ctx, execution, terminalStatus, reason, state.Reason, state.Message, state.ExitCode)
 	}
 	if state.Phase == RuntimePhaseSucceeded {
 		completedAt := execution.UpdatedAt
@@ -159,7 +159,7 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 		if now.Sub(completedAt) < r.config.CompletionGrace {
 			return nil
 		}
-		return r.fail(ctx, execution, model.TaskExecutionFailed, "missing_completion", "Runtime workload succeeded without an Agent completion callback", state.ExitCode)
+		return r.fail(ctx, execution, model.TaskExecutionFailed, "missing_completion", state.Reason, "Runtime workload succeeded without an Agent completion callback", state.ExitCode)
 	}
 	if execution.Started && r.config.HeartbeatTimeout > 0 {
 		heartbeatBase := execution.LastHeartbeatAt
@@ -167,17 +167,18 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 			heartbeatBase = execution.StartedAt
 		}
 		if heartbeatBase != nil && now.Sub(*heartbeatBase) >= r.config.HeartbeatTimeout {
-			return r.fail(ctx, execution, model.TaskExecutionTimedOut, "deadline_exceeded", "Agent heartbeat deadline exceeded", state.ExitCode)
+			return r.fail(ctx, execution, model.TaskExecutionTimedOut, "deadline_exceeded", state.Reason, "Agent heartbeat deadline exceeded", state.ExitCode)
 		}
 	}
 	return nil
 }
 
-func (r *RuntimeReconciler) fail(ctx context.Context, execution *model.TaskExecution, status, reason, message string, exitCode *int32) error {
+func (r *RuntimeReconciler) fail(ctx context.Context, execution *model.TaskExecution, status, reason, runtimeReason, message string, exitCode *int32) error {
 	diagnostics, _ := json.Marshal(map[string]any{
-		"reason":    reason,
-		"message":   sanitizeRuntimeDiagnostic(message),
-		"exit_code": exitCodeValue(exitCode),
+		"reason":         reason,
+		"runtime_reason": sanitizeRuntimeDiagnostic(runtimeReason),
+		"message":        sanitizeRuntimeDiagnostic(message),
+		"exit_code":      exitCodeValue(exitCode),
 	})
 	if err := r.service.ReconcileExecutionFailure(ctx, execution.ID, status, reason, diagnostics, r.config.PreStartRetryLimit); err != nil {
 		return err
@@ -233,24 +234,17 @@ func runtimeTerminalReason(state *RuntimeExecutionState) (string, string) {
 	if state == nil {
 		return "inspection_empty", model.TaskExecutionFailed
 	}
+	if state.Phase != RuntimePhaseFailed {
+		return "", ""
+	}
 	reason := strings.ToLower(strings.TrimSpace(state.Reason))
 	switch {
-	case reason == "deadlineexceeded" || strings.Contains(reason, "deadline") || strings.Contains(reason, "timeout"):
+	case reason == "deadlineexceeded" || strings.Contains(reason, "deadline"):
 		return "deadline_exceeded", model.TaskExecutionTimedOut
 	case reason == "oomkilled" || (state.ExitCode != nil && *state.ExitCode == 137):
 		return "oom_killed", model.TaskExecutionFailed
-	case reason == "failedscheduling" || strings.Contains(reason, "unschedul"):
-		return "scheduling_failed", model.TaskExecutionFailed
-	case reason == "failedmount" || reason == "failedattachvolume" || strings.Contains(reason, "mount") || strings.Contains(reason, "provision"):
-		return "volume_mount_failed", model.TaskExecutionFailed
-	case reason == "errimagepull" || reason == "imagepullbackoff" || strings.Contains(reason, "imagepull"):
-		return "image_pull_failed", model.TaskExecutionFailed
-	case strings.Contains(reason, "containerconfig") || strings.Contains(reason, "crashloop") || strings.Contains(reason, "runcontainer"):
-		return "container_start_failed", model.TaskExecutionFailed
-	case state.Phase == RuntimePhaseFailed:
-		return "runtime_failed", model.TaskExecutionFailed
 	default:
-		return "", ""
+		return "runtime_failed", model.TaskExecutionFailed
 	}
 }
 
