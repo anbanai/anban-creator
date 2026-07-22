@@ -87,7 +87,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
-		"plugins/agents/wechatarticle.md",
+		"plugins/agents/article.md",
 		"plugins/agents/ecommerce.md",
 		"plugins/agents/moments.md",
 	} {
@@ -104,7 +104,7 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	}
 
 	for _, relPath := range []string{
-		"plugins/agents/wechatarticle.toml",
+		"plugins/agents/article.toml",
 		"plugins/agents/ecommerce.toml",
 		"plugins/agents/moments.toml",
 	} {

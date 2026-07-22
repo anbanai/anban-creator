@@ -140,12 +140,13 @@ func (d *Downloader) resolveWorkspacePath(target string) (string, error) {
 		return "", fmt.Errorf("target path is empty")
 	}
 
+	workspace := runtimeCwd(d.cfg.Workspace, d.cfg.TaskType)
 	if !filepath.IsAbs(target) {
-		target = filepath.Join(d.cfg.Workspace, target)
+		target = filepath.Join(workspace, target)
 	}
 	target = filepath.Clean(target)
 
-	workspace := filepath.Clean(d.cfg.Workspace)
+	workspace = filepath.Clean(workspace)
 	if target != workspace && !strings.HasPrefix(target, workspace+string(filepath.Separator)) {
 		return "", fmt.Errorf("target path %q escapes workspace", target)
 	}

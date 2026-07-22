@@ -78,8 +78,8 @@ func NewDockerExecutor(
 	if err != nil {
 		return nil, fmt.Errorf("docker client init: %w", err)
 	}
-	if _, err := cli.ImageInspect(context.Background(), dockerCfg.Image); err != nil {
-		return nil, fmt.Errorf("docker image %q not found locally (run 'make docker-agent-image' to build it): %w", dockerCfg.Image, err)
+	if _, err := cli.ImageInspect(context.Background(), dockerCfg.ArticleImage); err != nil {
+		return nil, fmt.Errorf("Docker Article image %q not found locally (run 'make docker-agent-image' to build it): %w", dockerCfg.ArticleImage, err)
 	}
 
 	return &DockerExecutor{
@@ -285,12 +285,15 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		}
 	}
 
-	result := &ExecutionResult{Success: false, WorkDir: workDir}
+	result := &ExecutionResult{Success: false, WorkDir: dockerResultWorkDir(workDir, opts.Task.Type)}
 	if parsed, err := parseAgentResult(execRes.stdout.String()); err == nil {
 		result = parsed
 	} else if execRes.err == nil {
 		execRes.err = fmt.Errorf("parse agent result: %w", err)
 	}
+	// The Agent reports a container path, but all host-side consumers need the
+	// host runtime directory on both successful and failed executions.
+	normalizeDockerResultWorkDir(result, workDir, opts.Task.Type)
 
 	if execRes.err != nil {
 		result.Model = agentModel
@@ -304,12 +307,6 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		return result, nil
 	}
 
-	// Always override WorkDir with the host-side path. The agent binary
-	// runs inside the container and sets WorkDir to the container path
-	// (e.g. /workspace/{taskID}), but all host-side consumers
-	// (uploadMissingTaskFiles, CountMeaningfulFiles, cleanup) need the
-	// host filesystem path.
-	result.WorkDir = workDir
 	result.Model = agentModel
 
 	if opts.LogWriter != nil {
@@ -393,6 +390,9 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions, runtimeHome string) []string {
 	env := make([]string, 0, len(e.claudeEnv)+len(opts.MontageEnv)+5)
 	for key, value := range montageEnvForTask(opts) {
+		if isManagedContainerEnv(key) {
+			continue
+		}
 		env = upsertContainerEnv(env, key, value)
 	}
 	for k, v := range e.claudeEnv {
@@ -407,7 +407,9 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions, runtimeHome strin
 		env = upsertContainerEnv(env, "ANBAN_DEFAULT_PROJECT", opts.Project.ID)
 	}
 	env = upsertContainerEnv(env, "ANBAN_API_URL", e.serverURL)
-	env = upsertContainerEnv(env, MontageSubmoduleEnvName, ContainerMontageSubmodulePath)
+	if model.IsMontagePlatform(opts.Task.Type) {
+		env = upsertContainerEnv(env, MontageTemplateEnvName, ContainerMontageTemplatePath)
+	}
 	return env
 }
 
@@ -519,6 +521,19 @@ func validateDockerHostWorkspace(root string) error {
 		return fmt.Errorf("Docker workspace root %q must be a real directory", root)
 	}
 	return nil
+}
+
+func dockerResultWorkDir(workDir, taskType string) string {
+	if model.IsMontagePlatform(taskType) {
+		return filepath.Join(workDir, MontageRuntimeDirName)
+	}
+	return workDir
+}
+
+func normalizeDockerResultWorkDir(result *ExecutionResult, workDir, taskType string) {
+	if result != nil {
+		result.WorkDir = dockerResultWorkDir(workDir, taskType)
+	}
 }
 
 func dockerWorkspacePreparationExecOptions(workDirInContainer, runtimeUser string) container.ExecOptions {

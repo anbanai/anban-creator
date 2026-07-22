@@ -159,13 +159,13 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 	root := repoRoot(t)
 	expected := map[string][]string{
-		"designer":      {"line-art-coloring"},
-		"ecommerce":     {"ecommerce-product-analysis", "ecommerce-copywriting", "humanizer", "ecommerce-visual-design", "ecommerce-platform-specs"},
-		"live-slicer":   {"live-slice", "capcut-draft"},
-		"moments":       {"moments", "humanizer"},
-		"montage":       {"montage"},
-		"seednote":      {"agent-reach", "seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
-		"wechatarticle": {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-publishing", "article-viral-strategy"},
+		"designer":    {"line-art-coloring"},
+		"ecommerce":   {"ecommerce-product-analysis", "ecommerce-copywriting", "humanizer", "ecommerce-visual-design", "ecommerce-platform-specs"},
+		"live-slicer": {"live-slice", "capcut-draft"},
+		"moments":     {"moments", "humanizer"},
+		"montage":     {"montage"},
+		"seednote":    {"agent-reach", "seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
+		"article":     {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-publishing", "article-viral-strategy"},
 	}
 
 	for agentName, want := range expected {
@@ -257,9 +257,9 @@ func TestCodexAgentSkillConfigsPointToBundledSkills(t *testing.T) {
 func TestCodexAgentsDoNotPreloadDuplicateUmbrellaSkills(t *testing.T) {
 	root := repoRoot(t)
 	for agentName, umbrellaSkill := range map[string]string{
-		"ecommerce":     "ecommerce",
-		"seednote":      "seednote",
-		"wechatarticle": "article",
+		"ecommerce": "ecommerce",
+		"seednote":  "seednote",
+		"article":   "article",
 	} {
 		path := filepath.Join(root, "plugins", "agents", agentName+".toml")
 		body := readRepoFile(t, path)

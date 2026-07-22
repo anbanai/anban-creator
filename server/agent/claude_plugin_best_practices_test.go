@@ -21,7 +21,7 @@ func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
 		"moments",
 		"montage",
 		"seednote",
-		"wechatarticle",
+		"article",
 	}
 
 	for _, name := range agents {
@@ -41,7 +41,7 @@ func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
 func TestClaudeAgentFeedbackCallsMatchMCPSchema(t *testing.T) {
 	agents := []string{
 		"designer", "ecommerce", "live-slicer", "moments", "montage",
-		"seednote", "wechatarticle",
+		"article", "seednote",
 	}
 	allowedArgs := map[string]bool{
 		"task_id": true, "agent_name": true, "scores": true,
@@ -342,7 +342,7 @@ func TestClaudeAgentFeedbackFollowsDeliveryReport(t *testing.T) {
 		summaryTerms []string
 	}{
 		{
-			name:         "wechatarticle",
+			name:         "article",
 			anchor:       "**产出**：`$DIR/draft.json`",
 			summaryTerms: []string{"所选模板", "草稿状态", "Vision 校验通过率"},
 		},

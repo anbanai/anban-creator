@@ -7,7 +7,7 @@ import "github.com/anbanai/anban-creator/server/model"
 // progress_percent, so the progress bar advances without requiring every
 // skill to pass a number. Stages not listed here leave percent unchanged.
 //
-// Stage names are extracted from plugins/agents/{wechatarticle,seednote,moments}.md.
+// Stage names are extracted from plugins/agents/{article,seednote,moments}.md.
 // Agent-backed content pipelines go through TaskService.UpdateProgress; other
 // pipelines such as designer, live-slicer, and video have their own services.
 var stagePercentByType = map[string]map[string]int{

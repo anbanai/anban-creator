@@ -40,13 +40,25 @@ func NewRunner(cfg *Config, reporter *Reporter, downloader *Downloader) *Runner 
 }
 
 func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) {
+	workDir := runtimeCwd(r.cfg.Workspace, r.cfg.TaskType)
 	result := &serveragent.ExecutionResult{
 		Success:    false,
-		WorkDir:    r.cfg.Workspace,
+		WorkDir:    workDir,
 		CostStatus: serveragent.CostStatusUnreconciled,
 		CostDiagnostics: []serveragent.CostDiagnostic{{
 			Code: serveragent.CostDiagnosticMissingTerminalModelUsage,
 		}},
+	}
+	if model.IsMontagePlatform(strings.TrimSpace(r.cfg.TaskType)) {
+		runtimePath, err := materializeMontageRuntime(r.cfg.Workspace)
+		if err != nil {
+			result.TerminalReason = model.TaskBillingTerminalPlatformError
+			return result, err
+		}
+		if err := syncMontageTaskInputs(r.cfg.Workspace, runtimePath); err != nil {
+			result.TerminalReason = model.TaskBillingTerminalPlatformError
+			return result, err
+		}
 	}
 
 	sdkOpts, err := r.buildSDKOptions(ctx)

@@ -104,14 +104,14 @@ bash plugins/install/install-subagents.sh`}
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">指定 subagent 示例：</p>
             <CodeBlock
-              code={`use the wechatarticle subagent to write a 3000-word article about Rust ownership
+              code={`use the article subagent to write a 3000-word article about Rust ownership
 use the seednote subagent for a 种草笔记 about 降噪耳机
 delegate to designer: colorize the line art at /path/to/lineart/ using a warm summer palette`}
               language="text"
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            第一次验证时，优先跑 `use the wechatarticle subagent` 或直接说一条自然语言需求，最容易确认整条链路是否通了。
+            第一次验证时，优先跑 `use the article subagent` 或直接说一条自然语言需求，最容易确认整条链路是否通了。
           </p>
         </div>
       </StepCard>

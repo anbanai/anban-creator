@@ -135,32 +135,28 @@ func TestWorkspaceInitScript(t *testing.T) {
 			t.Fatalf("content init script missing %q: %s", want, content)
 		}
 	}
-	if strings.Contains(content, "OpenMontage") || strings.Contains(content, "openmontage") {
+	if strings.Contains(content, "OpenMontage") || strings.Contains(content, "montage-template") {
 		t.Fatalf("content init script references Montage: %s", content)
 	}
 
 	montage := kubernetesWorkspaceInitScript(model.PlatformMontage)
 	for _, want := range []string{
-		"template=/app/third_party/OpenMontage",
-		"runtime=/workspace/openmontage",
-		"staging=/workspace/.openmontage-init",
+		"template=/opt/montage-template",
+		"runtime=/workspace/montage",
+		"staging=/workspace/.montage-init",
 		`if [ ! -e "$runtime" ]; then`,
 		`cp -a "$template/." "$staging/"`,
 		`mv "$staging" "$runtime"`,
-		`test -f "$runtime/.anban-source-revision"`,
-		`cmp -s "$template/.anban-source-revision" "$runtime/.anban-source-revision"`,
 		`chown -R 1000:1000 "$runtime"`,
+		`chmod -R u+rwX "$runtime"`,
 	} {
 		if !strings.Contains(montage, want) {
 			t.Fatalf("Montage init script missing %q: %s", want, montage)
 		}
 	}
-	if strings.Index(montage, `cmp -s "$template/.anban-source-revision"`) > strings.Index(montage, `chown -R 1000:1000 "$runtime"`) {
-		t.Fatal("Montage runtime must verify revision before modifying ownership")
-	}
 }
 
-func TestBuildKubernetesJobInitializesMontageRoot(t *testing.T) {
+func TestBuildKubernetesJobCopiesCompleteMontageWorkspaceWithoutRevisionMarker(t *testing.T) {
 	task := testTask()
 	task.Type = model.PlatformMontage
 	execution := testExecution()
@@ -168,8 +164,15 @@ func TestBuildKubernetesJobInitializesMontageRoot(t *testing.T) {
 	execution.RuntimeImage = "registry.example.com/montage@sha256:run"
 	job := buildKubernetesJob(testJobConfig(), execution, task)
 	script := strings.Join(job.Spec.Template.Spec.InitContainers[0].Args, " ")
-	if !strings.Contains(script, "/workspace/openmontage") || !strings.Contains(script, ".anban-source-revision") {
-		t.Fatalf("Montage Job init script = %q", script)
+	for _, want := range []string{"/opt/montage-template", "/workspace/montage", `cp -a "$template/."`} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("Montage Job init script missing %q: %s", want, script)
+		}
+	}
+	for _, forbidden := range []string{".anban-source-revision", "OPENMONTAGE_REVISION"} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("Montage Job init script retains revision contract %q: %s", forbidden, script)
+		}
 	}
 }
 
@@ -178,13 +181,11 @@ func TestMontageWorkspaceInitScriptPreservesExistingRuntime(t *testing.T) {
 	template := filepath.Join(root, "template")
 	runtimePath := filepath.Join(root, "runtime")
 	staging := filepath.Join(root, "staging")
-	if err := os.MkdirAll(template, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(template, "nested"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(template, ".anban-source-revision"), []byte("revision-a\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(template, "template.txt"), []byte("template"), 0o644); err != nil {
+	templateFile := filepath.Join(template, "nested", "pipeline.yaml")
+	if err := os.WriteFile(templateFile, []byte("version: one\n"), 0o444); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,24 +197,27 @@ func TestMontageWorkspaceInitScriptPreservesExistingRuntime(t *testing.T) {
 	if output, err := run(); err != nil {
 		t.Fatalf("new runtime init: %v: %s", err, output)
 	}
+	if body, err := os.ReadFile(filepath.Join(runtimePath, "nested", "pipeline.yaml")); err != nil || string(body) != "version: one\n" {
+		t.Fatalf("copied runtime file = %q, err=%v", body, err)
+	}
 	checkpoint := filepath.Join(runtimePath, "checkpoint.json")
 	if err := os.WriteFile(checkpoint, []byte("preserve-me"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if output, err := run(); err != nil {
-		t.Fatalf("matching runtime init: %v: %s", err, output)
-	}
-	if got, err := os.ReadFile(checkpoint); err != nil || string(got) != "preserve-me" {
-		t.Fatalf("matching runtime changed checkpoint: %q err=%v", got, err)
-	}
-	if err := os.WriteFile(filepath.Join(template, ".anban-source-revision"), []byte("revision-b\n"), 0o644); err != nil {
+	if err := os.Chmod(templateFile, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if output, err := run(); err == nil {
-		t.Fatalf("mismatched runtime init succeeded: %s", output)
+	if err := os.WriteFile(templateFile, []byte("version: two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run(); err != nil {
+		t.Fatalf("existing runtime init: %v: %s", err, output)
 	}
 	if got, err := os.ReadFile(checkpoint); err != nil || string(got) != "preserve-me" {
-		t.Fatalf("mismatched runtime changed checkpoint: %q err=%v", got, err)
+		t.Fatalf("existing runtime changed checkpoint: %q err=%v", got, err)
+	}
+	if body, err := os.ReadFile(filepath.Join(runtimePath, "nested", "pipeline.yaml")); err != nil || string(body) != "version: one\n" {
+		t.Fatalf("existing runtime was replaced: %q, err=%v", body, err)
 	}
 }
 
@@ -1234,7 +1238,7 @@ func testJobConfig() kubernetesJobConfig {
 	return kubernetesJobConfig{
 		KubernetesConfig: srvconfig.KubernetesConfig{
 			Namespace:               "anban",
-			AgentImage:              "registry.example.com/creator-agent:v2",
+			ArticleImage:            "registry.example.com/creator-agent:v2",
 			ServiceAccount:          "creator-agent-runner",
 			ImagePullSecret:         "acr-secret",
 			ServerCASecret:          "anban-server-tls",
@@ -1256,7 +1260,7 @@ func testJobConfig() kubernetesJobConfig {
 func testExecution() *model.TaskExecution {
 	return &model.TaskExecution{
 		ID: "execution-1", TaskID: "task-1", Attempt: 1, Namespace: "anban", JobName: kubernetesJobName("execution-1"),
-		RuntimeProfile: "article", RuntimeImage: testJobConfig().AgentImage,
+		RuntimeProfile: "article", RuntimeImage: testJobConfig().ArticleImage,
 	}
 }
 

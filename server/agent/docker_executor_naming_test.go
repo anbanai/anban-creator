@@ -31,7 +31,7 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	if got, want := cmd[1], "run"; got != want {
 		t.Fatalf("agent subcommand = %q, want %q", got, want)
 	}
-	if got, want := flagValue(cmd, "--agent-flag"), "anban:wechatarticle"; got != want {
+	if got, want := flagValue(cmd, "--agent-flag"), "anban:article"; got != want {
 		t.Fatalf("--agent-flag = %q, want %q", got, want)
 	}
 
@@ -41,8 +41,24 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	if got, want := EphemeralContainerName(task.ID), "creator-agent-task-task-1"; got != want {
 		t.Fatalf("container name = %q, want %q", got, want)
 	}
-	if got, want := DockerAgentImageDefault, "creator-agent-article:latest"; got != want {
+	if got, want := DockerArticleImageDefault, "creator-agent-article:latest"; got != want {
 		t.Fatalf("Docker Agent image default = %q, want %q", got, want)
+	}
+}
+
+func TestDockerResultWorkDirUsesTaskRuntimeRoot(t *testing.T) {
+	workspace := t.TempDir()
+	if got, want := dockerResultWorkDir(workspace, model.PlatformMontage), filepath.Join(workspace, MontageRuntimeDirName); got != want {
+		t.Fatalf("Montage result WorkDir = %q, want %q", got, want)
+	}
+	if got := dockerResultWorkDir(workspace, model.PlatformArticle); got != workspace {
+		t.Fatalf("Article result WorkDir = %q, want %q", got, workspace)
+	}
+
+	parsedFailure := &ExecutionResult{Success: false, WorkDir: "/workspace/montage"}
+	normalizeDockerResultWorkDir(parsedFailure, workspace, model.PlatformMontage)
+	if want := filepath.Join(workspace, MontageRuntimeDirName); parsedFailure.WorkDir != want {
+		t.Fatalf("parsed failure WorkDir = %q, want host path %q", parsedFailure.WorkDir, want)
 	}
 }
 
@@ -203,8 +219,11 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 		},
 	}, dockerRuntimeHome("/workspace/task-1"))
 
-	if !slices.Contains(env, "ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage") {
-		t.Fatalf("env = %#v, want Montage runtime path", env)
+	if !slices.Contains(env, "ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template") {
+		t.Fatalf("env = %#v, want Montage template path", env)
+	}
+	if countEnvKey(env, MontageSubmoduleEnvName) != 0 {
+		t.Fatalf("env = %#v, Montage workspace path must be assigned by the Agent after materialization", env)
 	}
 	if !slices.Contains(env, "NEW_PROVIDER_TOKEN=future-secret") {
 		t.Fatalf("env = %#v, want unrestricted Montage env", env)
@@ -221,7 +240,7 @@ func TestDockerExecutorExposesMontageRuntimePath(t *testing.T) {
 	for key, want := range map[string]string{
 		"ANBAN_API_URL":         "http://localhost:8080/",
 		"ANBAN_DEFAULT_PROJECT": "project-1",
-		MontageSubmoduleEnvName: ContainerMontageSubmodulePath,
+		MontageTemplateEnvName:  ContainerMontageTemplatePath,
 	} {
 		if countEnvKey(env, key) != 1 || !slices.Contains(env, key+"="+want) {
 			t.Fatalf("env = %#v, want one managed %s=%s", env, key, want)
@@ -244,6 +263,9 @@ func TestDockerExecutorDoesNotExposeMontageEnvToOtherTasks(t *testing.T) {
 	if slices.Contains(env, "NEW_PROVIDER_TOKEN=future-secret") {
 		t.Fatalf("env = %#v, non-Montage task must not receive Montage env", env)
 	}
+	if countEnvKey(env, MontageTemplateEnvName) != 0 || countEnvKey(env, MontageSubmoduleEnvName) != 0 {
+		t.Fatalf("env = %#v, Article task must not receive managed Montage paths", env)
+	}
 	if !slices.Contains(env, "PATH="+ContainerContentRuntimePath) {
 		t.Fatalf("env = %#v, want minimal content PATH", env)
 	}
@@ -253,6 +275,9 @@ func TestDockerExecutorDoesNotExposeMontageEnvToOtherTasks(t *testing.T) {
 	}, dockerRuntimeHome("/workspace/task-2"))
 	if !slices.Contains(seednoteEnv, "PATH="+ContainerSeednoteRuntimePath) {
 		t.Fatalf("env = %#v, want Agent-Reach PATH", seednoteEnv)
+	}
+	if countEnvKey(seednoteEnv, MontageTemplateEnvName) != 0 || countEnvKey(seednoteEnv, MontageSubmoduleEnvName) != 0 {
+		t.Fatalf("env = %#v, Seednote task must not receive managed Montage paths", seednoteEnv)
 	}
 }
 

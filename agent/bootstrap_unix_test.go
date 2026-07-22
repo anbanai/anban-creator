@@ -131,7 +131,7 @@ func TestMaterializeBootstrapDupFailureAfterMkdirRollsBackDirectory(t *testing.T
 
 func TestMaterializeBootstrapReplayPreservesMontageAndClaudeRuntimeState(t *testing.T) {
 	root := t.TempDir()
-	checkpointPath := filepath.Join(root, "openmontage", "projects", "task-1", "checkpoint_assets.json")
+	checkpointPath := filepath.Join(root, "montage", "projects", "task-1", "checkpoint_assets.json")
 	sessionPath := filepath.Join(root, ".anban-runtime-home", ".claude", "projects", "session.jsonl")
 	for path, body := range map[string]string{
 		checkpointPath: `{"checkpoint":"assets"}`,

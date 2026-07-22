@@ -196,7 +196,7 @@ func applySlotsToMarkdown(markdown string, plan *LayoutPlan) string {
 	// emit a duplicate <img> (inline image + slot image, same URL). The existing
 	// inline keeps its position; we add no second copy. This makes the render
 	// resilient to upstream callers that both inline images and pass them as
-	// slots (the wechatarticle workflow did this and had to manually clean up).
+	// slots (the article workflow did this and had to manually clean up).
 	//
 	// Contract: each slot image URL is unique within an article (the rhythm plan
 	// requires pairwise-distinct content images, never reusing one as cover/other).

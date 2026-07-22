@@ -161,7 +161,7 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 		"ANBAN_CLAUDE_EXECUTOR":           "kubernetes",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL":   "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
 		"ANBAN_AGENT_NAMESPACE":           "${namespace}",
-		"ANBAN_AGENT_IMAGE":               "${agent_image_repo}",
+		"ANBAN_ARTICLE_AGENT_IMAGE":       "${article_agent_image_repo}",
 		"ANBAN_SEEDNOTE_AGENT_IMAGE":      "${seednote_agent_image_repo}",
 		"ANBAN_MONTAGE_AGENT_IMAGE":       "${montage_agent_image_repo}",
 		"ANBAN_AGENT_SERVICE_ACCOUNT":     "creator-agent-runner",
@@ -220,7 +220,7 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 	} {
 		for _, want := range []string{
 			`executor: "${ANBAN_CLAUDE_EXECUTOR:-local}"`,
-			`agent_image: "${ANBAN_AGENT_IMAGE}"`,
+			`article_image: "${ANBAN_ARTICLE_AGENT_IMAGE}"`,
 			`seednote: "${ANBAN_SEEDNOTE_AGENT_IMAGE}"`,
 			`montage: "${ANBAN_MONTAGE_AGENT_IMAGE}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,

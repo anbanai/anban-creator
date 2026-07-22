@@ -23,10 +23,10 @@ func TestGuizangSocialCardRoutingIsRemoved(t *testing.T) {
 	root := repoRoot(t)
 	files := []string{
 		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "wechatarticle.md"),
+		filepath.Join(root, "plugins", "agents", "article.md"),
 		filepath.Join(root, "plugins", "agents", "moments.toml"),
 		filepath.Join(root, "plugins", "agents", "seednote.toml"),
-		filepath.Join(root, "plugins", "agents", "wechatarticle.toml"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
 	}
 	for _, plugin := range []string{"plugins"} {
 		for _, skill := range []string{"moments", "seednote-visual-design", "article-visual-design", "article-cover-design"} {

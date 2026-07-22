@@ -266,21 +266,19 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-montage")
 	body := readTextFile(t, path)
 	for _, want := range []string{
-		"ARG OPENMONTAGE_REVISION",
-		"COPY third_party/OpenMontage/ /app/third_party/OpenMontage/",
+		"COPY third_party/OpenMontage/ /opt/montage-template/",
 		"requirements.txt",
 		"remotion-composer/package-lock.json",
 		"npm ci",
 		"registry.discover()",
 		"load_pipeline",
-		".anban-source-revision",
-		"ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage",
+		"ENV ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("%s missing %q", path, want)
 		}
 	}
-	for _, forbidden := range []string{"Agent-Reach", "MCPORTER_VERSION", "mcporter", "gh --version", " ca-certificates curl gh git"} {
+	for _, forbidden := range []string{"Agent-Reach", "MCPORTER_VERSION", "mcporter", "gh --version", " ca-certificates curl gh git", "OPENMONTAGE_REVISION", ".anban-source-revision", "ANBAN_MONTAGE_SUBMODULE_PATH=/app"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("%s must not contain Seednote-only dependency %q", path, forbidden)
 		}
@@ -557,6 +555,7 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 	for _, want := range []string{
 		"desktop/",
 		"miniapp/",
+		"**/.git",
 		"**/node_modules/",
 		"**/dist/",
 		"**/.cache/",
@@ -843,7 +842,7 @@ func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
 		"agent:\n        condition: service_started",
 		"ANBAN_CLAUDE_EXECUTOR: \"docker\"",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL: \"http://server:8080\"",
-		"ANBAN_CLAUDE_DOCKER_IMAGE: \"creator-agent-article:latest\"",
+		"ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE: \"creator-agent-article:latest\"",
 		"ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE: \"creator-agent-seednote:latest\"",
 		"ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE: \"creator-agent-montage:latest\"",
 		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: \"creator-agent-article\"",
@@ -860,7 +859,7 @@ func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
 	for _, configPath := range []string{"server/config.yaml", "server/config.example.yaml"} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
-			"image: \"${ANBAN_CLAUDE_DOCKER_IMAGE:-creator-agent-article:latest}\"",
+			"article_image: \"${ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE:-creator-agent-article:latest}\"",
 			"seednote: \"${ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE:-creator-agent-seednote:latest}\"",
 			"montage: \"${ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE:-creator-agent-montage:latest}\"",
 			"container_name: \"${ANBAN_CLAUDE_DOCKER_CONTAINER_NAME}\"",

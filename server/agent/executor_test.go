@@ -67,8 +67,67 @@ func TestMontageSubmoduleRuntimePathUsesRepoSiblingWhenAvailable(t *testing.T) {
 
 func TestMontageSubmoduleRuntimePathFallsBackToContainerPath(t *testing.T) {
 	got := montageSubmoduleRuntimePath(filepath.Join(t.TempDir(), "claudecode"))
-	if got != ContainerMontageSubmodulePath {
-		t.Fatalf("montageSubmoduleRuntimePath = %q, want %q", got, ContainerMontageSubmodulePath)
+	if got != ContainerMontageTemplatePath {
+		t.Fatalf("montageSubmoduleRuntimePath = %q, want %q", got, ContainerMontageTemplatePath)
+	}
+}
+
+func TestPrepareLocalExecutionWorkDirMaterializesMontageTemplateOnce(t *testing.T) {
+	root := t.TempDir()
+	pluginDir := filepath.Join(root, "plugins")
+	templateDir := filepath.Join(root, "third_party", "OpenMontage")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	templateFile := filepath.Join(templateDir, "pipeline.yaml")
+	if err := os.WriteFile(templateFile, []byte("version: one\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(templateDir, ".git"), []byte("gitdir: ../../.git/modules/OpenMontage\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := filepath.Join(root, "workspace")
+	got, err := prepareLocalExecutionWorkDir(workspace, model.PlatformMontage, pluginDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(workspace, MontageRuntimeDirName)
+	if got != want {
+		t.Fatalf("Montage workDir = %q, want %q", got, want)
+	}
+	if body, err := os.ReadFile(filepath.Join(got, "pipeline.yaml")); err != nil || string(body) != "version: one\n" {
+		t.Fatalf("materialized template = %q, err=%v", body, err)
+	}
+	if _, err := os.Lstat(filepath.Join(got, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("materialized runtime must exclude template Git metadata: %v", err)
+	}
+	checkpoint := filepath.Join(got, "checkpoint.json")
+	if err := os.WriteFile(checkpoint, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(templateFile, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(templateFile, []byte("version: two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareLocalExecutionWorkDir(workspace, model.PlatformMontage, pluginDir); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := os.ReadFile(filepath.Join(got, "pipeline.yaml")); err != nil || string(body) != "version: one\n" {
+		t.Fatalf("resume replaced runtime = %q, err=%v", body, err)
+	}
+	if body, err := os.ReadFile(checkpoint); err != nil || string(body) != "preserve" {
+		t.Fatalf("resume lost checkpoint = %q, err=%v", body, err)
+	}
+
+	articleRoot := filepath.Join(root, "article")
+	if got, err := prepareLocalExecutionWorkDir(articleRoot, model.PlatformArticle, pluginDir); err != nil || got != articleRoot {
+		t.Fatalf("Article workDir = %q, err=%v, want %q", got, err, articleRoot)
 	}
 }
 
@@ -358,7 +417,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 		taskType string
 		want     string
 	}{
-		{model.ScopeArticle, "wechatarticle"},
+		{model.ScopeArticle, "article"},
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},

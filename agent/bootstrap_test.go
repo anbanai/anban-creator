@@ -49,7 +49,7 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "article", "project_id": "project-1",
-			"prompt": "write", "model": "sonnet", "max_turns": 12, "agent_flag": "anban:wechatarticle",
+			"prompt": "write", "model": "sonnet", "max_turns": 12, "agent_flag": "anban:article",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": ".task-context", "text": "TASK_ID=task-1\n", "mode": 420}},
 			"model_usage_aliases": testModelUsageAliases(),
 			"runtime_env":         testClaudeRuntimeEnv(),
@@ -71,6 +71,45 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 	projected, _ := os.ReadFile(tokenFile)
 	if string(projected) != "workload-token\n" {
 		t.Fatalf("projected token was overwritten: %q", projected)
+	}
+}
+
+func TestBootstrapJobMaterializesMontageInputsInsideRuntime(t *testing.T) {
+	template := filepath.Join(t.TempDir(), "template")
+	if err := os.MkdirAll(template, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(template, "README.md"), []byte("template"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(serveragent.MontageTemplateEnvName, template)
+
+	workspace := t.TempDir()
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("workload-token\n"), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	executionToken := testExecutionToken(t, "execution-1", "task-1", "project-1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
+			"execution_token": executionToken, "task_id": "task-1", "task_type": "montage", "project_id": "project-1",
+			"prompt": "render", "model": "sonnet", "max_turns": 40, "agent_flag": "anban:montage",
+			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": "montage-input.json", "text": "{}", "mode": 420}},
+			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
+		}})
+	}))
+	defer server.Close()
+
+	if _, err := testBootstrapJob(context.Background(), JobConfig{ServerURL: server.URL, ExecutionID: "execution-1", Workspace: workspace, WorkloadTokenFile: tokenFile}); err != nil {
+		t.Fatalf("BootstrapJob: %v", err)
+	}
+	for _, name := range []string{"README.md", "montage-input.json"} {
+		if _, err := os.Stat(filepath.Join(workspace, "montage", name)); err != nil {
+			t.Fatalf("Montage runtime missing %s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "montage-input.json")); !os.IsNotExist(err) {
+		t.Fatalf("Montage input must not be materialized outside runtime: %v", err)
 	}
 }
 
@@ -220,7 +259,7 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		return BootstrapResponse{
 			ExecutionToken: testExecutionToken(t, "execution-1", "task-1", "project-1"),
 			TaskID:         "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write",
-			Model: "sonnet", MaxTurns: 40, AgentFlag: "anban:wechatarticle", AutoMemoryDirectory: ".claude/memory",
+			Model: "sonnet", MaxTurns: 40, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory",
 			ModelUsageAliases: testModelUsageAliases(),
 			RuntimeEnv:        testClaudeRuntimeEnv(),
 		}

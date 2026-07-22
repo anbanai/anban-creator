@@ -38,26 +38,23 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
 
 COPY --from=builder /out/anban /usr/local/bin/anban
 COPY plugins/ /anbanai/
-COPY third_party/OpenMontage/ /app/third_party/OpenMontage/
+COPY third_party/OpenMontage/ /opt/montage-template/
 
-ARG OPENMONTAGE_REVISION
 ENV OPENMONTAGE_VENV=/opt/openmontage-venv
 
 RUN set -eux; \
-    test -n "$OPENMONTAGE_REVISION"; \
-    printf '%s\n' "$OPENMONTAGE_REVISION" > /app/third_party/OpenMontage/.anban-source-revision; \
     python3 -m venv "$OPENMONTAGE_VENV"; \
-    "$OPENMONTAGE_VENV/bin/pip" install --no-cache-dir -r /app/third_party/OpenMontage/requirements.txt; \
-    test -f /app/third_party/OpenMontage/remotion-composer/package-lock.json; \
-    cd /app/third_party/OpenMontage/remotion-composer; \
+    "$OPENMONTAGE_VENV/bin/pip" install --no-cache-dir -r /opt/montage-template/requirements.txt; \
+    test -f /opt/montage-template/remotion-composer/package-lock.json; \
+    cd /opt/montage-template/remotion-composer; \
     npm ci; \
-    cd /app/third_party/OpenMontage; \
+    cd /opt/montage-template; \
     "$OPENMONTAGE_VENV/bin/python" -c "from tools.tool_registry import registry; registry.discover(); summary = registry.provider_menu_summary(); assert isinstance(summary, dict)"; \
     "$OPENMONTAGE_VENV/bin/python" -c "from lib.pipeline_loader import load_pipeline; manifest = load_pipeline('cinematic'); assert manifest.get('name') or manifest.get('display_name')"; \
     npm cache clean --force; \
     rm -rf /root/.npm; \
-    chown -R root:root /app/third_party/OpenMontage "$OPENMONTAGE_VENV"; \
-    chmod -R a=rX /app/third_party/OpenMontage "$OPENMONTAGE_VENV"
+    chown -R root:root /opt/montage-template "$OPENMONTAGE_VENV"; \
+    chmod -R a=rX /opt/montage-template "$OPENMONTAGE_VENV"
 
 RUN set -eux; \
     if [ -n "$(find /anbanai -type l -print -quit)" ]; then \
@@ -69,7 +66,7 @@ RUN set -eux; \
 
 ENV CLAUDE_PLUGIN_ROOT=/anbanai
 ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template
-ENV ANBAN_MONTAGE_SUBMODULE_PATH=/app/third_party/OpenMontage
+ENV ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template
 ENV HOME=/home/node
 ENV PATH="${OPENMONTAGE_VENV}/bin:${PATH}"
 

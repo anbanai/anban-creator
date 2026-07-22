@@ -235,7 +235,7 @@ func writeProjectCLAUDEMD(workDir string, project *model.Project) error {
 func TaskTypeToAgent(taskType string) string {
 	switch taskType {
 	case model.ScopeArticle:
-		return "wechatarticle"
+		return "article"
 	case model.ScopeSeednote:
 		return "seednote"
 	case model.ScopeMoments:

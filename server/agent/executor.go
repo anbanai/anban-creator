@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -37,7 +38,7 @@ func filterAgentEnv(env map[string]string) map[string]string {
 
 func isManagedContainerEnv(key string) bool {
 	switch key {
-	case "HOME", "PATH":
+	case "HOME", "PATH", MontageSubmoduleEnvName, MontageTemplateEnvName:
 		return true
 	default:
 		return false
@@ -55,7 +56,117 @@ func montageSubmoduleRuntimePath(pluginDir string) string {
 			}
 		}
 	}
-	return ContainerMontageSubmodulePath
+	return ContainerMontageTemplatePath
+}
+
+func prepareLocalExecutionWorkDir(workspace, taskType, pluginDir string) (string, error) {
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		return "", fmt.Errorf("create workdir: %w", err)
+	}
+	if !model.IsMontagePlatform(strings.TrimSpace(taskType)) {
+		return workspace, nil
+	}
+
+	runtimePath := filepath.Join(workspace, MontageRuntimeDirName)
+	if info, err := os.Lstat(runtimePath); err == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("Montage workspace %s must be a real directory", runtimePath)
+		}
+		return runtimePath, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("inspect Montage workspace: %w", err)
+	}
+
+	templatePath := montageSubmoduleRuntimePath(pluginDir)
+	if info, err := os.Stat(templatePath); err != nil {
+		return "", fmt.Errorf("inspect Montage template %s: %w", templatePath, err)
+	} else if !info.IsDir() {
+		return "", fmt.Errorf("Montage template %s must be a directory", templatePath)
+	}
+
+	stagingPath, err := os.MkdirTemp(workspace, ".montage-init-")
+	if err != nil {
+		return "", fmt.Errorf("create Montage staging workspace: %w", err)
+	}
+	defer os.RemoveAll(stagingPath)
+	if err := copyLocalMontageTemplate(templatePath, stagingPath); err != nil {
+		return "", fmt.Errorf("copy Montage template into workspace: %w", err)
+	}
+	if err := os.Rename(stagingPath, runtimePath); err != nil {
+		if info, statErr := os.Lstat(runtimePath); statErr == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			return runtimePath, nil
+		}
+		return "", fmt.Errorf("activate Montage workspace: %w", err)
+	}
+	return runtimePath, nil
+}
+
+func copyLocalMontageTemplate(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if relative == ".git" {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(destination, relative)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case entry.IsDir():
+			mode := info.Mode().Perm() | 0o700
+			if err := os.MkdirAll(target, mode); err != nil {
+				return err
+			}
+			return os.Chmod(target, mode)
+		case info.Mode()&os.ModeSymlink != 0:
+			linkTarget, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(linkTarget, target)
+		case info.Mode().IsRegular():
+			mode := info.Mode().Perm() | 0o600
+			return copyLocalMontageFile(path, target, mode)
+		default:
+			return fmt.Errorf("unsupported file type %s", path)
+		}
+	})
+}
+
+func copyLocalMontageFile(source, destination string, mode fs.FileMode) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil {
+		_ = input.Close()
+		return err
+	}
+
+	_, copyErr := io.Copy(output, input)
+	outputCloseErr := output.Close()
+	inputCloseErr := input.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if outputCloseErr != nil {
+		return outputCloseErr
+	}
+	if inputCloseErr != nil {
+		return inputCloseErr
+	}
+	return os.Chmod(destination, mode)
 }
 
 // UserPromptParams holds the inputs for BuildUserPrompt. Struct keeps call sites
@@ -432,14 +543,15 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 2. Create workspace directory.
-	var workDir string
+	var workspace string
 	if e.workspaceDir != "" {
-		workDir = filepath.Join(e.workspaceDir, opts.Task.ID)
+		workspace = filepath.Join(e.workspaceDir, opts.Task.ID)
 	} else {
-		workDir = DefaultWorkspaceDir(opts.Task.ID)
+		workspace = DefaultWorkspaceDir(opts.Task.ID)
 	}
-	if err := os.MkdirAll(workDir, 0755); err != nil {
-		return nil, fmt.Errorf("create workdir: %w", err)
+	workDir, err := prepareLocalExecutionWorkDir(workspace, opts.Task.Type, e.pluginDir)
+	if err != nil {
+		return nil, err
 	}
 
 	// Write task context file so the agent knows its task ID.
@@ -654,7 +766,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
 	}
 	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
-	sdkOpts = append(sdkOpts, claudecode.WithEnvVar(MontageSubmoduleEnvName, montageSubmoduleRuntimePath(e.pluginDir)))
+	if model.IsMontagePlatform(opts.Task.Type) {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(MontageSubmoduleEnvName, workDir))
+	}
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
 	// ${ANBAN_API_KEY} for the Anban Creator MCP server.

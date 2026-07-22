@@ -186,7 +186,7 @@ func TestMontageConfigFilesDoNotDeclareRunnerImage(t *testing.T) {
 		}
 		raw := string(body)
 		if strings.Contains(raw, "ANBAN_MONTAGE_RUNNER_IMAGE") || strings.Contains(raw, "cloud_image:") {
-			t.Fatalf("%s must not declare montage.runner.cloud_image; use claude.docker.image or claude.kubernetes.agent_image", path)
+			t.Fatalf("%s must not declare montage.runner.cloud_image; use claude.docker.article_image or claude.kubernetes.article_image", path)
 		}
 	}
 }

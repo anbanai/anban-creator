@@ -190,9 +190,9 @@ func kubernetesWorkspaceInitScript(taskType string) string {
 		return strings.Join(lines, "\n")
 	}
 	return strings.Join(append(lines, kubernetesMontageInitScript(
-		"/app/third_party/OpenMontage",
-		"/workspace/openmontage",
-		"/workspace/.openmontage-init",
+		ContainerMontageTemplatePath,
+		"/workspace/"+MontageRuntimeDirName,
+		"/workspace/.montage-init",
 	)), "\n")
 }
 
@@ -207,9 +207,8 @@ func kubernetesMontageInitScript(templatePath, runtimePath, stagingPath string) 
 		`  cp -a "$template/." "$staging/"`,
 		`  mv "$staging" "$runtime"`,
 		"fi",
-		`test -f "$runtime/.anban-source-revision"`,
-		`cmp -s "$template/.anban-source-revision" "$runtime/.anban-source-revision"`,
 		`chown -R 1000:1000 "$runtime"`,
+		`chmod -R u+rwX "$runtime"`,
 	}, "\n")
 }
 

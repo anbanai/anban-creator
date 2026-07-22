@@ -57,7 +57,7 @@ func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 		if cfg.ExecutionID != "execution-1" || cfg.WorkloadTokenFile != "/token" {
 			t.Fatalf("job config=%+v", cfg)
 		}
-		return &BootstrapResponse{ExecutionToken: "jwt", TaskID: "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write", Model: "sonnet", MaxTurns: 9, AgentFlag: "anban:wechatarticle", AutoMemoryDirectory: ".claude/memory", ResumeSessionID: "bba21f1d-70b8-4157-917b-f9802c2b1740", ResumeContextPath: ".anban-creator/resume/executions/execution-1/latest.md", RuntimeEnv: map[string]string{
+		return &BootstrapResponse{ExecutionToken: "jwt", TaskID: "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write", Model: "sonnet", MaxTurns: 9, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory", ResumeSessionID: "bba21f1d-70b8-4157-917b-f9802c2b1740", ResumeContextPath: ".anban-creator/resume/executions/execution-1/latest.md", RuntimeEnv: map[string]string{
 			"ANTHROPIC_AUTH_TOKEN": "runtime-token",
 			"ANBAN_API_KEY":        "must-not-override",
 		}, ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{

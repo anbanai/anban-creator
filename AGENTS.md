@@ -144,7 +144,7 @@ The project ships all agent-facing workflows from `plugins/agents` and `plugins/
 
 Current major agents:
 
-- `wechatarticle`: end-to-end WeChat article creation.
+- `article`: end-to-end WeChat article creation.
 - `seednote`: Seednote-style note creation, clone/rewrite, visual generation, and archival.
 - `designer`: line-art coloring and visual consistency workflows.
 - `live-slicer`: live video transcription, segmentation, ffmpeg export, and optional CapCut draft generation.

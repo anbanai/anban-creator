@@ -150,13 +150,11 @@ docker-seednote-agent-image:
 	docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(SEEDNOTE_AGENT_IMAGE)"
 
-# Build the dedicated Montage Agent image with an immutable OpenMontage template.
+# Build the dedicated Montage Agent image with its OpenMontage workspace template.
 docker-montage-agent-image:
 	@git submodule update --init --recursive third_party/claude-agent-sdk-go third_party/OpenMontage
 	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-montage \
-	  --build-arg OPENMONTAGE_REVISION=$$(git -C third_party/OpenMontage rev-parse HEAD) \
-	  -t $(MONTAGE_AGENT_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.agent-montage -t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
 
 # Build the anban-creator-server Docker image

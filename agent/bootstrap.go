@@ -114,6 +114,15 @@ func bootstrapJobWithPolicy(ctx context.Context, cfg JobConfig, policy bootstrap
 	if err := materializeBootstrap(ctx, cfg.Workspace, envelope.Data.Files, bootstrapDownloadClient()); err != nil {
 		return &envelope.Data, fmt.Errorf("materialize bootstrap workspace: %w", err)
 	}
+	if model.IsMontagePlatform(strings.TrimSpace(envelope.Data.TaskType)) {
+		runtimePath, err := materializeMontageRuntime(cfg.Workspace)
+		if err != nil {
+			return &envelope.Data, fmt.Errorf("materialize Montage workspace: %w", err)
+		}
+		if err := syncMontageTaskInputs(cfg.Workspace, runtimePath); err != nil {
+			return &envelope.Data, fmt.Errorf("materialize Montage task inputs: %w", err)
+		}
+	}
 	return &envelope.Data, nil
 }
 

@@ -127,14 +127,14 @@ func TestActiveRuntimeFeedbackScoresAreSerialized(t *testing.T) {
 		"plugins/agents/live-slicer.md",
 		"plugins/agents/ecommerce.md",
 		"plugins/agents/designer.md",
-		"plugins/agents/wechatarticle.md",
+		"plugins/agents/article.md",
 		"plugins/agents/montage.md",
 		"plugins/agents/moments.toml",
 		"plugins/agents/seednote.toml",
 		"plugins/agents/live-slicer.toml",
 		"plugins/agents/ecommerce.toml",
 		"plugins/agents/designer.toml",
-		"plugins/agents/wechatarticle.toml",
+		"plugins/agents/article.toml",
 		"plugins/agents/montage.toml",
 	}
 	for _, relativePath := range paths {
@@ -156,11 +156,11 @@ func TestChangedRuntimeFeedbackOwnership(t *testing.T) {
 		{path: "plugins/agents/seednote.md", reportMarker: "#### 步骤 12：最终报告"},
 		{path: "plugins/agents/ecommerce.md", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
 		{path: "plugins/agents/moments.md", reportMarker: "最终摘要包含"},
-		{path: "plugins/agents/wechatarticle.md", reportMarker: "步骤 9 的最终验收都已写入报告后"},
+		{path: "plugins/agents/article.md", reportMarker: "步骤 9 的最终验收都已写入报告后"},
 		{path: "plugins/agents/seednote.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
 		{path: "plugins/agents/ecommerce.toml", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
 		{path: "plugins/agents/moments.toml", reportMarker: "最终摘要包含"},
-		{path: "plugins/agents/wechatarticle.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
+		{path: "plugins/agents/article.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {

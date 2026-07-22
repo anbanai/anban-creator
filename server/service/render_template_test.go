@@ -232,7 +232,7 @@ func TestApplySlotsToMarkdown_InlineDetailAfterParagraph(t *testing.T) {
 
 // Regression: a slot whose image URL is ALREADY inlined in the source markdown
 // must be skipped, otherwise the renderer emits a duplicate <img> (the
-// wechatarticle workflow hit this and had to manually clean up repeated img).
+// article workflow hit this and had to manually clean up repeated img).
 func TestApplySlotsToMarkdown_DedupAlreadyInlinedURL(t *testing.T) {
 	markdown := `# Title
 

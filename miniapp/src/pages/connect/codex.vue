@@ -101,7 +101,7 @@
         <text class="copy-block__hint">点击复制</text>
       </view>
       <text class="step-text">
-        第一次验证时，优先跑 use the wechatarticle subagent 或直接说一条自然语言需求，最容易确认整条链路是否通了。
+        第一次验证时，优先跑 use the article subagent 或直接说一条自然语言需求，最容易确认整条链路是否通了。
       </text>
     </view>
   </view>
@@ -130,7 +130,7 @@ const envUrlSnippet = `export ANBAN_API_URL="https://api.creator.anbanai.com"`
 const naturalExample = `写一篇关于 AI Agent 的公众号文章
 种草笔记，主题是降噪耳机`
 
-const subagentExample = `use the wechatarticle subagent to write a 3000-word article about Rust ownership
+const subagentExample = `use the article subagent to write a 3000-word article about Rust ownership
 use the seednote subagent for a 种草笔记 about 降噪耳机
 delegate to designer: colorize the line art at /path/to/lineart/ using a warm summer palette`
 

@@ -37,13 +37,13 @@ func TestRunnerReconcilesOnlyTransportedExactModelAliases(t *testing.T) {
 
 func TestRuntimeCwd(t *testing.T) {
 	workspace := "/workspace"
-	if got := runtimeCwd(workspace, "montage"); got != "/workspace/openmontage" {
+	if got := runtimeCwd(workspace, "montage"); got != "/workspace/montage" {
 		t.Fatalf("Montage cwd = %q", got)
 	}
 	if got := runtimeCwd(workspace, "seednote"); got != workspace {
 		t.Fatalf("Seednote cwd = %q, want %q", got, workspace)
 	}
-	if got := montageRuntimePath(workspace); got != "/workspace/openmontage" {
+	if got := montageRuntimePath(workspace); got != "/workspace/montage" {
 		t.Fatalf("Montage runtime path = %q", got)
 	}
 }
@@ -60,7 +60,7 @@ func TestRunnerOptionsUseWritableMontageRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := claudecode.NewOptions(opts...)
-	wantRoot := filepath.Join(workspace, "openmontage")
+	wantRoot := filepath.Join(workspace, "montage")
 	if got.Cwd == nil || *got.Cwd != wantRoot {
 		t.Fatalf("Montage cwd = %#v, want %q", got.Cwd, wantRoot)
 	}

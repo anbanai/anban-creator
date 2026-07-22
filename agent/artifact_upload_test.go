@@ -105,7 +105,7 @@ func TestScanWorkspaceArtifactsPrefersOutputAndSkipsRuntimeFiles(t *testing.T) {
 	writeAgentArtifactTestFile(t, root, "output/.claude/session.json", "{}")
 	writeAgentArtifactTestFile(t, root, "output/node_modules/pkg/index.js", "module.exports = {}")
 	writeAgentArtifactTestFile(t, root, "output/package.json", "{}")
-	writeAgentArtifactTestFile(t, root, "openmontage/projects/task-1/checkpoint_assets.json", "{}")
+	writeAgentArtifactTestFile(t, root, "montage/projects/task-1/checkpoint_assets.json", "{}")
 	writeAgentArtifactTestFile(t, root, ".anban-runtime-home/.claude/projects/session.jsonl", "{}")
 
 	files, err := ScanWorkspaceArtifacts(context.Background(), root)

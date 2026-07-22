@@ -16,8 +16,8 @@ func baseKubernetesConfigForTest() Config {
 	claude.Executor = "kubernetes"
 	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
 	claude.Kubernetes = KubernetesConfig{
-		Namespace:  "anbanai-prod",
-		AgentImage: "registry.example.com/creator-agent@sha256:" + strings.Repeat("a", 64),
+		Namespace:    "anbanai-prod",
+		ArticleImage: "registry.example.com/creator-agent-article@sha256:" + strings.Repeat("a", 64),
 		ImageProfiles: map[string]string{
 			model.PlatformSeednote: "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
 			model.PlatformMontage:  "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
@@ -54,20 +54,46 @@ func TestValidateAcceptsKubernetesExecutor(t *testing.T) {
 	}
 }
 
-func TestKubernetesAgentImageMustBeExplicit(t *testing.T) {
+func TestKubernetesArticleImageMustBeExplicit(t *testing.T) {
 	cfg := Config{}
 	cfg.applyDefaults()
-	if cfg.Claude.Kubernetes.AgentImage != "" {
-		t.Fatalf("kubernetes agent image default = %q, want explicit production image", cfg.Claude.Kubernetes.AgentImage)
+	if cfg.Claude.Kubernetes.ArticleImage != "" {
+		t.Fatalf("Kubernetes Article image default = %q, want explicit production image", cfg.Claude.Kubernetes.ArticleImage)
 	}
-	if cfg.Claude.Docker.Image != "creator-agent-article:latest" {
-		t.Fatalf("docker image default = %q, want creator-agent Docker runtime identity", cfg.Claude.Docker.Image)
+	if cfg.Claude.Docker.ArticleImage != "creator-agent-article:latest" {
+		t.Fatalf("Docker Article image default = %q, want creator-agent Docker runtime identity", cfg.Claude.Docker.ArticleImage)
 	}
 }
 
-func TestKubernetesImageForTaskUsesProfileThenDefault(t *testing.T) {
+func TestRejectsGenericAgentImageKeys(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "Docker image",
+			body: "claude:\n  docker:\n    image: creator-agent-article:latest\n",
+			want: "deprecated config key claude.docker.image; use claude.docker.article_image",
+		},
+		{
+			name: "Kubernetes Agent image",
+			body: "claude:\n  kubernetes:\n    agent_image: registry.example.com/article:v1\n",
+			want: "deprecated config key claude.kubernetes.agent_image; use claude.kubernetes.article_image",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := rejectDeprecatedConfigKeys([]byte(test.body))
+			if err == nil || err.Error() != test.want {
+				t.Fatalf("rejectDeprecatedConfigKeys() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestKubernetesImageForTaskUsesProfileThenArticle(t *testing.T) {
 	cfg := KubernetesConfig{
-		AgentImage: "registry/content@sha256:default",
+		ArticleImage: "registry/article@sha256:article",
 		ImageProfiles: map[string]string{
 			model.PlatformSeednote: "registry/seednote@sha256:seednote",
 			model.PlatformMontage:  "registry/montage@sha256:montage",
@@ -81,9 +107,9 @@ func TestKubernetesImageForTaskUsesProfileThenDefault(t *testing.T) {
 	}
 }
 
-func TestDockerImageForTaskUsesProfileThenDefault(t *testing.T) {
+func TestDockerImageForTaskUsesProfileThenArticle(t *testing.T) {
 	cfg := DockerConfig{
-		Image: "creator-agent-article:latest",
+		ArticleImage: "creator-agent-article:latest",
 		ImageProfiles: map[string]string{
 			model.PlatformSeednote: "creator-agent-seednote:latest",
 			model.PlatformMontage:  "creator-agent-montage:latest",
@@ -147,9 +173,9 @@ func TestValidateKubernetesAcceptsTaggedImages(t *testing.T) {
 		mutate func(*Config)
 	}{
 		{
-			name: "default image tag",
+			name: "Article image tag",
 			mutate: func(cfg *Config) {
-				cfg.Claude.Kubernetes.AgentImage = "registry.example.com/content:latest"
+				cfg.Claude.Kubernetes.ArticleImage = "registry.example.com/article:latest"
 			},
 		},
 		{
@@ -287,7 +313,7 @@ claude:
   executor: "kubernetes"
   agent_server_url: "https://creator-api-svc:8443"
   kubernetes:
-    agent_image: "registry.example.com/creator-agent@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    article_image: "registry.example.com/creator-agent-article@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     image_profiles:
       seednote: "registry.example.com/creator-agent-seednote@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       montage: "registry.example.com/creator-agent-montage@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"

@@ -247,7 +247,7 @@ func main() {
 		agentExecutor = dockerExec
 		dockerExec.CleanupOrphanedContainers()
 		log.Info().
-			Str("image", cfg.Claude.Docker.Image).
+			Str("article_image", cfg.Claude.Docker.ArticleImage).
 			Int64("cpu_cores", cfg.Claude.Docker.CPUCores).
 			Int64("memory_mb", cfg.Claude.Docker.MemoryMB).
 			Int("timeout_sec", cfg.Claude.Docker.TimeoutSec).
@@ -264,7 +264,7 @@ func main() {
 		}
 		log.Info().
 			Str("namespace", cfg.Claude.Kubernetes.Namespace).
-			Str("image", cfg.Claude.Kubernetes.AgentImage).
+			Str("article_image", cfg.Claude.Kubernetes.ArticleImage).
 			Msg("Kubernetes Job runtime client created")
 	default:
 		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)

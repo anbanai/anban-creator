@@ -120,7 +120,7 @@ func TestArticleSkillContracts_NoUnconditionalImageRequirements(t *testing.T) {
 func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "wechatarticle.md"),
+		filepath.Join(root, "plugins", "agents", "article.md"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
@@ -214,8 +214,8 @@ func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
 	articlePaths := []string{
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "plugins", "agents", "wechatarticle.md"),
-		filepath.Join(root, "plugins", "agents", "wechatarticle.toml"),
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
 	}
 	for _, path := range articlePaths {
 		t.Run(path, func(t *testing.T) {
@@ -267,8 +267,8 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 	root := articleContractRepoRoot(t)
 
 	for _, path := range []string{
-		filepath.Join(root, "plugins", "agents", "wechatarticle.md"),
-		filepath.Join(root, "plugins", "agents", "wechatarticle.toml"),
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
 	} {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
@@ -445,8 +445,8 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 	root := articleContractRepoRoot(t)
 
 	for _, path := range []string{
-		filepath.Join(root, "plugins", "agents", "wechatarticle.md"),
-		filepath.Join(root, "plugins", "agents", "wechatarticle.toml"),
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 	} {
@@ -505,8 +505,8 @@ func TestArticleSkillsDoNotReferenceRemovedGenerationMCPTools(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	removed := []string{"write_article", "research_topics", "optimize_seo", "generate_outline"}
 	files := []string{
-		filepath.Join(root, "plugins", "agents", "wechatarticle.md"),
-		filepath.Join(root, "plugins", "agents", "wechatarticle.toml"),
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
 	}
 	for _, plugin := range []string{"plugins"} {
 		for _, skill := range []string{"content-writing", "topic-research", "seo-optimization"} {
@@ -558,11 +558,11 @@ func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *test
 	}
 }
 
-func TestWechatArticleAgentsRouteCreativeGenerationToSkills(t *testing.T) {
+func TestArticleAgentsRouteCreativeGenerationToSkills(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, file := range []string{
-		filepath.Join(root, "plugins", "agents", "wechatarticle.md"),
-		filepath.Join(root, "plugins", "agents", "wechatarticle.toml"),
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
 	} {
 		body := readArticleContractFile(t, file)
 		assertArticleContractContainsAll(t, file, body,

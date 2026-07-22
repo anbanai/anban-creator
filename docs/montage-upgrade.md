@@ -31,7 +31,7 @@ cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.co
 
 Production uses three immutable Agent images:
 
-- `ANBAN_AGENT_IMAGE`: the minimal default Article runtime.
+- `ANBAN_ARTICLE_AGENT_IMAGE` (deployed from `article_agent_image_repo`): the minimal Article runtime.
 - `ANBAN_SEEDNOTE_AGENT_IMAGE`: the Seednote runtime with Python, Agent-Reach, and mcporter.
 - `ANBAN_MONTAGE_AGENT_IMAGE`: the Montage runtime with an embedded OpenMontage template.
 
@@ -43,20 +43,20 @@ make docker-seednote-agent-image
 make docker-montage-agent-image
 ```
 
-The Montage build passes the pinned submodule commit as `OPENMONTAGE_REVISION`
-and writes it to `/app/third_party/OpenMontage/.anban-source-revision`. Publish
-all three images by digest. Do not deploy mutable tags as the persisted
-`task_executions.runtime_image` value.
+The Montage image stores a complete read-only OpenMontage template at
+`/opt/montage-template`. Publish all three images by digest. Do not deploy
+mutable tags as the persisted `task_executions.runtime_image` value.
 
 ## Workspace And Resume
 
-The task PVC is mounted at `/workspace`. The Montage init container copies the
-immutable image template once to `/workspace/openmontage`, then verifies the
-revision marker on every attempt. The agent runs with:
+The task PVC is mounted at `/workspace`. At Kubernetes task startup, the init
+container atomically copies the complete image template into a writable
+`/workspace/montage` directory when it does not already exist. The Agent uses
+the same materialization contract as a Docker/local fallback. It runs with:
 
 ```text
-cwd=/workspace/openmontage
-ANBAN_MONTAGE_SUBMODULE_PATH=/workspace/openmontage
+cwd=/workspace/montage
+ANBAN_MONTAGE_SUBMODULE_PATH=/workspace/montage
 ```
 
 OpenMontage project files, checkpoints, and Claude session state therefore stay
@@ -67,10 +67,11 @@ parent execution's persisted runtime profile and image digest, even if current
 server configuration has changed.
 
 `/tmp` is an `emptyDir` and is intentionally not recoverable. Do not place
-resume-critical state there. Direct artifact upload scans `/workspace/output`
-only; source trees, checkpoints, `.anban-runtime-home`, `.claude`, secrets, and
-dependency caches remain on NAS and are not published as task artifacts unless
-the workflow explicitly registers a stable file through MCP.
+resume-critical state there. Direct artifact upload uses
+`/workspace/montage/output`; source trees, checkpoints, `.anban-runtime-home`,
+`.claude`, secrets, and dependency caches remain on NAS and are not published as
+task artifacts unless the workflow explicitly registers a stable file through
+MCP.
 
 Terminal task workspaces remain available for resume. Permanently deleting the
 task deletes its task-workspace PVC; deleting the PVC out of band also makes the
@@ -84,7 +85,7 @@ Verify a live deployment with:
 ```bash
 kubectl -n anbanai-prod get pod <pod> -o jsonpath='{range .status.initContainerStatuses[*]}{.name}{"="}{.imageID}{"\n"}{end}{range .status.containerStatuses[*]}{.name}{"="}{.imageID}{"\n"}{end}'
 kubectl -n anbanai-prod get pod <pod> -o jsonpath='{range .spec.volumes[*]}{.name}{"="}{.persistentVolumeClaim.claimName}{"\n"}{end}'
-kubectl -n anbanai-prod exec <pod> -- sh -c 'pwd; test -f /workspace/openmontage/.anban-source-revision; cat /workspace/openmontage/.anban-source-revision'
+kubectl -n anbanai-prod exec <pod> -- sh -c 'pwd; test -d /workspace/montage; test -w /workspace/montage; test -d /workspace/montage/remotion-composer'
 ```
 
 ## Adapter Rule
