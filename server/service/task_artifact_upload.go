@@ -34,6 +34,11 @@ type taskArtifactPromotionStorage interface {
 	storage.ConditionalObjectPromoter
 }
 
+type taskArtifactFinalizationClaim struct {
+	sessionID string
+	token     string
+}
+
 type TaskArtifactPrepareRequest struct {
 	TaskID       string `json:"task_id"`
 	ExecutionID  string `json:"execution_id,omitempty"`
@@ -234,9 +239,16 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 	if !ok {
 		return fmt.Errorf("%w: storage provider does not support immutable object promotion", ErrTaskArtifactUnavailable)
 	}
+	operationCtx, operationCancel := context.WithTimeout(ctx, uploadFinalizationTimeout)
+	defer operationCancel()
+	ctx = operationCtx
 	prefix := buildTaskArtifactStoragePrefix(task, executionID)
 	files := make([]*model.TaskFile, 0, len(req.Files))
 	stagingKeys := make([]string, 0, len(req.Files))
+	claims := make([]taskArtifactFinalizationClaim, 0, len(req.Files))
+	defer func() {
+		releaseTaskArtifactFinalizationClaims(ctx, s.repo, claims)
+	}()
 	now := time.Now()
 	for _, file := range req.Files {
 		relPath, err := cleanTaskArtifactRelativePath(task, file.RelativePath)
@@ -286,7 +298,12 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 				}
 				stat = finalStat
 			case errors.Is(finalErr, storage.ErrObjectNotFound):
-				if err := s.validateTaskArtifactStagingSession(ctx, task, stagingUploadID, objectKey, relPath, normalizeTaskArtifactContentType(file.ContentType, relPath), file.Size, now); err != nil {
+				claim, claimErr := s.claimTaskArtifactStagingSession(ctx, task, stagingUploadID, objectKey, relPath, normalizeTaskArtifactContentType(file.ContentType, relPath), file.Size, now)
+				if claimErr != nil {
+					return claimErr
+				}
+				claims = append(claims, claim)
+				if err := validateTaskArtifactStagingClaim(ctx, s.repo, task, claim, objectKey, relPath, normalizeTaskArtifactContentType(file.ContentType, relPath), file.Size, now); err != nil {
 					return err
 				}
 				stat, err = statTaskArtifactObject(ctx, artifactStore, objectKey)
@@ -369,6 +386,8 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 			return err
 		}
 	}
+	releaseTaskArtifactFinalizationClaims(ctx, s.repo, claims)
+	claims = nil
 	deleteTaskArtifactStagingObjects(ctx, s.store, stagingKeys)
 	return nil
 }
@@ -410,22 +429,74 @@ func taskArtifactStagingUploadID(task *model.Task, executionID, hash, relPath, k
 	return uploadID, true
 }
 
-func (s *TaskService) validateTaskArtifactStagingSession(ctx context.Context, task *model.Task, uploadID, stagingKey, relPath, contentType string, size int64, now time.Time) error {
+func (s *TaskService) claimTaskArtifactStagingSession(ctx context.Context, task *model.Task, uploadID, stagingKey, relPath, contentType string, size int64, now time.Time) (taskArtifactFinalizationClaim, error) {
+	claim := taskArtifactFinalizationClaim{sessionID: uploadID, token: uuid.NewString()}
+	claimed, err := s.repo.UploadSessions().ClaimFinalization(ctx, uploadID, claim.token, now, now.Add(-uploadFinalizationLease))
+	if err != nil {
+		return taskArtifactFinalizationClaim{}, fmt.Errorf("%w: claim task artifact upload session: %v", ErrTaskArtifactPersistence, err)
+	}
+	if claimed {
+		return claim, nil
+	}
 	session, err := s.repo.UploadSessions().FindByID(ctx, uploadID)
+	if err != nil {
+		if errors.Is(err, model.ErrUploadSessionNotFound) {
+			return taskArtifactFinalizationClaim{}, taskArtifactInvalidf("task artifact %s staging upload session is unavailable", relPath)
+		}
+		return taskArtifactFinalizationClaim{}, fmt.Errorf("%w: find task artifact upload session: %v", ErrTaskArtifactPersistence, err)
+	}
+	if err := validateTaskArtifactStagingSessionIdentity(session, task, stagingKey, relPath, contentType, size); err != nil {
+		return taskArtifactFinalizationClaim{}, err
+	}
+	if session.Status == model.UploadSessionFinalizing && session.FinalizationClaimedAt != nil && session.FinalizationClaimedAt.After(now.Add(-uploadFinalizationLease)) {
+		return taskArtifactFinalizationClaim{}, fmt.Errorf("%w: task artifact %s is already being finalized", ErrTaskArtifactUnavailable, relPath)
+	}
+	if !session.ExpiresAt.After(now) {
+		return taskArtifactFinalizationClaim{}, taskArtifactInvalidf("task artifact %s staging upload session has expired", relPath)
+	}
+	if session.Status != model.UploadSessionPending {
+		return taskArtifactFinalizationClaim{}, taskArtifactInvalidf("task artifact %s staging upload session is not pending", relPath)
+	}
+	return taskArtifactFinalizationClaim{}, fmt.Errorf("%w: task artifact %s finalization claim was rejected", ErrTaskArtifactUnavailable, relPath)
+}
+
+func validateTaskArtifactStagingClaim(ctx context.Context, repo repository.Repository, task *model.Task, claim taskArtifactFinalizationClaim, stagingKey, relPath, contentType string, size int64, now time.Time) error {
+	session, err := repo.UploadSessions().FindByID(ctx, claim.sessionID)
 	if err != nil {
 		if errors.Is(err, model.ErrUploadSessionNotFound) {
 			return taskArtifactInvalidf("task artifact %s staging upload session is unavailable", relPath)
 		}
-		return fmt.Errorf("%w: find task artifact upload session: %v", ErrTaskArtifactPersistence, err)
+		return fmt.Errorf("%w: reload task artifact upload session: %v", ErrTaskArtifactPersistence, err)
 	}
-	if session.UserID != task.UserID || session.Purpose != DirectUploadPurposeTaskArtifact || session.StagingKey != stagingKey ||
+	if err := validateTaskArtifactStagingSessionIdentity(session, task, stagingKey, relPath, contentType, size); err != nil {
+		return err
+	}
+	if session.Status != model.UploadSessionFinalizing || session.FinalizationToken != claim.token || session.FinalizationClaimedAt == nil {
+		return fmt.Errorf("%w: task artifact %s finalization claim was lost", ErrTaskArtifactUnavailable, relPath)
+	}
+	if !session.ExpiresAt.After(now) {
+		return taskArtifactInvalidf("task artifact %s staging upload session has expired", relPath)
+	}
+	return nil
+}
+
+func validateTaskArtifactStagingSessionIdentity(session *model.UploadSession, task *model.Task, stagingKey, relPath, contentType string, size int64) error {
+	if session == nil || session.UserID != task.UserID || session.Purpose != DirectUploadPurposeTaskArtifact || session.StagingKey != stagingKey ||
 		session.FileName != filepath.Base(relPath) || session.ContentType != contentType || session.Size != size {
 		return taskArtifactInvalidf("task artifact %s staging upload session does not match manifest", relPath)
 	}
-	if session.Status != model.UploadSessionPending || !session.ExpiresAt.After(now) {
-		return taskArtifactInvalidf("task artifact %s staging upload session is not pending and unexpired", relPath)
-	}
 	return nil
+}
+
+func releaseTaskArtifactFinalizationClaims(ctx context.Context, repo repository.Repository, claims []taskArtifactFinalizationClaim) {
+	if repo == nil || len(claims) == 0 {
+		return
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), uploadFinalizationCleanupTTL)
+	defer cancel()
+	for i := len(claims) - 1; i >= 0; i-- {
+		_, _ = repo.UploadSessions().ReleaseFinalization(releaseCtx, claims[i].sessionID, claims[i].token)
+	}
 }
 
 func deleteTaskArtifactStagingObjects(ctx context.Context, store storage.Provider, keys []string) {

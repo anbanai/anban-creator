@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,6 +41,7 @@ type fakeTaskArtifactStorage struct {
 	promoteCalls       []taskArtifactPromotion
 	promoteErr         error
 	promoteErrBySource map[string]error
+	beforePromote      func(sourceKey, finalKey string)
 	afterPromote       func(sourceKey, finalKey string)
 	objects            map[string][]byte
 	deletedKeys        []string
@@ -72,6 +74,43 @@ type failingTaskArtifactUploadSessionRepository struct {
 
 func (r *failingTaskArtifactUploadSessionRepository) Create(context.Context, *model.UploadSession) error {
 	return r.err
+}
+
+type recordingTaskArtifactUploadSessionRepository struct {
+	repository.UploadSessionRepository
+	releasedIDs []string
+}
+
+func (r *recordingTaskArtifactUploadSessionRepository) ReleaseFinalization(ctx context.Context, id, token string) (bool, error) {
+	r.releasedIDs = append(r.releasedIDs, id)
+	return r.UploadSessionRepository.ReleaseFinalization(ctx, id, token)
+}
+
+type blockingFirstTaskArtifactClaimRepository struct {
+	repository.UploadSessionRepository
+	firstClaimed chan struct{}
+	releaseFirst chan struct{}
+	once         sync.Once
+}
+
+func (r *blockingFirstTaskArtifactClaimRepository) ClaimFinalization(ctx context.Context, id, token string, claimedAt, claimStaleBefore time.Time) (bool, error) {
+	claimed, err := r.UploadSessionRepository.ClaimFinalization(ctx, id, token, claimedAt, claimStaleBefore)
+	if err != nil || !claimed {
+		return claimed, err
+	}
+	blocked := false
+	r.once.Do(func() {
+		blocked = true
+		close(r.firstClaimed)
+	})
+	if blocked {
+		select {
+		case <-ctx.Done():
+			return false, context.Cause(ctx)
+		case <-r.releaseFirst:
+		}
+	}
+	return true, nil
 }
 
 func (s *statOnlyTaskArtifactStorage) StatObject(ctx context.Context, key string) (*storage.ObjectInfo, error) {
@@ -152,6 +191,9 @@ func (f *fakeTaskArtifactStorage) StatObject(_ context.Context, key string) (*st
 
 func (f *fakeTaskArtifactStorage) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) (*storage.ObjectInfo, error) {
 	f.promoteCalls = append(f.promoteCalls, taskArtifactPromotion{sourceKey: sourceKey, finalKey: finalKey, expectedETag: expectedETag})
+	if f.beforePromote != nil {
+		f.beforePromote(sourceKey, finalKey)
+	}
 	if err := f.promoteErrBySource[sourceKey]; err != nil {
 		delete(f.promoteErrBySource, sourceKey)
 		return nil, err
@@ -499,6 +541,15 @@ func TestFinalizeTaskArtifactManifestPromotesStagingAndPersistsImmutableFinal(t 
 	}
 	store.stats = make(map[string]*storage.ObjectInfo)
 	store.stats[prepared.Key] = &storage.ObjectInfo{Key: prepared.Key, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging-etag"}
+	store.beforePromote = func(_, _ string) {
+		claimed, findErr := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+		if findErr != nil {
+			t.Fatalf("find claimed task artifact session: %v", findErr)
+		}
+		if claimed.Status != model.UploadSessionFinalizing || claimed.FinalizationToken == "" || claimed.FinalizationClaimedAt == nil {
+			t.Fatalf("task artifact session during promotion = %#v, want active finalization lease", claimed)
+		}
+	}
 	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{
 		taskArtifactManifestEntry("output/article.md", prepared.Key, 7, taskArtifactTestSHA256),
 	}}
@@ -516,13 +567,104 @@ func TestFinalizeTaskArtifactManifestPromotesStagingAndPersistsImmutableFinal(t 
 	if rows[0].OSSKey != finalKey || rows[0].OSSURL != store.GetURL(finalKey) || rows[0].ContentHash != taskArtifactTestSHA256 {
 		t.Fatalf("persisted row = %#v, want immutable final key", rows[0])
 	}
+	found, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	if err != nil || found.Status != model.UploadSessionPending || found.FinalizationToken != "" || found.FinalizationClaimedAt != nil {
+		t.Fatalf("released task artifact session = %#v, err=%v", found, err)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRejectsActiveClaimAndRetriesAfterRelease(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.stats = map[string]*storage.ObjectInfo{
+		prepared.Key: {Key: prepared.Key, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging"},
+	}
+	now := time.Now()
+	claimed, err := repo.UploadSessions().ClaimFinalization(ctx, prepared.UploadID, "concurrent-claim", now, now.Add(-uploadFinalizationLease))
+	if err != nil || !claimed {
+		t.Fatalf("ClaimFinalization = %v, %v", claimed, err)
+	}
+	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{
+		taskArtifactManifestEntry("output/article.md", prepared.Key, 7, taskArtifactTestSHA256),
+	}}
+	err = svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest)
+	if !errors.Is(err, ErrTaskArtifactUnavailable) || len(store.promoteCalls) != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("active-claim finalize = %v promote=%#v delete=%#v; want retryable unavailable", err, store.promoteCalls, store.deletedKeys)
+	}
+	released, err := repo.UploadSessions().ReleaseFinalization(ctx, prepared.UploadID, "concurrent-claim")
+	if err != nil || !released {
+		t.Fatalf("ReleaseFinalization = %v, %v", released, err)
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatalf("retry after release: %v", err)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestAllowsOnlyOneConcurrentClaim(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.stats = map[string]*storage.ObjectInfo{
+		prepared.Key: {Key: prepared.Key, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging"},
+	}
+	sessions := &blockingFirstTaskArtifactClaimRepository{
+		UploadSessionRepository: repo.UploadSessions(),
+		firstClaimed:            make(chan struct{}),
+		releaseFirst:            make(chan struct{}),
+	}
+	svc.repo = &taskArtifactRepositoryOverride{Repository: repo, uploadSessions: sessions}
+	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{
+		taskArtifactManifestEntry("output/article.md", prepared.Key, 7, taskArtifactTestSHA256),
+	}}
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest)
+	}()
+	select {
+	case <-sessions.firstClaimed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first finalization did not acquire its claim")
+	}
+	secondErr := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest)
+	if !errors.Is(secondErr, ErrTaskArtifactUnavailable) {
+		t.Fatalf("second concurrent finalize error = %v, want retryable unavailable", secondErr)
+	}
+	close(sessions.releaseFirst)
+	select {
+	case firstErr := <-firstResult:
+		if firstErr != nil {
+			t.Fatalf("first concurrent finalize: %v", firstErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("first finalization did not finish after release")
+	}
+	if len(store.promoteCalls) != 1 {
+		t.Fatalf("concurrent promotions = %#v, want one", store.promoteCalls)
+	}
+	found, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	if err != nil || found.Status != model.UploadSessionPending || found.FinalizationToken != "" {
+		t.Fatalf("concurrent finalization session = %#v, err=%v", found, err)
+	}
 }
 
 func TestTaskArtifactStagingCleanupAndFinalExistingRetry(t *testing.T) {
 	svc, repo, store, task := newTaskArtifactTestService(t)
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
-	now := time.Now().UTC().Truncate(time.Second)
+	now := time.Now().Truncate(time.Second)
 	cfg := taskArtifactDirectUploadConfig(t)
 	cfg.Now = func() time.Time { return now }
 	cfg.Storage.DirectUploadExpiresSeconds = 60
@@ -554,19 +696,42 @@ func TestTaskArtifactStagingCleanupAndFinalExistingRetry(t *testing.T) {
 		t.Fatalf("post-commit upload session = %#v, err=%v; want pending for delayed cleanup", found, err)
 	}
 
-	// A delayed PUT can recreate staging, but the still-pending session lets the
-	// existing expiration cleanup delete it again without touching final bytes.
-	store.stats[prepared.Key] = &storage.ObjectInfo{Key: prepared.Key, Size: 9, SHA256: strings.Repeat("b", 64), ETag: "staging-b"}
+	// Cleanup remains repeatable for a bounded grace window so a delayed PUT
+	// cannot permanently recreate staging after the first expiration sweep.
 	cleaned, err := CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(time.Second), 10)
 	if err != nil || cleaned != 1 {
-		t.Fatalf("CleanupExpiredUploadSessions = %d, %v; want one delayed staging cleanup", cleaned, err)
+		t.Fatalf("first CleanupExpiredUploadSessions = %d, %v", cleaned, err)
 	}
 	if store.stats[prepared.Key] != nil || store.stats[finalKey] == nil || len(store.deletedKeys) != 2 || store.deletedKeys[1] != prepared.Key {
-		t.Fatalf("expiration cleanup: staging=%#v final=%#v deleted=%#v", store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
+		t.Fatalf("first expiration cleanup: staging=%#v final=%#v deleted=%#v", store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
+	}
+	found, err = repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil || found.Status != model.UploadSessionPending {
+		t.Fatalf("task artifact session during cleanup grace = %#v, err=%v", found, err)
+	}
+
+	store.stats[prepared.Key] = &storage.ObjectInfo{Key: prepared.Key, Size: 9, SHA256: strings.Repeat("b", 64), ETag: "staging-b"}
+	cleaned, err = CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(30*time.Minute), 10)
+	if err != nil || cleaned != 1 || store.stats[prepared.Key] != nil || store.stats[finalKey] == nil || len(store.deletedKeys) != 3 || store.deletedKeys[2] != prepared.Key {
+		t.Fatalf("delayed PUT cleanup = %d, %v staging=%#v final=%#v deleted=%#v", cleaned, err, store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
+	}
+	found, err = repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil || found.Status != model.UploadSessionPending {
+		t.Fatalf("task artifact session after delayed cleanup = %#v, err=%v", found, err)
+	}
+
+	cleaned, err = CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(time.Hour+time.Second), 10)
+	if err != nil || cleaned != 1 {
+		t.Fatalf("terminal CleanupExpiredUploadSessions = %d, %v", cleaned, err)
 	}
 	found, err = repo.UploadSessions().FindByID(ctx, session.ID)
 	if err != nil || found.Status != model.UploadSessionExpired {
-		t.Fatalf("expired task artifact session = %#v, err=%v", found, err)
+		t.Fatalf("terminal task artifact session = %#v, err=%v", found, err)
+	}
+	deleted := len(store.deletedKeys)
+	cleaned, err = CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(time.Hour+time.Minute), 10)
+	if err != nil || cleaned != 0 || len(store.deletedKeys) != deleted || store.stats[finalKey] == nil {
+		t.Fatalf("post-grace cleanup = %d, %v deleted=%#v final=%#v", cleaned, err, store.deletedKeys, store.stats[finalKey])
 	}
 
 	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
@@ -607,6 +772,75 @@ func TestCleanupExpiredAbandonedTaskArtifactSessionNeverDeletesFinal(t *testing.
 	}
 	if store.stats[prepared.Key] != nil || store.stats[finalKey] == nil || len(store.deletedKeys) != 1 || store.deletedKeys[0] != prepared.Key {
 		t.Fatalf("abandoned cleanup touched wrong objects: staging=%#v final=%#v deleted=%#v", store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
+	}
+}
+
+func TestCleanupExpiredTaskArtifactWaitsForFreshFinalizationClaim(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	now := time.Now().UTC().Truncate(time.Second)
+	cfg := taskArtifactDirectUploadConfig(t)
+	cfg.Now = func() time.Time { return now }
+	cfg.Storage.DirectUploadExpiresSeconds = 60
+	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimAt := session.ExpiresAt.Add(-time.Second)
+	claimed, err := repo.UploadSessions().ClaimFinalization(ctx, session.ID, "fresh-finalizer", claimAt, claimAt.Add(-uploadFinalizationLease))
+	if err != nil || !claimed {
+		t.Fatalf("ClaimFinalization = %v, %v", claimed, err)
+	}
+	finalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	store.stats = map[string]*storage.ObjectInfo{
+		prepared.Key: {Key: prepared.Key, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "staging"},
+		finalKey:     {Key: finalKey, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "final"},
+	}
+	cleanupAt := session.ExpiresAt.Add(time.Second)
+	cleaned, err := CleanupExpiredUploadSessions(ctx, store, repo, cleanupAt, 10)
+	if err != nil || cleaned != 0 || len(store.deletedKeys) != 0 || store.stats[prepared.Key] == nil || store.stats[finalKey] == nil {
+		t.Fatalf("cleanup during fresh claim = %d, %v staging=%#v final=%#v deleted=%#v", cleaned, err, store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
+	}
+	released, err := repo.UploadSessions().ReleaseFinalization(ctx, session.ID, "fresh-finalizer")
+	if err != nil || !released {
+		t.Fatalf("ReleaseFinalization = %v, %v", released, err)
+	}
+	cleaned, err = CleanupExpiredUploadSessions(ctx, store, repo, cleanupAt, 10)
+	if err != nil || cleaned != 1 || len(store.deletedKeys) != 1 || store.deletedKeys[0] != prepared.Key || store.stats[finalKey] == nil {
+		t.Fatalf("cleanup after release = %d, %v final=%#v deleted=%#v", cleaned, err, store.stats[finalKey], store.deletedKeys)
+	}
+}
+
+func TestCleanupExpiredTaskArtifactSkipsAssetFinalizationRecovery(t *testing.T) {
+	_, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	now := time.Now().UTC().Truncate(time.Second)
+	stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
+	session := seedTaskArtifactUploadSession(t, repo, task, stagingKey, "output/article.md", 7, func(session *model.UploadSession) {
+		session.ExpiresAt = now.Add(-time.Minute)
+		session.PromotionSourceETag = "must-not-trigger-asset-recovery"
+		session.FinalizationETag = "must-not-trigger-asset-recovery"
+	})
+	finalKey := expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, "output/article.md")
+	store.stats = map[string]*storage.ObjectInfo{
+		stagingKey: {Key: stagingKey, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "staging"},
+		finalKey:   {Key: finalKey, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "final"},
+	}
+	cleaned, err := CleanupExpiredUploadSessions(ctx, store, repo, now, 10)
+	if err != nil || cleaned != 1 || len(store.statKeys) != 0 || len(store.deletedKeys) != 1 || store.deletedKeys[0] != stagingKey || store.stats[finalKey] == nil {
+		t.Fatalf("task artifact cleanup = %d, %v stats=%#v final=%#v deleted=%#v", cleaned, err, store.statKeys, store.stats[finalKey], store.deletedKeys)
+	}
+	found, err := repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil || found.Status != model.UploadSessionPending {
+		t.Fatalf("task artifact recovery isolation session = %#v, err=%v", found, err)
 	}
 }
 
@@ -657,6 +891,8 @@ func TestFinalizeTaskArtifactManifestRetainsStagingWhenPersistenceFails(t *testi
 	svc, repo, store, task := newTaskArtifactTestService(t)
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
+	sessions := &recordingTaskArtifactUploadSessionRepository{UploadSessionRepository: repo.UploadSessions()}
+	svc.repo = &taskArtifactRepositoryOverride{Repository: repo, uploadSessions: sessions}
 	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
 		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
 	})
@@ -675,6 +911,10 @@ func TestFinalizeTaskArtifactManifestRetainsStagingWhenPersistenceFails(t *testi
 	}
 	if store.stats[prepared.Key] == nil || len(store.deletedKeys) != 0 {
 		t.Fatalf("failed persistence cleaned staging: object=%#v deleted=%#v", store.stats[prepared.Key], store.deletedKeys)
+	}
+	found, findErr := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	if findErr != nil || found.Status != model.UploadSessionPending || found.FinalizationToken != "" || len(sessions.releasedIDs) != 1 || sessions.releasedIDs[0] != prepared.UploadID {
+		t.Fatalf("failed persistence claim release: session=%#v err=%v releases=%#v", found, findErr, sessions.releasedIDs)
 	}
 }
 
@@ -871,11 +1111,13 @@ func TestFinalizeTaskArtifactManifestRetriesPartialPromotionIdempotently(t *test
 	svc, repo, store, task := newTaskArtifactTestService(t)
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
+	sessions := &recordingTaskArtifactUploadSessionRepository{UploadSessionRepository: repo.UploadSessions()}
+	svc.repo = &taskArtifactRepositoryOverride{Repository: repo, uploadSessions: sessions}
 	hashB := strings.Repeat("b", 64)
 	stagingA := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/output/article.md"
 	stagingB := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + hashB + "/" + uuid.NewString() + "/output/cover.png"
-	seedTaskArtifactUploadSession(t, repo, task, stagingA, "output/article.md", 7, nil)
-	seedTaskArtifactUploadSession(t, repo, task, stagingB, "output/cover.png", 8, nil)
+	sessionA := seedTaskArtifactUploadSession(t, repo, task, stagingA, "output/article.md", 7, nil)
+	sessionB := seedTaskArtifactUploadSession(t, repo, task, stagingB, "output/cover.png", 8, nil)
 	store.stats = map[string]*storage.ObjectInfo{
 		stagingA: {Key: stagingA, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "etag-a"},
 		stagingB: {Key: stagingB, Size: 8, ContentType: "image/png", SHA256: hashB, ETag: "etag-b"},
@@ -887,6 +1129,15 @@ func TestFinalizeTaskArtifactManifestRetriesPartialPromotionIdempotently(t *test
 	}}
 	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); !errors.Is(err, ErrTaskArtifactUnavailable) {
 		t.Fatalf("first finalize error = %v, want promotion failure", err)
+	}
+	if len(sessions.releasedIDs) != 2 {
+		t.Fatalf("partial promotion releases = %#v, want both claims released", sessions.releasedIDs)
+	}
+	for _, sessionID := range []string{sessionA.ID, sessionB.ID} {
+		found, findErr := repo.UploadSessions().FindByID(ctx, sessionID)
+		if findErr != nil || found.Status != model.UploadSessionPending || found.FinalizationToken != "" {
+			t.Fatalf("partial promotion session %s = %#v, err=%v", sessionID, found, findErr)
+		}
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
 	if err != nil || len(rows) != 0 {
