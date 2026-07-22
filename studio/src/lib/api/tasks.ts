@@ -1,12 +1,13 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment } from '@/types'
+import type { Task, TaskFile, CreateTaskRequest, CloneTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment } from '@/types'
 
 export interface ResumeTaskRequest {
   prompt?: string
   input_attachments: InputAttachment[]
 }
 
-export interface CloneTaskRequest {
+// TODO(Task 6): remove after the task detail clone flow submits CloneTaskRequest.
+type ExactCloneTaskRequest = {
   prompt: string
   input_attachments: InputAttachment[]
 }
@@ -28,7 +29,7 @@ export const tasksApi = {
 
   // Clone a completed/failed/cancelled task into a fresh billed task while
   // preserving the full frozen configuration. Returns the new task.
-  clone: (id: string, data: CloneTaskRequest) =>
+  clone: (id: string, data: CloneTaskRequest | ExactCloneTaskRequest) =>
     unwrap<Task>(http.post(`/tasks/${id}/clone`, data)),
 
   resume: (id: string, data: ResumeTaskRequest) =>
