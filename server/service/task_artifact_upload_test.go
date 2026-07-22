@@ -510,11 +510,39 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 	}
 
 	settlementKey := billingFingerprint(task.ID, executionID, operationID)
+	if processed, err := fixture.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 1 {
+		t.Fatalf("ProcessSettlementOutbox = %d, %v, want one processed settlement", processed, err)
+	}
 	settlementBefore, err := fixture.repo.Billing().FindSettlementByKey(ctx, "mcp-image-settlement", settlementKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var outboxBefore, chargesBefore int64
+	if settlementBefore.Status != "processed" || settlementBefore.Attempts != 1 || settlementBefore.ResourceID != generated.ID {
+		t.Fatalf("processed settlement = %#v, want one processed attempt linked to %s", settlementBefore, generated.ID)
+	}
+	chargeBefore, err := fixture.repo.Billing().FindChargeByOperation(ctx, task.ID, executionID, operationID, "retail-test-v1", "image.cover.v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chargeBefore.Kind != model.BillingChargeKindOperation || chargeBefore.Status != model.BillingChargeStatusPosted ||
+		chargeBefore.PriceCredits != 500 || chargeBefore.PaidCredits != 500 ||
+		chargeBefore.PromotionalCredits != 0 || chargeBefore.DebtCredits != 0 ||
+		chargeBefore.ResourceID != generated.ID || chargeBefore.IdempotencyScope != "outbox-charge" || chargeBefore.IdempotencyKey != settlementBefore.ID {
+		t.Fatalf("operation charge = %#v, want resource %s linked to settlement %s", chargeBefore, generated.ID, settlementBefore.ID)
+	}
+	var deductionBefore model.BillingWalletEntry
+	if err := db.Where("charge_id = ?", chargeBefore.ID).First(&deductionBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+	if deductionBefore.EventKind != model.BillingWalletEventKindCharge || deductionBefore.PaidDelta != -500 ||
+		deductionBefore.PromotionalDelta != 0 || deductionBefore.DebtDelta != 0 || deductionBefore.ResourceID != generated.ID {
+		t.Fatalf("wallet deduction = %#v, want one 500-credit paid deduction for %s", deductionBefore, generated.ID)
+	}
+	accountBefore := fixture.account(t, billingWalletUserID)
+	if accountBefore.PaidCredits != 0 || accountBefore.PromotionalCredits != 0 || accountBefore.DebtCredits != 0 {
+		t.Fatalf("account after operation charge = %#v, want fully consumed 500-credit balance", accountBefore)
+	}
+	var outboxBefore, chargesBefore, deductionsBefore int64
 	if err := db.Model(&model.BillingSettlementOutbox{}).
 		Where("task_id = ? AND attempt_id = ?", task.ID, executionID).
 		Count(&outboxBefore).Error; err != nil {
@@ -523,6 +551,11 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 	if err := db.Model(&model.BillingCharge{}).
 		Where("operation_task_id = ? AND attempt_id = ?", task.ID, executionID).
 		Count(&chargesBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.BillingWalletEntry{}).
+		Where("charge_id = ?", chargeBefore.ID).
+		Count(&deductionsBefore).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -541,6 +574,9 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if processed, err := fixture.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 0 {
+		t.Fatalf("duplicate ProcessSettlementOutbox = %d, %v, want no work", processed, err)
+	}
 
 	rows, err := fixture.repo.TaskFiles().FindByExecutionID(ctx, executionID)
 	if err != nil {
@@ -556,10 +592,34 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settlementAfter.ID != settlementBefore.ID || settlementAfter.ResourceID != generated.ID {
+	if settlementAfter.ID != settlementBefore.ID || settlementAfter.ResourceID != generated.ID ||
+		settlementAfter.Status != settlementBefore.Status || settlementAfter.Attempts != settlementBefore.Attempts {
 		t.Fatalf("settlement after replacement = %#v, want stable settlement %s linked to %s", settlementAfter, settlementBefore.ID, generated.ID)
 	}
-	var outboxAfter, chargesAfter int64
+	chargeAfter, err := fixture.repo.Billing().FindChargeByOperation(ctx, task.ID, executionID, operationID, "retail-test-v1", "image.cover.v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chargeAfter.ID != chargeBefore.ID || chargeAfter.ResourceID != chargeBefore.ResourceID ||
+		chargeAfter.IdempotencyScope != chargeBefore.IdempotencyScope || chargeAfter.IdempotencyKey != chargeBefore.IdempotencyKey ||
+		chargeAfter.PriceCredits != chargeBefore.PriceCredits || chargeAfter.PaidCredits != chargeBefore.PaidCredits ||
+		chargeAfter.PromotionalCredits != chargeBefore.PromotionalCredits || chargeAfter.DebtCredits != chargeBefore.DebtCredits {
+		t.Fatalf("charge after replacement = %#v, want unchanged charge %#v", chargeAfter, chargeBefore)
+	}
+	var deductionAfter model.BillingWalletEntry
+	if err := db.Where("charge_id = ?", chargeBefore.ID).First(&deductionAfter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if deductionAfter.ID != deductionBefore.ID || deductionAfter.PaidDelta != deductionBefore.PaidDelta ||
+		deductionAfter.PromotionalDelta != deductionBefore.PromotionalDelta || deductionAfter.DebtDelta != deductionBefore.DebtDelta {
+		t.Fatalf("deduction after replacement = %#v, want unchanged deduction %#v", deductionAfter, deductionBefore)
+	}
+	accountAfter := fixture.account(t, billingWalletUserID)
+	if accountAfter.PaidCredits != accountBefore.PaidCredits || accountAfter.PromotionalCredits != accountBefore.PromotionalCredits ||
+		accountAfter.DebtCredits != accountBefore.DebtCredits || accountAfter.Version != accountBefore.Version {
+		t.Fatalf("account after replacement = %#v, want unchanged projection %#v", accountAfter, accountBefore)
+	}
+	var outboxAfter, chargesAfter, deductionsAfter int64
 	if err := db.Model(&model.BillingSettlementOutbox{}).
 		Where("task_id = ? AND attempt_id = ?", task.ID, executionID).
 		Count(&outboxAfter).Error; err != nil {
@@ -570,8 +630,15 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 		Count(&chargesAfter).Error; err != nil {
 		t.Fatal(err)
 	}
-	if outboxBefore != 1 || outboxAfter != outboxBefore || chargesAfter != chargesBefore {
-		t.Fatalf("billing rows changed: outbox %d -> %d, charges %d -> %d", outboxBefore, outboxAfter, chargesBefore, chargesAfter)
+	if err := db.Model(&model.BillingWalletEntry{}).
+		Where("charge_id = ?", chargeBefore.ID).
+		Count(&deductionsAfter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if outboxBefore != 1 || outboxAfter != outboxBefore || chargesBefore != 1 || chargesAfter != chargesBefore ||
+		deductionsBefore != 1 || deductionsAfter != deductionsBefore {
+		t.Fatalf("billing rows changed: outbox %d -> %d, charges %d -> %d, deductions %d -> %d",
+			outboxBefore, outboxAfter, chargesBefore, chargesAfter, deductionsBefore, deductionsAfter)
 	}
 }
 
