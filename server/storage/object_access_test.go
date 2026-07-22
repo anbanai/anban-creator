@@ -122,6 +122,27 @@ func TestOSSProviderStatObjectClassifiesNotFound(t *testing.T) {
 	}
 }
 
+func TestOSSProviderStatObjectReturnsArtifactSHA256(t *testing.T) {
+	const hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "7")
+		w.Header().Set("Content-Type", "text/markdown")
+		w.Header().Set("ETag", "etag-1")
+		w.Header().Set("X-Oss-Meta-Sha256", hash)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	provider := newTestOSSProvider(t, server.URL)
+
+	info, err := provider.StatObject(context.Background(), "output/article.md")
+	if err != nil {
+		t.Fatalf("StatObject: %v", err)
+	}
+	if info.SHA256 != hash || info.Size != 7 || info.ETag != "etag-1" {
+		t.Fatalf("ObjectInfo = %#v, want stored hash, size, and ETag", info)
+	}
+}
+
 func TestLocalProviderPromotesVerifiedObjectImmutably(t *testing.T) {
 	provider, err := NewLocalProvider(t.TempDir())
 	if err != nil {

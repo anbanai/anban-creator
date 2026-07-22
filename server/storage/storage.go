@@ -7,6 +7,8 @@ import (
 	"io"
 )
 
+const ObjectMetadataSHA256 = "sha256"
+
 // UploadResult holds the result of a file upload.
 type UploadResult struct {
 	URL      string // Public URL or local path
@@ -22,6 +24,7 @@ type ObjectInfo struct {
 	MimeType    string
 	ContentType string
 	ETag        string
+	SHA256      string
 }
 
 var (

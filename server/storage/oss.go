@@ -153,12 +153,14 @@ func (p *OSSProvider) StatObject(ctx context.Context, key string) (*ObjectInfo, 
 	size, _ := strconv.ParseInt(meta.Get("Content-Length"), 10, 64)
 	contentType := meta.Get("Content-Type")
 	etag := strings.TrimSpace(meta.Get("ETag"))
+	sha256 := strings.ToLower(strings.TrimSpace(meta.Get("X-Oss-Meta-Sha256")))
 	return &ObjectInfo{
 		Key:         key,
 		Size:        size,
 		MimeType:    contentType,
 		ContentType: contentType,
 		ETag:        etag,
+		SHA256:      sha256,
 	}, nil
 }
 
