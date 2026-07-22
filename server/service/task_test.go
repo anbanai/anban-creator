@@ -1973,7 +1973,7 @@ func TestTaskServiceLegacyProjectConcurrencyCapOverridesProjectLimit(t *testing.
 func TestTaskServiceJobDispatcherIgnoresLegacyProjectConcurrencyCap(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetProjectConcurrencyCap(1)
-	svc.SetKubernetesDispatcher(&dispatchTestDispatcher{})
+	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -2016,7 +2016,7 @@ func TestTaskServiceProjectConcurrencyModes(t *testing.T) {
 	if got := svc.effectiveProjectMaxConcurrent(project); got != 1 {
 		t.Fatalf("legacy Kubernetes limit = %d, want 1", got)
 	}
-	svc.SetKubernetesDispatcher(&dispatchTestDispatcher{})
+	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
 	if got := svc.effectiveProjectMaxConcurrent(project); got != 8 {
 		t.Fatalf("Job dispatcher configured limit = %d, want 8", got)
 	}

@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -21,21 +20,6 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-const (
-	kubernetesPhasePending   = "pending"
-	kubernetesPhaseRunning   = "running"
-	kubernetesPhaseSucceeded = "succeeded"
-	kubernetesPhaseFailed    = "failed"
-)
-
-type KubernetesDispatcher interface {
-	ResolveRuntime(taskType string) srvconfig.RuntimeImageSelection
-	Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*KubernetesRuntimeIdentity, error)
-	Delete(ctx context.Context, execution *model.TaskExecution) error
-	DeleteProjectMemory(ctx context.Context, projectID string) error
-	Inspect(ctx context.Context, execution *model.TaskExecution) (*KubernetesExecutionState, error)
-}
-
 func (d *kubernetesJobDispatcher) ResolveRuntime(taskType string) srvconfig.RuntimeImageSelection {
 	if d == nil {
 		return srvconfig.RuntimeImageSelection{}
@@ -43,28 +27,16 @@ func (d *kubernetesJobDispatcher) ResolveRuntime(taskType string) srvconfig.Runt
 	return RuntimeImageForTask(d.config.RuntimeImages, taskType)
 }
 
-type KubernetesRuntimeIdentity struct {
-	Namespace string
-	JobName   string
-}
-
-type KubernetesExecutionState struct {
-	Phase       string
-	PodUID      string
-	Reason      string
-	Message     string
-	ExitCode    *int32
-	CompletedAt *time.Time
-}
-
 type kubernetesJobDispatcher struct {
 	config kubernetesJobConfig
 	kube   kubernetes.Interface
 }
 
-var _ KubernetesDispatcher = (*kubernetesJobDispatcher)(nil)
+var _ RuntimeDispatcher = (*kubernetesJobDispatcher)(nil)
 
-func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string) (KubernetesDispatcher, error) {
+func (*kubernetesJobDispatcher) Scope() string { return "kubernetes" }
+
+func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string) (RuntimeDispatcher, error) {
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("kubernetes in-cluster config: %w", err)
@@ -76,7 +48,7 @@ func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, runtimeImages srvco
 	return NewKubernetesDispatcherWithClient(cfg, runtimeImages, serverURL, client)
 }
 
-func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string, client kubernetes.Interface) (KubernetesDispatcher, error) {
+func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string, client kubernetes.Interface) (RuntimeDispatcher, error) {
 	if client == nil {
 		return nil, fmt.Errorf("kubernetes client is required")
 	}
@@ -84,7 +56,7 @@ func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, runtimeIm
 	return &kubernetesJobDispatcher{config: jobCfg, kube: client}, nil
 }
 
-func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*KubernetesRuntimeIdentity, error) {
+func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
 	if err := d.validate(execution); err != nil {
 		return nil, NewPermanentDispatchError(err)
 	}
@@ -131,7 +103,7 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 			return nil, NewPermanentDispatchError(err)
 		}
 	}
-	return &KubernetesRuntimeIdentity{Namespace: desiredJob.Namespace, JobName: desiredJob.Name}, nil
+	return &model.RuntimeIdentity{Scope: desiredJob.Namespace, Workload: desiredJob.Name}, nil
 }
 
 func (d *kubernetesJobDispatcher) validateRuntime(execution *model.TaskExecution, task *model.Task) error {
@@ -278,12 +250,15 @@ func (d *kubernetesJobDispatcher) DeleteTaskWorkspace(ctx context.Context, task 
 	return nil
 }
 
-func (d *kubernetesJobDispatcher) Inspect(ctx context.Context, execution *model.TaskExecution) (*KubernetesExecutionState, error) {
+func (d *kubernetesJobDispatcher) Inspect(ctx context.Context, execution *model.TaskExecution) (*RuntimeExecutionState, error) {
 	if err := d.validate(execution); err != nil {
 		return nil, err
 	}
 	name := kubernetesJobName(execution.ID)
 	job, err := d.kube.BatchV1().Jobs(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, fmt.Errorf("get Kubernetes Job %q: %w", name, ErrRuntimeWorkloadNotFound)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("get Kubernetes Job %q: %w", name, err)
 	}
@@ -301,7 +276,7 @@ func (d *kubernetesJobDispatcher) Inspect(ctx context.Context, execution *model.
 		}
 	}
 	if pod := newestPod(ownedPods); pod != nil {
-		state.PodUID = string(pod.UID)
+		state.InstanceID = string(pod.UID)
 		applyPodDiagnostics(state, pod)
 	}
 	return state, nil
@@ -542,22 +517,22 @@ func verifyRequiredLabels(existing, desired map[string]string) error {
 	return nil
 }
 
-func inspectJob(job *batchv1.Job) *KubernetesExecutionState {
-	state := &KubernetesExecutionState{Phase: kubernetesPhasePending}
+func inspectJob(job *batchv1.Job) *RuntimeExecutionState {
+	state := &RuntimeExecutionState{Phase: RuntimePhasePending}
 	for _, condition := range job.Status.Conditions {
 		if condition.Status != corev1.ConditionTrue {
 			continue
 		}
 		switch condition.Type {
 		case batchv1.JobFailed:
-			state.Phase = kubernetesPhaseFailed
+			state.Phase = RuntimePhaseFailed
 			state.Reason = condition.Reason
 			state.Message = condition.Message
 			completedAt := condition.LastTransitionTime.Time
 			state.CompletedAt = &completedAt
 			return state
 		case batchv1.JobComplete:
-			state.Phase = kubernetesPhaseSucceeded
+			state.Phase = RuntimePhaseSucceeded
 			state.Reason = condition.Reason
 			state.Message = condition.Message
 			completedAt := condition.LastTransitionTime.Time
@@ -566,23 +541,23 @@ func inspectJob(job *batchv1.Job) *KubernetesExecutionState {
 		}
 	}
 	if job.Status.Active > 0 {
-		state.Phase = kubernetesPhaseRunning
+		state.Phase = RuntimePhaseRunning
 	}
 	return state
 }
 
-func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
+func applyPodDiagnostics(state *RuntimeExecutionState, pod *corev1.Pod) {
 	jobTerminal := isTerminalKubernetesPhase(state.Phase)
 	if !jobTerminal {
 		switch pod.Status.Phase {
 		case corev1.PodPending:
-			state.Phase = kubernetesPhasePending
+			state.Phase = RuntimePhasePending
 		case corev1.PodRunning:
-			state.Phase = kubernetesPhaseRunning
+			state.Phase = RuntimePhaseRunning
 		case corev1.PodSucceeded:
-			state.Phase = kubernetesPhaseSucceeded
+			state.Phase = RuntimePhaseSucceeded
 		case corev1.PodFailed:
-			state.Phase = kubernetesPhaseFailed
+			state.Phase = RuntimePhaseFailed
 		}
 	}
 	for _, status := range pod.Status.ContainerStatuses {
@@ -604,11 +579,11 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 		}
 		exitCode := terminated.ExitCode
 		state.ExitCode = &exitCode
-		if state.Phase == kubernetesPhasePending || state.Phase == kubernetesPhaseRunning {
+		if state.Phase == RuntimePhasePending || state.Phase == RuntimePhaseRunning {
 			if exitCode == 0 {
-				state.Phase = kubernetesPhaseSucceeded
+				state.Phase = RuntimePhaseSucceeded
 			} else {
-				state.Phase = kubernetesPhaseFailed
+				state.Phase = RuntimePhaseFailed
 			}
 		}
 		if terminated.Reason != "" {
@@ -628,7 +603,7 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 	}
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse && !jobTerminal {
-			state.Phase = kubernetesPhasePending
+			state.Phase = RuntimePhasePending
 			state.Reason = condition.Reason
 			state.Message = condition.Message
 			return
@@ -643,7 +618,7 @@ func applyPodDiagnostics(state *KubernetesExecutionState, pod *corev1.Pod) {
 }
 
 func isTerminalKubernetesPhase(phase string) bool {
-	return phase == kubernetesPhaseSucceeded || phase == kubernetesPhaseFailed
+	return phase == RuntimePhaseSucceeded || phase == RuntimePhaseFailed
 }
 
 func newestPod(pods []corev1.Pod) *corev1.Pod {

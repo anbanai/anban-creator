@@ -468,8 +468,8 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 	if err != nil || preparation != pendingExecutionReady {
 		return err
 	}
-	if s.kubernetesDispatcher != nil {
-		return s.dispatchKubernetes(ctx, task)
+	if s.runtimeDispatcher != nil {
+		return s.dispatchRuntime(ctx, task)
 	}
 
 	// Atomic CAS: pending → running (with started_at). Eliminates TOCTOU race.

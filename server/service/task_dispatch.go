@@ -15,30 +15,41 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrDispatchInProgress = errors.New("Kubernetes dispatch is already in progress")
+var ErrDispatchInProgress = errors.New("runtime dispatch is already in progress")
 
-const defaultKubernetesDispatchLease = time.Minute
+const defaultRuntimeDispatchLease = time.Minute
 
 const autocompactThrashingErrorPrefix = "Autocompact is thrashing:"
 
-func (s *TaskService) SetKubernetesDispatcher(dispatcher agent.KubernetesDispatcher) {
-	s.kubernetesDispatcher = dispatcher
+func (s *TaskService) SetRuntimeDispatcher(dispatcher agent.RuntimeDispatcher) {
+	s.runtimeDispatcher = dispatcher
 }
 
-func (s *TaskService) SetKubernetesDispatchLease(duration time.Duration) {
+func (s *TaskService) runtimeDispatcherScope() (string, error) {
+	if s.runtimeDispatcher == nil {
+		return "", fmt.Errorf("runtime dispatcher is not configured")
+	}
+	target := strings.TrimSpace(s.runtimeDispatcher.Scope())
+	if target == "" {
+		return "", fmt.Errorf("runtime dispatcher scope is required")
+	}
+	return target, nil
+}
+
+func (s *TaskService) SetRuntimeDispatchLease(duration time.Duration) {
 	if duration > 0 {
 		s.dispatchLeaseDuration = duration
 	}
 }
 
-func (s *TaskService) kubernetesDispatchLease() time.Duration {
+func (s *TaskService) runtimeDispatchLease() time.Duration {
 	if s.dispatchLeaseDuration > 0 {
 		return s.dispatchLeaseDuration
 	}
-	return defaultKubernetesDispatchLease
+	return defaultRuntimeDispatchLease
 }
 
-func (s *TaskService) dispatchKubernetes(ctx context.Context, task *model.Task) error {
+func (s *TaskService) dispatchRuntime(ctx context.Context, task *model.Task) error {
 	if s.dispatchBeforeCreate != nil {
 		s.dispatchBeforeCreate()
 	}
@@ -76,6 +87,9 @@ func (s *TaskService) reloadCurrentDispatchState(ctx context.Context, taskID str
 }
 
 func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) error {
+	if s.runtimeDispatcher == nil {
+		return fmt.Errorf("runtime dispatcher is not configured")
+	}
 	if task.Status != model.TaskStatusRunning {
 		return fmt.Errorf("task %s has current execution %s but task status is %s", task.ID, execution.ID, task.Status)
 	}
@@ -89,14 +103,14 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 	}
 
 	token := uuid.NewString()
-	won, err := s.repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, token, s.kubernetesDispatchLease())
+	won, err := s.repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, token, s.runtimeDispatchLease())
 	if err != nil {
-		return fmt.Errorf("claim Kubernetes dispatch: %w", err)
+		return fmt.Errorf("claim runtime dispatch: %w", err)
 	}
 	if !won {
 		latest, findErr := s.repo.TaskExecutions().FindByID(ctx, execution.ID)
 		if findErr != nil {
-			return fmt.Errorf("reload contended Kubernetes dispatch: %w", findErr)
+			return fmt.Errorf("reload contended runtime dispatch: %w", findErr)
 		}
 		if latest.Status == model.TaskExecutionStarting || latest.Status == model.TaskExecutionRunning {
 			return nil
@@ -104,50 +118,51 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 		if latest.Status == model.TaskExecutionDispatching {
 			return fmt.Errorf("%w: execution %s", ErrDispatchInProgress, execution.ID)
 		}
-		return fmt.Errorf("Kubernetes dispatch claim lost to execution status %s", latest.Status)
+		return fmt.Errorf("runtime dispatch claim lost to execution status %s", latest.Status)
 	}
 	execution.Status = model.TaskExecutionDispatching
 	execution.DispatchClaimToken = token
 
-	runtimeIdentity, err := s.kubernetesDispatcher.Dispatch(ctx, execution, task)
+	runtimeIdentity, err := s.runtimeDispatcher.Dispatch(ctx, execution, task)
 	if err != nil {
 		if agent.IsPermanentDispatchError(err) {
 			return s.failDispatch(ctx, task, execution, token, err)
 		}
 		abandoned, abandonErr := s.repo.TaskExecutions().AbandonDispatch(ctx, execution.ID, token)
 		if abandonErr != nil {
-			return errors.Join(fmt.Errorf("ambiguous Kubernetes dispatch: %w", err), fmt.Errorf("abandon dispatch claim: %w", abandonErr))
+			return errors.Join(fmt.Errorf("ambiguous runtime dispatch: %w", err), fmt.Errorf("abandon dispatch claim: %w", abandonErr))
 		}
 		if !abandoned {
-			return errors.Join(fmt.Errorf("ambiguous Kubernetes dispatch: %w", err), fmt.Errorf("abandon dispatch claim: stale execution %s", execution.ID))
+			return errors.Join(fmt.Errorf("ambiguous runtime dispatch: %w", err), fmt.Errorf("abandon dispatch claim: stale execution %s", execution.ID))
 		}
-		return fmt.Errorf("ambiguous Kubernetes dispatch: %w", err)
+		return fmt.Errorf("ambiguous runtime dispatch: %w", err)
 	}
-	if runtimeIdentity == nil || strings.TrimSpace(runtimeIdentity.Namespace) == "" || strings.TrimSpace(runtimeIdentity.JobName) == "" {
-		return fmt.Errorf("Kubernetes dispatcher returned incomplete runtime identity")
+	if runtimeIdentity == nil || strings.TrimSpace(runtimeIdentity.Scope) == "" || strings.TrimSpace(runtimeIdentity.Workload) == "" {
+		return fmt.Errorf("runtime dispatcher returned incomplete runtime identity")
 	}
-	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token, model.RuntimeIdentity{
-		Scope:    runtimeIdentity.Namespace,
-		Workload: runtimeIdentity.JobName,
-	})
+	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token, *runtimeIdentity)
 	if err != nil {
-		return fmt.Errorf("mark Kubernetes execution starting: %w", err)
+		return fmt.Errorf("mark runtime execution starting: %w", err)
 	}
 	if !won {
-		return fmt.Errorf("mark Kubernetes execution starting: stale execution %s", execution.ID)
+		return fmt.Errorf("mark runtime execution starting: stale execution %s", execution.ID)
 	}
 	return nil
 }
 
 func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Task) (*model.TaskExecution, bool, error) {
+	target, err := s.runtimeDispatcherScope()
+	if err != nil {
+		return nil, false, err
+	}
 	var execution *model.TaskExecution
 	created := false
-	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+	err = s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
 		swapped, err := txRepo.Tasks().CompareAndSwapStatusAndStartedAt(
 			ctx, task.ID, model.TaskStatusPending, model.TaskStatusRunning,
 		)
 		if err != nil {
-			return fmt.Errorf("claim task for Kubernetes dispatch: %w", err)
+			return fmt.Errorf("claim task for runtime dispatch: %w", err)
 		}
 		if !swapped {
 			return nil
@@ -171,10 +186,7 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 				return fmt.Errorf("resume parent execution runtime identity is missing: execution %s", parent.ID)
 			}
 		} else {
-			if s.kubernetesDispatcher == nil {
-				return fmt.Errorf("Kubernetes dispatcher is not configured")
-			}
-			runtime = s.kubernetesDispatcher.ResolveRuntime(task.Type)
+			runtime = s.runtimeDispatcher.ResolveRuntime(task.Type)
 			runtime.Profile = strings.TrimSpace(runtime.Profile)
 			runtime.Image = strings.TrimSpace(runtime.Image)
 			if runtime.Profile == "" || runtime.Image == "" {
@@ -193,7 +205,7 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 			ResumeSessionID:   resumeSessionID,
 			RuntimeProfile:    runtime.Profile,
 			RuntimeImage:      runtime.Image,
-			Target:            "kubernetes",
+			Target:            target,
 			Status:            model.TaskExecutionCreated,
 		}
 		if err := txRepo.TaskExecutions().Create(ctx, execution); err != nil {
@@ -279,10 +291,10 @@ func (s *TaskService) failDispatch(ctx context.Context, task *model.Task, execut
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("dispatch Kubernetes execution: %w (terminalize: %v)", dispatchErr, err)
+		return fmt.Errorf("dispatch runtime execution: %w (terminalize: %v)", dispatchErr, err)
 	}
 	if !terminalized {
-		return fmt.Errorf("dispatch Kubernetes execution: %w", dispatchErr)
+		return fmt.Errorf("dispatch runtime execution: %w", dispatchErr)
 	}
 
 	execution.Status = model.TaskExecutionFailed
@@ -293,9 +305,9 @@ func (s *TaskService) failDispatch(ctx context.Context, task *model.Task, execut
 	execution.CleanupStatus = model.TaskExecutionCleanupPending
 	if finalizeErr := s.finalizeTaskFromExecution(ctx, task, execution); finalizeErr != nil {
 		return errors.Join(
-			fmt.Errorf("dispatch Kubernetes execution: %w", dispatchErr),
-			fmt.Errorf("finalize failed Kubernetes dispatch: %w", finalizeErr),
+			fmt.Errorf("dispatch runtime execution: %w", dispatchErr),
+			fmt.Errorf("finalize failed runtime dispatch: %w", finalizeErr),
 		)
 	}
-	return fmt.Errorf("dispatch Kubernetes execution: %w", dispatchErr)
+	return fmt.Errorf("dispatch runtime execution: %w", dispatchErr)
 }

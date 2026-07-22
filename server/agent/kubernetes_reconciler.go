@@ -8,11 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-
-	"github.com/anbanai/anban-creator/server/model"
 )
 
 type KubernetesReconcileService interface {
@@ -40,14 +38,14 @@ type KubernetesReconcilerConfig struct {
 }
 
 type KubernetesReconciler struct {
-	dispatcher KubernetesDispatcher
+	dispatcher RuntimeDispatcher
 	service    KubernetesReconcileService
 	config     KubernetesReconcilerConfig
 	logger     *zerolog.Logger
 	now        func() time.Time
 }
 
-func NewKubernetesReconciler(dispatcher KubernetesDispatcher, service KubernetesReconcileService, cfg KubernetesReconcilerConfig, logger *zerolog.Logger) *KubernetesReconciler {
+func NewKubernetesReconciler(dispatcher RuntimeDispatcher, service KubernetesReconcileService, cfg KubernetesReconcilerConfig, logger *zerolog.Logger) *KubernetesReconciler {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 10 * time.Second
 	}
@@ -135,13 +133,13 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 		if missingSince.IsZero() {
 			missingSince = execution.CreatedAt
 		}
-		if apierrors.IsNotFound(err) && now.Sub(missingSince) >= r.config.MissingResourceGrace {
+		if errors.Is(err, ErrRuntimeWorkloadNotFound) && now.Sub(missingSince) >= r.config.MissingResourceGrace {
 			return r.fail(ctx, execution, model.TaskExecutionFailed, "job_missing", "Kubernetes Job or Pod was not found", nil)
 		}
 		return err
 	}
-	if state.PodUID != "" {
-		if err := r.service.RecordExecutionInstance(ctx, execution.ID, state.PodUID); err != nil {
+	if state.InstanceID != "" {
+		if err := r.service.RecordExecutionInstance(ctx, execution.ID, state.InstanceID); err != nil {
 			return err
 		}
 	}
@@ -150,7 +148,7 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 	if reason != "" {
 		return r.fail(ctx, execution, terminalStatus, reason, state.Message, state.ExitCode)
 	}
-	if state.Phase == kubernetesPhaseSucceeded {
+	if state.Phase == RuntimePhaseSucceeded {
 		completedAt := execution.UpdatedAt
 		if state.CompletedAt != nil {
 			completedAt = *state.CompletedAt
@@ -228,7 +226,7 @@ func exitCodeValue(exitCode *int32) any {
 	return *exitCode
 }
 
-func kubernetesTerminalReason(state *KubernetesExecutionState) (string, string) {
+func kubernetesTerminalReason(state *RuntimeExecutionState) (string, string) {
 	if state == nil {
 		return "inspection_empty", model.TaskExecutionFailed
 	}
@@ -246,7 +244,7 @@ func kubernetesTerminalReason(state *KubernetesExecutionState) (string, string) 
 		return "image_pull_failed", model.TaskExecutionFailed
 	case strings.Contains(reason, "containerconfig") || strings.Contains(reason, "crashloop") || strings.Contains(reason, "runcontainer"):
 		return "container_start_failed", model.TaskExecutionFailed
-	case state.Phase == kubernetesPhaseFailed:
+	case state.Phase == RuntimePhaseFailed:
 		return "job_failed", model.TaskExecutionFailed
 	default:
 		return "", ""

@@ -586,8 +586,10 @@ func (*cancelOrderingDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSe
 	return srvconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
 }
 
-func (*cancelOrderingDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*agent.KubernetesRuntimeIdentity, error) {
-	return &agent.KubernetesRuntimeIdentity{Namespace: "anban", JobName: "job-" + execution.ID}, nil
+func (*cancelOrderingDispatcher) Scope() string { return "docker" }
+
+func (*cancelOrderingDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	return &model.RuntimeIdentity{Scope: "daemon-a", Workload: "container-" + execution.ID}, nil
 }
 func (d *cancelOrderingDispatcher) Delete(_ context.Context, execution *model.TaskExecution) error {
 	found, _ := d.repo.TaskExecutions().FindByID(context.Background(), execution.ID)
@@ -595,14 +597,14 @@ func (d *cancelOrderingDispatcher) Delete(_ context.Context, execution *model.Ta
 	return d.deleteErr
 }
 func (*cancelOrderingDispatcher) DeleteProjectMemory(context.Context, string) error { return nil }
-func (*cancelOrderingDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.KubernetesExecutionState, error) {
+func (*cancelOrderingDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.RuntimeExecutionState, error) {
 	return nil, nil
 }
 
 func TestCancelCloudMarksAttemptBeforeDeleteAndDoesNotRollBack(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true)
 	dispatcher := &cancelOrderingDispatcher{repo: repo, deleteErr: errors.New("delete unavailable")}
-	svc.SetKubernetesDispatcher(dispatcher)
+	svc.SetRuntimeDispatcher(dispatcher)
 	svc.cleanupRetryBackoff = time.Millisecond
 	err := svc.CancelForUser(context.Background(), task.UserID, task.ID)
 	if err == nil {
@@ -634,7 +636,7 @@ func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
 	t.Run("one configured replacement", func(t *testing.T) {
 		svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 		dispatcher := &dispatchTestDispatcher{}
-		svc.SetKubernetesDispatcher(dispatcher)
+		svc.SetRuntimeDispatcher(dispatcher)
 		if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
 			t.Fatal(err)
 		}
@@ -666,7 +668,7 @@ func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
 	t.Run("post-start enters terminal finalizer", func(t *testing.T) {
 		svc, repo, task, execution := setupCloudCompletionTest(t, true, true)
 		dispatcher := &dispatchTestDispatcher{}
-		svc.SetKubernetesDispatcher(dispatcher)
+		svc.SetRuntimeDispatcher(dispatcher)
 		if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "job_failed", nil, 1); err != nil {
 			t.Fatal(err)
 		}
@@ -681,7 +683,7 @@ func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
 func TestReplacePreStartExecutionPreservesRuntimeImage(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{}
-	svc.SetKubernetesDispatcher(dispatcher)
+	svc.SetRuntimeDispatcher(dispatcher)
 	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -692,12 +694,15 @@ func TestReplacePreStartExecutionPreservesRuntimeImage(t *testing.T) {
 	if replacement.RuntimeProfile != execution.RuntimeProfile || replacement.RuntimeImage != execution.RuntimeImage {
 		t.Fatalf("replacement runtime = %q %q, want %q %q", replacement.RuntimeProfile, replacement.RuntimeImage, execution.RuntimeProfile, execution.RuntimeImage)
 	}
+	if replacement.Target != "docker" {
+		t.Fatalf("replacement target = %q, want selected dispatcher scope", replacement.Target)
+	}
 }
 
 func TestReplacementDispatchResumesSameAttemptAfterTransientFailure(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{err: errors.New("temporary Kubernetes API failure")}
-	svc.SetKubernetesDispatcher(dispatcher)
+	svc.SetRuntimeDispatcher(dispatcher)
 	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err == nil {
 		t.Fatal("expected first replacement dispatch to fail")
 	}
@@ -726,7 +731,7 @@ func TestReplacementDispatchResumesSameAttemptAfterTransientFailure(t *testing.T
 func TestConcurrentPreStartReconcileCreatesOneReplacement(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{}
-	svc.SetKubernetesDispatcher(dispatcher)
+	svc.SetRuntimeDispatcher(dispatcher)
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
 	for range 2 {
@@ -759,7 +764,7 @@ func TestConcurrentPreStartReconcileCreatesOneReplacement(t *testing.T) {
 func TestBootstrapStartedBoundaryPreventsPreStartReplacement(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{}
-	svc.SetKubernetesDispatcher(dispatcher)
+	svc.SetRuntimeDispatcher(dispatcher)
 	if won, err := repo.TaskExecutions().Transition(context.Background(), execution.ID,
 		[]string{model.TaskExecutionStarting}, model.TaskExecutionRunning,
 		model.ExecutionTransition{Started: true, RuntimeInstanceID: "pod-1"}); err != nil || !won {

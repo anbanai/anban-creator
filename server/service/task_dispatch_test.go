@@ -36,12 +36,21 @@ type dispatchTestDispatcher struct {
 	runtimeSelection  serverconfig.RuntimeImageSelection
 }
 
+type scopedDispatchTestDispatcher struct {
+	*dispatchTestDispatcher
+	scope string
+}
+
+func (d *scopedDispatchTestDispatcher) Scope() string { return d.scope }
+
 func (d *dispatchTestDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
 	if d.runtimeSelection.Profile != "" || d.runtimeSelection.Image != "" {
 		return d.runtimeSelection
 	}
 	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
 }
+
+func (d *dispatchTestDispatcher) Scope() string { return "docker" }
 
 type cancelingReferenceAssetRepository struct {
 	repository.AssetRepository
@@ -161,7 +170,7 @@ func (r *cancelingReferenceAssetRepository) FindOwnedByID(context.Context, strin
 	return nil, context.Canceled
 }
 
-func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*agent.KubernetesRuntimeIdentity, error) {
+func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
 	d.mu.Lock()
 	d.calls++
 	if d.seen == nil {
@@ -187,7 +196,7 @@ func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.Ta
 	if err != nil {
 		return nil, err
 	}
-	return &agent.KubernetesRuntimeIdentity{Namespace: "anban", JobName: "job-" + execution.ID}, nil
+	return &model.RuntimeIdentity{Scope: "daemon-a", Workload: "container-" + execution.ID}, nil
 }
 
 func (d *dispatchTestDispatcher) Delete(context.Context, *model.TaskExecution) error {
@@ -198,7 +207,7 @@ func (d *dispatchTestDispatcher) DeleteProjectMemory(context.Context, string) er
 	return nil
 }
 
-func (d *dispatchTestDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.KubernetesExecutionState, error) {
+func (d *dispatchTestDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.RuntimeExecutionState, error) {
 	return nil, nil
 }
 
@@ -230,7 +239,7 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 	logger := zerolog.New(io.Discard)
 	dispatcher := &dispatchTestDispatcher{}
 	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
-	svc.SetKubernetesDispatcher(dispatcher)
+	svc.SetRuntimeDispatcher(dispatcher)
 	task := &model.Task{
 		ID:        uuid.NewString(),
 		UserID:    uuid.NewString(),
@@ -279,7 +288,7 @@ func ageDispatchClaim(t *testing.T, db *gorm.DB, executionID string, age time.Du
 	}
 }
 
-func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterJobAccepted(t *testing.T) {
+func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterRuntimeAccepted(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	ctx := context.Background()
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
@@ -289,10 +298,10 @@ func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterJobAccepted(t *testing
 		t.Fatalf("dispatch calls = %d, want 1", dispatcher.callCount())
 	}
 	current := mustCurrentExecution(t, repo, task.ID)
-	if current.Attempt != 1 || current.Target != "kubernetes" || current.Status != model.TaskExecutionStarting {
+	if current.Attempt != 1 || current.Target != "docker" || current.Status != model.TaskExecutionStarting {
 		t.Fatalf("current execution = %+v", current)
 	}
-	if current.RuntimeScope != "anban" || current.RuntimeWorkload != "job-"+current.ID {
+	if current.RuntimeScope != "daemon-a" || current.RuntimeWorkload != "container-"+current.ID {
 		t.Fatalf("runtime identity = %q/%q, want persisted scope and workload", current.RuntimeScope, current.RuntimeWorkload)
 	}
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err != nil {
@@ -340,6 +349,30 @@ func TestCreateCurrentExecutionPersistsRuntimeImage(t *testing.T) {
 	}
 }
 
+func TestCreateCurrentExecutionRejectsMissingRuntimeDispatcher(t *testing.T) {
+	svc, _, _, _, task := setupDispatchTest(t)
+	svc.SetRuntimeDispatcher(nil)
+	if _, _, err := svc.createCurrentExecution(context.Background(), task); err == nil || !strings.Contains(err.Error(), "runtime dispatcher is not configured") {
+		t.Fatalf("create error = %v, want missing runtime dispatcher", err)
+	}
+}
+
+func TestCreateCurrentExecutionRejectsEmptyRuntimeScope(t *testing.T) {
+	svc, _, _, dispatcher, task := setupDispatchTest(t)
+	svc.SetRuntimeDispatcher(&scopedDispatchTestDispatcher{dispatchTestDispatcher: dispatcher})
+	if _, _, err := svc.createCurrentExecution(context.Background(), task); err == nil || !strings.Contains(err.Error(), "runtime dispatcher scope is required") {
+		t.Fatalf("create error = %v, want empty runtime scope", err)
+	}
+}
+
+func TestCreateCurrentExecutionRejectsIncompleteRuntimeSelection(t *testing.T) {
+	svc, _, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "article"}
+	if _, _, err := svc.createCurrentExecution(context.Background(), task); err == nil || !strings.Contains(err.Error(), "returned incomplete identity") {
+		t.Fatalf("create error = %v, want incomplete runtime selection", err)
+	}
+}
+
 func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.T) {
 	svc, repo, _, _, task := setupDispatchTest(t)
 	ctx := context.Background()
@@ -369,6 +402,9 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 	}
 	if current.RuntimeProfile != parent.RuntimeProfile || current.RuntimeImage != parent.RuntimeImage {
 		t.Fatalf("resumed runtime = %q %q, want parent %q %q", current.RuntimeProfile, current.RuntimeImage, parent.RuntimeProfile, parent.RuntimeImage)
+	}
+	if current.Target != "docker" {
+		t.Fatalf("resumed target = %q, want selected dispatcher scope", current.Target)
 	}
 }
 
@@ -583,7 +619,7 @@ func TestDispatchCloudTaskDoesNotAcknowledgeStartingAttemptOnTerminalTask(t *tes
 
 func TestDispatchCloudTaskAcceptedTransitionFailureIsReclaimed(t *testing.T) {
 	svc, repo, db, dispatcher, task := setupDispatchTest(t)
-	svc.SetKubernetesDispatchLease(time.Minute)
+	svc.SetRuntimeDispatchLease(time.Minute)
 	trigger := `CREATE TRIGGER reject_starting BEFORE UPDATE OF status ON task_executions
 		WHEN NEW.status = 'starting' BEGIN SELECT RAISE(ABORT, 'starting rejected'); END`
 	if err := db.Exec(trigger).Error; err != nil {
@@ -627,7 +663,7 @@ func TestDispatchCloudTaskUsesDatabaseTimeForActiveClaim(t *testing.T) {
 		t.Fatalf("seed active claim: %v", err)
 	}
 	ageDispatchClaim(t, db, execution.ID, 0)
-	svc.SetKubernetesDispatchLease(time.Minute)
+	svc.SetRuntimeDispatchLease(time.Minute)
 
 	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); !errors.Is(err, ErrDispatchInProgress) {
 		t.Fatalf("active replay error = %v, want ErrDispatchInProgress", err)
@@ -707,7 +743,7 @@ func TestDispatchCloudTaskInitialTransactionContentionCreatesOneAttempt(t *testi
 
 func TestDispatchCloudTaskStaleClaimRaceHasOneOwner(t *testing.T) {
 	svc, _, _, dispatcher, task := setupDispatchTest(t)
-	svc.SetKubernetesDispatchLease(time.Minute)
+	svc.SetRuntimeDispatchLease(time.Minute)
 	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
 		t.Fatal(err)
 	}

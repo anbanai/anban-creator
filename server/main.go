@@ -233,7 +233,7 @@ func main() {
 	// 12. Create agent executor.
 	var agentExecutor agent.TaskExecutor
 	var kubeClient kubernetes.Interface
-	var kubeDispatcher agent.KubernetesDispatcher
+	var runtimeDispatcher agent.RuntimeDispatcher
 	var kubeVerifier *agent.KubernetesWorkloadVerifier
 	var executionTokens *auth.ExecutionTokenService
 	var bootstrapSvc *service.AgentBootstrapService
@@ -323,7 +323,7 @@ func main() {
 			if err != nil {
 				log.Fatal().Err(err).Msg("failed to create Kubernetes execution token service")
 			}
-			kubeDispatcher, err = agent.NewKubernetesDispatcherWithClient(cfg.Claude.Kubernetes, cfg.Claude.RuntimeImages, cfg.AgentServerURL(), kubeClient)
+			runtimeDispatcher, err = agent.NewKubernetesDispatcherWithClient(cfg.Claude.Kubernetes, cfg.Claude.RuntimeImages, cfg.AgentServerURL(), kubeClient)
 			if err != nil {
 				log.Fatal().Err(err).Msg("failed to create Kubernetes Job dispatcher")
 			}
@@ -346,14 +346,18 @@ func main() {
 				RuntimeEnv:              cfg.Claude.RuntimeEnv(),
 				ModelUsageAliases:       cfg.Claude.RuntimeModelUsageAliases(),
 			}, *log)
-			taskSvc.SetKubernetesDispatcher(kubeDispatcher)
-			workspaceLifecycle, ok := kubeDispatcher.(service.TaskWorkspaceLifecycle)
+			taskSvc.SetRuntimeDispatcher(runtimeDispatcher)
+			workspaceLifecycle, ok := runtimeDispatcher.(service.TaskWorkspaceLifecycle)
 			if !ok {
 				log.Fatal().Msg("Kubernetes dispatcher does not manage task workspaces")
 			}
 			taskSvc.SetTaskWorkspaceLifecycle(workspaceLifecycle)
-			projectSvc.SetProjectMemoryLifecycle(kubeDispatcher)
-			kubeReconciler = agent.NewKubernetesReconciler(kubeDispatcher, taskSvc, agent.KubernetesReconcilerConfig{
+			projectMemoryLifecycle, ok := runtimeDispatcher.(service.ProjectMemoryLifecycle)
+			if !ok {
+				log.Fatal().Msg("Kubernetes dispatcher does not manage project memory")
+			}
+			projectSvc.SetProjectMemoryLifecycle(projectMemoryLifecycle)
+			kubeReconciler = agent.NewKubernetesReconciler(runtimeDispatcher, taskSvc, agent.KubernetesReconcilerConfig{
 				PreStartRetryLimit: cfg.Claude.Kubernetes.PreStartRetryLimit,
 				HeartbeatTimeout:   time.Duration(cfg.Claude.Kubernetes.HeartbeatTimeoutSeconds) * time.Second,
 			}, log)

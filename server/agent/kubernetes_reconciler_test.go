@@ -7,16 +7,13 @@ import (
 	"testing"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
 
 type reconcileTestDispatcher struct {
 	mu         sync.Mutex
-	states     map[string]*KubernetesExecutionState
+	states     map[string]*RuntimeExecutionState
 	errs       map[string]error
 	deleteErrs []error
 	deletes    int
@@ -26,8 +23,10 @@ func (*reconcileTestDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSel
 	return srvconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
 }
 
-func (*reconcileTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*KubernetesRuntimeIdentity, error) {
-	return &KubernetesRuntimeIdentity{Namespace: "anban", JobName: "job-" + execution.ID}, nil
+func (*reconcileTestDispatcher) Scope() string { return "kubernetes" }
+
+func (*reconcileTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	return &model.RuntimeIdentity{Scope: "anban", Workload: "job-" + execution.ID}, nil
 }
 func (d *reconcileTestDispatcher) Delete(context.Context, *model.TaskExecution) error {
 	d.mu.Lock()
@@ -41,7 +40,7 @@ func (d *reconcileTestDispatcher) Delete(context.Context, *model.TaskExecution) 
 	return err
 }
 func (*reconcileTestDispatcher) DeleteProjectMemory(context.Context, string) error { return nil }
-func (d *reconcileTestDispatcher) Inspect(_ context.Context, execution *model.TaskExecution) (*KubernetesExecutionState, error) {
+func (d *reconcileTestDispatcher) Inspect(_ context.Context, execution *model.TaskExecution) (*RuntimeExecutionState, error) {
 	return d.states[execution.ID], d.errs[execution.ID]
 }
 
@@ -135,16 +134,16 @@ func TestKubernetesTerminalReasonPrecedence(t *testing.T) {
 		name, phase, reason, want string
 		exit                      *int32
 	}{
-		{"deadline before generic failure", kubernetesPhaseFailed, "DeadlineExceeded", "deadline_exceeded", nil},
-		{"oom", kubernetesPhaseFailed, "", "oom_killed", &exit137},
-		{"scheduling", kubernetesPhasePending, "FailedScheduling", "scheduling_failed", nil},
-		{"mount", kubernetesPhasePending, "FailedMount", "volume_mount_failed", nil},
-		{"image", kubernetesPhasePending, "ImagePullBackOff", "image_pull_failed", nil},
-		{"job", kubernetesPhaseFailed, "BackoffLimitExceeded", "job_failed", nil},
+		{"deadline before generic failure", RuntimePhaseFailed, "DeadlineExceeded", "deadline_exceeded", nil},
+		{"oom", RuntimePhaseFailed, "", "oom_killed", &exit137},
+		{"scheduling", RuntimePhasePending, "FailedScheduling", "scheduling_failed", nil},
+		{"mount", RuntimePhasePending, "FailedMount", "volume_mount_failed", nil},
+		{"image", RuntimePhasePending, "ImagePullBackOff", "image_pull_failed", nil},
+		{"job", RuntimePhaseFailed, "BackoffLimitExceeded", "job_failed", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _ := kubernetesTerminalReason(&KubernetesExecutionState{Phase: tc.phase, Reason: tc.reason, ExitCode: tc.exit})
+			got, _ := kubernetesTerminalReason(&RuntimeExecutionState{Phase: tc.phase, Reason: tc.reason, ExitCode: tc.exit})
 			if got != tc.want {
 				t.Fatalf("reason=%q want=%q", got, tc.want)
 			}
@@ -162,12 +161,12 @@ func TestKubernetesReconcilerGracesAndItemIsolation(t *testing.T) {
 		{ID: "bad-item", Status: model.TaskExecutionRunning, UpdatedAt: now.Add(-time.Minute), CreatedAt: now.Add(-time.Minute)},
 		{ID: "terminal", Status: model.TaskExecutionFailed, FinalizationStatus: model.TaskExecutionFinalizationTask},
 	}
-	notFound := apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, "gone")
+	notFound := ErrRuntimeWorkloadNotFound
 	dispatcher := &reconcileTestDispatcher{
-		states: map[string]*KubernetesExecutionState{
-			"success-grace":   {Phase: kubernetesPhaseSucceeded},
-			"success-expired": {Phase: kubernetesPhaseSucceeded, PodUID: "pod-1"},
-			"bad-item":        {Phase: kubernetesPhaseFailed},
+		states: map[string]*RuntimeExecutionState{
+			"success-grace":   {Phase: RuntimePhaseSucceeded},
+			"success-expired": {Phase: RuntimePhaseSucceeded, InstanceID: "pod-1"},
+			"bad-item":        {Phase: RuntimePhaseFailed},
 		},
 		errs: map[string]error{"missing-grace": notFound, "missing-expired": notFound},
 	}
@@ -204,8 +203,8 @@ func TestKubernetesReconcilerUsesExecutionHeartbeat(t *testing.T) {
 	started := now.Add(-10 * time.Minute)
 	heartbeat := now.Add(-4 * time.Minute)
 	execution := &model.TaskExecution{ID: "stale-heartbeat", Status: model.TaskExecutionRunning, Started: true, StartedAt: &started, LastHeartbeatAt: &heartbeat}
-	dispatcher := &reconcileTestDispatcher{states: map[string]*KubernetesExecutionState{
-		execution.ID: {Phase: kubernetesPhaseRunning},
+	dispatcher := &reconcileTestDispatcher{states: map[string]*RuntimeExecutionState{
+		execution.ID: {Phase: RuntimePhaseRunning},
 	}, errs: map[string]error{}}
 	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
 	reconciler := NewKubernetesReconciler(dispatcher, service, KubernetesReconcilerConfig{HeartbeatTimeout: 3 * time.Minute}, nil)
@@ -221,7 +220,7 @@ func TestKubernetesReconcilerUsesExecutionHeartbeat(t *testing.T) {
 }
 
 func TestKubernetesReconcilerRunStopsWithContext(t *testing.T) {
-	dispatcher := &reconcileTestDispatcher{states: map[string]*KubernetesExecutionState{}, errs: map[string]error{}}
+	dispatcher := &reconcileTestDispatcher{states: map[string]*RuntimeExecutionState{}, errs: map[string]error{}}
 	service := &reconcileTestService{}
 	reconciler := NewKubernetesReconciler(dispatcher, service, KubernetesReconcilerConfig{Interval: time.Millisecond}, nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -237,7 +236,7 @@ func TestKubernetesReconcilerRunStopsWithContext(t *testing.T) {
 
 func TestKubernetesReconcilerResumesCreatedDispatch(t *testing.T) {
 	execution := &model.TaskExecution{ID: "replacement", Status: model.TaskExecutionCreated}
-	dispatcher := &reconcileTestDispatcher{states: map[string]*KubernetesExecutionState{}, errs: map[string]error{}}
+	dispatcher := &reconcileTestDispatcher{states: map[string]*RuntimeExecutionState{}, errs: map[string]error{}}
 	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
 	reconciler := NewKubernetesReconciler(dispatcher, service, KubernetesReconcilerConfig{}, nil)
 	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
@@ -251,8 +250,8 @@ func TestKubernetesReconcilerResumesCreatedDispatch(t *testing.T) {
 func TestKubernetesReconcilerDoesNotInferBootstrapFromContainerState(t *testing.T) {
 	now := time.Now()
 	execution := &model.TaskExecution{ID: "started-repair", Status: model.TaskExecutionStarting, CreatedAt: now.Add(-time.Minute)}
-	dispatcher := &reconcileTestDispatcher{states: map[string]*KubernetesExecutionState{
-		execution.ID: {Phase: kubernetesPhaseFailed, PodUID: "pod-1", Reason: "Error"},
+	dispatcher := &reconcileTestDispatcher{states: map[string]*RuntimeExecutionState{
+		execution.ID: {Phase: RuntimePhaseFailed, InstanceID: "pod-1", Reason: "Error"},
 	}, errs: map[string]error{}}
 	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
 	reconciler := NewKubernetesReconciler(dispatcher, service, KubernetesReconcilerConfig{}, nil)
@@ -269,7 +268,7 @@ func TestKubernetesReconcilerDoesNotInferBootstrapFromContainerState(t *testing.
 
 func TestKubernetesReconcilerRetriesDurableCleanup(t *testing.T) {
 	execution := &model.TaskExecution{ID: "cleanup", Status: model.TaskExecutionFailed, FinalizationStatus: model.TaskExecutionFinalizationDone, CleanupStatus: model.TaskExecutionCleanupPending}
-	dispatcher := &reconcileTestDispatcher{states: map[string]*KubernetesExecutionState{}, errs: map[string]error{}, deleteErrs: []error{errors.New("delete failed"), nil}}
+	dispatcher := &reconcileTestDispatcher{states: map[string]*RuntimeExecutionState{}, errs: map[string]error{}, deleteErrs: []error{errors.New("delete failed"), nil}}
 	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
 	reconciler := NewKubernetesReconciler(dispatcher, service, KubernetesReconcilerConfig{}, nil)
 	if err := reconciler.ReconcileOnce(context.Background()); err != nil {

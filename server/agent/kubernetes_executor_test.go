@@ -330,6 +330,12 @@ func TestKubernetesDispatcherValidatesPersistedRuntimeIdentity(t *testing.T) {
 	})
 }
 
+func TestKubernetesDispatcherScope(t *testing.T) {
+	if got := testDispatcher(fake.NewSimpleClientset()).Scope(); got != "kubernetes" {
+		t.Fatalf("Scope() = %q, want kubernetes", got)
+	}
+}
+
 func TestKubernetesFinalizationTimeoutIsBoundedByGraceAndDeadline(t *testing.T) {
 	tests := []struct {
 		grace    int
@@ -398,7 +404,7 @@ func TestKubernetesDispatcherDispatchCreatesAndReusesObjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Dispatch: %v", err)
 	}
-	if identity == nil || identity.Namespace != "anban" || identity.JobName != kubernetesJobName(testExecution().ID) {
+	if identity == nil || identity.Scope != "anban" || identity.Workload != kubernetesJobName(testExecution().ID) {
 		t.Fatalf("runtime identity = %+v, want created Job identity", identity)
 	}
 	if _, err := d.Dispatch(ctx, testExecution(), testTask()); err != nil {
@@ -949,7 +955,7 @@ func TestKubernetesDispatcherInspectMapsJobAndPodTermination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.Phase != kubernetesPhaseFailed || state.PodUID != "pod-uid-1" || state.ExitCode == nil || *state.ExitCode != exitCode {
+	if state.Phase != RuntimePhaseFailed || state.InstanceID != "pod-uid-1" || state.ExitCode == nil || *state.ExitCode != exitCode {
 		t.Fatalf("state = %#v, want failed pod with exit 137", state)
 	}
 	if state.Reason != "OOMKilled" || state.Message != "memory limit exceeded" {
@@ -965,10 +971,10 @@ func TestKubernetesDispatcherInspectMapsPendingAndCompleteJobs(t *testing.T) {
 		active    int32
 		want      string
 	}{
-		{name: "pending", want: kubernetesPhasePending},
-		{name: "running", active: 1, want: kubernetesPhaseRunning},
-		{name: "complete active", condition: &batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, Reason: "Completed"}, active: 1, want: kubernetesPhaseSucceeded},
-		{name: "failed active", condition: &batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "Failed"}, active: 1, want: kubernetesPhaseFailed},
+		{name: "pending", want: RuntimePhasePending},
+		{name: "running", active: 1, want: RuntimePhaseRunning},
+		{name: "complete active", condition: &batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, Reason: "Completed"}, active: 1, want: RuntimePhaseSucceeded},
+		{name: "failed active", condition: &batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "Failed"}, active: 1, want: RuntimePhaseFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
@@ -1006,7 +1012,7 @@ func TestKubernetesDispatcherInspectMapsPodTerminationBeforeJobCondition(t *test
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.Phase != kubernetesPhaseFailed {
+	if state.Phase != RuntimePhaseFailed {
 		t.Fatalf("phase = %q, want failed from terminated container before Job condition", state.Phase)
 	}
 }
@@ -1033,7 +1039,7 @@ func TestKubernetesDispatcherInspectPreservesSchedulingFailureDiagnostics(t *tes
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.Phase != kubernetesPhasePending {
+	if state.Phase != RuntimePhasePending {
 		t.Fatalf("phase = %q, want pending for pre-start scheduling failure", state.Phase)
 	}
 	if state.Reason != "Unschedulable" || state.Message != "0/3 nodes are available: insufficient memory" {
@@ -1061,7 +1067,7 @@ func TestKubernetesDispatcherInspectKeepsRunningPodRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.Phase != kubernetesPhaseRunning {
+	if state.Phase != RuntimePhaseRunning {
 		t.Fatalf("phase = %q, want running for a running Pod", state.Phase)
 	}
 }
@@ -1084,7 +1090,7 @@ func TestKubernetesDispatcherInspectMapsContainerWaitingDiagnostics(t *testing.T
 			if err != nil {
 				t.Fatalf("Inspect: %v", err)
 			}
-			if state.Phase != kubernetesPhasePending || state.Reason != reason || state.Message != "waiting message" {
+			if state.Phase != RuntimePhasePending || state.Reason != reason || state.Message != "waiting message" {
 				t.Fatalf("state = %#v, want pending waiting diagnostics", state)
 			}
 		})
@@ -1116,7 +1122,7 @@ func TestKubernetesDispatcherInspectPreservesTerminalJobDiagnosticsFromWaitingPo
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.Phase != kubernetesPhaseSucceeded || state.Reason != "Completed" || state.Message != "job completed" {
+	if state.Phase != RuntimePhaseSucceeded || state.Reason != "Completed" || state.Message != "job completed" {
 		t.Fatalf("state = %#v, want authoritative terminal Job diagnostics", state)
 	}
 }
@@ -1143,7 +1149,7 @@ func TestKubernetesDispatcherInspectIgnoresSpoofedOrStalePods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.PodUID != "owned-uid" || state.Phase != kubernetesPhaseRunning {
+	if state.InstanceID != "owned-uid" || state.Phase != RuntimePhaseRunning {
 		t.Fatalf("state = %#v, want only current Job-owned Pod", state)
 	}
 }
@@ -1162,8 +1168,8 @@ func TestNewestPodUsesStableNameAndUIDTieBreak(t *testing.T) {
 
 func TestKubernetesDispatcherInspectPropagatesNotFound(t *testing.T) {
 	_, err := testDispatcher(fake.NewSimpleClientset()).Inspect(context.Background(), testExecution())
-	if !apierrors.IsNotFound(err) {
-		t.Fatalf("Inspect error = %v, want NotFound", err)
+	if !errors.Is(err, ErrRuntimeWorkloadNotFound) {
+		t.Fatalf("Inspect error = %v, want ErrRuntimeWorkloadNotFound", err)
 	}
 }
 

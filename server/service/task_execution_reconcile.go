@@ -114,9 +114,13 @@ func (s *TaskService) ReconcileExecutionFailure(ctx context.Context, executionID
 }
 
 func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution, reason string, diagnostics []byte) (*model.TaskExecution, bool, error) {
+	target, err := s.runtimeDispatcherScope()
+	if err != nil {
+		return nil, false, err
+	}
 	var replacement *model.TaskExecution
 	replaced := false
-	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+	err = s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
 		currentTask, err := txRepo.Tasks().FindByID(ctx, task.ID)
 		if err != nil {
 			return err
@@ -147,7 +151,7 @@ func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.
 			Attempt:        current.Attempt + 1,
 			RuntimeProfile: current.RuntimeProfile,
 			RuntimeImage:   current.RuntimeImage,
-			Target:         current.Target,
+			Target:         target,
 			Status:         model.TaskExecutionCreated,
 			RuntimeScope:   current.RuntimeScope,
 		}

@@ -48,7 +48,7 @@ const TypeContentGenerate = "content:generate"
 type TaskService struct {
 	repo                     repository.Repository
 	executor                 agent.TaskExecutor
-	kubernetesDispatcher     agent.KubernetesDispatcher
+	runtimeDispatcher        agent.RuntimeDispatcher
 	dispatchLeaseDuration    time.Duration
 	dispatchBeforeCreate     func()
 	finalizationAfterStage   func(string) error
@@ -311,7 +311,7 @@ func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int 
 	if project != nil && project.MaxConcurrentTasks > 0 {
 		maxConcurrent = project.MaxConcurrentTasks
 	}
-	if s.kubernetesDispatcher == nil && s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
+	if s.runtimeDispatcher == nil && s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
 		return s.projectConcurrencyCap
 	}
 	return maxConcurrent
@@ -1006,7 +1006,7 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 	if userID != "" && taskErr == nil && task != nil && task.UserID != userID {
 		return fmt.Errorf("task not found")
 	}
-	if taskErr == nil && task != nil && task.CurrentExecutionID != nil && s.kubernetesDispatcher != nil {
+	if taskErr == nil && task != nil && task.CurrentExecutionID != nil && s.runtimeDispatcher != nil {
 		return s.cancelCloudExecution(ctx, task, userID)
 	}
 
