@@ -11,14 +11,19 @@ the Anban Writer repository with a managed Git submodule at the same path.
 The new repository starts from a fresh snapshot. Historical commits from the
 Anban Writer repository and the earlier plugin repositories are not migrated.
 The initial snapshot includes every currently tracked file under `plugins/`
-and all current uncommitted changes under that directory.
+and all current uncommitted changes under that directory, except Humanizer.
+`plugins/skills/humanizer` is represented by a nested submodule pinned to the
+reviewed `blader/humanizer` commit
+`1b48564898e999219882660237fde01bf4843a0f` instead of copying the normalized
+`SKILL.md`. This exception is defined by the Humanizer nested-submodule design.
 
 ## Publication Flow
 
 1. Copy the current `plugins/` working tree into an isolated temporary
    directory without parent-repository Git metadata.
-2. Initialize a new repository with `main` as its branch and create one initial
-   commit containing the complete snapshot.
+2. Initialize a new repository with `main` as its branch, add the official
+   Humanizer repository at `skills/humanizer`, and create one initial commit
+   containing the snapshot plus the nested Humanizer gitlink.
 3. Push that commit to `anbanai/creator-skills.git` and verify the remote
    `refs/heads/main` SHA before modifying the parent repository.
 4. Preserve a temporary backup of the original directory, remove the ordinary
@@ -39,6 +44,10 @@ The sync settings make `plugins/` participate in the existing managed
 submodule pre-push workflow. The parent repository records only the gitlink and
 `.gitmodules`; unrelated working-tree changes remain untouched.
 
+The child repository owns its nested `skills/humanizer` submodule declaration.
+All checkout, validation, packaging, and Docker workflows initialize submodules
+recursively.
+
 ## Failure Handling
 
 No parent-repository conversion occurs unless the child push succeeds and the
@@ -56,5 +65,7 @@ unchanged child repository.
   conversion is committed.
 - Confirm `.gitmodules` exposes the expected URL, branch, and managed-push
   settings.
+- Confirm the child repository records `skills/humanizer` as a gitlink to the
+  official `blader/humanizer` repository at the reviewed commit.
 - Confirm `git submodule status plugins` reports the same SHA as remote `main`.
 - Run plugin contract tests and the full Go test suite required by `AGENTS.md`.
