@@ -16,6 +16,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
+const ossObjectMetadataSHA256Header = oss.HTTPHeaderOssMetaPrefix + ObjectMetadataSHA256
+
 // OSSProvider implements Provider using Alibaba Cloud OSS.
 type OSSProvider struct {
 	client       *oss.Client
@@ -153,7 +155,7 @@ func (p *OSSProvider) StatObject(ctx context.Context, key string) (*ObjectInfo, 
 	size, _ := strconv.ParseInt(meta.Get("Content-Length"), 10, 64)
 	contentType := meta.Get("Content-Type")
 	etag := strings.TrimSpace(meta.Get("ETag"))
-	sha256 := strings.ToLower(strings.TrimSpace(meta.Get("X-Oss-Meta-Sha256")))
+	sha256 := strings.ToLower(strings.TrimSpace(meta.Get(ossObjectMetadataSHA256Header)))
 	return &ObjectInfo{
 		Key:         key,
 		Size:        size,

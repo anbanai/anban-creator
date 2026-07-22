@@ -56,7 +56,7 @@ func TestLocalProviderStatsAndBoundsObjectReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StatObject: %v", err)
 	}
-	if info.Size != 5 || info.ContentType != "image/png" {
+	if info.Size != 5 || info.ContentType != "image/png" || info.SHA256 != "" {
 		t.Fatalf("ObjectInfo = %#v", info)
 	}
 	if _, err := provider.ReadObject(context.Background(), key, 4); !errors.Is(err, ErrObjectExceedsMaxSize) {
@@ -123,12 +123,15 @@ func TestOSSProviderStatObjectClassifiesNotFound(t *testing.T) {
 }
 
 func TestOSSProviderStatObjectReturnsArtifactSHA256(t *testing.T) {
-	const hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const (
+		storedHash = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		wantHash   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "7")
 		w.Header().Set("Content-Type", "text/markdown")
 		w.Header().Set("ETag", "etag-1")
-		w.Header().Set("X-Oss-Meta-Sha256", hash)
+		w.Header().Set(oss.HTTPHeaderOssMetaPrefix+ObjectMetadataSHA256, storedHash)
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(server.Close)
@@ -138,8 +141,27 @@ func TestOSSProviderStatObjectReturnsArtifactSHA256(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StatObject: %v", err)
 	}
-	if info.SHA256 != hash || info.Size != 7 || info.ETag != "etag-1" {
-		t.Fatalf("ObjectInfo = %#v, want stored hash, size, and ETag", info)
+	if info.SHA256 != wantHash || info.Size != 7 || info.ETag != "etag-1" {
+		t.Fatalf("ObjectInfo = %#v, want normalized stored hash, size, and ETag", info)
+	}
+}
+
+func TestOSSProviderStatObjectLeavesArtifactSHA256EmptyWhenMetadataAbsent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "7")
+		w.Header().Set("Content-Type", "text/markdown")
+		w.Header().Set("ETag", "etag-1")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	provider := newTestOSSProvider(t, server.URL)
+
+	info, err := provider.StatObject(context.Background(), "output/article.md")
+	if err != nil {
+		t.Fatalf("StatObject: %v", err)
+	}
+	if info.SHA256 != "" {
+		t.Fatalf("ObjectInfo.SHA256 = %q, want empty for an object without hash metadata", info.SHA256)
 	}
 }
 
