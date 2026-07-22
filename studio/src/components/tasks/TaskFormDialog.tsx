@@ -73,11 +73,13 @@ export function TaskFormDialog({
   const queryClient = useQueryClient()
   const { submit } = useSubmitLock()
   const initializedKeyRef = useRef<string | undefined>(undefined)
+  const localExecutorStatusRef = useRef<LocalExecutorStatus | null>(null)
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [montageUploading, setMontageUploading] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [localExecutorStatus, setLocalExecutorStatus] = useState<LocalExecutorStatus | null>(null)
-  const [runLocally, setRunLocally] = useState(true)
+  const [localExecutorLoading, setLocalExecutorLoading] = useState(false)
+  const [runLocally, setRunLocally] = useState(false)
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ['projects', 'active'],
@@ -159,20 +161,46 @@ export function TaskFormDialog({
 
   useEffect(() => {
     if (!open) {
+      localExecutorStatusRef.current = null
+      setLocalExecutorStatus(null)
+      setLocalExecutorLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setLocalExecutorLoading(true)
+    void getLocalExecutorStatus().then((status) => {
+      if (cancelled) return
+      localExecutorStatusRef.current = status
+      setLocalExecutorStatus(status)
+      setLocalExecutorLoading(false)
+      if (mode === 'create') setRunLocally(shouldDefaultRunLocally(status))
+    })
+    return () => { cancelled = true }
+  }, [mode, open])
+
+  useEffect(() => {
+    if (!open) {
       initializedKeyRef.current = undefined
       return
     }
     if (mode === 'clone' && !sourceTask) return
-    if (mode === 'create' && initialProjectId && projectsLoading) return
+    if ((mode === 'clone' || initialProjectId) && projectsLoading) return
 
     const initializationKey = mode === 'clone'
-      ? `clone:${sourceTask?.id ?? ''}`
+      ? `clone:${sourceTask?.id ?? ''}:${sourceTask?.project_id ?? ''}:${sourceTask?.type ?? ''}:${sourceTask?.execution_target ?? ''}`
       : `create:${initialProjectId ?? ''}:${initialType ?? ''}`
     if (initializedKeyRef.current === initializationKey) return
 
     const project = initialProjectId ? projectMap.get(initialProjectId) : undefined
     const defaults = mode === 'clone' && sourceTask
-      ? cloneTaskFormDefaults(sourceTask)
+      ? (() => {
+          const cloned = cloneTaskFormDefaults(sourceTask)
+          const sourceProject = projectMap.get(sourceTask.project_id ?? '')
+          return sourceProject
+            ? switchTaskFormDefaults(cloned, sourceProject)
+            : { ...cloned, project_id: '' }
+        })()
       : createInitialDefaults(project, initialType)
     initializedKeyRef.current = initializationKey
     form.reset(defaults)
@@ -180,18 +208,10 @@ export function TaskFormDialog({
     setReferenceUploading(false)
     setMontageUploading(false)
     setShowDirtyDialog(false)
-    let cancelled = false
-    void getLocalExecutorStatus().then((status) => {
-      if (cancelled) return
-      setLocalExecutorStatus(status)
-      const inheritedLocal = defaults.execution_target === 'local' || defaults.execution_target === 'local_claimed'
-      setRunLocally(mode === 'clone' ? inheritedLocal : shouldDefaultRunLocally(status))
-    })
+    const inheritedLocal = defaults.execution_target === 'local' || defaults.execution_target === 'local_claimed'
+    setRunLocally(mode === 'clone' ? inheritedLocal : shouldDefaultRunLocally(localExecutorStatusRef.current))
     const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
-    return () => {
-      cancelled = true
-      clearTimeout(focusTimeout)
-    }
+    return () => clearTimeout(focusTimeout)
   }, [form, initialProjectId, initialType, mode, open, projectMap, projectsLoading, resetAttachments, sourceTask])
 
   const taskMutation = useMutation({
@@ -204,7 +224,9 @@ export function TaskFormDialog({
     },
     onSuccess: (task, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      toast.success(mode === 'clone' ? '任务克隆成功' : '任务创建成功')
+      toast.success(mode === 'clone'
+        ? variables.quantity > 1 ? `已克隆 ${variables.quantity} 个任务` : '任务克隆成功'
+        : '任务创建成功')
       onCreated(task, variables.quantity)
       form.reset(createTaskFormDefaults())
       attachmentController.clear()
@@ -215,12 +237,14 @@ export function TaskFormDialog({
       toast.error(getApiErrorMessage(error, mode === 'clone' ? '克隆任务失败，请稍后再试' : '创建任务失败，请重试'))
     },
   })
+  const isSubmitting = form.formState.isSubmitting || taskMutation.isPending
 
   function setFormValue<K extends FieldPath<TaskFormDefaults>>(name: K, value: FieldPathValue<TaskFormDefaults, K>) {
     form.setValue(name, value, { shouldDirty: true, shouldValidate: true })
   }
 
   function resetAndClose() {
+    if (isSubmitting) return
     initializedKeyRef.current = undefined
     form.reset(createTaskFormDefaults())
     attachmentController.clear()
@@ -231,6 +255,7 @@ export function TaskFormDialog({
   }
 
   function requestClose() {
+    if (isSubmitting) return
     if (form.formState.isDirty) {
       setShowDirtyDialog(true)
       return
@@ -260,6 +285,7 @@ export function TaskFormDialog({
   async function onSubmit(values: TaskFormDefaults) {
     let statusForSubmit = localExecutorStatus
     const wantsLocalExecution = values.type !== 'montage' && runLocally
+    if (wantsLocalExecution && localExecutorLoading) return
     if (wantsLocalExecution && statusForSubmit?.state === 'ready_stopped') {
       const started = await startLocalExecutor()
       if (started) {
@@ -300,15 +326,21 @@ export function TaskFormDialog({
   })
   const creationBlocker = !costPreview.priceAvailable
     ? { message: '固定价格目录暂不可用，请稍后重试。', href: '' }
-    : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
-      ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
-      : imageModelUnavailable
-        ? { message: '当前图像模型不可用，请重新选择。', href: '' }
-        : watchedType !== 'ecommerce' && goalMode && !goal.trim()
-          ? { message: '强目标模式需要填写目标条件。', href: '' }
-          : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
-            ? { message: '电商出图需要先上传产品图。', href: '' }
-            : null
+    : mode === 'clone' && projectsLoading
+      ? { message: '正在加载可用项目，请稍候。', href: '' }
+      : mode === 'clone' && !selectedProject
+        ? { message: '源任务项目不可用，请选择一个有效项目。', href: '' }
+        : runLocally && localExecutorLoading
+          ? { message: '正在检查本地执行器，请稍候。', href: '' }
+          : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
+            ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
+            : imageModelUnavailable
+              ? { message: '当前图像模型不可用，请重新选择。', href: '' }
+              : watchedType !== 'ecommerce' && goalMode && !goal.trim()
+                ? { message: '强目标模式需要填写目标条件。', href: '' }
+                : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
+                  ? { message: '电商出图需要先上传产品图。', href: '' }
+                  : null
 
   const promptComposer = (
     <AgentPromptInput
@@ -325,7 +357,7 @@ export function TaskFormDialog({
       submitMode="external"
       placeholder="描述创作目标、内容要求和素材使用方式..."
       submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
-      submitting={taskMutation.isPending}
+      submitting={isSubmitting}
       submitDisabled={Boolean(creationBlocker)}
       contextBar={(
         <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -353,8 +385,8 @@ export function TaskFormDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) requestClose() }}>
-        <DialogContent className="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-5xl">
+      <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !isSubmitting) requestClose() }}>
+        <DialogContent closeButtonDisabled={isSubmitting} className="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-5xl">
           <DialogHeader className="border-b border-border px-4 py-3">
             <DialogTitle>{mode === 'clone' ? '克隆任务' : '新建任务'}</DialogTitle>
             <DialogDescription>
@@ -644,14 +676,16 @@ export function TaskFormDialog({
 
                 {watchedType !== 'ecommerce' && !isMontageTask ? (
                   <div className={`rounded-lg border p-3 transition-colors ${goalMode ? 'border-primary bg-primary/5' : 'border-border'}`}>
-                    <button type="button" onClick={() => setFormValue('goal_mode', !goalMode)} className="flex w-full items-start gap-3 text-left">
-                      <Target className={`mt-0.5 h-5 w-5 shrink-0 ${goalMode ? 'text-primary' : 'text-muted-foreground'}`} />
-                      <div className="min-w-0 flex-1">
-                        <p className={`text-sm font-medium ${goalMode ? 'text-foreground' : 'text-muted-foreground'}`}>强目标模式</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">开启后扣费 ×3，最多尝试 3 次。任务执行后由 AI 评估产出是否满足「目标条件」，未达成自动重试。</p>
-                      </div>
-                      <Switch checked={goalMode} onCheckedChange={(checked) => setFormValue('goal_mode', checked)} />
-                    </button>
+                    <div className="flex w-full items-start gap-3">
+                      <label htmlFor="task-goal-mode" className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left">
+                        <Target className={`mt-0.5 h-5 w-5 shrink-0 ${goalMode ? 'text-primary' : 'text-muted-foreground'}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className={`block text-sm font-medium ${goalMode ? 'text-foreground' : 'text-muted-foreground'}`}>强目标模式</span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">开启后扣费 ×3，最多尝试 3 次。任务执行后由 AI 评估产出是否满足「目标条件」，未达成自动重试。</span>
+                        </span>
+                      </label>
+                      <Switch id="task-goal-mode" checked={goalMode} onCheckedChange={(checked) => setFormValue('goal_mode', checked)} />
+                    </div>
                     {goalMode ? (
                       <div className="mt-3 space-y-2">
                         <Textarea
@@ -702,12 +736,12 @@ export function TaskFormDialog({
                 <span className="max-w-[260px] truncate text-muted-foreground/75" title={localExecutorHint}>{localExecutorHint}</span>
               </div>
             ) : null}
-            <Button variant="secondary" onClick={requestClose}>取消</Button>
+            <Button variant="secondary" disabled={isSubmitting} onClick={requestClose}>取消</Button>
             <Button
               type="submit"
               form="task-create-form"
-              loading={taskMutation.isPending}
-              disabled={Boolean(creationBlocker) || referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)}
+              loading={isSubmitting}
+              disabled={isSubmitting || Boolean(creationBlocker) || referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)}
             >
               {submitLabel}
             </Button>
@@ -715,15 +749,15 @@ export function TaskFormDialog({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>
+      <AlertDialog open={showDirtyDialog} onOpenChange={(nextOpen) => { if (!isSubmitting) setShowDirtyDialog(nextOpen) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>放弃编辑？</AlertDialogTitle>
             <AlertDialogDescription>你有未保存的更改，确定要关闭吗？</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>继续编辑</AlertDialogCancel>
-            <AlertDialogAction onClick={resetAndClose}>放弃</AlertDialogAction>
+            <AlertDialogCancel disabled={isSubmitting}>继续编辑</AlertDialogCancel>
+            <AlertDialogAction disabled={isSubmitting} onClick={resetAndClose}>放弃</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

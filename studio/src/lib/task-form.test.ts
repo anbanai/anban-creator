@@ -147,6 +147,84 @@ describe('task form mapping', () => {
     })
   })
 
+  it('preserves ecommerce edits when switching between ecommerce projects', () => {
+    const current = {
+      ...createTaskFormDefaults(project({
+        id: 'source-ecommerce',
+        platform: 'ecommerce',
+        ecommerce_defaults: { default_selected_modules: { hero: 1 } },
+      })),
+      prompt: 'Keep ecommerce prompt',
+      product_photos: ['oss://product.png'],
+      selected_modules: { hero: 3, detail: 2 },
+      target_platform: 'tmall',
+      selling_points: 'Lightweight and durable',
+      language: 'zh-CN',
+    }
+    const destination = project({
+      id: 'destination-ecommerce',
+      platform: 'ecommerce',
+      ecommerce_defaults: {
+        image_model_key: 'destination-model',
+        default_selected_modules: { stale_default: 1 },
+        target_platform: 'douyin',
+      },
+    })
+
+    const switched = switchTaskFormDefaults(current, destination)
+
+    expect(switched).toMatchObject({
+      project_id: 'destination-ecommerce',
+      type: 'ecommerce',
+      prompt: 'Keep ecommerce prompt',
+      product_photos: ['oss://product.png'],
+      selected_modules: { hero: 3, detail: 2 },
+      target_platform: 'tmall',
+      selling_points: 'Lightweight and durable',
+      language: 'zh-CN',
+    })
+  })
+
+  it('preserves Montage input when switching between Montage projects', () => {
+    const current = {
+      ...createTaskFormDefaults(project({ id: 'source-montage', platform: 'montage' })),
+      prompt: 'Keep montage brief',
+      montage_input: {
+        brief: 'Keep montage brief',
+        pipeline_key: 'custom-pipeline',
+        source_assets: [{ type: 'video_url' as const, url: 'oss://source.mp4' }],
+        preferences: { aspect_ratio: '9:16', duration_seconds: 37, style: 'kinetic' },
+        delivery_targets: ['douyin'],
+        advanced: { render: { fps: 60 } },
+      },
+    }
+    const destination = project({
+      id: 'destination-montage',
+      platform: 'montage',
+      montage_defaults: {
+        default_pipeline: 'destination-default',
+        preferences: { duration_seconds: 15 },
+        delivery_targets: ['wechat'],
+      },
+    })
+
+    const switched = switchTaskFormDefaults(current, destination)
+
+    expect(switched).toMatchObject({
+      project_id: 'destination-montage',
+      type: 'montage',
+      prompt: 'Keep montage brief',
+      montage_input: {
+        brief: 'Keep montage brief',
+        pipeline_key: 'custom-pipeline',
+        source_assets: [{ type: 'video_url', url: 'oss://source.mp4' }],
+        preferences: { aspect_ratio: '9:16', duration_seconds: 37, style: 'kinetic' },
+        delivery_targets: ['douyin'],
+        advanced: { render: { fps: 60 } },
+      },
+    })
+  })
+
   it('switches into Montage with the current prompt as the editable video brief', () => {
     const montageProject = project({
       id: 'montage-project',

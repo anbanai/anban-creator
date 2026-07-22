@@ -69,6 +69,13 @@ export function switchTaskFormDefaults(
   current: TaskFormDefaults,
   project?: Project | null,
 ): TaskFormDefaults {
+  if (project && current.type === project.platform) {
+    return {
+      ...cloneValue(current),
+      project_id: project.id,
+    }
+  }
+
   const defaults = createTaskFormDefaults(project)
   return {
     ...defaults,

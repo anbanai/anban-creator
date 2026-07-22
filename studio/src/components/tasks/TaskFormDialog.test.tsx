@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
 import { api } from '@/lib/api'
+import { getLocalExecutorStatus, setExecutorEnabled, startLocalExecutor, type LocalExecutorStatus } from '@/lib/tauri'
 import { createTestQueryClient } from '@/test/test-utils'
 import type { Project, Task } from '@/types'
 import { TaskFormDialog, type TaskFormDialogProps } from './TaskFormDialog'
@@ -24,6 +25,38 @@ vi.mock('@/lib/tauri', () => ({
 }))
 
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => { resolve = next })
+  return { promise, resolve }
+}
+
+function executorStatus(overrides: Partial<LocalExecutorStatus> = {}): LocalExecutorStatus {
+  return {
+    state: 'needs_config',
+    available: false,
+    running: false,
+    agent_present: false,
+    node_present: false,
+    claude_present: false,
+    plugin_present: false,
+    ffmpeg_present: false,
+    claude_authenticated: false,
+    workspace_set: false,
+    workspace_valid: false,
+    workspace_writable: false,
+    api_key_set: false,
+    auth_mode: 'missing',
+    checks: [],
+    current_task_id: null,
+    last_error: null,
+    last_event_at: null,
+    workspace: '',
+    reason: '未配置',
+    ...overrides,
+  }
+}
 
 vi.mock('@/lib/direct-upload', async () => {
   const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
@@ -161,6 +194,9 @@ function renderDialog(props: Partial<TaskFormDialogProps> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(getLocalExecutorStatus).mockResolvedValue(executorStatus())
+  vi.mocked(startLocalExecutor).mockResolvedValue(false)
+  vi.mocked(setExecutorEnabled).mockResolvedValue(false)
   vi.mocked(api.projects.list).mockResolvedValue([
     fixtures.articleProject,
     fixtures.seednoteProject,
@@ -230,6 +266,43 @@ describe('TaskFormDialog', () => {
     expect(within(dialog).queryByText('尾图')).not.toBeInTheDocument()
   })
 
+  it('waits for active projects and makes the source project platform authoritative for clone defaults', async () => {
+    const projectsRequest = deferred<Project[]>()
+    vi.mocked(api.projects.list).mockReturnValueOnce(projectsRequest.promise)
+    renderDialog({
+      mode: 'clone',
+      sourceTask: { ...fixtures.sourceTask, type: 'seednote' },
+      initialProjectId: undefined,
+    })
+
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    expect(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('')
+
+    await act(async () => projectsRequest.resolve([
+      fixtures.articleProject,
+      fixtures.seednoteProject,
+      fixtures.montageProject,
+    ]))
+
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目'))
+    expect(within(dialog).getByText('公众号文章')).toBeInTheDocument()
+    expect(within(dialog).getByText('正文配图')).toBeInTheDocument()
+    expect(within(dialog).queryByText('尾图')).not.toBeInTheDocument()
+  })
+
+  it('blocks a clone whose source project is not active until an active project is selected', async () => {
+    renderDialog({
+      mode: 'clone',
+      sourceTask: { ...fixtures.sourceTask, project_id: 'inactive-project' },
+      initialProjectId: undefined,
+    })
+
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    expect(await within(dialog).findByText('源任务项目不可用，请选择一个有效项目。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
+    expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('选择项目')
+  })
+
   it('hydrates clone defaults and removes resume-only attachments', async () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
 
@@ -273,6 +346,17 @@ describe('TaskFormDialog', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it('reports the cloned quantity in its success toast', async () => {
+    renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '3' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
+
+    await waitFor(() => expect(toastMocks.success).toHaveBeenCalledWith('已克隆 3 个任务'))
+  })
+
   it('shows and blocks an inherited image model that is no longer available', async () => {
     vi.mocked(api.imageModels.list).mockResolvedValue({
       tier: 'pro',
@@ -287,6 +371,49 @@ describe('TaskFormDialog', () => {
     expect(await within(dialog).findByText('source-model（当前任务配置）')).toBeInTheDocument()
     expect(within(dialog).getByText('当前图像模型不可用，请重新选择。')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
+  })
+
+  it('keeps inherited local execution while project and executor requests resolve independently', async () => {
+    const projectsRequest = deferred<Project[]>()
+    const executorRequest = deferred<LocalExecutorStatus | null>()
+    vi.mocked(api.projects.list).mockReturnValueOnce(projectsRequest.promise)
+    vi.mocked(getLocalExecutorStatus).mockReturnValueOnce(executorRequest.promise)
+    renderDialog({
+      mode: 'clone',
+      sourceTask: { ...fixtures.sourceTask, execution_target: 'local' },
+      initialProjectId: undefined,
+    })
+
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    await act(async () => projectsRequest.resolve([
+      fixtures.articleProject,
+      fixtures.seednoteProject,
+      fixtures.montageProject,
+    ]))
+    expect(await within(dialog).findByText('正在检查本地执行器，请稍候。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
+
+    await act(async () => executorRequest.resolve(executorStatus({
+      state: 'running_idle',
+      available: true,
+      running: true,
+    })))
+
+    const localExecutionLabel = await within(dialog).findByText('在本机运行')
+    expect(within(localExecutionLabel.closest('label')!).getByRole('switch')).toBeChecked()
+    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeEnabled()
+  })
+
+  it('keeps a cloud clone on cloud when the desktop executor is available', async () => {
+    vi.mocked(getLocalExecutorStatus).mockResolvedValueOnce(executorStatus({
+      state: 'running_idle',
+      available: true,
+      running: true,
+    }))
+    renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
+
+    const localExecutionLabel = await screen.findByText('在本机运行')
+    expect(within(localExecutionLabel.closest('label')!).getByRole('switch')).not.toBeChecked()
   })
 
   it('submits create mode and reports the submitted quantity', async () => {
@@ -356,6 +483,46 @@ describe('TaskFormDialog', () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })
 
+  it('fences every close path during local startup and the clone request', async () => {
+    const startRequest = deferred<boolean>()
+    const cloneRequest = deferred<Task>()
+    vi.mocked(getLocalExecutorStatus).mockResolvedValueOnce(executorStatus({
+      state: 'ready_stopped',
+      available: true,
+      running: false,
+    }))
+    vi.mocked(startLocalExecutor).mockReturnValueOnce(startRequest.promise)
+    vi.mocked(setExecutorEnabled).mockResolvedValueOnce(true)
+    vi.mocked(api.tasks.clone).mockReturnValueOnce(cloneRequest.promise)
+    const { onOpenChange, onCreated } = renderDialog({
+      mode: 'clone',
+      sourceTask: { ...fixtures.sourceTask, execution_target: 'local' },
+      initialProjectId: undefined,
+    })
+
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+    await within(dialog).findByText('在本机运行')
+    fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
+
+    await waitFor(() => expect(startLocalExecutor).toHaveBeenCalledOnce())
+    expect(within(dialog).getByRole('button', { name: '取消' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(onOpenChange).not.toHaveBeenCalled()
+
+    await act(async () => startRequest.resolve(true))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledOnce())
+    expect(within(dialog).getByRole('button', { name: '取消' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeDisabled()
+
+    await act(async () => cloneRequest.resolve(fixtures.createdTask))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(fixtures.createdTask, 1))
+    expect(onOpenChange).toHaveBeenCalledTimes(1)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it('asks for confirmation before closing a dirty form', async () => {
     renderDialog()
     await screen.findByRole('dialog', { name: '新建任务' })
@@ -365,6 +532,20 @@ describe('TaskFormDialog', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(await screen.findByRole('alertdialog', { name: '放弃编辑？' })).toBeInTheDocument()
+  })
+
+  it('uses a label and sibling switch for goal mode without nested interactive controls', async () => {
+    renderDialog()
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目'))
+
+    const goalModeText = within(dialog).getByText('强目标模式')
+    const goalModeLabel = goalModeText.closest('label')
+    expect(goalModeLabel).not.toBeNull()
+    const goalModeSwitch = within(goalModeLabel!.parentElement!).getByRole('switch')
+    expect(goalModeSwitch.parentElement?.closest('button')).toBeNull()
+    fireEvent.click(goalModeLabel!)
+    expect(goalModeSwitch).toBeChecked()
   })
 
   it('shows destination Montage defaults and removes incompatible article controls', async () => {
