@@ -65,6 +65,8 @@ type DirectUploadPrepareRequest struct {
 }
 
 type DirectUploadPrepareResult struct {
+	UploadRequired     bool              `json:"upload_required"`
+	ETag               string            `json:"etag,omitempty"`
 	UploadSessionID    string            `json:"upload_session_id"`
 	UploadID           string            `json:"upload_id"`
 	StagingKey         string            `json:"key"`
@@ -269,6 +271,7 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo re
 		return nil, fmt.Errorf("record upload session: %w", err)
 	}
 	return &DirectUploadPrepareResult{
+		UploadRequired:     true,
 		UploadSessionID:    uploadID,
 		UploadID:           uploadID,
 		StagingKey:         key,

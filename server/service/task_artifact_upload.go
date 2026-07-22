@@ -18,7 +18,10 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-const maxTaskArtifactUploadBytes = 512 * 1024 * 1024
+const (
+	maxTaskArtifactUploadBytes = 512 * 1024 * 1024
+	taskArtifactSHA256Header   = "X-Oss-Meta-Sha256"
+)
 
 var (
 	ErrTaskArtifactInvalid           = errors.New("invalid task artifact request")
@@ -89,12 +92,38 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	if req.Size > maxTaskArtifactUploadBytes {
 		return nil, taskArtifactInvalidf("file size exceeds the %d MB limit", maxTaskArtifactUploadBytes/(1024*1024))
 	}
-	if req.SHA256 != "" && !validTaskArtifactSHA256(req.SHA256) {
+	if !validTaskArtifactSHA256(req.SHA256) {
 		return nil, taskArtifactInvalidf("sha256 must be a 64-character hex string")
 	}
+	req.SHA256 = strings.ToLower(strings.TrimSpace(req.SHA256))
 
 	contentType := normalizeTaskArtifactContentType(req.ContentType, relPath)
 	key := buildTaskArtifactStorageKey(task, executionID, relPath)
+	statProvider, ok := s.store.(taskArtifactObjectStatProvider)
+	if !ok {
+		return nil, fmt.Errorf("%w: storage provider does not support object metadata", ErrTaskArtifactUnavailable)
+	}
+	stat, statErr := statProvider.StatObject(ctx, key)
+	switch {
+	case statErr == nil && stat != nil && stat.Size == req.Size && strings.EqualFold(strings.TrimSpace(stat.SHA256), req.SHA256):
+		return &DirectUploadPrepareResult{
+			UploadRequired: false,
+			ETag:           stat.ETag,
+			StagingKey:     key,
+			Key:            key,
+			PublicURL:      s.store.GetURL(key),
+			Method:         "PUT",
+			Headers: map[string]string{
+				"Content-Type":           contentType,
+				taskArtifactSHA256Header: req.SHA256,
+			},
+			MaxSize: maxTaskArtifactUploadBytes,
+		}, nil
+	case statErr == nil || errors.Is(statErr, storage.ErrObjectNotFound):
+		// A missing or stale object requires a fresh upload.
+	default:
+		return nil, fmt.Errorf("%w: stat task artifact %s: %v", ErrTaskArtifactUnavailable, key, statErr)
+	}
 	now := time.Now
 	if cfg.Now != nil {
 		now = cfg.Now
@@ -132,13 +161,17 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 
 	uploadID := uuid.NewString()
 	return &DirectUploadPrepareResult{
-		UploadID:           uploadID,
-		StagingKey:         key,
-		Key:                key,
-		PublicURL:          s.store.GetURL(key),
-		UploadURL:          uploadURL,
-		Method:             "PUT",
-		Headers:            map[string]string{"Content-Type": contentType},
+		UploadRequired: true,
+		UploadID:       uploadID,
+		StagingKey:     key,
+		Key:            key,
+		PublicURL:      s.store.GetURL(key),
+		UploadURL:      uploadURL,
+		Method:         "PUT",
+		Headers: map[string]string{
+			"Content-Type":           contentType,
+			taskArtifactSHA256Header: req.SHA256,
+		},
 		Region:             ossBrowserRegion(cfg.Storage.Region, cfg.Storage.Endpoint),
 		Bucket:             cfg.Storage.BucketName,
 		Endpoint:           cfg.Storage.Endpoint,
@@ -173,6 +206,10 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		return err
 	}
 	prefix := buildTaskArtifactStoragePrefix(task, executionID)
+	statProvider, ok := s.store.(taskArtifactObjectStatProvider)
+	if !ok {
+		return fmt.Errorf("%w: storage provider does not support object metadata", ErrTaskArtifactUnavailable)
+	}
 	files := make([]*model.TaskFile, 0, len(req.Files))
 	for _, file := range req.Files {
 		relPath, err := cleanTaskArtifactRelativePath(task, file.RelativePath)
@@ -193,25 +230,23 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		if !validTaskArtifactSHA256(file.SHA256) {
 			return taskArtifactInvalidf("sha256 must be a 64-character hex string for %s", relPath)
 		}
-		contentType := normalizeTaskArtifactContentType(file.ContentType, relPath)
-		size := file.Size
-		if statProvider, ok := s.store.(taskArtifactObjectStatProvider); ok {
-			stat, err := statProvider.StatObject(ctx, objectKey)
-			if err != nil {
-				return fmt.Errorf("%w: stat task artifact %s: %v", ErrTaskArtifactUnavailable, objectKey, err)
-			}
-			if stat.Size > 0 {
-				if size > 0 && stat.Size != size {
-					return taskArtifactInvalidf("task artifact %s size mismatch: manifest=%d storage=%d", relPath, size, stat.Size)
-				}
-				size = stat.Size
-			}
-			if statContentType := firstNonEmptyString(stat.ContentType, stat.MimeType); statContentType != "" {
-				contentType = statContentType
-			}
+		stat, err := statProvider.StatObject(ctx, objectKey)
+		if err != nil || stat == nil {
+			return fmt.Errorf("%w: stat task artifact %s: %v", ErrTaskArtifactUnavailable, objectKey, err)
 		}
-		if size <= 0 {
+		if file.Size <= 0 {
 			return taskArtifactInvalidf("file size is required for %s", relPath)
+		}
+		if stat.Size != file.Size {
+			return taskArtifactInvalidf("task artifact %s size mismatch: manifest=%d storage=%d", relPath, file.Size, stat.Size)
+		}
+		if !strings.EqualFold(strings.TrimSpace(stat.SHA256), strings.TrimSpace(file.SHA256)) {
+			return taskArtifactInvalidf("task artifact %s sha256 mismatch: manifest=%s storage=%s", relPath, strings.ToLower(file.SHA256), strings.ToLower(stat.SHA256))
+		}
+		contentType := normalizeTaskArtifactContentType(file.ContentType, relPath)
+		size := stat.Size
+		if statContentType := firstNonEmptyString(stat.ContentType, stat.MimeType); statContentType != "" {
+			contentType = statContentType
 		}
 
 		filename := filepath.Base(relPath)
@@ -227,7 +262,7 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 			FileName:        filename,
 			MimeType:        contentType,
 			FileSize:        size,
-			ContentHash:     strings.ToLower(file.SHA256),
+			ContentHash:     strings.ToLower(strings.TrimSpace(file.SHA256)),
 			OSSKey:          objectKey,
 			OSSURL:          s.store.GetURL(objectKey),
 			StorageProvider: s.store.Name(),

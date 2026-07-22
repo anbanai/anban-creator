@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -21,6 +22,8 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
 )
+
+const taskArtifactTestSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type fakeTaskArtifactStorage struct {
 	name              string
@@ -81,10 +84,27 @@ func (f *fakeTaskArtifactStorage) IsOwnedURL(rawURL string) bool {
 
 func (f *fakeTaskArtifactStorage) StatObject(_ context.Context, key string) (*storage.ObjectInfo, error) {
 	if f.stats == nil || f.stats[key] == nil {
-		return nil, os.ErrNotExist
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectNotFound, key)
 	}
 	cp := *f.stats[key]
 	return &cp, nil
+}
+
+func startTaskArtifactExecution(t *testing.T, repo repository.Repository, task *model.Task) string {
+	t.Helper()
+	executionID := uuid.NewString()
+	task.CurrentExecutionID = &executionID
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes",
+		Status: model.TaskExecutionRunning, Started: true, StartedAt: &now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return executionID
 }
 
 func newTaskArtifactTestService(t *testing.T) (*TaskService, repository.Repository, *fakeTaskArtifactStorage, *model.Task) {
@@ -149,6 +169,7 @@ func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 		Filename:     "article.md",
 		ContentType:  "text/markdown",
 		Size:         12345,
+		SHA256:       taskArtifactTestSHA256,
 	})
 	if err != nil {
 		t.Fatalf("PrepareTaskArtifactUpload: %v", err)
@@ -163,6 +184,137 @@ func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 	}
 	if result.STSAccessKeyID != "sts-ak" || result.STSSecurityToken != "sts-token" {
 		t.Fatalf("sts fields = %#v", result)
+	}
+}
+
+func TestPrepareTaskArtifactUploadSkipsOnlyMatchingStoredObject(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	key := buildTaskArtifactStorageKey(task, executionID, "output/article.md")
+	req := TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md",
+		ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	}
+
+	for _, tt := range []struct {
+		name            string
+		info            storage.ObjectInfo
+		uploadRequired  bool
+		wantStoredETag  string
+		wantCredentials bool
+	}{
+		{
+			name:            "matching size and hash",
+			info:            storage.ObjectInfo{Key: key, Size: 7, ContentType: "text/markdown", ETag: "etag-1", SHA256: taskArtifactTestSHA256},
+			uploadRequired:  false,
+			wantStoredETag:  "etag-1",
+			wantCredentials: false,
+		},
+		{
+			name:            "wrong hash",
+			info:            storage.ObjectInfo{Key: key, Size: 7, ContentType: "text/markdown", SHA256: strings.Repeat("b", 64)},
+			uploadRequired:  true,
+			wantCredentials: true,
+		},
+		{
+			name:            "wrong size",
+			info:            storage.ObjectInfo{Key: key, Size: 8, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256},
+			uploadRequired:  true,
+			wantCredentials: true,
+		},
+		{
+			name:            "missing hash metadata",
+			info:            storage.ObjectInfo{Key: key, Size: 7, ContentType: "text/markdown"},
+			uploadRequired:  true,
+			wantCredentials: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store.stats = map[string]*storage.ObjectInfo{key: &tt.info}
+			store.uploadKey = ""
+			store.uploadContentType = ""
+
+			result, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.UploadRequired != tt.uploadRequired {
+				t.Fatalf("UploadRequired = %v, want %v", result.UploadRequired, tt.uploadRequired)
+			}
+			if result.ETag != tt.wantStoredETag {
+				t.Fatalf("ETag = %q, want %q", result.ETag, tt.wantStoredETag)
+			}
+			if gotCredentials := result.STSAccessKeyID != "" || result.STSAccessKeySecret != "" || result.STSSecurityToken != ""; gotCredentials != tt.wantCredentials {
+				t.Fatalf("credentials present = %v, want %v", gotCredentials, tt.wantCredentials)
+			}
+			if !tt.uploadRequired {
+				if store.uploadKey != "" {
+					t.Fatalf("matching object requested upload URL for %q", store.uploadKey)
+				}
+				return
+			}
+			if result.Headers["X-Oss-Meta-Sha256"] != taskArtifactTestSHA256 {
+				t.Fatalf("hash header = %q, want %q", result.Headers["X-Oss-Meta-Sha256"], taskArtifactTestSHA256)
+			}
+		})
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRejectsStoredHashMismatch(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	key := buildTaskArtifactStorageKey(task, executionID, "output/article.md")
+	store.stats = map[string]*storage.ObjectInfo{
+		key: {Key: key, Size: 7, ContentType: "text/markdown", SHA256: strings.Repeat("b", 64)},
+	}
+
+	err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{{RelativePath: "output/article.md", ObjectKey: key, ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want sha256 mismatch", err)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestRejectsStoredSizeMismatch(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	key := buildTaskArtifactStorageKey(task, executionID, "output/article.md")
+	store.stats = map[string]*storage.ObjectInfo{
+		key: {Key: key, Size: 8, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256},
+	}
+
+	err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{{RelativePath: "output/article.md", ObjectKey: key, ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "size mismatch") {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want size mismatch", err)
+	}
+}
+
+func TestTaskArtifactEndpointsRejectTerminalExecution(t *testing.T) {
+	svc, repo, _, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	if transitioned, err := repo.TaskExecutions().Transition(ctx, executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionSucceeded, model.ExecutionTransition{}); err != nil || !transitioned {
+		t.Fatalf("transition execution: transitioned=%v err=%v", transitioned, err)
+	}
+
+	_, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if !errors.Is(err, ErrTaskArtifactExecutionConflict) {
+		t.Fatalf("PrepareTaskArtifactUpload error = %v, want ErrTaskArtifactExecutionConflict", err)
+	}
+
+	err = svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID})
+	if !errors.Is(err, ErrTaskArtifactExecutionConflict) {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want ErrTaskArtifactExecutionConflict", err)
 	}
 }
 
@@ -201,9 +353,9 @@ func TestFinalizeTaskArtifactManifestPreservesExecutionMCPArtifacts(t *testing.T
 	store.stats = make(map[string]*storage.ObjectInfo, len(paths))
 	for _, relPath := range paths {
 		key := buildTaskArtifactStorageKey(task, executionID, relPath)
-		store.stats[key] = &storage.ObjectInfo{Key: key, Size: 3, ContentType: DetectTaskFileMIME(relPath)}
+		store.stats[key] = &storage.ObjectInfo{Key: key, Size: 3, ContentType: DetectTaskFileMIME(relPath), SHA256: taskArtifactTestSHA256}
 		manifest.Files = append(manifest.Files, TaskArtifactManifestFile{
-			RelativePath: relPath, ObjectKey: key, ContentType: DetectTaskFileMIME(relPath), Size: 3, SHA256: strings.Repeat("a", 64),
+			RelativePath: relPath, ObjectKey: key, ContentType: DetectTaskFileMIME(relPath), Size: 3, SHA256: taskArtifactTestSHA256,
 		})
 	}
 	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
@@ -330,6 +482,7 @@ func TestPrepareTaskArtifactUploadRejectsMissingSTSRole(t *testing.T) {
 		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
+		SHA256:       taskArtifactTestSHA256,
 	})
 	if err == nil || !strings.Contains(err.Error(), "storage.sts_role_arn") {
 		t.Fatalf("PrepareTaskArtifactUpload missing STS role error = %v, want sts_role_arn rejection", err)
@@ -366,6 +519,7 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 			Size:        int64(len(body)),
 			ContentType: "text/markdown",
 			ETag:        "etag-1",
+			SHA256:      hash,
 		},
 	}
 
@@ -415,8 +569,8 @@ func TestExecutionArtifactManifestStaysPendingUntilPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	objectKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/executions/" + executionID + "/artifacts/output/article.md"
-	store.stats = map[string]*storage.ObjectInfo{objectKey: {Key: objectKey, Size: 7, ContentType: "text/markdown"}}
-	req := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{{RelativePath: "output/article.md", ObjectKey: objectKey, Size: 7, SHA256: strings.Repeat("a", 64)}}}
+	store.stats = map[string]*storage.ObjectInfo{objectKey: {Key: objectKey, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256}}
+	req := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID, Files: []TaskArtifactManifestFile{{RelativePath: "output/article.md", ObjectKey: objectKey, Size: 7, SHA256: taskArtifactTestSHA256}}}
 	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, req); err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +603,7 @@ func TestExecutionArtifactPrepareRejectsMissingOrStaleIdentity(t *testing.T) {
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now}); err != nil {
 		t.Fatal(err)
 	}
-	request := TaskArtifactPrepareRequest{TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", Size: 7}
+	request := TaskArtifactPrepareRequest{TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", Size: 7, SHA256: taskArtifactTestSHA256}
 	result, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), request)
 	if err != nil {
 		t.Fatal(err)
