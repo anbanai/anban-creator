@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -326,27 +327,16 @@ func TestCopyArtifactWithContextRejectsShortWrite(t *testing.T) {
 	}
 }
 
-func TestFileSHA256ReturnsCloseErrorAfterSuccessfulHash(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "article.md")
-	writeAgentArtifactTestFile(t, root, "article.md", "stable")
-	closeErr := errors.New("close failed")
-	previousOpen := openArtifactFile
-	openArtifactFile = func(path string) (artifactFile, error) {
-		file, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		return &artifactTestFile{File: file, closeErr: closeErr}, nil
-	}
-	t.Cleanup(func() { openArtifactFile = previousOpen })
+func TestArtifactHeaderCaptureCapsBytesWithoutShortWrite(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 1024)
+	capture := &artifactHeaderCapture{}
 
-	hash, err := fileSHA256(context.Background(), path)
-	if hash != "" {
-		t.Fatalf("hash = %q, want empty on close failure", hash)
+	written, err := capture.Write(payload)
+	if err != nil || written != len(payload) {
+		t.Fatalf("Write() = (%d, %v), want (%d, nil)", written, err, len(payload))
 	}
-	if !errors.Is(err, closeErr) || !strings.Contains(err.Error(), "close artifact") {
-		t.Fatalf("fileSHA256 error = %v, want contextual close error", err)
+	if len(capture.bytes) != 512 || !bytes.Equal(capture.bytes, payload[:512]) {
+		t.Fatalf("captured %d bytes, want first 512 bytes", len(capture.bytes))
 	}
 }
 
@@ -426,7 +416,7 @@ func TestOpenArtifactSnapshotPreservesStatAndCloseErrors(t *testing.T) {
 	}
 }
 
-func TestFileSHA256RejectsCancellationAfterFinalRead(t *testing.T) {
+func TestOpenArtifactSnapshotRejectsCancellationAfterFinalRead(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "article.md")
 	writeAgentArtifactTestFile(t, root, "article.md", "final bytes")
@@ -454,9 +444,9 @@ func TestFileSHA256RejectsCancellationAfterFinalRead(t *testing.T) {
 	}
 	t.Cleanup(func() { openArtifactFile = previousOpen })
 
-	hash, err := fileSHA256(ctx, path)
-	if hash != "" || !errors.Is(err, cancelCause) {
-		t.Fatalf("fileSHA256 = (%q, %v), want empty hash and cancellation cause", hash, err)
+	snapshot, err := openArtifactSnapshot(ctx, path)
+	if snapshot != nil || !errors.Is(err, cancelCause) {
+		t.Fatalf("openArtifactSnapshot = (%v, %v), want nil snapshot and cancellation cause", snapshot, err)
 	}
 }
 
@@ -493,6 +483,46 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	}
 	if got := reporter.progress; len(got) != 1 || got[0] != "collected 1 workspace artifact(s)" {
 		t.Fatalf("progress = %#v, want collected artifact progress", got)
+	}
+}
+
+func TestArtifactUploaderOpensStableArtifactOnce(t *testing.T) {
+	root := t.TempDir()
+	const body = "stable artifact"
+	writeAgentArtifactTestFile(t, root, "output/article.md", body)
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+
+	previousOpen := openArtifactFile
+	openCalls := 0
+	openArtifactFile = func(path string) (artifactFile, error) {
+		openCalls++
+		return os.Open(path)
+	}
+	t.Cleanup(func() { openArtifactFile = previousOpen })
+
+	var uploaded string
+	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, source io.Reader, _ string) (string, error) {
+		content, err := io.ReadAll(source)
+		uploaded = string(content)
+		return "etag-1", err
+	}
+
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
+	}
+	if openCalls != 1 {
+		t.Fatalf("open calls = %d, want 1", openCalls)
+	}
+	if uploaded != body {
+		t.Fatalf("uploaded body = %q, want %q", uploaded, body)
+	}
+	wantHash := sha256Hex(body)
+	if len(reporter.prepared) != 1 || reporter.prepared[0].Size != int64(len(body)) || reporter.prepared[0].SHA256 != wantHash {
+		t.Fatalf("prepare = %#v, want size %d and SHA-256 %q", reporter.prepared, len(body), wantHash)
+	}
+	if len(reporter.manifest.Files) != 1 || reporter.manifest.Files[0].Size != int64(len(body)) || reporter.manifest.Files[0].SHA256 != wantHash {
+		t.Fatalf("manifest = %#v, want size %d and SHA-256 %q", reporter.manifest, len(body), wantHash)
 	}
 }
 
@@ -761,17 +791,12 @@ func TestArtifactUploaderRetainsOwnershipOfOSSUploadFile(t *testing.T) {
 	}
 
 	previousOpen := openArtifactFile
-	openCalls := 0
 	ownerCloseCalls := 0
 	var uploadFile *artifactTestFile
 	openArtifactFile = func(path string) (artifactFile, error) {
-		openCalls++
 		file, err := os.Open(path)
 		if err != nil {
 			return nil, err
-		}
-		if openCalls == 1 {
-			return file, nil
 		}
 		uploadFile = &artifactTestFile{File: file, closeCalls: &ownerCloseCalls}
 		return uploadFile, nil
@@ -877,7 +902,7 @@ func TestArtifactUploaderPreservesPrepareAndCloseErrors(t *testing.T) {
 	closeErr := errors.New("close failed")
 	reporter := &fakeArtifactReporter{prepareErrors: []error{prepareErr}}
 	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
-	installArtifactCloseFailureAfterScan(t, closeErr)
+	installArtifactCloseFailure(t, closeErr)
 
 	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if !errors.Is(err, prepareErr) || !errors.Is(err, closeErr) {
@@ -898,7 +923,7 @@ func TestArtifactUploaderPreservesPutAndCloseErrors(t *testing.T) {
 	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, io.Reader, string) (string, error) {
 		return "", putErr
 	}
-	installArtifactCloseFailureAfterScan(t, closeErr)
+	installArtifactCloseFailure(t, closeErr)
 
 	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if !errors.Is(err, putErr) || !errors.Is(err, closeErr) {
@@ -925,7 +950,7 @@ func TestArtifactUploaderRetriesFileChangedDuringSnapshotOpen(t *testing.T) {
 	openCalls := 0
 	openArtifactFile = func(openPath string) (artifactFile, error) {
 		openCalls++
-		if openCalls == 2 {
+		if openCalls == 1 {
 			if err := os.Remove(openPath); err != nil {
 				return nil, err
 			}
@@ -940,8 +965,8 @@ func TestArtifactUploaderRetriesFileChangedDuringSnapshotOpen(t *testing.T) {
 	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
 	}
-	if openCalls != 3 || putCalls != 1 {
-		t.Fatalf("open/PUT calls = %d/%d, want 3/1", openCalls, putCalls)
+	if openCalls != 2 || putCalls != 1 {
+		t.Fatalf("open/PUT calls = %d/%d, want 2/1", openCalls, putCalls)
 	}
 	if reporter.manifestCalls != 1 || len(reporter.manifest.Files) != 1 {
 		t.Fatalf("manifest calls/files = %d/%d, want 1/1", reporter.manifestCalls, len(reporter.manifest.Files))
@@ -951,6 +976,59 @@ func TestArtifactUploaderRetriesFileChangedDuringSnapshotOpen(t *testing.T) {
 	}
 	if body, err := os.ReadFile(path); err != nil || string(body) != "version-two-expanded" {
 		t.Fatalf("latest artifact = %q, %v", body, err)
+	}
+}
+
+func TestArtifactUploaderUsesLatestSnapshotMIMEAfterPathReplacement(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/artifact.bin", "plain text artifact")
+	latest := []byte("\x89PNG\r\n\x1a\nlatest png payload")
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+
+	previousOpen := openArtifactFile
+	openCalls := 0
+	openArtifactFile = func(openPath string) (artifactFile, error) {
+		openCalls++
+		if openCalls == 1 {
+			if err := os.Remove(openPath); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(openPath, latest, 0o644); err != nil {
+				return nil, err
+			}
+		}
+		return os.Open(openPath)
+	}
+	t.Cleanup(func() { openArtifactFile = previousOpen })
+
+	var uploaded []byte
+	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, source io.Reader, _ string) (string, error) {
+		var err error
+		uploaded, err = io.ReadAll(source)
+		return "etag-latest", err
+	}
+
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
+	}
+	wantHash := sha256Hex(string(latest))
+	if len(reporter.prepared) != 1 {
+		t.Fatalf("prepare calls = %d, want 1", len(reporter.prepared))
+	}
+	prepared := reporter.prepared[0]
+	if prepared.ContentType != "image/png" || prepared.Size != int64(len(latest)) || prepared.SHA256 != wantHash {
+		t.Fatalf("prepare content type/size/SHA-256 = %q/%d/%q, want image/png/%d/%q", prepared.ContentType, prepared.Size, prepared.SHA256, len(latest), wantHash)
+	}
+	if len(reporter.manifest.Files) != 1 {
+		t.Fatalf("manifest files = %d, want 1", len(reporter.manifest.Files))
+	}
+	manifestFile := reporter.manifest.Files[0]
+	if manifestFile.ContentType != "image/png" || manifestFile.Size != int64(len(latest)) || manifestFile.SHA256 != wantHash {
+		t.Fatalf("manifest content type/size/SHA-256 = %q/%d/%q, want image/png/%d/%q", manifestFile.ContentType, manifestFile.Size, manifestFile.SHA256, len(latest), wantHash)
+	}
+	if !bytes.Equal(uploaded, latest) {
+		t.Fatalf("uploaded body = %q, want latest PNG bytes", uploaded)
 	}
 }
 
@@ -968,15 +1046,10 @@ func TestArtifactUploaderDoesNotRetryPostUploadDescriptorStatError(t *testing.T)
 		return "etag", err
 	}
 	previousOpen := openArtifactFile
-	openCalls := 0
 	openArtifactFile = func(path string) (artifactFile, error) {
-		openCalls++
 		file, err := os.Open(path)
 		if err != nil {
 			return nil, err
-		}
-		if openCalls == 1 {
-			return file, nil
 		}
 		statCalls := 0
 		return &artifactTestFile{
@@ -1023,7 +1096,7 @@ func TestArtifactUploaderDoesNotRetryPostUploadPathStatError(t *testing.T) {
 		}
 		return "etag", nil
 	}
-	installArtifactCloseFailureAfterScan(t, closeErr)
+	installArtifactCloseFailure(t, closeErr)
 
 	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if !errors.Is(err, fs.ErrNotExist) || !errors.Is(err, closeErr) {
@@ -1046,14 +1119,12 @@ func TestArtifactUploaderFailsWhenFileKeepsChangingWhileOpening(t *testing.T) {
 	openCalls := 0
 	openArtifactFile = func(openPath string) (artifactFile, error) {
 		openCalls++
-		if openCalls > 1 {
-			if err := os.Remove(openPath); err != nil {
-				return nil, err
-			}
-			body := strings.Repeat("expanded-", openCalls) + fmt.Sprintf("version-%d", openCalls)
-			if err := os.WriteFile(openPath, []byte(body), 0o644); err != nil {
-				return nil, err
-			}
+		if err := os.Remove(openPath); err != nil {
+			return nil, err
+		}
+		body := strings.Repeat("expanded-", openCalls) + fmt.Sprintf("version-%d", openCalls)
+		if err := os.WriteFile(openPath, []byte(body), 0o644); err != nil {
+			return nil, err
 		}
 		return os.Open(openPath)
 	}
@@ -1063,7 +1134,7 @@ func TestArtifactUploaderFailsWhenFileKeepsChangingWhileOpening(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "artifact output/article.md changed during final collection") {
 		t.Fatalf("UploadWorkspaceArtifacts error = %v, want persistent open-race error", err)
 	}
-	if attempts := openCalls - 1; attempts != maxArtifactSnapshotAttempts {
+	if attempts := openCalls; attempts != maxArtifactSnapshotAttempts {
 		t.Fatalf("snapshot attempts = %d, want %d", attempts, maxArtifactSnapshotAttempts)
 	}
 	if len(reporter.prepared) != 0 || reporter.manifestCalls != 0 {
@@ -1082,7 +1153,7 @@ func TestArtifactUploaderPreservesOpenRaceAndCloseErrors(t *testing.T) {
 	openArtifactFile = func(openPath string) (artifactFile, error) {
 		openCalls++
 		file, err := os.Open(openPath)
-		if openCalls == 2 {
+		if openCalls == 1 {
 			if err != nil {
 				return nil, err
 			}
@@ -1114,18 +1185,13 @@ func TestArtifactUploaderPreservesOpenRaceAndCloseErrors(t *testing.T) {
 	}
 }
 
-func installArtifactCloseFailureAfterScan(t *testing.T, closeErr error) {
+func installArtifactCloseFailure(t *testing.T, closeErr error) {
 	t.Helper()
 	previousOpen := openArtifactFile
-	openCalls := 0
 	openArtifactFile = func(path string) (artifactFile, error) {
-		openCalls++
 		file, err := os.Open(path)
 		if err != nil {
 			return nil, err
-		}
-		if openCalls == 1 {
-			return file, nil
 		}
 		return &artifactTestFile{File: file, closeErr: closeErr}, nil
 	}

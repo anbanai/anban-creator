@@ -62,10 +62,19 @@ func DetectTaskFileMIME(filePath string) string {
 
 	buf := make([]byte, 512)
 	n, _ := f.Read(buf)
-	detected := http.DetectContentType(buf[:n])
+	return DetectTaskFileMIMEFromContent(filePath, buf[:n])
+}
+
+// DetectTaskFileMIMEFromContent returns the MIME type from a path and its leading bytes.
+func DetectTaskFileMIMEFromContent(filePath string, content []byte) string {
+	if len(content) > 512 {
+		content = content[:512]
+	}
+	detected := http.DetectContentType(content)
 	if strings.HasPrefix(detected, "image/") {
 		return detected
 	}
+	ext := strings.ToLower(filepath.Ext(filePath))
 	if mime, ok := mimeTypes[ext]; ok {
 		return mime
 	}

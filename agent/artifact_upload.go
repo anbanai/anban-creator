@@ -66,9 +66,6 @@ type WorkspaceArtifact struct {
 	LocalPath    string
 	RelativePath string
 	Filename     string
-	ContentType  string
-	Size         int64
-	SHA256       string
 }
 
 type ArtifactReporter interface {
@@ -183,7 +180,7 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 			ExecutionID:  u.cfg.ExecutionID,
 			RelativePath: file.RelativePath,
 			Filename:     file.Filename,
-			ContentType:  file.ContentType,
+			ContentType:  snapshot.contentType,
 			Size:         snapshot.size,
 			SHA256:       snapshot.hash,
 		})
@@ -210,7 +207,7 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 
 		contentType := prepared.Headers["Content-Type"]
 		if contentType == "" {
-			contentType = file.ContentType
+			contentType = snapshot.contentType
 		}
 		if prepared.UploadRequired {
 			preparedSHA256 := strings.ToLower(strings.TrimSpace(prepared.Headers[artifactSHA256Header]))
@@ -312,7 +309,7 @@ func scanWorkspaceArtifacts(ctx context.Context, root, taskType string) ([]Works
 			return nil
 		}
 
-		artifact, err := describeWorkspaceArtifact(ctx, root, path, info)
+		artifact, err := describeWorkspaceArtifact(ctx, root, path)
 		if err != nil {
 			return err
 		}
@@ -334,7 +331,7 @@ func scanWorkspaceArtifacts(ctx context.Context, root, taskType string) ([]Works
 	return files, nil
 }
 
-func describeWorkspaceArtifact(ctx context.Context, root, path string, info fs.FileInfo) (WorkspaceArtifact, error) {
+func describeWorkspaceArtifact(ctx context.Context, root, path string) (WorkspaceArtifact, error) {
 	if err := artifactContextCause(ctx); err != nil {
 		return WorkspaceArtifact{}, err
 	}
@@ -343,24 +340,10 @@ func describeWorkspaceArtifact(ctx context.Context, root, path string, info fs.F
 		relPath = filepath.Base(path)
 	}
 	relPath = filepath.ToSlash(relPath)
-	hash, err := fileSHA256(ctx, path)
-	if err != nil {
-		return WorkspaceArtifact{}, err
-	}
-	if err := artifactContextCause(ctx); err != nil {
-		return WorkspaceArtifact{}, err
-	}
-	contentType := service.DetectTaskFileMIME(path)
-	if err := artifactContextCause(ctx); err != nil {
-		return WorkspaceArtifact{}, err
-	}
 	return WorkspaceArtifact{
 		LocalPath:    path,
 		RelativePath: relPath,
 		Filename:     filepath.Base(path),
-		ContentType:  contentType,
-		Size:         info.Size(),
-		SHA256:       hash,
 	}, nil
 }
 

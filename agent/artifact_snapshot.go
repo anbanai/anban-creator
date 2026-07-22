@@ -9,6 +9,8 @@ import (
 	"io"
 	"io/fs"
 	"os"
+
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 const maxArtifactSnapshotAttempts = 3
@@ -22,11 +24,27 @@ type artifactFile interface {
 }
 
 type artifactSnapshot struct {
-	file   artifactFile
-	path   string
-	before fs.FileInfo
-	size   int64
-	hash   string
+	file        artifactFile
+	path        string
+	before      fs.FileInfo
+	size        int64
+	hash        string
+	contentType string
+}
+
+type artifactHeaderCapture struct {
+	bytes []byte
+}
+
+func (c *artifactHeaderCapture) Write(p []byte) (int, error) {
+	written := len(p)
+	if remaining := 512 - len(c.bytes); remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		c.bytes = append(c.bytes, p...)
+	}
+	return written, nil
 }
 
 type artifactUploadSource struct {
@@ -77,15 +95,17 @@ func openArtifactSnapshot(ctx context.Context, path string) (*artifactSnapshot, 
 	}
 
 	hash := sha256.New()
-	if _, err := copyArtifactWithContext(ctx, hash, file); err != nil {
+	header := &artifactHeaderCapture{}
+	if _, err := copyArtifactWithContext(ctx, io.MultiWriter(hash, header), file); err != nil {
 		return nil, closeArtifactFile(path, file, fmt.Errorf("hash artifact %s: %w", path, err))
 	}
 	return &artifactSnapshot{
-		file:   file,
-		path:   path,
-		before: info,
-		size:   info.Size(),
-		hash:   hex.EncodeToString(hash.Sum(nil)),
+		file:        file,
+		path:        path,
+		before:      info,
+		size:        info.Size(),
+		hash:        hex.EncodeToString(hash.Sum(nil)),
+		contentType: service.DetectTaskFileMIMEFromContent(path, header.bytes),
 	}, nil
 }
 
@@ -140,17 +160,6 @@ func copyArtifactWithContext(ctx context.Context, dst io.Writer, src io.Reader) 
 			return total, readErr
 		}
 	}
-}
-
-func fileSHA256(ctx context.Context, path string) (string, error) {
-	snapshot, err := openArtifactSnapshot(ctx, path)
-	if err != nil {
-		return "", err
-	}
-	if err := closeArtifactFile(path, snapshot.file, nil); err != nil {
-		return "", err
-	}
-	return snapshot.hash, nil
 }
 
 func closeArtifactFile(path string, file artifactFile, primary error) error {
