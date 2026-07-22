@@ -38,7 +38,8 @@ const (
 	uploadFinalizationCleanupTTL  = 5 * time.Second
 	// Task-artifact staging remains cleanup-eligible for one hour after expiry
 	// so scheduler sweeps can remove objects recreated by delayed signed PUTs.
-	taskArtifactCleanupGrace = time.Hour
+	taskArtifactCleanupGrace      = time.Hour
+	taskArtifactCleanupRetryDelay = 30 * time.Minute
 )
 
 var (
@@ -834,7 +835,8 @@ func CleanupExpiredUploadSessions(ctx context.Context, store DirectUploadFinaliz
 			return cleaned, err
 		}
 		if session.Purpose == DirectUploadPurposeTaskArtifact && before.Before(session.ExpiresAt.Add(taskArtifactCleanupGrace)) {
-			reopened, err := repo.UploadSessions().ReopenExpiration(ctx, session.ID, claimID)
+			nextCleanupAt := minTime(before.Add(taskArtifactCleanupRetryDelay), session.ExpiresAt.Add(taskArtifactCleanupGrace))
+			reopened, err := repo.UploadSessions().RescheduleExpiration(ctx, session.ID, claimID, nextCleanupAt)
 			if err != nil {
 				return cleaned, err
 			}

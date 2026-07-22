@@ -406,7 +406,7 @@ func TestPrepareTaskArtifactUploadTargetsUniqueStagingKey(t *testing.T) {
 	}
 	if result.UploadSessionID != result.UploadID || session.UserID != task.UserID || session.Purpose != DirectUploadPurposeTaskArtifact ||
 		session.StagingKey != result.Key || session.FileName != "article.md" || session.ContentType != "text/markdown" ||
-		session.Size != request.Size || session.Status != model.UploadSessionPending || !session.ExpiresAt.After(cfg.Now()) {
+		session.Size != request.Size || session.Status != model.UploadSessionPending || session.NextCleanupAt != nil || !session.ExpiresAt.After(cfg.Now()) {
 		t.Fatalf("task artifact upload session = %#v result=%#v", session, result)
 	}
 	second, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, request)
@@ -698,7 +698,8 @@ func TestTaskArtifactStagingCleanupAndFinalExistingRetry(t *testing.T) {
 
 	// Cleanup remains repeatable for a bounded grace window so a delayed PUT
 	// cannot permanently recreate staging after the first expiration sweep.
-	cleaned, err := CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(time.Second), 10)
+	firstCleanupAt := session.ExpiresAt.Add(time.Second)
+	cleaned, err := CleanupExpiredUploadSessions(ctx, store, repo, firstCleanupAt, 10)
 	if err != nil || cleaned != 1 {
 		t.Fatalf("first CleanupExpiredUploadSessions = %d, %v", cleaned, err)
 	}
@@ -706,12 +707,12 @@ func TestTaskArtifactStagingCleanupAndFinalExistingRetry(t *testing.T) {
 		t.Fatalf("first expiration cleanup: staging=%#v final=%#v deleted=%#v", store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
 	}
 	found, err = repo.UploadSessions().FindByID(ctx, session.ID)
-	if err != nil || found.Status != model.UploadSessionPending {
+	if err != nil || found.Status != model.UploadSessionPending || found.NextCleanupAt == nil || !found.NextCleanupAt.Equal(firstCleanupAt.Add(taskArtifactCleanupRetryDelay)) {
 		t.Fatalf("task artifact session during cleanup grace = %#v, err=%v", found, err)
 	}
 
 	store.stats[prepared.Key] = &storage.ObjectInfo{Key: prepared.Key, Size: 9, SHA256: strings.Repeat("b", 64), ETag: "staging-b"}
-	cleaned, err = CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(30*time.Minute), 10)
+	cleaned, err = CleanupExpiredUploadSessions(ctx, store, repo, firstCleanupAt.Add(taskArtifactCleanupRetryDelay), 10)
 	if err != nil || cleaned != 1 || store.stats[prepared.Key] != nil || store.stats[finalKey] == nil || len(store.deletedKeys) != 3 || store.deletedKeys[2] != prepared.Key {
 		t.Fatalf("delayed PUT cleanup = %d, %v staging=%#v final=%#v deleted=%#v", cleaned, err, store.stats[prepared.Key], store.stats[finalKey], store.deletedKeys)
 	}
@@ -720,12 +721,12 @@ func TestTaskArtifactStagingCleanupAndFinalExistingRetry(t *testing.T) {
 		t.Fatalf("task artifact session after delayed cleanup = %#v, err=%v", found, err)
 	}
 
-	cleaned, err = CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(time.Hour+time.Second), 10)
+	cleaned, err = CleanupExpiredUploadSessions(ctx, store, repo, session.ExpiresAt.Add(taskArtifactCleanupGrace), 10)
 	if err != nil || cleaned != 1 {
 		t.Fatalf("terminal CleanupExpiredUploadSessions = %d, %v", cleaned, err)
 	}
 	found, err = repo.UploadSessions().FindByID(ctx, session.ID)
-	if err != nil || found.Status != model.UploadSessionExpired {
+	if err != nil || found.Status != model.UploadSessionExpired || found.NextCleanupAt != nil {
 		t.Fatalf("terminal task artifact session = %#v, err=%v", found, err)
 	}
 	deleted := len(store.deletedKeys)
@@ -841,6 +842,46 @@ func TestCleanupExpiredTaskArtifactSkipsAssetFinalizationRecovery(t *testing.T) 
 	found, err := repo.UploadSessions().FindByID(ctx, session.ID)
 	if err != nil || found.Status != model.UploadSessionPending {
 		t.Fatalf("task artifact recovery isolation session = %#v, err=%v", found, err)
+	}
+}
+
+func TestCleanupExpiredTaskArtifactsFairAcrossBatchLimit(t *testing.T) {
+	_, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	expiresAt := time.Now().Truncate(time.Second).Add(-time.Minute)
+	store.stats = make(map[string]*storage.ObjectInfo)
+	const (
+		totalSessions = 101
+		batchLimit    = 100
+	)
+	for i := 0; i < totalSessions; i++ {
+		relPath := fmt.Sprintf("output/fair-%03d.md", i)
+		stagingKey := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + taskArtifactTestSHA256 + "/" + uuid.NewString() + "/" + relPath
+		seedTaskArtifactUploadSession(t, repo, task, stagingKey, relPath, 7, func(session *model.UploadSession) {
+			session.ExpiresAt = expiresAt
+			if i == totalSessions-1 {
+				session.ExpiresAt = expiresAt.Add(time.Second)
+			}
+		})
+		store.stats[stagingKey] = &storage.ObjectInfo{Key: stagingKey, Size: 7, SHA256: taskArtifactTestSHA256, ETag: "staging"}
+	}
+
+	cleanupAt := expiresAt.Add(time.Minute)
+	cleaned, err := CleanupExpiredUploadSessions(ctx, store, repo, cleanupAt, batchLimit)
+	if err != nil || cleaned != batchLimit || len(store.deletedKeys) != batchLimit {
+		t.Fatalf("first cleanup = %d, %v deleted=%d; want %d", cleaned, err, len(store.deletedKeys), batchLimit)
+	}
+	cleaned, err = CleanupExpiredUploadSessions(ctx, store, repo, cleanupAt, batchLimit)
+	if err != nil || cleaned != totalSessions-batchLimit {
+		t.Fatalf("second cleanup = %d, %v; want remaining %d", cleaned, err, totalSessions-batchLimit)
+	}
+	deleted := make(map[string]struct{}, len(store.deletedKeys))
+	for _, key := range store.deletedKeys {
+		deleted[key] = struct{}{}
+	}
+	if len(deleted) != totalSessions {
+		t.Fatalf("unique staging keys cleaned after two batches = %d, want %d (raw deletes=%d)", len(deleted), totalSessions, len(store.deletedKeys))
 	}
 }
 

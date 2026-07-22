@@ -60,6 +60,7 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 		"KEY `idx_upload_sessions_asset_id` (`asset_id`)",
 		"KEY `idx_upload_sessions_cleanup_claim_id` (`cleanup_claim_id`)",
 		"KEY `idx_upload_sessions_cleanup_claimed_at` (`cleanup_claimed_at`)",
+		"KEY `idx_upload_sessions_next_cleanup_at` (`next_cleanup_at`)",
 		"CREATE TABLE `assets`",
 		"UNIQUE KEY `idx_assets_storage_key` (`storage_key`)",
 		"KEY `idx_assets_user_id` (`user_id`)",

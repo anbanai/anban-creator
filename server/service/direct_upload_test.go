@@ -155,6 +155,10 @@ func (r *fakeUploadSessionRepo) ReopenExpiration(context.Context, string, string
 	return false, nil
 }
 
+func (r *fakeUploadSessionRepo) RescheduleExpiration(context.Context, string, string, time.Time) (bool, error) {
+	return false, nil
+}
+
 func newDirectUploadTestRepository(t *testing.T) repository.Repository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:direct-upload-"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -635,7 +639,7 @@ func TestPrepareDirectUploadCreatesPendingScopedSTSSession(t *testing.T) {
 	if result.MaxSize != 50*1024*1024 {
 		t.Fatalf("max_size = %d, want 50MB", result.MaxSize)
 	}
-	if repo.createdSession == nil || repo.createdSession.Status != model.UploadSessionPending {
+	if repo.createdSession == nil || repo.createdSession.Status != model.UploadSessionPending || repo.createdSession.NextCleanupAt != nil {
 		t.Fatalf("upload session not recorded: %#v", repo.createdSession)
 	}
 	if store.uploadKey != result.Key || store.contentType != "video/mp4" {

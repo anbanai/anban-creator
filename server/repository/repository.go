@@ -232,6 +232,7 @@ type UploadSessionRepository interface {
 	ClaimExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error)
 	CompleteExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error)
 	ReopenExpiration(ctx context.Context, id, claimID string) (bool, error)
+	RescheduleExpiration(ctx context.Context, id, claimID string, nextCleanupAt time.Time) (bool, error)
 }
 
 // AssetRepository provides access to immutable finalized upload assets.
