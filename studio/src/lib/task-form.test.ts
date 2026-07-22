@@ -6,6 +6,7 @@ import {
   switchTaskFormDefaults,
   taskFormValuesToRequest,
 } from './task-form'
+import type { TaskFormDefaults } from './task-form'
 
 function project(overrides: Partial<Project> = {}): Project {
   return {
@@ -144,6 +145,52 @@ describe('task form mapping', () => {
       article_with_cover: true,
       article_with_content_images: true,
     })
+  })
+
+  it('switches into Montage with the current prompt as the editable video brief', () => {
+    const montageProject = project({
+      id: 'montage-project',
+      platform: 'montage',
+      montage_defaults: {
+        default_pipeline: 'social-short',
+        preferences: { aspect_ratio: '16:9', duration_seconds: 45 },
+        delivery_targets: ['douyin'],
+      },
+    })
+    const current = {
+      ...createTaskFormDefaults(project({ platform: 'ecommerce' })),
+      prompt: 'Keep this video brief',
+      product_photos: ['oss://stale-product.png'],
+      selected_modules: { stale: 1 },
+      target_platform: 'stale',
+      montage_input: {
+        brief: 'stale',
+        source_assets: [],
+        delivery_targets: [],
+      },
+    }
+
+    const switched = switchTaskFormDefaults(current, montageProject)
+
+    expect(switched).toMatchObject({
+      project_id: 'montage-project',
+      type: 'montage',
+      prompt: 'Keep this video brief',
+      product_photos: [],
+      selected_modules: {},
+      target_platform: '',
+      montage_input: {
+        brief: 'Keep this video brief',
+        pipeline_key: 'social-short',
+        preferences: { aspect_ratio: '16:9', duration_seconds: 45 },
+        delivery_targets: ['douyin'],
+      },
+    })
+
+    switched.montage_input!.delivery_targets.push('xiaohongshu')
+    expect(montageProject.montage_defaults?.delivery_targets).toEqual(['douyin'])
+    expect(current.montage_input?.delivery_targets).toEqual([])
+    expect(current.selected_modules).toEqual({ stale: 1 })
   })
 
   it('creates a fresh Montage form default from project Montage settings', () => {
@@ -296,7 +343,7 @@ describe('task form mapping', () => {
     })
   })
 
-  it('serializes every form field without dropping explicit false values or mutating form values', () => {
+  it('serializes active Montage fields without mutating form values', () => {
     const values = cloneTaskFormDefaults(task({
       type: 'montage',
       watermark: false,
@@ -318,17 +365,174 @@ describe('task form mapping', () => {
       quantity: 3,
       watermark: false,
       goal_mode: false,
-      has_content_image: false,
-      has_tail_image: false,
-      article_with_cover: false,
-      article_with_content_images: false,
-      selected_modules: { hero: 1 },
-      product_photos: ['oss://product.png'],
       montage_input: { advanced: { render: { fps: 30 } } },
     })
-    request.selected_modules!.hero = 2
     ;(request.montage_input!.advanced!.render as { fps: number }).fps = 60
-    expect(values.selected_modules).toEqual({ hero: 1 })
     expect((values.montage_input?.advanced?.render as { fps: number }).fps).toBe(30)
+    expect(request).not.toHaveProperty('selected_modules')
+    expect(request).not.toHaveProperty('product_photos')
+    expect(request).not.toHaveProperty('has_content_image')
+    expect(request).not.toHaveProperty('article_with_cover')
+  })
+
+  it.each([
+    {
+      name: 'seednote trims shared text and keeps explicit composition false values',
+      values: {
+        type: 'seednote' as const,
+        prompt: '  Seednote prompt  ',
+        goal_mode: true,
+        goal: '  publish ready  ',
+        has_content_image: false,
+        has_tail_image: false,
+        article_with_cover: false,
+        article_with_content_images: false,
+        product_photos: ['oss://stale.png'],
+        selected_modules: { stale: 1 },
+        target_platform: 'stale',
+        selling_points: 'stale',
+        language: 'en',
+        montage_input: { brief: 'stale', source_assets: [], delivery_targets: [] },
+        execution_target: 'local_claimed' as const,
+      },
+      expected: {
+        prompt: 'Seednote prompt',
+        goal_mode: true,
+        goal: 'publish ready',
+        has_content_image: false,
+        has_tail_image: false,
+        execution_target: 'local',
+      },
+      omitted: ['article_with_cover', 'article_with_content_images', 'product_photos', 'selected_modules', 'target_platform', 'selling_points', 'language', 'montage_input'],
+    },
+    {
+      name: 'article omits empty prompt and inactive platform fields while retaining explicit false article settings',
+      values: {
+        type: 'article' as const,
+        prompt: '   ',
+        goal_mode: false,
+        goal: '  stale goal  ',
+        has_content_image: false,
+        has_tail_image: false,
+        article_with_cover: false,
+        article_with_content_images: false,
+        product_photos: ['oss://stale.png'],
+        selected_modules: { stale: 1 },
+        montage_input: { brief: 'stale', source_assets: [], delivery_targets: [] },
+        execution_target: 'cloud' as const,
+      },
+      expected: {
+        prompt: undefined,
+        goal_mode: false,
+        article_with_cover: false,
+        article_with_content_images: false,
+        execution_target: 'cloud',
+      },
+      omitted: ['goal', 'has_content_image', 'has_tail_image', 'product_photos', 'selected_modules', 'target_platform', 'selling_points', 'language', 'montage_input'],
+    },
+    {
+      name: 'ecommerce gates non-ecommerce values and keeps only active delivery modules',
+      values: {
+        type: 'ecommerce' as const,
+        prompt: '  Product launch  ',
+        goal_mode: true,
+        goal: '  stale goal  ',
+        has_content_image: false,
+        has_tail_image: false,
+        article_with_cover: false,
+        article_with_content_images: false,
+        product_photos: ['oss://product.png'],
+        selected_modules: { hero: 2, ignored: 0 },
+        target_platform: 'tmall',
+        selling_points: '  Light and portable  ',
+        language: 'zh-CN',
+        montage_input: { brief: 'stale', source_assets: [], delivery_targets: [] },
+        execution_target: 'local' as const,
+      },
+      expected: {
+        prompt: 'Product launch',
+        product_photos: ['oss://product.png'],
+        selected_modules: { hero: 2, ignored: 0 },
+        target_platform: 'tmall',
+        selling_points: 'Light and portable',
+        language: 'zh-CN',
+        execution_target: 'local',
+      },
+      omitted: ['goal', 'goal_mode', 'has_content_image', 'has_tail_image', 'article_with_cover', 'article_with_content_images', 'montage_input'],
+    },
+    {
+      name: 'Montage normalizes nested submission input and omits execution target',
+      values: {
+        type: 'montage' as const,
+        prompt: '  Launch video  ',
+        goal_mode: true,
+        goal: '  publish ready  ',
+        has_content_image: false,
+        has_tail_image: false,
+        article_with_cover: false,
+        article_with_content_images: false,
+        product_photos: ['oss://stale.png'],
+        selected_modules: { stale: 1 },
+        montage_input: {
+          brief: '  Launch video  ',
+          pipeline_key: ' social-short ',
+          source_assets: [{ type: 'image_url' as const, url: 'oss://source.png' }],
+          preferences: { aspect_ratio: '9:16', duration_seconds: 30, style: '  clean  ', music_prompt: '  upbeat  ' },
+          delivery_targets: ['douyin'],
+        },
+        execution_target: 'local_claimed' as const,
+      },
+      expected: {
+        prompt: 'Launch video',
+        goal_mode: true,
+        goal: 'publish ready',
+        montage_input: {
+          brief: 'Launch video',
+          pipeline_key: 'social-short',
+          source_assets: [{ type: 'image_url', url: 'oss://source.png' }],
+          preferences: { aspect_ratio: '9:16', duration_seconds: 30, style: 'clean', music_prompt: 'upbeat' },
+          delivery_targets: ['douyin'],
+        },
+      },
+      omitted: ['has_content_image', 'has_tail_image', 'article_with_cover', 'article_with_content_images', 'product_photos', 'selected_modules', 'target_platform', 'selling_points', 'language', 'execution_target'],
+    },
+  ])('$name', ({ values, expected, omitted }) => {
+    const formValues: TaskFormDefaults = {
+      ...createTaskFormDefaults(project({ id: `${values.type}-project`, platform: values.type as Project['platform'] })),
+      ...(values as unknown as Partial<TaskFormDefaults>),
+      quantity: 1,
+      image_ratio: '',
+      image_model_key: '',
+      reference_image: null,
+      skip_reference_image: false,
+    }
+
+    const request = taskFormValuesToRequest(formValues)
+
+    expect(request).toMatchObject({
+      type: values.type,
+      project_id: `${values.type}-project`,
+      quantity: 1,
+      watermark: false,
+      skip_reference_image: false,
+      ...expected,
+    })
+    expect(request.image_ratio).toBeUndefined()
+    expect(request.image_model_key).toBeUndefined()
+    expect(request.reference_image).toBeUndefined()
+    for (const key of omitted) expect(request).not.toHaveProperty(key)
+  })
+
+  it('preserves an explicit reference clearing request when cloning skips the reference image', () => {
+    const values = {
+      ...createTaskFormDefaults(project()),
+      skip_reference_image: true,
+      reference_image: null,
+    }
+
+    expect(taskFormValuesToRequest(values)).toMatchObject({
+      skip_reference_image: true,
+      reference_image: null,
+    })
   })
 })

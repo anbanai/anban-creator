@@ -1,6 +1,6 @@
 import type { CreateTaskRequest, ExecutionTarget, Project, ReferenceImageSelection, Task } from '@/types'
 import type { CreateTaskFormValues } from '@/lib/schemas'
-import { initialMontageInput } from '@/lib/montage-form'
+import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
 
 export interface TaskFormDefaults extends CreateTaskFormValues {
@@ -27,9 +27,9 @@ function cloneValue<T>(value: T): T {
   return value
 }
 
-function projectMontageInput(project?: Project | null): TaskFormDefaults['montage_input'] {
+function projectMontageInput(project?: Project | null, brief = ''): TaskFormDefaults['montage_input'] {
   if (project?.platform !== 'montage') return undefined
-  return cloneValue(initialMontageInput('', undefined, project.montage_defaults))
+  return cloneValue(initialMontageInput(brief, undefined, project.montage_defaults))
 }
 
 export function createTaskFormDefaults(project?: Project | null): TaskFormDefaults {
@@ -81,6 +81,7 @@ export function switchTaskFormDefaults(
     watermark: current.watermark,
     goal: current.goal,
     goal_mode: current.goal_mode,
+    montage_input: projectMontageInput(project, current.prompt),
     execution_target: current.execution_target,
   }
 }
@@ -125,30 +126,61 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
 }
 
 export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskRequest {
+  const prompt = values.prompt?.trim() || undefined
+  const goal = values.goal?.trim() || undefined
+  const sellingPoints = values.selling_points?.trim() || undefined
+  const hasActiveModules = Object.values(values.selected_modules ?? {}).some((quantity) => quantity >= 1)
+  const referenceImage = values.reference_image
+    ? cloneValue(values.reference_image)
+    : values.skip_reference_image
+      ? null
+      : undefined
+  const executionTarget = values.execution_target === 'local_claimed'
+    ? 'local'
+    : values.execution_target || undefined
+
   return {
     type: values.type,
     topic: values.topic,
-    prompt: values.prompt,
+    prompt,
     project_id: values.project_id,
     quantity: values.quantity,
-    image_ratio: values.image_ratio,
-    image_model_key: values.image_model_key,
+    image_ratio: values.image_ratio || undefined,
+    image_model_key: values.image_model_key || undefined,
     skip_reference_image: values.skip_reference_image,
-    reference_image: cloneValue(values.reference_image),
+    ...(referenceImage !== undefined ? { reference_image: referenceImage } : {}),
     input_attachments: cloneValue(values.input_attachments),
     watermark: values.watermark,
-    goal: values.goal,
-    goal_mode: values.goal_mode,
-    has_content_image: values.has_content_image,
-    has_tail_image: values.has_tail_image,
-    article_with_cover: values.article_with_cover,
-    article_with_content_images: values.article_with_content_images,
-    product_photos: cloneValue(values.product_photos),
-    selected_modules: cloneValue(values.selected_modules),
-    target_platform: values.target_platform,
-    selling_points: values.selling_points,
-    language: values.language,
-    montage_input: cloneValue(values.montage_input),
-    execution_target: values.execution_target,
+    ...(values.type !== 'ecommerce'
+      ? {
+          goal_mode: values.goal_mode,
+          ...(values.goal_mode && goal ? { goal } : {}),
+        }
+      : {}),
+    ...(values.type === 'seednote'
+      ? {
+          has_content_image: values.has_content_image,
+          has_tail_image: values.has_tail_image,
+        }
+      : {}),
+    ...(values.type === 'article'
+      ? {
+          article_with_cover: values.article_with_cover,
+          article_with_content_images: values.article_with_content_images,
+        }
+      : {}),
+    ...(values.type === 'ecommerce'
+      ? {
+          ...(values.product_photos?.length ? { product_photos: cloneValue(values.product_photos) } : {}),
+          ...(hasActiveModules ? { selected_modules: cloneValue(values.selected_modules) } : {}),
+          ...(values.target_platform ? { target_platform: values.target_platform } : {}),
+          ...(sellingPoints ? { selling_points: sellingPoints } : {}),
+          ...(values.language ? { language: values.language } : {}),
+        }
+      : {}),
+    ...(values.type === 'montage'
+      ? { montage_input: cloneValue(buildMontageInputForSubmit(values.prompt, values.montage_input)) }
+      : {}),
+    ...(values.type !== 'montage' && executionTarget ? { execution_target: executionTarget } : {}),
   }
 }
