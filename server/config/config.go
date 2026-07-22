@@ -797,11 +797,15 @@ func (c ClaudeConfig) Validate() error {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Network    string `yaml:"network"`
-	CPUCores   int64  `yaml:"cpu_cores"`
-	MemoryMB   int64  `yaml:"memory_mb"`
-	PidsLimit  int64  `yaml:"pids_limit"`
-	TimeoutSec int    `yaml:"timeout_sec"`
+	Network       string `yaml:"network"`
+	CPUCores      int64  `yaml:"cpu_cores"`
+	cpuCoresSet   bool   `yaml:"-"`
+	MemoryMB      int64  `yaml:"memory_mb"`
+	memoryMBSet   bool   `yaml:"-"`
+	PidsLimit     int64  `yaml:"pids_limit"`
+	pidsLimitSet  bool   `yaml:"-"`
+	TimeoutSec    int    `yaml:"timeout_sec"`
+	timeoutSecSet bool   `yaml:"-"`
 }
 
 // KubernetesConfig holds ACK/Kubernetes Job runtime settings.
@@ -862,7 +866,22 @@ func (c *DockerConfig) UnmarshalYAML(value *yaml.Node) error {
 		}
 	}
 	type plain DockerConfig
-	return value.Decode((*plain)(c))
+	if err := value.Decode((*plain)(c)); err != nil {
+		return err
+	}
+	for i := 0; i < len(value.Content); i += 2 {
+		switch value.Content[i].Value {
+		case "cpu_cores":
+			c.cpuCoresSet = true
+		case "memory_mb":
+			c.memoryMBSet = true
+		case "pids_limit":
+			c.pidsLimitSet = true
+		case "timeout_sec":
+			c.timeoutSecSet = true
+		}
+	}
+	return nil
 }
 
 func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -1241,13 +1260,19 @@ func (c *Config) applyDefaults() {
 			}
 		}
 	}
-	if c.Claude.Docker.CPUCores == 0 {
+	if c.Claude.Docker.Network == "" {
+		c.Claude.Docker.Network = "anban-creator-network"
+	}
+	if c.Claude.Docker.CPUCores == 0 && !c.Claude.Docker.cpuCoresSet {
 		c.Claude.Docker.CPUCores = 2
 	}
-	if c.Claude.Docker.MemoryMB == 0 {
+	if c.Claude.Docker.MemoryMB == 0 && !c.Claude.Docker.memoryMBSet {
 		c.Claude.Docker.MemoryMB = 4096
 	}
-	if c.Claude.Docker.TimeoutSec == 0 {
+	if c.Claude.Docker.PidsLimit == 0 && !c.Claude.Docker.pidsLimitSet {
+		c.Claude.Docker.PidsLimit = 512
+	}
+	if c.Claude.Docker.TimeoutSec == 0 && !c.Claude.Docker.timeoutSecSet {
 		// Default 3600s (60m) to stay >= asynq.content_generate_timeout (60m).
 		// The container must outlive the task deadline, otherwise it is killed
 		// before the agent finishes (silent partial failure).
@@ -1710,7 +1735,18 @@ func (c *Config) Validate() error {
 	// long as content_generate_timeout, otherwise the container is killed before
 	// the asynq task deadline (the agent's work is lost mid-pipeline).
 	if c.Claude.Executor == "docker" {
-		if time.Duration(c.Claude.Docker.TimeoutSec)*time.Second < c.Asynq.ContentGenerateTimeout {
+		if c.Claude.Docker.CPUCores <= 0 {
+			errs = append(errs, "claude.docker.cpu_cores must be positive")
+		}
+		if c.Claude.Docker.MemoryMB <= 0 {
+			errs = append(errs, "claude.docker.memory_mb must be positive")
+		}
+		if c.Claude.Docker.PidsLimit <= 0 {
+			errs = append(errs, "claude.docker.pids_limit must be positive")
+		}
+		if c.Claude.Docker.TimeoutSec <= 0 {
+			errs = append(errs, "claude.docker.timeout_sec must be positive")
+		} else if time.Duration(c.Claude.Docker.TimeoutSec)*time.Second < c.Asynq.ContentGenerateTimeout {
 			errs = append(errs, fmt.Sprintf(
 				"claude.docker.timeout_sec (%ds) must be >= asynq.content_generate_timeout (%s); otherwise the container is killed before the task deadline",
 				c.Claude.Docker.TimeoutSec, c.Asynq.ContentGenerateTimeout))

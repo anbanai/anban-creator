@@ -14,7 +14,6 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/rs/zerolog"
@@ -49,6 +48,7 @@ type DockerExecutor struct {
 	maxTurnsOverrides map[string]int
 	store             storage.Provider
 	memoryMgr         *projectmemory.ProjectMemoryManager
+	workspaceRoot     string
 }
 
 // NewDockerExecutor creates a new DockerExecutor.
@@ -164,7 +164,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		return nil, err
 	}
 
-	workDir := DefaultWorkspaceDir(opts.Task.ID)
+	workDir := e.serverWorkspaceDir(opts.Task.ID)
 	if err := os.MkdirAll(workDir, 0o777); err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
@@ -248,7 +248,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		Msg("Docker executor: starting agent execution")
 
 	var cmd []string
-	workDirInContainer := "/workspace"
+	workDirInContainer := dockerContainerWorkspaceDir(opts.Task.ID)
 	if opts.AutoMemoryDirectory != "" {
 		opts.AutoMemoryDirectory = containerMemoryDir(workDir, workDirInContainer, opts.AutoMemoryDirectory)
 	}
@@ -259,14 +259,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	env := e.buildAgentEnv(opts, dockerRuntimeHome(workDirInContainer))
 	runtime := RuntimeImageForTask(e.runtimeImages, opts.Task.Type)
 
-	if _, err := e.dockerCLI.ImageInspect(ctx, runtime.Image); err != nil {
-		buildTarget := "docker-agent-image"
-		if runtime.Profile != model.PlatformArticle {
-			buildTarget = "docker-" + runtime.Profile + "-agent-image"
+	var execRes execResult
+	if runtime.Profile == model.PlatformArticle {
+		execRes = e.executeViaExec(ctx, opts.Task.ID, dockerPersistentAgentContainerName, workDirInContainer, runtimeUser, cmd, env, opts.HeartbeatFunc)
+	} else {
+		if _, err := e.dockerCLI.ImageInspect(ctx, runtime.Image); err != nil {
+			buildTarget := "docker-" + runtime.Profile + "-agent-image"
+			return nil, fmt.Errorf("docker %s image %q not found locally (run 'make %s' to build it): %w", runtime.Profile, runtime.Image, buildTarget, err)
 		}
-		return nil, fmt.Errorf("docker %s image %q not found locally (run 'make %s' to build it): %w", runtime.Profile, runtime.Image, buildTarget, err)
+		execRes = e.executeInNewContainer(ctx, opts.Task.ID, runtimeUser, cmd, env, runtime.Image)
 	}
-	execRes := e.executeInNewContainer(ctx, opts.Task.ID, workDir, runtimeUser, cmd, env, runtime.Image, "")
 
 	if opts.LogWriter != nil {
 		if execRes.stderr.Len() > 0 {
@@ -511,6 +513,14 @@ func validateDockerHostWorkspace(root string) error {
 	return nil
 }
 
+func (e *DockerExecutor) serverWorkspaceDir(taskID string) string {
+	root := e.workspaceRoot
+	if root == "" {
+		root = DockerServerWorkspaceRoot
+	}
+	return filepath.Join(root, taskID)
+}
+
 func dockerResultWorkDir(workDir, taskType string) string {
 	if model.IsMontagePlatform(taskType) {
 		return filepath.Join(workDir, MontageRuntimeDirName)
@@ -552,13 +562,14 @@ func dockerAgentContainerConfig(image string, cmd, env []string, runtimeUser str
 	}
 }
 
-func dockerAgentHostConfig(workDir, volumeDonor string, cfg srvconfig.DockerConfig) *container.HostConfig {
+func dockerAgentHostConfig(cfg srvconfig.DockerConfig) *container.HostConfig {
 	hostConfig := &container.HostConfig{
 		Resources: container.Resources{
 			NanoCPUs: cfg.CPUCores * 1e9,
 			Memory:   cfg.MemoryMB * 1024 * 1024,
 		},
-		ExtraHosts: []string{"host.docker.internal:host-gateway"},
+		ExtraHosts:  []string{"host.docker.internal:host-gateway"},
+		VolumesFrom: []string{dockerPersistentAgentContainerName},
 	}
 	if cfg.PidsLimit > 0 {
 		hostConfig.PidsLimit = &cfg.PidsLimit
@@ -566,15 +577,6 @@ func dockerAgentHostConfig(workDir, volumeDonor string, cfg srvconfig.DockerConf
 	if cfg.Network != "" {
 		hostConfig.NetworkMode = container.NetworkMode(cfg.Network)
 	}
-	if volumeDonor != "" {
-		hostConfig.VolumesFrom = []string{volumeDonor}
-		return hostConfig
-	}
-	hostConfig.Mounts = []mount.Mount{{
-		Type:   mount.TypeBind,
-		Source: workDir,
-		Target: "/workspace",
-	}}
 	return hostConfig
 }
 
@@ -630,9 +632,9 @@ func (e *DockerExecutor) waitForDone(done chan error, execID, containerName stri
 	}
 }
 
-func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, workDir, runtimeUser string, cmd []string, env []string, image, volumeDonor string) execResult {
+func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, runtimeUser string, cmd []string, env []string, image string) execResult {
 	containerConfig := dockerAgentContainerConfig(image, cmd, env, runtimeUser)
-	hostConfig := dockerAgentHostConfig(workDir, volumeDonor, e.dockerCfg)
+	hostConfig := dockerAgentHostConfig(e.dockerCfg)
 
 	containerName := EphemeralContainerName(taskID)
 	resp, err := e.dockerCLI.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)

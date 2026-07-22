@@ -238,8 +238,10 @@ func main() {
 	var executionTokens *auth.ExecutionTokenService
 	var bootstrapSvc *service.AgentBootstrapService
 	var kubeReconciler *agent.KubernetesReconciler
+	var taskWorkspaceRoot string
 	switch cfg.Claude.Executor {
 	case "docker":
+		taskWorkspaceRoot = agent.DockerServerWorkspaceRoot
 		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.Docker, cfg.Claude.RuntimeImages, cfg.AgentServerURL(), cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker executor")
@@ -302,7 +304,7 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, log, cfg.Claude.TaskLogDir, workspaceSvc, "", service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, log, cfg.Claude.TaskLogDir, workspaceSvc, taskWorkspaceRoot, service.NewRedisPubSub(rdb, log), publishingSvc)
 		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
 		planSvc.SetReferenceAssetService(referenceAssetSvc)
 		taskSvc.SetReferenceAssetService(referenceAssetSvc)

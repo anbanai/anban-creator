@@ -158,12 +158,12 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 	}
 	env := deploymentEnvMap(t, deployment)
 	for name, want := range map[string]string{
-		"ANBAN_CLAUDE_EXECUTOR":           "kubernetes",
+		"ANBAN_AGENT_EXECUTOR":            "kubernetes",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL":   "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
 		"ANBAN_AGENT_NAMESPACE":           "${namespace}",
-		"ANBAN_ARTICLE_AGENT_IMAGE":       "${article_agent_image_repo}",
-		"ANBAN_SEEDNOTE_AGENT_IMAGE":      "${seednote_agent_image_repo}",
-		"ANBAN_MONTAGE_AGENT_IMAGE":       "${montage_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_ARTICLE":       "${article_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_SEEDNOTE":      "${seednote_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_MONTAGE":       "${montage_agent_image_repo}",
 		"ANBAN_AGENT_SERVICE_ACCOUNT":     "creator-agent-runner",
 		"ANBAN_AGENT_SERVER_CA_SECRET":    "anban-internal-ca",
 		"ANBAN_AGENT_IMAGE_PULL_SECRET":   "${imagePullSecret}",
@@ -176,6 +176,11 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 	} {
 		if got := env[name]; got != want {
 			t.Fatalf("server env %s = %q, want %q", name, got, want)
+		}
+	}
+	for _, legacy := range []string{"ANBAN_CLAUDE_EXECUTOR", "ANBAN_ARTICLE_AGENT_IMAGE", "ANBAN_SEEDNOTE_AGENT_IMAGE", "ANBAN_MONTAGE_AGENT_IMAGE"} {
+		if _, ok := env[legacy]; ok {
+			t.Fatalf("server deployment retains legacy managed runtime env %s", legacy)
 		}
 	}
 	for _, forbidden := range []string{"anban-agent-nas", "serviceAccountName: anban-server", "ANBAN_AGENT_MEMORY_STORAGE_CLASS", "ANBAN_AGENT_MEMORY_SIZE"} {
@@ -219,10 +224,10 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 		{name: "config.yaml", text: string(configYAML)},
 	} {
 		for _, want := range []string{
-			`executor: "${ANBAN_CLAUDE_EXECUTOR:-local}"`,
-			`article_image: "${ANBAN_ARTICLE_AGENT_IMAGE}"`,
-			`seednote: "${ANBAN_SEEDNOTE_AGENT_IMAGE}"`,
-			`montage: "${ANBAN_MONTAGE_AGENT_IMAGE}"`,
+			`executor: "${ANBAN_AGENT_EXECUTOR}"`,
+			`article: "${ANBAN_AGENT_IMAGE_ARTICLE}"`,
+			`seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"`,
+			`montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
 			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"`,
 			`execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"`,

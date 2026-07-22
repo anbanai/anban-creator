@@ -36,9 +36,10 @@ func TestDockerExecutorReferenceAssetFailureStopsBeforeContainerStart(t *testing
 	key := "assets/users/user-1/asset-1/reference.png"
 	store := &fakeStore{readErr: context.Canceled}
 	executor := &DockerExecutor{
-		logger:    &logger,
-		store:     store,
-		dockerCfg: srvconfig.DockerConfig{},
+		logger:        &logger,
+		store:         store,
+		dockerCfg:     srvconfig.DockerConfig{},
+		workspaceRoot: t.TempDir(),
 	}
 	opts := referenceAssetExecutionOptions(key)
 
@@ -67,7 +68,7 @@ func TestExecutorsRejectReferenceAssetSizeMismatchBeforeStartup(t *testing.T) {
 		}},
 		{name: "docker", run: func(store *fakeStore, opts *ExecutionOptions) error {
 			logger := zerolog.Nop()
-			executor := &DockerExecutor{logger: &logger, store: store, dockerCfg: srvconfig.DockerConfig{}}
+			executor := &DockerExecutor{logger: &logger, store: store, dockerCfg: srvconfig.DockerConfig{}, workspaceRoot: t.TempDir()}
 			_, err := executor.Execute(t.Context(), opts)
 			return err
 		}},

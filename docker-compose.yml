@@ -148,13 +148,11 @@ services:
       ANBAN_DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-anban_creator_dev}@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local"
       ANBAN_REDIS_ADDR: "redis:6379"
       ANBAN_BILLING_ADMIN_API_KEY: "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}"
-      ANBAN_CLAUDE_EXECUTOR: "docker"
+      ANBAN_AGENT_EXECUTOR: "docker"
       ANBAN_CLAUDE_AGENT_SERVER_URL: "http://server:8080"
-      ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE: "creator-agent-article:latest"
-      ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE: "creator-agent-seednote:latest"
-      ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE: "creator-agent-montage:latest"
-      ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: "creator-agent-article"
-      ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: "/app/data/workspace"
+      ANBAN_AGENT_IMAGE_ARTICLE: "creator-agent-article:latest"
+      ANBAN_AGENT_IMAGE_SEEDNOTE: "creator-agent-seednote:latest"
+      ANBAN_AGENT_IMAGE_MONTAGE: "creator-agent-montage:latest"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"
       ANBAN_ILINK_BASE_URL: "http://wcflink:18070"
@@ -202,4 +200,5 @@ services:
 
 networks:
   anban-creator-network:
+    name: anban-creator-network
     driver: bridge

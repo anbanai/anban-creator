@@ -836,23 +836,34 @@ func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
-		"pull_policy: build\n    container_name: creator-agent-article",
+		"pull_policy: build\n    container_name: " + dockerPersistentAgentContainerName,
 		"entrypoint: [\"tini\", \"--\"]\n    command: [\"sleep\", \"infinity\"]",
-		"- ./data/workspace:/workspace",
+		"- ./data/workspace:" + dockerContainerWorkspaceRoot,
 		"agent:\n        condition: service_started",
-		"ANBAN_CLAUDE_EXECUTOR: \"docker\"",
+		"ANBAN_AGENT_EXECUTOR: \"docker\"",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL: \"http://server:8080\"",
-		"ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE: \"creator-agent-article:latest\"",
-		"ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE: \"creator-agent-seednote:latest\"",
-		"ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE: \"creator-agent-montage:latest\"",
-		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: \"creator-agent-article\"",
-		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: \"/app/data/workspace\"",
-		"- ./data/workspace:/app/data/workspace",
+		"ANBAN_AGENT_IMAGE_ARTICLE: \"creator-agent-article:latest\"",
+		"ANBAN_AGENT_IMAGE_SEEDNOTE: \"creator-agent-seednote:latest\"",
+		"ANBAN_AGENT_IMAGE_MONTAGE: \"creator-agent-montage:latest\"",
+		"- ./data/workspace:" + DockerServerWorkspaceRoot,
 		"- /var/run/docker.sock:/var/run/docker.sock",
 		"group_add:\n      - \"${DOCKER_GID:-0}\"",
+		"anban-creator-network:\n    name: anban-creator-network\n    driver: bridge",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Fatalf("docker-compose.yml missing persistent Docker executor contract %q", want)
+		}
+	}
+	for _, legacy := range []string{
+		"ANBAN_CLAUDE_EXECUTOR",
+		"ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE",
+		"ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE",
+		"ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE",
+		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME",
+		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR",
+	} {
+		if strings.Contains(compose, legacy) {
+			t.Fatalf("docker-compose.yml retains legacy managed runtime env %q", legacy)
 		}
 	}
 

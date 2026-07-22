@@ -23,6 +23,58 @@ func TestAsynqConfigTimeoutDefaults(t *testing.T) {
 	}
 }
 
+func TestDockerSchedulerDefaults(t *testing.T) {
+	cfg := &Config{}
+	cfg.applyDefaults()
+
+	if cfg.Claude.Docker.Network != "anban-creator-network" {
+		t.Errorf("claude.docker.network default = %q, want anban-creator-network", cfg.Claude.Docker.Network)
+	}
+	if cfg.Claude.Docker.CPUCores != 2 {
+		t.Errorf("claude.docker.cpu_cores default = %d, want 2", cfg.Claude.Docker.CPUCores)
+	}
+	if cfg.Claude.Docker.MemoryMB != 4096 {
+		t.Errorf("claude.docker.memory_mb default = %d, want 4096", cfg.Claude.Docker.MemoryMB)
+	}
+	if cfg.Claude.Docker.PidsLimit != 512 {
+		t.Errorf("claude.docker.pids_limit default = %d, want 512", cfg.Claude.Docker.PidsLimit)
+	}
+}
+
+func TestValidateDockerSchedulerSettingsMustBePositive(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*DockerConfig)
+		want   string
+	}{
+		{name: "zero CPU", mutate: func(cfg *DockerConfig) { cfg.CPUCores = 0 }, want: "claude.docker.cpu_cores must be positive"},
+		{name: "negative CPU", mutate: func(cfg *DockerConfig) { cfg.CPUCores = -1 }, want: "claude.docker.cpu_cores must be positive"},
+		{name: "zero memory", mutate: func(cfg *DockerConfig) { cfg.MemoryMB = 0 }, want: "claude.docker.memory_mb must be positive"},
+		{name: "negative memory", mutate: func(cfg *DockerConfig) { cfg.MemoryMB = -1 }, want: "claude.docker.memory_mb must be positive"},
+		{name: "zero PID limit", mutate: func(cfg *DockerConfig) { cfg.PidsLimit = 0 }, want: "claude.docker.pids_limit must be positive"},
+		{name: "negative PID limit", mutate: func(cfg *DockerConfig) { cfg.PidsLimit = -1 }, want: "claude.docker.pids_limit must be positive"},
+		{name: "zero timeout", mutate: func(cfg *DockerConfig) { cfg.TimeoutSec = 0 }, want: "claude.docker.timeout_sec must be positive"},
+		{name: "negative timeout", mutate: func(cfg *DockerConfig) { cfg.TimeoutSec = -1 }, want: "claude.docker.timeout_sec must be positive"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := &Config{
+				Database: DatabaseConfig{DSN: "dsn"},
+				JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
+				Claude:   validClaudeConfigForTest(),
+			}
+			cfg.applyDefaults()
+			test.mutate(&cfg.Claude.Docker)
+
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestValidate_DockerTimeoutMustExceedContentGenerateTimeout(t *testing.T) {
 	cfg := &Config{
 		Database: DatabaseConfig{DSN: "dsn"},
@@ -39,25 +91,5 @@ func TestValidate_DockerTimeoutMustExceedContentGenerateTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must be >=") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestValidate_DockerTimeoutOKForLocalExecutor(t *testing.T) {
-	cfg := &Config{
-		Database: DatabaseConfig{DSN: "dsn"},
-		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   validClaudeConfigForTest(),
-	}
-	cfg.Claude.Executor = "local"
-	cfg.Claude.PluginDir = "." // local needs plugin_dir
-	cfg.applyDefaults()
-	cfg.Claude.Docker.TimeoutSec = 1800 // would fail the docker check, but executor is local
-
-	if err := cfg.Validate(); err != nil {
-		// plugin_dir "." may not contain agents/; only assert the docker-timeout
-		// check did not fire for the local executor.
-		if strings.Contains(err.Error(), "must be >=") {
-			t.Fatalf("docker-timeout check must not fire for local executor: %v", err)
-		}
 	}
 }

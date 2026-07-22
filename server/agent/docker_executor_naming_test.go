@@ -41,6 +41,15 @@ func TestDockerExecutorUsesCreatorAgentRuntimeNames(t *testing.T) {
 	if got, want := EphemeralContainerName(task.ID), "creator-agent-task-task-1"; got != want {
 		t.Fatalf("container name = %q, want %q", got, want)
 	}
+	if got, want := e.serverWorkspaceDir(task.ID), "/app/data/workspace/task-1"; got != want {
+		t.Fatalf("server workspace = %q, want %q", got, want)
+	}
+	if got, want := dockerContainerWorkspaceDir(task.ID), "/workspace/task-1"; got != want {
+		t.Fatalf("agent workspace = %q, want %q", got, want)
+	}
+	if got, want := dockerPersistentAgentContainerName, "creator-agent-article"; got != want {
+		t.Fatalf("persistent agent container = %q, want %q", got, want)
+	}
 }
 
 func TestDockerResultWorkDirUsesTaskRuntimeRoot(t *testing.T) {
@@ -279,7 +288,7 @@ func TestDockerExecutorDoesNotExposeMontageEnvToOtherTasks(t *testing.T) {
 }
 
 func TestDockerAgentHostConfigUsesSchedulerSettings(t *testing.T) {
-	cfg := dockerAgentHostConfig("/host/workspace/task-1", "", config.DockerConfig{
+	cfg := dockerAgentHostConfig(config.DockerConfig{
 		Network:   "anban-runtime",
 		CPUCores:  3,
 		MemoryMB:  5120,
@@ -296,13 +305,10 @@ func TestDockerAgentHostConfigUsesSchedulerSettings(t *testing.T) {
 	}
 }
 
-func TestStandaloneDockerContainerBindsTaskWorkspace(t *testing.T) {
-	cfg := dockerAgentHostConfig("/host/workspace/task-1", "", config.DockerConfig{})
-	if len(cfg.VolumesFrom) != 0 || len(cfg.Mounts) != 1 {
+func TestDockerSpecializedContainerInheritsPersistentWorkspaceVolume(t *testing.T) {
+	cfg := dockerAgentHostConfig(config.DockerConfig{})
+	if !slices.Equal(cfg.VolumesFrom, []string{dockerPersistentAgentContainerName}) || len(cfg.Mounts) != 0 {
 		t.Fatalf("host config = %#v", cfg)
-	}
-	if cfg.Mounts[0].Source != "/host/workspace/task-1" || cfg.Mounts[0].Target != "/workspace" {
-		t.Fatalf("workspace mount = %#v", cfg.Mounts[0])
 	}
 }
 
