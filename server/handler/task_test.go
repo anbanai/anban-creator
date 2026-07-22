@@ -933,6 +933,7 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+	app.Post("/tasks/bulk-clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkClone(c) })
 
 	view, err := h.presentTaskReference(ctx, userID, source)
 	if err != nil || view == nil || view.AssetID != inherited.ID {
@@ -974,19 +975,29 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	if firstClone.ReferenceImageAssetID != inherited.ID {
 		t.Fatalf("first persisted clone reference = %q, want %q", firstClone.ReferenceImageAssetID, inherited.ID)
 	}
-	firstClone.Status = model.TaskStatusCompleted
+	firstClone.Status = model.TaskStatusFailed
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
-		t.Fatalf("complete first clone: %v", err)
+		t.Fatalf("fail first clone: %v", err)
 	}
-	resp = postJSON(t, app, "/tasks/"+firstClone.ID+"/clone", cloneBody(inherited.ID))
+	resp = postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+firstClone.ID+`"]}`)
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		t.Fatalf("clone-of-clone status = %d, want 200 body=%s", resp.StatusCode, body)
+		t.Fatalf("bulk clone-of-clone status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	var bulkEnvelope struct {
+		Data bulkTasksResponse `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&bulkEnvelope); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode bulk clone-of-clone: %v", err)
 	}
 	resp.Body.Close()
+	if bulkEnvelope.Data.Succeeded != 1 || len(bulkEnvelope.Data.Results) != 1 || !bulkEnvelope.Data.Results[0].OK {
+		t.Fatalf("bulk clone-of-clone result = %#v, want one success", bulkEnvelope.Data)
+	}
 	if taskCount() != 3 {
-		t.Fatalf("task count after clone-of-clone = %d, want 3", taskCount())
+		t.Fatalf("task count after bulk clone-of-clone = %d, want 3", taskCount())
 	}
 
 	for _, test := range []struct {

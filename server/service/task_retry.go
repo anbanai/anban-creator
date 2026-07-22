@@ -141,6 +141,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ArticleWithContentImages: articleContent,
 		ExecutionTarget:          executionTarget,
 	}
+	params.allowProjectReferenceAsset = trustedCloneProjectReferenceAsset(src, src.ReferenceImageAssetID)
 
 	// Preserve the e-commerce package config (module selection, product photos,
 	// selling points) so the clone bills the same package and reuses the inputs.

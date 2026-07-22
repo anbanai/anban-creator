@@ -116,6 +116,25 @@ func (h *TaskHandler) presentTaskReferences(ctx context.Context, userID string, 
 	return nil
 }
 
+func (h *TaskHandler) presentCloneTaskReference(ctx context.Context, userID string, task *model.Task) (*model.AssetView, error) {
+	if task == nil || strings.TrimSpace(task.ReferenceImageAssetID) == "" {
+		return h.presentTaskReference(ctx, userID, task)
+	}
+	if h.referenceAssets == nil {
+		return nil, service.ErrReferenceAssetUnavailable
+	}
+	allowed := []string{service.DirectUploadPurposeTaskReference, service.DirectUploadPurposeAIEntryAttachment}
+	if trustedTaskCreationProjectReference(task, task.ReferenceImageAssetID) {
+		allowed = append(allowed, service.DirectUploadPurposeProjectReference)
+	}
+	view, err := h.referenceAssets.Present(ctx, userID, task.ReferenceImageAssetID, allowed)
+	if err != nil {
+		return nil, err
+	}
+	task.ReferenceImage = view
+	return view, nil
+}
+
 // Request types.
 
 type createTaskRequest struct {
@@ -275,14 +294,18 @@ func trustedTaskCreationSource(source *model.Task) taskScopedCreationInput {
 	return taskScopedCreationInput{userID: source.UserID, projectID: projectID, taskID: taskID}
 }
 
+func trustedTaskCreationProjectReference(source *model.Task, assetID string) bool {
+	assetID = strings.TrimSpace(assetID)
+	if source == nil || assetID == "" {
+		return false
+	}
+	return assetID == strings.TrimSpace(source.ReferenceImageAssetID) ||
+		assetID == strings.TrimSpace(source.ProjectSnapshot.Data().ReferenceImageAssetID)
+}
+
 func taskCreationReferencePurposes(source *model.Task, selection service.ReferenceImageSelection) []string {
 	allowed := []string{service.DirectUploadPurposeTaskReference}
-	assetID := strings.TrimSpace(selection.AssetID)
-	if source == nil || assetID == "" {
-		return allowed
-	}
-	if assetID == strings.TrimSpace(source.ReferenceImageAssetID) ||
-		assetID == strings.TrimSpace(source.ProjectSnapshot.Data().ReferenceImageAssetID) {
+	if trustedTaskCreationProjectReference(source, selection.AssetID) {
 		return append(allowed, service.DirectUploadPurposeProjectReference)
 	}
 	return allowed
@@ -828,7 +851,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		}
 		params.InputAttachments = &attachments
 	}
-	referenceView, err := h.presentTaskReference(c.Context(), userID, task)
+	referenceView, err := h.presentCloneTaskReference(c.Context(), userID, task)
 	if err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
@@ -1147,7 +1170,7 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "image_model_unavailable"})
 			continue
 		}
-		if _, err := h.presentTaskReference(c.Context(), userID, task); err != nil {
+		if _, err := h.presentCloneTaskReference(c.Context(), userID, task); err != nil {
 			results = append(results, bulkTaskResult{ID: id, Reason: "reference_unavailable"})
 			continue
 		}

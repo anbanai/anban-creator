@@ -1545,7 +1545,27 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 		Size:        128,
 		ETag:        "unrelated-etag",
 	}
-	for _, asset := range []*model.Asset{inherited, unrelated} {
+	foreign := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      uuid.NewString(),
+		Purpose:     DirectUploadPurposeProjectReference,
+		StorageKey:  "assets/users/foreign/reference/foreign.png",
+		FileName:    "foreign.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "foreign-etag",
+	}
+	taskReference := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      userID,
+		Purpose:     DirectUploadPurposeTaskReference,
+		StorageKey:  "assets/users/" + userID + "/reference/task.png",
+		FileName:    "task.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "task-etag",
+	}
+	for _, asset := range []*model.Asset{inherited, unrelated, foreign, taskReference} {
 		seedReferenceAsset(t, repo, asset)
 	}
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
@@ -1555,11 +1575,22 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
 	}
+	taskCount := func() int64 {
+		count, err := repo.Tasks().CountByUserID(ctx, userID, "", "")
+		if err != nil {
+			t.Fatalf("count tasks: %v", err)
+		}
+		return count
+	}
 
+	before := taskCount()
 	if _, err := svc.CreateManual(ctx, CreateManualParams{
 		UserID: userID, ProjectID: destinationProjectID, Quantity: 1, ReferenceImageAssetID: inherited.ID,
 	}); !errors.Is(err, ErrReferenceAssetPurposeMismatch) {
 		t.Fatalf("direct CreateManual error = %v, want ErrReferenceAssetPurposeMismatch", err)
+	}
+	if got := taskCount(); got != before {
+		t.Fatalf("task count after rejected CreateManual = %d, want %d", got, before)
 	}
 
 	clone := func(assetID string) ([]*model.Task, error) {
@@ -1571,8 +1602,38 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	if err != nil || len(clones) != 1 || clones[0].ReferenceImageAssetID != inherited.ID {
 		t.Fatalf("trusted inherited clone = %#v, %v", clones, err)
 	}
-	if _, err := clone(unrelated.ID); !errors.Is(err, ErrReferenceAssetPurposeMismatch) {
-		t.Fatalf("unrelated project reference clone error = %v, want ErrReferenceAssetPurposeMismatch", err)
+	firstClone := clones[0]
+	firstClone.Status = model.TaskStatusCompleted
+	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
+		t.Fatalf("complete first clone: %v", err)
+	}
+	exactClones, err := svc.Clone(ctx, firstClone.ID, CloneTaskParams{})
+	if err != nil || len(exactClones) != 1 || exactClones[0].ReferenceImageAssetID != inherited.ID {
+		t.Fatalf("exact clone-of-clone = %#v, %v", exactClones, err)
+	}
+
+	for _, test := range []struct {
+		name    string
+		assetID string
+		wantErr error
+	}{
+		{name: "unrelated same-user project reference", assetID: unrelated.ID, wantErr: ErrReferenceAssetPurposeMismatch},
+		{name: "foreign project reference", assetID: foreign.ID, wantErr: ErrReferenceAssetForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := taskCount()
+			if _, err := clone(test.assetID); !errors.Is(err, test.wantErr) {
+				t.Fatalf("clone error = %v, want %v", err, test.wantErr)
+			}
+			if got := taskCount(); got != before {
+				t.Fatalf("task count after rejected clone = %d, want %d", got, before)
+			}
+		})
+	}
+
+	normalClones, err := clone(taskReference.ID)
+	if err != nil || len(normalClones) != 1 || normalClones[0].ReferenceImageAssetID != taskReference.ID {
+		t.Fatalf("normal task-reference clone = %#v, %v", normalClones, err)
 	}
 }
 
