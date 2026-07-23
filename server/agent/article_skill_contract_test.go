@@ -556,6 +556,79 @@ func TestArticleAgentsUseStructuredFailuresWithoutMidRunUserAssistance(t *testin
 	}
 }
 
+func articleConvertMarkdownFallbackScopes(body string) []string {
+	var scopes []string
+	for _, paragraph := range strings.Split(body, "\n\n") {
+		lower := strings.ToLower(paragraph)
+		if !strings.Contains(lower, "render_template") || !strings.Contains(lower, "convert_markdown") {
+			continue
+		}
+
+		deniesFallback := false
+		for _, denial := range []string{
+			"不得改用 `convert_markdown`", "不得改用 convert_markdown",
+			"禁止改用 `convert_markdown`", "禁止改用 convert_markdown",
+			"不得用 `convert_markdown`", "不得用 convert_markdown",
+			"禁止使用 `convert_markdown`", "禁止使用 convert_markdown",
+		} {
+			if strings.Contains(lower, strings.ToLower(denial)) {
+				deniesFallback = true
+				break
+			}
+		}
+		if deniesFallback {
+			continue
+		}
+
+		failureContext := false
+		for _, marker := range []string{"不可用", "调用失败", "旧版 server", "旧服务器"} {
+			if strings.Contains(lower, marker) {
+				failureContext = true
+				break
+			}
+		}
+		fallbackAlternative := false
+		for _, marker := range []string{"兼容降级", "降级路径", "备用路径", "替代路径", "fallback"} {
+			if strings.Contains(lower, marker) {
+				fallbackAlternative = true
+				break
+			}
+		}
+		if failureContext && fallbackAlternative {
+			scopes = append(scopes, paragraph)
+		}
+	}
+	return scopes
+}
+
+func TestArticleRenderTemplateFailureHasNoConvertMarkdownFallback(t *testing.T) {
+	stale := "`render_template` 是主路径；`convert_markdown` 仅作旧版 server 兼容降级，不得作主渲染路径。"
+	if scopes := articleConvertMarkdownFallbackScopes(stale); len(scopes) != 1 {
+		t.Fatalf("stale render fallback must be detected, got %d scopes", len(scopes))
+	}
+
+	legitimateDistinction := "`render_template` 负责结构化渲染；`convert_markdown` 处理普通 Markdown 转换，二者职责不同。"
+	if scopes := articleConvertMarkdownFallbackScopes(legitimateDistinction); len(scopes) != 0 {
+		t.Fatalf("tool responsibility distinction must remain allowed, got %d scopes", len(scopes))
+	}
+
+	failClosed := "`render_template` 不可用或调用失败时写 failure-state；不得改用 `convert_markdown`。"
+	if scopes := articleConvertMarkdownFallbackScopes(failClosed); len(scopes) != 0 {
+		t.Fatalf("fail-closed render policy must remain allowed, got %d scopes", len(scopes))
+	}
+
+	root := articleContractRepoRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
+		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
+	} {
+		if scopes := articleConvertMarkdownFallbackScopes(readArticleContractFile(t, path)); len(scopes) != 0 {
+			t.Fatalf("%s still permits convert_markdown fallback when render_template is unavailable", path)
+		}
+	}
+}
+
 func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
