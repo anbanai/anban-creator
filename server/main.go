@@ -671,6 +671,7 @@ func main() {
 			ArticleScoreSvc:        service.NewArticleScoreService(),
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
 			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
+			TaskImageSvc:           service.NewTaskImageService(taskSvc, modelConfigSvc, imageSvc, fixedBilling.Catalog, log),
 			TingWuConfigured:       cfg.TingWu.Complete(),
 		})
 		mcp.SetBillingServices(modelConfigSvc, cfg)

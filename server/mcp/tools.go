@@ -67,6 +67,7 @@ type Services struct {
 	ArticleScoreSvc        *service.ArticleScoreService
 	SeednoteExportSvc      *service.SeednoteExportService
 	ResourceCatalogSvc     *service.ResourceCatalogService
+	TaskImageSvc           *service.TaskImageService
 	TingWuConfigured       bool
 }
 
