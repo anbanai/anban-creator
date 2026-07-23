@@ -264,6 +264,60 @@ func TestSeednoteQualityGateAcceptsCanonicalManagedOutput(t *testing.T) {
 	}
 }
 
+func TestSeednoteQualityGateAcceptsCanonicalModeImageSets(t *testing.T) {
+	tests := []struct {
+		name   string
+		images []string
+	}{
+		{name: "cover_only", images: []string{"cover.png"}},
+		{name: "cover_tail", images: []string{"cover.png", "tail.png"}},
+		{name: "cover_content_one", images: []string{"cover.png", "image_01.png"}},
+		{name: "cover_content_two", images: []string{"cover.png", "image_01.png", "image_02.png"}},
+		{name: "full_three", images: []string{"cover.png", "image_01.png", "image_02.png", "image_03.png", "tail.png"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			writeSeednoteGateImageSet(t, workspace, tt.images)
+			if output := runSeednoteQualityGate(t, workspace); strings.TrimSpace(output) != "" {
+				t.Fatalf("quality gate blocked canonical %s image set: %s", tt.name, output)
+			}
+		})
+	}
+}
+
+func TestSeednoteQualityGateRejectsInvalidContentImageNames(t *testing.T) {
+	tests := []struct {
+		name       string
+		images     []string
+		wantReason string
+	}{
+		{name: "arbitrary suffix", images: []string{"cover.png", "image_bad.png"}, wantReason: "非规范内容图文件名"},
+		{name: "non-padded index", images: []string{"cover.png", "image_1.png"}, wantReason: "非规范内容图文件名"},
+		{name: "index above maximum", images: []string{"cover.png", "image_04.png"}, wantReason: "非规范内容图文件名"},
+		{name: "starts at second image", images: []string{"cover.png", "image_02.png"}, wantReason: "内容图编号必须从 image_01.png 开始连续"},
+		{name: "gap in sequence", images: []string{"cover.png", "image_01.png", "image_03.png"}, wantReason: "内容图编号必须从 image_01.png 开始连续"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			writeSeednoteGateImageSet(t, workspace, tt.images)
+			output := runSeednoteQualityGate(t, workspace)
+			if strings.TrimSpace(output) == "" {
+				t.Fatalf("quality gate accepted invalid image set: %v", tt.images)
+			}
+			var result map[string]any
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("parse quality gate output %q: %v", output, err)
+			}
+			reason, _ := result["reason"].(string)
+			if result["decision"] != "block" || !strings.Contains(reason, tt.wantReason) {
+				t.Fatalf("quality gate output = %#v, want block containing %q", result, tt.wantReason)
+			}
+		})
+	}
+}
+
 func TestSeednoteArchiveScriptIsRemoved(t *testing.T) {
 	script := filepath.Join(repoRoot(t), "plugins", "scripts", "archive-seednote-workspace.sh")
 	if _, err := os.Stat(script); !os.IsNotExist(err) {
@@ -313,6 +367,44 @@ func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) strin
 			"file_name":      "cover.png",
 			"quality_status": qualityStatus,
 		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "reference-usage-summary.json"), summary, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeSeednoteGateImageSet(t *testing.T, workspace string, images []string) string {
+	t.Helper()
+	dir := writeSeednoteGateFixture(t, workspace, true)
+	for _, name := range images {
+		if name == "cover.png" {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "image-plan.md"),
+		[]byte(fmt.Sprintf("计划图片数量: %d\n", len(images))),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	outputs := make([]map[string]any, 0, len(images))
+	for _, name := range images {
+		outputs = append(outputs, map[string]any{
+			"file_name":      name,
+			"quality_status": "accepted",
+		})
+	}
+	summary, err := json.Marshal(map[string]any{
+		"version": "1.0",
+		"outputs": outputs,
 	})
 	if err != nil {
 		t.Fatal(err)

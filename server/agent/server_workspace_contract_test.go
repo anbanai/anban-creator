@@ -156,6 +156,32 @@ func TestNativeAgentPairsDeclareSameExplicitOutputPaths(t *testing.T) {
 	}
 }
 
+func TestSeednoteNativeAgentsDeclareModeAwareImageSemantics(t *testing.T) {
+	root := repoRoot(t)
+	for _, relativePath := range []string{
+		"plugins/agents/seednote.md",
+		"plugins/agents/seednote.toml",
+	} {
+		t.Run(relativePath, func(t *testing.T) {
+			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
+			for _, required := range []string{
+				"cover_only 和 cover_tail 模式的内容图数量必须为 0",
+				"cover_content 和 full 模式的内容图数量必须为 1~3",
+				"内容图文件必须从 output/image_01.png 开始连续编号",
+				"只允许使用 output/image_01.png、output/image_02.png、output/image_03.png",
+				"不得跳号或使用其他 image_*.png 文件名",
+			} {
+				if !strings.Contains(body, required) {
+					t.Errorf("%s missing Seednote image-mode semantic %q", relativePath, required)
+				}
+			}
+			if strings.Contains(body, "封面 1 + 内容图 1~3 + 尾图 0~1") {
+				t.Errorf("%s makes 1~3 content images unconditional across zero-content modes", relativePath)
+			}
+		})
+	}
+}
+
 func explicitOutputPaths(body string) []string {
 	matches := regexp.MustCompile(`\boutput/[A-Za-z0-9._/-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+\b`).FindAllString(body, -1)
 	seen := make(map[string]struct{}, len(matches))
