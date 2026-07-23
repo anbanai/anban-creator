@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"os"
+	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -28,6 +31,48 @@ func TestResolveDockerRuntimeUserUsesNonRootUnixHostIdentity(t *testing.T) {
 	prep := dockerWorkspacePreparationExecOptions("/workspace/task", got)
 	if prep.User != got || strings.Contains(strings.Join(prep.Cmd, " "), "chown") {
 		t.Fatalf("workspace preparation = %#v, want resolved user and no chown", prep)
+	}
+	if command := strings.Join(prep.Cmd, " "); !strings.Contains(command, "/workspace/task/output") {
+		t.Fatalf("workspace preparation command = %q, want runtime-owned output", command)
+	}
+}
+
+func TestDockerWorkspacePreparationCreatesSafeOutput(t *testing.T) {
+	workspace := t.TempDir()
+	opts := dockerWorkspacePreparationExecOptions(workspace, "501:20")
+	if output, err := exec.Command(opts.Cmd[0], opts.Cmd[1:]...).CombinedOutput(); err != nil {
+		t.Fatalf("prepare Docker workspace: %v: %s", err, output)
+	}
+	info, err := os.Lstat(filepath.Join(workspace, "output"))
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o750 {
+		t.Fatalf("Docker runtime output = %#v, err=%v", info, err)
+	}
+}
+
+func TestDockerWorkspacePreparationRejectsUnsafeOutput(t *testing.T) {
+	for _, setup := range []struct {
+		name string
+		run  func(*testing.T, string)
+	}{
+		{name: "symlink", run: func(t *testing.T, path string) {
+			if err := os.Symlink(t.TempDir(), path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "regular file", run: func(t *testing.T, path string) {
+			if err := os.WriteFile(path, []byte("unsafe"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(setup.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			setup.run(t, filepath.Join(workspace, "output"))
+			opts := dockerWorkspacePreparationExecOptions(workspace, "501:20")
+			if output, err := exec.Command(opts.Cmd[0], opts.Cmd[1:]...).CombinedOutput(); err == nil {
+				t.Fatalf("unsafe Docker output accepted: %s", output)
+			}
+		})
 	}
 }
 

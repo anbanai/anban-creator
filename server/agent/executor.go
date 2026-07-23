@@ -63,6 +63,10 @@ func prepareLocalExecutionWorkDir(workspace, taskType, pluginDir string) (string
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		return "", fmt.Errorf("create workdir: %w", err)
 	}
+	canonicalOutput, err := ensureRuntimeOutputDirectory(workspace)
+	if err != nil {
+		return "", err
+	}
 	if !model.IsMontagePlatform(strings.TrimSpace(taskType)) {
 		return workspace, nil
 	}
@@ -71,6 +75,9 @@ func prepareLocalExecutionWorkDir(workspace, taskType, pluginDir string) (string
 	if info, err := os.Lstat(runtimePath); err == nil {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return "", fmt.Errorf("Montage workspace %s must be a real directory", runtimePath)
+		}
+		if err := ensureLocalMontageOutputLink(runtimePath, canonicalOutput); err != nil {
+			return "", err
 		}
 		return runtimePath, nil
 	} else if !os.IsNotExist(err) {
@@ -94,11 +101,60 @@ func prepareLocalExecutionWorkDir(workspace, taskType, pluginDir string) (string
 	}
 	if err := os.Rename(stagingPath, runtimePath); err != nil {
 		if info, statErr := os.Lstat(runtimePath); statErr == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			if linkErr := ensureLocalMontageOutputLink(runtimePath, canonicalOutput); linkErr != nil {
+				return "", linkErr
+			}
 			return runtimePath, nil
 		}
 		return "", fmt.Errorf("activate Montage workspace: %w", err)
 	}
+	if err := ensureLocalMontageOutputLink(runtimePath, canonicalOutput); err != nil {
+		return "", err
+	}
 	return runtimePath, nil
+}
+
+func ensureRuntimeOutputDirectory(workspace string) (string, error) {
+	outputPath := filepath.Join(workspace, "output")
+	info, err := os.Lstat(outputPath)
+	switch {
+	case os.IsNotExist(err):
+		if err := os.Mkdir(outputPath, 0o750); err != nil {
+			return "", fmt.Errorf("create runtime output directory: %w", err)
+		}
+	case err != nil:
+		return "", fmt.Errorf("inspect runtime output directory: %w", err)
+	case !info.IsDir() || info.Mode()&os.ModeSymlink != 0:
+		return "", fmt.Errorf("runtime output must be a real directory")
+	}
+	if err := os.Chmod(outputPath, 0o750); err != nil {
+		return "", fmt.Errorf("set runtime output permissions: %w", err)
+	}
+	return outputPath, nil
+}
+
+func ensureLocalMontageOutputLink(runtimePath, canonicalOutput string) error {
+	linkPath := filepath.Join(runtimePath, "output")
+	info, err := os.Lstat(linkPath)
+	switch {
+	case os.IsNotExist(err):
+		if err := os.Symlink(canonicalOutput, linkPath); err != nil {
+			return fmt.Errorf("link Montage output to canonical output: %w", err)
+		}
+		return nil
+	case err != nil:
+		return fmt.Errorf("inspect Montage output link: %w", err)
+	case info.Mode()&os.ModeSymlink == 0:
+		return fmt.Errorf("Montage output must link to canonical output")
+	}
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		return fmt.Errorf("read Montage output link: %w", err)
+	}
+	if target != canonicalOutput {
+		return fmt.Errorf("Montage output must link to canonical output")
+	}
+	return nil
 }
 
 func copyLocalMontageTemplate(source, destination string) error {

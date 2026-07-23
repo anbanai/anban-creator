@@ -114,16 +114,44 @@ func bootstrapJobWithPolicy(ctx context.Context, cfg JobConfig, policy bootstrap
 	if err := materializeBootstrap(ctx, cfg.Workspace, envelope.Data.Files, bootstrapDownloadClient()); err != nil {
 		return &envelope.Data, fmt.Errorf("materialize bootstrap workspace: %w", err)
 	}
-	if model.IsMontagePlatform(strings.TrimSpace(envelope.Data.TaskType)) {
-		runtimePath, err := materializeMontageRuntime(cfg.Workspace)
-		if err != nil {
-			return &envelope.Data, fmt.Errorf("materialize Montage workspace: %w", err)
-		}
-		if err := syncMontageTaskInputs(cfg.Workspace, runtimePath); err != nil {
-			return &envelope.Data, fmt.Errorf("materialize Montage task inputs: %w", err)
-		}
+	if err := prepareRuntimeWorkspace(cfg.Workspace, envelope.Data.TaskType); err != nil {
+		return &envelope.Data, fmt.Errorf("prepare runtime workspace: %w", err)
 	}
 	return &envelope.Data, nil
+}
+
+func prepareRuntimeWorkspace(workspace, profile string) error {
+	root, err := validateWorkspaceRoot(workspace)
+	if err != nil {
+		return err
+	}
+	outputPath := filepath.Join(root, "output")
+	info, err := os.Lstat(outputPath)
+	switch {
+	case os.IsNotExist(err):
+		if err := os.Mkdir(outputPath, 0o750); err != nil {
+			return fmt.Errorf("create runtime output directory: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("inspect runtime output directory: %w", err)
+	case !info.IsDir() || info.Mode()&os.ModeSymlink != 0:
+		return fmt.Errorf("runtime output must be a real directory")
+	}
+	if err := os.Chmod(outputPath, 0o750); err != nil {
+		return fmt.Errorf("set runtime output permissions: %w", err)
+	}
+
+	if !model.IsMontagePlatform(strings.TrimSpace(profile)) {
+		return nil
+	}
+	runtimePath, err := materializeMontageRuntime(root)
+	if err != nil {
+		return fmt.Errorf("materialize Montage workspace: %w", err)
+	}
+	if err := syncMontageTaskInputs(root, runtimePath); err != nil {
+		return fmt.Errorf("materialize Montage task inputs: %w", err)
+	}
+	return nil
 }
 
 func validateBootstrapServerURL(raw string, allowHTTPLoopback bool) (*url.URL, error) {

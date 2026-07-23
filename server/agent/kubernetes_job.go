@@ -183,6 +183,9 @@ func kubernetesWorkspaceInitScript(taskType string) string {
 		"set -eu",
 		"chown 1000:1000 /workspace",
 		"chmod 0770 /workspace",
+		"output=/workspace/output",
+		`if [ -L "$output" ] || { [ -e "$output" ] && [ ! -d "$output" ]; }; then echo "runtime output must be a real directory" >&2; exit 1; fi`,
+		`install -d -m 0750 -o 1000 -g 1000 "$output"`,
 		"install -d -m 0700 -o 1000 -g 1000 " + kubernetesRuntimeHomePath,
 		"install -d -m 0770 -o 1000 -g 1000 " + kubernetesMemoryMountPath,
 	}
@@ -193,14 +196,16 @@ func kubernetesWorkspaceInitScript(taskType string) string {
 		ContainerMontageTemplatePath,
 		"/workspace/"+MontageRuntimeDirName,
 		"/workspace/.montage-init",
+		"/workspace/output",
 	)), "\n")
 }
 
-func kubernetesMontageInitScript(templatePath, runtimePath, stagingPath string) string {
+func kubernetesMontageInitScript(templatePath, runtimePath, stagingPath, outputPath string) string {
 	return strings.Join([]string{
 		"template=" + templatePath,
 		"runtime=" + runtimePath,
 		"staging=" + stagingPath,
+		"output=" + outputPath,
 		`if [ ! -e "$runtime" ]; then`,
 		`  rm -rf "$staging"`,
 		`  mkdir -p "$staging"`,
@@ -209,6 +214,7 @@ func kubernetesMontageInitScript(templatePath, runtimePath, stagingPath string) 
 		"fi",
 		`chown -R 1000:1000 "$runtime"`,
 		`chmod -R u+rwX "$runtime"`,
+		`if [ -L "$runtime/output" ]; then [ "$(readlink "$runtime/output")" = "$output" ] || { echo "Montage output must link to canonical output" >&2; exit 1; }; elif [ -e "$runtime/output" ]; then echo "Montage output must link to canonical output" >&2; exit 1; else ln -s "$output" "$runtime/output"; fi`,
 	}, "\n")
 }
 

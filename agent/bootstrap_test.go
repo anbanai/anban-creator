@@ -72,6 +72,10 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 	if string(projected) != "workload-token\n" {
 		t.Fatalf("projected token was overwritten: %q", projected)
 	}
+	info, err := os.Lstat(filepath.Join(workspace, "output"))
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o750 {
+		t.Fatalf("runtime output = %#v, err=%v", info, err)
+	}
 }
 
 func TestBootstrapJobMaterializesMontageInputsInsideRuntime(t *testing.T) {
@@ -110,6 +114,10 @@ func TestBootstrapJobMaterializesMontageInputsInsideRuntime(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "montage-input.json")); !os.IsNotExist(err) {
 		t.Fatalf("Montage input must not be materialized outside runtime: %v", err)
+	}
+	link, err := os.Readlink(filepath.Join(workspace, "montage", "output"))
+	if err != nil || link != filepath.Join(workspace, "output") {
+		t.Fatalf("Montage output link = %q, err=%v", link, err)
 	}
 }
 

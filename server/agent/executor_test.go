@@ -99,6 +99,9 @@ func TestPrepareLocalExecutionWorkDirMaterializesMontageTemplateOnce(t *testing.
 	if got != want {
 		t.Fatalf("Montage workDir = %q, want %q", got, want)
 	}
+	if link, err := os.Readlink(filepath.Join(got, "output")); err != nil || link != filepath.Join(workspace, "output") {
+		t.Fatalf("Montage output link = %q, err=%v", link, err)
+	}
 	if body, err := os.ReadFile(filepath.Join(got, "pipeline.yaml")); err != nil || string(body) != "version: one\n" {
 		t.Fatalf("materialized template = %q, err=%v", body, err)
 	}
@@ -128,6 +131,35 @@ func TestPrepareLocalExecutionWorkDirMaterializesMontageTemplateOnce(t *testing.
 	articleRoot := filepath.Join(root, "article")
 	if got, err := prepareLocalExecutionWorkDir(articleRoot, model.PlatformArticle, pluginDir); err != nil || got != articleRoot {
 		t.Fatalf("Article workDir = %q, err=%v, want %q", got, err, articleRoot)
+	}
+	if info, err := os.Lstat(filepath.Join(articleRoot, "output")); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o750 {
+		t.Fatalf("Article output = %#v, err=%v", info, err)
+	}
+}
+
+func TestPrepareLocalExecutionWorkDirRejectsUnsafeOutput(t *testing.T) {
+	for _, setup := range []struct {
+		name string
+		run  func(*testing.T, string)
+	}{
+		{name: "symlink", run: func(t *testing.T, path string) {
+			if err := os.Symlink(t.TempDir(), path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "regular file", run: func(t *testing.T, path string) {
+			if err := os.WriteFile(path, []byte("unsafe"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(setup.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			setup.run(t, filepath.Join(workspace, "output"))
+			if _, err := prepareLocalExecutionWorkDir(workspace, model.PlatformArticle, ""); err == nil || !strings.Contains(err.Error(), "real directory") {
+				t.Fatalf("unsafe output error = %v", err)
+			}
+		})
 	}
 }
 

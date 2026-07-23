@@ -43,6 +43,9 @@ func TestMaterializeMontageRuntimeCopiesCompleteWritableWorkspace(t *testing.T) 
 	if _, err := os.Lstat(filepath.Join(runtimePath, ".git")); !os.IsNotExist(err) {
 		t.Fatalf("materialized runtime must exclude template Git metadata: %v", err)
 	}
+	if link, err := os.Readlink(filepath.Join(runtimePath, "output")); err != nil || link != filepath.Join(workspace, "output") {
+		t.Fatalf("Montage output link = %q, err=%v", link, err)
+	}
 	if err := os.WriteFile(filepath.Join(runtimePath, "nested", "checkpoint.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatalf("Montage workspace must be writable: %v", err)
 	}

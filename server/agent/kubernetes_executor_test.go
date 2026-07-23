@@ -130,7 +130,7 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 
 func TestWorkspaceInitScript(t *testing.T) {
 	content := kubernetesWorkspaceInitScript(model.PlatformSeednote)
-	for _, want := range []string{"set -eu", "chown 1000:1000 /workspace", kubernetesRuntimeHomePath, kubernetesMemoryMountPath} {
+	for _, want := range []string{"set -eu", "chown 1000:1000 /workspace", kubernetesRuntimeHomePath, kubernetesMemoryMountPath, "/workspace/output"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("content init script missing %q: %s", want, content)
 		}
@@ -149,10 +149,85 @@ func TestWorkspaceInitScript(t *testing.T) {
 		`mv "$staging" "$runtime"`,
 		`chown -R 1000:1000 "$runtime"`,
 		`chmod -R u+rwX "$runtime"`,
+		`ln -s "$output" "$runtime/output"`,
 	} {
 		if !strings.Contains(montage, want) {
 			t.Fatalf("Montage init script missing %q: %s", want, montage)
 		}
+	}
+}
+
+func TestWorkspaceInitScriptRejectsUnsafeCanonicalOutput(t *testing.T) {
+	var outputGuard string
+	for _, line := range strings.Split(kubernetesWorkspaceInitScript(model.PlatformSeednote), "\n") {
+		if strings.Contains(line, "runtime output must be a real directory") {
+			outputGuard = line
+			break
+		}
+	}
+	if outputGuard == "" {
+		t.Fatal("workspace init script is missing the canonical output guard")
+	}
+
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, outputPath string)
+		wantErr bool
+	}{
+		{
+			name: "real directory",
+			prepare: func(t *testing.T, outputPath string) {
+				t.Helper()
+				if err := os.Mkdir(outputPath, 0o750); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "symlink",
+			prepare: func(t *testing.T, outputPath string) {
+				t.Helper()
+				target := filepath.Join(filepath.Dir(outputPath), "target")
+				if err := os.Mkdir(target, 0o750); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, outputPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: true,
+		},
+		{
+			name: "regular file",
+			prepare: func(t *testing.T, outputPath string) {
+				t.Helper()
+				if err := os.WriteFile(outputPath, []byte("unsafe"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputPath := filepath.Join(t.TempDir(), "output")
+			tt.prepare(t, outputPath)
+			script := strings.Join([]string{
+				"set -eu",
+				`output="$OUTPUT_PATH"`,
+				outputGuard,
+			}, "\n")
+			cmd := exec.Command("/bin/sh", "-c", script)
+			cmd.Env = append(os.Environ(), "OUTPUT_PATH="+outputPath)
+			combined, err := cmd.CombinedOutput()
+			if tt.wantErr && err == nil {
+				t.Fatalf("unsafe output accepted: %s", combined)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("real output directory rejected: %v: %s", err, combined)
+			}
+		})
 	}
 }
 
@@ -189,13 +264,16 @@ func TestMontageWorkspaceInitScriptPreservesExistingRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	script := "set -eu\n" + kubernetesMontageInitScript(template, runtimePath, staging)
+	script := "set -eu\n" + kubernetesMontageInitScript(template, runtimePath, staging, filepath.Join(root, "output"))
 	script = strings.Replace(script, `chown -R 1000:1000 "$runtime"`, ":", 1)
 	run := func() ([]byte, error) {
 		return exec.Command("/bin/sh", "-c", script).CombinedOutput()
 	}
 	if output, err := run(); err != nil {
 		t.Fatalf("new runtime init: %v: %s", err, output)
+	}
+	if link, err := os.Readlink(filepath.Join(runtimePath, "output")); err != nil || link != filepath.Join(root, "output") {
+		t.Fatalf("Montage output link = %q, err=%v", link, err)
 	}
 	if body, err := os.ReadFile(filepath.Join(runtimePath, "nested", "pipeline.yaml")); err != nil || string(body) != "version: one\n" {
 		t.Fatalf("copied runtime file = %q, err=%v", body, err)

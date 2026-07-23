@@ -27,6 +27,9 @@ func materializeMontageRuntime(workspace string) (string, error) {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return "", fmt.Errorf("Montage workspace %s must be a real directory", runtimePath)
 		}
+		if err := ensureMontageOutputLink(runtimePath, filepath.Join(workspace, "output")); err != nil {
+			return "", err
+		}
 		return runtimePath, nil
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("inspect Montage workspace: %w", err)
@@ -49,11 +52,41 @@ func materializeMontageRuntime(workspace string) (string, error) {
 	}
 	if err := os.Rename(stagingPath, runtimePath); err != nil {
 		if info, statErr := os.Lstat(runtimePath); statErr == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			if linkErr := ensureMontageOutputLink(runtimePath, filepath.Join(workspace, "output")); linkErr != nil {
+				return "", linkErr
+			}
 			return runtimePath, nil
 		}
 		return "", fmt.Errorf("activate Montage workspace: %w", err)
 	}
+	if err := ensureMontageOutputLink(runtimePath, filepath.Join(workspace, "output")); err != nil {
+		return "", err
+	}
 	return runtimePath, nil
+}
+
+func ensureMontageOutputLink(runtimePath, canonicalOutput string) error {
+	linkPath := filepath.Join(runtimePath, "output")
+	info, err := os.Lstat(linkPath)
+	switch {
+	case os.IsNotExist(err):
+		if err := os.Symlink(canonicalOutput, linkPath); err != nil {
+			return fmt.Errorf("link Montage output to canonical output: %w", err)
+		}
+		return nil
+	case err != nil:
+		return fmt.Errorf("inspect Montage output link: %w", err)
+	case info.Mode()&os.ModeSymlink == 0:
+		return fmt.Errorf("Montage output must link to canonical output")
+	}
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		return fmt.Errorf("read Montage output link: %w", err)
+	}
+	if target != canonicalOutput {
+		return fmt.Errorf("Montage output must link to canonical output")
+	}
+	return nil
 }
 
 func syncMontageTaskInputs(workspace, runtimePath string) error {

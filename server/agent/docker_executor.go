@@ -537,8 +537,16 @@ func normalizeDockerResultWorkDir(result *ExecutionResult, workDir, taskType str
 }
 
 func dockerWorkspacePreparationExecOptions(workDirInContainer, runtimeUser string) container.ExecOptions {
+	outputPath := filepath.ToSlash(filepath.Join(workDirInContainer, "output"))
 	return container.ExecOptions{
-		Cmd:  []string{"mkdir", "-p", workDirInContainer},
+		Cmd: []string{"/bin/sh", "-c", `set -eu
+output=$1
+if [ -L "$output" ] || { [ -e "$output" ] && [ ! -d "$output" ]; }; then
+  echo "runtime output must be a real directory" >&2
+  exit 1
+fi
+mkdir -p "$output"
+chmod 0750 "$output"`, "anban-output-init", outputPath},
 		User: runtimeUser,
 	}
 }
