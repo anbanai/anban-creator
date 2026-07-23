@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -272,6 +273,203 @@ func TestTaskExecutionRepositoryConcurrentRuntimeInstanceBindingHasOneWinner(t *
 	}
 }
 
+func TestTaskExecutionDispatchBarrierUsesDatabaseClockAndExactToken(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionDispatching)
+	token := uuid.NewString()
+	won, err := repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, token, time.Minute)
+	if err != nil || !won {
+		t.Fatalf("claim dispatch won=%v err=%v", won, err)
+	}
+	active, err := repo.TaskExecutions().DispatchClaimActive(ctx, execution.ID, time.Minute)
+	if err != nil || !active {
+		t.Fatalf("fresh dispatch barrier active=%v err=%v", active, err)
+	}
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).
+		Update("dispatch_claimed_at", gorm.Expr("DATETIME('now', '-2 minutes')")).Error; err != nil {
+		t.Fatal(err)
+	}
+	active, err = repo.TaskExecutions().DispatchClaimActive(ctx, execution.ID, time.Minute)
+	if err != nil || active {
+		t.Fatalf("expired dispatch barrier active=%v err=%v", active, err)
+	}
+	refreshed, err := repo.TaskExecutions().RefreshDispatchClaim(ctx, execution.ID, uuid.NewString())
+	if err != nil || refreshed {
+		t.Fatalf("stale token refresh=%v err=%v", refreshed, err)
+	}
+	refreshed, err = repo.TaskExecutions().RefreshDispatchClaim(ctx, execution.ID, token)
+	if err != nil || !refreshed {
+		t.Fatalf("owner refresh=%v err=%v", refreshed, err)
+	}
+	active, err = repo.TaskExecutions().DispatchClaimActive(ctx, execution.ID, time.Minute)
+	if err != nil || !active {
+		t.Fatalf("refreshed dispatch barrier active=%v err=%v", active, err)
+	}
+
+	won, err = repo.TaskExecutions().Transition(ctx, execution.ID,
+		[]string{model.TaskExecutionDispatching}, model.TaskExecutionCancelled,
+		model.ExecutionTransition{TerminalReason: "user_cancelled"})
+	if err != nil || !won {
+		t.Fatalf("terminalize dispatch won=%v err=%v", won, err)
+	}
+	refreshed, err = repo.TaskExecutions().RefreshDispatchClaim(ctx, execution.ID, token)
+	if err != nil || !refreshed {
+		t.Fatalf("terminal barrier refresh=%v err=%v", refreshed, err)
+	}
+}
+
+func TestTaskExecutionRefreshDispatchClaimReloadsExactTokenWhenUpdateReportsZeroRows(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionDispatching)
+	token := uuid.NewString()
+	won, err := repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, token, time.Minute)
+	if err != nil || !won {
+		t.Fatalf("claim dispatch won=%v err=%v", won, err)
+	}
+	trigger := fmt.Sprintf(`CREATE TRIGGER ignore_dispatch_refresh
+		BEFORE UPDATE OF dispatch_claimed_at ON task_executions
+		WHEN OLD.id = '%s'
+		BEGIN
+			SELECT RAISE(IGNORE);
+		END`, execution.ID)
+	if err := repo.db.Exec(trigger).Error; err != nil {
+		t.Fatalf("create zero-row refresh trigger: %v", err)
+	}
+
+	refreshed, err := repo.TaskExecutions().RefreshDispatchClaim(ctx, execution.ID, token)
+	if err != nil || !refreshed {
+		t.Fatalf("exact-token zero-row refresh=%v err=%v, want ownership confirmed", refreshed, err)
+	}
+}
+
+func TestTaskExecutionRefreshDispatchClaimRejectsEmptyTokenWithoutMutation(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionDispatching)
+
+	refreshed, err := repo.TaskExecutions().RefreshDispatchClaim(ctx, execution.ID, "")
+	if err == nil || refreshed {
+		t.Fatalf("empty-token refresh=%v err=%v, want rejection", refreshed, err)
+	}
+	found, findErr := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
+	if found.DispatchClaimToken != "" || found.DispatchClaimedAt != nil {
+		t.Fatalf("empty-token refresh mutated claim: token=%q claimed_at=%v", found.DispatchClaimToken, found.DispatchClaimedAt)
+	}
+}
+
+func TestTaskExecutionLeaseTokenAuthorityRejectsBlankTokensWithoutMutation(t *testing.T) {
+	tokens := []struct {
+		name  string
+		value string
+	}{
+		{name: "empty", value: ""},
+		{name: "whitespace", value: " \t "},
+	}
+	dispatchMutations := []struct {
+		name string
+		call func(TaskExecutionRepository, string, string) error
+	}{
+		{name: "claim", call: func(repo TaskExecutionRepository, id, token string) error {
+			_, err := repo.ClaimDispatch(context.Background(), id, token, time.Minute)
+			return err
+		}},
+		{name: "refresh", call: func(repo TaskExecutionRepository, id, token string) error {
+			_, err := repo.RefreshDispatchClaim(context.Background(), id, token)
+			return err
+		}},
+		{name: "abandon", call: func(repo TaskExecutionRepository, id, token string) error {
+			_, err := repo.AbandonDispatch(context.Background(), id, token)
+			return err
+		}},
+		{name: "complete", call: func(repo TaskExecutionRepository, id, token string) error {
+			_, err := repo.CompleteDispatch(context.Background(), id, token, model.RuntimeIdentity{Scope: "docker", Workload: "container-1", InstanceID: "instance-1"})
+			return err
+		}},
+		{name: "fail", call: func(repo TaskExecutionRepository, id, token string) error {
+			_, err := repo.FailDispatch(context.Background(), id, token, "dispatch_failed", []byte(`{"error":"failed"}`), []byte(`{"success":false}`))
+			return err
+		}},
+	}
+	for _, mutation := range dispatchMutations {
+		for _, token := range tokens {
+			t.Run("dispatch/"+mutation.name+"/"+token.name, func(t *testing.T) {
+				repo := setupTaskExecutionRepository(t)
+				execution := seedTaskExecution(t, repo, model.TaskExecutionDispatching)
+				if err := mutation.call(repo.TaskExecutions(), execution.ID, token.value); err == nil {
+					t.Fatal("blank dispatch lease token was accepted")
+				}
+				found, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if found.Status != model.TaskExecutionDispatching || found.DispatchClaimToken != "" || found.DispatchClaimedAt != nil ||
+					found.RuntimeScope != "" || found.RuntimeWorkload != "" || found.RuntimeInstanceID != "" ||
+					found.TerminalReason != "" || found.CleanupStatus != "" || found.CompletedAt != nil {
+					t.Fatalf("blank dispatch token mutated execution: %+v", found)
+				}
+			})
+		}
+	}
+
+	cleanupMutations := []struct {
+		name string
+		call func(TaskExecutionRepository, string, string) error
+	}{
+		{name: "claim", call: func(repo TaskExecutionRepository, id, token string) error {
+			_, err := repo.ClaimCleanup(context.Background(), id, token, time.Minute)
+			return err
+		}},
+		{name: "set identity", call: func(repo TaskExecutionRepository, id, token string) error {
+			_, err := repo.SetCleanupRuntimeIdentity(context.Background(), id, token, model.RuntimeIdentity{Scope: "docker", Workload: "container-1", InstanceID: "instance-1"})
+			return err
+		}},
+		{name: "complete", call: func(repo TaskExecutionRepository, id, token string) error {
+			_, err := repo.CompleteCleanup(context.Background(), id, token)
+			return err
+		}},
+		{name: "fail", call: func(repo TaskExecutionRepository, id, token string) error {
+			_, err := repo.FailCleanup(context.Background(), id, token, time.Minute)
+			return err
+		}},
+		{name: "release", call: func(repo TaskExecutionRepository, id, token string) error {
+			return repo.ReleaseCleanup(context.Background(), id, token)
+		}},
+	}
+	for _, mutation := range cleanupMutations {
+		for _, token := range tokens {
+			t.Run("cleanup/"+mutation.name+"/"+token.name, func(t *testing.T) {
+				repo := setupTaskExecutionRepository(t)
+				execution := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+				if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).Updates(map[string]any{
+					"cleanup_status":       model.TaskExecutionCleanupPending,
+					"dispatch_claim_token": "retained-dispatch-barrier",
+					"dispatch_claimed_at":  gorm.Expr("CURRENT_TIMESTAMP"),
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := mutation.call(repo.TaskExecutions(), execution.ID, token.value); err == nil {
+					t.Fatal("blank cleanup lease token was accepted")
+				}
+				found, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if found.Status != model.TaskExecutionFailed || found.CleanupStatus != model.TaskExecutionCleanupPending ||
+					found.CleanupToken != "" || found.CleanupAt != nil || found.CleanupNextAt != nil || found.CleanupAttempts != 0 ||
+					found.RuntimeScope != "" || found.RuntimeWorkload != "" || found.RuntimeInstanceID != "" ||
+					found.DispatchClaimToken != "retained-dispatch-barrier" || found.DispatchClaimedAt == nil {
+					t.Fatalf("blank cleanup token mutated execution: %+v", found)
+				}
+			})
+		}
+	}
+}
+
 func TestTaskExecutionFinalizationLeaseRenewalAndTakeover(t *testing.T) {
 	repo := setupTaskExecutionRepository(t)
 	ctx := context.Background()
@@ -333,6 +531,61 @@ func TestTaskExecutionCleanupClaimIsDurableAndExclusive(t *testing.T) {
 	found, _ := repo.TaskExecutions().FindByID(ctx, execution.ID)
 	if found.CleanupStatus != model.TaskExecutionCleanupDone {
 		t.Fatalf("cleanup status=%s", found.CleanupStatus)
+	}
+}
+
+func TestTaskExecutionSetCleanupRuntimeIdentityIsLeaseFencedAndFillOnly(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).
+		Update("cleanup_status", model.TaskExecutionCleanupPending).Error; err != nil {
+		t.Fatal(err)
+	}
+	token := uuid.NewString()
+	won, err := repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, token, time.Minute)
+	if err != nil || !won {
+		t.Fatalf("claim cleanup won=%v err=%v", won, err)
+	}
+	identity := model.RuntimeIdentity{Scope: "anban", Workload: "creator-agent-job-1", InstanceID: "job-uid-1"}
+
+	bound, err := repo.TaskExecutions().SetCleanupRuntimeIdentity(ctx, execution.ID, token, identity)
+	if err != nil || !bound {
+		t.Fatalf("bind recovered identity=%v err=%v", bound, err)
+	}
+	bound, err = repo.TaskExecutions().SetCleanupRuntimeIdentity(ctx, execution.ID, token, identity)
+	if err != nil || !bound {
+		t.Fatalf("replay recovered identity=%v err=%v", bound, err)
+	}
+	bound, err = repo.TaskExecutions().SetCleanupRuntimeIdentity(ctx, execution.ID, uuid.NewString(), identity)
+	if err != nil || bound {
+		t.Fatalf("stale cleanup identity bind=%v err=%v", bound, err)
+	}
+	for name, drift := range map[string]model.RuntimeIdentity{
+		"scope":    {Scope: "other", Workload: identity.Workload, InstanceID: identity.InstanceID},
+		"workload": {Scope: identity.Scope, Workload: "creator-agent-job-2", InstanceID: identity.InstanceID},
+		"instance": {Scope: identity.Scope, Workload: identity.Workload, InstanceID: "job-uid-2"},
+	} {
+		t.Run(name+" drift", func(t *testing.T) {
+			bound, err := repo.TaskExecutions().SetCleanupRuntimeIdentity(ctx, execution.ID, token, drift)
+			if bound || !errors.Is(err, ErrRuntimeIdentityConflict) {
+				t.Fatalf("drift bind=%v err=%v, want conflict", bound, err)
+			}
+		})
+	}
+
+	found, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runtimeIdentityFromExecution(found); got != identity {
+		t.Fatalf("runtime identity = %#v, want %#v", got, identity)
+	}
+}
+
+func runtimeIdentityFromExecution(execution *model.TaskExecution) model.RuntimeIdentity {
+	return model.RuntimeIdentity{
+		Scope: execution.RuntimeScope, Workload: execution.RuntimeWorkload, InstanceID: execution.RuntimeInstanceID,
 	}
 }
 

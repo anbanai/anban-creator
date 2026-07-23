@@ -442,6 +442,54 @@ func TestKubernetesDispatcherPreparesAndActivatesExactJob(t *testing.T) {
 	}
 }
 
+func TestKubernetesDispatcherResolvePreparedIsLookupOnlyAndUIDFenced(t *testing.T) {
+	ctx := context.Background()
+	execution := testExecution()
+	task := testTask()
+	job := buildKubernetesJob(testJobConfig(), execution, task)
+	job.UID = types.UID("prepared-job-uid")
+	client := fake.NewSimpleClientset(job.DeepCopy())
+	dispatcher := testDispatcher(client)
+
+	resolved, err := dispatcher.ResolvePrepared(ctx, execution, task)
+	if err != nil {
+		t.Fatalf("ResolvePrepared: %v", err)
+	}
+	want := model.RuntimeIdentity{Scope: job.Namespace, Workload: job.Name, InstanceID: string(job.UID)}
+	if resolved == nil || *resolved != want {
+		t.Fatalf("resolved identity = %#v, want %#v", resolved, want)
+	}
+	for _, action := range client.Actions() {
+		if action.GetVerb() != "get" || action.GetResource().Resource != "jobs" {
+			t.Fatalf("recovery action = %s %s, want Job GET only", action.GetVerb(), action.GetResource().Resource)
+		}
+	}
+
+	replacement := *execution
+	replacement.RuntimeInstanceID = "original-job-uid"
+	if _, err := dispatcher.ResolvePrepared(ctx, &replacement, task); err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "UID mismatch") {
+		t.Fatalf("replacement ResolvePrepared error = %v, want permanent UID mismatch", err)
+	}
+	found, err := client.BatchV1().Jobs(job.Namespace).Get(ctx, job.Name, metav1.GetOptions{})
+	if err != nil || found.UID != job.UID || found.Spec.Suspend == nil || !*found.Spec.Suspend {
+		t.Fatalf("replacement Job mutated: uid=%q suspend=%v err=%v", found.UID, found.Spec.Suspend, err)
+	}
+}
+
+func TestKubernetesDispatcherResolvePreparedReportsNotFoundWithoutCreating(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	_, err := testDispatcher(client).ResolvePrepared(ctx, testExecution(), testTask())
+	if !errors.Is(err, ErrRuntimeWorkloadNotFound) {
+		t.Fatalf("ResolvePrepared error = %v, want ErrRuntimeWorkloadNotFound", err)
+	}
+	for _, action := range client.Actions() {
+		if action.GetVerb() != "get" || action.GetResource().Resource != "jobs" {
+			t.Fatalf("missing recovery action = %s %s, want Job GET only", action.GetVerb(), action.GetResource().Resource)
+		}
+	}
+}
+
 func TestKubernetesDispatcherResumeRequiresOriginalPersistentState(t *testing.T) {
 	ctx := context.Background()
 	task := testTask()
@@ -965,6 +1013,17 @@ func TestKubernetesDispatcherDeleteRejectsForeignJob(t *testing.T) {
 				t.Fatalf("foreign Job was deleted: %v", getErr)
 			}
 		})
+	}
+}
+
+func TestKubernetesDispatcherDeleteRejectsEmptyRuntimeIdentity(t *testing.T) {
+	execution := testExecution()
+	execution.RuntimeScope = ""
+	execution.RuntimeWorkload = ""
+	execution.RuntimeInstanceID = ""
+	err := testDispatcher(fake.NewSimpleClientset()).Delete(context.Background(), execution)
+	if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "identity") {
+		t.Fatalf("Delete error = %v, want permanent incomplete identity error", err)
 	}
 }
 

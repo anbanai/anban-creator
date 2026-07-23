@@ -25,16 +25,18 @@ import (
 )
 
 type dispatchTestDispatcher struct {
-	mu                sync.Mutex
-	calls             int
-	creates           int
-	seen              map[string]struct{}
-	err               error
-	sideEffectOnError bool
-	started           chan struct{}
-	release           chan struct{}
-	runtimeSelection  serverconfig.RuntimeImageSelection
-	identity          *model.RuntimeIdentity
+	mu                 sync.Mutex
+	calls              int
+	creates            int
+	seen               map[string]struct{}
+	err                error
+	sideEffectOnError  bool
+	started            chan struct{}
+	release            chan struct{}
+	runtimeSelection   serverconfig.RuntimeImageSelection
+	identity           *model.RuntimeIdentity
+	prepareDeadline    time.Time
+	hasPrepareDeadline bool
 }
 
 type scopedDispatchTestDispatcher struct {
@@ -55,6 +57,146 @@ type activationOrderingDispatcher struct {
 	deleteIdentities  []model.RuntimeIdentity
 }
 
+type lateCreatingDispatcher struct {
+	prepareStarted       chan struct{}
+	allowCreate          chan struct{}
+	mu                   sync.Mutex
+	created              bool
+	resolvedBeforeCreate bool
+	deleted              []model.RuntimeIdentity
+}
+
+type lateCommitAfterErrorDispatcher struct {
+	mu                   sync.Mutex
+	created              bool
+	resolvedBeforeCommit bool
+	deleted              []model.RuntimeIdentity
+}
+
+func (*lateCommitAfterErrorDispatcher) Scope() string { return "docker" }
+
+func (*lateCommitAfterErrorDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
+	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+}
+
+func (*lateCommitAfterErrorDispatcher) Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
+	return nil, errors.New("provider create result is ambiguous")
+}
+
+func (d *lateCommitAfterErrorDispatcher) ResolvePrepared(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.created {
+		d.resolvedBeforeCommit = true
+		return nil, agent.ErrRuntimeWorkloadNotFound
+	}
+	return &model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}, nil
+}
+
+func (*lateCommitAfterErrorDispatcher) Activate(context.Context, *model.TaskExecution) error {
+	return nil
+}
+
+func (*lateCommitAfterErrorDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.RuntimeExecutionState, error) {
+	return &agent.RuntimeExecutionState{Phase: agent.RuntimePhasePending}, nil
+}
+
+func (d *lateCommitAfterErrorDispatcher) Delete(_ context.Context, execution *model.TaskExecution) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deleted = append(d.deleted, runtimeIdentityFromExecution(execution))
+	return nil
+}
+
+func (d *lateCommitAfterErrorDispatcher) commit() {
+	d.mu.Lock()
+	d.created = true
+	d.mu.Unlock()
+}
+
+type staleWinnerDispatcher struct {
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+	mu           sync.Mutex
+	prepareCalls int
+	deleted      []model.RuntimeIdentity
+}
+
+func (*staleWinnerDispatcher) Scope() string { return "docker" }
+
+func (*staleWinnerDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
+	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+}
+
+func (d *staleWinnerDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	d.mu.Lock()
+	d.prepareCalls++
+	call := d.prepareCalls
+	d.mu.Unlock()
+	if call == 1 {
+		close(d.firstStarted)
+		<-d.releaseFirst
+	}
+	return &model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}, nil
+}
+
+func (d *staleWinnerDispatcher) ResolvePrepared(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	return &model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}, nil
+}
+
+func (*staleWinnerDispatcher) Activate(context.Context, *model.TaskExecution) error { return nil }
+
+func (*staleWinnerDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.RuntimeExecutionState, error) {
+	return &agent.RuntimeExecutionState{Phase: agent.RuntimePhasePending}, nil
+}
+
+func (d *staleWinnerDispatcher) Delete(_ context.Context, execution *model.TaskExecution) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deleted = append(d.deleted, runtimeIdentityFromExecution(execution))
+	return nil
+}
+
+func (*lateCreatingDispatcher) Scope() string { return "docker" }
+
+func (*lateCreatingDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
+	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+}
+
+func (d *lateCreatingDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	close(d.prepareStarted)
+	<-d.allowCreate
+	d.mu.Lock()
+	d.created = true
+	d.mu.Unlock()
+	return &model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}, nil
+}
+
+func (d *lateCreatingDispatcher) ResolvePrepared(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.created {
+		d.resolvedBeforeCreate = true
+		return nil, agent.ErrRuntimeWorkloadNotFound
+	}
+	return &model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}, nil
+}
+
+func (*lateCreatingDispatcher) Activate(context.Context, *model.TaskExecution) error { return nil }
+
+func (*lateCreatingDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.RuntimeExecutionState, error) {
+	return &agent.RuntimeExecutionState{Phase: agent.RuntimePhasePending}, nil
+}
+
+func (d *lateCreatingDispatcher) Delete(_ context.Context, execution *model.TaskExecution) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deleted = append(d.deleted, model.RuntimeIdentity{
+		Scope: execution.RuntimeScope, Workload: execution.RuntimeWorkload, InstanceID: execution.RuntimeInstanceID,
+	})
+	return nil
+}
+
 func (*activationOrderingDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
 	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
 }
@@ -68,6 +210,10 @@ func (d *activationOrderingDispatcher) Prepare(_ context.Context, execution *mod
 		<-d.release
 	}
 	return identity, nil
+}
+
+func (d *activationOrderingDispatcher) ResolvePrepared(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	return &model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}, nil
 }
 
 func (d *activationOrderingDispatcher) Activate(_ context.Context, execution *model.TaskExecution) error {
@@ -113,6 +259,15 @@ func (d *dispatchTestDispatcher) ResolveRuntime(string) serverconfig.RuntimeImag
 }
 
 func (d *dispatchTestDispatcher) Scope() string { return "docker" }
+
+func (d *dispatchTestDispatcher) ResolvePrepared(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	identity := d.identity
+	if identity == nil {
+		identity = &model.RuntimeIdentity{Scope: "docker", Workload: "runtime-" + execution.ID, InstanceID: "instance-" + execution.ID}
+	}
+	copy := *identity
+	return &copy, nil
+}
 
 type cancelingReferenceAssetRepository struct {
 	repository.AssetRepository
@@ -220,9 +375,10 @@ func (r *cancelingReferenceAssetRepository) FindOwnedByID(context.Context, strin
 	return nil, context.Canceled
 }
 
-func (d *dispatchTestDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+func (d *dispatchTestDispatcher) Prepare(ctx context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
 	d.mu.Lock()
 	d.calls++
+	d.prepareDeadline, d.hasPrepareDeadline = ctx.Deadline()
 	if d.seen == nil {
 		d.seen = make(map[string]struct{})
 	}
@@ -255,6 +411,12 @@ func (d *dispatchTestDispatcher) Prepare(_ context.Context, execution *model.Tas
 		return identity, nil
 	}
 	return &model.RuntimeIdentity{Scope: "daemon-a", Workload: "container-" + execution.ID}, nil
+}
+
+func (d *dispatchTestDispatcher) capturedPrepareDeadline() (time.Time, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.prepareDeadline, d.hasPrepareDeadline
 }
 
 func (*dispatchTestDispatcher) Activate(context.Context, *model.TaskExecution) error { return nil }
@@ -399,8 +561,11 @@ func TestDispatchCancellationAfterResourcePreparationCompensatesWithoutActivatio
 		dispatchDone <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
 	}()
 	<-dispatcher.prepared
-	if err := svc.CancelForUser(context.Background(), task.UserID, task.ID); err != nil {
-		t.Fatalf("cancel prepared execution: %v", err)
+	if err := svc.CancelForUser(context.Background(), task.UserID, task.ID); !errors.Is(err, ErrRuntimePreparationInFlight) {
+		t.Fatalf("cancel prepared execution error = %v, want ErrRuntimePreparationInFlight", err)
+	}
+	if found := mustCurrentExecution(t, repo, task.ID); found.CleanupStatus != model.TaskExecutionCleanupPending {
+		t.Fatalf("cleanup status = %s, want pending", found.CleanupStatus)
 	}
 	close(dispatcher.release)
 	if err := <-dispatchDone; err == nil {
@@ -411,8 +576,8 @@ func TestDispatchCancellationAfterResourcePreparationCompensatesWithoutActivatio
 	if activationCalls != 0 || status != "" || startedIdentity.Scope != "" {
 		t.Fatalf("provider ran after cancellation: calls=%d status=%q identity=%#v", activationCalls, status, startedIdentity)
 	}
-	if len(deleted) < 2 {
-		t.Fatalf("delete calls=%d identities=%#v, want initial cancellation plus identity-bound compensation", len(deleted), deleted)
+	if len(deleted) != 1 {
+		t.Fatalf("delete calls=%d identities=%#v, want one identity-bound compensation", len(deleted), deleted)
 	}
 	last := deleted[len(deleted)-1]
 	if last.Scope != "docker" || last.Workload == "" || last.InstanceID == "" {
@@ -541,7 +706,7 @@ func TestDispatchIncompleteIdentityFailsPermanently(t *testing.T) {
 		t.Fatalf("dispatch error = %v, want permanent incomplete identity failure", err)
 	}
 	execution := mustCurrentExecution(t, repo, task.ID)
-	if execution.Status != model.TaskExecutionFailed || execution.DispatchClaimToken != "" || execution.DispatchClaimedAt != nil || execution.RuntimeScope != "" || execution.RuntimeWorkload != "" {
+	if execution.Status != model.TaskExecutionFailed || execution.DispatchClaimToken == "" || execution.DispatchClaimedAt == nil || execution.RuntimeScope != "" || execution.RuntimeWorkload != "" {
 		t.Fatalf("failed incomplete dispatch = %+v", execution)
 	}
 }
@@ -567,7 +732,7 @@ func TestDispatchRuntimeIdentityConflictFailsPermanently(t *testing.T) {
 		t.Fatalf("dispatch error = %v, want permanent ErrRuntimeIdentityConflict", err)
 	}
 	execution = mustCurrentExecution(t, repo, task.ID)
-	if execution.Status != model.TaskExecutionFailed || execution.DispatchClaimToken != "" || execution.DispatchClaimedAt != nil {
+	if execution.Status != model.TaskExecutionFailed || execution.DispatchClaimToken == "" || execution.DispatchClaimedAt == nil {
 		t.Fatalf("conflicted dispatch was not terminalized: %+v", execution)
 	}
 }
@@ -817,6 +982,152 @@ func TestDispatchCloudTaskConcurrentHandlersCreateAndDispatchOneAttempt(t *testi
 	}
 }
 
+func TestDispatchCloudTaskBoundsPrepareWithRelativeTimeoutShorterThanDatabaseLease(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	lease := 2 * time.Minute
+	svc.SetRuntimeDispatchLease(lease)
+	dispatcher.started = make(chan struct{}, 1)
+	dispatcher.release = make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
+	}()
+	<-dispatcher.started
+
+	execution := mustCurrentExecution(t, repo, task.ID)
+	if execution.Status != model.TaskExecutionDispatching || execution.DispatchClaimedAt == nil {
+		t.Fatalf("claimed execution = %#v", execution)
+	}
+	deadline, ok := dispatcher.capturedPrepareDeadline()
+	if !ok {
+		t.Fatal("Prepare context has no deadline")
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 || remaining > lease/2 {
+		t.Fatalf("Prepare deadline remaining = %v, want positive relative timeout <= %v", remaining, lease/2)
+	}
+
+	close(dispatcher.release)
+	if err := <-done; err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+}
+
+func TestCleanupDoesNotCompleteWhenResolveNotFoundPrecedesInFlightPrepareCreate(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	dispatcher := &lateCreatingDispatcher{prepareStarted: make(chan struct{}), allowCreate: make(chan struct{})}
+	svc.SetRuntimeDispatcher(dispatcher)
+	svc.SetRuntimeDispatchLease(time.Minute)
+	dispatchDone := make(chan error, 1)
+	go func() {
+		dispatchDone <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
+	}()
+	<-dispatcher.prepareStarted
+
+	cancelErr := svc.CancelForUser(context.Background(), task.UserID, task.ID)
+	if !errors.Is(cancelErr, ErrRuntimePreparationInFlight) {
+		t.Fatalf("cancel error = %v, want ErrRuntimePreparationInFlight", cancelErr)
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	if execution.CleanupStatus != model.TaskExecutionCleanupPending {
+		t.Fatalf("cleanup status = %s, want pending", execution.CleanupStatus)
+	}
+
+	close(dispatcher.allowCreate)
+	if err := <-dispatchDone; err == nil {
+		t.Fatal("stale dispatch unexpectedly completed")
+	}
+	dispatcher.mu.Lock()
+	created := dispatcher.created
+	resolvedBeforeCreate := dispatcher.resolvedBeforeCreate
+	deleted := append([]model.RuntimeIdentity(nil), dispatcher.deleted...)
+	dispatcher.mu.Unlock()
+	want := model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}
+	if !created || resolvedBeforeCreate || len(deleted) != 1 || deleted[0] != want {
+		t.Fatalf("created=%v resolved_before_create=%v deleted=%#v, want exact %#v", created, resolvedBeforeCreate, deleted, want)
+	}
+	found, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.CleanupStatus != model.TaskExecutionCleanupPending {
+		t.Fatalf("cleanup after compensation = %s, want pending for durable retry", found.CleanupStatus)
+	}
+}
+
+func TestCleanupRetainsBarrierAcrossAmbiguousPrepareReturnAndLateProviderCommit(t *testing.T) {
+	svc, repo, db, _, task := setupDispatchTest(t)
+	dispatcher := &lateCommitAfterErrorDispatcher{}
+	svc.SetRuntimeDispatcher(dispatcher)
+	svc.SetRuntimeDispatchLease(time.Minute)
+	svc.cleanupRetryBackoff = time.Minute
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
+		t.Fatal("expected ambiguous Prepare error")
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	if execution.Status != model.TaskExecutionDispatching || execution.DispatchClaimToken == "" || execution.DispatchClaimedAt == nil {
+		t.Fatalf("ambiguous dispatch barrier = %#v", execution)
+	}
+	if err := svc.CancelForUser(context.Background(), task.UserID, task.ID); !errors.Is(err, ErrRuntimePreparationInFlight) {
+		t.Fatalf("cancel before late commit error = %v, want ErrRuntimePreparationInFlight", err)
+	}
+	found := mustCurrentExecution(t, repo, task.ID)
+	if found.CleanupStatus != model.TaskExecutionCleanupPending {
+		t.Fatalf("cleanup before late commit = %s, want pending", found.CleanupStatus)
+	}
+
+	dispatcher.commit()
+	ageDispatchClaim(t, db, execution.ID, 2*time.Minute)
+	if err := db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).Update("cleanup_next_at", nil).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CancelForUser(context.Background(), task.UserID, task.ID); err != nil {
+		t.Fatalf("cleanup after late commit: %v", err)
+	}
+	found = mustCurrentExecution(t, repo, task.ID)
+	dispatcher.mu.Lock()
+	resolvedBeforeCommit := dispatcher.resolvedBeforeCommit
+	deleted := append([]model.RuntimeIdentity(nil), dispatcher.deleted...)
+	dispatcher.mu.Unlock()
+	want := model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}
+	if resolvedBeforeCommit || len(deleted) != 1 || deleted[0] != want || found.CleanupStatus != model.TaskExecutionCleanupDone || runtimeIdentityFromExecution(found) != want {
+		t.Fatalf("resolved_before_commit=%v deleted=%#v persisted=%#v cleanup=%s", resolvedBeforeCommit, deleted, runtimeIdentityFromExecution(found), found.CleanupStatus)
+	}
+}
+
+func TestStaleDispatchClaimantDoesNotDeleteWinnerSameIdentity(t *testing.T) {
+	svc, repo, db, _, task := setupDispatchTest(t)
+	dispatcher := &staleWinnerDispatcher{firstStarted: make(chan struct{}), releaseFirst: make(chan struct{})}
+	svc.SetRuntimeDispatcher(dispatcher)
+	svc.SetRuntimeDispatchLease(time.Minute)
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
+	}()
+	<-dispatcher.firstStarted
+	execution := mustCurrentExecution(t, repo, task.ID)
+	ageDispatchClaim(t, db, execution.ID, 2*time.Minute)
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatalf("winner dispatch: %v", err)
+	}
+	close(dispatcher.releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("stale same-identity claimant did not converge: %v", err)
+	}
+
+	found := mustCurrentExecution(t, repo, task.ID)
+	dispatcher.mu.Lock()
+	deleted := append([]model.RuntimeIdentity(nil), dispatcher.deleted...)
+	prepareCalls := dispatcher.prepareCalls
+	dispatcher.mu.Unlock()
+	want := model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}
+	if prepareCalls != 2 || len(deleted) != 0 || found.Status != model.TaskExecutionStarting || runtimeIdentityFromExecution(found) != want {
+		t.Fatalf("prepare_calls=%d deleted=%#v execution=%#v", prepareCalls, deleted, found)
+	}
+}
+
 func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	mr := miniredis.RunT(t)
@@ -854,8 +1165,8 @@ func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 	}
 }
 
-func TestDispatchCloudTaskAmbiguousErrorAbandonsClaimAndRetriesWithoutTerminalizing(t *testing.T) {
-	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+func TestDispatchCloudTaskAmbiguousErrorRetainsClaimUntilDatabaseLeaseExpires(t *testing.T) {
+	svc, repo, db, dispatcher, task := setupDispatchTest(t)
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -875,8 +1186,8 @@ func TestDispatchCloudTaskAmbiguousErrorAbandonsClaimAndRetriesWithoutTerminaliz
 	if err != nil {
 		t.Fatal(err)
 	}
-	if execution.Status != model.TaskExecutionCreated || execution.DispatchClaimToken != "" || execution.DispatchClaimedAt != nil {
-		t.Fatalf("abandoned execution = %+v", execution)
+	if execution.Status != model.TaskExecutionDispatching || execution.DispatchClaimToken == "" || execution.DispatchClaimedAt == nil {
+		t.Fatalf("unfenced ambiguous execution = %+v", execution)
 	}
 	if currentTask.Status != model.TaskStatusRunning || currentTask.CompletedAt != nil || currentTask.ErrorMessage != "" {
 		t.Fatalf("ambiguous task was terminalized: %+v", currentTask)
@@ -886,6 +1197,10 @@ func TestDispatchCloudTaskAmbiguousErrorAbandonsClaimAndRetriesWithoutTerminaliz
 	}
 
 	dispatcher.err = nil
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); !errors.Is(err, ErrDispatchInProgress) {
+		t.Fatalf("immediate ambiguous retry error = %v, want ErrDispatchInProgress", err)
+	}
+	ageDispatchClaim(t, db, execution.ID, 2*time.Minute)
 	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
 		t.Fatalf("retry ambiguous dispatch: %v", err)
 	}
@@ -1530,8 +1845,8 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 	if err != nil || count != 1 {
 		t.Fatalf("slot count after duplicate fallback = %d, err=%v, want only A slot", count, err)
 	}
-	if err := svc.Cancel(ctx, task.ID); err != nil {
-		t.Fatalf("Cancel: %v", err)
+	if err := svc.Cancel(ctx, task.ID); !errors.Is(err, ErrRuntimePreparationInFlight) {
+		t.Fatalf("Cancel error = %v, want ErrRuntimePreparationInFlight", err)
 	}
 	if _, ok, err := svc.pubsub.TryReserveSlot(ctx, projectID, 10); err != nil || !ok {
 		t.Fatalf("reserve replacement slot B: ok=%v err=%v", ok, err)

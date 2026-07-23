@@ -135,25 +135,54 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 		}
 		return fmt.Errorf("runtime dispatch claim lost to execution status %s", latest.Status)
 	}
-	execution.Status = model.TaskExecutionDispatching
-	execution.DispatchClaimToken = token
-
-	runtimeIdentity, err := s.runtimeDispatcher.Prepare(ctx, execution, task)
+	prepareTimeout := s.runtimeDispatchLease() / 2
+	if prepareTimeout <= 0 {
+		return fmt.Errorf("runtime dispatch lease is too short")
+	}
+	prepareCtx, cancelPrepare := context.WithTimeout(ctx, prepareTimeout)
+	refreshed, err := s.repo.TaskExecutions().RefreshDispatchClaim(prepareCtx, execution.ID, token)
 	if err != nil {
-		if agent.IsPermanentDispatchError(err) {
-			return s.failDispatch(ctx, task, execution, token, err)
-		}
-		abandoned, abandonErr := s.repo.TaskExecutions().AbandonDispatch(ctx, execution.ID, token)
+		cancelPrepare()
+		return fmt.Errorf("refresh runtime dispatch barrier: %w", err)
+	}
+	if !refreshed {
+		cancelPrepare()
+		return fmt.Errorf("runtime dispatch claim %s was lost before preparation", execution.ID)
+	}
+	claimed, err := s.repo.TaskExecutions().FindByID(prepareCtx, execution.ID)
+	if err != nil {
+		cancelPrepare()
+		abandoned, abandonErr := s.repo.TaskExecutions().AbandonDispatch(context.WithoutCancel(ctx), execution.ID, token)
 		if abandonErr != nil {
-			return errors.Join(fmt.Errorf("ambiguous runtime dispatch: %w", err), fmt.Errorf("abandon dispatch claim: %w", abandonErr))
+			return errors.Join(fmt.Errorf("reload claimed runtime dispatch: %w", err), fmt.Errorf("abandon unreadable dispatch claim: %w", abandonErr))
 		}
 		if !abandoned {
-			return errors.Join(fmt.Errorf("ambiguous runtime dispatch: %w", err), fmt.Errorf("abandon dispatch claim: stale execution %s", execution.ID))
+			return errors.Join(fmt.Errorf("reload claimed runtime dispatch: %w", err), fmt.Errorf("abandon unreadable dispatch claim: stale execution %s", execution.ID))
+		}
+		return fmt.Errorf("reload claimed runtime dispatch: %w", err)
+	}
+	if claimed.Status != model.TaskExecutionDispatching || claimed.DispatchClaimToken != token || claimed.DispatchClaimedAt == nil {
+		cancelPrepare()
+		return fmt.Errorf("runtime dispatch claim %s was not durably readable", execution.ID)
+	}
+	execution = claimed
+	runtimeIdentity, err := s.runtimeDispatcher.Prepare(prepareCtx, execution, task)
+	cancelPrepare()
+	if err != nil {
+		barrierErr := s.refreshRuntimeDispatchBarrier(ctx, execution.ID, token)
+		if barrierErr != nil {
+			return errors.Join(fmt.Errorf("ambiguous runtime dispatch: %w", err), barrierErr)
+		}
+		if agent.IsPermanentDispatchError(err) {
+			return s.failDispatch(ctx, task, execution, token, err)
 		}
 		return fmt.Errorf("ambiguous runtime dispatch: %w", err)
 	}
 	normalizedIdentity, err := normalizeRuntimeIdentity(runtimeIdentity)
 	if err != nil {
+		if barrierErr := s.refreshRuntimeDispatchBarrier(ctx, execution.ID, token); barrierErr != nil {
+			return errors.Join(err, barrierErr)
+		}
 		return s.failDispatch(ctx, task, execution, token, agent.NewPermanentDispatchError(err))
 	}
 	preparedExecution := executionWithRuntimeIdentity(execution, normalizedIdentity)
@@ -171,10 +200,7 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 		)
 	}
 	if !won {
-		return errors.Join(
-			fmt.Errorf("mark runtime execution starting: stale execution %s", execution.ID),
-			s.compensatePreparedRuntime(ctx, preparedExecution),
-		)
+		return s.resolveLostDispatchCompletion(ctx, preparedExecution, normalizedIdentity)
 	}
 	authoritative, err := s.repo.TaskExecutions().FindByID(ctx, execution.ID)
 	if err != nil {
@@ -227,6 +253,39 @@ func runtimeIdentityFromExecution(execution *model.TaskExecution) model.RuntimeI
 	return model.RuntimeIdentity{
 		Scope: execution.RuntimeScope, Workload: execution.RuntimeWorkload, InstanceID: execution.RuntimeInstanceID,
 	}
+}
+
+func (s *TaskService) refreshRuntimeDispatchBarrier(ctx context.Context, executionID, token string) error {
+	timeout := s.runtimeDispatchLease() / 2
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+	refreshed, err := s.repo.TaskExecutions().RefreshDispatchClaim(refreshCtx, executionID, token)
+	if err != nil {
+		return fmt.Errorf("refresh ambiguous runtime dispatch barrier: %w", err)
+	}
+	if !refreshed {
+		return fmt.Errorf("refresh ambiguous runtime dispatch barrier: stale execution %s", executionID)
+	}
+	return nil
+}
+
+func (s *TaskService) resolveLostDispatchCompletion(ctx context.Context, prepared *model.TaskExecution, identity model.RuntimeIdentity) error {
+	latest, err := s.repo.TaskExecutions().FindByID(context.WithoutCancel(ctx), prepared.ID)
+	if err != nil {
+		return fmt.Errorf("reload stale runtime dispatch %s: %w", prepared.ID, err)
+	}
+	staleErr := fmt.Errorf("mark runtime execution starting: stale execution %s", prepared.ID)
+	authoritativeIdentity := runtimeIdentityFromExecution(latest)
+	if !isTerminalExecution(latest.Status) && completeRuntimeIdentity(authoritativeIdentity) && authoritativeIdentity == identity {
+		return nil
+	}
+	if isTerminalExecution(latest.Status) || completeRuntimeIdentity(authoritativeIdentity) {
+		return errors.Join(staleErr, s.compensatePreparedRuntime(ctx, prepared))
+	}
+	return staleErr
 }
 
 func (s *TaskService) compensatePreparedRuntime(ctx context.Context, execution *model.TaskExecution) error {

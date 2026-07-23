@@ -713,7 +713,10 @@ func (s *TaskService) cleanupCancelledExecution(ctx context.Context, execution *
 		}
 	}()
 	deleteCtx, cancel := context.WithTimeout(ctx, s.cloudFinalizationLease()/2)
-	deleteErr := s.runtimeDispatcher.Delete(deleteCtx, execution)
+	authoritative, exists, deleteErr := s.ResolveExecutionCleanupRuntime(deleteCtx, execution.ID, token)
+	if deleteErr == nil && exists {
+		deleteErr = s.runtimeDispatcher.Delete(deleteCtx, authoritative)
+	}
 	cancel()
 	if deleteErr != nil {
 		backoff := s.cleanupRetryBackoff

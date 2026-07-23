@@ -40,6 +40,10 @@ func (availableRuntimeDispatcher) Prepare(context.Context, *model.TaskExecution,
 	return &model.RuntimeIdentity{Scope: "docker", Workload: "test-runtime"}, nil
 }
 
+func (availableRuntimeDispatcher) ResolvePrepared(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
+	return &model.RuntimeIdentity{Scope: "docker", Workload: "test-runtime", InstanceID: "test-instance"}, nil
+}
+
 func (availableRuntimeDispatcher) Activate(context.Context, *model.TaskExecution) error { return nil }
 
 func (availableRuntimeDispatcher) Delete(context.Context, *model.TaskExecution) error { return nil }

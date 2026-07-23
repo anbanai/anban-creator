@@ -20,6 +20,10 @@ func (*runtimeDispatcherTestFake) Prepare(context.Context, *model.TaskExecution,
 	return &model.RuntimeIdentity{Scope: "daemon-a", Workload: "container-1"}, nil
 }
 
+func (*runtimeDispatcherTestFake) ResolvePrepared(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
+	return &model.RuntimeIdentity{Scope: "daemon-a", Workload: "container-1", InstanceID: "instance-1"}, nil
+}
+
 func (*runtimeDispatcherTestFake) Activate(context.Context, *model.TaskExecution) error { return nil }
 
 func (*runtimeDispatcherTestFake) Inspect(context.Context, *model.TaskExecution) (*RuntimeExecutionState, error) {

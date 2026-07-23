@@ -15,13 +15,14 @@ import (
 )
 
 type reconcileTestDispatcher struct {
-	mu           sync.Mutex
-	states       map[string]*RuntimeExecutionState
-	errs         map[string]error
-	activateErrs map[string]error
-	activated    []string
-	deleteErrs   []error
-	deleted      []string
+	mu                sync.Mutex
+	states            map[string]*RuntimeExecutionState
+	errs              map[string]error
+	activateErrs      map[string]error
+	activated         []string
+	deleteErrs        []error
+	deleted           []string
+	deletedIdentities []model.RuntimeIdentity
 }
 
 var _ RuntimeDispatcher = (*reconcileTestDispatcher)(nil)
@@ -35,6 +36,9 @@ func (*reconcileTestDispatcher) Scope() string { return "test" }
 func (*reconcileTestDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
 	return &model.RuntimeIdentity{Scope: "test", Workload: "runtime-" + execution.ID}, nil
 }
+func (*reconcileTestDispatcher) ResolvePrepared(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	return &model.RuntimeIdentity{Scope: "test", Workload: "runtime-" + execution.ID, InstanceID: "instance-" + execution.ID}, nil
+}
 func (d *reconcileTestDispatcher) Activate(_ context.Context, execution *model.TaskExecution) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -45,6 +49,9 @@ func (d *reconcileTestDispatcher) Delete(_ context.Context, execution *model.Tas
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.deleted = append(d.deleted, execution.ID)
+	d.deletedIdentities = append(d.deletedIdentities, model.RuntimeIdentity{
+		Scope: execution.RuntimeScope, Workload: execution.RuntimeWorkload, InstanceID: execution.RuntimeInstanceID,
+	})
 	if len(d.deleteErrs) == 0 {
 		return nil
 	}
@@ -58,15 +65,18 @@ func (d *reconcileTestDispatcher) Inspect(_ context.Context, execution *model.Ta
 
 type reconcileFailure struct{ id, status, reason string }
 type reconcileTestService struct {
-	mu          sync.Mutex
-	executions  []*model.TaskExecution
-	failures    []reconcileFailure
-	resumed     []string
-	dispatched  []string
-	instances   map[string]string
-	cleanup     map[string]string
-	diagnostics map[string][]byte
-	failID      string
+	mu                 sync.Mutex
+	executions         []*model.TaskExecution
+	failures           []reconcileFailure
+	resumed            []string
+	dispatched         []string
+	instances          map[string]string
+	cleanup            map[string]string
+	diagnostics        map[string][]byte
+	failID             string
+	cleanupResolutions map[string]*model.TaskExecution
+	cleanupResolveErr  error
+	resolvedCleanup    []string
 }
 
 func (s *reconcileTestService) FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error) {
@@ -98,6 +108,25 @@ func (s *reconcileTestService) ClaimExecutionCleanup(_ context.Context, id, toke
 	}
 	s.cleanup[id] = token
 	return true, nil
+}
+func (s *reconcileTestService) ResolveExecutionCleanupRuntime(_ context.Context, id, token string) (*model.TaskExecution, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resolvedCleanup = append(s.resolvedCleanup, id)
+	if s.cleanupResolveErr != nil {
+		return nil, false, s.cleanupResolveErr
+	}
+	if resolved := s.cleanupResolutions[id]; resolved != nil {
+		copy := *resolved
+		return &copy, true, nil
+	}
+	for _, execution := range s.executions {
+		if execution != nil && execution.ID == id {
+			copy := *execution
+			return &copy, true, nil
+		}
+	}
+	return nil, false, nil
 }
 func (s *reconcileTestService) CompleteExecutionCleanup(_ context.Context, id, token string) (bool, error) {
 	s.mu.Lock()
@@ -411,6 +440,41 @@ func TestRuntimeReconcilerActiveDeadlineTimesOutNeverBootstrappedWorkload(t *tes
 	defer service.mu.Unlock()
 	if len(service.failures) != 1 || service.failures[0].status != model.TaskExecutionTimedOut || service.failures[0].reason != "deadline_exceeded" || service.cleanup[execution.ID] != "done" {
 		t.Fatalf("failures=%v cleanup=%v", service.failures, service.cleanup)
+	}
+}
+
+func TestRuntimeReconcilerActiveDeadlineRecoversIdentityBeforeExactDeleteWithoutActivation(t *testing.T) {
+	now := time.Now()
+	execution := &model.TaskExecution{
+		ID: "prepared-before-deadline", Status: model.TaskExecutionDispatching, CreatedAt: now.Add(-11 * time.Minute),
+		CleanupStatus: model.TaskExecutionCleanupPending,
+	}
+	resolved := *execution
+	resolved.Status = model.TaskExecutionTimedOut
+	resolved.RuntimeScope = "test"
+	resolved.RuntimeWorkload = "runtime-prepared-before-deadline"
+	resolved.RuntimeInstanceID = "instance-prepared-before-deadline"
+	dispatcher := &reconcileTestDispatcher{states: map[string]*RuntimeExecutionState{}, errs: map[string]error{}}
+	service := &reconcileTestService{
+		executions:         []*model.TaskExecution{execution},
+		cleanupResolutions: map[string]*model.TaskExecution{execution.ID: &resolved},
+	}
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{ActiveDeadline: 10 * time.Minute}, zerolog.Nop())
+	reconciler.now = func() time.Time { return now }
+
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.mu.Lock()
+	activated := append([]string(nil), dispatcher.activated...)
+	deleted := append([]model.RuntimeIdentity(nil), dispatcher.deletedIdentities...)
+	dispatcher.mu.Unlock()
+	service.mu.Lock()
+	resolvedCalls := append([]string(nil), service.resolvedCleanup...)
+	service.mu.Unlock()
+	want := model.RuntimeIdentity{Scope: resolved.RuntimeScope, Workload: resolved.RuntimeWorkload, InstanceID: resolved.RuntimeInstanceID}
+	if len(activated) != 0 || len(resolvedCalls) != 1 || resolvedCalls[0] != execution.ID || len(deleted) != 1 || deleted[0] != want {
+		t.Fatalf("activated=%v resolved=%v deleted=%#v, want exact %#v", activated, resolvedCalls, deleted, want)
 	}
 }
 

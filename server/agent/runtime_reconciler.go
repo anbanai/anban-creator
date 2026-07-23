@@ -20,6 +20,7 @@ type RuntimeReconcileService interface {
 	ResumeExecutionFinalization(context.Context, string) error
 	ReconcileExecutionFailure(context.Context, string, string, string, []byte, int) error
 	ClaimExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
+	ResolveExecutionCleanupRuntime(context.Context, string, string) (*model.TaskExecution, bool, error)
 	CompleteExecutionCleanup(context.Context, string, string) (bool, error)
 	FailExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
 	ReleaseExecutionCleanup(context.Context, string, string) error
@@ -218,7 +219,10 @@ func (r *RuntimeReconciler) cleanupExecution(ctx context.Context, execution *mod
 		}
 	}()
 	deleteCtx, cancel := context.WithTimeout(ctx, r.config.CleanupLease/2)
-	deleteErr := r.dispatcher.Delete(deleteCtx, execution)
+	authoritative, exists, deleteErr := r.service.ResolveExecutionCleanupRuntime(deleteCtx, execution.ID, token)
+	if deleteErr == nil && exists {
+		deleteErr = r.dispatcher.Delete(deleteCtx, authoritative)
+	}
 	cancel()
 	if deleteErr != nil {
 		failed, failErr := r.service.FailExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token, r.config.CleanupRetryBackoff)

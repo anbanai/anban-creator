@@ -111,6 +111,43 @@ func (d *kubernetesJobDispatcher) Prepare(ctx context.Context, execution *model.
 	return &model.RuntimeIdentity{Scope: desiredJob.Namespace, Workload: desiredJob.Name, InstanceID: string(existingJob.UID)}, nil
 }
 
+func (d *kubernetesJobDispatcher) ResolvePrepared(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
+	if err := d.validate(execution); err != nil {
+		return nil, NewPermanentDispatchError(err)
+	}
+	if task == nil {
+		return nil, NewPermanentDispatchError(fmt.Errorf("task is required"))
+	}
+	if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.ProjectID) == "" {
+		return nil, NewPermanentDispatchError(fmt.Errorf("task ID and project ID are required"))
+	}
+	if execution.TaskID != task.ID {
+		return nil, NewPermanentDispatchError(fmt.Errorf("execution task identity mismatch: execution has %q, task has %q", execution.TaskID, task.ID))
+	}
+	if err := d.validateRuntime(execution, task); err != nil {
+		return nil, NewPermanentDispatchError(err)
+	}
+
+	desiredJob := buildKubernetesJob(d.config, execution, task)
+	existingJob, err := d.kube.BatchV1().Jobs(d.config.Namespace).Get(ctx, desiredJob.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, fmt.Errorf("resolve prepared Kubernetes Job %q: %w", desiredJob.Name, ErrRuntimeWorkloadNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get prepared Kubernetes Job %q: %w", desiredJob.Name, classifyKubernetesDispatchAPIError(err, false))
+	}
+	if err := verifyJob(existingJob, desiredJob, execution, task); err != nil {
+		return nil, NewPermanentDispatchError(err)
+	}
+	if execution.RuntimeInstanceID != "" && string(existingJob.UID) != execution.RuntimeInstanceID {
+		return nil, NewPermanentDispatchError(fmt.Errorf("Kubernetes Job %q UID mismatch: got %q, want persisted %q", existingJob.Name, existingJob.UID, execution.RuntimeInstanceID))
+	}
+	if existingJob.UID == "" {
+		return nil, NewPermanentDispatchError(fmt.Errorf("Kubernetes Job %q has no UID", existingJob.Name))
+	}
+	return &model.RuntimeIdentity{Scope: existingJob.Namespace, Workload: existingJob.Name, InstanceID: string(existingJob.UID)}, nil
+}
+
 func (d *kubernetesJobDispatcher) Activate(ctx context.Context, execution *model.TaskExecution) error {
 	if err := d.validatePersistedJobIdentity(execution); err != nil {
 		return NewPermanentDispatchError(err)
@@ -226,9 +263,6 @@ func classifyKubernetesDispatchAPIError(err error, create bool) error {
 func (d *kubernetesJobDispatcher) Delete(ctx context.Context, execution *model.TaskExecution) error {
 	if err := d.validate(execution); err != nil {
 		return err
-	}
-	if execution.RuntimeScope == "" && execution.RuntimeWorkload == "" && execution.RuntimeInstanceID == "" {
-		return nil
 	}
 	if err := d.validatePersistedJobIdentity(execution); err != nil {
 		return NewPermanentDispatchError(err)

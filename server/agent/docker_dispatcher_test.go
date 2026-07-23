@@ -100,6 +100,51 @@ func TestDockerDispatcherPreparesThenActivatesContainer(t *testing.T) {
 	assertCallSubsequence(t, engine.calls, "archive-copy", "container-start")
 }
 
+func TestDockerDispatcherResolvePreparedIsLookupOnlyAndInstanceFenced(t *testing.T) {
+	ctx := context.Background()
+	engine := newFakeDockerEngine()
+	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+	execution := dockerDispatcherTestExecution()
+	task := dockerDispatcherTestTask()
+	prepared, err := dispatcher.Prepare(ctx, execution, task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	engine.calls = nil
+
+	resolved, err := dispatcher.ResolvePrepared(ctx, execution, task)
+	if err != nil {
+		t.Fatalf("ResolvePrepared: %v", err)
+	}
+	if *resolved != *prepared {
+		t.Fatalf("resolved identity = %#v, want %#v", resolved, prepared)
+	}
+	if !slices.Equal(engine.calls, []string{"image-inspect", "container-inspect"}) {
+		t.Fatalf("recovery calls = %v, want lookup only", engine.calls)
+	}
+
+	replacement := *execution
+	replacement.RuntimeInstanceID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if _, err := dispatcher.ResolvePrepared(ctx, &replacement, task); err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "instance identity mismatch") {
+		t.Fatalf("replacement ResolvePrepared error = %v, want permanent instance mismatch", err)
+	}
+	if len(engine.removedContainers) != 0 || slices.Contains(engine.calls, "container-start") || slices.Contains(engine.calls, "container-create") {
+		t.Fatalf("replacement recovery mutated runtime: calls=%v removed=%v", engine.calls, engine.removedContainers)
+	}
+}
+
+func TestDockerDispatcherResolvePreparedReportsNotFoundWithoutCreating(t *testing.T) {
+	engine := newFakeDockerEngine()
+	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+	_, err := dispatcher.ResolvePrepared(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+	if !errors.Is(err, ErrRuntimeWorkloadNotFound) {
+		t.Fatalf("ResolvePrepared error = %v, want ErrRuntimeWorkloadNotFound", err)
+	}
+	if !slices.Equal(engine.calls, []string{"image-inspect", "container-inspect"}) {
+		t.Fatalf("missing recovery calls = %v, want lookup only", engine.calls)
+	}
+}
+
 func TestDockerDispatcherDoesNotStartBeforeRuntimeIdentityPersistence(t *testing.T) {
 	engine := newFakeDockerEngine()
 	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
@@ -488,6 +533,21 @@ func TestDockerDeleteStopsAndRemovesOnlyOwnedContainer(t *testing.T) {
 	err := newDockerDispatcherForTest(t, foreign, dockerDispatcherTestTokens(t)).Delete(context.Background(), execution)
 	if err == nil || len(foreign.stoppedContainers) != 0 || len(foreign.removedContainers) != 0 {
 		t.Fatalf("foreign container delete error=%v stopped=%v removed=%v", err, foreign.stoppedContainers, foreign.removedContainers)
+	}
+}
+
+func TestDockerDeleteRejectsEmptyRuntimeIdentity(t *testing.T) {
+	engine := newFakeDockerEngine()
+	execution := dockerDispatcherTestExecution()
+	engine.containers[dockerRuntimeContainerName(execution.ID)] = dockerIdentityInspect(execution, engine.containerID, &containertypes.State{
+		Status: containertypes.StateRunning, Running: true,
+	})
+	err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Delete(context.Background(), execution)
+	if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "identity") {
+		t.Fatalf("Delete error = %v, want permanent incomplete identity error", err)
+	}
+	if len(engine.stoppedContainers) != 0 || len(engine.removedContainers) != 0 {
+		t.Fatalf("empty-identity delete mutated container: stopped=%v removed=%v", engine.stoppedContainers, engine.removedContainers)
 	}
 }
 

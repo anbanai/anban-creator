@@ -177,14 +177,51 @@ func (d *DockerDispatcher) Prepare(ctx context.Context, execution *model.TaskExe
 	return identity, nil
 }
 
+func (d *DockerDispatcher) ResolvePrepared(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
+	if err := d.validateDispatch(execution, task); err != nil {
+		return nil, NewPermanentDispatchError(err)
+	}
+
+	resolveCtx, cancel := context.WithTimeout(ctx, time.Duration(d.config.TimeoutSec)*time.Second)
+	defer cancel()
+	inspectedImage, err := d.engine.ImageInspect(resolveCtx, execution.RuntimeImage)
+	if err != nil {
+		if errdefs.IsNotFound(err) || errdefs.IsInvalidParameter(err) || errdefs.IsForbidden(err) || errdefs.IsUnauthorized(err) {
+			err = NewPermanentDispatchError(err)
+		}
+		return nil, fmt.Errorf("inspect Docker runtime image %q while resolving prepared container: %w", execution.RuntimeImage, err)
+	}
+	if strings.TrimSpace(inspectedImage.ID) == "" || inspectedImage.Config == nil {
+		return nil, NewPermanentDispatchError(fmt.Errorf("Docker runtime image %q has incomplete trusted identity", execution.RuntimeImage))
+	}
+
+	spec := buildDockerRuntimeSpec(dockerRuntimeConfig{
+		DockerConfig: d.config,
+		ServerURL:    d.serverURL,
+		ImageID:      inspectedImage.ID,
+		ImageConfig:  dockerContainerConfigFromInspect(inspectedImage.Config),
+	}, execution, task)
+	inspected, err := d.engine.ContainerInspect(resolveCtx, spec.ContainerName)
+	if errdefs.IsNotFound(err) {
+		return nil, fmt.Errorf("resolve prepared Docker container %q: %w", spec.ContainerName, ErrRuntimeWorkloadNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("inspect prepared Docker container %q: %w", spec.ContainerName, classifyDockerAccessOrInputError(err))
+	}
+	if err := verifyExistingDockerContainer(inspected, spec, execution.RuntimeInstanceID); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(inspected.ID) == "" {
+		return nil, NewPermanentDispatchError(fmt.Errorf("Docker container %q has no instance identity", spec.ContainerName))
+	}
+	return &model.RuntimeIdentity{Scope: dockerRuntimeScope, Workload: spec.ContainerName, InstanceID: inspected.ID}, nil
+}
+
 func (d *DockerDispatcher) Activate(ctx context.Context, execution *model.TaskExecution) error {
-	if err := d.validateExecution(execution); err != nil {
+	if err := d.validatePersistedContainerIdentity(execution); err != nil {
 		return NewPermanentDispatchError(err)
 	}
 	name := dockerRuntimeContainerName(execution.ID)
-	if execution.RuntimeScope != dockerRuntimeScope || execution.RuntimeWorkload != name || execution.RuntimeInstanceID == "" {
-		return NewPermanentDispatchError(fmt.Errorf("persisted Docker runtime identity is incomplete or mismatched"))
-	}
 	activateCtx, cancel := context.WithTimeout(ctx, time.Duration(d.config.TimeoutSec)*time.Second)
 	defer cancel()
 	inspected, err := d.engine.ContainerInspect(activateCtx, name)
@@ -448,8 +485,8 @@ func dockerStateReason(status containertypes.ContainerState) string {
 }
 
 func (d *DockerDispatcher) Delete(ctx context.Context, execution *model.TaskExecution) error {
-	if err := d.validateExecution(execution); err != nil {
-		return err
+	if err := d.validatePersistedContainerIdentity(execution); err != nil {
+		return NewPermanentDispatchError(err)
 	}
 	name := dockerRuntimeContainerName(execution.ID)
 	inspected, err := d.engine.ContainerInspect(ctx, name)
@@ -576,6 +613,18 @@ func (d *DockerDispatcher) validateExecution(execution *model.TaskExecution) err
 	}
 	if execution.RuntimeInstanceID != "" && !isCanonicalDockerIdentity(execution.RuntimeInstanceID) {
 		return fmt.Errorf("execution runtime instance identity must be canonical")
+	}
+	return nil
+}
+
+func (d *DockerDispatcher) validatePersistedContainerIdentity(execution *model.TaskExecution) error {
+	if err := d.validateExecution(execution); err != nil {
+		return err
+	}
+	if execution.RuntimeScope != dockerRuntimeScope ||
+		execution.RuntimeWorkload != dockerRuntimeContainerName(execution.ID) ||
+		execution.RuntimeInstanceID == "" {
+		return fmt.Errorf("persisted Docker runtime identity is incomplete or mismatched")
 	}
 	return nil
 }
