@@ -17,6 +17,7 @@ import (
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/resources"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -36,9 +37,16 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
 	planSvc := service.NewPlanService(repo, &logger)
 	templateSvc := service.NewTemplateService(repo, &logger)
+	profileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), srvconfig.MontageConfig{})
 
 	old := svcs
-	svcs = &Services{ProjectSvc: projectSvc, TaskSvc: taskSvc, PlanSvc: planSvc, TemplateSvc: templateSvc}
+	svcs = &Services{
+		ProjectSvc: projectSvc, TaskSvc: taskSvc, PlanSvc: planSvc, TemplateSvc: templateSvc,
+		AgentProjectProfileSvc: profileSvc,
+		ArticleScoreSvc:        service.NewArticleScoreService(),
+		SeednoteExportSvc:      service.NewSeednoteExportService(),
+		ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
+	}
 
 	cleanup := func() {
 		sqlDB, _ := db.DB()
@@ -48,6 +56,17 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 		svcs = old
 	}
 	return taskSvc, projectSvc, repo, cleanup
+}
+
+func getAgentProjectProfileForTest(ctx context.Context, userID string, args map[string]any) (map[string]any, string) {
+	profile, err := svcs.AgentProjectProfileSvc.Get(ctx, service.AgentProjectProfileRequest{
+		UserID: userID, ProjectID: stringArg(args, "project_id"),
+		TaskID: stringArg(args, "task_id"), Scope: stringArg(args, "scope"),
+	})
+	if err != nil {
+		return nil, err.Error()
+	}
+	return map[string]any(*profile), ""
 }
 
 func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
@@ -229,7 +248,7 @@ func TestBuildAccountInfo_NoTaskID_FallsBackToProject(t *testing.T) {
 		t.Fatalf("update project instructions: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "seednote",
 	})
@@ -260,7 +279,7 @@ func TestBuildAccountInfo_TaskStyleOverride(t *testing.T) {
 	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
 	task := createAccountInfoTask(t, repo, userID, ch.ID, "温暖治愈系，柔光摄影")
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "seednote",
 		"task_id":    task.ID,
@@ -307,7 +326,7 @@ func TestBuildAccountInfo_TaskProjectSnapshotWinsOverCurrentProject(t *testing.T
 		t.Fatalf("update task snapshot: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "seednote",
 		"task_id":    task.ID,
@@ -346,7 +365,7 @@ func TestBuildAccountInfoReferenceAssetOnlyExposesRuntimePath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{"project_id": ch.ID, "scope": "seednote", "task_id": task.ID})
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{"project_id": ch.ID, "scope": "seednote", "task_id": task.ID})
 	if errMsg != "" {
 		t.Fatal(errMsg)
 	}
@@ -368,7 +387,7 @@ func TestBuildAccountInfoReferenceAssetOnlyExposesRuntimePath(t *testing.T) {
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	info, errMsg = buildAccountInfo(ctx, userID, map[string]any{"project_id": ch.ID, "scope": "seednote", "task_id": task.ID})
+	info, errMsg = getAgentProjectProfileForTest(ctx, userID, map[string]any{"project_id": ch.ID, "scope": "seednote", "task_id": task.ID})
 	if errMsg != "" {
 		t.Fatal(errMsg)
 	}
@@ -380,7 +399,7 @@ func TestBuildAccountInfoReferenceAssetOnlyExposesRuntimePath(t *testing.T) {
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	info, errMsg = buildAccountInfo(ctx, userID, map[string]any{"project_id": ch.ID, "scope": "seednote", "task_id": task.ID})
+	info, errMsg = getAgentProjectProfileForTest(ctx, userID, map[string]any{"project_id": ch.ID, "scope": "seednote", "task_id": task.ID})
 	if errMsg != "" {
 		t.Fatal(errMsg)
 	}
@@ -421,7 +440,7 @@ func TestBuildAccountInfo_MomentsProfileIncludesDeliveryContract(t *testing.T) {
 		t.Fatalf("create moments task: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "moments",
 		"task_id":    task.ID,
@@ -462,7 +481,7 @@ func TestBuildAccountInfo_TaskStyleEmpty_FallsBackToProject(t *testing.T) {
 	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
 	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "seednote",
 		"task_id":    task.ID,
@@ -490,7 +509,7 @@ func TestBuildAccountInfo_CrossProject_Rejected(t *testing.T) {
 	// task belongs to project B, but we query project A.
 	taskOnB := createAccountInfoTask(t, repo, userID, chB.ID, "B的task风格")
 
-	_, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	_, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": chA.ID,
 		"scope":      "seednote",
 		"task_id":    taskOnB.ID,
@@ -527,7 +546,7 @@ func TestBuildAccountInfo_ArticleScope_TaskStyleOverride(t *testing.T) {
 		t.Fatalf("update task type: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
@@ -566,7 +585,7 @@ func TestBuildAccountInfo_ArticleWriterDefault(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "article",
 	})
@@ -584,7 +603,7 @@ func TestBuildAccountInfo_ArticleWriterDefault(t *testing.T) {
 // TestBuildAccountInfo_CrossUser_RejectedAtProjectLookup: a request from a different
 // user is rejected at the project-ownership check (ProjectSvc.Get enforces
 // ch.UserID == userID before we ever reach the task lookup). This means the inner
-// `task.UserID != userID` guard in buildAccountInfo is defense-in-depth — it cannot
+// The profile service's task ownership guard is defense-in-depth — it cannot
 // be exercised through the public API surface today because ProjectSvc.Get
 // short-circuits first. We keep the test to lock in the user-facing guarantee.
 func TestBuildAccountInfo_CrossUser_RejectedAtProjectLookup(t *testing.T) {
@@ -596,7 +615,7 @@ func TestBuildAccountInfo_CrossUser_RejectedAtProjectLookup(t *testing.T) {
 	ch := createAccountInfoProject(t, repo, ownerID, "owner风格")
 	task := createAccountInfoTask(t, repo, ownerID, ch.ID, "owner的task风格")
 
-	_, errMsg := buildAccountInfo(ctx, otherUserID, map[string]any{
+	_, errMsg := getAgentProjectProfileForTest(ctx, otherUserID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "seednote",
 		"task_id":    task.ID,
@@ -633,7 +652,7 @@ func TestBuildAccountInfo_AuthorAndWriter(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "article",
 	})
@@ -695,7 +714,7 @@ func TestBuildAccountInfo_TaskAuthorOverridesProject(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
@@ -741,7 +760,7 @@ func TestBuildAccountInfo_AuthorFallbackToProject(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
@@ -768,7 +787,7 @@ func TestBuildAccountInfo_NoTemplateNamespace(t *testing.T) {
 	userID := uuid.New().String()
 	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"scope":      "article",
 	})
@@ -787,7 +806,7 @@ func TestBuildAccountInfo_NoTemplateNamespace(t *testing.T) {
 	}
 }
 
-func TestBuildAccountInfoExposesImageGenerationCapability(t *testing.T) {
+func TestAgentProjectProfileDoesNotExposeImageRouteMetadata(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -805,40 +824,18 @@ func TestBuildAccountInfoExposesImageGenerationCapability(t *testing.T) {
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	resolved := &service.ResolvedImageModel{
-		Key:                "server-only-key",
-		Provider:           "openai",
-		Model:              "gpt-image-2",
-		Source:             "preset:openai-gpt-image",
-		SupportsReference:  true,
-		MaxReferenceImages: 16,
-		SelectionReason:    "preferred",
-	}
-	resolver := &fakeImageModelResolver{resolved: resolved}
-	svcs.ImageModelResolver = resolver
-
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": project.ID,
 		"task_id":    task.ID,
 	})
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	imageGeneration, ok := info["image_generation"].(map[string]any)
-	if !ok {
-		t.Fatalf("image_generation block missing: %#v", info)
-	}
-	if imageGeneration["provider"] != resolved.Provider || imageGeneration["model"] != resolved.Model {
-		t.Fatalf("image_generation model = %#v", imageGeneration)
-	}
-	if imageGeneration["supports_reference"] != true || imageGeneration["max_reference_images"] != 16 || imageGeneration["selection_reason"] != "preferred" {
-		t.Fatalf("image_generation capabilities = %#v", imageGeneration)
-	}
-	if _, ok := imageGeneration["key"]; ok || strings.Contains(mustJSON(t, imageGeneration), resolved.Key) {
-		t.Fatalf("image_generation must not expose resolved key: %#v", imageGeneration)
-	}
-	if resolver.calls != 1 || resolver.userID != userID || resolver.imageModelKey != task.ImageModelKey || resolver.imageType != "content" || resolver.referenceCount != 0 {
-		t.Fatalf("resolver calls/args = %d user=%q key=%q type=%q refs=%d", resolver.calls, resolver.userID, resolver.imageModelKey, resolver.imageType, resolver.referenceCount)
+	raw := mustJSON(t, info)
+	for _, forbidden := range []string{"image_generation", "image_model", "preferred-key", "provider", "selection_reason"} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("profile exposes route metadata %q: %s", forbidden, raw)
+		}
 	}
 }
 
@@ -879,7 +876,7 @@ func TestBuildAccountInfo_EcommerceProjectAutoReturnsEcommerceBlockWithoutScope(
 		t.Fatalf("create task: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"task_id":    task.ID,
 	})
@@ -903,7 +900,7 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	defer cleanup()
 	oldBillSvc := billSvc
 	defer func() { billSvc = oldBillSvc }()
-	SetBillingServices(nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{
+	montageConfig := srvconfig.MontageConfig{
 		Env: map[string]string{
 			"NEW_PROVIDER_TOKEN": "future-secret",
 			"RUNWAY_API_KEY":     "",
@@ -914,7 +911,11 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 		PipelineDefaults: map[string]map[string]any{
 			"social-short": {"budget_usd": 2.0, "video_generation": "auto"},
 		},
-	}})
+	}
+	SetBillingServices(nil, &srvconfig.Config{Montage: montageConfig})
+	svcs.AgentProjectProfileSvc = service.NewAgentProjectProfileService(
+		svcs.ProjectSvc, svcs.TaskSvc, resources.Manager(), montageConfig,
+	)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	ch := &model.Project{
@@ -961,7 +962,7 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+	info, errMsg := getAgentProjectProfileForTest(ctx, userID, map[string]any{
 		"project_id": ch.ID,
 		"task_id":    task.ID,
 	})
@@ -1023,23 +1024,6 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 		toJSONForTest(t, montage["pipeline_defaults"]),
 	}, "\n"), "future-secret") {
 		t.Fatalf("montage profile leaked environment secret: %#v", montage)
-	}
-}
-
-func TestBuildMontageProfileBlockReturnsEmptyObjectsForUnsetRuntimeConfig(t *testing.T) {
-	oldBillSvc := billSvc
-	defer func() { billSvc = oldBillSvc }()
-	SetBillingServices(nil, &srvconfig.Config{Montage: srvconfig.MontageConfig{}})
-
-	block := buildMontageProfileBlock(&model.Project{Platform: model.PlatformMontage}, &model.Task{Type: model.PlatformMontage})
-	for _, key := range []string{"env", "tool_policy", "pipeline_defaults"} {
-		data, err := json.Marshal(block[key])
-		if err != nil {
-			t.Fatalf("marshal %s: %v", key, err)
-		}
-		if string(data) != "{}" {
-			t.Fatalf("%s marshals to %s, want {}", key, data)
-		}
 	}
 }
 

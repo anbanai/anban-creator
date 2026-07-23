@@ -31,6 +31,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/resources"
 	"github.com/anbanai/anban-creator/server/router"
 	"github.com/anbanai/anban-creator/server/scheduler"
 	"github.com/anbanai/anban-creator/server/seednote"
@@ -647,26 +648,30 @@ func main() {
 		}
 
 		mcp.SetServices(&mcp.Services{
-			ProjectSvc:           projectSvc,
-			Store:                store,
-			TaskSvc:              taskSvc,
-			PlanSvc:              planSvc,
-			ImageSvc:             imageSvc,
-			ImageModelResolver:   modelConfigSvc,
-			ImageGenerator:       imageSvc,
-			ProviderCostSvc:      fixedBilling.Cost,
-			BillingCatalogSvc:    fixedBilling.Catalog,
-			GenerateImageTimeout: cfg.MCP.ToolTimeouts.GenerateImage,
-			WritingSvc:           writingSvc,
-			PublishingSvc:        publishingSvc,
-			WorkspaceSvc:         workspaceSvc,
-			TemplateSvc:          templateSvc,
-			LiveSliceSvc:         liveSliceSvc,
-			SeednoteClient:       seednoteClient,
-			SeednoteReadiness:    seednoteMonitor,
-			TopicPoolSvc:         topicPoolSvc,
-			AgentFeedbackSvc:     agentFeedbackSvc,
-			TingWuConfigured:     cfg.TingWu.Complete(),
+			ProjectSvc:             projectSvc,
+			Store:                  store,
+			TaskSvc:                taskSvc,
+			PlanSvc:                planSvc,
+			ImageSvc:               imageSvc,
+			ImageModelResolver:     modelConfigSvc,
+			ImageGenerator:         imageSvc,
+			ProviderCostSvc:        fixedBilling.Cost,
+			BillingCatalogSvc:      fixedBilling.Catalog,
+			GenerateImageTimeout:   cfg.MCP.ToolTimeouts.GenerateImage,
+			WritingSvc:             writingSvc,
+			PublishingSvc:          publishingSvc,
+			WorkspaceSvc:           workspaceSvc,
+			TemplateSvc:            templateSvc,
+			LiveSliceSvc:           liveSliceSvc,
+			SeednoteClient:         seednoteClient,
+			SeednoteReadiness:      seednoteMonitor,
+			TopicPoolSvc:           topicPoolSvc,
+			AgentFeedbackSvc:       agentFeedbackSvc,
+			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage),
+			ArticleScoreSvc:        service.NewArticleScoreService(),
+			SeednoteExportSvc:      service.NewSeednoteExportService(),
+			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
+			TingWuConfigured:       cfg.TingWu.Complete(),
 		})
 		mcp.SetBillingServices(modelConfigSvc, cfg)
 		mcp.SetLogger(log)
