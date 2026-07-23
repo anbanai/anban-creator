@@ -127,21 +127,22 @@ func prepareRuntimeWorkspace(workspace, profile string) error {
 		return err
 	}
 	outputPath := filepath.Join(root, "output")
-	info, err := os.Lstat(outputPath)
-	if os.IsNotExist(err) {
-		if err := os.Mkdir(outputPath, 0o750); err != nil {
-			return fmt.Errorf("create runtime output directory: %w", err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("inspect runtime output directory: %w", err)
-	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("runtime output must be a real directory")
-	}
-	if err := os.Chmod(outputPath, 0o750); err != nil {
-		return fmt.Errorf("set runtime output permissions: %w", err)
+	if err := ensureRuntimeDirectory(outputPath, "output"); err != nil {
+		return err
 	}
 
-	if !model.IsMontagePlatform(strings.TrimSpace(profile)) {
+	profile = strings.TrimSpace(profile)
+	if profile == "live-slicer" {
+		exportsPath := filepath.Join(outputPath, "exports")
+		if err := ensureRuntimeDirectory(exportsPath, "live-slicer exports"); err != nil {
+			return err
+		}
+		if err := ensureRuntimeDirectory(filepath.Join(exportsPath, ".parts"), "live-slicer parts"); err != nil {
+			return err
+		}
+	}
+
+	if !model.IsMontagePlatform(profile) {
 		return nil
 	}
 	runtimePath, err := materializeMontageRuntime(root)
@@ -150,6 +151,23 @@ func prepareRuntimeWorkspace(workspace, profile string) error {
 	}
 	if err := syncMontageTaskInputs(root, runtimePath); err != nil {
 		return fmt.Errorf("materialize Montage task inputs: %w", err)
+	}
+	return nil
+}
+
+func ensureRuntimeDirectory(path, label string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		if err := os.Mkdir(path, 0o750); err != nil {
+			return fmt.Errorf("create runtime %s directory: %w", label, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("inspect runtime %s directory: %w", label, err)
+	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("runtime %s must be a real directory", label)
+	}
+	if err := os.Chmod(path, 0o750); err != nil {
+		return fmt.Errorf("set runtime %s permissions: %w", label, err)
 	}
 	return nil
 }
