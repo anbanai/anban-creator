@@ -180,6 +180,7 @@ Before claiming completion, run fresh verification that matches the changed surf
 
 - Prefer current project patterns over introducing new frameworks.
 - For Claude Code-facing features and system-level workflows, design agentic-first: build on official Claude Code capabilities and conventions such as Agents, Skills, Hooks, MCP, configuration, permissions, context management, tool calls, observable progress, and recoverable workflows. Let complex work live in agent workflows instead of duplicating scheduling, plugin discovery, context injection, tool execution, or closed form-wizard frameworks inside the repository. Add custom infrastructure only when official capabilities cannot meet the product need, and document the reason.
+- MCP is a stateless capability transport. Agents and Skills own business workflow orchestration, including sequencing, retries, quality gates, and stop/continue decisions. An MCP handler may authenticate, validate protocol and security constraints, invoke one application capability, and encode its result. It must not compose multiple domain services or conditionally run another capability. Atomic persistence and settlement belong in the application service.
 - Keep behavior changes covered by tests.
 - Do not preserve obsolete compatibility paths in this new project unless a current product path depends on them.
 - Do not revert user or submodule changes you did not make.
