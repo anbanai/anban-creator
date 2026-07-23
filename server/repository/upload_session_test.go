@@ -2,10 +2,14 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestUploadSessionFinalizationClaimCAS(t *testing.T) {
@@ -166,6 +170,74 @@ func TestUploadSessionCleanupReclaimsStaleLeaseAtBoundary(t *testing.T) {
 	}
 	if reopened, err := repo.UploadSessions().ReopenExpiration(ctx, session.ID, "cleanup-old"); err != nil || reopened {
 		t.Fatalf("old cleanup claim reopened after takeover: reopened=%v err=%v", reopened, err)
+	}
+}
+
+func TestUploadSessionCleanupRescheduleUsesNotBeforeWithoutChangingExpiry(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(-time.Hour)
+	session := uploadSessionFixture("rescheduled-cleanup", now)
+	session.ExpiresAt = expiresAt
+	if err := repo.UploadSessions().Create(ctx, session); err != nil {
+		t.Fatalf("create upload session: %v", err)
+	}
+	found, err := repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil || found.NextCleanupAt != nil {
+		t.Fatalf("new upload session next cleanup = %v, %v; want nil", found.NextCleanupAt, err)
+	}
+	claimed, err := repo.UploadSessions().ClaimExpiration(ctx, session.ID, "cleanup-1", now, now.Add(-5*time.Minute))
+	if err != nil || !claimed {
+		t.Fatalf("ClaimExpiration = %v, %v", claimed, err)
+	}
+	nextCleanupAt := now.Add(30 * time.Minute)
+	rescheduled, err := repo.UploadSessions().RescheduleExpiration(ctx, session.ID, "cleanup-1", nextCleanupAt)
+	if err != nil || !rescheduled {
+		t.Fatalf("RescheduleExpiration = %v, %v", rescheduled, err)
+	}
+	found, err = repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil || found.Status != model.UploadSessionPending || found.NextCleanupAt == nil || !found.NextCleanupAt.Equal(nextCleanupAt) || !found.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("rescheduled upload session = %#v, err=%v", found, err)
+	}
+	if claimed, err := repo.UploadSessions().ClaimExpiration(ctx, session.ID, "cleanup-early", now, now.Add(-5*time.Minute)); err != nil || claimed {
+		t.Fatalf("early ClaimExpiration = %v, %v; want false, nil", claimed, err)
+	}
+	candidates, err := repo.UploadSessions().FindForCleanup(ctx, now, now.Add(-5*time.Minute), 10)
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("early cleanup candidates = %#v, %v", candidates, err)
+	}
+	candidates, err = repo.UploadSessions().FindForCleanup(ctx, nextCleanupAt, nextCleanupAt.Add(-5*time.Minute), 10)
+	if err != nil || len(candidates) != 1 || candidates[0].ID != session.ID {
+		t.Fatalf("due cleanup candidates = %#v, %v", candidates, err)
+	}
+}
+
+func TestUploadSessionCleanupQueryIsPortableAcrossSQLiteAndMySQL(t *testing.T) {
+	now := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
+	dialectors := map[string]gorm.Dialector{
+		"sqlite": sqlite.Open(":memory:"),
+		"mysql": mysql.New(mysql.Config{
+			DSN:                       "unused:unused@tcp(localhost:3306)/unused?parseTime=true",
+			SkipInitializeWithVersion: true,
+		}),
+	}
+	for name, dialector := range dialectors {
+		t.Run(name, func(t *testing.T) {
+			db, err := gorm.Open(dialector, &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+			if err != nil {
+				t.Fatalf("open dry-run database: %v", err)
+			}
+			var sessions []*model.UploadSession
+			stmt := buildUploadSessionCleanupQuery(db.Model(&model.UploadSession{}), now, now.Add(-5*time.Minute)).Limit(100).Find(&sessions).Statement
+			sql := stmt.SQL.String()
+			for _, fragment := range []string{"next_cleanup_at IS NULL OR next_cleanup_at <=", "COALESCE(next_cleanup_at, expires_at) ASC", "expires_at ASC", "id ASC"} {
+				if !strings.Contains(sql, fragment) {
+					t.Fatalf("%s cleanup SQL = %s; missing %q", name, sql, fragment)
+				}
+			}
+		})
 	}
 }
 

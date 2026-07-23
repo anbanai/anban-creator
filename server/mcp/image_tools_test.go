@@ -20,6 +20,48 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 )
 
+func TestGenerateImageToolDescriptionUsesTerminalFileSemantics(t *testing.T) {
+	ctx := context.Background()
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	registerImageTools(server)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	result, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range result.Tools {
+		if tool.Name != "generate_image" {
+			continue
+		}
+		for _, want := range []string{
+			"registers the generated task file to the current execution",
+			"Terminal file collection occurs after the final workspace manifest and terminal finalization",
+			"download_url is the immediate durable handle",
+		} {
+			if !strings.Contains(tool.Description, want) {
+				t.Fatalf("generate_image description missing %q: %s", want, tool.Description)
+			}
+		}
+		if strings.Contains(tool.Description, "list_task_files returns it immediately") {
+			t.Fatalf("generate_image description recommends runtime task-file polling: %s", tool.Description)
+		}
+		return
+	}
+	t.Fatal("generate_image tool not registered")
+}
+
 func containsAnyString(values []any, want string) bool {
 	for _, value := range values {
 		if value, ok := value.(string); ok && value == want {

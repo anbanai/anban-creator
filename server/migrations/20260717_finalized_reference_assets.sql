@@ -20,6 +20,7 @@ CREATE TABLE `upload_sessions` (
   `finalized_at` datetime(3) DEFAULT NULL,
   `cleanup_claim_id` char(36) DEFAULT NULL,
   `cleanup_claimed_at` datetime(3) DEFAULT NULL,
+  `next_cleanup_at` datetime(3) DEFAULT NULL,
   `expired_at` datetime(3) DEFAULT NULL,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -33,7 +34,8 @@ CREATE TABLE `upload_sessions` (
   KEY `idx_upload_sessions_finalization_claimed_at` (`finalization_claimed_at`),
   KEY `idx_upload_sessions_asset_id` (`asset_id`),
   KEY `idx_upload_sessions_cleanup_claim_id` (`cleanup_claim_id`),
-  KEY `idx_upload_sessions_cleanup_claimed_at` (`cleanup_claimed_at`)
+  KEY `idx_upload_sessions_cleanup_claimed_at` (`cleanup_claimed_at`),
+  KEY `idx_upload_sessions_next_cleanup_at` (`next_cleanup_at`)
 );
 
 CREATE TABLE `assets` (

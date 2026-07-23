@@ -263,7 +263,7 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 		}},
 		{"upload", "/agent/upload", func(taskID, _ string) *http.Request { return agentMultipartUploadRequest(taskID) }},
 		{"prepare", "/agent/artifacts/prepare", func(taskID, executionID string) *http.Request {
-			return agentJSONRequest("/agent/artifacts/prepare", `{"task_id":"`+taskID+`","execution_id":"`+executionID+`","relative_path":"output/content.md","filename":"content.md","content_type":"text/markdown","size":7}`)
+			return agentJSONRequest("/agent/artifacts/prepare", `{"task_id":"`+taskID+`","execution_id":"`+executionID+`","relative_path":"output/content.md","filename":"content.md","content_type":"text/markdown","size":7,"sha256":"`+strings.Repeat("a", 64)+`"}`)
 		}},
 		{"manifest", "/agent/artifacts/manifest", func(taskID, executionID string) *http.Request {
 			return agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+taskID+`","execution_id":"`+executionID+`","files":[]}`)
@@ -393,8 +393,8 @@ func TestAgentAPIKeyCannotUseLegacyArtifactContractForCloudTask(t *testing.T) {
 
 func TestAgentArtifactManifestPersistenceFailureIsRedacted(t *testing.T) {
 	app, _, task, executionID, token, _, store := setupExecutionScopedAgentApp(t)
-	key := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/executions/" + executionID + "/artifacts/output/content.md"
-	store.stats = map[string]*storage.ObjectInfo{key: {Key: key, Size: 7, ContentType: "text/markdown"}}
+	key := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/executions/" + executionID + "/artifacts/workspace/sha256/" + strings.Repeat("a", 64) + "/output/content.md"
+	store.stats = map[string]*storage.ObjectInfo{key: {Key: key, Size: 7, ContentType: "text/markdown", SHA256: strings.Repeat("a", 64)}}
 	file := `{"relative_path":"output/content.md","object_key":"` + key + `","size":7,"sha256":"` + strings.Repeat("a", 64) + `"}`
 	req := agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+task.ID+`","execution_id":"`+executionID+`","files":[`+file+`,`+file+`]}`)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -643,15 +643,32 @@ func (f *fakeAgentArtifactStorage) StatObject(_ context.Context, key string) (*s
 		return nil, f.statErr
 	}
 	if f.stats == nil || f.stats[key] == nil {
-		return nil, os.ErrNotExist
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectNotFound, key)
 	}
 	cp := *f.stats[key]
 	return &cp, nil
 }
 
+func (f *fakeAgentArtifactStorage) PromoteObject(_ context.Context, sourceKey, finalKey, expectedETag string) (*storage.ObjectInfo, error) {
+	source := f.stats[sourceKey]
+	if source == nil {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectNotFound, sourceKey)
+	}
+	if source.ETag != expectedETag {
+		return nil, fmt.Errorf("%w: %s", storage.ErrPromotionPreconditionFailed, sourceKey)
+	}
+	if f.stats[finalKey] != nil {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectAlreadyExists, finalKey)
+	}
+	copy := *source
+	copy.Key = finalKey
+	f.stats[finalKey] = &copy
+	return &copy, nil
+}
+
 func TestAgentArtifactManifestErrorTaxonomy(t *testing.T) {
 	app, _, task, store, rawKey, _ := setupAgentArtifactApp(t)
-	wantKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/output/article.md"
+	wantKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/workspace/sha256/" + strings.Repeat("a", 64) + "/output/article.md"
 	request := func(body string) (int, string) {
 		req := httptest.NewRequest(http.MethodPost, "/agent/artifacts/manifest", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+rawKey)
@@ -749,8 +766,11 @@ func setupAgentArtifactApp(t *testing.T) (*fiber.App, repository.Repository, *mo
 
 func TestAgentArtifactPrepareAndManifest(t *testing.T) {
 	app, repo, task, store, rawKey, _ := setupAgentArtifactApp(t)
+	body := []byte("# title\n\nbody")
+	sum := sha256.Sum256(body)
+	hash := hex.EncodeToString(sum[:])
 
-	prepareBody := `{"task_id":"` + task.ID + `","relative_path":"output/article.md","filename":"article.md","content_type":"text/markdown","size":123}`
+	prepareBody := `{"task_id":"` + task.ID + `","relative_path":"output/article.md","filename":"article.md","content_type":"text/markdown","size":13,"sha256":"` + hash + `"}`
 	req := httptest.NewRequest("POST", "/agent/artifacts/prepare", strings.NewReader(prepareBody))
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -773,21 +793,19 @@ func TestAgentArtifactPrepareAndManifest(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode prepare: %v", err)
 	}
-	wantKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/output/article.md"
-	if env.Data.Key != wantKey || store.uploadKey != wantKey || store.uploadContentType != "text/markdown" {
-		t.Fatalf("prepared key/store = %q/%q/%q, want %q", env.Data.Key, store.uploadKey, store.uploadContentType, wantKey)
+	stagingKey := env.Data.Key
+	stagingPrefix := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/staging/sha256/" + hash + "/"
+	if !strings.HasPrefix(stagingKey, stagingPrefix) || !strings.HasSuffix(stagingKey, "/output/article.md") || store.uploadKey != stagingKey || store.uploadContentType != "text/markdown" {
+		t.Fatalf("prepared key/store = %q/%q/%q, want scoped staging key with prefix %q", stagingKey, store.uploadKey, store.uploadContentType, stagingPrefix)
 	}
 	if env.Data.STSAccessKeyID != "sts-ak" || env.Data.STSSecurityToken != "sts-token" || env.Data.STSAccessKeySecret == "" {
 		t.Fatalf("missing sts credentials: %#v", env.Data)
 	}
 
-	body := []byte("# title\n\nbody")
-	sum := sha256.Sum256(body)
-	hash := hex.EncodeToString(sum[:])
 	store.stats = map[string]*storage.ObjectInfo{
-		wantKey: {Key: wantKey, Size: int64(len(body)), ContentType: "text/markdown", ETag: "etag"},
+		stagingKey: {Key: stagingKey, Size: int64(len(body)), ContentType: "text/markdown", ETag: "etag", SHA256: hash},
 	}
-	manifestBody := `{"task_id":"` + task.ID + `","files":[{"relative_path":"output/article.md","object_key":"` + wantKey + `","content_type":"text/markdown","size":` + "13" + `,"sha256":"` + hash + `","etag":"etag"}]}`
+	manifestBody := `{"task_id":"` + task.ID + `","files":[{"relative_path":"output/article.md","object_key":"` + stagingKey + `","content_type":"text/markdown","size":` + "13" + `,"sha256":"` + hash + `"}]}`
 	req = httptest.NewRequest("POST", "/agent/artifacts/manifest", strings.NewReader(manifestBody))
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -803,8 +821,9 @@ func TestAgentArtifactPrepareAndManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find task files: %v", err)
 	}
-	if len(files) != 1 || files[0].OSSKey != wantKey {
-		t.Fatalf("task files = %#v, want one file with key %q", files, wantKey)
+	finalKey := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/workspace/sha256/" + hash + "/output/article.md"
+	if len(files) != 1 || files[0].OSSKey != finalKey {
+		t.Fatalf("task files = %#v, want one file with immutable key %q", files, finalKey)
 	}
 }
 

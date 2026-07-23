@@ -25,7 +25,7 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate one durable task image from a creative prompt and optional ordered references. The server resolves the configured route, registers the generated task file, and settles the operation atomically. Returns the durable asset name, role, download_url, and task-relative file_path.",
+		Description: "Generate one durable task image from a creative prompt and optional ordered references. The server resolves the configured route, registers the generated task file to the current execution, and settles the operation atomically. Terminal file collection occurs after the final workspace manifest and terminal finalization; download_url is the immediate durable handle. Returns the durable asset name, role, download_url, and task-relative file_path.",
 		InputSchema: generateImageInputSchema(),
 	}, generateImageHandler)
 

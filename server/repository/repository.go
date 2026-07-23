@@ -188,7 +188,9 @@ type TaskFileRepository interface {
 	CollectCurrentExecution(ctx context.Context, taskID, executionID string) error
 	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
 	UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error)
+	UpdatePendingCurrentExecutionMetadata(ctx context.Context, original *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error)
 	ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
+	ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
 }
 
 // TaskExecutionRepository provides durable execution-attempt persistence.
@@ -230,6 +232,7 @@ type UploadSessionRepository interface {
 	ClaimExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error)
 	CompleteExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error)
 	ReopenExpiration(ctx context.Context, id, claimID string) (bool, error)
+	RescheduleExpiration(ctx context.Context, id, claimID string, nextCleanupAt time.Time) (bool, error)
 }
 
 // AssetRepository provides access to immutable finalized upload assets.
