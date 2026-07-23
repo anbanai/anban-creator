@@ -540,7 +540,7 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 				"不要在 Anban 内自行判断",
 				"实际可用性、安装、登录和 fallback 顺序由 Agent-Reach 决定",
 				"只作为 legacy/server/internal fallback，不进入新 seednote 研究主路径",
-				"原创模式不得失败、不得写 `failure-state.json`",
+				"原创模式不得失败、不得写 `output/failure-state.json`",
 				"missing_fields=external_hot_data",
 				"无外部数据时不得套用 CES",
 				"这条失败规则不适用于原创模式",
@@ -570,6 +570,12 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 				if strings.Contains(body, forbidden) {
 					t.Fatalf("%s must not include write-operation command %q", path, forbidden)
 				}
+			}
+			if !strings.Contains(body, "写结构化 `output/failure-state.json`") {
+				t.Fatalf("%s must write recoverable research failures to output/failure-state.json", path)
+			}
+			if strings.Contains(body, "`failure-state.json`") {
+				t.Fatalf("%s contains a bare failure-state.json instruction", path)
 			}
 		})
 	}

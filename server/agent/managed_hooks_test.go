@@ -35,11 +35,12 @@ func TestManagedTaskStopHookRunsTaskGateForMainAgent(t *testing.T) {
 			script := filepath.Join(hooksDir, tt.script)
 			body := fmt.Sprintf(`#!/bin/sh
 input=$(cat)
+test "$CLAUDE_PROJECT_DIR" = %q || exit 3
 case "$input" in
   *'"agent_type":"%s"'*'"managed_main_session":true'*) printf '%%s' '{"decision":"block","reason":"gate-ran"}' ;;
   *) exit 2 ;;
 esac
-`, tt.agentType)
+`, workspace, tt.agentType)
 			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -75,16 +76,16 @@ func TestManagedTaskStopHookSkipsTaskTypesWithoutGate(t *testing.T) {
 	}
 }
 
-func TestSeednoteQualityGateAcceptsServerVerificationSchema(t *testing.T) {
+func TestSeednoteQualityGateAcceptsAcceptedContentQuality(t *testing.T) {
 	workspace := t.TempDir()
 	seednoteDir := writeSeednoteGateFixture(t, workspace, true)
 	output := runSeednoteQualityGate(t, workspace)
 	if strings.TrimSpace(output) != "" {
-		t.Fatalf("quality gate blocked a passing verification in %s: %s", seednoteDir, output)
+		t.Fatalf("quality gate blocked accepted content quality in %s: %s", seednoteDir, output)
 	}
 }
 
-func TestSeednoteQualityGateBlocksFailedServerVerification(t *testing.T) {
+func TestSeednoteQualityGateBlocksRejectedContentQuality(t *testing.T) {
 	workspace := t.TempDir()
 	writeSeednoteGateFixture(t, workspace, false)
 	output := runSeednoteQualityGate(t, workspace)
@@ -92,8 +93,61 @@ func TestSeednoteQualityGateBlocksFailedServerVerification(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("parse quality gate output %q: %v", output, err)
 	}
-	if result["decision"] != "block" || !strings.Contains(result["reason"].(string), "passed=False") {
-		t.Fatalf("quality gate output = %#v, want failed verification block", result)
+	if result["decision"] != "block" || !strings.Contains(result["reason"].(string), "quality_status=rejected") {
+		t.Fatalf("quality gate output = %#v, want rejected content quality block", result)
+	}
+}
+
+func TestSeednoteQualityGateBlocksMissingRuntimeWorkspaceInjection(t *testing.T) {
+	workspace := t.TempDir()
+	writeSeednoteGateFixture(t, workspace, true)
+
+	tests := []struct {
+		name         string
+		workspaceEnv []string
+	}{
+		{name: "missing"},
+		{name: "empty", workspaceEnv: []string{""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := runSeednoteQualityGateInvocation(
+				t,
+				workspace,
+				`{"agent_type":"anban:seednote","managed_main_session":true}`,
+				tt.workspaceEnv...,
+			)
+			var result map[string]any
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("parse quality gate output %q: %v", output, err)
+			}
+			reason, _ := result["reason"].(string)
+			if result["decision"] != "block" ||
+				!strings.Contains(reason, "missing runtime workspace injection") ||
+				!strings.Contains(reason, "CLAUDE_PROJECT_DIR") {
+				t.Fatalf("quality gate output = %#v, want missing runtime workspace injection block", result)
+			}
+		})
+	}
+}
+
+func TestSeednoteQualityGateSkipsNonSeednoteWithoutRuntimeWorkspaceInjection(t *testing.T) {
+	output := runSeednoteQualityGateInvocation(
+		t,
+		t.TempDir(),
+		`{"agent_type":"anban:article","managed_main_session":true}`,
+	)
+	if strings.TrimSpace(output) != "" {
+		t.Fatalf("quality gate returned output for non-Seednote invocation: %s", output)
+	}
+}
+
+func TestSeednoteQualityGateDoesNotFallBackToProcessWorkingDirectory(t *testing.T) {
+	hook := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh"))
+	for _, forbidden := range []string{"$PWD", "os.getcwd()", "CLAUDE_PROJECT_DIR:-"} {
+		if strings.Contains(hook, forbidden) {
+			t.Errorf("seednote quality gate contains forbidden CWD fallback %q", forbidden)
+		}
 	}
 }
 
@@ -249,11 +303,15 @@ func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) strin
 	if err := os.WriteFile(filepath.Join(dir, "image-plan.md"), []byte("计划图片数量: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	qualityStatus := "rejected"
+	if passed {
+		qualityStatus = "accepted"
+	}
 	summary, err := json.Marshal(map[string]any{
 		"version": "1.0",
 		"outputs": []any{map[string]any{
-			"file_name":    "cover.png",
-			"verification": map[string]any{"passed": passed, "score": "high"},
+			"file_name":      "cover.png",
+			"quality_status": qualityStatus,
 		}},
 	})
 	if err != nil {
@@ -267,11 +325,29 @@ func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) strin
 
 func runSeednoteQualityGate(t *testing.T, workspace string) string {
 	t.Helper()
+	return runSeednoteQualityGateInvocation(
+		t,
+		workspace,
+		`{"agent_type":"anban:seednote","managed_main_session":true}`,
+		workspace,
+	)
+}
+
+func runSeednoteQualityGateInvocation(t *testing.T, workspace, input string, workspaceEnv ...string) string {
+	t.Helper()
 	script := filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh")
 	cmd := exec.Command("bash", script)
 	cmd.Dir = workspace
-	cmd.Env = append(os.Environ(), "CLAUDE_PROJECT_DIR="+workspace)
-	cmd.Stdin = strings.NewReader(`{"agent_type":"anban:seednote","managed_main_session":true}`)
+	cmd.Env = make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "CLAUDE_PROJECT_DIR=") {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	if len(workspaceEnv) > 0 {
+		cmd.Env = append(cmd.Env, "CLAUDE_PROJECT_DIR="+workspaceEnv[0])
+	}
+	cmd.Stdin = strings.NewReader(input)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()
