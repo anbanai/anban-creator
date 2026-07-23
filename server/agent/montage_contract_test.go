@@ -170,6 +170,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"/workspace/openmontage",
 		"provider_menu_summary",
 		"env_keys",
 		"delivery-manifest.json",
@@ -188,6 +189,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"/workspace/openmontage",
 		"provider_menu_summary",
 		"delivery-manifest.json",
 		"final_video",
@@ -230,6 +232,9 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"/workspace/openmontage",
+		"output/montage-project.json",
+		`"output_dir": "output"`,
 		"provider_menu_summary",
 		"Secrets only arrive through environment variables",
 		"env_keys",
@@ -243,6 +248,35 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 	}
 	if strings.Contains(canonical, "provider_env") {
 		t.Fatal("montage skill must use env_keys without the legacy provider_env name")
+	}
+	for _, forbidden := range []string{
+		"/workspace/montage",
+		"fall back to the configured/default `third_party/OpenMontage` path",
+		"workspace preparation",
+	} {
+		if strings.Contains(canonical, forbidden) {
+			t.Fatalf("managed montage skill contains obsolete runtime contract %q", forbidden)
+		}
+	}
+
+	examples := readRepoFile(t, filepath.Join(root, "plugins", "skills", "montage", "references", "examples.md"))
+	for _, want := range []string{
+		"output/montage-project.json",
+		"output/delivery-manifest.json",
+		"output/failure-diagnosis.md",
+	} {
+		if !strings.Contains(examples, want) {
+			t.Fatalf("montage examples missing managed artifact path %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"/workspace/montage",
+		"configured submodule or runner",
+		"workspace and task-file tools",
+	} {
+		if strings.Contains(examples, forbidden) {
+			t.Fatalf("montage examples contain obsolete runtime contract %q", forbidden)
+		}
 	}
 }
 
