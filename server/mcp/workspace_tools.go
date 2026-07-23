@@ -11,7 +11,7 @@ import (
 func registerWorkspaceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_workspace",
-		Description: "Returns the canonical task-relative output directory, a relative path rooted at the agent task workspace/current working directory. Managed server tasks must provide task_id. The agent leaves deliverables in place for server collection.",
+		Description: "Returns the canonical task-relative output directory, a relative path rooted at the agent task workspace/current working directory. Managed server tasks must provide task_id.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

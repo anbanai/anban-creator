@@ -35,7 +35,7 @@ func registerWritingTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "render_template",
-		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the renderer freely decide image placement and layout), render_template deterministically folds planned images and layout modules into the Markdown before theme rendering. When task_id is given, the theme (排版样式) comes from the task's frozen project snapshot; old rows without a snapshot fall back to legacy task/project resolution. Use this when visual-rhythm-plan.md dictates where each image/module goes (hero / section_opener / inline_detail / footer).",
+		Description: "Render Markdown to WeChat HTML using a structured layout_plan. The renderer deterministically folds planned images and layout modules into Markdown before theme rendering. When task_id is given, the theme comes from the task's frozen project snapshot; old rows without a snapshot fall back to legacy task/project resolution.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

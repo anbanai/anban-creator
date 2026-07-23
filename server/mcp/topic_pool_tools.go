@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func registerTopicPoolTools(server *mcp.Server) {
@@ -57,28 +59,25 @@ func claimTopicHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	}
 	taskID, _ := args["task_id"].(string)
 
-	// When the caller passes a task_id (the generation skill knows its task),
-	// associate the claimed topic with that task for provenance; otherwise claim
-	// without linkage.
-	if taskID != "" {
-		topic, err := svcs.TopicPoolSvc.ClaimForTask(ctx, userID, projectID, taskID)
-		if err != nil {
-			return errorResult(fmt.Sprintf("claim topic: %v", err)), nil
-		}
-		if topic == "" {
-			return textResult(map[string]any{"topic": nil, "id": nil, "task_id": taskID, "message": "topic pool is empty"})
-		}
-		return textResult(map[string]any{"topic": topic, "id": nil, "task_id": taskID, "claimed": true})
-	}
-
-	topic, topicID, err := svcs.TopicPoolSvc.Claim(ctx, userID, projectID)
+	result, err := svcs.TopicPoolSvc.ClaimTopic(ctx, service.ClaimTopicRequest{
+		UserID: userID, ProjectID: projectID, TaskID: taskID,
+	})
 	if err != nil {
 		return errorResult(fmt.Sprintf("claim topic: %v", err)), nil
 	}
-	if topic == "" {
-		return textResult(map[string]any{"topic": nil, "id": nil, "message": "topic pool is empty"})
+	if result.Topic == "" {
+		payload := map[string]any{"topic": nil, "id": nil, "message": "topic pool is empty"}
+		if result.TaskID != "" {
+			payload["task_id"] = result.TaskID
+		}
+		return textResult(payload)
 	}
-	return textResult(map[string]any{"topic": topic, "id": topicID, "claimed": true})
+	payload := map[string]any{"topic": result.Topic, "id": result.TopicID, "claimed": true}
+	if result.TaskID != "" {
+		payload["id"] = nil
+		payload["task_id"] = result.TaskID
+	}
+	return textResult(payload)
 }
 
 func listTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

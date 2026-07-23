@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/anbanai/anban-creator/server/repository"
-	"github.com/anbanai/anban-creator/server/seednote"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
@@ -59,8 +59,9 @@ type Services struct {
 	WorkspaceSvc           *service.WorkspaceService
 	TemplateSvc            *service.TemplateService
 	LiveSliceSvc           *service.LiveSliceService
-	SeednoteClient         *seednote.Client
-	SeednoteReadiness      service.Readiness
+	SeednoteCapabilitySvc  *service.SeednoteCapabilityService
+	FileUploadSvc          *service.FileUploadService
+	MediaPipelineSvc       *service.MediaPipelineService
 	TopicPoolSvc           *service.TopicPoolService
 	AgentFeedbackSvc       *service.AgentFeedbackService
 	AgentProjectProfileSvc *service.AgentProjectProfileService
@@ -68,7 +69,6 @@ type Services struct {
 	SeednoteExportSvc      *service.SeednoteExportService
 	ResourceCatalogSvc     *service.ResourceCatalogService
 	TaskImageSvc           *service.TaskImageService
-	TingWuConfigured       bool
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -210,7 +210,7 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_project_titles",
-		Description: "List all recorded content titles for a project. Use this before selecting a new title to avoid duplicates within the same project.",
+		Description: "List all recorded content titles for a project for duplicate detection.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -222,7 +222,7 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "finalize_task_title",
-		Description: "Record the Agent-selected final content title before title-dependent artifacts are generated, so future tasks can deduplicate by canonical title.",
+		Description: "Record the Agent-selected final content title for canonical deduplication.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -420,11 +420,7 @@ func titleListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult("project_id is required"), nil
 	}
 
-	if _, _, err := svcs.ProjectSvc.Get(context.Background(), userID, projectID); err != nil {
-		return errorResult(fmt.Sprintf("get project: %v", err)), nil
-	}
-
-	titles, err := svcs.TaskSvc.ListTitles(context.Background(), projectID)
+	titles, err := svcs.TaskSvc.ListTitlesForUser(context.Background(), userID, projectID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("list titles: %v", err)), nil
 	}
@@ -457,12 +453,11 @@ func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	if taskID == "" {
 		return errorResult("task_id is required"), nil
 	}
-	if _, err := svcs.TaskSvc.ValidateAgentTaskAccess(context.Background(), taskID, userID); err != nil {
-		return errorResult("task not found"), nil
-	}
-
-	files, err := svcs.TaskSvc.GetVisibleFiles(context.Background(), taskID)
+	files, err := svcs.TaskSvc.GetVisibleFilesForUser(context.Background(), userID, taskID)
 	if err != nil {
+		if errors.Is(err, service.ErrTaskCapabilityAccessDenied) {
+			return errorResult("task not found"), nil
+		}
 		return errorResult(fmt.Sprintf("get task files: %v", err)), nil
 	}
 	return textResult(map[string]any{"files": files, "count": len(files)})

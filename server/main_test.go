@@ -34,7 +34,7 @@ func TestMainUsesAsyncSidecarMonitors(t *testing.T) {
 		"ilinkMonitor = service.NewSidecarMonitor",
 		"go ilinkMonitor.Run(ctx)",
 		"projectHandler.SetSeednoteReadiness(seednoteMonitor)",
-		"SeednoteReadiness:",
+		"NewSeednoteCapabilityService(seednoteClient, seednoteMonitor)",
 		"ilinkPoller.SetReadiness(ilinkMonitor)",
 		"ilinkWorker.SetReadiness(ilinkMonitor)",
 	} {

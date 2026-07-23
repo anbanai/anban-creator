@@ -242,7 +242,6 @@ func TestDesignerMCPToolDescriptionsDocumentPathAndSizeSemantics(t *testing.T) {
 		"image_base64 for agent/client-local bytes",
 		"file_path for an absolute server-local file",
 		"file_path analysis is limited to 10MB",
-		"compress_image first or upload_image and retry with image_url",
 		"relative path rooted at the agent task workspace/current working directory",
 	}
 	all := body.String()

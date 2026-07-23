@@ -33,6 +33,8 @@ type UniqueTaskEnqueuer interface {
 	EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error)
 }
 
+var ErrTaskCapabilityAccessDenied = errors.New("task capability access denied")
+
 type PublishedTrackingService interface {
 	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error
 }
@@ -944,6 +946,17 @@ func (s *TaskService) ListTitles(ctx context.Context, projectID string) ([]strin
 	return s.repo.Tasks().FindTitlesByProjectID(ctx, projectID)
 }
 
+func (s *TaskService) ListTitlesForUser(ctx context.Context, userID, projectID string) ([]string, error) {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("find project: %w", err)
+	}
+	if project.UserID != userID {
+		return nil, fmt.Errorf("project not owned by user")
+	}
+	return s.ListTitles(ctx, projectID)
+}
+
 var artifactTaskTitles = map[string]struct{}{
 	"图片内容规划":    {},
 	"标题候选与评分":   {},
@@ -1155,6 +1168,13 @@ func (s *TaskService) GetVisibleFiles(ctx context.Context, taskID string) ([]*mo
 	files := append(published, collected...)
 	s.EnrichFilesWithURLs(ctx, files)
 	return files, nil
+}
+
+func (s *TaskService) GetVisibleFilesForUser(ctx context.Context, userID, taskID string) ([]*model.TaskFile, error) {
+	if _, err := s.ValidateAgentTaskAccess(ctx, taskID, userID); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrTaskCapabilityAccessDenied, err)
+	}
+	return s.GetVisibleFiles(ctx, taskID)
 }
 
 func (s *TaskService) RebuildWorkflowStatus(ctx context.Context, taskID string) error {

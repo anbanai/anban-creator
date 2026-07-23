@@ -44,7 +44,6 @@ func TestWorkspaceToolSurface(t *testing.T) {
 	for _, want := range []string{
 		"canonical task-relative output",
 		"managed server tasks must provide task_id",
-		"leaves deliverables in place for server collection",
 	} {
 		if !strings.Contains(strings.ToLower(description), want) {
 			t.Fatalf("prepare_workspace description = %q, missing %q", description, want)

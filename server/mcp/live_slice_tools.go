@@ -13,7 +13,7 @@ import (
 func registerLiveSliceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "upload_live_audio",
-		Description: "Legacy server-local upload for live audio. Agent/client-local files should use prepare_file_upload(purpose=live_audio), PUT to upload_url, then pass audio_key to create_live_analysis_task.",
+		Description: "Upload one server-local live audio file and return its storage URL and object key.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -26,7 +26,7 @@ func registerLiveSliceTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "create_live_analysis_task",
-		Description: "Create an Alibaba TingWu offline analysis task for a live audio URL. Returns task_id; query it with query_live_analysis_task until completed.",
+		Description: "Create one Alibaba TingWu offline analysis task for a live audio URL or object key. Returns the TingWu task ID.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

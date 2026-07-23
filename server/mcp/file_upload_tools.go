@@ -10,7 +10,7 @@ import (
 func registerFileUploadTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_file_upload",
-		Description: "Prepare an OSS direct upload for live-slicer audio. Upload the local file to upload_url with PUT, then pass the returned key to create_live_analysis_task.",
+		Description: "Create an OSS direct-upload target for live-slicer audio. Returns the object key, signed PUT URL, download URL, method, headers, and expiry.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -25,7 +25,7 @@ func registerFileUploadTools(server *mcp.Server) {
 }
 
 func prepareFileUploadHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.Store == nil {
+	if svcs == nil || svcs.FileUploadSvc == nil {
 		return errorResult("storage provider is not available"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
@@ -33,7 +33,7 @@ func prepareFileUploadHandler(ctx context.Context, req *mcp.CallToolRequest) (*m
 	filename, _ := args["filename"].(string)
 	contentType, _ := args["content_type"].(string)
 	expires := intFromArg(args["expires_seconds"], 0)
-	result, err := service.PrepareFileUpload(ctx, svcs.Store, service.FileUploadPrepareRequest{
+	result, err := svcs.FileUploadSvc.Prepare(ctx, service.FileUploadPrepareRequest{
 		Purpose:        purpose,
 		Filename:       filename,
 		ContentType:    contentType,

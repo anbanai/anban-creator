@@ -663,8 +663,9 @@ func main() {
 			WorkspaceSvc:           workspaceSvc,
 			TemplateSvc:            templateSvc,
 			LiveSliceSvc:           liveSliceSvc,
-			SeednoteClient:         seednoteClient,
-			SeednoteReadiness:      seednoteMonitor,
+			SeednoteCapabilitySvc:  service.NewSeednoteCapabilityService(seednoteClient, seednoteMonitor),
+			FileUploadSvc:          service.NewFileUploadService(store),
+			MediaPipelineSvc:       service.NewMediaPipelineService(store, cfg.TingWu.Complete()),
 			TopicPoolSvc:           topicPoolSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
 			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage),
@@ -672,7 +673,6 @@ func main() {
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
 			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
 			TaskImageSvc:           service.NewTaskImageService(taskSvc, modelConfigSvc, imageSvc, fixedBilling.Catalog, log),
-			TingWuConfigured:       cfg.TingWu.Complete(),
 		})
 		mcp.SetBillingServices(modelConfigSvc, cfg)
 		mcp.SetLogger(log)

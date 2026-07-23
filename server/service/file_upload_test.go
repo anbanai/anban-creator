@@ -53,3 +53,20 @@ func TestPrepareFileUploadAcceptsLiveAudioPurpose(t *testing.T) {
 		t.Fatalf("UploadURL content type = %q, want audio/mpeg", got)
 	}
 }
+
+func TestFileUploadServicePreparesTypedRequest(t *testing.T) {
+	store := &fakeTaskStorage{name: "oss"}
+	svc := NewFileUploadService(store)
+
+	result, err := svc.Prepare(context.Background(), FileUploadPrepareRequest{
+		Purpose:     FileUploadPurposeLiveAudio,
+		Filename:    "live.mp3",
+		ContentType: "audio/mpeg",
+	})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if !strings.HasPrefix(result.Key, "uploads/live-audio/") || result.Method != "PUT" {
+		t.Fatalf("prepared upload = %#v", result)
+	}
+}

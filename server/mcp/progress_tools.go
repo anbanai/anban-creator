@@ -10,7 +10,7 @@ import (
 func registerProgressTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "update_task_progress",
-		Description: "Update task progress at a pipeline stage. Agents call this at each step with stage name, title, and optional description.",
+		Description: "Update one task progress stage with its name, title, optional description, and percentage.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

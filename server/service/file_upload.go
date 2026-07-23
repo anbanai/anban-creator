@@ -43,6 +43,21 @@ type FileUploadPrepareRequest struct {
 	ExpiresSeconds int    `json:"expires_seconds,omitempty"`
 }
 
+type FileUploadService struct {
+	store storage.Provider
+}
+
+func NewFileUploadService(store storage.Provider) *FileUploadService {
+	return &FileUploadService{store: store}
+}
+
+func (s *FileUploadService) Prepare(ctx context.Context, req FileUploadPrepareRequest) (*PreparedFileUpload, error) {
+	if s == nil {
+		return nil, fmt.Errorf("storage provider is not available; configure OSS storage")
+	}
+	return PrepareFileUpload(ctx, s.store, req)
+}
+
 func PrepareFileUpload(ctx context.Context, store storage.Provider, req FileUploadPrepareRequest) (*PreparedFileUpload, error) {
 	if store == nil {
 		return nil, fmt.Errorf("storage provider is not available; configure OSS storage")

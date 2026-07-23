@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/anbanai/anban-creator/server/seednote"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 type seednoteReadiness bool
@@ -18,8 +19,9 @@ func (r seednoteReadiness) Ready() bool { return bool(r) }
 func TestCheckSeednoteLoginStatusReportsUnavailableWhenSidecarNotReady(t *testing.T) {
 	old := svcs
 	svcs = &Services{
-		SeednoteClient:    seednote.NewClient("http://127.0.0.1:1", time.Second),
-		SeednoteReadiness: seednoteReadiness(false),
+		SeednoteCapabilitySvc: service.NewSeednoteCapabilityService(
+			seednote.NewClient("http://127.0.0.1:1", time.Second), seednoteReadiness(false),
+		),
 	}
 	t.Cleanup(func() { svcs = old })
 

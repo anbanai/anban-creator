@@ -7,6 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/anbanai/anban-creator/server/seednote"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func registerSeednoteTools(server *mcp.Server) {
@@ -50,7 +51,7 @@ func registerSeednoteTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_seednote_login_qrcode",
-		Description: "获取种草笔记登录二维码。返回 base64 编码的 PNG 图片，用手机种草笔记 App 扫描登录。",
+		Description: "获取种草笔记登录二维码，返回 base64 编码的 PNG 图片。",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -78,51 +79,31 @@ func seednoteUnavailable() (*mcp.CallToolResult, error) {
 	})
 }
 
-func requireSeednoteClient() (*seednote.Client, *mcp.CallToolResult, error) {
-	if svcs == nil || svcs.SeednoteClient == nil {
-		result, err := seednoteUnavailable()
-		return nil, result, err
-	}
-	if svcs.SeednoteReadiness != nil && !svcs.SeednoteReadiness.Ready() {
-		result, err := textResult(map[string]any{
-			"available": false,
-			"message":   "Seednote sidecar 暂不可用，正在后台连接",
-		})
-		return nil, result, err
-	}
-	return svcs.SeednoteClient, nil, nil
+func seednoteUnavailableMessage(message string) (*mcp.CallToolResult, error) {
+	return textResult(map[string]any{"available": false, "message": message})
 }
 
 func searchSeednoteFeedsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	client, unavailable, err := requireSeednoteClient()
-	if unavailable != nil || err != nil {
-		return unavailable, err
+	if svcs == nil || svcs.SeednoteCapabilitySvc == nil {
+		return seednoteUnavailable()
 	}
-
 	args := parseArgs(req.Params.Arguments)
-	keyword, _ := args["keyword"].(string)
-	if keyword == "" {
-		return errorResult("keyword is required"), nil
-	}
-
-	searchReq := &seednote.SearchRequest{Keyword: keyword}
-	if v, _ := args["sort_by"].(string); v != "" {
-		searchReq.Filters.SortBy = v
-	}
-	if v, _ := args["note_type"].(string); v != "" {
-		searchReq.Filters.NoteType = v
-	}
-	if v, _ := args["publish_time"].(string); v != "" {
-		searchReq.Filters.PublishTime = v
-	}
-
-	feeds, err := client.SearchFeeds(ctx, searchReq)
+	result, err := svcs.SeednoteCapabilitySvc.SearchFeeds(ctx, service.SeednoteSearchFeedsRequest{
+		Keyword: stringArg(args, "keyword"), SortBy: stringArg(args, "sort_by"),
+		NoteType: stringArg(args, "note_type"), PublishTime: stringArg(args, "publish_time"),
+	})
 	if err != nil {
+		if err.Error() == "keyword is required" {
+			return errorResult(err.Error()), nil
+		}
 		return nil, fmt.Errorf("搜索失败: %w", err)
 	}
+	if !result.Available {
+		return seednoteUnavailableMessage(result.Message)
+	}
 
-	result := make([]map[string]any, 0, len(feeds))
-	for _, f := range feeds {
+	feeds := make([]map[string]any, 0, len(result.Value))
+	for _, f := range result.Value {
 		item := map[string]any{
 			"id": f.ID, "title": f.NoteCard.DisplayTitle,
 			"author": f.NoteCard.User.Nickname, "author_id": f.NoteCard.User.UserID,
@@ -135,37 +116,30 @@ func searchSeednoteFeedsHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		if f.NoteCard.Cover.URLDefault != "" {
 			item["cover_url"] = f.NoteCard.Cover.URLDefault
 		}
-		result = append(result, item)
+		feeds = append(feeds, item)
 	}
-	return textResult(result)
+	return textResult(feeds)
 }
 
 func getSeednoteFeedDetailHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	client, unavailable, err := requireSeednoteClient()
-	if unavailable != nil || err != nil {
-		return unavailable, err
+	if svcs == nil || svcs.SeednoteCapabilitySvc == nil {
+		return seednoteUnavailable()
 	}
-
 	args := parseArgs(req.Params.Arguments)
-	feedID, _ := args["feed_id"].(string)
-	xsecToken, _ := args["xsec_token"].(string)
 	loadAll, _ := args["load_all_comments"].(bool)
-
-	if feedID == "" {
-		return errorResult("feed_id is required"), nil
-	}
-
-	detailReq := &seednote.FeedDetailRequest{
-		FeedID: feedID, XsecToken: xsecToken,
-	}
-	if loadAll {
-		detailReq.LoadAllComments = true
-	}
-
-	detail, err := client.GetFeedDetail(ctx, detailReq)
+	result, err := svcs.SeednoteCapabilitySvc.FeedDetail(ctx, service.SeednoteFeedDetailRequest{
+		FeedID: stringArg(args, "feed_id"), XsecToken: stringArg(args, "xsec_token"), LoadAllComments: loadAll,
+	})
 	if err != nil {
+		if err.Error() == "feed_id is required" {
+			return errorResult(err.Error()), nil
+		}
 		return nil, fmt.Errorf("获取笔记详情失败: %w", err)
 	}
+	if !result.Available {
+		return seednoteUnavailableMessage(result.Message)
+	}
+	detail := result.Value
 
 	note := map[string]any{
 		"note_id": detail.Note.NoteID, "title": detail.Note.Title,
@@ -178,7 +152,7 @@ func getSeednoteFeedDetailHandler(ctx context.Context, req *mcp.CallToolRequest)
 		"image_urls":    extractDetailImageURLs(detail.Note.ImageList),
 	}
 
-	result := map[string]any{
+	payload := map[string]any{
 		"note":              note,
 		"comments_count":    len(detail.Comments.List),
 		"has_more_comments": detail.Comments.HasMore,
@@ -193,68 +167,68 @@ func getSeednoteFeedDetailHandler(ctx context.Context, req *mcp.CallToolRequest)
 				"sub_comments": c.SubCommentCount,
 			})
 		}
-		result["comments"] = comments
+		payload["comments"] = comments
 	}
-	return textResult(result)
+	return textResult(payload)
 }
 
 func checkSeednoteLoginStatusHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.SeednoteClient == nil {
+	if svcs == nil || svcs.SeednoteCapabilitySvc == nil {
 		return textResult(map[string]any{"available": false, "logged_in": false, "message": "Seednote sidecar 未配置"})
 	}
-	if svcs.SeednoteReadiness != nil && !svcs.SeednoteReadiness.Ready() {
-		return textResult(map[string]any{"available": false, "logged_in": false, "message": "Seednote sidecar 暂不可用，正在后台连接"})
-	}
-
-	loggedIn, err := svcs.SeednoteClient.CheckLoginStatus(ctx)
+	result, err := svcs.SeednoteCapabilitySvc.LoginStatus(ctx, service.SeednoteLoginStatusRequest{})
 	if err != nil {
 		return textResult(map[string]any{"available": true, "logged_in": false, "message": err.Error()})
 	}
+	if !result.Available {
+		return textResult(map[string]any{"available": false, "logged_in": false, "message": result.Message})
+	}
 
 	msg := "已登录"
-	if !loggedIn {
+	if !result.Value {
 		msg = "未登录，请使用 get_seednote_login_qrcode 获取二维码扫描登录"
 	}
-	return textResult(map[string]any{"available": true, "logged_in": loggedIn, "message": msg})
+	return textResult(map[string]any{"available": true, "logged_in": result.Value, "message": msg})
 }
 
 func getSeednoteLoginQRCodeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	client, unavailable, err := requireSeednoteClient()
-	if unavailable != nil || err != nil {
-		return unavailable, err
+	if svcs == nil || svcs.SeednoteCapabilitySvc == nil {
+		return seednoteUnavailable()
 	}
-
-	qrBase64, err := client.GetLoginQRCode(ctx)
+	result, err := svcs.SeednoteCapabilitySvc.LoginQRCode(ctx, service.SeednoteLoginQRCodeRequest{})
 	if err != nil {
 		return nil, fmt.Errorf("获取二维码失败: %w", err)
+	}
+	if !result.Available {
+		return seednoteUnavailableMessage(result.Message)
 	}
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			&mcp.ImageContent{Data: []byte(qrBase64), MIMEType: "image/png"},
+			&mcp.ImageContent{Data: []byte(result.Value), MIMEType: "image/png"},
 			&mcp.TextContent{Text: "请用种草笔记 App 扫描二维码登录。登录后使用 check_seednote_login_status 确认状态。"},
 		},
 	}, nil
 }
 
 func getSeednoteUserProfileHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	client, unavailable, err := requireSeednoteClient()
-	if unavailable != nil || err != nil {
-		return unavailable, err
+	if svcs == nil || svcs.SeednoteCapabilitySvc == nil {
+		return seednoteUnavailable()
 	}
-
 	args := parseArgs(req.Params.Arguments)
-	userID, _ := args["user_id"].(string)
-	xsecToken, _ := args["xsec_token"].(string)
-
-	if userID == "" {
-		return errorResult("user_id is required"), nil
-	}
-
-	profile, err := client.GetUserProfile(ctx, userID, xsecToken)
+	result, err := svcs.SeednoteCapabilitySvc.UserProfile(ctx, service.SeednoteUserProfileRequest{
+		UserID: stringArg(args, "user_id"), XsecToken: stringArg(args, "xsec_token"),
+	})
 	if err != nil {
+		if err.Error() == "user_id is required" {
+			return errorResult(err.Error()), nil
+		}
 		return nil, fmt.Errorf("获取用户资料失败: %w", err)
 	}
+	if !result.Available {
+		return seednoteUnavailableMessage(result.Message)
+	}
+	profile := result.Value
 
 	interactions := map[string]string{}
 	for _, i := range profile.Interactions {

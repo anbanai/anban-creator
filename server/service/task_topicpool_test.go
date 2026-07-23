@@ -69,6 +69,34 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 	}
 }
 
+func TestTopicPoolClaimTopicOwnsTaskBranching(t *testing.T) {
+	_, topicSvc := setupTaskServiceWithTopicPool(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformArticle)
+	if _, err := topicSvc.Add(ctx, userID, projectID, []string{"first", "second"}); err != nil {
+		t.Fatalf("seed topics: %v", err)
+	}
+
+	unbound, err := topicSvc.ClaimTopic(ctx, ClaimTopicRequest{UserID: userID, ProjectID: projectID})
+	if err != nil {
+		t.Fatalf("ClaimTopic unbound: %v", err)
+	}
+	if unbound.Topic != "first" || unbound.TopicID == nil || *unbound.TopicID == 0 || unbound.TaskID != "" {
+		t.Fatalf("unbound result = %#v", unbound)
+	}
+
+	bound, err := topicSvc.ClaimTopic(ctx, ClaimTopicRequest{
+		UserID: userID, ProjectID: projectID, TaskID: "task-1",
+	})
+	if err != nil {
+		t.Fatalf("ClaimTopic bound: %v", err)
+	}
+	if bound.Topic != "second" || bound.TopicID != nil || bound.TaskID != "task-1" {
+		t.Fatalf("bound result = %#v", bound)
+	}
+}
+
 // TestCreateFromPlan_ClaimsTopicFromPool_Seednote: the topic pool is keyed by
 // project_id and is platform-agnostic at the data layer, so a seednote-project
 // plan claims just like an article-project plan.
