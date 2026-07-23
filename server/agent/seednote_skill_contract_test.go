@@ -21,21 +21,57 @@ func extractSeednoteReferenceContract(t *testing.T, body string) string {
 }
 
 func documentedGenerateImageScopes(body string) []string {
+	const tool = "generate_image"
 	var scopes []string
-	for _, paragraph := range strings.Split(body, "\n\n") {
+	for searchAt := 0; searchAt < len(body); {
+		relativeAt := strings.Index(body[searchAt:], tool)
+		if relativeAt < 0 {
+			break
+		}
+		callAt := searchAt + relativeAt
+		afterTool := callAt + len(tool)
+		if afterTool < len(body) && body[afterTool] == '`' {
+			afterTool++
+		}
+		for afterTool < len(body) && (body[afterTool] == ' ' || body[afterTool] == '\t' || body[afterTool] == '\n' || body[afterTool] == '\r') {
+			afterTool++
+		}
+		searchAt = callAt + len(tool)
+		if afterTool >= len(body) || body[afterTool] != '(' {
+			continue
+		}
+
+		paragraphAt := strings.LastIndex(body[:callAt], "\n\n") + 2
+		prefix := body[paragraphAt:afterTool]
 		negated := false
 		for _, marker := range []string{
 			"不再调用 `generate_image`", "不得调用 `generate_image`", "不再使用 `generate_image`",
 			"不再调用 generate_image", "不得调用 generate_image", "不再使用 generate_image",
 		} {
-			if strings.Contains(paragraph, marker) {
+			if strings.Contains(prefix, marker) {
 				negated = true
 				break
 			}
 		}
-		if !negated && (strings.Contains(paragraph, "generate_image(") || strings.Contains(paragraph, "调用 `generate_image`")) {
-			scopes = append(scopes, paragraph)
+		if negated {
+			continue
 		}
+
+		depth := 0
+		callEnd := len(body)
+		for at := afterTool; at < len(body); at++ {
+			switch body[at] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					callEnd = at + 1
+					at = len(body)
+				}
+			}
+		}
+		scopes = append(scopes, body[callAt:callEnd])
 	}
 	return scopes
 }
@@ -55,7 +91,7 @@ func activeReferenceSelectionScope(paragraph string) bool {
 }
 
 func TestImageWorkflowScopeHelpersIgnoreNegatedMigrationProse(t *testing.T) {
-	migration := "迁移说明：不再调用 `generate_image`(provider=\"openai\")，旧字段仅用于解释历史。"
+	migration := "迁移说明：不再调用 generate_image (provider=\"openai\")，旧字段仅用于解释历史。"
 	if scopes := documentedGenerateImageScopes(migration); len(scopes) != 0 {
 		t.Fatalf("negated generate_image migration prose produced %d invocation scopes", len(scopes))
 	}
@@ -64,6 +100,18 @@ func TestImageWorkflowScopeHelpersIgnoreNegatedMigrationProse(t *testing.T) {
 	scopes := documentedGenerateImageScopes(invocation)
 	if len(scopes) != 1 || !containsDocumentedFieldAssignment(scopes[0], "provider") {
 		t.Fatal("active generate_image invocation must remain detectable")
+	}
+
+	spacedInvocation := "generate_image (prompt=\"...\", provider=\"openai\")"
+	spacedScopes := documentedGenerateImageScopes(spacedInvocation)
+	if len(spacedScopes) != 1 || !containsDocumentedFieldAssignment(spacedScopes[0], "provider") {
+		t.Fatal("generate_image with whitespace before its argument list must remain detectable")
+	}
+
+	multilineInvocation := "generate_image\n(\n  prompt=\"...\",\n  verification_prompt=\"legacy\"\n)"
+	multilineScopes := documentedGenerateImageScopes(multilineInvocation)
+	if len(multilineScopes) != 1 || !containsDocumentedFieldAssignment(multilineScopes[0], "verification_prompt") {
+		t.Fatal("multiline generate_image removed arguments must remain detectable")
 	}
 
 	if activeReferenceSelectionScope("参考图选择不再按 OpenAI/Gemini 分支，服务端负责路由。") {
@@ -113,7 +161,9 @@ func imageWorkflowContractPaths(root string) []string {
 		filepath.Join(root, "agents", "seednote.toml"),
 		filepath.Join(root, "skills", "article-cover-design", "SKILL.md"),
 		filepath.Join(root, "skills", "article-publishing", "SKILL.md"),
+		filepath.Join(root, "skills", "article", "SKILL.md"),
 		filepath.Join(root, "skills", "article-visual-design", "SKILL.md"),
+		filepath.Join(root, "skills", "article-visual-design", "references", "content.md"),
 		filepath.Join(root, "skills", "ecommerce-visual-design", "SKILL.md"),
 		filepath.Join(root, "skills", "line-art-coloring", "SKILL.md"),
 		filepath.Join(root, "skills", "portrait-pose-variants", "SKILL.md"),
@@ -640,7 +690,6 @@ func TestSeednoteWritingSkillKeepsUserInputLocking(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "skills", "seednote-writing", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-writing", "SKILL.md"),
 	}
 
 	required := []string{
@@ -674,8 +723,6 @@ func TestSeednoteSkillContracts_RuntimeImageMode(t *testing.T) {
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
 		filepath.Join(root, "plugins", "agents", "seednote.toml"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -792,7 +839,6 @@ func TestAgentReachSkillsTreatUnavailableBackendAsOptionalForOriginalResearch(t 
 func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-research", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "seednote-research", "SKILL.md"),
 	}
 

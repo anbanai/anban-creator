@@ -74,7 +74,6 @@ func TestArticleSkillContracts_NoUnconditionalImageRequirements(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -123,8 +122,6 @@ func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testin
 		filepath.Join(root, "plugins", "agents", "article.md"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -150,7 +147,6 @@ func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testin
 func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "skills", "content-writing", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "content-writing", "SKILL.md"),
 	}
 	for _, path := range paths {
@@ -188,7 +184,6 @@ func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	contentWritingPaths := []string{
 		filepath.Join(root, "plugins", "skills", "content-writing", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "content-writing", "SKILL.md"),
 	}
 	for _, path := range contentWritingPaths {
 		t.Run(path, func(t *testing.T) {
@@ -212,7 +207,6 @@ func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
 	}
 
 	articlePaths := []string{
-		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "agents", "article.md"),
 		filepath.Join(root, "plugins", "agents", "article.toml"),
@@ -240,8 +234,6 @@ func TestArticleSkillContracts_WechatVisualsForbidDiversionCues(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"),
 	}
 	for _, path := range paths {
@@ -303,7 +295,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 
 	for _, path := range []string{
 		filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
@@ -351,7 +342,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 
 	for _, path := range []string{
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "cover.md"),
-		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "cover.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
@@ -365,7 +355,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "content.md"),
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "content.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -384,7 +373,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		filepath.Join(root, "plugins", "skills", "article-cover-design", "references", "examples.md"),
 		filepath.Join(root, "plugins", "skills", "article-cover-design", "references", "examples.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -447,7 +435,6 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 	for _, path := range []string{
 		filepath.Join(root, "plugins", "agents", "article.md"),
 		filepath.Join(root, "plugins", "agents", "article.toml"),
-		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -529,22 +516,31 @@ func TestArticleImageReferencesUseIndependentCapabilitiesAndAgentJudgment(t *tes
 
 func TestArticleAgentsUseStructuredFailuresWithoutMidRunUserAssistance(t *testing.T) {
 	root := articleContractRepoRoot(t)
-	for _, path := range []string{
-		filepath.Join(root, "plugins", "agents", "article.md"),
-		filepath.Join(root, "plugins", "agents", "article.toml"),
-	} {
-		body := readArticleContractFile(t, path)
+	cases := []struct {
+		path       string
+		errorCodes []string
+	}{
+		{filepath.Join(root, "plugins", "agents", "article.md"), []string{"article_cover_generation_failed", "article_content_images_failed", "article_draft_creation_failed"}},
+		{filepath.Join(root, "plugins", "agents", "article.toml"), []string{"article_cover_generation_failed", "article_content_images_failed", "article_draft_creation_failed"}},
+		{filepath.Join(root, "plugins", "skills", "article", "SKILL.md"), []string{"article_cover_generation_failed", "article_cover_quality_failed", "article_content_images_failed", "article_draft_creation_failed"}},
+		{filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"), []string{"article_cover_quality_failed"}},
+		{filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"), []string{"article_cover_quality_failed", "article_content_images_failed"}},
+	}
+	for _, tc := range cases {
+		body := readArticleContractFile(t, tc.path)
 		for _, required := range []string{
 			"failure-state.json",
 			`"status":"recoverable_failure"`,
 			`"resume_from"`,
-			"article_cover_generation_failed",
-			"article_content_images_failed",
-			"article_draft_creation_failed",
 			"不得请求用户协助",
 		} {
 			if !strings.Contains(body, required) {
-				t.Fatalf("%s missing managed zero-interaction failure term %q", path, required)
+				t.Fatalf("%s missing managed zero-interaction failure term %q", tc.path, required)
+			}
+		}
+		for _, errorCode := range tc.errorCodes {
+			if !strings.Contains(body, errorCode) {
+				t.Fatalf("%s missing managed zero-interaction error code %q", tc.path, errorCode)
 			}
 		}
 		for _, forbidden := range []string{
@@ -554,7 +550,7 @@ func TestArticleAgentsUseStructuredFailuresWithoutMidRunUserAssistance(t *testin
 			"暂停流程，分析原因",
 		} {
 			if strings.Contains(body, forbidden) {
-				t.Fatalf("%s still contains mid-run user assistance path %q", path, forbidden)
+				t.Fatalf("%s still contains mid-run user assistance path %q", tc.path, forbidden)
 			}
 		}
 	}
