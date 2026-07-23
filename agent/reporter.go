@@ -43,6 +43,8 @@ func isRetryableStatus(code int) bool {
 // Overridden in tests to keep them fast.
 var reportRetryBaseBackoff = 2 * time.Second
 
+const maxArtifactStreamResponse = 64 << 10
+
 type Reporter struct {
 	cfg    *Config
 	client *http.Client
@@ -120,8 +122,11 @@ func (r *Reporter) StreamArtifactContent(ctx context.Context, req ArtifactStream
 		return nil, &httpStatusError{code: response.StatusCode}
 	}
 	var envelope apiEnvelope[ArtifactStreamResponse]
-	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+	if err := decodeBoundedJSON(response.Body, maxArtifactStreamResponse, &envelope); err != nil {
 		return nil, fmt.Errorf("decode artifact stream response: %w", err)
+	}
+	if envelope.Code != 0 {
+		return nil, fmt.Errorf("artifact stream response failed: code=%d message=%s", envelope.Code, strings.TrimSpace(envelope.Msg))
 	}
 	return &envelope.Data, nil
 }

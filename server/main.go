@@ -713,8 +713,8 @@ func main() {
 		defer reclaimCancel()
 		go startLocalClaimFallback(reclaimCtx, taskSvc, log)
 	}
-	if repo != nil && store != nil && store.Name() == "oss" {
-		if finalStore, ok := store.(service.DirectUploadFinalizationStorage); ok {
+	if repo != nil && store != nil {
+		if finalStore, ok := uploadSessionCleanupStorage(store); ok {
 			uploadCleanupCtx, uploadCleanupCancel := context.WithCancel(context.Background())
 			defer uploadCleanupCancel()
 			service.StartUploadSessionCleanup(uploadCleanupCtx, finalStore, repo, 30*time.Minute, log)
@@ -1065,6 +1065,11 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	}()
 
 	return srv
+}
+
+func uploadSessionCleanupStorage(store storage.Provider) (service.DirectUploadFinalizationStorage, bool) {
+	finalStore, ok := store.(service.DirectUploadFinalizationStorage)
+	return finalStore, ok
 }
 
 // parseLogLevel converts a LOG_LEVEL string to a zerolog level.

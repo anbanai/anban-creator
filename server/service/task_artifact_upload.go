@@ -174,6 +174,7 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 	}
 	prefix := buildTaskArtifactStoragePrefix(task, executionID)
 	files := make([]*model.TaskFile, 0, len(req.Files))
+	streamClaims := make([]repository.TaskArtifactSessionClaim, 0, len(req.Files))
 	for _, file := range req.Files {
 		relPath, err := cleanTaskArtifactRelativePath(task, file.RelativePath)
 		if err != nil {
@@ -187,7 +188,8 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 			return taskArtifactInvalidf("object key %q is outside task artifact prefix %q", objectKey, prefix)
 		}
 		expectedKey := buildTaskArtifactStorageKey(task, executionID, relPath)
-		if objectKey != expectedKey {
+		attemptID, isStreamAttempt := taskArtifactStreamAttemptID(expectedKey, objectKey)
+		if objectKey != expectedKey && !isStreamAttempt {
 			return taskArtifactInvalidf("object key %q does not match relative path %q", objectKey, relPath)
 		}
 		if !validTaskArtifactSHA256(file.SHA256) {
@@ -212,6 +214,12 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		}
 		if size <= 0 {
 			return taskArtifactInvalidf("file size is required for %s", relPath)
+		}
+		if isStreamAttempt {
+			streamClaims = append(streamClaims, repository.TaskArtifactSessionClaim{
+				ID: attemptID, StagingKey: objectKey, FileName: filepath.Base(relPath),
+				ContentType: contentType, Size: size,
+			})
 		}
 
 		filename := filepath.Base(relPath)
@@ -243,9 +251,18 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		if err != nil {
 			return fmt.Errorf("%w: preserve server-generated artifacts: %v", ErrTaskArtifactPersistence, err)
 		}
-		if err := s.repo.TaskFiles().ReplacePendingCurrentExecution(ctx, task.ID, executionID, files); err != nil {
+		err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+			if err := tx.TaskFiles().ReplacePendingCurrentExecution(ctx, task.ID, executionID, files); err != nil {
+				return err
+			}
+			return tx.UploadSessions().AdoptTaskArtifactManifest(ctx, task.UserID, prefix, streamClaims, time.Now())
+		})
+		if err != nil {
 			if errors.Is(err, repository.ErrTaskFileExecutionNotCurrent) || errors.Is(err, repository.ErrTaskFileTaskNotRunning) || errors.Is(err, repository.ErrTaskFileManifestState) {
 				return fmt.Errorf("%w: %v", ErrTaskArtifactExecutionConflict, err)
+			}
+			if errors.Is(err, repository.ErrTaskArtifactSessionInvalid) {
+				return taskArtifactInvalidf("%v", err)
 			}
 			return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
 		}
@@ -290,15 +307,33 @@ func (s *TaskService) mergeExecutionMCPArtifacts(ctx context.Context, task *mode
 }
 
 func buildTaskArtifactStoragePrefix(task *model.Task, executionID string) string {
-	segments := []string{"uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID}
+	segments := []string{strings.TrimSuffix(buildTaskArtifactTaskStoragePrefix(task), "/")}
 	if executionID != "" {
 		segments = append(segments, "executions", executionID)
 	}
 	return path.Join(append(segments, "artifacts")...) + "/"
 }
 
+func buildTaskArtifactTaskStoragePrefix(task *model.Task) string {
+	return path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID) + "/"
+}
+
 func buildTaskArtifactStorageKey(task *model.Task, executionID, relPath string) string {
 	return buildTaskArtifactStoragePrefix(task, executionID) + filepath.ToSlash(relPath)
+}
+
+func buildTaskArtifactStreamStorageKey(task *model.Task, executionID, relPath, attemptID string) string {
+	return path.Join(buildTaskArtifactStorageKey(task, executionID, relPath), "attempts", attemptID)
+}
+
+func taskArtifactStreamAttemptID(expectedKey, objectKey string) (string, bool) {
+	prefix := expectedKey + "/attempts/"
+	if !strings.HasPrefix(objectKey, prefix) {
+		return "", false
+	}
+	attemptID := strings.TrimPrefix(objectKey, prefix)
+	parsed, err := uuid.Parse(attemptID)
+	return attemptID, err == nil && parsed.String() == attemptID
 }
 
 func (s *TaskService) validateTaskArtifactExecution(ctx context.Context, task *model.Task, userID, authenticatedExecutionID, requestedExecutionID string) (string, error) {

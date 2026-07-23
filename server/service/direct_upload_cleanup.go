@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/repository"
@@ -23,15 +24,25 @@ func StartUploadSessionCleanup(ctx context.Context, store DirectUploadFinalizati
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				cleaned, err := CleanupExpiredUploadSessions(ctx, store, repo, time.Now(), 100)
-				if err != nil {
-					if logger != nil {
-						logger.Warn().Err(err).Msg("upload session cleanup failed")
+				const batchSize = 100
+				total := 0
+				var cleanupErr error
+				for {
+					result := cleanupExpiredUploadSessionBatch(ctx, store, repo, time.Now(), batchSize)
+					total += result.cleaned
+					cleanupErr = errors.Join(cleanupErr, result.err, result.fatal)
+					if result.fatal != nil {
+						break
 					}
-					continue
+					if result.candidates < batchSize || result.advanced == 0 || ctx.Err() != nil {
+						break
+					}
 				}
-				if cleaned > 0 && logger != nil {
-					logger.Info().Int("count", cleaned).Msg("cleaned expired upload sessions")
+				if cleanupErr != nil && logger != nil {
+					logger.Warn().Err(cleanupErr).Int("cleaned", total).Msg("upload session cleanup failed")
+				}
+				if total > 0 && logger != nil {
+					logger.Info().Int("count", total).Msg("cleaned expired upload sessions")
 				}
 			}
 		}

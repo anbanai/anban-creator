@@ -1455,6 +1455,9 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 			return fmt.Errorf("delete task workspace: %w", err)
 		}
 	}
+	if err := s.repo.UploadSessions().ScheduleTaskArtifactPrefixExpiration(ctx, task.UserID, buildTaskArtifactTaskStoragePrefix(task), time.Now()); err != nil {
+		return fmt.Errorf("schedule task artifact cleanup: %w", err)
+	}
 
 	files, err := s.repo.TaskFiles().FindByTaskID(ctx, id)
 	if err != nil {

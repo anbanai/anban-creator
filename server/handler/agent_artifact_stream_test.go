@@ -61,3 +61,36 @@ func TestAgentArtifactStreamHandlerDoesNotBufferRequestBody(t *testing.T) {
 		t.Fatal("stream handler must not buffer or bind the request body")
 	}
 }
+
+func TestAgentArtifactStreamSupportsUnicodePathAndRejectsDeclaredSizeMismatch(t *testing.T) {
+	app, _, _, _, token, _, store := setupExecutionScopedAgentApp(t)
+	body := "artifact-body"
+	sum := sha256.Sum256([]byte(body))
+	request := func(size string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/agent/artifacts/content", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "text/markdown")
+		req.Header.Set("X-Anban-Artifact-Path", "output/文章.md")
+		req.Header.Set("X-Anban-Artifact-Size", size)
+		req.Header.Set("X-Anban-Artifact-SHA256", hex.EncodeToString(sum[:]))
+		return req
+	}
+
+	response, err := app.Test(request("12"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != fiber.StatusBadRequest {
+		responseBody, _ := io.ReadAll(response.Body)
+		t.Fatalf("mismatched size status/body = %d/%s", response.StatusCode, responseBody)
+	}
+
+	response, err = app.Test(request("13"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != fiber.StatusOK || !strings.Contains(store.uploadedKey, "/output/文章.md/attempts/") {
+		responseBody, _ := io.ReadAll(response.Body)
+		t.Fatalf("unicode path status/key/body = %d/%q/%s", response.StatusCode, store.uploadedKey, responseBody)
+	}
+}

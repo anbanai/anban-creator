@@ -232,7 +232,19 @@ type UploadSessionRepository interface {
 	FindForCleanup(ctx context.Context, expiredBefore, claimStaleBefore time.Time, limit int) ([]*model.UploadSession, error)
 	ClaimExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error)
 	CompleteExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error)
+	DeferExpiration(ctx context.Context, id, claimID string, retryAt time.Time) (bool, error)
 	ReopenExpiration(ctx context.Context, id, claimID string) (bool, error)
+	AdoptTaskArtifactManifest(ctx context.Context, userID, executionPrefix string, claims []TaskArtifactSessionClaim, now time.Time) error
+	ScheduleTaskArtifactExpiration(ctx context.Context, id string, expiresAt time.Time) error
+	ScheduleTaskArtifactPrefixExpiration(ctx context.Context, userID, stagingPrefix string, expiresAt time.Time) error
+}
+
+type TaskArtifactSessionClaim struct {
+	ID          string
+	StagingKey  string
+	FileName    string
+	ContentType string
+	Size        int64
 }
 
 // AssetRepository provides access to immutable finalized upload assets.

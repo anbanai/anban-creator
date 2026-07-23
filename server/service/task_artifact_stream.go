@@ -4,9 +4,20 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/google/uuid"
+)
+
+const (
+	taskArtifactCleanupTimeout = 30 * time.Second
+	taskArtifactStreamTTL      = time.Hour
 )
 
 type TaskArtifactStreamRequest struct {
@@ -70,7 +81,16 @@ func (s *TaskService) StreamTaskArtifact(ctx context.Context, taskID, authentica
 		return nil, taskArtifactInvalidf("%v", err)
 	}
 	contentType := normalizeTaskArtifactContentType(req.ContentType, relativePath)
-	objectKey := buildTaskArtifactStorageKey(task, executionID, relativePath)
+	attemptID := uuid.NewString()
+	objectKey := buildTaskArtifactStreamStorageKey(task, executionID, relativePath, attemptID)
+	now := time.Now()
+	if err := s.repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID: attemptID, UserID: authenticatedUserID, Purpose: DirectUploadPurposeTaskArtifact,
+		StagingKey: objectKey, FileName: filepath.Base(relativePath), ContentType: contentType,
+		Size: req.Size, Status: model.UploadSessionPending, ExpiresAt: now.Add(taskArtifactStreamTTL),
+	}); err != nil {
+		return nil, fmt.Errorf("%w: record task artifact stream attempt: %w", ErrTaskArtifactUnavailable, err)
+	}
 
 	hash := sha256.New()
 	counter := &artifactByteCounter{}
@@ -78,12 +98,12 @@ func (s *TaskService) StreamTaskArtifact(ctx context.Context, taskID, authentica
 	stream := io.TeeReader(bounded, io.MultiWriter(hash, counter))
 	upload, err := s.store.Upload(ctx, objectKey, stream, contentType)
 	if err != nil {
-		cleanupErr := s.store.Delete(ctx, objectKey)
-		if cleanupErr != nil {
-			return nil, fmt.Errorf("%w: upload task artifact: %v; cleanup: %v", ErrTaskArtifactUnavailable, err, cleanupErr)
-		}
-		return nil, fmt.Errorf("%w: upload task artifact: %v", ErrTaskArtifactUnavailable, err)
+		uploadErr := fmt.Errorf("%w: upload task artifact: %w", ErrTaskArtifactUnavailable, err)
+		return nil, s.failTaskArtifactAttempt(ctx, attemptID, objectKey, uploadErr)
 	}
+	uploadedBytes := counter.n
+	probe := []byte{0}
+	probeBytes, probeErr := io.ReadFull(stream, probe)
 
 	storedKey := objectKey
 	if upload != nil && strings.TrimSpace(upload.Key) != "" {
@@ -94,27 +114,47 @@ func (s *TaskService) StreamTaskArtifact(ctx context.Context, taskID, authentica
 	switch {
 	case storedKey != objectKey:
 		validationErr = taskArtifactInvalidf("storage returned an unexpected object key")
-	case counter.n < req.Size:
+	case probeBytes > 0 && uploadedBytes < req.Size:
+		validationErr = taskArtifactInvalidf("storage provider did not consume the declared artifact body")
+	case probeBytes > 0:
+		validationErr = taskArtifactInvalidf("artifact body exceeds declared size")
+	case probeErr != nil && !errors.Is(probeErr, io.EOF):
+		validationErr = fmt.Errorf("%w: verify artifact body completion: %w", ErrTaskArtifactUnavailable, probeErr)
+	case uploadedBytes < req.Size:
 		validationErr = taskArtifactInvalidf("artifact body is shorter than declared size")
-	case counter.n > req.Size:
+	case uploadedBytes > req.Size:
 		validationErr = taskArtifactInvalidf("artifact body exceeds declared size")
 	case actualSHA256 != wantSHA256:
 		validationErr = taskArtifactInvalidf("artifact sha256 does not match request")
 	}
 	if validationErr != nil {
-		cleanupErr := s.store.Delete(ctx, storedKey)
-		if storedKey != objectKey {
-			if err := s.store.Delete(ctx, objectKey); cleanupErr == nil {
-				cleanupErr = err
-			}
-		}
-		if cleanupErr != nil {
-			return nil, fmt.Errorf("%w: %v; cleanup failed: %v", ErrTaskArtifactUnavailable, validationErr, cleanupErr)
-		}
-		return nil, validationErr
+		return nil, s.failTaskArtifactAttempt(ctx, attemptID, objectKey, validationErr)
 	}
 
 	return &TaskArtifactStreamResult{
-		ObjectKey: objectKey, ContentType: contentType, Size: counter.n, SHA256: actualSHA256,
+		ObjectKey: objectKey, ContentType: contentType, Size: uploadedBytes, SHA256: actualSHA256,
 	}, nil
+}
+
+func (s *TaskService) failTaskArtifactAttempt(ctx context.Context, attemptID, objectKey string, original error) error {
+	expireCtx, expireCancel := context.WithTimeout(context.WithoutCancel(ctx), taskArtifactCleanupTimeout)
+	expireErr := s.repo.UploadSessions().ScheduleTaskArtifactExpiration(expireCtx, attemptID, time.Now())
+	expireCancel()
+	if expireErr != nil {
+		expireErr = fmt.Errorf("%w: schedule task artifact cleanup: %w", ErrTaskArtifactUnavailable, expireErr)
+	}
+	return errors.Join(original, expireErr, taskArtifactCleanupError(s.cleanupTaskArtifactObject(ctx, objectKey)))
+}
+
+func (s *TaskService) cleanupTaskArtifactObject(ctx context.Context, objectKey string) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskArtifactCleanupTimeout)
+	defer cancel()
+	return s.store.Delete(cleanupCtx, objectKey)
+}
+
+func taskArtifactCleanupError(cleanup error) error {
+	if cleanup == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: cleanup task artifact: %w", ErrTaskArtifactUnavailable, cleanup)
 }

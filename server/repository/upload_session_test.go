@@ -169,6 +169,52 @@ func TestUploadSessionCleanupReclaimsStaleLeaseAtBoundary(t *testing.T) {
 	}
 }
 
+func TestUploadSessionDefersExpirationWithCleanupClaimCAS(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
+	retryAt := now.Add(30 * time.Minute)
+
+	session := uploadSessionFixture("defer-cleanup", now)
+	session.Status = model.UploadSessionExpiring
+	session.ExpiresAt = now.Add(-time.Hour)
+	session.CleanupClaimID = "cleanup-current"
+	session.CleanupClaimedAt = &now
+	if err := repo.UploadSessions().Create(ctx, session); err != nil {
+		t.Fatalf("create upload session: %v", err)
+	}
+
+	type expirationDeferrer interface {
+		DeferExpiration(context.Context, string, string, time.Time) (bool, error)
+	}
+	deferrer, ok := repo.UploadSessions().(expirationDeferrer)
+	if !ok {
+		t.Fatal("UploadSessionRepository does not implement DeferExpiration")
+	}
+	if deferred, err := deferrer.DeferExpiration(ctx, session.ID, "cleanup-old", retryAt); err != nil || deferred {
+		t.Fatalf("stale cleanup claim deferred session: deferred=%v err=%v", deferred, err)
+	}
+	found, err := repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("find after stale defer: %v", err)
+	}
+	if found.Status != model.UploadSessionExpiring || found.CleanupClaimID != "cleanup-current" || !found.ExpiresAt.Equal(session.ExpiresAt) {
+		t.Fatalf("stale defer mutated session: %#v", found)
+	}
+
+	if deferred, err := deferrer.DeferExpiration(ctx, session.ID, "cleanup-current", retryAt); err != nil || !deferred {
+		t.Fatalf("current cleanup claim defer = %v, %v; want true, nil", deferred, err)
+	}
+	found, err = repo.UploadSessions().FindByID(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("find deferred session: %v", err)
+	}
+	if found.Status != model.UploadSessionPending || !found.ExpiresAt.Equal(retryAt) || found.CleanupClaimID != "" || found.CleanupClaimedAt != nil {
+		t.Fatalf("deferred cleanup state = %#v", found)
+	}
+}
+
 func TestUploadSessionRecordsFinalizationETagWithLeaseToken(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)
