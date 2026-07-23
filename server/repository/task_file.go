@@ -55,7 +55,7 @@ func (r *taskFileRepository) Upsert(ctx context.Context, file *model.TaskFile) (
 		Columns: []clause.Column{{Name: "task_id"}, {Name: "execution_id"}, {Name: "file_path"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"file_name", "mime_type", "file_size", "oss_key", "oss_url",
-			"storage_provider", "role", "content_hash", "media_id", "wechat_url",
+			"cleanup_oss_key", "storage_provider", "role", "content_hash", "media_id", "wechat_url",
 		}),
 	}).Create(file)
 
@@ -105,6 +105,25 @@ func (r *taskFileRepository) FindByExecutionID(ctx context.Context, executionID 
 		return nil, err
 	}
 	return files, nil
+}
+
+func (r *taskFileRepository) FindPendingObjectCleanup(ctx context.Context, storageProvider string, limit int) ([]*model.TaskFile, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var files []*model.TaskFile
+	err := r.db.WithContext(ctx).
+		Where("cleanup_oss_key <> ? AND storage_provider = ?", "", storageProvider).
+		Order("created_at ASC").Order("id ASC").Limit(limit).
+		Find(&files).Error
+	return files, err
+}
+
+func (r *taskFileRepository) ClearPendingObjectCleanup(ctx context.Context, id, expectedOSSKey string) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.TaskFile{}).
+		Where("id = ? AND cleanup_oss_key = ?", id, expectedOSSKey).
+		Update("cleanup_oss_key", "")
+	return result.RowsAffected == 1, result.Error
 }
 
 // PublishCurrentExecution is the guarded Task 8 publication contract. It locks
@@ -267,7 +286,7 @@ func (r *taskFileRepository) UpsertPendingCurrentExecution(ctx context.Context, 
 			Columns: []clause.Column{{Name: "task_id"}, {Name: "execution_id"}, {Name: "file_path"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"state", "file_name", "mime_type", "file_size", "oss_key", "oss_url",
-				"storage_provider", "role", "content_hash", "media_id", "wechat_url",
+				"cleanup_oss_key", "storage_provider", "role", "content_hash", "media_id", "wechat_url",
 			}),
 		}).Create(file)
 		if result.Error != nil {

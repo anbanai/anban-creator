@@ -15,7 +15,29 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/storage"
 )
+
+type renderedImageLifecycleStorage struct {
+	*fakeTaskStorage
+	uploadCalls    int
+	deleteFailures int
+}
+
+func (s *renderedImageLifecycleStorage) Upload(ctx context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
+	s.uploadCalls++
+	return s.fakeTaskStorage.Upload(ctx, key, reader, contentType)
+}
+
+func (s *renderedImageLifecycleStorage) Delete(_ context.Context, key string) error {
+	s.deletedKeys = append(s.deletedKeys, key)
+	if s.deleteFailures > 0 {
+		s.deleteFailures--
+		return errors.New("injected superseded object delete failure")
+	}
+	delete(s.files, key)
+	return nil
+}
 
 func TestTaskServiceRegisterRenderedImageOwnsValidationAndRegistration(t *testing.T) {
 	db := setupTaskTestDB(t)
@@ -92,6 +114,46 @@ func TestRegisterRenderedImagePersistsRequestedRoleInInitialWrite(t *testing.T) 
 	}
 	if writes != 1 || len(roles) != 1 || roles[0] != model.FileRoleOther {
 		t.Fatalf("task-file writes=%d roles=%v, want one initial write with requested role", writes, roles)
+	}
+}
+
+func TestRegisterRenderedImageUpdatesRoleWithoutReuploadingIdenticalContent(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := &renderedImageLifecycleStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	payload := base64.StdEncoding.EncodeToString(mustDecodeRenderedPNG(t))
+	if _, err := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+		UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover, ImageBase64: payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+		UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleOther, ImageBase64: payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Role != model.FileRoleOther {
+		t.Fatalf("result role = %q, want %q", result.Role, model.FileRoleOther)
+	}
+	persisted, err := repo.TaskFiles().FindExisting(ctx, task.ID, "cover.png")
+	if err != nil || persisted == nil {
+		t.Fatalf("find persisted rendered image: %#v, %v", persisted, err)
+	}
+	if persisted.Role != model.FileRoleOther {
+		t.Fatalf("persisted role = %q, want %q", persisted.Role, model.FileRoleOther)
+	}
+	if store.uploadCalls != 1 {
+		t.Fatalf("upload calls = %d, want 1 for role-only replacement", store.uploadCalls)
 	}
 }
 
@@ -219,6 +281,76 @@ func TestRegisterRenderedImageSuccessfulReplacementDeletesSupersededObject(t *te
 	}
 	if stored, ok := store.files[current.OSSKey]; !ok || !bytes.Equal(stored, replacementBytes) {
 		t.Fatalf("current object %q is missing or incorrect", current.OSSKey)
+	}
+}
+
+func TestRegisterRenderedImageDeleteFailureLeavesRecoverableCleanupIntent(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := &renderedImageLifecycleStorage{
+		fakeTaskStorage: &fakeTaskStorage{name: "oss"},
+		deleteFailures:  1,
+	}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	originalBytes := mustDecodeRenderedPNG(t)
+	if _, err := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+		UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover,
+		ImageBase64: base64.StdEncoding.EncodeToString(originalBytes),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	original, err := repo.TaskFiles().FindExisting(ctx, task.ID, "cover.png")
+	if err != nil || original == nil {
+		t.Fatalf("find original: %#v, %v", original, err)
+	}
+	replacementBytes := append(append([]byte(nil), originalBytes...), 0)
+	if _, err := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+		UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover,
+		ImageBase64: base64.StdEncoding.EncodeToString(replacementBytes),
+	}); err != nil {
+		t.Fatalf("replacement registration failed with cleanup error: %v", err)
+	}
+	current, err := repo.TaskFiles().FindExisting(ctx, task.ID, "cover.png")
+	if err != nil || current == nil || current.OSSKey == original.OSSKey {
+		t.Fatalf("current registration = %#v, %v; want replacement", current, err)
+	}
+	if _, ok := store.files[original.OSSKey]; !ok {
+		t.Fatalf("failed delete unexpectedly removed superseded object %q", original.OSSKey)
+	}
+	var cleanupKey string
+	if err := db.Model(&model.TaskFile{}).Select("cleanup_oss_key").Where("id = ?", current.ID).Scan(&cleanupKey).Error; err != nil {
+		t.Fatalf("load durable cleanup intent: %v", err)
+	}
+	if cleanupKey != original.OSSKey {
+		t.Fatalf("cleanup intent = %q, want %q", cleanupKey, original.OSSKey)
+	}
+	runner, ok := any(svc).(interface {
+		CleanupSupersededTaskFileObjects(context.Context, int) (int, error)
+	})
+	if !ok {
+		t.Fatal("TaskService does not expose superseded task-file cleanup recovery")
+	}
+	cleaned, err := runner.CleanupSupersededTaskFileObjects(ctx, 10)
+	if err != nil || cleaned != 1 {
+		t.Fatalf("cleanup retry = %d, %v; want 1, nil", cleaned, err)
+	}
+	if _, ok := store.files[original.OSSKey]; ok {
+		t.Fatalf("superseded object %q remains after cleanup retry", original.OSSKey)
+	}
+	cleanupKey = "not-cleared"
+	if err := db.Model(&model.TaskFile{}).Select("cleanup_oss_key").Where("id = ?", current.ID).Scan(&cleanupKey).Error; err != nil {
+		t.Fatalf("reload cleanup intent: %v", err)
+	}
+	if cleanupKey != "" {
+		t.Fatalf("cleanup intent remains after successful retry: %q", cleanupKey)
 	}
 }
 

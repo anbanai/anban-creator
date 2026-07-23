@@ -368,8 +368,37 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 			}
 		}
 	}
+	role := DetermineTaskFileRole(filename, mimeType)
+	if options.Role != "" {
+		role = options.Role
+	}
 	if existing != nil && existing.ContentHash == contentHash && settlement == nil {
+		if options.Role == "" || existing.Role == role {
+			return existing, nil
+		}
+		updated := *existing
+		updated.Role = role
+		if executionID != "" {
+			existing, err = s.repo.TaskFiles().UpsertPendingCurrentExecution(ctx, taskID, executionID, &updated)
+		} else {
+			existing, err = s.repo.TaskFiles().Upsert(ctx, &updated)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("persist task file role %s: %w", cleanRelPath, err)
+		}
 		return existing, nil
+	}
+	if options.ContentAddressedObject && existing != nil && existing.CleanupOSSKey != "" {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		cleaned, cleanupErr := s.cleanupSupersededTaskFileObject(cleanupCtx, existing)
+		cancel()
+		if cleanupErr != nil {
+			return nil, fmt.Errorf("cleanup previously superseded task file object: %w", cleanupErr)
+		}
+		if !cleaned {
+			return nil, fmt.Errorf("cleanup intent changed while replacing task file %s", cleanRelPath)
+		}
+		existing.CleanupOSSKey = ""
 	}
 
 	ossKey := buildTaskStorageKey(userID, taskID, cleanRelPath)
@@ -405,9 +434,10 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 		fileSize = uploadResult.Size
 	}
 
-	role := DetermineTaskFileRole(filename, mimeType)
-	if options.Role != "" {
-		role = options.Role
+	cleanupOSSKey := ""
+	if options.ContentAddressedObject && existing != nil && existing.OSSKey != "" && existing.OSSKey != ossKey &&
+		(existing.StorageProvider == "" || existing.StorageProvider == s.store.Name()) {
+		cleanupOSSKey = existing.OSSKey
 	}
 	taskFile := &model.TaskFile{
 		TaskID:          taskID,
@@ -418,6 +448,7 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 		FileSize:        fileSize,
 		ContentHash:     contentHash,
 		OSSKey:          ossKey,
+		CleanupOSSKey:   cleanupOSSKey,
 		OSSURL:          uploadResult.URL,
 		StorageProvider: s.store.Name(),
 		FilePath:        cleanRelPath,
@@ -483,15 +514,67 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 	}
 
 	persistedUpload = true
-	if options.ContentAddressedObject && existing != nil && existing.OSSKey != "" && existing.OSSKey != ossKey &&
-		(existing.StorageProvider == "" || existing.StorageProvider == s.store.Name()) {
+	if persisted.CleanupOSSKey != "" {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if deleteErr := s.store.Delete(cleanupCtx, existing.OSSKey); deleteErr != nil && s.logger != nil {
-			s.logger.Warn().Err(deleteErr).Str("oss_key", existing.OSSKey).Msg("delete superseded task file object")
+		if _, cleanupErr := s.cleanupSupersededTaskFileObject(cleanupCtx, persisted); cleanupErr != nil {
+			if s.logger != nil {
+				s.logger.Warn().Err(cleanupErr).Str("oss_key", persisted.CleanupOSSKey).Msg("delete superseded task file object")
+			}
+		} else {
+			persisted.CleanupOSSKey = ""
 		}
 	}
 	return persisted, nil
+}
+
+// CleanupSupersededTaskFileObjects retries durable cleanup intents left by
+// successful content-addressed replacements whose old object deletion failed.
+func (s *TaskService) CleanupSupersededTaskFileObjects(ctx context.Context, limit int) (int, error) {
+	if s == nil || s.repo == nil || s.store == nil {
+		return 0, nil
+	}
+	files, err := s.repo.TaskFiles().FindPendingObjectCleanup(ctx, s.store.Name(), limit)
+	if err != nil {
+		return 0, fmt.Errorf("find superseded task file objects: %w", err)
+	}
+	cleaned := 0
+	var cleanupErrors []error
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+		cleared, cleanupErr := s.cleanupSupersededTaskFileObject(ctx, file)
+		if cleanupErr != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("cleanup task file %s: %w", file.ID, cleanupErr))
+			continue
+		}
+		if cleared {
+			cleaned++
+		}
+	}
+	return cleaned, errors.Join(cleanupErrors...)
+}
+
+func (s *TaskService) cleanupSupersededTaskFileObject(ctx context.Context, file *model.TaskFile) (bool, error) {
+	key := strings.TrimSpace(file.CleanupOSSKey)
+	if key == "" {
+		return false, nil
+	}
+	if key == file.OSSKey {
+		return false, fmt.Errorf("refusing to delete current task file object %q", key)
+	}
+	if file.StorageProvider != "" && file.StorageProvider != s.store.Name() {
+		return false, fmt.Errorf("storage provider %q is unavailable", file.StorageProvider)
+	}
+	if err := s.store.Delete(ctx, key); err != nil {
+		return false, err
+	}
+	cleared, err := s.repo.TaskFiles().ClearPendingObjectCleanup(ctx, file.ID, key)
+	if err != nil {
+		return false, fmt.Errorf("clear cleanup intent: %w", err)
+	}
+	return cleared, nil
 }
 
 // UpdateTaskFileMetadata updates publication-facing metadata on a task file

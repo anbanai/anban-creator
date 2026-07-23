@@ -181,6 +181,8 @@ type TaskFileRepository interface {
 	FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)
 	FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error)
+	FindPendingObjectCleanup(ctx context.Context, storageProvider string, limit int) ([]*model.TaskFile, error)
+	ClearPendingObjectCleanup(ctx context.Context, id, expectedOSSKey string) (bool, error)
 	BatchCreate(ctx context.Context, files []*model.TaskFile) error
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)

@@ -84,7 +84,7 @@ func TestLiveSliceHandlersValidateMissingServiceAndArgs(t *testing.T) {
 	}
 }
 
-func TestUploadLiveAudioHandlerLegacyErrorMentionsDirectUpload(t *testing.T) {
+func TestUploadLiveAudioHandlerErrorContainsCapabilityStateOnly(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
 	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
@@ -98,12 +98,15 @@ func TestUploadLiveAudioHandlerLegacyErrorMentionsDirectUpload(t *testing.T) {
 		t.Fatalf("uploadLiveAudioHandler returned error: %v", err)
 	}
 	if !result.IsError {
-		t.Fatal("expected legacy upload to fail without storage")
+		t.Fatal("expected upload to fail without storage")
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	for _, want := range []string{"legacy", "server-local", "prepare_file_upload", "audio_key"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("legacy upload error missing %q: %q", want, text)
+	if !strings.Contains(strings.ToLower(text), "storage") {
+		t.Fatalf("upload error does not describe storage capability state: %q", text)
+	}
+	for _, forbidden := range []string{"prepare_file_upload", "create_live_analysis_task", "PUT", "audio_key", "then call"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("upload error contains workflow directive %q: %q", forbidden, text)
 		}
 	}
 }

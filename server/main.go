@@ -714,7 +714,7 @@ func main() {
 	if repo != nil {
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		defer cleanupCancel()
-		go startPeriodicArtifactCleanup(cleanupCtx, viralAnalysisSvc, posterSvc, log)
+		go startPeriodicArtifactCleanup(cleanupCtx, taskSvc, viralAnalysisSvc, posterSvc, log)
 	}
 
 	// 15.3 Start the local-claim fallback worker (every 10s). Flips
@@ -1100,11 +1100,16 @@ func parseLogLevel(level string) zerolog.Level {
 }
 
 // startPeriodicArtifactCleanup removes expirable derived records without touching NAS task workspaces.
-func startPeriodicArtifactCleanup(ctx context.Context, viralSvc *service.ViralAnalysisService, posterSvc *service.PosterService, log *zerolog.Logger) {
+func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskService, viralSvc *service.ViralAnalysisService, posterSvc *service.PosterService, log *zerolog.Logger) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
 	cleanup := func() {
+		if taskSvc != nil {
+			if _, err := taskSvc.CleanupSupersededTaskFileObjects(ctx, 100); err != nil {
+				log.Error().Err(err).Msg("superseded task file object cleanup failed")
+			}
+		}
 		if viralSvc != nil {
 			if err := viralSvc.CleanupOldCompleted(ctx); err != nil {
 				log.Error().Err(err).Msg("viral analysis cleanup failed")
