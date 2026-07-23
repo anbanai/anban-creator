@@ -453,6 +453,15 @@ func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 	if err := validateSeednoteDeliveryContract(valid); err != nil {
 		t.Fatalf("valid seednote delivery contract rejected: %v", err)
 	}
+	finalReport, err := markdownSection(valid, "#### 步骤 12：最终报告", "\n---")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutatedFinalReport := strings.Replace(finalReport, "output/content.md", "content.md", 1)
+	if mutatedFinalReport == finalReport {
+		t.Fatal("seednote final report missing output/content.md mutation target")
+	}
+	explicitContentPathMissing := strings.Replace(valid, finalReport, mutatedFinalReport, 1)
 
 	finalize := `finalize_task_title` + `(task_id=$TASK_ID, title=$FINAL_TITLE)`
 	tests := []struct {
@@ -469,7 +478,7 @@ func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 		},
 		{
 			name: "explicit content path missing",
-			body: strings.Replace(valid, "output/content.md", "content.md", 1),
+			body: explicitContentPathMissing,
 		},
 	}
 	for _, tt := range tests {
