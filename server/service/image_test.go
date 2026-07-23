@@ -204,6 +204,25 @@ func TestDetectTaskFileMIMEUsesImageContentBeforeExtension(t *testing.T) {
 	}
 }
 
+func TestDetectTaskFileMIMEFromContentPreservesPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		body []byte
+		want string
+	}{
+		{name: "image content", path: "article.md", body: tinyImagePNG(t), want: "image/png"},
+		{name: "known extension", path: "article.md", body: []byte("# article"), want: "text/markdown"},
+		{name: "detected fallback", path: "artifact.bin", body: []byte("plain text"), want: "text/plain; charset=utf-8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DetectTaskFileMIMEFromContent(tc.path, tc.body); got != tc.want {
+				t.Fatalf("DetectTaskFileMIMEFromContent() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func tinyImagePNG(t *testing.T) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 1, 1))

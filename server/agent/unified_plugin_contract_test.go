@@ -87,6 +87,20 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	}
 }
 
+func TestRuntimeContractsDoNotUseTaskFileListingAsCompletionGate(t *testing.T) {
+	root := repoRoot(t)
+	for _, rel := range []string{
+		"plugins/agents/ecommerce.md",
+		"plugins/agents/ecommerce.toml",
+		"plugins/skills/seednote-visual-design/SKILL.md",
+	} {
+		body := readRepoFile(t, filepath.Join(root, rel))
+		if strings.Contains(body, "list_task_files") {
+			t.Fatalf("%s still depends on list_task_files during execution", rel)
+		}
+	}
+}
+
 func pluginAgentNames(t *testing.T, dir, extension string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)

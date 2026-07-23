@@ -40,6 +40,27 @@ func TestPendingStartupMigrationSQLContract(t *testing.T) {
 	}
 }
 
+func TestWorkspaceManifestSealMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260723_workspace_manifest_seal.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"ALTER TABLE `task_executions`",
+		"ADD COLUMN `manifest_sealed` boolean NOT NULL DEFAULT false",
+	} {
+		if !strings.Contains(strings.ToLower(sql), strings.ToLower(fragment)) {
+			t.Errorf("workspace manifest seal migration missing %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{"DROP COLUMN", "DROP TABLE", "UPDATE `task_executions`"} {
+		if strings.Contains(strings.ToUpper(sql), strings.ToUpper(forbidden)) {
+			t.Errorf("workspace manifest seal migration contains destructive or backfill statement %q", forbidden)
+		}
+	}
+}
+
 func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260717_finalized_reference_assets.sql")
 	if err != nil {
@@ -60,6 +81,7 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 		"KEY `idx_upload_sessions_asset_id` (`asset_id`)",
 		"KEY `idx_upload_sessions_cleanup_claim_id` (`cleanup_claim_id`)",
 		"KEY `idx_upload_sessions_cleanup_claimed_at` (`cleanup_claimed_at`)",
+		"KEY `idx_upload_sessions_next_cleanup_at` (`next_cleanup_at`)",
 		"CREATE TABLE `assets`",
 		"UNIQUE KEY `idx_assets_storage_key` (`storage_key`)",
 		"KEY `idx_assets_user_id` (`user_id`)",

@@ -59,6 +59,8 @@ func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
 	if err := repo.TaskFiles().BatchCreate(context.Background(), []*model.TaskFile{
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "running", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/pending.md", FileName: "pending.md"},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "old", State: model.TaskFileStateSuperseded, Role: model.FileRoleOther, FilePath: "output/old.md", FileName: "old.md"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +76,12 @@ func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
 	states := []any{files[0].(map[string]any)["state"], files[1].(map[string]any)["state"]}
 	if states[0] != model.TaskFileStatePublished || states[1] != model.TaskFileStateCollected {
 		t.Fatalf("states = %#v", states)
+	}
+	for _, raw := range files {
+		state := raw.(map[string]any)["state"]
+		if state == model.TaskFileStatePending || state == model.TaskFileStateSuperseded {
+			t.Fatalf("hidden task-file state leaked: %#v", raw)
+		}
 	}
 }
 

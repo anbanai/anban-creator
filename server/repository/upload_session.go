@@ -110,21 +110,25 @@ func (r *uploadSessionRepository) ReleaseFinalization(ctx context.Context, id, t
 
 func (r *uploadSessionRepository) FindForCleanup(ctx context.Context, expiredBefore, claimStaleBefore time.Time, limit int) ([]*model.UploadSession, error) {
 	var sessions []*model.UploadSession
-	err := r.db.WithContext(ctx).
-		Where("(status = ? AND expires_at <= ?) OR (status = ? AND cleanup_claimed_at <= ?) OR (status = ? AND expires_at <= ? AND finalization_claimed_at <= ?)",
-			model.UploadSessionPending, expiredBefore,
-			model.UploadSessionExpiring, claimStaleBefore,
-			model.UploadSessionFinalizing, expiredBefore, claimStaleBefore).
-		Order("expires_at ASC").
+	err := buildUploadSessionCleanupQuery(r.db.WithContext(ctx).Model(&model.UploadSession{}), expiredBefore, claimStaleBefore).
 		Limit(limit).
 		Find(&sessions).Error
 	return sessions, err
 }
 
+func buildUploadSessionCleanupQuery(db *gorm.DB, expiredBefore, claimStaleBefore time.Time) *gorm.DB {
+	return db.
+		Where("(status = ? AND expires_at <= ? AND (next_cleanup_at IS NULL OR next_cleanup_at <= ?)) OR (status = ? AND cleanup_claimed_at <= ?) OR (status = ? AND expires_at <= ? AND finalization_claimed_at <= ?)",
+			model.UploadSessionPending, expiredBefore, expiredBefore,
+			model.UploadSessionExpiring, claimStaleBefore,
+			model.UploadSessionFinalizing, expiredBefore, claimStaleBefore).
+		Order("COALESCE(next_cleanup_at, expires_at) ASC, expires_at ASC, id ASC")
+}
+
 func (r *uploadSessionRepository) ClaimExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&model.UploadSession{}).
-		Where("id = ? AND ((status = ? AND expires_at <= ?) OR (status = ? AND cleanup_claimed_at <= ?) OR (status = ? AND expires_at <= ? AND finalization_claimed_at <= ?))",
-			id, model.UploadSessionPending, claimedAt,
+		Where("id = ? AND ((status = ? AND expires_at <= ? AND (next_cleanup_at IS NULL OR next_cleanup_at <= ?)) OR (status = ? AND cleanup_claimed_at <= ?) OR (status = ? AND expires_at <= ? AND finalization_claimed_at <= ?))",
+			id, model.UploadSessionPending, claimedAt, claimedAt,
 			model.UploadSessionExpiring, claimStaleBefore,
 			model.UploadSessionFinalizing, claimedAt, claimStaleBefore).
 		Updates(map[string]any{
@@ -145,6 +149,7 @@ func (r *uploadSessionRepository) CompleteExpiration(ctx context.Context, id, cl
 			"expired_at":         expiredAt,
 			"cleanup_claim_id":   "",
 			"cleanup_claimed_at": nil,
+			"next_cleanup_at":    nil,
 		})
 	return result.RowsAffected == 1, result.Error
 }
@@ -156,6 +161,18 @@ func (r *uploadSessionRepository) ReopenExpiration(ctx context.Context, id, clai
 			"status":             model.UploadSessionPending,
 			"cleanup_claim_id":   "",
 			"cleanup_claimed_at": nil,
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *uploadSessionRepository) RescheduleExpiration(ctx context.Context, id, claimID string, nextCleanupAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.UploadSession{}).
+		Where("id = ? AND status = ? AND cleanup_claim_id = ?", id, model.UploadSessionExpiring, claimID).
+		Updates(map[string]any{
+			"status":             model.UploadSessionPending,
+			"cleanup_claim_id":   "",
+			"cleanup_claimed_at": nil,
+			"next_cleanup_at":    nextCleanupAt,
 		})
 	return result.RowsAffected == 1, result.Error
 }

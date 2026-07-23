@@ -38,6 +38,7 @@ type UploadSession struct {
 	FinalizedAt           *time.Time `json:"finalized_at,omitempty"`
 	CleanupClaimID        string     `gorm:"type:char(36);index" json:"-"`
 	CleanupClaimedAt      *time.Time `gorm:"index" json:"-"`
+	NextCleanupAt         *time.Time `gorm:"index" json:"-"`
 	ExpiredAt             *time.Time `json:"expired_at,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
