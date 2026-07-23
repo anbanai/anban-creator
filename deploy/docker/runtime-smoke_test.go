@@ -399,6 +399,65 @@ cleanup 0
 	}
 }
 
+func TestRuntimeSmokeCleanupWaitsForResourceCreatedAfterFirstEmptySweep(t *testing.T) {
+	testDir := t.TempDir()
+	containerState := filepath.Join(testDir, "container-state")
+	injectedState := filepath.Join(testDir, "resource-injected")
+	cleanupLog := filepath.Join(testDir, "cleanup.log")
+	body := `
+CLEANUP_MAX_ATTEMPTS=5
+CLEANUP_INTERVAL_SECONDS=0
+PROJECT_IDS="$TEST_PROJECT_ID"
+TASK_IDS=
+sleep() { printf 'sleep %s\n' "$*" >>"$TEST_CLEANUP_LOG"; }
+docker() {
+  printf 'docker %s\n' "$*" >>"$TEST_CLEANUP_LOG"
+  local last="${!#}"
+  if [[ "$1 $2" == "container ls" ]]; then
+    [[ "$last" == "label=anban.ai/project-id=$TEST_PROJECT_ID" && -s "$TEST_CONTAINER_STATE" ]] && cat "$TEST_CONTAINER_STATE"
+  elif [[ "$1 $2" == "container inspect" ]]; then
+    printf '%s\n' "$TEST_PROJECT_ID"
+  elif [[ "$1 $2 $3" == "container rm -f" ]]; then
+    : >"$TEST_CONTAINER_STATE"
+  elif [[ "$1 $2" == "volume ls" && "$last" == "label=anban.ai/project-id=$TEST_PROJECT_ID" && ! -f "$TEST_INJECTED_STATE" ]]; then
+    : >"$TEST_INJECTED_STATE"
+    printf '%s\n' in-flight-container >"$TEST_CONTAINER_STATE"
+  fi
+  return 0
+}
+cleanup_labeled_resources
+`
+	const projectID = "22222222-2222-4222-8222-222222222222"
+	output, exitCode := runtimeSmokeShell(t, body,
+		"TEST_PROJECT_ID="+projectID,
+		"TEST_CONTAINER_STATE="+containerState,
+		"TEST_INJECTED_STATE="+injectedState,
+		"TEST_CLEANUP_LOG="+cleanupLog,
+	)
+	if exitCode != 0 {
+		t.Fatalf("settled cleanup exited %d: %s", exitCode, output)
+	}
+	state, err := os.ReadFile(containerState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(state)) != "" {
+		t.Fatalf("cleanup missed resource created after first empty sweep: %q", state)
+	}
+	logData, err := os.ReadFile(cleanupLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logData)
+	if !strings.Contains(log, "sleep 0") || !strings.Contains(log, "container rm -f in-flight-container") {
+		t.Fatalf("cleanup did not settle and remove the in-flight resource:\n%s", log)
+	}
+	projectContainerScan := "docker container ls -aq --filter label=anban.ai/project-id=" + projectID
+	if scans := strings.Count(log, projectContainerScan); scans < 4 {
+		t.Fatalf("cleanup performed %d project-container scans, want first empty, removal, and two settled-empty scans:\n%s", scans, log)
+	}
+}
+
 func TestRuntimeSmokeMakeReachesDockerOnlySkipBeforeAnyBuild(t *testing.T) {
 	repoRoot := runtimeSmokeRepoRoot(t)
 	binDir := t.TempDir()

@@ -199,7 +199,7 @@ remove_owned_resource() {
 
 cleanup_labeled_resources() {
   local attempt kind label_key ids owner_id resource owner resources seen
-  local found cleanup_step_status sweep_status last_status=1
+  local found cleanup_step_status sweep_status empty_sweeps=0 last_status=1
   for (( attempt = 1; attempt <= CLEANUP_MAX_ATTEMPTS; attempt++ )); do
     found=0
     sweep_status=0
@@ -245,14 +245,19 @@ cleanup_labeled_resources() {
       done
     done
     if (( found == 0 && sweep_status == 0 )); then
-      return 0
+      empty_sweeps=$((empty_sweeps + 1))
+      if (( empty_sweeps >= 2 )); then
+        return 0
+      fi
+    else
+      empty_sweeps=0
     fi
     (( sweep_status != 0 )) && last_status=$sweep_status
     if (( attempt < CLEANUP_MAX_ATTEMPTS )); then
       sleep "$CLEANUP_INTERVAL_SECONDS"
     fi
   done
-  fail "owned Docker resources remain after $CLEANUP_MAX_ATTEMPTS cleanup attempts"
+  fail "owned Docker resources did not settle after $CLEANUP_MAX_ATTEMPTS cleanup attempts"
   return "$last_status"
 }
 
