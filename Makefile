@@ -21,6 +21,8 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         docker-up docker-down docker-logs docker-image \
         docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images
 
+.PHONY: docker-runtime-smoke
+
 # Default target
 all: server-build
 
@@ -157,6 +159,13 @@ docker-montage-agent-image:
 	docker build -f deploy/docker/Dockerfile.agent-montage -t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
 
+# Preserve the smoke script's sole exit-0 skip: when no Docker-compatible CLI
+# exists, Make must reach the script before attempting image prerequisites.
+DOCKER_RUNTIME_SMOKE_DEPS := $(shell command -v docker >/dev/null 2>&1 && printf '%s' 'docker-agent-image docker-seednote-agent-image docker-montage-agent-image')
+
+docker-runtime-smoke: $(DOCKER_RUNTIME_SMOKE_DEPS)
+	@ANBAN_RUNTIME_SMOKE_SKIP_IMAGE_BUILD=1 deploy/docker/runtime-smoke.sh
+
 # Build the anban-creator-server Docker image
 docker-server-image:
 	@git submodule update --init --recursive
@@ -243,6 +252,7 @@ help:
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-seednote-agent-image - Build Seednote agent image with Agent-Reach"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
+	@echo "  make docker-runtime-smoke - Run isolated Docker dispatch smoke coverage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
 	@echo "  make docker-wcflink-image - Build wcfLink sidecar image"
 	@echo "  make docker-studio-image - Build Studio image (Bun + nginx)"
