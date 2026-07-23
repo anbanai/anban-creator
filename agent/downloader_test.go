@@ -26,7 +26,7 @@ func TestDownloaderResolvesRelativePathsFromTaskRuntimeCwd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(workspace, "montage", "output", "final.mp4"); got != want {
+	if want := filepath.Join(workspace, "openmontage", "output", "final.mp4"); got != want {
 		t.Fatalf("Montage download path = %q, want %q", got, want)
 	}
 

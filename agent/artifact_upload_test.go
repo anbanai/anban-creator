@@ -128,7 +128,7 @@ func TestScanWorkspaceArtifactsPrefersOutputAndSkipsRuntimeFiles(t *testing.T) {
 	}
 }
 
-func TestScanWorkspaceArtifactsSkipsDockerRuntimeHome(t *testing.T) {
+func TestScanWorkspaceArtifactsDoesNotFallbackToWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "article.md", "# article")
 	writeAgentArtifactTestFile(t, root, ".anban-runtime-home/secret.md", "runtime state")
@@ -137,8 +137,41 @@ func TestScanWorkspaceArtifactsSkipsDockerRuntimeHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanWorkspaceArtifacts: %v", err)
 	}
-	if len(files) != 1 || files[0].RelativePath != "article.md" {
-		t.Fatalf("files = %#v, want only article.md", files)
+	if len(files) != 0 {
+		t.Fatalf("files = %#v, want no workspace-root artifacts", files)
+	}
+}
+
+func TestJobArtifactUploaderRejectsSymlinkOutput(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Symlink(t.TempDir(), filepath.Join(root, "output")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := scanWorkspaceArtifacts(context.Background(), root, "article")
+	if err == nil || !strings.Contains(err.Error(), "real directory") {
+		t.Fatalf("symlink output error = %v, want real-directory rejection", err)
+	}
+}
+
+func TestJobArtifactUploaderUsesCanonicalWorkspaceOutput(t *testing.T) {
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
+	runtimePath := filepath.Join(root, "openmontage")
+	if err := os.Mkdir(runtimePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reporter := &fakeArtifactReporter{}
+	uploader := NewArtifactUploader(&Config{
+		TaskID: "task-1", ExecutionID: "execution-1", TaskType: "montage", Workspace: root,
+	}, reporter)
+	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
+		return "etag", nil
+	}
+	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{WorkDir: runtimePath}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reporter.prepared) != 1 || reporter.prepared[0].RelativePath != "output/article.md" {
+		t.Fatalf("prepared = %#v, want canonical output/article.md", reporter.prepared)
 	}
 }
 

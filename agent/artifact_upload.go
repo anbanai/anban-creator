@@ -99,32 +99,13 @@ func ScanWorkspaceArtifacts(ctx context.Context, root string) ([]WorkspaceArtifa
 	return scanWorkspaceArtifacts(ctx, root, "")
 }
 
-func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result *serveragent.ExecutionResult) error {
+func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serveragent.ExecutionResult) error {
 	if u == nil || u.cfg == nil || u.reporter == nil {
 		return fmt.Errorf("artifact uploader is not configured")
 	}
 	workDir := u.cfg.Workspace
-	if result != nil && strings.TrimSpace(result.WorkDir) != "" {
-		workDir = result.WorkDir
-	}
 	if err := artifactContextCause(ctx); err != nil {
 		return err
-	}
-	if u.cfg.ExecutionID != "" {
-		outputDir := filepath.Join(workDir, "output")
-		info, err := os.Lstat(outputDir)
-		if cause := artifactContextCause(ctx); cause != nil {
-			return cause
-		}
-		if os.IsNotExist(err) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("inspect job output directory: %w", err)
-		}
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("job output must be a real directory")
-		}
 	}
 	files, err := scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
 	if err != nil {
@@ -216,18 +197,28 @@ func scanWorkspaceArtifacts(ctx context.Context, root, taskType string) ([]Works
 		return nil, err
 	}
 
-	scanDir := root
 	outputDir := filepath.Join(root, "output")
-	if info, err := os.Stat(outputDir); err == nil && info.IsDir() {
-		scanDir = outputDir
+	info, err := os.Lstat(outputDir)
+	if cause := artifactContextCause(ctx); cause != nil {
+		return nil, cause
 	}
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("inspect runtime output directory: %w", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("runtime output must be a real directory")
+	}
+	scanDir := outputDir
 	if err := artifactContextCause(ctx); err != nil {
 		return nil, err
 	}
 
 	task := taskForArtifactFiltering(taskType)
 	var files []WorkspaceArtifact
-	err := filepath.WalkDir(scanDir, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(scanDir, func(path string, d fs.DirEntry, err error) error {
 		if cause := artifactContextCause(ctx); cause != nil {
 			return cause
 		}

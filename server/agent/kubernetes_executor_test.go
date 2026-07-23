@@ -145,7 +145,7 @@ func TestWorkspaceInitScript(t *testing.T) {
 	montage := kubernetesWorkspaceInitScript(model.PlatformMontage)
 	for _, want := range []string{
 		"template=/opt/montage-template",
-		"runtime=/workspace/montage",
+		"runtime=/workspace/openmontage",
 		"staging=/workspace/.montage-init",
 		`if [ ! -e "$runtime" ]; then`,
 		`cp -a "$template/." "$staging/"`,
@@ -167,7 +167,7 @@ func TestBuildKubernetesJobCopiesCompleteMontageWorkspaceWithoutRevisionMarker(t
 	execution.RuntimeImage = "registry.example.com/montage@sha256:run"
 	job := buildKubernetesJob(testJobConfig(), execution, task)
 	script := strings.Join(job.Spec.Template.Spec.InitContainers[0].Args, " ")
-	for _, want := range []string{"/opt/montage-template", "/workspace/montage", `cp -a "$template/."`} {
+	for _, want := range []string{"/opt/montage-template", "/workspace/openmontage", `cp -a "$template/."`} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("Montage Job init script missing %q: %s", want, script)
 		}

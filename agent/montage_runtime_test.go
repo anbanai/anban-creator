@@ -31,7 +31,7 @@ func TestMaterializeMontageRuntimeCopiesCompleteWritableWorkspace(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(workspace, "montage"); runtimePath != want {
+	if want := filepath.Join(workspace, "openmontage"); runtimePath != want {
 		t.Fatalf("runtime path = %q, want %q", runtimePath, want)
 	}
 	if body, err := os.ReadFile(filepath.Join(runtimePath, "nested", "pipeline.yaml")); err != nil || string(body) != "version: one\n" {
@@ -67,7 +67,7 @@ func TestMaterializeMontageRuntimeCopiesCompleteWritableWorkspace(t *testing.T) 
 
 func TestMaterializeMontageRuntimeRejectsNonDirectoryRuntime(t *testing.T) {
 	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, "montage"), []byte("invalid"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "openmontage"), []byte("invalid"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := materializeMontageRuntime(workspace); err == nil {
@@ -77,7 +77,7 @@ func TestMaterializeMontageRuntimeRejectsNonDirectoryRuntime(t *testing.T) {
 
 func TestSyncMontageTaskInputsMergesManagedWorkspaceFiles(t *testing.T) {
 	workspace := t.TempDir()
-	runtimePath := filepath.Join(workspace, "montage")
+	runtimePath := filepath.Join(workspace, "openmontage")
 	if err := os.MkdirAll(filepath.Join(workspace, ".anban-creator", "resume"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -113,5 +113,23 @@ func TestSyncMontageTaskInputsMergesManagedWorkspaceFiles(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(workspace, name)); !os.IsNotExist(err) {
 			t.Fatalf("migrated input %s remains outside Montage runtime: %v", name, err)
 		}
+	}
+}
+
+func TestMontageRuntimeLinksCanonicalOutput(t *testing.T) {
+	template := filepath.Join(t.TempDir(), "template")
+	if err := os.MkdirAll(template, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(serveragent.MontageTemplateEnvName, template)
+	workspace := t.TempDir()
+
+	runtimePath, err := materializeMontageRuntime(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := os.Readlink(filepath.Join(runtimePath, "output"))
+	if err != nil || link != filepath.Join(workspace, "output") {
+		t.Fatalf("Montage output link = %q, err=%v", link, err)
 	}
 }

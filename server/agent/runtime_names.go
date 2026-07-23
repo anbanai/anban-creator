@@ -21,7 +21,7 @@ const (
 	ContainerMontageRuntimePath      = ContainerOpenMontageVenvPath + "/bin:" + ContainerContentRuntimePath
 	MontageSubmoduleEnvName          = "ANBAN_MONTAGE_SUBMODULE_PATH"
 	MontageTemplateEnvName           = "ANBAN_MONTAGE_TEMPLATE_PATH"
-	MontageRuntimeDirName            = "montage"
+	MontageRuntimeDirName            = "openmontage"
 	ContainerMontageTemplatePath     = "/opt/montage-template"
 	dockerRuntimeContainerNamePrefix = "creator-agent-job"
 	dockerProjectMemoryNamePrefix    = "creator-agent-memory"
