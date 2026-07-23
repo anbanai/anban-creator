@@ -311,6 +311,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},
+		{model.TaskTypeLiveSlicer, "live-slicer"},
 		{"unknown", "seednote"},
 	}
 

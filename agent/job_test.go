@@ -13,6 +13,7 @@ import (
 	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -112,6 +113,10 @@ func TestJobRuntimeConfigMapsMontageEnvOnlyForMontageTasks(t *testing.T) {
 	article := jobRuntimeConfig(jobCfg, &BootstrapResponse{TaskType: "article", Env: env})
 	if len(article.Env) != 0 {
 		t.Fatalf("article env = %#v, want empty", article.Env)
+	}
+	liveSlicer := jobRuntimeConfig(jobCfg, &BootstrapResponse{TaskType: model.TaskTypeLiveSlicer, Env: env})
+	if len(liveSlicer.Env) != 0 {
+		t.Fatalf("live-slicer env = %#v, want empty", liveSlicer.Env)
 	}
 }
 

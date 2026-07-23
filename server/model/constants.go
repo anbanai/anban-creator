@@ -58,6 +58,9 @@ const (
 	ScopeMontage   = "montage"
 )
 
+// Managed task types that are not project platforms.
+const TaskTypeLiveSlicer = "live-slicer"
+
 // File role constants.
 const (
 	FileRoleImage         = "image"

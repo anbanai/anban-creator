@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/model"
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
@@ -138,6 +139,41 @@ func TestManagedRequiredMCPToolsExcludeArchive(t *testing.T) {
 	}
 }
 
+func TestValidateManagedMCPStatusRequiresNamespacedLiveSlicerTools(t *testing.T) {
+	want := []string{
+		"build_live_clip_manifest",
+		"build_live_clip_plan",
+		"build_live_subject_clip_plan",
+		"complete_live_subject",
+		"create_live_analysis_task",
+		"get_media_pipeline_status",
+		"prepare_file_upload",
+		"query_live_analysis_task",
+		"recognize_live_invalid_sentences",
+		"recognize_live_segments",
+		"recognize_live_subjects",
+		"submit_agent_feedback",
+		"update_task_progress",
+	}
+	if got := managedRequiredMCPTools(model.TaskTypeLiveSlicer); !reflect.DeepEqual(got, want) {
+		t.Fatalf("managedRequiredMCPTools(live-slicer) = %#v, want %#v", got, want)
+	}
+	tools := make([]claudecode.McpToolInfo, 0, len(want))
+	for _, name := range want {
+		tools = append(tools, claudecode.McpToolInfo{Name: "mcp__anban__" + name})
+	}
+	status := &claudecode.McpStatusResponse{McpServers: []claudecode.McpServerStatus{{
+		Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusConnected, Tools: tools,
+	}}}
+	if err := ValidateManagedMCPStatus(status, model.TaskTypeLiveSlicer); err != nil {
+		t.Fatalf("ValidateManagedMCPStatus namespaced tools: %v", err)
+	}
+	status.McpServers[0].Tools = status.McpServers[0].Tools[1:]
+	if err := ValidateManagedMCPStatus(status, model.TaskTypeLiveSlicer); err == nil || !strings.Contains(err.Error(), "build_live_clip_manifest") {
+		t.Fatalf("error = %v, want missing build_live_clip_manifest", err)
+	}
+}
+
 func TestValidateManagedMCPStatusRejectsDisconnectedServer(t *testing.T) {
 	detail := "401 unauthorized"
 	status := &claudecode.McpStatusResponse{McpServers: []claudecode.McpServerStatus{{
@@ -230,6 +266,7 @@ func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
 		},
 		{taskType: "article", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},
 		{taskType: "ecommerce", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},
+		{taskType: model.TaskTypeLiveSlicer, skills: []any{"anban:live-slice", "anban:capcut-draft"}, missing: "anban:live-slice"},
 	} {
 		t.Run(tc.taskType, func(t *testing.T) {
 			message := &claudecode.SystemMessage{

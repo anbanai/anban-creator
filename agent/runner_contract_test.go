@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
@@ -42,6 +43,9 @@ func TestRuntimeCwd(t *testing.T) {
 	}
 	if got := runtimeCwd(workspace, "seednote"); got != workspace {
 		t.Fatalf("Seednote cwd = %q, want %q", got, workspace)
+	}
+	if got := runtimeCwd(workspace, model.TaskTypeLiveSlicer); got != workspace {
+		t.Fatalf("Live Slicer cwd = %q, want %q", got, workspace)
 	}
 	if got := montageRuntimePath(workspace); got != "/workspace/openmontage" {
 		t.Fatalf("Montage runtime path = %q", got)

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -102,6 +103,37 @@ func TestBootstrapCreatesRuntimeOwnedOutput(t *testing.T) {
 	info, err := os.Lstat(filepath.Join(workspace, "output"))
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o750 {
 		t.Fatalf("runtime output = %#v, err=%v", info, err)
+	}
+}
+
+func TestBootstrapCreatesLiveSlicerOutputTree(t *testing.T) {
+	workspace := t.TempDir()
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("workload-token\n"), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	executionToken := testExecutionToken(t, "execution-1", "task-1", "project-1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
+			"execution_token": executionToken, "task_id": "task-1", "task_type": model.TaskTypeLiveSlicer, "project_id": "project-1",
+			"prompt": "slice", "model": "sonnet", "max_turns": 160, "agent_flag": "anban:live-slicer",
+			"auto_memory_directory": ".claude/memory", "files": []map[string]any{},
+			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
+			"artifact_transport": map[string]any{"mode": "stream"},
+		}})
+	}))
+	defer server.Close()
+
+	if _, err := testBootstrapJob(context.Background(), JobConfig{
+		ServerURL: server.URL, ExecutionID: "execution-1", Workspace: workspace, WorkloadTokenFile: tokenFile,
+	}); err != nil {
+		t.Fatalf("BootstrapJob: %v", err)
+	}
+	for _, relative := range []string{"output", "output/exports", "output/exports/.parts"} {
+		assertRuntimeDirectory(t, filepath.Join(workspace, filepath.FromSlash(relative)))
+	}
+	if _, err := os.Lstat(filepath.Join(workspace, serveragent.MontageRuntimeDirName)); !os.IsNotExist(err) {
+		t.Fatalf("live-slicer Montage runtime path error = %v, want not exist", err)
 	}
 }
 

@@ -132,7 +132,7 @@ func prepareRuntimeWorkspace(workspace, profile string) error {
 	}
 
 	profile = strings.TrimSpace(profile)
-	if profile == "live-slicer" {
+	if profile == model.TaskTypeLiveSlicer {
 		exportsPath := filepath.Join(outputPath, "exports")
 		if err := ensureRuntimeDirectory(exportsPath, "live-slicer exports"); err != nil {
 			return err
@@ -442,7 +442,7 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 
 func validBootstrapTaskType(taskType string) bool {
 	switch taskType {
-	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage:
+	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.TaskTypeLiveSlicer:
 		return true
 	default:
 		return false

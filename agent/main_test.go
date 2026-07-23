@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 func TestRunAgentPreparesDesktopWorkspaceOutput(t *testing.T) {
@@ -66,7 +68,7 @@ func TestRunAgentRejectsUnsafeWorkspaceOutput(t *testing.T) {
 
 func TestPrepareRuntimeWorkspaceCreatesLiveSlicerOutputTree(t *testing.T) {
 	workspace := t.TempDir()
-	if err := prepareRuntimeWorkspace(workspace, "live-slicer"); err != nil {
+	if err := prepareRuntimeWorkspace(workspace, model.TaskTypeLiveSlicer); err != nil {
 		t.Fatalf("prepareRuntimeWorkspace: %v", err)
 	}
 
@@ -85,7 +87,7 @@ func TestPrepareRuntimeWorkspaceReusesLiveSlicerOutputTree(t *testing.T) {
 	}
 
 	for range 2 {
-		if err := prepareRuntimeWorkspace(workspace, " live-slicer "); err != nil {
+		if err := prepareRuntimeWorkspace(workspace, " "+model.TaskTypeLiveSlicer+" "); err != nil {
 			t.Fatalf("prepareRuntimeWorkspace: %v", err)
 		}
 	}
@@ -115,7 +117,7 @@ func TestPrepareRuntimeWorkspaceRejectsUnsafeLiveSlicerOutputTree(t *testing.T) 
 			}
 			tt.setup(t, path)
 
-			err := prepareRuntimeWorkspace(workspace, "live-slicer")
+			err := prepareRuntimeWorkspace(workspace, model.TaskTypeLiveSlicer)
 			if err == nil || !strings.Contains(err.Error(), "real directory") {
 				t.Fatalf("prepareRuntimeWorkspace error = %v, want real-directory rejection", err)
 			}

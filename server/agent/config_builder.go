@@ -233,6 +233,8 @@ func TaskTypeToAgent(taskType string) string {
 		return "ecommerce"
 	case model.ScopeMontage:
 		return "montage"
+	case model.TaskTypeLiveSlicer:
+		return model.TaskTypeLiveSlicer
 	default:
 		return "seednote"
 	}

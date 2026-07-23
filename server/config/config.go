@@ -842,6 +842,8 @@ func canonicalRuntimeProfile(taskType string) string {
 		return model.PlatformSeednote
 	case model.PlatformMontage:
 		return model.PlatformMontage
+	case model.TaskTypeLiveSlicer:
+		return model.PlatformMontage
 	default:
 		return model.PlatformArticle
 	}

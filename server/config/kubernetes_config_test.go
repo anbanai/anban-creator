@@ -70,6 +70,7 @@ func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 		{taskType: model.PlatformEcommerce, profile: "article", image: "creator-agent-article:latest"},
 		{taskType: model.PlatformSeednote, profile: "seednote", image: "creator-agent-seednote:latest"},
 		{taskType: model.PlatformMontage, profile: "montage", image: "creator-agent-montage:latest"},
+		{taskType: model.TaskTypeLiveSlicer, profile: "montage", image: "creator-agent-montage:latest"},
 	} {
 		if got := images.ForTask(test.taskType); got.Profile != test.profile || got.Image != test.image {
 			t.Fatalf("task %s runtime = %#v, want %s/%s", test.taskType, got, test.profile, test.image)
