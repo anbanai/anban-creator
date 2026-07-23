@@ -201,7 +201,8 @@ func TestTaskImageAnalysisSSRFAndRedirectPolicy(t *testing.T) {
 	for _, address := range []string{
 		"0.0.0.1", "10.0.0.1", "100.64.0.1", "127.0.0.1", "169.254.0.1", "172.16.0.1",
 		"192.0.0.1", "192.0.2.1", "192.168.0.1", "198.18.0.1", "198.51.100.1", "203.0.113.1", "240.0.0.1",
-		"::1", "100::1", "2001:db8::1", "fc00::1", "fe80::1",
+		"::1", "64:ff9b::a00:1", "64:ff9b:1::1", "100::1", "100:0:0:1::1",
+		"2001:db8::1", "5f00::1", "fc00::1", "fe80::1",
 	} {
 		if isPublicTaskAnalysisIP(net.ParseIP(address)) {
 			t.Errorf("special-use address %s accepted as public", address)
