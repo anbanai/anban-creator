@@ -8,6 +8,7 @@ BINDIR      := bin
 AGENT_IMAGE := creator-agent-article:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
+DOCKER_CLI ?= docker
 SERVER_IMAGE := anban-creator-server:latest
 WCFLINK_IMAGE := anban-creator-wcflink:latest
 STUDIO_IMAGE := anban-creator-studio:latest
@@ -142,29 +143,29 @@ docker-logs:
 docker-agent-image:
 	@git submodule update --init --recursive third_party/claude-agent-sdk-go
 	@echo "Building $(AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) . && \
+	$(DOCKER_CLI) build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) . && \
 	echo "Image build complete: $(AGENT_IMAGE)"
 
 # Build the Seednote Agent image with Agent-Reach and its Python runtime.
 docker-seednote-agent-image:
 	@git submodule update --init --recursive third_party/claude-agent-sdk-go third_party/Agent-Reach
 	@echo "Building $(SEEDNOTE_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
+	$(DOCKER_CLI) build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(SEEDNOTE_AGENT_IMAGE)"
 
 # Build the dedicated Montage Agent image with its OpenMontage workspace template.
 docker-montage-agent-image:
 	@git submodule update --init --recursive third_party/claude-agent-sdk-go third_party/OpenMontage
 	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-montage -t $(MONTAGE_AGENT_IMAGE) . && \
+	$(DOCKER_CLI) build -f deploy/docker/Dockerfile.agent-montage -t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
 
 # Preserve the smoke script's sole exit-0 skip: when no Docker-compatible CLI
 # exists, Make must reach the script before attempting image prerequisites.
-DOCKER_RUNTIME_SMOKE_DEPS := $(shell command -v docker >/dev/null 2>&1 && printf '%s' 'docker-agent-image docker-seednote-agent-image docker-montage-agent-image')
+DOCKER_RUNTIME_SMOKE_DEPS := $(shell command -v "$(DOCKER_CLI)" >/dev/null 2>&1 && printf '%s' 'docker-agent-image docker-seednote-agent-image docker-montage-agent-image')
 
 docker-runtime-smoke: $(DOCKER_RUNTIME_SMOKE_DEPS)
-	@ANBAN_RUNTIME_SMOKE_SKIP_IMAGE_BUILD=1 deploy/docker/runtime-smoke.sh
+	@DOCKER_CLI="$(DOCKER_CLI)" ANBAN_RUNTIME_SMOKE_SKIP_IMAGE_BUILD=1 deploy/docker/runtime-smoke.sh
 
 # Build the anban-creator-server Docker image
 docker-server-image:
