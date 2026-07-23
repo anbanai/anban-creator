@@ -19,6 +19,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -551,7 +552,7 @@ func (s *TaskService) uploadContentAddressedTaskFile(
 		ossKey = buildTaskMCPArtifactStoragePrefix(task, executionID) + filepath.ToSlash(cleanRelPath)
 	}
 	ext := filepath.Ext(ossKey)
-	ossKey = strings.TrimSuffix(ossKey, ext) + "-" + contentHash + ext
+	objectKeyPrefix := strings.TrimSuffix(ossKey, ext) + "-" + contentHash
 
 	roleOnly := false
 	for attempt := 0; attempt < contentAddressedTaskFileMaxAttempts; attempt++ {
@@ -588,6 +589,10 @@ func (s *TaskService) uploadContentAddressedTaskFile(
 			continue
 		}
 
+		// A key may outlive the row that once owned it while durable cleanup is
+		// pending. Never reuse such a key: otherwise a delayed delete can remove a
+		// newly published object with identical content.
+		ossKey = objectKeyPrefix + "-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ext
 		uploaded, err := s.store.Upload(ctx, ossKey, bytes.NewReader(payload), mimeType)
 		if err != nil {
 			return nil, fmt.Errorf("upload file %s: %w", cleanRelPath, err)
@@ -682,56 +687,56 @@ func (s *TaskService) CleanupSupersededTaskFileObjects(ctx context.Context, limi
 	if s == nil || s.repo == nil || s.store == nil {
 		return 0, nil
 	}
-	files, err := s.repo.TaskFiles().FindPendingObjectCleanup(ctx, s.store.Name(), limit)
-	if err != nil {
-		return 0, fmt.Errorf("find superseded task file objects: %w", err)
+	if limit <= 0 {
+		limit = 100
 	}
+	files, err := s.repo.TaskFiles().FindPendingObjectCleanup(ctx, s.store.Name(), limit)
 	cleaned := 0
 	var cleanupErrors []error
-	for _, file := range files {
-		if file == nil {
-			continue
-		}
-		cleared, cleanupErr := s.cleanupSupersededTaskFileObject(ctx, file)
-		if cleanupErr != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("cleanup task file %s: %w", file.ID, cleanupErr))
-			continue
-		}
-		if cleared {
-			cleaned++
-		}
-	}
-	remaining := limit - len(files)
-	if limit <= 0 {
-		remaining = 100
-	}
-	if remaining > 0 {
-		queued, findErr := s.repo.TaskFiles().FindQueuedObjectCleanup(ctx, s.store.Name(), remaining)
-		if findErr != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("find queued task file objects: %w", findErr))
-		} else {
-			for _, cleanup := range queued {
-				current, currentErr := s.repo.TaskFiles().FindAnyByID(ctx, cleanup.TaskFileID)
-				if currentErr != nil && !errors.Is(currentErr, gorm.ErrRecordNotFound) {
-					cleanupErrors = append(cleanupErrors, fmt.Errorf("load task file %s for queued cleanup: %w", cleanup.TaskFileID, currentErr))
-					continue
-				}
-				if current != nil && current.OSSKey == cleanup.OSSKey {
-					if err := s.repo.TaskFiles().DeleteQueuedObjectCleanup(ctx, cleanup.ID); err != nil {
-						cleanupErrors = append(cleanupErrors, fmt.Errorf("drop re-owned cleanup %s: %w", cleanup.ID, err))
-					}
-					continue
-				}
-				if err := s.store.Delete(ctx, cleanup.OSSKey); err != nil {
-					cleanupErrors = append(cleanupErrors, fmt.Errorf("delete queued object %s: %w", cleanup.OSSKey, err))
-					continue
-				}
-				if err := s.repo.TaskFiles().DeleteQueuedObjectCleanup(ctx, cleanup.ID); err != nil {
-					cleanupErrors = append(cleanupErrors, fmt.Errorf("clear queued cleanup %s: %w", cleanup.ID, err))
-					continue
-				}
+	if err != nil {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("find superseded task file objects: %w", err))
+	} else {
+		for _, file := range files {
+			if file == nil {
+				continue
+			}
+			cleared, cleanupErr := s.cleanupSupersededTaskFileObject(ctx, file)
+			if cleanupErr != nil {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("cleanup task file %s: %w", file.ID, cleanupErr))
+				continue
+			}
+			if cleared {
 				cleaned++
 			}
+		}
+	}
+	// Queued CAS-loser objects have an independent bounded batch so a full or
+	// repeatedly failing legacy cleanup batch cannot starve them.
+	queued, findErr := s.repo.TaskFiles().FindQueuedObjectCleanup(ctx, s.store.Name(), limit)
+	if findErr != nil {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("find queued task file objects: %w", findErr))
+	} else {
+		for _, cleanup := range queued {
+			current, currentErr := s.repo.TaskFiles().FindAnyByID(ctx, cleanup.TaskFileID)
+			if currentErr != nil && !errors.Is(currentErr, gorm.ErrRecordNotFound) {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("load task file %s for queued cleanup: %w", cleanup.TaskFileID, currentErr))
+				continue
+			}
+			if current != nil && current.OSSKey == cleanup.OSSKey {
+				if err := s.repo.TaskFiles().DeleteQueuedObjectCleanup(ctx, cleanup.ID); err != nil {
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("drop re-owned cleanup %s: %w", cleanup.ID, err))
+				}
+				continue
+			}
+			if err := s.store.Delete(ctx, cleanup.OSSKey); err != nil {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("delete queued object %s: %w", cleanup.OSSKey, err))
+				continue
+			}
+			if err := s.repo.TaskFiles().DeleteQueuedObjectCleanup(ctx, cleanup.ID); err != nil {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("clear queued cleanup %s: %w", cleanup.ID, err))
+				continue
+			}
+			cleaned++
 		}
 	}
 	return cleaned, errors.Join(cleanupErrors...)

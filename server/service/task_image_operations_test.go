@@ -198,8 +198,19 @@ func TestTaskImageOperationsRejectsInvalidLocalAndRemoteImageSources(t *testing.
 }
 
 func TestTaskImageAnalysisSSRFAndRedirectPolicy(t *testing.T) {
-	if _, err := publicTaskAnalysisDialContext(context.Background(), "tcp", net.JoinHostPort("127.0.0.1", "443")); err == nil || !strings.Contains(err.Error(), "non-public") {
-		t.Fatalf("private address dial error = %v, want non-public rejection", err)
+	for _, address := range []string{
+		"0.0.0.1", "10.0.0.1", "100.64.0.1", "127.0.0.1", "169.254.0.1", "172.16.0.1",
+		"192.0.0.1", "192.0.2.1", "192.168.0.1", "198.18.0.1", "198.51.100.1", "203.0.113.1", "240.0.0.1",
+		"::1", "100::1", "2001:db8::1", "fc00::1", "fe80::1",
+	} {
+		if isPublicTaskAnalysisIP(net.ParseIP(address)) {
+			t.Errorf("special-use address %s accepted as public", address)
+		}
+	}
+	for _, address := range []string{"8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"} {
+		if !isPublicTaskAnalysisIP(net.ParseIP(address)) {
+			t.Errorf("public address %s rejected", address)
+		}
 	}
 	for _, tt := range []struct {
 		name string

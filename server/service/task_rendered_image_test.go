@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -35,6 +36,10 @@ type concurrentRenderedImageStorage struct {
 	arrived        chan struct{}
 	release        chan struct{}
 	deleteFailures int
+	blockDeleteKey string
+	deleteArrived  chan struct{}
+	deleteRelease  chan struct{}
+	deleteOnce     sync.Once
 }
 
 func (s *concurrentRenderedImageStorage) Upload(ctx context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
@@ -54,6 +59,12 @@ func (s *concurrentRenderedImageStorage) Upload(ctx context.Context, key string,
 }
 
 func (s *concurrentRenderedImageStorage) Delete(_ context.Context, key string) error {
+	if key == s.blockDeleteKey && s.deleteArrived != nil && s.deleteRelease != nil {
+		s.deleteOnce.Do(func() {
+			s.deleteArrived <- struct{}{}
+			<-s.deleteRelease
+		})
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deletedKeys = append(s.deletedKeys, key)
@@ -464,6 +475,165 @@ func TestRegisterRenderedImageConcurrentReplacementsDoNotLeakCASLoser(t *testing
 		if _, leaked := files[key]; leaked {
 			t.Fatalf("noncurrent uploaded object %q is neither deleted nor durably queued; current=%#v uploaded=%v", key, current, uploaded)
 		}
+	}
+}
+
+func TestUnpublishedRenderedImageCleanupCannotDeleteRepublishedContent(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := &concurrentRenderedImageStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	base := mustDecodeRenderedPNG(t)
+	register := func(payload []byte) *model.TaskFile {
+		t.Helper()
+		_, err := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+			UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover,
+			ImageBase64: base64.StdEncoding.EncodeToString(payload),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := repo.TaskFiles().FindExisting(ctx, task.ID, "cover.png")
+		if err != nil || file == nil {
+			t.Fatalf("find current rendered image: %#v, %v", file, err)
+		}
+		return file
+	}
+	register(base)
+	republishedPayload := append(append([]byte(nil), base...), 1)
+	old := register(republishedPayload)
+	current := register(append(append([]byte(nil), base...), 2))
+
+	store.mu.Lock()
+	store.files[old.OSSKey] = append([]byte(nil), republishedPayload...)
+	store.mu.Unlock()
+	store.blockDeleteKey = old.OSSKey
+	store.deleteArrived = make(chan struct{}, 1)
+	store.deleteRelease = make(chan struct{})
+	cleanupDone := make(chan error, 1)
+	go func() { cleanupDone <- svc.cleanupUnpublishedTaskFileObject(ctx, current, old.OSSKey) }()
+	<-store.deleteArrived
+
+	republished := register(republishedPayload)
+	close(store.deleteRelease)
+	if err := <-cleanupDone; err != nil {
+		t.Fatalf("cleanup unpublished object: %v", err)
+	}
+	files, _ := store.snapshot()
+	if _, ok := files[republished.OSSKey]; !ok {
+		t.Fatalf("cleanup deleted republished current object %q (old key %q)", republished.OSSKey, old.OSSKey)
+	}
+}
+
+func TestQueuedRenderedImageCleanupCannotDeleteRepublishedContent(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := &concurrentRenderedImageStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	base := mustDecodeRenderedPNG(t)
+	register := func(payload []byte) *model.TaskFile {
+		t.Helper()
+		_, err := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+			UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover,
+			ImageBase64: base64.StdEncoding.EncodeToString(payload),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := repo.TaskFiles().FindExisting(ctx, task.ID, "cover.png")
+		if err != nil || file == nil {
+			t.Fatalf("find current rendered image: %#v, %v", file, err)
+		}
+		return file
+	}
+	register(base)
+	republishedPayload := append(append([]byte(nil), base...), 3)
+	old := register(republishedPayload)
+	current := register(append(append([]byte(nil), base...), 4))
+	store.mu.Lock()
+	store.files[old.OSSKey] = append([]byte(nil), republishedPayload...)
+	store.mu.Unlock()
+	if err := repo.TaskFiles().QueueObjectCleanup(ctx, &model.TaskFileObjectCleanup{
+		TaskFileID: current.ID, StorageProvider: store.Name(), OSSKey: old.OSSKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.blockDeleteKey = old.OSSKey
+	store.deleteArrived = make(chan struct{}, 1)
+	store.deleteRelease = make(chan struct{})
+	cleanupDone := make(chan error, 1)
+	go func() {
+		_, err := svc.CleanupSupersededTaskFileObjects(ctx, 10)
+		cleanupDone <- err
+	}()
+	<-store.deleteArrived
+
+	republished := register(republishedPayload)
+	close(store.deleteRelease)
+	if err := <-cleanupDone; err != nil {
+		t.Fatalf("queued cleanup: %v", err)
+	}
+	files, _ := store.snapshot()
+	if _, ok := files[republished.OSSKey]; !ok {
+		t.Fatalf("queued cleanup deleted republished current object %q (old key %q)", republished.OSSKey, old.OSSKey)
+	}
+}
+
+func TestTaskFileCleanupAttemptsQueuedObjectsWhenLegacyBatchIsFull(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := &renderedImageLifecycleStorage{
+		fakeTaskStorage: &fakeTaskStorage{name: "oss", files: map[string][]byte{}},
+		deleteFailures:  2,
+	}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	ctx := context.Background()
+	var owner *model.TaskFile
+	for index := range 2 {
+		file := &model.TaskFile{
+			TaskID: uuid.NewString(), State: model.TaskFileStatePublished, Role: model.FileRoleImage,
+			FilePath: fmt.Sprintf("legacy-%d.png", index), FileName: fmt.Sprintf("legacy-%d.png", index),
+			OSSKey: fmt.Sprintf("current-%d", index), CleanupOSSKey: fmt.Sprintf("legacy-%d", index), StorageProvider: store.Name(),
+		}
+		if err := repo.TaskFiles().Create(ctx, file); err != nil {
+			t.Fatal(err)
+		}
+		store.files[file.CleanupOSSKey] = []byte("legacy")
+		if owner == nil {
+			owner = file
+		}
+	}
+	queuedKey := "queued-object"
+	store.files[queuedKey] = []byte("queued")
+	if err := repo.TaskFiles().QueueObjectCleanup(ctx, &model.TaskFileObjectCleanup{
+		TaskFileID: owner.ID, StorageProvider: store.Name(), OSSKey: queuedKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.CleanupSupersededTaskFileObjects(ctx, 2)
+	if err == nil {
+		t.Fatal("cleanup unexpectedly hid injected legacy delete failures")
+	}
+	if _, ok := store.files[queuedKey]; ok {
+		t.Fatalf("queued object %q was starved by a full legacy cleanup batch", queuedKey)
 	}
 }
 
