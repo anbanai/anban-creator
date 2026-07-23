@@ -574,7 +574,8 @@ func validateSeednoteDeliveryContract(body string) error {
 	for _, required := range []string{
 		"`$DIR/content.md`",
 		"逐项校验",
-		"verification.passed=true",
+		"`image-review.md` 仅记录可见内容质量观察",
+		"运行错误写入 `failure-state.json` 或保留在服务端观测记录中",
 		"failure-state.json",
 		"仅在所有交付校验通过后、即将报告成功前删除",
 	} {

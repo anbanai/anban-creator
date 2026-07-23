@@ -20,6 +20,122 @@ func extractSeednoteReferenceContract(t *testing.T, body string) string {
 	return strings.Join(strings.Fields(section), " ")
 }
 
+func TestPluginAssetsDoNotUseRemovedGenerateImageWorkflowFields(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	for _, subtree := range []string{"agents", "skills"} {
+		err := filepath.Walk(filepath.Join(root, subtree), func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if info.IsDir() || (filepath.Ext(path) != ".md" && filepath.Ext(path) != ".toml") {
+				return nil
+			}
+			body := readRepoFile(t, path)
+			for _, removed := range []string{"verify_with_vision", "verification_prompt", "upload_to_cdn", "operation_id"} {
+				if strings.Contains(body, removed) {
+					t.Fatalf("%s still uses removed generate_image workflow field %q", path, removed)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestImageWorkflowAssetsDoNotTrackGenerationPlumbing(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	paths := []string{
+		filepath.Join(root, "agents", "article.md"),
+		filepath.Join(root, "agents", "article.toml"),
+		filepath.Join(root, "agents", "designer.md"),
+		filepath.Join(root, "agents", "designer.toml"),
+		filepath.Join(root, "agents", "ecommerce.md"),
+		filepath.Join(root, "agents", "ecommerce.toml"),
+		filepath.Join(root, "agents", "seednote.md"),
+		filepath.Join(root, "agents", "seednote.toml"),
+		filepath.Join(root, "skills", "article-cover-design", "SKILL.md"),
+		filepath.Join(root, "skills", "article-publishing", "SKILL.md"),
+		filepath.Join(root, "skills", "article-visual-design", "SKILL.md"),
+		filepath.Join(root, "skills", "article-visual-design", "references", "content.md"),
+		filepath.Join(root, "skills", "article", "SKILL.md"),
+		filepath.Join(root, "skills", "ecommerce-visual-design", "SKILL.md"),
+		filepath.Join(root, "skills", "line-art-coloring", "SKILL.md"),
+		filepath.Join(root, "skills", "portrait-pose-variants", "SKILL.md"),
+		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "skills", "short-video-cover", "SKILL.md"),
+	}
+	for _, path := range paths {
+		body := readRepoFile(t, path)
+		for _, removed := range []string{
+			"provider", "image_model", "model_fallback_reason", "selection_reason",
+			"response_type", "revised_prompt", "output_mime", "generation_attempts",
+			"verification_audit", "模型路由", "图像模型", "服务端核验对象",
+		} {
+			if strings.Contains(body, removed) {
+				t.Fatalf("%s still tracks image-generation plumbing %q", path, removed)
+			}
+		}
+	}
+}
+
+func TestSeednoteImagePromptsContainOnlyCreativeContent(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	paths := []string{
+		filepath.Join(root, "agents", "seednote.md"),
+		filepath.Join(root, "agents", "seednote.toml"),
+		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
+	}
+	for _, path := range paths {
+		body := readRepoFile(t, path)
+		for _, required := range []string{"image-prompts.md", "用途：", "提示词："} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing creative image-prompts contract %q", path, required)
+			}
+		}
+		for _, removed := range []string{
+			"generation_attempts", "selection_reason", "response_type", "output_mime",
+			"实际width/height", "provider", "image_model", `"verification"`, "路由选择",
+		} {
+			if strings.Contains(body, removed) {
+				t.Fatalf("%s still requires technical image-prompts field %q", path, removed)
+			}
+		}
+	}
+}
+
+func TestImageCapabilitiesRemainIndependent(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	for _, path := range []string{
+		filepath.Join(root, "agents", "article.md"),
+		filepath.Join(root, "agents", "article.toml"),
+		filepath.Join(root, "skills", "article-publishing", "SKILL.md"),
+	} {
+		body := readRepoFile(t, path)
+		for _, required := range []string{"generate_image", "analyze_image", "upload_image", "上传失败只重试上传，不重新生成"} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing independent image capability contract %q", path, required)
+			}
+		}
+	}
+
+	for _, path := range []string{
+		filepath.Join(root, "agents", "seednote.md"),
+		filepath.Join(root, "agents", "seednote.toml"),
+		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
+	} {
+		body := readRepoFile(t, path)
+		for _, required := range []string{
+			"generate_image", "analyze_image", "单独调用", "不能阻止继续生成后续计划图片",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing independent analysis contract %q", path, required)
+			}
+		}
+	}
+}
+
 func TestSeednoteWorkflowAnalyzesRequestBeforeReferenceImages(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
@@ -101,7 +217,7 @@ func TestSeednoteWorkflowAnalyzesRequestBeforeReferenceImages(t *testing.T) {
 	}
 }
 
-func TestSeednoteVisualWorkflowSelectsAndVerifiesReferencesPerOutput(t *testing.T) {
+func TestSeednoteVisualWorkflowSelectsReferencesAndReviewsOutputsIndependently(t *testing.T) {
 	root := repoRoot(t)
 	visualSkills := []string{
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
@@ -120,18 +236,12 @@ func TestSeednoteVisualWorkflowSelectsAndVerifiesReferencesPerOutput(t *testing.
 				selectionRule,
 				"对每张输出图独立决定使用 0、1 或多张附件",
 				"不得把所有素材传给所有页面",
-				"超过服务端返回的数量上限时按当页相关性排序选择子集",
 				"只传当前输出图相关的原始路径",
-				"每张生成图片都要根据当页职责和参考素材用途动态编写 `verification_prompt`",
-				"verify_with_vision=true",
-				"verification call failed:",
-				"不得误写成图片 API 超时",
-				"不得再次调用 `generate_image`",
-				"不得改用 `verify_with_vision=false` 绕过核验",
-				"不适用于计费、配置、网络或其他运行依赖错误",
-				"`analyze_image` 只用于理解输入参考图",
-				"每张输出图最多 3 次生成尝试",
-				"初次生成计入",
+				"数组顺序必须与 prompt 中“参考图 1、参考图 2”一致",
+				"图片生成成功后单独调用 `analyze_image`",
+				"不能阻止继续生成后续计划图片",
+				"可调整参考组合/顺序和创作 prompt 后重新生成",
+				"单张最多 3 次",
 			} {
 				if !strings.Contains(body, term) {
 					t.Fatalf("%s missing per-output reference workflow term %q", path, term)
@@ -205,12 +315,9 @@ func TestSeednoteWorkflowDocumentsReferenceUsageSchemaAndFailurePolicy(t *testin
 		`"analysis_attempts"`,
 		`"warnings"`,
 		`"references"`,
-		`"generation_attempts"`,
-		`"verification"`,
-		`"provider"`,
-		`"model"`,
-		`"selection_reason"`,
-		`"model_fallback_reason"`,
+		`"purpose"`,
+		`"quality_status"`,
+		`"quality_notes"`,
 		"唯一产品身份、Logo、包装、型号或核心结构证据不可用",
 		"身份或结构幻觉",
 		"冲突版本融合",
@@ -288,12 +395,10 @@ func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
 		"editorial 信息层级",
 		"Swiss/magazine 秩序感",
 		"图文节奏",
-		"provider",
-		"model",
-		"output_path",
-		"下一步建议",
+		"analyze_image",
+		"可见主体、文字、构图和合规",
+		"不能阻止继续生成后续计划图片",
 		"failure-state.json",
-		"verify_with_vision=true",
 	}
 
 	for _, path := range paths {
@@ -323,9 +428,8 @@ func TestSeednoteAgentsTreatImageFailuresAsRecoverableFailedState(t *testing.T) 
 		"generate_image",
 		"image-prompts.md",
 		"image-review.md",
-		"provider",
-		"model",
-		"verification.passed=true",
+		"可见内容质量观察",
+		"不能阻止继续生成后续计划图片",
 		"failure-state.json",
 		"停止在图片阶段",
 		"不得提前删除",
