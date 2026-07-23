@@ -251,6 +251,9 @@ func (r *taskFileRepository) UpsertPendingCurrentExecution(ctx context.Context, 
 		if err != nil {
 			return err
 		}
+		if execution.ManifestSealed {
+			return ErrTaskFileManifestState
+		}
 		if execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending {
 			return ErrTaskFileManifestState
 		}
@@ -461,6 +464,17 @@ func (r *taskFileRepository) replacePendingCurrentExecution(ctx context.Context,
 				return statusResult.Error
 			}
 			if statusResult.RowsAffected != 1 {
+				return ErrTaskFileManifestState
+			}
+		}
+		if !execution.ManifestSealed {
+			sealResult := tx.Model(&model.TaskExecution{}).
+				Where("id = ? AND manifest_sealed = ?", executionID, false).
+				Update("manifest_sealed", true)
+			if sealResult.Error != nil {
+				return sealResult.Error
+			}
+			if sealResult.RowsAffected != 1 {
 				return ErrTaskFileManifestState
 			}
 		}

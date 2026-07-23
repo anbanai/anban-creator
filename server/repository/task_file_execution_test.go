@@ -658,6 +658,123 @@ func TestTaskFileRepositoryReplacePendingExecutionEmptyManifestPreservesLockedMC
 	}
 }
 
+func TestTaskFileRepositoryWorkspaceManifestRejectsLateMCPUpsertForCollidingPath(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	original, err := repo.TaskFiles().UpsertPendingCurrentExecution(ctx, "t1", "e1", &model.TaskFile{
+		Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "mcp-cover.png",
+		MimeType: "image/png", FileSize: 11, ContentHash: strings.Repeat("a", 64),
+		OSSKey: "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/output/cover.png",
+		OSSURL: "https://mcp.example/cover.png", StorageProvider: "oss",
+		MediaID: "mcp-media", WechatURL: "https://mcp.example/wechat",
+	})
+	if err != nil {
+		t.Fatalf("initial MCP upsert: %v", err)
+	}
+	workspace := &model.TaskFile{
+		Role: model.FileRoleCover, FilePath: "output/cover.png", FileName: "workspace-cover.png",
+		MimeType: "image/webp", FileSize: 22, ContentHash: strings.Repeat("b", 64),
+		OSSKey: "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/output/cover.png",
+		OSSURL: "https://workspace.example/cover.webp", StorageProvider: "oss",
+		MediaID: "workspace-media", WechatURL: "https://workspace.example/wechat",
+	}
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", []*model.TaskFile{workspace}); err != nil {
+		t.Fatalf("workspace replacement: %v", err)
+	}
+
+	_, err = repo.TaskFiles().UpsertPendingCurrentExecution(ctx, "t1", "e1", &model.TaskFile{
+		Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "late-mcp-cover.png",
+		MimeType: "image/png", FileSize: 33, ContentHash: strings.Repeat("c", 64),
+		OSSKey: "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/output/late-cover.png",
+		OSSURL: "https://late-mcp.example/cover.png", StorageProvider: "oss",
+		MediaID: "late-mcp-media", WechatURL: "https://late-mcp.example/wechat",
+	})
+	if !errors.Is(err, ErrTaskFileManifestState) {
+		t.Fatalf("late MCP upsert error = %v, want ErrTaskFileManifestState", err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("execution rows = %#v, err=%v", rows, err)
+	}
+	got := rows[0]
+	if got.ID != original.ID || got.Role != workspace.Role || got.FileName != workspace.FileName ||
+		got.MimeType != workspace.MimeType || got.FileSize != workspace.FileSize || got.ContentHash != workspace.ContentHash ||
+		got.OSSKey != workspace.OSSKey || got.OSSURL != workspace.OSSURL || got.StorageProvider != workspace.StorageProvider ||
+		got.MediaID != workspace.MediaID || got.WechatURL != workspace.WechatURL {
+		t.Fatalf("workspace artifact changed after late MCP upsert: %#v", got)
+	}
+}
+
+func TestTaskFileRepositoryEmptyWorkspaceManifestRejectsLateMCPUpsert(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", nil); err != nil {
+		t.Fatalf("empty workspace replacement: %v", err)
+	}
+
+	_, err := repo.TaskFiles().UpsertPendingCurrentExecution(ctx, "t1", "e1", &model.TaskFile{
+		Role: model.FileRoleImage, FilePath: "output/late.png", FileName: "late.png",
+		ContentHash: strings.Repeat("d", 64),
+		OSSKey:      "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/output/late.png",
+	})
+	if !errors.Is(err, ErrTaskFileManifestState) {
+		t.Fatalf("late MCP upsert error = %v, want ErrTaskFileManifestState", err)
+	}
+	rows, findErr := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if findErr != nil || len(rows) != 0 {
+		t.Fatalf("empty manifest gained rows: %#v, err=%v", rows, findErr)
+	}
+}
+
+func TestTaskFileRepositoryWorkspaceManifestReplayRemainsAllowedAfterSeal(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	for _, contentHash := range []string{strings.Repeat("a", 64), strings.Repeat("b", 64)} {
+		if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", []*model.TaskFile{{
+			Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+			OSSKey: "workspace/article.md", ContentHash: contentHash,
+		}}); err != nil {
+			t.Fatalf("workspace manifest replay: %v", err)
+		}
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 || rows[0].ContentHash != strings.Repeat("b", 64) {
+		t.Fatalf("replayed workspace rows = %#v, err=%v", rows, err)
+	}
+}
+
+func TestTaskFileRepositorySealedManifestAllowsMetadataForPreservedMCPIdentity(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	original, err := repo.TaskFiles().UpsertPendingCurrentExecution(ctx, "t1", "e1", &model.TaskFile{
+		Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "cover.png",
+		OSSKey:      "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/output/cover.png",
+		ContentHash: strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatalf("initial MCP upsert: %v", err)
+	}
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", []*model.TaskFile{{
+		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+		OSSKey: "workspace/article.md", ContentHash: strings.Repeat("b", 64),
+	}}); err != nil {
+		t.Fatalf("workspace replacement: %v", err)
+	}
+
+	updated, err := repo.TaskFiles().UpdatePendingCurrentExecutionMetadata(ctx, original, model.FileRoleCover, "media-1", "https://wechat.example/cover.png")
+	if err != nil {
+		t.Fatalf("metadata update for preserved MCP identity: %v", err)
+	}
+	if updated.ID != original.ID || updated.OSSKey != original.OSSKey || updated.ContentHash != original.ContentHash ||
+		updated.Role != model.FileRoleCover || updated.MediaID != "media-1" || updated.WechatURL != "https://wechat.example/cover.png" {
+		t.Fatalf("updated preserved MCP row = %#v", updated)
+	}
+}
+
 // This behavioral test fixes the operation order with one SQLite connection.
 // The MySQL contract tests below separately prove both methods take the same
 // task-then-execution row locks used for production serialization.
@@ -938,7 +1055,7 @@ func TestTaskFileRepositoryUpsertPendingExecutionMySQLLockOrderContract(t *testi
 	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status", "manifest_sealed"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending, false))
 	mock.ExpectExec("INSERT INTO `task_files`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery("SELECT .* FROM `task_files`").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "oss_key", "content_hash"}).
@@ -977,7 +1094,7 @@ func TestTaskFileRepositoryUpdatePendingExecutionMetadataMySQLLockOrderContract(
 	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status", "manifest_sealed"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending, false))
 	mock.ExpectQuery("SELECT .* FROM `task_files`").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "oss_key", "content_hash"}).
 			AddRow("file-1", "t1", "e1", model.TaskFileStatePending, model.FileRoleImage, "output/cover.png", "cover.png", "mcp/cover.png", strings.Repeat("a", 64)))
@@ -1020,13 +1137,15 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T)
 	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status", "manifest_sealed"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending, false))
 	mock.ExpectQuery("SELECT .* FROM `task_files` WHERE task_id = \\? AND execution_id = \\? AND state = \\?").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "oss_key"}).
 			AddRow("persisted-id", "t1", "e1", model.TaskFileStatePending, model.FileRoleMarkdown, "output/article.md", "article.md", "old-key"))
 	mock.ExpectExec("DELETE FROM `task_files`").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("UPDATE `task_files` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO `task_files`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE `task_executions` SET .*`manifest_sealed`=\\?.*WHERE id = \\? AND manifest_sealed = \\?").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	repo := New(db)
@@ -1055,6 +1174,10 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T)
 		}
 	}
 	assertTaskFileMutationLockOrder(t, sql)
+	if !strings.Contains(sql, "UPDATE `task_executions` SET `manifest_sealed`=true") ||
+		!strings.Contains(sql, "WHERE id = 'e1' AND manifest_sealed = false") {
+		t.Fatalf("workspace manifest seal SQL contract invalid:\n%s", sql)
+	}
 }
 
 func TestTaskFileRepositoryReplacePendingExecutionMySQLIdenticalRetrySkipsNoOpUpdates(t *testing.T) {
@@ -1075,7 +1198,7 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLIdenticalRetrySkipsNoOpUp
 	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status", "manifest_sealed"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending, true))
 	mock.ExpectQuery("SELECT .* FROM `task_files` WHERE task_id = \\? AND execution_id = \\? AND state = \\?").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "mime_type", "file_size",
