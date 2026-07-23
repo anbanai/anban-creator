@@ -588,9 +588,10 @@ func (*cancelOrderingDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSe
 
 func (*cancelOrderingDispatcher) Scope() string { return "docker" }
 
-func (*cancelOrderingDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+func (*cancelOrderingDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
 	return &model.RuntimeIdentity{Scope: "daemon-a", Workload: "container-" + execution.ID}, nil
 }
+func (*cancelOrderingDispatcher) Activate(context.Context, *model.TaskExecution) error { return nil }
 func (d *cancelOrderingDispatcher) Delete(_ context.Context, execution *model.TaskExecution) error {
 	found, _ := d.repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	d.statusAtDelete = found.Status

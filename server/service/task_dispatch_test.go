@@ -42,6 +42,67 @@ type scopedDispatchTestDispatcher struct {
 	scope string
 }
 
+type activationOrderingDispatcher struct {
+	repo              repository.Repository
+	prepared          chan struct{}
+	release           chan struct{}
+	activationStarted chan struct{}
+	activationRelease chan struct{}
+	mu                sync.Mutex
+	activationCalls   int
+	statusAtStart     string
+	identityAtStart   model.RuntimeIdentity
+	deleteIdentities  []model.RuntimeIdentity
+}
+
+func (*activationOrderingDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
+	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+}
+
+func (*activationOrderingDispatcher) Scope() string { return "docker" }
+
+func (d *activationOrderingDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+	identity := &model.RuntimeIdentity{Scope: "docker", Workload: "container-" + execution.ID, InstanceID: "instance-" + execution.ID}
+	if d.prepared != nil {
+		close(d.prepared)
+		<-d.release
+	}
+	return identity, nil
+}
+
+func (d *activationOrderingDispatcher) Activate(_ context.Context, execution *model.TaskExecution) error {
+	found, _ := d.repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	d.mu.Lock()
+	d.activationCalls++
+	d.statusAtStart = found.Status
+	d.identityAtStart = model.RuntimeIdentity{Scope: found.RuntimeScope, Workload: found.RuntimeWorkload, InstanceID: found.RuntimeInstanceID}
+	d.mu.Unlock()
+	if d.activationStarted != nil {
+		close(d.activationStarted)
+		<-d.activationRelease
+	}
+	return nil
+}
+
+func (d *activationOrderingDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.RuntimeExecutionState, error) {
+	return &agent.RuntimeExecutionState{Phase: agent.RuntimePhasePending}, nil
+}
+
+func (d *activationOrderingDispatcher) Delete(_ context.Context, execution *model.TaskExecution) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deleteIdentities = append(d.deleteIdentities, model.RuntimeIdentity{
+		Scope: execution.RuntimeScope, Workload: execution.RuntimeWorkload, InstanceID: execution.RuntimeInstanceID,
+	})
+	return nil
+}
+
+func (d *activationOrderingDispatcher) snapshot() (int, string, model.RuntimeIdentity, []model.RuntimeIdentity) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.activationCalls, d.statusAtStart, d.identityAtStart, append([]model.RuntimeIdentity(nil), d.deleteIdentities...)
+}
+
 func (d *scopedDispatchTestDispatcher) Scope() string { return d.scope }
 
 func (d *dispatchTestDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
@@ -159,7 +220,7 @@ func (r *cancelingReferenceAssetRepository) FindOwnedByID(context.Context, strin
 	return nil, context.Canceled
 }
 
-func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+func (d *dispatchTestDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
 	d.mu.Lock()
 	d.calls++
 	if d.seen == nil {
@@ -195,6 +256,8 @@ func (d *dispatchTestDispatcher) Dispatch(_ context.Context, execution *model.Ta
 	}
 	return &model.RuntimeIdentity{Scope: "daemon-a", Workload: "container-" + execution.ID}, nil
 }
+
+func (*dispatchTestDispatcher) Activate(context.Context, *model.TaskExecution) error { return nil }
 
 func (d *dispatchTestDispatcher) Delete(context.Context, *model.TaskExecution) error {
 	return nil
@@ -306,6 +369,99 @@ func TestDispatchCloudTaskCreatesOneAttemptAndReturnsAfterRuntimeAccepted(t *tes
 	}
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("duplicate dispatch calls = %d", dispatcher.callCount())
+	}
+}
+
+func TestDispatchActivatesOnlyAfterStartingIdentityIsAuthoritative(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	dispatcher := &activationOrderingDispatcher{repo: repo}
+	svc.SetRuntimeDispatcher(dispatcher)
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	activationCalls, status, identity, _ := dispatcher.snapshot()
+	current := mustCurrentExecution(t, repo, task.ID)
+	want := model.RuntimeIdentity{Scope: current.RuntimeScope, Workload: current.RuntimeWorkload, InstanceID: current.RuntimeInstanceID}
+	if activationCalls != 1 || status != model.TaskExecutionStarting || identity != want || identity.InstanceID == "" {
+		t.Fatalf("activation calls=%d status=%q identity=%#v, want one activation of Starting and %#v", activationCalls, status, identity, want)
+	}
+}
+
+func TestDispatchCancellationAfterResourcePreparationCompensatesWithoutActivation(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	dispatcher := &activationOrderingDispatcher{
+		repo: repo, prepared: make(chan struct{}), release: make(chan struct{}),
+	}
+	svc.SetRuntimeDispatcher(dispatcher)
+	dispatchDone := make(chan error, 1)
+	go func() {
+		dispatchDone <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
+	}()
+	<-dispatcher.prepared
+	if err := svc.CancelForUser(context.Background(), task.UserID, task.ID); err != nil {
+		t.Fatalf("cancel prepared execution: %v", err)
+	}
+	close(dispatcher.release)
+	if err := <-dispatchDone; err == nil {
+		t.Fatal("dispatch succeeded after cancellation")
+	}
+
+	activationCalls, status, startedIdentity, deleted := dispatcher.snapshot()
+	if activationCalls != 0 || status != "" || startedIdentity.Scope != "" {
+		t.Fatalf("provider ran after cancellation: calls=%d status=%q identity=%#v", activationCalls, status, startedIdentity)
+	}
+	if len(deleted) < 2 {
+		t.Fatalf("delete calls=%d identities=%#v, want initial cancellation plus identity-bound compensation", len(deleted), deleted)
+	}
+	last := deleted[len(deleted)-1]
+	if last.Scope != "docker" || last.Workload == "" || last.InstanceID == "" {
+		t.Fatalf("compensating delete identity=%#v", last)
+	}
+}
+
+func TestDispatchCancellationAfterIdentityPersistenceCompensatesExactActivatedWorkload(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	dispatcher := &activationOrderingDispatcher{
+		repo: repo, activationStarted: make(chan struct{}), activationRelease: make(chan struct{}),
+	}
+	svc.SetRuntimeDispatcher(dispatcher)
+	dispatchDone := make(chan error, 1)
+	go func() {
+		dispatchDone <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
+	}()
+	<-dispatcher.activationStarted
+
+	starting := mustCurrentExecution(t, repo, task.ID)
+	want := model.RuntimeIdentity{
+		Scope: starting.RuntimeScope, Workload: starting.RuntimeWorkload, InstanceID: starting.RuntimeInstanceID,
+	}
+	if starting.Status != model.TaskExecutionStarting || want.Scope == "" || want.Workload == "" || want.InstanceID == "" {
+		t.Fatalf("prepared execution = %+v, want authoritative Starting identity", starting)
+	}
+	if err := svc.CancelForUser(context.Background(), task.UserID, task.ID); err != nil {
+		t.Fatalf("cancel activating execution: %v", err)
+	}
+	close(dispatcher.activationRelease)
+	if err := <-dispatchDone; err != nil {
+		t.Fatalf("dispatch completion after cancellation: %v", err)
+	}
+
+	activationCalls, status, activatedIdentity, deleted := dispatcher.snapshot()
+	if activationCalls != 1 || status != model.TaskExecutionStarting || activatedIdentity != want {
+		t.Fatalf("activation calls=%d status=%q identity=%#v, want one exact Starting activation %#v", activationCalls, status, activatedIdentity, want)
+	}
+	if len(deleted) < 2 {
+		t.Fatalf("delete calls=%d identities=%#v, want cancellation plus post-activation compensation", len(deleted), deleted)
+	}
+	for _, identity := range deleted {
+		if identity != want {
+			t.Fatalf("delete identity=%#v, want exact prepared identity %#v", identity, want)
+		}
+	}
+	current := mustCurrentExecution(t, repo, task.ID)
+	if current.Status != model.TaskExecutionCancelled {
+		t.Fatalf("execution status=%q, want cancelled", current.Status)
 	}
 }
 

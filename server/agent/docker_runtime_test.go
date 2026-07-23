@@ -147,6 +147,7 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	wantCommand := []string{
 		"job",
 		"--server-url", "http://server:8080",
+		"--allow-http-server",
 		"--execution-id", execution.ID,
 		"--workspace", dockerTaskWorkspaceMountPath,
 		"--workload-token-file", dockerWorkloadTokenFile,
@@ -169,6 +170,28 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 		dockerUserIDLabel:    task.UserID,
 	}) {
 		t.Fatalf("task volume labels = %#v", spec.TaskVolume.Labels)
+	}
+}
+
+func TestDockerRuntimeSpecEmitsExplicitHTTPBootstrapTrustOnlyForHTTP(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		serverURL  string
+		wantPolicy bool
+	}{
+		{name: "operator HTTP", serverURL: "http://creator-server:8080", wantPolicy: true},
+		{name: "HTTPS", serverURL: "https://creator-server:8443"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			spec := buildDockerRuntimeSpec(dockerRuntimeConfig{
+				DockerConfig: dockerDispatcherTestConfig(), ServerURL: test.serverURL,
+				ImageID: dockerDispatcherTestImageID, ImageConfig: &containertypes.Config{},
+			}, dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+			got := slices.Contains(spec.ContainerConfig.Cmd, "--allow-http-server")
+			if got != test.wantPolicy {
+				t.Fatalf("command = %v, allow HTTP flag=%v want %v", spec.ContainerConfig.Cmd, got, test.wantPolicy)
+			}
+		})
 	}
 }
 

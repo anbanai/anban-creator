@@ -80,6 +80,26 @@ func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 	}
 }
 
+func TestJobCommandPassesExplicitManagedHTTPPolicy(t *testing.T) {
+	called := false
+	bootstrap := func(_ context.Context, cfg JobConfig) (*BootstrapResponse, error) {
+		called = true
+		field := reflect.ValueOf(cfg).FieldByName("AllowHTTPServer")
+		if !field.IsValid() || field.Kind() != reflect.Bool || !field.Bool() {
+			t.Fatalf("job config does not carry explicit HTTP trust: %+v", cfg)
+		}
+		return &BootstrapResponse{}, nil
+	}
+	cmd := newJobCommand(bootstrap, func(context.Context, *Config) error { return nil })
+	err := cmd.Run(context.Background(), []string{
+		"job", "--server-url", "http://creator-server:8080", "--allow-http-server",
+		"--execution-id", "execution-1", "--workspace", "/workspace", "--workload-token-file", "/token",
+	})
+	if err != nil || !called {
+		t.Fatalf("explicit HTTP job flag: called=%v err=%v", called, err)
+	}
+}
+
 func TestJobRuntimeConfigMapsMontageEnvOnlyForMontageTasks(t *testing.T) {
 	jobCfg := JobConfig{ServerURL: "http://server", ExecutionID: "execution-1", Workspace: "/workspace"}
 	env := map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"}

@@ -138,7 +138,7 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 	execution.Status = model.TaskExecutionDispatching
 	execution.DispatchClaimToken = token
 
-	runtimeIdentity, err := s.runtimeDispatcher.Dispatch(ctx, execution, task)
+	runtimeIdentity, err := s.runtimeDispatcher.Prepare(ctx, execution, task)
 	if err != nil {
 		if agent.IsPermanentDispatchError(err) {
 			return s.failDispatch(ctx, task, execution, token, err)
@@ -156,15 +156,91 @@ func (s *TaskService) dispatchCurrentExecution(ctx context.Context, task *model.
 	if err != nil {
 		return s.failDispatch(ctx, task, execution, token, agent.NewPermanentDispatchError(err))
 	}
+	preparedExecution := executionWithRuntimeIdentity(execution, normalizedIdentity)
 	won, err = s.repo.TaskExecutions().CompleteDispatch(ctx, execution.ID, token, normalizedIdentity)
 	if errors.Is(err, repository.ErrRuntimeIdentityConflict) {
-		return s.failDispatch(ctx, task, execution, token, agent.NewPermanentDispatchError(err))
+		return errors.Join(
+			s.failDispatch(ctx, task, execution, token, agent.NewPermanentDispatchError(err)),
+			s.compensatePreparedRuntime(ctx, preparedExecution),
+		)
 	}
 	if err != nil {
-		return fmt.Errorf("mark runtime execution starting: %w", err)
+		return errors.Join(
+			fmt.Errorf("mark runtime execution starting: %w", err),
+			s.compensatePreparedRuntime(ctx, preparedExecution),
+		)
 	}
 	if !won {
-		return fmt.Errorf("mark runtime execution starting: stale execution %s", execution.ID)
+		return errors.Join(
+			fmt.Errorf("mark runtime execution starting: stale execution %s", execution.ID),
+			s.compensatePreparedRuntime(ctx, preparedExecution),
+		)
+	}
+	authoritative, err := s.repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		return errors.Join(fmt.Errorf("reload prepared runtime execution: %w", err), s.compensatePreparedRuntime(ctx, preparedExecution))
+	}
+	if authoritative.Status != model.TaskExecutionStarting || runtimeIdentityFromExecution(authoritative) != normalizedIdentity {
+		return errors.Join(
+			fmt.Errorf("prepared runtime execution %s lost activation authority", execution.ID),
+			s.compensatePreparedRuntime(ctx, preparedExecution),
+		)
+	}
+	activateErr := s.runtimeDispatcher.Activate(ctx, authoritative)
+	latest, reloadErr := s.repo.TaskExecutions().FindByID(context.WithoutCancel(ctx), execution.ID)
+	if reloadErr != nil {
+		return errors.Join(activateErr, fmt.Errorf("reload runtime execution after activation: %w", reloadErr))
+	}
+	if isTerminalExecution(latest.Status) {
+		return s.compensatePreparedRuntime(ctx, authoritative)
+	}
+	if activateErr != nil {
+		if agent.IsPermanentDispatchError(activateErr) {
+			diagnostics, _ := json.Marshal(map[string]string{"error": activateErr.Error()})
+			terminalErr := s.TerminalizeCurrentExecution(context.WithoutCancel(ctx), execution.ID, model.TaskExecutionFailed, "activation_failed", diagnostics)
+			return errors.Join(
+				fmt.Errorf("activate runtime execution: %w", activateErr),
+				terminalErr,
+				s.compensatePreparedRuntime(ctx, authoritative),
+			)
+		}
+		return fmt.Errorf("activate runtime execution: %w", activateErr)
+	}
+	return nil
+}
+
+func executionWithRuntimeIdentity(execution *model.TaskExecution, identity model.RuntimeIdentity) *model.TaskExecution {
+	if execution == nil {
+		return nil
+	}
+	bound := *execution
+	bound.RuntimeScope = identity.Scope
+	bound.RuntimeWorkload = identity.Workload
+	bound.RuntimeInstanceID = identity.InstanceID
+	return &bound
+}
+
+func runtimeIdentityFromExecution(execution *model.TaskExecution) model.RuntimeIdentity {
+	if execution == nil {
+		return model.RuntimeIdentity{}
+	}
+	return model.RuntimeIdentity{
+		Scope: execution.RuntimeScope, Workload: execution.RuntimeWorkload, InstanceID: execution.RuntimeInstanceID,
+	}
+}
+
+func (s *TaskService) compensatePreparedRuntime(ctx context.Context, execution *model.TaskExecution) error {
+	if execution == nil || s.runtimeDispatcher == nil {
+		return nil
+	}
+	timeout := s.runtimeDispatchLease() / 2
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+	if err := s.runtimeDispatcher.Delete(deleteCtx, execution); err != nil {
+		return fmt.Errorf("delete prepared runtime workload: %w", err)
 	}
 	return nil
 }

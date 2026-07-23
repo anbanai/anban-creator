@@ -16,9 +16,11 @@ func (*runtimeDispatcherTestFake) ResolveRuntime(string) srvconfig.RuntimeImageS
 	return srvconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
 }
 
-func (*runtimeDispatcherTestFake) Dispatch(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
+func (*runtimeDispatcherTestFake) Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
 	return &model.RuntimeIdentity{Scope: "daemon-a", Workload: "container-1"}, nil
 }
+
+func (*runtimeDispatcherTestFake) Activate(context.Context, *model.TaskExecution) error { return nil }
 
 func (*runtimeDispatcherTestFake) Inspect(context.Context, *model.TaskExecution) (*RuntimeExecutionState, error) {
 	return &RuntimeExecutionState{Phase: RuntimePhaseRunning, InstanceID: "container-1"}, nil

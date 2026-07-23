@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"reflect"
 	"slices"
 	"strings"
@@ -65,10 +66,15 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 	containerConfig.Cmd = []string{
 		"job",
 		"--server-url", strings.TrimRight(cfg.ServerURL, "/"),
+	}
+	if parsed, err := url.Parse(strings.TrimSpace(cfg.ServerURL)); err == nil && parsed.Scheme == "http" {
+		containerConfig.Cmd = append(containerConfig.Cmd, "--allow-http-server")
+	}
+	containerConfig.Cmd = append(containerConfig.Cmd,
 		"--execution-id", executionID(execution),
 		"--workspace", dockerTaskWorkspaceMountPath,
 		"--workload-token-file", dockerWorkloadTokenFile,
-	}
+	)
 	containerConfig.WorkingDir = dockerTaskWorkspaceMountPath
 	containerConfig.Labels[dockerExecutionIDLabel] = executionID(execution)
 	containerConfig.Labels[dockerTaskIDLabel] = taskID(task)

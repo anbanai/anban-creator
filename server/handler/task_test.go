@@ -36,9 +36,11 @@ func (availableRuntimeDispatcher) ResolveRuntime(string) config.RuntimeImageSele
 	return config.RuntimeImageSelection{Profile: "article", Image: "creator-agent-article:test"}
 }
 
-func (availableRuntimeDispatcher) Dispatch(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
+func (availableRuntimeDispatcher) Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
 	return &model.RuntimeIdentity{Scope: "docker", Workload: "test-runtime"}, nil
 }
+
+func (availableRuntimeDispatcher) Activate(context.Context, *model.TaskExecution) error { return nil }
 
 func (availableRuntimeDispatcher) Delete(context.Context, *model.TaskExecution) error { return nil }
 

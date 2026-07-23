@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -56,7 +57,7 @@ func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, runtimeIm
 	return &kubernetesJobDispatcher{config: jobCfg, kube: client}, nil
 }
 
-func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
+func (d *kubernetesJobDispatcher) Prepare(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
 	if err := d.validate(execution); err != nil {
 		return nil, NewPermanentDispatchError(err)
 	}
@@ -102,8 +103,63 @@ func (d *kubernetesJobDispatcher) Dispatch(ctx context.Context, execution *model
 		if err := verifyJob(existingJob, desiredJob, execution, task); err != nil {
 			return nil, NewPermanentDispatchError(err)
 		}
+		if existingJob.Spec.Suspend != nil && !*existingJob.Spec.Suspend &&
+			(execution.RuntimeScope != desiredJob.Namespace || execution.RuntimeWorkload != desiredJob.Name) {
+			return nil, NewPermanentDispatchError(fmt.Errorf("Kubernetes Job %q was activated before its runtime identity was persisted", desiredJob.Name))
+		}
 	}
-	return &model.RuntimeIdentity{Scope: desiredJob.Namespace, Workload: desiredJob.Name}, nil
+	return &model.RuntimeIdentity{Scope: desiredJob.Namespace, Workload: desiredJob.Name, InstanceID: string(existingJob.UID)}, nil
+}
+
+func (d *kubernetesJobDispatcher) Activate(ctx context.Context, execution *model.TaskExecution) error {
+	if err := d.validatePersistedJobIdentity(execution); err != nil {
+		return NewPermanentDispatchError(err)
+	}
+	name := kubernetesJobName(execution.ID)
+	jobs := d.kube.BatchV1().Jobs(d.config.Namespace)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		job, err := jobs.Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if err := verifyPersistedKubernetesJob(job, execution); err != nil {
+			return NewPermanentDispatchError(err)
+		}
+		if job.Spec.Suspend != nil && !*job.Spec.Suspend {
+			return nil
+		}
+		updated := job.DeepCopy()
+		suspend := false
+		updated.Spec.Suspend = &suspend
+		_, err = jobs.Update(ctx, updated, metav1.UpdateOptions{})
+		return err
+	})
+	if err == nil {
+		return nil
+	}
+	if IsPermanentDispatchError(err) {
+		return err
+	}
+	if apierrors.IsNotFound(err) {
+		return NewPermanentDispatchError(fmt.Errorf("persisted Kubernetes Job %q is missing: %w", name, err))
+	}
+	return fmt.Errorf("activate Kubernetes Job %q: %w", name, classifyKubernetesDispatchAPIError(err, false))
+}
+
+func verifyPersistedKubernetesJob(job *batchv1.Job, execution *model.TaskExecution) error {
+	if job == nil || job.Namespace != execution.RuntimeScope || job.Name != execution.RuntimeWorkload {
+		return fmt.Errorf("Kubernetes Job identity mismatch")
+	}
+	if string(job.UID) != execution.RuntimeInstanceID {
+		return fmt.Errorf("Kubernetes Job %q UID mismatch: got %q, want persisted %q", job.Name, job.UID, execution.RuntimeInstanceID)
+	}
+	if err := verifyRequiredLabels(job.Labels, kubernetesExecutionLabels(execution, nil)); err != nil {
+		return fmt.Errorf("Kubernetes Job %q identity mismatch: %w", job.Name, err)
+	}
+	if len(job.Spec.Template.Spec.Containers) != 1 || job.Spec.Template.Spec.Containers[0].Image != execution.RuntimeImage {
+		return fmt.Errorf("Kubernetes Job %q runtime image mismatch", job.Name)
+	}
+	return nil
 }
 
 func (d *kubernetesJobDispatcher) validateRuntime(execution *model.TaskExecution, task *model.Task) error {
@@ -171,6 +227,12 @@ func (d *kubernetesJobDispatcher) Delete(ctx context.Context, execution *model.T
 	if err := d.validate(execution); err != nil {
 		return err
 	}
+	if execution.RuntimeScope == "" && execution.RuntimeWorkload == "" && execution.RuntimeInstanceID == "" {
+		return nil
+	}
+	if err := d.validatePersistedJobIdentity(execution); err != nil {
+		return NewPermanentDispatchError(err)
+	}
 	name := kubernetesJobName(execution.ID)
 	jobs := d.kube.BatchV1().Jobs(d.config.Namespace)
 	job, err := jobs.Get(ctx, name, metav1.GetOptions{})
@@ -180,9 +242,8 @@ func (d *kubernetesJobDispatcher) Delete(ctx context.Context, execution *model.T
 	if err != nil {
 		return fmt.Errorf("get Kubernetes Job %q before delete: %w", name, err)
 	}
-	desiredLabels := kubernetesExecutionLabels(execution, nil)
-	if err := verifyRequiredLabels(job.Labels, desiredLabels); err != nil {
-		return fmt.Errorf("Kubernetes Job %q identity mismatch: %w", name, err)
+	if err := verifyPersistedKubernetesJob(job, execution); err != nil {
+		return NewPermanentDispatchError(err)
 	}
 	foreground := metav1.DeletePropagationForeground
 	err = jobs.Delete(ctx, name, metav1.DeleteOptions{
@@ -251,8 +312,8 @@ func (d *kubernetesJobDispatcher) DeleteTaskWorkspace(ctx context.Context, task 
 }
 
 func (d *kubernetesJobDispatcher) Inspect(ctx context.Context, execution *model.TaskExecution) (*RuntimeExecutionState, error) {
-	if err := d.validate(execution); err != nil {
-		return nil, err
+	if err := d.validatePersistedJobIdentity(execution); err != nil {
+		return nil, NewPermanentDispatchError(err)
 	}
 	name := kubernetesJobName(execution.ID)
 	job, err := d.kube.BatchV1().Jobs(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
@@ -262,7 +323,11 @@ func (d *kubernetesJobDispatcher) Inspect(ctx context.Context, execution *model.
 	if err != nil {
 		return nil, fmt.Errorf("get Kubernetes Job %q: %w", name, err)
 	}
+	if err := verifyPersistedKubernetesJob(job, execution); err != nil {
+		return nil, NewPermanentDispatchError(err)
+	}
 	state := inspectJob(job)
+	state.InstanceID = string(job.UID)
 	pods, err := d.kube.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: kubernetesExecutionIDLabel + "=" + kubernetesLabelValue(execution.ID),
 	})
@@ -276,7 +341,6 @@ func (d *kubernetesJobDispatcher) Inspect(ctx context.Context, execution *model.
 		}
 	}
 	if pod := newestPod(ownedPods); pod != nil {
-		state.InstanceID = string(pod.UID)
 		applyPodDiagnostics(state, pod)
 	}
 	return state, nil
@@ -295,6 +359,18 @@ func (d *kubernetesJobDispatcher) validate(execution *model.TaskExecution) error
 	}
 	if execution.RuntimeScope != "" && execution.RuntimeScope != d.config.Namespace {
 		return fmt.Errorf("execution runtime scope identity mismatch: scope is %q, want %q", execution.RuntimeScope, d.config.Namespace)
+	}
+	return nil
+}
+
+func (d *kubernetesJobDispatcher) validatePersistedJobIdentity(execution *model.TaskExecution) error {
+	if err := d.validate(execution); err != nil {
+		return err
+	}
+	if execution.RuntimeScope != d.config.Namespace ||
+		execution.RuntimeWorkload != kubernetesJobName(execution.ID) ||
+		strings.TrimSpace(execution.RuntimeInstanceID) == "" {
+		return fmt.Errorf("persisted Kubernetes Job identity is incomplete or mismatched")
 	}
 	return nil
 }
@@ -353,9 +429,9 @@ func normalizedJobSpec(job *batchv1.Job) batchv1.JobSpec {
 		mode := batchv1.NonIndexedCompletion
 		spec.CompletionMode = &mode
 	}
-	if spec.Suspend == nil {
-		spec.Suspend = pointerTo(false)
-	}
+	// Suspension is protocol state: Prepare sets it and Activate clears it.
+	// It is verified separately from immutable workload configuration.
+	spec.Suspend = nil
 	if spec.PodReplacementPolicy == nil {
 		policy := batchv1.TerminatingOrFailed
 		if spec.PodFailurePolicy != nil {

@@ -37,7 +37,7 @@ func TestWorkloadVerifierBindsTokenPodJobAndExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.Target != "kubernetes" || identity.Scope != "anban" || identity.Workload != "job-1" || identity.InstanceID != "pod-uid-1" || identity.ExecutionID != "execution-1" || identity.TaskID != "task-1" || identity.ProjectID != "project-1" || identity.Deadline.IsZero() {
+	if identity.Target != "kubernetes" || identity.Scope != "anban" || identity.Workload != "job-1" || identity.InstanceID != "job-uid-1" || identity.ExecutionID != "execution-1" || identity.TaskID != "task-1" || identity.ProjectID != "project-1" || identity.Deadline.IsZero() {
 		t.Fatalf("identity = %#v", identity)
 	}
 	var _ WorkloadVerifier = verifier

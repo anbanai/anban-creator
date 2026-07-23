@@ -39,6 +39,7 @@ const (
 
 type JobConfig struct {
 	ServerURL         string
+	AllowHTTPServer   bool
 	ExecutionID       string
 	Workspace         string
 	WorkloadTokenFile string
@@ -54,19 +55,19 @@ type bootstrapEnvelope struct {
 }
 
 func BootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error) {
-	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{})
+	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{allowHTTPServer: cfg.AllowHTTPServer})
 }
 
 type bootstrapRequestPolicy struct {
-	allowHTTPLoopback bool
-	client            *http.Client
+	allowHTTPServer bool
+	client          *http.Client
 }
 
 func bootstrapJobWithPolicy(ctx context.Context, cfg JobConfig, policy bootstrapRequestPolicy) (*BootstrapResponse, error) {
 	if strings.TrimSpace(cfg.ServerURL) == "" || strings.TrimSpace(cfg.ExecutionID) == "" || strings.TrimSpace(cfg.Workspace) == "" || strings.TrimSpace(cfg.WorkloadTokenFile) == "" {
 		return nil, fmt.Errorf("server-url, execution-id, workspace, and workload-token-file are required")
 	}
-	serverURL, err := validateBootstrapServerURL(cfg.ServerURL, policy.allowHTTPLoopback)
+	serverURL, err := validateBootstrapServerURL(cfg.ServerURL, policy.allowHTTPServer)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +127,7 @@ func bootstrapJobWithPolicy(ctx context.Context, cfg JobConfig, policy bootstrap
 	return &envelope.Data, nil
 }
 
-func validateBootstrapServerURL(raw string, allowHTTPLoopback bool) (*url.URL, error) {
+func validateBootstrapServerURL(raw string, allowHTTPServer bool) (*url.URL, error) {
 	trimmed := strings.TrimSpace(raw)
 	parsed, err := url.Parse(trimmed)
 	if err != nil || trimmed == "" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || (parsed.Path != "" && parsed.Path != "/") {
@@ -135,11 +136,8 @@ func validateBootstrapServerURL(raw string, allowHTTPLoopback bool) (*url.URL, e
 	if _, err := net.LookupPort("tcp", parsed.Port()); parsed.Port() != "" && err != nil {
 		return nil, fmt.Errorf("bootstrap server URL is invalid")
 	}
-	if parsed.Scheme != "https" {
-		ip := net.ParseIP(parsed.Hostname())
-		if !allowHTTPLoopback || parsed.Scheme != "http" || ip == nil || !ip.IsLoopback() {
-			return nil, fmt.Errorf("bootstrap server URL must use HTTPS")
-		}
+	if parsed.Scheme != "https" && (parsed.Scheme != "http" || !allowHTTPServer) {
+		return nil, fmt.Errorf("bootstrap server URL must use HTTPS")
 	}
 	parsed.Path = ""
 	return parsed, nil

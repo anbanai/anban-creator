@@ -99,7 +99,7 @@ func (d *DockerDispatcher) ResolveRuntime(taskType string) srvconfig.RuntimeImag
 	return RuntimeImageForTask(d.runtimeImages, taskType)
 }
 
-func (d *DockerDispatcher) Dispatch(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
+func (d *DockerDispatcher) Prepare(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
 	if err := d.validateDispatch(execution, task); err != nil {
 		return nil, NewPermanentDispatchError(err)
 	}
@@ -144,6 +144,9 @@ func (d *DockerDispatcher) Dispatch(ctx context.Context, execution *model.TaskEx
 	}
 	identity := &model.RuntimeIdentity{Scope: dockerRuntimeScope, Workload: spec.ContainerName, InstanceID: containerID}
 	if !needsStart {
+		if execution.RuntimeInstanceID == "" {
+			return nil, NewPermanentDispatchError(fmt.Errorf("Docker container %q was activated before its runtime identity was persisted", spec.ContainerName))
+		}
 		return identity, nil
 	}
 
@@ -171,10 +174,46 @@ func (d *DockerDispatcher) Dispatch(ctx context.Context, execution *model.TaskEx
 	if err := d.engine.CopyToContainer(dispatchCtx, containerID, path.Dir(dockerWorkloadTokenFile), bytes.NewReader(archive), containertypes.CopyToContainerOptions{CopyUIDGID: true}); err != nil {
 		return nil, fmt.Errorf("copy workload token into Docker container %q: %w", spec.ContainerName, classifyDockerContainerOperationError(err, execution.RuntimeInstanceID != ""))
 	}
-	if err := d.engine.ContainerStart(dispatchCtx, containerID, containertypes.StartOptions{}); err != nil && !errdefs.IsNotModified(err) {
-		return nil, fmt.Errorf("start Docker container %q: %w", spec.ContainerName, classifyDockerContainerOperationError(err, execution.RuntimeInstanceID != ""))
-	}
 	return identity, nil
+}
+
+func (d *DockerDispatcher) Activate(ctx context.Context, execution *model.TaskExecution) error {
+	if err := d.validateExecution(execution); err != nil {
+		return NewPermanentDispatchError(err)
+	}
+	name := dockerRuntimeContainerName(execution.ID)
+	if execution.RuntimeScope != dockerRuntimeScope || execution.RuntimeWorkload != name || execution.RuntimeInstanceID == "" {
+		return NewPermanentDispatchError(fmt.Errorf("persisted Docker runtime identity is incomplete or mismatched"))
+	}
+	activateCtx, cancel := context.WithTimeout(ctx, time.Duration(d.config.TimeoutSec)*time.Second)
+	defer cancel()
+	inspected, err := d.engine.ContainerInspect(activateCtx, name)
+	if errdefs.IsNotFound(err) {
+		return NewPermanentDispatchError(fmt.Errorf("persisted Docker container %q is missing: %w", name, err))
+	}
+	if err != nil {
+		return fmt.Errorf("inspect Docker container %q before activation: %w", name, classifyDockerAccessOrInputError(err))
+	}
+	if err := verifyDockerExecutionContainer(inspected, execution); err != nil {
+		return NewPermanentDispatchError(err)
+	}
+	if inspected.State != nil && inspected.State.Running {
+		return nil
+	}
+	if inspected.State == nil || inspected.State.Status != containertypes.StateCreated {
+		return NewPermanentDispatchError(fmt.Errorf("Docker container %q cannot be activated from state %q", name, dockerContainerState(inspected.State)))
+	}
+	if err := d.engine.ContainerStart(activateCtx, inspected.ID, containertypes.StartOptions{}); err != nil && !errdefs.IsNotModified(err) {
+		return fmt.Errorf("start Docker container %q: %w", name, classifyDockerContainerOperationError(err, true))
+	}
+	return nil
+}
+
+func dockerContainerState(state *containertypes.State) containertypes.ContainerState {
+	if state == nil {
+		return ""
+	}
+	return state.Status
 }
 
 func (d *DockerDispatcher) ensureVolume(ctx context.Context, desired volume.CreateOptions, kind string, allowCreation bool) error {

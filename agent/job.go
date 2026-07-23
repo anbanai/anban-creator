@@ -14,9 +14,10 @@ type bootstrapJobFunc func(context.Context, JobConfig) (*BootstrapResponse, erro
 func newJobCommand(bootstrap bootstrapJobFunc, run runAgentFunc) *cli.Command {
 	return &cli.Command{
 		Name:  "job",
-		Usage: "run one Kubernetes agent execution",
+		Usage: "run one managed agent workload",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "server-url", Usage: "base server URL", Required: true, Config: cli.StringConfig{TrimSpace: true}},
+			&cli.BoolFlag{Name: "allow-http-server", Usage: "allow an explicitly managed HTTP bootstrap server"},
 			&cli.StringFlag{Name: "execution-id", Usage: "task execution ID", Required: true, Config: cli.StringConfig{TrimSpace: true}},
 			&cli.StringFlag{Name: "workspace", Usage: "workspace directory", Value: "/workspace", Config: cli.StringConfig{TrimSpace: true}},
 			&cli.StringFlag{Name: "workload-token-file", Usage: "projected Kubernetes workload token file", Required: true, Config: cli.StringConfig{TrimSpace: true}},
@@ -24,6 +25,7 @@ func newJobCommand(bootstrap bootstrapJobFunc, run runAgentFunc) *cli.Command {
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			jobCfg := JobConfig{
 				ServerURL:         strings.TrimRight(cmd.String("server-url"), "/"),
+				AllowHTTPServer:   cmd.Bool("allow-http-server"),
 				ExecutionID:       cmd.String("execution-id"),
 				Workspace:         cmd.String("workspace"),
 				WorkloadTokenFile: cmd.String("workload-token-file"),

@@ -45,6 +45,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	backoffLimit := int32(0)
 	activeDeadline := cfg.ActiveDeadlineSeconds
 	ttl := cfg.TTLSecondsAfterFinished
+	suspend := true
 	automountToken := false
 	runAsNonRoot := true
 	runAsRoot := false
@@ -71,6 +72,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 			BackoffLimit:            &backoffLimit,
 			ActiveDeadlineSeconds:   &activeDeadline,
 			TTLSecondsAfterFinished: &ttl,
+			Suspend:                 &suspend,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: copyLabels(labels)},
 				Spec: corev1.PodSpec{

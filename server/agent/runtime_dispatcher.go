@@ -21,7 +21,8 @@ var ErrRuntimeWorkloadNotFound = errors.New("runtime workload not found")
 type RuntimeDispatcher interface {
 	Scope() string
 	ResolveRuntime(string) srvconfig.RuntimeImageSelection
-	Dispatch(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error)
+	Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error)
+	Activate(context.Context, *model.TaskExecution) error
 	Inspect(context.Context, *model.TaskExecution) (*RuntimeExecutionState, error)
 	Delete(context.Context, *model.TaskExecution) error
 }

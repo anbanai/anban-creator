@@ -30,12 +30,13 @@ import (
 
 const dockerDispatcherTestImageID = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-func TestDockerDispatcherCreatesVolumeContainerSecretAndStarts(t *testing.T) {
+func TestDockerDispatcherPreparesThenActivatesContainer(t *testing.T) {
 	engine := newFakeDockerEngine()
 	tokens := dockerDispatcherTestTokens(t)
 	dispatcher := newDockerDispatcherForTest(t, engine, tokens)
+	execution := dockerDispatcherTestExecution()
 
-	identity, err := dispatcher.Dispatch(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+	identity, err := dispatcher.Prepare(context.Background(), execution, dockerDispatcherTestTask())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,8 +44,11 @@ func TestDockerDispatcherCreatesVolumeContainerSecretAndStarts(t *testing.T) {
 		t.Fatalf("identity = %#v", identity)
 	}
 	assertCallSubsequence(t, engine.calls,
-		"volume-create:project", "volume-create:task", "container-create", "archive-copy", "container-start",
+		"volume-create:project", "volume-create:task", "container-create", "archive-copy",
 	)
+	if slices.Contains(engine.calls, "container-start") {
+		t.Fatalf("container started during preparation: calls=%v", engine.calls)
+	}
 	if engine.createdConfig == nil || engine.createdConfig.Image != dockerDispatcherTestExecution().RuntimeImage {
 		t.Fatalf("created config = %#v", engine.createdConfig)
 	}
@@ -89,6 +93,27 @@ func TestDockerDispatcherCreatesVolumeContainerSecretAndStarts(t *testing.T) {
 	if !engine.allDispatchCallsHadDeadline {
 		t.Fatal("Docker dispatch did not apply one execution timeout to Engine calls")
 	}
+	bindDockerRuntimeIdentity(execution, identity)
+	if err := dispatcher.Activate(context.Background(), execution); err != nil {
+		t.Fatal(err)
+	}
+	assertCallSubsequence(t, engine.calls, "archive-copy", "container-start")
+}
+
+func TestDockerDispatcherDoesNotStartBeforeRuntimeIdentityPersistence(t *testing.T) {
+	engine := newFakeDockerEngine()
+	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+
+	identity, err := dispatcher.Prepare(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity == nil || identity.InstanceID == "" {
+		t.Fatalf("prepared identity = %#v", identity)
+	}
+	if slices.Contains(engine.calls, "container-start") {
+		t.Fatalf("container started before identity persistence: calls=%v", engine.calls)
+	}
 }
 
 func TestDockerResumeRequiresExistingTaskVolume(t *testing.T) {
@@ -107,7 +132,7 @@ func TestDockerResumeRequiresExistingTaskVolume(t *testing.T) {
 			execution.RuntimeProfile = model.PlatformMontage
 			execution.RuntimeImage = "registry.example.com/creator-agent-montage@sha256:parent"
 
-			_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), execution, dockerDispatcherTestTask())
+			_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), execution, dockerDispatcherTestTask())
 			if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "original task workspace") {
 				t.Fatalf("Dispatch error = %v, want permanent original task workspace error", err)
 			}
@@ -158,14 +183,14 @@ func TestDockerDispatcherRecoversCreateRacesAndRejectsDrift(t *testing.T) {
 		engine.conflictProjectCreate = true
 		engine.conflictTaskCreate = true
 		engine.conflictContainerCreate = true
-		identity, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+		identity, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
 		if err != nil {
 			t.Fatal(err)
 		}
 		if identity.InstanceID != engine.containerID {
 			t.Fatalf("identity = %#v", identity)
 		}
-		assertCallSubsequence(t, engine.calls, "volume-create:project", "volume-create:task", "container-create", "archive-copy", "container-start")
+		assertCallSubsequence(t, engine.calls, "volume-create:project", "volume-create:task", "container-create", "archive-copy")
 	})
 
 	t.Run("foreign volume", func(t *testing.T) {
@@ -176,7 +201,7 @@ func TestDockerDispatcherRecoversCreateRacesAndRejectsDrift(t *testing.T) {
 			dockerProjectIDLabel: task.ProjectID,
 			dockerUserIDLabel:    "foreign-user",
 		}}
-		_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), dockerDispatcherTestExecution(), task)
+		_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), dockerDispatcherTestExecution(), task)
 		if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "drift") {
 			t.Fatalf("Dispatch error = %v, want permanent volume drift", err)
 		}
@@ -189,7 +214,7 @@ func TestDockerDispatcherRecoversCreateRacesAndRejectsDrift(t *testing.T) {
 		engine := newFakeDockerEngine()
 		engine.conflictContainerCreate = true
 		engine.foreignContainerOnConflict = true
-		_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+		_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
 		if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "drift") {
 			t.Fatalf("Dispatch error = %v, want permanent container drift", err)
 		}
@@ -203,7 +228,7 @@ func TestDockerDispatcherRejectsReplacedPersistedContainer(t *testing.T) {
 	engine := newFakeDockerEngine()
 	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
 	execution := dockerDispatcherTestExecution()
-	identity, err := dispatcher.Dispatch(context.Background(), execution, dockerDispatcherTestTask())
+	identity, err := dispatcher.Prepare(context.Background(), execution, dockerDispatcherTestTask())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +237,7 @@ func TestDockerDispatcherRejectsReplacedPersistedContainer(t *testing.T) {
 	execution.RuntimeInstanceID = "persisted-container-instance"
 	engine.calls = nil
 
-	_, err = dispatcher.Dispatch(context.Background(), execution, dockerDispatcherTestTask())
+	_, err = dispatcher.Prepare(context.Background(), execution, dockerDispatcherTestTask())
 	if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "instance identity mismatch") {
 		t.Fatalf("Dispatch error = %v, want permanent persisted instance mismatch", err)
 	}
@@ -228,7 +253,7 @@ func TestDockerDispatcherRejectsMissingPersistedContainerBeforeMutations(t *test
 	execution.RuntimeWorkload = dockerRuntimeContainerName(execution.ID)
 	execution.RuntimeInstanceID = "persisted-container-instance"
 
-	_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), execution, dockerDispatcherTestTask())
+	_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), execution, dockerDispatcherTestTask())
 	if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "instance identity mismatch") {
 		t.Fatalf("Dispatch error = %v, want permanent missing persisted instance", err)
 	}
@@ -243,7 +268,7 @@ func TestDockerDispatcherClassifiesPermanentInspectErrors(t *testing.T) {
 	t.Run("volume inspect", func(t *testing.T) {
 		engine := newFakeDockerEngine()
 		engine.volumeInspectError = errdefs.Forbidden(errors.New("volume access denied"))
-		_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+		_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
 		if err == nil || !IsPermanentDispatchError(err) {
 			t.Fatalf("Dispatch error = %v, want permanent volume inspect error", err)
 		}
@@ -252,7 +277,7 @@ func TestDockerDispatcherClassifiesPermanentInspectErrors(t *testing.T) {
 	t.Run("container inspect", func(t *testing.T) {
 		engine := newFakeDockerEngine()
 		engine.containerInspectError = errdefs.Unauthorized(errors.New("container access denied"))
-		_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+		_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
 		if err == nil || !IsPermanentDispatchError(err) {
 			t.Fatalf("Dispatch error = %v, want permanent container inspect error", err)
 		}
@@ -262,13 +287,19 @@ func TestDockerDispatcherClassifiesPermanentInspectErrors(t *testing.T) {
 func TestDockerDispatcherTreatsAlreadyStartedContainerAsDesiredState(t *testing.T) {
 	engine := newFakeDockerEngine()
 	engine.startError = errdefs.NotModified(errors.New("container already started"))
+	execution := dockerDispatcherTestExecution()
+	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
 
-	identity, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+	identity, err := dispatcher.Prepare(context.Background(), execution, dockerDispatcherTestTask())
 	if err != nil {
-		t.Fatalf("Dispatch already-started container: %v", err)
+		t.Fatalf("prepare container: %v", err)
 	}
 	if identity == nil || identity.Scope != dockerRuntimeScope || identity.Workload != dockerRuntimeContainerName(dockerDispatcherTestExecution().ID) || identity.InstanceID != engine.containerID {
 		t.Fatalf("identity = %#v", identity)
+	}
+	bindDockerRuntimeIdentity(execution, identity)
+	if err := dispatcher.Activate(context.Background(), execution); err != nil {
+		t.Fatalf("activate already-started container: %v", err)
 	}
 	assertCallSubsequence(t, engine.calls, "container-create", "archive-copy", "container-start")
 }
@@ -281,9 +312,6 @@ func TestDockerDispatcherContainerDisappearanceBeforePersistenceIsRetryable(t *t
 		{name: "copy token", configure: func(engine *fakeDockerEngine) {
 			engine.copyError = errdefs.NotFound(errors.New("container disappeared before archive copy"))
 		}},
-		{name: "start", configure: func(engine *fakeDockerEngine) {
-			engine.startError = errdefs.NotFound(errors.New("container disappeared before start"))
-		}},
 		{name: "create conflict inspect", configure: func(engine *fakeDockerEngine) {
 			engine.conflictContainerCreate = true
 			engine.containerMissingOnConflict = true
@@ -293,7 +321,7 @@ func TestDockerDispatcherContainerDisappearanceBeforePersistenceIsRetryable(t *t
 		t.Run(testCase.name, func(t *testing.T) {
 			engine := newFakeDockerEngine()
 			testCase.configure(engine)
-			_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+			_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
 			if err == nil {
 				t.Fatal("Dispatch succeeded after pre-persistence container disappearance")
 			}
@@ -301,6 +329,56 @@ func TestDockerDispatcherContainerDisappearanceBeforePersistenceIsRetryable(t *t
 				t.Fatalf("Dispatch error = %v, want retryable container disappearance", err)
 			}
 		})
+	}
+}
+
+func TestDockerActivationIsIdentityBoundAndIdempotent(t *testing.T) {
+	engine := newFakeDockerEngine()
+	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+	execution := dockerDispatcherTestExecution()
+	identity, err := dispatcher.Prepare(context.Background(), execution, dockerDispatcherTestTask())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("mismatched persisted instance", func(t *testing.T) {
+		mismatched := *execution
+		bindDockerRuntimeIdentity(&mismatched, identity)
+		mismatched.RuntimeInstanceID = "replacement-instance"
+		err := dispatcher.Activate(context.Background(), &mismatched)
+		if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "instance identity mismatch") {
+			t.Fatalf("Activate error = %v, want permanent instance mismatch", err)
+		}
+	})
+
+	bindDockerRuntimeIdentity(execution, identity)
+	if err := dispatcher.Activate(context.Background(), execution); err != nil {
+		t.Fatal(err)
+	}
+	engine.calls = nil
+	if err := dispatcher.Activate(context.Background(), execution); err != nil {
+		t.Fatalf("idempotent Activate: %v", err)
+	}
+	if slices.Contains(engine.calls, "container-start") {
+		t.Fatalf("running container was started again: calls=%v", engine.calls)
+	}
+}
+
+func TestDockerActivationDoesNotRecreateMissingContainer(t *testing.T) {
+	engine := newFakeDockerEngine()
+	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+	execution := dockerDispatcherTestExecution()
+	bindDockerRuntimeIdentity(execution, &model.RuntimeIdentity{
+		Scope: dockerRuntimeScope, Workload: dockerRuntimeContainerName(execution.ID), InstanceID: "missing-instance",
+	})
+	err := dispatcher.Activate(context.Background(), execution)
+	if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("Activate error = %v, want permanent missing container", err)
+	}
+	for _, call := range engine.calls {
+		if strings.Contains(call, "create") {
+			t.Fatalf("activation recreated missing resource: calls=%v", engine.calls)
+		}
 	}
 }
 
@@ -320,7 +398,7 @@ func TestDockerDispatcherValidatesBeforeDockerMutation(t *testing.T) {
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
 			engine := newFakeDockerEngine()
-			_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Dispatch(context.Background(), testCase.execution, testCase.task)
+			_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), testCase.execution, testCase.task)
 			if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), testCase.want) {
 				t.Fatalf("Dispatch error = %v, want permanent %q", err, testCase.want)
 			}
@@ -514,6 +592,12 @@ func dockerDispatcherTestExecution() *model.TaskExecution {
 		ID: "docker-execution-1", TaskID: "docker-task-1", Attempt: 1,
 		RuntimeProfile: model.PlatformArticle, RuntimeImage: dockerDispatcherTestImages()[model.PlatformArticle],
 	}
+}
+
+func bindDockerRuntimeIdentity(execution *model.TaskExecution, identity *model.RuntimeIdentity) {
+	execution.RuntimeScope = identity.Scope
+	execution.RuntimeWorkload = identity.Workload
+	execution.RuntimeInstanceID = identity.InstanceID
 }
 
 func dockerDispatcherTestTask() *model.Task {

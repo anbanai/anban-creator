@@ -235,8 +235,6 @@ func main() {
 	}
 	var bootstrapSvc *service.AgentBootstrapService
 	var runtimeReconciler *agent.RuntimeReconciler
-	var activeDeadline time.Duration
-	var reconcilerConfig agent.RuntimeReconcilerConfig
 	switch cfg.Claude.Executor {
 	case "docker":
 		dockerClient, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
@@ -252,7 +250,6 @@ func main() {
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker workload verifier")
 		}
-		activeDeadline = time.Duration(cfg.Claude.Docker.TimeoutSec) * time.Second
 		log.Info().
 			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformArticle).Image).
 			Int64("cpu_cores", cfg.Claude.Docker.CPUCores).
@@ -276,12 +273,6 @@ func main() {
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Kubernetes workload verifier")
 		}
-		activeDeadline = time.Duration(cfg.Claude.Kubernetes.ActiveDeadlineSeconds) * time.Second
-		reconcilerConfig = agent.RuntimeReconcilerConfig{
-			CompletionGrace:    time.Duration(cfg.Claude.Kubernetes.CompletionGraceSeconds) * time.Second,
-			PreStartRetryLimit: cfg.Claude.Kubernetes.PreStartRetryLimit,
-			HeartbeatTimeout:   time.Duration(cfg.Claude.Kubernetes.HeartbeatTimeoutSeconds) * time.Second,
-		}
 		log.Info().
 			Str("namespace", cfg.Claude.Kubernetes.Namespace).
 			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformArticle).Image).
@@ -289,6 +280,8 @@ func main() {
 	default:
 		log.Fatal().Str("executor", cfg.Claude.Executor).Msg("unsupported Claude executor")
 	}
+	reconcilerConfig := managedRuntimeReconcilerConfig(cfg.Claude.Executor, cfg.Claude.Docker, cfg.Claude.Kubernetes)
+	activeDeadline := reconcilerConfig.ActiveDeadline
 	bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{
 		Model:                   cfg.Claude.Models.Default,
 		MaxTurns:                cfg.Claude.MaxTurns,
@@ -682,6 +675,12 @@ func main() {
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")
 	}
 
+	// Use one signal-derived lifecycle for runtime reconciliation and server shutdown.
+	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
+
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
@@ -694,10 +693,9 @@ func main() {
 		defer schedulerCancel()
 		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log, rdb)
 	}
+	var runtimeReconcilerDone <-chan struct{}
 	if runtimeReconciler != nil {
-		reconcilerCtx, reconcilerCancel := context.WithCancel(context.Background())
-		defer reconcilerCancel()
-		go runtimeReconciler.Run(reconcilerCtx)
+		runtimeReconcilerDone = startRuntimeReconciler(ctx, runtimeReconciler)
 	}
 
 	// 15.2 Clean up expirable derived records without touching NAS task workspaces.
@@ -789,12 +787,6 @@ func main() {
 	// 18. Start HTTP server with graceful shutdown.
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
-	// Use signal.NotifyContext for graceful shutdown.
-	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	ctx, cancel := context.WithCancel(signalCtx)
-	defer cancel()
-
 	var billingWorkerWG sync.WaitGroup
 	if fixedBilling != nil && fixedBilling.Worker != nil {
 		billingWorkerWG.Add(1)
@@ -842,6 +834,10 @@ func main() {
 		if asynqServer != nil {
 			asynqServer.Shutdown()
 			log.Info().Msg("Asynq server stopped")
+		}
+
+		if runtimeReconcilerDone != nil {
+			<-runtimeReconcilerDone
 		}
 
 		if runtimeClientCloser != nil {

@@ -134,7 +134,7 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 		}
 	}
 	return &WorkloadIdentity{
-		RuntimeIdentity: model.RuntimeIdentity{Scope: v.namespace, Workload: job.Name, InstanceID: podUID},
+		RuntimeIdentity: model.RuntimeIdentity{Scope: v.namespace, Workload: job.Name, InstanceID: string(job.UID)},
 		Target:          "kubernetes",
 		ExecutionID:     requestedExecutionID,
 		TaskID:          labels[kubernetesTaskIDLabel],

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -14,11 +15,13 @@ import (
 )
 
 type reconcileTestDispatcher struct {
-	mu         sync.Mutex
-	states     map[string]*RuntimeExecutionState
-	errs       map[string]error
-	deleteErrs []error
-	deleted    []string
+	mu           sync.Mutex
+	states       map[string]*RuntimeExecutionState
+	errs         map[string]error
+	activateErrs map[string]error
+	activated    []string
+	deleteErrs   []error
+	deleted      []string
 }
 
 var _ RuntimeDispatcher = (*reconcileTestDispatcher)(nil)
@@ -29,8 +32,14 @@ func (*reconcileTestDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSel
 
 func (*reconcileTestDispatcher) Scope() string { return "test" }
 
-func (*reconcileTestDispatcher) Dispatch(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
+func (*reconcileTestDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
 	return &model.RuntimeIdentity{Scope: "test", Workload: "runtime-" + execution.ID}, nil
+}
+func (d *reconcileTestDispatcher) Activate(_ context.Context, execution *model.TaskExecution) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.activated = append(d.activated, execution.ID)
+	return d.activateErrs[execution.ID]
 }
 func (d *reconcileTestDispatcher) Delete(_ context.Context, execution *model.TaskExecution) error {
 	d.mu.Lock()
@@ -332,6 +341,76 @@ func TestRuntimeReconcilerResumesCreatedDispatch(t *testing.T) {
 	}
 	if len(service.dispatched) != 1 || service.dispatched[0] != execution.ID {
 		t.Fatalf("dispatched=%v", service.dispatched)
+	}
+}
+
+func TestRuntimeReconcilerActivatesPersistedPendingWorkload(t *testing.T) {
+	execution := &model.TaskExecution{
+		ID: "prepared", Status: model.TaskExecutionStarting,
+		RuntimeScope: "test", RuntimeWorkload: "runtime-prepared", RuntimeInstanceID: "instance-prepared",
+	}
+	dispatcher := &reconcileTestDispatcher{
+		states: map[string]*RuntimeExecutionState{execution.ID: {Phase: RuntimePhasePending}}, errs: map[string]error{},
+	}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{}, zerolog.Nop())
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.mu.Lock()
+	defer dispatcher.mu.Unlock()
+	if len(dispatcher.activated) != 1 || dispatcher.activated[0] != execution.ID {
+		t.Fatalf("activated = %v, want crash recovery activation", dispatcher.activated)
+	}
+}
+
+func TestRuntimeReconcilerPermanentActivationFailureTerminalizesAndCleansUp(t *testing.T) {
+	execution := &model.TaskExecution{
+		ID: "activation-failed", Status: model.TaskExecutionStarting,
+		RuntimeScope: "test", RuntimeWorkload: "runtime-activation-failed", RuntimeInstanceID: "instance-activation-failed",
+	}
+	dispatcher := &reconcileTestDispatcher{
+		states:       map[string]*RuntimeExecutionState{execution.ID: {Phase: RuntimePhasePending}},
+		errs:         map[string]error{},
+		activateErrs: map[string]error{execution.ID: NewPermanentDispatchError(errors.New("activation identity drift"))},
+	}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{}, zerolog.Nop())
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if len(service.failures) != 1 || service.failures[0].reason != "activation_failed" || service.cleanup[execution.ID] != "done" {
+		t.Fatalf("failures=%v cleanup=%v", service.failures, service.cleanup)
+	}
+}
+
+func TestRuntimeReconcilerActiveDeadlineTimesOutNeverBootstrappedWorkload(t *testing.T) {
+	now := time.Now()
+	execution := &model.TaskExecution{
+		ID: "never-bootstrapped", Status: model.TaskExecutionStarting, CreatedAt: now.Add(-11 * time.Minute),
+		RuntimeScope: "test", RuntimeWorkload: "runtime-never-bootstrapped", RuntimeInstanceID: "instance-never-bootstrapped",
+	}
+	dispatcher := &reconcileTestDispatcher{
+		states: map[string]*RuntimeExecutionState{execution.ID: {Phase: RuntimePhasePending}}, errs: map[string]error{},
+	}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	cfg := RuntimeReconcilerConfig{}
+	field := reflect.ValueOf(&cfg).Elem().FieldByName("ActiveDeadline")
+	if !field.IsValid() || !field.CanSet() {
+		t.Fatal("RuntimeReconcilerConfig has no ActiveDeadline hard cap")
+	}
+	field.Set(reflect.ValueOf(10 * time.Minute))
+	reconciler := NewRuntimeReconciler(dispatcher, service, cfg, zerolog.Nop())
+	reconciler.now = func() time.Time { return now }
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if len(service.failures) != 1 || service.failures[0].status != model.TaskExecutionTimedOut || service.failures[0].reason != "deadline_exceeded" || service.cleanup[execution.ID] != "done" {
+		t.Fatalf("failures=%v cleanup=%v", service.failures, service.cleanup)
 	}
 }
 

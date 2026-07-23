@@ -179,6 +179,25 @@ func TestBootstrapProductionServerURLRequiresHTTPS(t *testing.T) {
 	}
 }
 
+func TestBootstrapJobRejectsHTTPByDefault(t *testing.T) {
+	_, err := BootstrapJob(context.Background(), JobConfig{
+		ServerURL: "http://creator-server:8080", ExecutionID: "execution-1", Workspace: t.TempDir(), WorkloadTokenFile: filepath.Join(t.TempDir(), "token"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("BootstrapJob HTTP error = %v, want default HTTPS rejection", err)
+	}
+}
+
+func TestValidateBootstrapServerURLAllowsExplicitManagedHTTPServer(t *testing.T) {
+	parsed, err := validateBootstrapServerURL("http://creator-server:8080", true)
+	if err != nil {
+		t.Fatalf("explicit managed HTTP server rejected: %v", err)
+	}
+	if parsed.Scheme != "http" || parsed.Host != "creator-server:8080" {
+		t.Fatalf("parsed URL = %s", parsed)
+	}
+}
+
 func TestReadProjectedTokenRejectsUnsafeTargets(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "root")
@@ -616,5 +635,5 @@ func testExecutionToken(t *testing.T, executionID, taskID, projectID string) str
 }
 
 func testBootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error) {
-	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{allowHTTPLoopback: true})
+	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{allowHTTPServer: true})
 }
