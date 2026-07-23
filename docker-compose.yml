@@ -122,10 +122,21 @@ services:
         condition: service_healthy
       wcflink:
         condition: service_started
+    # Compose uses the root .env for interpolation only unless it is also an
+    # env_file. Forward it so every ${...} reference in server/config.yaml can
+    # be configured without duplicating optional integration variables here.
+    env_file:
+      - .env
     environment:
       ANBAN_DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-anban_creator_dev}@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local"
       ANBAN_REDIS_ADDR: "redis:6379"
       ANBAN_BILLING_ADMIN_API_KEY: "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}"
+      ANBAN_JWT_SECRET_KEY: "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}"
+      ANBAN_OSS_ENDPOINT: "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}"
+      ANBAN_OSS_ACCESS_KEY_ID: "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}"
+      ANBAN_OSS_ACCESS_KEY_SECRET: "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}"
+      CLAUDE_CODE_AUTH_TOKEN: "${CLAUDE_CODE_AUTH_TOKEN:?CLAUDE_CODE_AUTH_TOKEN is required}"
+      MOONSHOT_API_KEY: "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}"
       ANBAN_AGENT_EXECUTOR: "docker"
       ANBAN_CLAUDE_AGENT_SERVER_URL: "http://server:8080"
       ANBAN_AGENT_EXECUTION_TOKEN_SECRET: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}"

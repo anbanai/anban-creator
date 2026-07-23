@@ -69,7 +69,7 @@ type deploymentDoc struct {
 	} `yaml:"spec"`
 }
 
-func TestACKAgentRuntimeManifest(t *testing.T) {
+func TestKubernetesAgentRuntime(t *testing.T) {
 	raw, err := os.ReadFile("../deploy/k8s/ack-agent-runtime.yaml")
 	if err != nil {
 		t.Fatalf("read ACK agent runtime manifest: %v", err)
@@ -205,6 +205,7 @@ func TestACKAgentRuntimeManifest(t *testing.T) {
 		t.Fatalf("server config file mounts = %d, want exactly one", configMounts)
 	}
 	assertDeploymentSecretEnv(t, deployment, "ANBAN_BILLING_ADMIN_API_KEY", "anban-billing-admin-api-key", "api-key")
+	assertDeploymentSecretEnv(t, deployment, "ANBAN_AGENT_EXECUTION_TOKEN_SECRET", "anban-agent-execution-token", "token-secret")
 	assertDeploymentTLSVolume(t, deployment, "anban-server-tls", "/var/run/secrets/anban-server-tls", "anban-server-tls", []string{"tls.crt", "tls.key"})
 	assertDeploymentTLSVolume(t, deployment, "anban-internal-ca", "/var/run/secrets/anban-internal-ca", "anban-internal-ca", []string{"ca.crt"})
 

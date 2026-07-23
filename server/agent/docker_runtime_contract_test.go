@@ -6,9 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"gopkg.in/yaml.v3"
 )
 
 func TestCreatorAgentImageNamingContract(t *testing.T) {
@@ -994,6 +998,189 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 			t.Fatalf("Makefile missing Docker socket group contract %q", want)
 		}
 	}
+}
+
+func TestDockerRuntimeContract(t *testing.T) {
+	root := repositoryRoot(t)
+
+	t.Run("Compose configures the scheduler without a persistent Agent", func(t *testing.T) {
+		body := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
+		var compose struct {
+			Services map[string]struct {
+				Environment map[string]string `yaml:"environment"`
+				EnvFile     []string          `yaml:"env_file"`
+				Volumes     []string          `yaml:"volumes"`
+				GroupAdd    []string          `yaml:"group_add"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal([]byte(body), &compose); err != nil {
+			t.Fatalf("parse docker-compose.yml: %v", err)
+		}
+		server, ok := compose.Services["server"]
+		if !ok {
+			t.Fatal("docker-compose.yml has no server service")
+		}
+		for name, want := range map[string]string{
+			"ANBAN_AGENT_EXECUTOR":               "docker",
+			"ANBAN_AGENT_IMAGE_ARTICLE":          "creator-agent-article:latest",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
+			"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET": "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
+			"ANBAN_BILLING_ADMIN_API_KEY":        "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
+			"ANBAN_JWT_SECRET_KEY":               "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
+			"ANBAN_OSS_ENDPOINT":                 "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
+			"ANBAN_OSS_ACCESS_KEY_ID":            "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
+			"ANBAN_OSS_ACCESS_KEY_SECRET":        "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
+			"CLAUDE_CODE_AUTH_TOKEN":             "${CLAUDE_CODE_AUTH_TOKEN:?CLAUDE_CODE_AUTH_TOKEN is required}",
+			"MOONSHOT_API_KEY":                   "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
+		} {
+			if got := server.Environment[name]; got != want {
+				t.Errorf("server environment %s = %q, want %q", name, got, want)
+			}
+		}
+		if _, exists := compose.Services["agent"]; exists {
+			t.Fatal("docker-compose.yml must not define a persistent agent service")
+		}
+		if len(server.EnvFile) != 1 || server.EnvFile[0] != ".env" {
+			t.Fatalf("server env_file = %v, want root .env", server.EnvFile)
+		}
+		if !containsString(server.Volumes, "/var/run/docker.sock:/var/run/docker.sock") {
+			t.Fatalf("server volumes = %v, want Docker daemon socket", server.Volumes)
+		}
+		if !containsString(server.GroupAdd, "${DOCKER_GID:-0}") {
+			t.Fatalf("server group_add = %v, want Docker socket group", server.GroupAdd)
+		}
+		for _, volume := range server.Volumes {
+			if strings.Contains(volume, ":/workspace") || strings.Contains(volume, ":/app/data/workspace") {
+				t.Fatalf("server retains persistent Agent workspace mount %q", volume)
+			}
+		}
+
+		dotenv := dotenvAssignments(readTextFile(t, filepath.Join(root, ".env.example")))
+		for _, name := range []string{
+			"ANBAN_BILLING_ADMIN_API_KEY",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
+			"ANBAN_JWT_SECRET_KEY",
+			"ANBAN_OSS_ENDPOINT",
+			"ANBAN_OSS_ACCESS_KEY_ID",
+			"ANBAN_OSS_ACCESS_KEY_SECRET",
+			"CLAUDE_CODE_AUTH_TOKEN",
+			"MOONSHOT_API_KEY",
+		} {
+			if _, ok := dotenv[name]; !ok {
+				t.Errorf(".env.example missing required Server variable %s", name)
+			}
+		}
+	})
+
+	t.Run("repository config loads with the documented Compose environment", func(t *testing.T) {
+		configPath := filepath.Join(root, "server", "config.yaml")
+		configBody := readTextFile(t, configPath)
+		envReference := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`)
+		for _, match := range envReference.FindAllStringSubmatch(configBody, -1) {
+			t.Setenv(match[1], "")
+		}
+		for name, value := range map[string]string{
+			"ANBAN_DATABASE_DSN":                 "root:dev@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local",
+			"ANBAN_REDIS_ADDR":                   "redis:6379",
+			"ANBAN_BILLING_ADMIN_API_KEY":        "test-billing-admin-key",
+			"ANBAN_AGENT_EXECUTOR":               "docker",
+			"ANBAN_CLAUDE_AGENT_SERVER_URL":      "http://server:8080",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET": "0123456789abcdef0123456789abcdef",
+			"ANBAN_AGENT_IMAGE_ARTICLE":          "creator-agent-article:latest",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
+			"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
+			"ANBAN_JWT_SECRET_KEY":               "0123456789abcdef0123456789abcdef",
+			"ANBAN_OSS_ENDPOINT":                 "oss-cn-test.aliyuncs.com",
+			"ANBAN_OSS_ACCESS_KEY_ID":            "test-access-key-id",
+			"ANBAN_OSS_ACCESS_KEY_SECRET":        "test-access-key-secret",
+			"CLAUDE_CODE_AUTH_TOKEN":             "test-claude-auth-token",
+			"MOONSHOT_API_KEY":                   "test-moonshot-api-key",
+		} {
+			t.Setenv(name, value)
+		}
+
+		cfg, err := srvconfig.NewConfig(configPath)
+		if err != nil {
+			t.Fatalf("load repository config with documented Compose environment: %v", err)
+		}
+		if cfg.Claude.Executor != "docker" || cfg.Storage.Provider != "oss" || cfg.Storage.Endpoint != "oss-cn-test.aliyuncs.com" {
+			t.Fatalf("loaded Compose config = executor %q storage %q/%q", cfg.Claude.Executor, cfg.Storage.Provider, cfg.Storage.Endpoint)
+		}
+	})
+
+	t.Run("current deployment documentation describes live managed dispatch", func(t *testing.T) {
+		docs := map[string]string{
+			"README.md":               readTextFile(t, filepath.Join(root, "README.md")),
+			"AGENTS.md":               readTextFile(t, filepath.Join(root, "AGENTS.md")),
+			"docs/montage-upgrade.md": readTextFile(t, filepath.Join(root, "docs", "montage-upgrade.md")),
+		}
+		normalizedDocs := make(map[string]string, len(docs))
+		for path, body := range docs {
+			normalizedDocs[path] = strings.Join(strings.Fields(body), " ")
+			for _, forbidden := range []string{
+				"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME",
+				"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR",
+				"ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE",
+				"ANBAN_ARTICLE_AGENT_IMAGE",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("%s retains obsolete variable %s", path, forbidden)
+				}
+			}
+			if regexp.MustCompile(`(?m)^\s*(article_image|image_profiles):`).MatchString(body) {
+				t.Errorf("%s retains an obsolete literal YAML key", path)
+			}
+		}
+
+		for _, want := range []string{
+			"ANBAN_AGENT_EXECUTOR",
+			"ANBAN_AGENT_IMAGE_ARTICLE",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE",
+			"ANBAN_AGENT_IMAGE_MONTAGE",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
+			"never builds missing runtime images",
+			"fresh container",
+			"runtime owns the task workspace and output",
+			"/var/run/docker.sock",
+			"immutable image digests",
+		} {
+			if !strings.Contains(normalizedDocs["README.md"], want) {
+				t.Errorf("README.md missing managed dispatch contract %q", want)
+			}
+		}
+		operatorDocs := normalizedDocs["AGENTS.md"] + " " + normalizedDocs["docs/montage-upgrade.md"]
+		for _, want := range []string{
+			"server never builds a missing runtime image",
+			"fresh container",
+			"runtime owns its workspace and output",
+			"/workspace/openmontage",
+		} {
+			if !strings.Contains(strings.ToLower(operatorDocs), strings.ToLower(want)) {
+				t.Errorf("operator documentation missing managed dispatch rule %q", want)
+			}
+		}
+
+		obsolete := filepath.Join(root, "docs", "superpowers", "specs", "2026-04-15-persistent-docker-executor-design.md")
+		if _, err := os.Stat(obsolete); !os.IsNotExist(err) {
+			t.Errorf("superseded persistent executor design must be removed; stat error = %v", err)
+		}
+	})
+}
+
+func dotenvAssignments(body string) map[string]string {
+	assignments := make(map[string]string)
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, value, ok := strings.Cut(line, "=")
+		if ok {
+			assignments[strings.TrimSpace(name)] = value
+		}
+	}
+	return assignments
 }
 
 func TestNoStaleDockerfileReferences(t *testing.T) {

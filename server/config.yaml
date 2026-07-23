@@ -345,12 +345,6 @@ email:
   code_ttl: 5m
   code_length: 6
 
-funasr:
-  base_url: "${ANBAN_FUNASR_BASE_URL}"
-  api_key: "${ANBAN_FUNASR_API_KEY}"
-  model: "fun-asr"
-  timeout: 10m
-
 seednote:
   base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://seednote:18060}"
   timeout: 30
