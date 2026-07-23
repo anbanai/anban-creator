@@ -33,7 +33,6 @@ func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 		"`generate_image`",
 		"`analyze_image`",
 		"`download_image`",
-		"`prepare_workspace`",
 		"`update_task_progress`",
 		"ANBAN_API_URL",
 		"ANBAN_DEFAULT_PROJECT",
@@ -41,7 +40,7 @@ func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 		"无法看到 `generate_image` 等 MCP 能力",
 		"停止并报告 MCP 工具未注入",
 		"不要绕过 MCP",
-		"prepare_workspace 返回的 path 可能是相对路径",
+		"runtime 已预创建的 `output/`",
 		"如果为空，调用 `list_projects`",
 	}
 	if !strings.Contains(frontmatter, "\nskills:") {
@@ -52,7 +51,7 @@ func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 			t.Fatalf("designer agent missing required term %q", term)
 		}
 	}
-	for _, forbidden := range []string{"`Skill` 工具", "anban:line-art-coloring", "不要在 Agent frontmatter 预加载"} {
+	for _, forbidden := range []string{"`Skill` 工具", "anban:line-art-coloring", "不要在 Agent frontmatter 预加载", "prepare_workspace", "$DIR"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("designer agent contains obsolete Skill loading instruction %q", forbidden)
 		}
@@ -122,9 +121,8 @@ func TestLineArtColoringSkillDocumentsRuntimeLimits(t *testing.T) {
 		"file_path` 方式分析有 10MB 限制",
 		"compress_image",
 		"upload_image",
-		"output_path` 是 MCP 服务器端路径",
-		"/tmp/anban-creator-line-art",
-		"prepare_workspace 返回的 path 可能是相对路径",
+		"runtime 已预创建的 `output/`",
+		"output_path` 使用任务相对路径 `output/",
 		"size` 是宽高比提示",
 		"从原始线稿推断最接近的支持比例",
 		"Prompt 控制在 500 词以内",
@@ -195,8 +193,8 @@ func TestLineArtColoringDocsMatchAnalyzeImageSingleImageSemantics(t *testing.T) 
 		"先为原始线稿生成线稿指纹",
 		"将上色图审计结果与线稿指纹逐项比对",
 		"同时传 `file_path` 和 `image_url` 时服务端只会使用 `file_path`",
-		"不能把 `download_image` 当作写入 `$DIR/colored_NN.png` 的本地归档步骤",
-		"下载 `download_url` 到 `$DIR/colored_NN.png`",
+		"不能把 `download_image` 当作写入 `output/colored_NN.png` 的本地归档步骤",
+		"下载 `download_url` 到 `output/colored_NN.png`",
 	}
 	for _, term := range required {
 		if !strings.Contains(all, term) {
@@ -206,7 +204,7 @@ func TestLineArtColoringDocsMatchAnalyzeImageSingleImageSemantics(t *testing.T) 
 
 	banned := []string{
 		"file_path=上色图服务器端路径, image_url=原始线稿CDN_URL",
-		"用 `download_image` 或返回的 `download_url` 下载到 `$DIR/colored_NN.png`",
+		"用 `download_image` 或返回的 `download_url` 下载到 `output/colored_NN.png`",
 	}
 	for _, term := range banned {
 		if strings.Contains(all, term) {

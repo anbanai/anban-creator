@@ -53,6 +53,8 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		"与归档",
 		"归档交付",
 		"→ 归档",
+		"prepare_workspace",
+		"$DIR",
 	}
 
 	for _, relativePath := range paths {
@@ -84,16 +86,15 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		t.Run(relativePath+"/canonical-output", func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
 			for _, term := range []string{
-				"prepare_workspace",
 				"$TASK_ID",
-				"$DIR",
-				"task_files",
-				"execution_id",
-				"OSS",
+				"output/",
 			} {
 				if !strings.Contains(body, term) {
 					t.Errorf("%s missing canonical server task output term %q", relativePath, term)
 				}
+			}
+			if strings.Contains(relativePath, "/agents/") && !strings.Contains(strings.ToLower(body), "runtime") {
+				t.Errorf("%s missing runtime-owned workspace contract", relativePath)
 			}
 			assertNoDeliverableRelocationCommands(t, relativePath, body)
 		})
@@ -126,8 +127,8 @@ func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
-			if strings.Contains(body, "$DIR/.anban-creator/products") {
-				t.Fatalf("%s incorrectly resolves product photos under $DIR", relativePath)
+			if strings.Contains(body, "output/.anban-creator/products") {
+				t.Fatalf("%s incorrectly resolves product photos under output/", relativePath)
 			}
 			const definition = "将 `ecommerce.product_photo_dir` 读取为 `$PRODUCT_PHOTO_DIR`"
 			assertVariableDefinedBeforeUse(t, relativePath, body, "$PRODUCT_PHOTO_DIR", definition)
@@ -156,7 +157,7 @@ func TestCodexOverviewDocsUseCanonicalTaskDelivery(t *testing.T) {
 				if regexp.MustCompile(`(?i)\bArchive\b`).MatchString(pipeline) {
 					t.Errorf("%s contains legacy Archive pipeline step: %s", relativePath, pipeline)
 				}
-				for _, required := range []string{"$DIR", "delivery validation"} {
+				for _, required := range []string{"output/", "delivery validation"} {
 					if !strings.Contains(strings.ToLower(pipeline), strings.ToLower(required)) {
 						t.Errorf("%s pipeline missing canonical delivery term %q: %s", relativePath, required, pipeline)
 					}
@@ -191,14 +192,13 @@ func TestDeliverableRelocationCommandDetection(t *testing.T) {
 		body string
 		want bool
 	}{
-		{name: "move deliverable set to archive", body: `mv "$DIR"/* "$ARCHIVE_DIR"/`, want: true},
-		{name: "copy result directory to archive", body: `cp -R "$DIR" "$ARCHIVE_DIR"`, want: true},
-		{name: "rsync result directory to archive", body: `rsync -a "$DIR/" "$ARCHIVE_DIR/"`, want: true},
-		{name: "move result to title suffix", body: `mv "$DIR" "$DIR-$TITLE"`, want: true},
-		{name: "move result to archive suffix", body: `mv "$DIR" "$DIR_ARCHIVE"`, want: true},
-		{name: "move braced result to suffix", body: `mv "${DIR}" "${DIR}-archive"`, want: true},
-		{name: "copy download into result file", body: `cp "$DOWNLOAD" "$DIR/cover.png"`, want: false},
-		{name: "move temporary file within result", body: `mv "$DIR/.tmp" "$DIR/final.json"`, want: false},
+		{name: "move deliverable set to archive", body: `mv output/* archive/`, want: true},
+		{name: "copy result directory to archive", body: `cp -R output archive`, want: true},
+		{name: "rsync result directory to archive", body: `rsync -a output/ archive/`, want: true},
+		{name: "move result to title suffix", body: `mv output output-title`, want: true},
+		{name: "move result to archive suffix", body: `mv output output-archive`, want: true},
+		{name: "copy download into result file", body: `cp "$DOWNLOAD" output/cover.png`, want: false},
+		{name: "move temporary file within result", body: `mv output/.tmp output/final.json`, want: false},
 		{name: "normal non result command", body: `mv "$DOWNLOAD.tmp" "$DOWNLOAD"`, want: false},
 		{name: "prose policy", body: "不得移动、复制或按标题重命名成果目录", want: false},
 	}
@@ -250,11 +250,11 @@ func findDeliverableRelocationCommand(body string) string {
 			continue
 		}
 		destination := normalizeShellPath(args[len(args)-1])
-		if isUnderDIR(destination) {
+		if isUnderOutput(destination) {
 			continue
 		}
 		for _, source := range args[:len(args)-1] {
-			if isUnderDIR(normalizeShellPath(source)) {
+			if isUnderOutput(normalizeShellPath(source)) {
 				return command
 			}
 		}
@@ -266,9 +266,8 @@ func normalizeShellPath(path string) string {
 	return strings.Trim(strings.ReplaceAll(path, `"`, ""), "' ,.;")
 }
 
-func isUnderDIR(path string) bool {
-	return path == "$DIR" || strings.HasPrefix(path, "$DIR/") ||
-		path == "${DIR}" || strings.HasPrefix(path, "${DIR}/")
+func isUnderOutput(path string) bool {
+	return path == "output" || strings.HasPrefix(path, "output/")
 }
 
 func indexAfterText(body, needle string, after int) int {

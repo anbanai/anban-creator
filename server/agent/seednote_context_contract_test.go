@@ -44,12 +44,12 @@ func TestClaudeSeednoteAgentDeclaresPhaseSkillsWithoutInvocationBoilerplate(t *t
 		}
 	}
 	for _, want := range []string{
-		"$DIR/topic-analysis.md",
-		"$DIR/source-analysis.md",
-		"$DIR/viral-template.json",
-		"$DIR/content.md",
-		"$DIR/image-plan.md",
-		"$DIR/image-review.md",
+		"output/topic-analysis.md",
+		"output/source-analysis.md",
+		"output/viral-template.json",
+		"output/content.md",
+		"output/image-plan.md",
+		"output/image-review.md",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("%s missing file-backed phase contract %q", path, want)

@@ -33,9 +33,9 @@ func TestLiveSliceSkillFiles(t *testing.T) {
 			"智能切片",
 			"听悟",
 			"live video slicing",
-			"ffprobe -v error -show_format -show_streams -of json \"$VIDEO\" > \"$DIR/metadata.json\"",
-			"ffmpeg -y -i \"$VIDEO\" -vn -ac 1 -ar 16000 -codec:a libmp3lame -q:a 4 \"$DIR/audio.mp3\"",
-			"ffmpeg -y -ss 0 -i \"$VIDEO\" -frames:v 1 -q:v 2 \"$DIR/cover.jpg\"",
+			"ffprobe -v error -show_format -show_streams -of json \"$VIDEO\" > \"output/metadata.json\"",
+			"ffmpeg -y -i \"$VIDEO\" -vn -ac 1 -ar 16000 -codec:a libmp3lame -q:a 4 \"output/audio.mp3\"",
+			"ffmpeg -y -ss 0 -i \"$VIDEO\" -frames:v 1 -q:v 2 \"output/cover.jpg\"",
 			"ffmpeg -y -ss \"$START\" -i \"$VIDEO\" -t \"$DURATION\" -c copy \"$OUT\"",
 			"ffmpeg -y -ss \"$START\" -i \"$VIDEO\" -t \"$DURATION\" -c:v libx264 -c:a aac \"$OUT\"",
 			"get_media_pipeline_status",
@@ -135,7 +135,6 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		"actual_duration_seconds",
 		"concat_shell",
 		"concat_list_content",
-		`mkdir -p "$(dirname "$OUT")"`,
 		"单 part clip 不需要冗余 `part_results`",
 		`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OUT"`,
 		"ffprobe",
@@ -161,6 +160,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		t.Fatal("live-slicer agent must preload its specialized Skills")
 	}
 	for _, banned := range []string{
+		`mkdir -p "$(dirname "$OUT")"`,
 		"Python",
 		"python" + "3",
 		"live_slice_media" + ".py",

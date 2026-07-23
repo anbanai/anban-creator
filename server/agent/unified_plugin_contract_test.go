@@ -2,8 +2,10 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -102,6 +104,157 @@ func TestRuntimeContractsDoNotUseTaskFileListingAsCompletionGate(t *testing.T) {
 			t.Fatalf("%s still depends on list_task_files during execution", rel)
 		}
 	}
+}
+
+func TestPluginImagePromptRecordsStayCreativeOnly(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	for _, path := range pluginWorkflowFiles(t, root) {
+		for _, finding := range technicalImagePromptRecordFields(readRepoFile(t, path)) {
+			t.Errorf("%s image prompt record exposes technical field %q", path, finding)
+		}
+	}
+}
+
+func TestImagePromptRecordScannerRejectsMultilineTechnicalMetadata(t *testing.T) {
+	body := "" +
+		"Write image-prompts.md with this format:\n\n" +
+		"```yaml\n" +
+		"prompt: a yellow tea cup\n" +
+		"provider: openai\n" +
+		"output_path: output/cover.png\n" +
+		"```\n"
+	got := technicalImagePromptRecordFields(body)
+	if strings.Join(got, ",") != "output_path,provider" {
+		t.Fatalf("technical fields = %v, want provider and output_path", got)
+	}
+}
+
+func TestPluginImageCapabilitiesUseTaskOwnedOutput(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	for _, path := range pluginWorkflowFiles(t, root) {
+		body := readRepoFile(t, path)
+		if strings.Contains(body, "/tmp/anban-") {
+			t.Errorf("%s still uses a process-global /tmp image path", path)
+		}
+		for _, finding := range generateImageContractFindings(body) {
+			t.Errorf("%s %s", path, finding)
+		}
+	}
+}
+
+func TestGenerateImageContractScannerRejectsInvalidSingleLineCall(t *testing.T) {
+	body := `generate_image(project_id="p", prompt="x", output_path="scratch/cover.png")`
+	got := strings.Join(generateImageContractFindings(body), "\n")
+	if !strings.Contains(got, "omits required task_id") || !strings.Contains(got, "must use task-owned output/") {
+		t.Fatalf("findings = %q, want task_id and output/ violations", got)
+	}
+}
+
+func pluginWorkflowFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var paths []string
+	for _, dir := range []string{filepath.Join(root, "agents"), filepath.Join(root, "skills")} {
+		if err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				if path != dir && filepath.Base(path) == "humanizer" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(entry.Name()))
+			if ext == ".md" || ext == ".toml" {
+				paths = append(paths, path)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func technicalImagePromptRecordFields(body string) []string {
+	technicalField := regexp.MustCompile(`(?i)^[[:space:]>*\x60"'-]*(provider|model|revised_prompt|verification|selection_reason|actual_width|actual_height|generation_attempts|output_path|ref_image_path)[[:space:]\x60"]*[:=：]`)
+	lines := strings.Split(body, "\n")
+	seen := make(map[string]struct{})
+	for index, line := range lines {
+		if !strings.Contains(strings.ToLower(line), "image-prompts.md") {
+			continue
+		}
+		end := index + 1
+		for end < len(lines) && strings.TrimSpace(lines[end]) != "" {
+			end++
+		}
+		cursor := end
+		for cursor < len(lines) && strings.TrimSpace(lines[cursor]) == "" {
+			cursor++
+		}
+		if cursor < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[cursor]), "```") {
+			end = cursor + 1
+			for end < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "```") {
+				end++
+			}
+		}
+		for _, recordLine := range lines[index:end] {
+			match := technicalField.FindStringSubmatch(recordLine)
+			if len(match) == 2 {
+				seen[strings.ToLower(match[1])] = struct{}{}
+			}
+		}
+	}
+	fields := make([]string, 0, len(seen))
+	for field := range seen {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+func generateImageContractFindings(body string) []string {
+	var findings []string
+	for offset := 0; ; {
+		start := strings.Index(body[offset:], "generate_image(")
+		if start < 0 {
+			break
+		}
+		start += offset
+		depth := 0
+		end := -1
+		for index := start; index < len(body); index++ {
+			switch body[index] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					end = index + 1
+				}
+			}
+			if end >= 0 {
+				break
+			}
+		}
+		if end < 0 {
+			break
+		}
+		call := body[start:end]
+		offset = end
+		if !strings.Contains(call, "project_id=") && !strings.Contains(call, "project_id =") {
+			continue
+		}
+		lineNumber := strings.Count(body[:start], "\n") + 1
+		if !strings.Contains(call, "task_id=") && !strings.Contains(call, "task_id =") {
+			findings = append(findings, fmt.Sprintf(":%d generate_image call omits required task_id: %s", lineNumber, call))
+		}
+		if !strings.Contains(call, `output_path="output/`) && !strings.Contains(call, `output_path = "output/`) {
+			findings = append(findings, fmt.Sprintf(":%d generate_image call must use task-owned output/: %s", lineNumber, call))
+		}
+	}
+	return findings
 }
 
 func pluginAgentNames(t *testing.T, dir, extension string) []string {

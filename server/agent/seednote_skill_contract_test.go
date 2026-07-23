@@ -338,7 +338,7 @@ func TestSeednoteAnalysisCannotStopLaterPlannedImageGeneration(t *testing.T) {
 	} {
 		body := readRepoFile(t, path)
 		for _, required := range []string{
-			"只有 `generate_image` 本身失败或超时时，才写入 `$DIR/failure-state.json` 并停止图片阶段",
+			"只有 `generate_image` 本身失败或超时时，才写入 `output/failure-state.json` 并停止图片阶段",
 			"`analyze_image` 传输或运行失败只记录为“审核不可用” warning",
 			"不得写入 `failure-state.json`",
 			"不能单独导致最终交付失败",

@@ -18,8 +18,8 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		"ANBAN_DEFAULT_PROJECT",
 		`list_projects(platform="moments")`,
 		`get_project_profile(project_id="$PROJECT_ID", scope="moments", task_id="$TASK_ID")`,
-		`prepare_workspace(content_type="moments", task_id=$TASK_ID)`,
-		"$DIR",
+		"Runtime workspace contract",
+		"output/",
 		"material-analysis.md",
 		"content.md",
 		"quality-review.md",
@@ -28,7 +28,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 			t.Fatalf("claudecode moments agent missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card", "archive_workspace", "$ARCHIVE_DIR"} {
+	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card", "archive_workspace", "$ARCHIVE_DIR", "prepare_workspace", "$DIR"} {
 		if strings.Contains(claudeAgent, forbidden) {
 			t.Fatalf("claudecode moments agent still contains removed visual handoff %q", forbidden)
 		}
@@ -41,14 +41,14 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		"skills/humanizer/SKILL.md",
 		`list_projects(platform="moments")`,
 		`get_project_profile(project_id="$PROJECT_ID", scope="moments", task_id="$TASK_ID")`,
-		`prepare_workspace(content_type="moments", task_id=$TASK_ID)`,
-		"$DIR",
+		"Runtime workspace contract",
+		"output/",
 	} {
 		if !strings.Contains(codexAgent, want) {
 			t.Fatalf("codex moments agent missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card", "archive_workspace", "$ARCHIVE_DIR"} {
+	for _, forbidden := range []string{"guizang-social-card", "社交卡片", "social card", "archive_workspace", "$ARCHIVE_DIR", "prepare_workspace", "$DIR"} {
 		if strings.Contains(codexAgent, forbidden) {
 			t.Fatalf("codex moments agent still contains removed visual handoff %q", forbidden)
 		}
@@ -77,7 +77,7 @@ func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 		t.Fatal("claudecode moments final summary must precede feedback")
 	}
 	finalSummary := claudeAgent[finalSummaryAt:feedbackAt]
-	for _, want := range []string{"成果目录", "质量复盘状态", "证据不足", "人工复核点"} {
+	for _, want := range []string{"output/", "质量复盘状态", "证据不足", "人工复核点"} {
 		if !strings.Contains(finalSummary, want) {
 			t.Fatalf("claudecode moments delivery validation missing %q", want)
 		}

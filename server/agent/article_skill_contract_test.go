@@ -101,9 +101,9 @@ func TestArticleSkillContracts_NoUnconditionalImageRequirements(t *testing.T) {
 				"任一硬性项失败时停止发布：内容不贴题、缺少封面 `media_id`、章节缺图",
 				"图文并茂**：每个 `##` 章节至少一张配图",
 				"图片生成要求",
-				"所有配图使用 `ref_image_path=\"$DIR/cover.png\"` 保持风格一致",
+				"所有配图使用 `ref_image_path=\"output/cover.png\"` 保持风格一致",
 				"将文件内容作为 `markdown` 参数传给 `convert_markdown",
-				"`$DIR/images.json` 仅作为审计记录，`convert_markdown` 不会读取该文件",
+				"`output/images.json` 仅作为审计记录，`convert_markdown` 不会读取该文件",
 				"| 6 | `article-visual-design` | `cover.png`, `image-plan.md` |",
 				"| 7 | `article-visual-design` | `images.json`, 更新 `04-article-final.md` |",
 				"| 8 | `content-writing` | `05-article.html` |",
@@ -134,7 +134,7 @@ func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testin
 				"封面关·配图开",
 				"不传",
 				"链到首张已生成图",
-				"不存在的 `$DIR/cover.png`",
+				"不存在的 `output/cover.png`",
 			} {
 				if !strings.Contains(text, term) {
 					t.Fatalf("%s missing content-only ref_image_path guard term %q", path, term)
@@ -169,7 +169,7 @@ func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 			for _, stale := range []string{
 				"Markdown 转微信 HTML：调用 `convert_markdown` MCP 工具",
 				"排版模块使用标准 Markdown 语法，由 `convert_markdown` 工具中的 LLM 自动渲染",
-				"保存为 `$DIR/05-article.html`。",
+				"保存为 `output/05-article.html`。",
 				"inspect_article",
 			} {
 				if strings.Contains(text, stale) {
@@ -736,7 +736,7 @@ func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *test
 			"get_resource(category=\"writers\"",
 			"render_template",
 			"convert_markdown",
-			"$DIR/03-article.md",
+			"output/03-article.md",
 		)...)
 
 		topic := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "topic-research", "SKILL.md"))
@@ -745,14 +745,14 @@ func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *test
 			"list_project_titles",
 			"list_drafts",
 			"list_published_articles",
-			"$DIR/01-research.md",
-			"$DIR/02-outline.md",
+			"output/01-research.md",
+			"output/02-outline.md",
 		)...)
 
 		seo := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "seo-optimization", "SKILL.md"))
 		assertArticleContractContainsAll(t, plugin+" seo-optimization", seo, append(requiredSections,
 			"MCP is not used for SEO generation",
-			"$DIR/seo-result.md",
+			"output/seo-result.md",
 			"CTR",
 		)...)
 	}
