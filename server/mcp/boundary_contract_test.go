@@ -6,8 +6,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func TestRepositoryInstructionsDefineMCPAsCapabilityTransport(t *testing.T) {
@@ -25,6 +28,71 @@ func TestRepositoryInstructionsDefineMCPAsCapabilityTransport(t *testing.T) {
 			if !strings.Contains(text, want) {
 				t.Fatalf("%s missing %q", path, want)
 			}
+		}
+	}
+}
+
+func TestGenerateImageSchemaContainsOnlySemanticInputs(t *testing.T) {
+	properties := generateImageInputSchema()["properties"].(map[string]any)
+	for _, removed := range []string{"operation_id", "verify_with_vision", "verification_prompt", "upload_to_cdn"} {
+		if _, ok := properties[removed]; ok {
+			t.Fatalf("generate_image exposes removed field %q", removed)
+		}
+	}
+	required := generateImageInputSchema()["required"].([]any)
+	for _, value := range required {
+		if value == "operation_id" {
+			t.Fatal("generate_image still requires operation_id")
+		}
+	}
+}
+
+func TestRegisterRenderedImageSchemaDoesNotUpload(t *testing.T) {
+	properties := registerRenderedImageInputSchema()["properties"].(map[string]any)
+	if _, ok := properties["upload_to_cdn"]; ok {
+		t.Fatal("register_rendered_image still exposes upload_to_cdn")
+	}
+}
+
+func TestDownloadImageSchemaDoesNotUpload(t *testing.T) {
+	properties := downloadImageInputSchema()["properties"].(map[string]any)
+	if _, ok := properties["upload"]; ok {
+		t.Fatal("download_image still exposes upload")
+	}
+}
+
+func TestGenerateImagePublicResultContainsOnlyDurableAssetFields(t *testing.T) {
+	raw, err := json.Marshal(service.TaskImageAsset{
+		Name: "cover.png", Role: "cover", DownloadURL: "/files/cover.png", FilePath: "output/cover.png",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, removed := range []string{
+		"provider", "model", "selection_reason", "response_type", "revised_prompt",
+		"output_mime", "verification", "wechat_url", "media_id", "billing",
+	} {
+		if strings.Contains(string(raw), removed) {
+			t.Fatalf("generate_image public result exposes %q: %s", removed, raw)
+		}
+	}
+}
+
+func TestGenerateImageFailureDoesNotExposeRouteMetadata(t *testing.T) {
+	raw, err := json.Marshal(classifyImageToolFailure(
+		context.Background(), context.Background(), context.DeadlineExceeded,
+		"generate", time.Minute, false,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := map[string]any{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, removed := range []string{"provider", "model"} {
+		if _, ok := fields[removed]; ok {
+			t.Fatalf("generate_image failure exposes %q: %s", removed, raw)
 		}
 	}
 }

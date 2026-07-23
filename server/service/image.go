@@ -85,12 +85,10 @@ type UploadImageResult struct {
 	WechatURL string `json:"wechat_url,omitempty"`
 }
 
-// DownloadImageResult is the response for image download (optionally with upload).
+// DownloadImageResult is the response for a server-local image download.
 type DownloadImageResult struct {
-	FilePath  string `json:"file_path,omitempty"`
-	URL       string `json:"url,omitempty"`
-	MediaID   string `json:"media_id,omitempty"`
-	WechatURL string `json:"wechat_url,omitempty"`
+	FilePath string `json:"file_path,omitempty"`
+	URL      string `json:"url,omitempty"`
 }
 
 // ImageService handles image generation, upload, and compression
@@ -820,43 +818,12 @@ func (s *ImageService) CompressImage(filePath string, maxWidth int) (string, boo
 	return compressor.CompressImage(filePath)
 }
 
-// DownloadImage downloads an image from a URL and optionally uploads it to WeChat CDN.
-// If upload is "true" or "wechat", the image is uploaded after download.
-// Otherwise the image is saved to a temp directory.
-func (s *ImageService) DownloadImage(
-	ctx context.Context,
-	userID, projectID, url, upload string,
-) (*DownloadImageResult, error) {
+// DownloadImage downloads an image from a URL to a server-local temporary file.
+func (s *ImageService) DownloadImage(ctx context.Context, projectID, url string) (*DownloadImageResult, error) {
 	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("find project: %w", err)
 	}
-
-	if strings.EqualFold(upload, "true") || strings.EqualFold(upload, "wechat") {
-		// WeChat platforms: download and upload to WeChat CDN.
-		if ch.Platform == model.PlatformArticle {
-			processor, err := s.buildProcessor(ctx, ch, "content", "")
-			if err != nil {
-				return nil, err
-			}
-
-			result, err := processor.DownloadAndUpload(url)
-			if err != nil {
-				return nil, fmt.Errorf("download and upload: %w", err)
-			}
-
-			return &DownloadImageResult{
-				URL:       url,
-				MediaID:   result.MediaID,
-				WechatURL: result.WechatURL,
-			}, nil
-		}
-
-		// Non-WeChat platforms: download and upload to storage provider.
-		return s.downloadAndUploadToStorage(ctx, url)
-	}
-
-	// Download only (all platforms).
 	processor, err := s.buildProcessor(ctx, ch, "content", "")
 	if err != nil {
 		return nil, err
@@ -876,51 +843,6 @@ func (s *ImageService) DownloadImage(
 	return &DownloadImageResult{
 		FilePath: result.FilePath,
 		URL:      url,
-	}, nil
-}
-
-// downloadAndUploadToStorage downloads an image from URL and uploads it to the storage provider.
-func (s *ImageService) downloadAndUploadToStorage(ctx context.Context, imageURL string) (*DownloadImageResult, error) {
-	if s.storage == nil {
-		return nil, fmt.Errorf("storage provider not available")
-	}
-
-	tmpDir, err := os.MkdirTemp("", "abw-dl-")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	outputPath := filepath.Join(tmpDir, "downloaded.png")
-
-	// Download using http.Get directly (no WeChat dependency needed).
-	resp, err := http.Get(imageURL)
-	if err != nil {
-		return nil, fmt.Errorf("download image: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download image: HTTP %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(outputPath)
-	if err != nil {
-		return nil, fmt.Errorf("create temp file: %w", err)
-	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("write temp file: %w", err)
-	}
-	f.Close()
-
-	uploadResult, err := s.uploadToStorage(ctx, outputPath)
-	if err != nil {
-		return nil, err
-	}
-
-	return &DownloadImageResult{
-		URL: uploadResult.URL,
 	}, nil
 }
 
